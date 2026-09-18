@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06
 **Author:** AgentX (agent)
-**Status:** Research only — no code changed. This catalogs everything found so a
+**Status:** draft — Research only — no code changed. This catalogs everything found so a
 scope decision can be made before any removal work starts.
 **Ask that triggered this:** remove `"Resumed — continuing where you left off"`
 and "all the other synthesized text agentmux generates" from the agent pane.

@@ -1,7 +1,7 @@
 # SPEC: Tool Block Interaction Hold + Glob Auto-Expand
 
 **Date:** 2026-06-09  
-**Status:** Implemented  
+**Status:** Implemented — #1320
 **Files changed:**
 - `frontend/app/view/agent/components/ToolBlock.tsx`
 - `frontend/app/view/agent/components/CompactResult.tsx`

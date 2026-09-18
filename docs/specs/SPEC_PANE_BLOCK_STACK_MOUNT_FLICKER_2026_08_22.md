@@ -1,6 +1,6 @@
 # Pane block-stack mount flicker — root causes + reveal-gate generalization
 
-**Status:** Phases 1-4 implemented (see §6)
+**Status:** implemented — Phases 1-4 implemented (see §6) — #2768
 **Owner:** AgentX
 **Date:** 2026-08-22
 **Scope:** `frontend/layout/lib/layoutStack.ts`, `layoutNodeModels.ts`'s `activeKeyFor`,

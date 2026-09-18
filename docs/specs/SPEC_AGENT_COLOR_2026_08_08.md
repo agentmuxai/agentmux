@@ -1,7 +1,7 @@
 # SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame
 
 **Date:** 2026-08-08
-**Status:** Implemented (same-day PR)
+**Status:** Implemented (same-day PR) — #2477
 **Author:** Agent3 (agent)
 **Trigger:** User request (2026-08-05, re-confirmed 2026-08-08) — *"when new
 agents are created, they should get a color … for now, generate a random

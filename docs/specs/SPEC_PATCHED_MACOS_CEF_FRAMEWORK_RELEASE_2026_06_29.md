@@ -1,7 +1,7 @@
 # SPEC: Patched macOS CEF Framework — Release Pipeline + CI Wiring
 
 **Date:** 2026-06-29
-**Status:** Plan (awaiting review — no code written yet)
+**Status:** proposed — Plan (awaiting review — no code written yet)
 **Repos:** `agentmuxai/agentmux`, `agentmuxai/cef`
 **Tracks:** macOS parity with the Linux patched-libcef pipeline
 **Related:** `SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md`,

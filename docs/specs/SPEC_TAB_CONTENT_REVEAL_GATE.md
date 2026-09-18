@@ -1,7 +1,7 @@
 # Tab content reveal gate
 
 **Status:** Implemented — but this document describes the ORIGINAL design; two
-later specs changed its behaviour. Read those before relying on anything below.
+later specs changed its behaviour. Read those before relying on anything below. — #2866
 **Owner:** AgentA
 **Date:** 2026-05-09
 

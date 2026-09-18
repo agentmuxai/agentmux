@@ -2,7 +2,7 @@
 
 **Goal:** Extend chrome zoom to include all pane headers as a unified group. Ctrl+Scroll over any pane header zooms all chrome elements together (title bar, status bar, AND all pane headers). Pane header zoom is independent of pane content zoom.
 
-**Status:** Ready for implementation.
+**Status:** proposed — Ready for implementation.
 
 ---
 

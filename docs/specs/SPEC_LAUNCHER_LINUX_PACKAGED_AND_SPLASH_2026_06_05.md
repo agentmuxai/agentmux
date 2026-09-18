@@ -3,7 +3,7 @@
 **Date:** 2026-06-05
 **Repo state:** branch `agentu/spec-linux-launcher-splash`, base `main` post-#1272 (`[patch.crates-io]` for CEF 148 patched-libcef) and post-#1275 (CEF 148 Vulkan SwiftShader bundle).
 **Author:** AgentU-asaf (driven by Claude)
-**Status:** Spec — ready to implement (phased, with two distinct workstreams of very different size)
+**Status:** proposed — Spec — ready to implement (phased, with two distinct workstreams of very different size)
 **Motivated by:** Linux AppImage launches the CEF host directly; no launcher in the launch path; the launcher's window/pool/instance reducer + durable saga coordinator (already written, already used on Windows) is dormant on Linux because the non-Windows IPC server is a no-op stub and `spawn_host_unix` doesn't export `AGENTMUX_LAUNCHER_PIPE`. We want the **full reducer + saga system** on Linux, not just "process supervision."
 **Builds on:** [`SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31.md`](./SPEC_LAUNCHER_MACOS_PACKAGED_AND_SPLASH_2026_05_31.md) (macOS precedent — same architectural gap, different OS), [`SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`](./SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md) (saga schema + replay semantics — platform-neutral), [`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md`](./SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) §0 (X11 ozone default on Linux).
 

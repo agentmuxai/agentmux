@@ -188,6 +188,15 @@ jobs:
       - name: RPC bindings are current
         run: bash scripts/check-rpc-bindings.sh
 
+      # Four checks the gate above CANNOT make: it verifies a generated file
+      # exists per type and is current with the Rust, which a file can be while
+      # still describing a wire format nobody speaks. Each of these was written
+      # after the same defect got past review more than once. Pure node, no
+      # extra toolchain, runs in under a second.
+      # See scripts/check-rpc-codegen-hygiene.mjs.
+      - name: RPC codegen hygiene
+        run: node scripts/check-rpc-codegen-hygiene.mjs
+
   docs:
     name: doc status + grep gates
     runs-on: ubuntu-latest
@@ -200,6 +209,18 @@ jobs:
 
       - name: Doc Status vocabulary (changed docs only)
         run: bash scripts/check-doc-status.sh
+
+      # The ratchet half of the same rule set. check-doc-status.sh is scoped to
+      # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the
+      # ~40% of the corpus that predates the vocabulary, and would be switched
+      # off within a day -- three earlier attempts died exactly that way). That
+      # stops the debt growing but applies no pressure to shrink it, which is
+      # why the backlog sat flat at ~357 for a month.
+      #
+      # This never asks you to fix debt you did not create. It only fails a
+      # change that ADDS to it. See scripts/check-docs-lifecycle.mjs.
+      - name: docs lifecycle ratchet
+        run: node scripts/check-docs-lifecycle.mjs
 
       # Blocking, and safe to be: INDEX.md's committed form no longer carries
       # any derived count, so two spec-adding branches three-way-merge to the

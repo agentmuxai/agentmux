@@ -1,6 +1,6 @@
 # SPEC: Terminal Input Echo-Latency Benchmark
 
-**Status:** Implemented
+**Status:** Implemented — #926
 **Date:** 2026-05-19
 **Owner:** AgentY
 **Tracking:** PR #926 (writeInFlight fix), `tools/tests/bench-term-echo.mjs`

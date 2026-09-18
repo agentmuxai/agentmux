@@ -3,6 +3,14 @@
 **Date:** 2026-03-29
 **Status:** Implemented
 
+> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> requires an `implemented` Status to cite its PR. This one cannot, and a guess would
+> be worse than the gap: the only commit that set this Status was a bulk restamp
+> (or predates the PR-squash convention), so git alone does not identify who
+> shipped it. Candidates found in this doc's own body were checked and rejected —
+> they touch no related source. Verify against the code before trusting this line.
+
+
 ---
 
 ## Portable Layout

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-20
 **Author:** Claude (Opus 4.8)
-**Status:** In progress (PR 1)
+**Status:** draft — In progress (PR 1)
 **Tracking:** #1591 §4c/4d. Builds on the merged foundation: CEF mic-permission
 handler (#1602) + actionable permission UX (#1603). Supersedes the Web Speech
 engine, which **cannot transcribe in CEF** (closed-source Google speech service,

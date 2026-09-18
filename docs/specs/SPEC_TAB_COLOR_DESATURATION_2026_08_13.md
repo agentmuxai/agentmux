@@ -1,7 +1,7 @@
 # Spec: Desaturate tab colors, keep agent pane border colors as-is
 
 **Date:** 2026-08-13
-**Status:** Implemented (see revision note below)
+**Status:** Implemented (see revision note below) — #2568
 **Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`, `frontend/app/view/agent/agent-color.ts`, `agentmux-srv/src/backend/agent_color.rs` (doc comment only)
 
 **Revision (same day):** the first implementation used a fully muted

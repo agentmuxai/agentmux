@@ -1,6 +1,6 @@
 # Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs)
 
-**Status:** implemented
+**Status:** implemented — #2993
 **Author:** Posa
 **Date:** 2026-09-04
 **Scope:** `frontend/app/tab/tabbar.tsx` (`handleSelect`, `displayActiveTabId`), `frontend/app/store/tab-actions.ts`

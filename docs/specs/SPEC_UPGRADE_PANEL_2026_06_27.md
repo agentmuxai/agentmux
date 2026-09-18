@@ -1,6 +1,6 @@
 # Maintenance Section in InstancePanel
 
-**Status:** Spec — not yet implemented  
+**Status:** proposed — Spec — not yet implemented
 **Date:** 2026-06-27  
 **Placement:** Inside `InstancePanel` (opens when clicking the `v0.49.5` chip in the
 bottom-right status bar)  

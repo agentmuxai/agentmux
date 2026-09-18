@@ -7,7 +7,7 @@ the mirror-div visual-row measurement becomes unnecessary entirely (position
 0 is always visual row 0 regardless of wrapping) — the whole `caretVisualEdge`
 function was replaced with a two-line pure position check,
 `caretAtSelectionEdge`, rather than layering a position check on top of the
-existing measurement. See the function's own doc comment for the reasoning.
+existing measurement. See the function's own doc comment for the reasoning. — #2540
 **Owner:** Agent3
 **Area:** Agent pane composer (`AgentFooter.tsx`) — sent-message history
 recall vs. text selection

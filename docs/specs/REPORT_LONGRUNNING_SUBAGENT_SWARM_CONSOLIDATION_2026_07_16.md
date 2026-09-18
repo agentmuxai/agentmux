@@ -1,6 +1,6 @@
 # Report: long-running processes, subagents, and the Swarm pane — consolidated state (2026-07-16)
 
-**Status:** Report — current-state inventory + refinement direction, verified
+**Status:** historical — Report — current-state inventory + refinement direction, verified
 against `main` @ `7ce6ab6b` (pulled 2026-07-16) and a full sweep of
 issues/PRs/discussions. Written to anchor the "refine long-running processes +
 subagents + swarm pane" initiative under one consolidated tracker.

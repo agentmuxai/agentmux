@@ -1,7 +1,7 @@
 # Spec: Modal-v2 ↔ Native Pane Airspace Clipping
 
 **Date:** 2026-04-24
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Owner:** AgentA
 **Touches:** `frontend/app/platform/pane-overlay.ts`, `frontend/app/element/modal-v2.tsx`
 

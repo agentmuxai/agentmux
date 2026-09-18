@@ -6,7 +6,7 @@ Rust: 106/106 `store::tests` pass (7 new), full 2763-test suite green.
 Frontend: `npx tsc --noEmit` clean, full 3060-test vitest suite green (7
 new). Manual live-pane verification (§5, "Manual") not done as part of this
 PR — no live dev instance was available; do before/at merge if practical,
-same caveat as the sibling dedent PR (#2780).
+same caveat as the sibling dedent PR (#2780). — #2782
 **Scope:** `agentmux-srv/src/backend/storage/migrations.rs`,
 `agentmux-srv/src/backend/storage/memory_bundles.rs`,
 `agentmux-srv/src/backend/rpc_types/{commands,memory}.rs`,

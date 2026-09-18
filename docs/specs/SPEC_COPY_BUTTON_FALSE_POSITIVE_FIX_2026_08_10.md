@@ -1,7 +1,7 @@
 # SPEC: Copy Button Silently Failing (Three Stacked Bugs)
 
 **Date:** 2026-08-10
-**Status:** Implemented, verified end-to-end (real OS clipboard content checked directly, not just UI state)
+**Status:** Implemented, verified end-to-end (real OS clipboard content checked directly, not just UI state) — #2535
 **Area:** Frontend `CopyButton` element, CEF host clipboard IPC (Windows), markdown code block text extraction
 **Severity:** P1 — code block copy has been silently writing an empty string to the clipboard, likely since the feature was first wired up
 

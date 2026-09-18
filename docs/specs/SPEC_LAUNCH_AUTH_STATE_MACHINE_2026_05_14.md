@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-14
 **Author:** AgentA
-**Status:** Design — supersedes the §8 sketch in `SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` with a full enumeration of paths and an extended reducer state machine.
+**Status:** proposed — Design — supersedes the §8 sketch in `SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` with a full enumeration of paths and an extended reducer state machine.
 
 ---
 

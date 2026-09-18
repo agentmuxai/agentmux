@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Author:** Lark
-**Status:** Implemented
+**Status:** Implemented — #2630
 
 ---
 

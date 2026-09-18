@@ -1,7 +1,7 @@
 # Architecture: Armory/Stash Foundation Consolidation (North Star)
 
 **Date:** 2026-08-19
-**Status:** proposal — vision/north-star document. Not implemented, not
+**Status:** proposed — proposal — vision/north-star document. Not implemented, not
 meant to land as one PR. Intended to be worked incrementally via
 follow-up `SPEC_` docs, each scoped to one theme below, sequenced per §4.
 **Author:** Agent1 (agent1-06309)

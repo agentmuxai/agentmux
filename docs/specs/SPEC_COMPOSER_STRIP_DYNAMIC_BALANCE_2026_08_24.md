@@ -1,7 +1,7 @@
 # SPEC: Composer strip — dynamic left/right slot pooling
 
 **Date:** 2026-08-24
-**Status:** Implemented
+**Status:** Implemented — #2808
 **Supersedes:** `SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md` (same day)
 **Trigger:** Direct user feedback on the static rebalance from earlier the same day: *"it looks the same .. there are stages with empty slots .. did you mot understand the req? the elements need to be equality distributed. along the left and right edges, there should never be an empty slow [sic]."*
 

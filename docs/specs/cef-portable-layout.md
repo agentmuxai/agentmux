@@ -1,6 +1,6 @@
 # CEF Portable Layout — Clean Directory Spec
 
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Branch:** agentx/cef-integration
 **Goal:** Users extract ZIP, see only `agentmux.exe` + `README.txt`, double-click and go.
 

@@ -2,7 +2,7 @@
 
 **Bug:** When a pane is magnified (maximized), agent and forge panes appear on top of the magnified pane instead of behind it.
 
-**Status:** Root cause narrowed down. Z-index chain verified correct via instrumentation.
+**Status:** proposed — Root cause narrowed down. Z-index chain verified correct via instrumentation.
 
 ---
 

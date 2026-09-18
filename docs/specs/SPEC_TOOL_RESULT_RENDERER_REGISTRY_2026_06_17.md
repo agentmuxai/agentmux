@@ -2,6 +2,14 @@
 
 **Date:** 2026-06-17
 **Status:** implemented — `frontend/app/view/agent/components/tool-renderers/registry.ts`
+
+> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> requires an `implemented` Status to cite its PR. This one cannot, and a guess would
+> be worse than the gap: the only commit that set this Status was a bulk restamp
+> (or predates the PR-squash convention), so git alone does not identify who
+> shipped it. Candidates found in this doc's own body were checked and rejected —
+> they touch no related source. Verify against the code before trusting this line.
+
 (+ `registry.test.ts`) is the shipped mechanism, load-bearing for several other result-view
 specs. Restamped 2026-09-16: the line previously read "Proposed (analysis + design; not
 implemented) (implemented — see note below)" — it contradicted itself, so the generated

@@ -1,6 +1,7 @@
 # Drift-storm renderer crash (post-PR #706 smoke) — architectural analysis
 
 **Date:** 2026-05-06
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Trigger:** v0.33.655 portable smoke. After 1 tear-off, renderer crashed with
 `Crashpad_NotConnectedToHandler` ~2.5 s after the promote.
 **Symptom:** 603 `hwnd_drift_detected` log lines in <3 s, **all carrying the same

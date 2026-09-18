@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-16
 **Author:** smike (agent)
-**Status:** In progress
+**Status:** draft — In progress
 **Companion analysis:** `docs/analysis/ANALYSIS_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`
 
 ## Goal

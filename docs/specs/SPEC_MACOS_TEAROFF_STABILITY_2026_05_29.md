@@ -3,7 +3,7 @@
 **Date:** 2026-05-29
 **Repo state:** `main` @ `53d781af` (v0.40.0)
 **Author:** AgentO-asaf
-**Status:** Spec ready to implement
+**Status:** proposed — Spec ready to implement
 **Closes:** [#1138](https://github.com/agentmuxai/agentmux/issues/1138)
 **Source report:** [`docs/analysis/REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md`](../analysis/REPORT_MACOS_TEAROFF_DRAG_CRASH_2026_05_29.md)
 **Prior art:** [PR #403](https://github.com/agentmuxai/agentmux/pull/403) — `fix(macos): patch NSApplication for macOS 26 Tahoe drag crash` (open since 2026-04-15, mixed scope, can't merge as-is)

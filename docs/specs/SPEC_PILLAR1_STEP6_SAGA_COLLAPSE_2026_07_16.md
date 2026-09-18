@@ -1,7 +1,7 @@
 # SPEC: Pillar 1 Step 6 — collapse launcher saga durability to an in-memory registry
 
 **Date:** 2026-07-16
-**Status:** Implemented (this PR)
+**Status:** Implemented (this PR) — #2191
 **Tracking:** Pillar 1 Step 6 (`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md` §3; `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_16.md` §1)
 **Supersedes (mechanism, not history):** `SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` (LSD-1..4) — that spec's durable log, recovery walker, retention vacuum, and `--diag sagas` offline reader are deleted by this change; its live coordinator semantics are retained unchanged.
 

@@ -3,7 +3,7 @@
 **Date:** 2026-07-07
 **Type:** Design spec (grounds Step 4 before any code — Steps 1-3 are done; this is genuinely new
 machinery, not "fire an existing path on a new trigger")
-**Status:** Ready for review — not yet implemented
+**Status:** proposed — Ready for review — not yet implemented
 **Builds on:** SPEC_864 (merged), SPEC_PILLAR1_STEP2 (merged), SPEC_PILLAR1_STEP3 (merged) —
 persistence prerequisites are all in place.
 **Corrects/resolves:** `SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` §6 step 4 — the design

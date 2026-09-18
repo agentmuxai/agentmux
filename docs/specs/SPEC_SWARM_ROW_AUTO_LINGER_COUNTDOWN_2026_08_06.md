@@ -1,7 +1,7 @@
 # SPEC — Swarm Row Auto-Linger Countdown on Completion
 
 **Date:** 2026-08-06
-**Status:** Implemented — PR pending. Countdown ticking reuses the existing `useTick(1000)` hook (`frontend/app/hook/useTick.ts`) rather than a bespoke ViewModel-owned interval — same ref-counted, auto-cleanup mechanism this file already uses for other relative-time displays; the "Where to arm the countdown" and "Rendering" sections below describe the originally-proposed shape, superseded on that one point.
+**Status:** Implemented — PR pending. Countdown ticking reuses the existing `useTick(1000)` hook (`frontend/app/hook/useTick.ts`) rather than a bespoke ViewModel-owned interval — same ref-counted, auto-cleanup mechanism this file already uses for other relative-time displays; the "Where to arm the countdown" and "Rendering" sections below describe the originally-proposed shape, superseded on that one point. — #2440
 **Scope:** `frontend/app/view/swarm/swarm-model.ts`, `swarm-view.tsx`
 **Trigger:** Live test spawn (Task-tool subagent, ~12s runtime) during a Swarm investigation session — user expected the row to go `Active → 60s countdown → gone`, but today's actual behavior is either "never disappears until manually dismissed" or (per a related, separately-tracked bug) "never appeared at all." This spec covers only the countdown/auto-retire half.
 

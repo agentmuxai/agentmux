@@ -1,7 +1,7 @@
 # Node Timestamp Hover
 
 **Date:** 2026-04-15
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 
 ---
 

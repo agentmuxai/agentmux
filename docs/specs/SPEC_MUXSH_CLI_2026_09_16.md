@@ -2,7 +2,7 @@
 
 **Author:** Vmer
 **Date:** 2026-09-16
-**Status:** active
+**Status:** active — PRs touching this work, newest first: #3255
 **Related:** `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (research + naming decision this spec implements), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (the `muxopen` precedent this follows exactly), `agentmux-docs/.../internals/agent-app-api.md` (`OpenEditor` / `pane.open`), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import Wave Terminal's `wsh` wholesale)
 
 ---

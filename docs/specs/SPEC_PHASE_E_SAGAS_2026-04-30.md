@@ -1,7 +1,7 @@
 # Phase E Sagas — Full Specification
 
 **Date:** 2026-04-30
-**Status:** Specification (not yet implemented)
+**Status:** proposed — Specification (not yet implemented)
 **Supersedes the "Option D register-after" plan in** `docs/retro/phase-e-tear-off-and-remaining-2026-04-30.md`.
 **Replaces spec §7 of** `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` **with concrete per-saga state machines.**
 

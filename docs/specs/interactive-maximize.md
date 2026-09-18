@@ -2,7 +2,7 @@
 
 **Goal:** Replace the current non-interactive magnify zoom with a fully interactive maximize that lets users work inside the maximized pane.
 
-**Status:** Analysis complete, ready for implementation.
+**Status:** proposed — Analysis complete, ready for implementation.
 
 ---
 

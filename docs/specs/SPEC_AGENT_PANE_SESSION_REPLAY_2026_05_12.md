@@ -1,6 +1,6 @@
 # Spec: Agent pane session-replay framework
 
-**Status:** Spec (no implementation yet)
+**Status:** proposed — Spec (no implementation yet)
 **Owner:** AgentA
 **Date:** 2026-05-12
 **Driving requirement:** *"Build a framework that makes it easy to simulate agent pane conversations — record one real session, reuse it as a deterministic fixture in tests, smoke runs, and bug repros. We don't want to run through a whole conversation manually."*

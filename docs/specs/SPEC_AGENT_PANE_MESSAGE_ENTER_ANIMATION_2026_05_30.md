@@ -1,7 +1,7 @@
 # SPEC: Agent Pane — New Message Enter Animation
 
 **Date:** 2026-05-30
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Area:** `frontend/app/view/agent/styles/_document.scss` + `_document-nodes.scss`
 **Goal:** New nodes that stream into the agent pane should enter with the same swift fade-in as the tool-panel collapse, instead of snapping in instantly.
 

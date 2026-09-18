@@ -1,7 +1,7 @@
 # Spec: macOS packaging — signed, launchable `AgentMux.app` / `.dmg`
 
 **Date:** 2026-05-30
-**Status:** Spec → implementation (phased)
+**Status:** proposed — Spec → implementation (phased)
 **Related:** `docs/macos-signing.md`, `docs/retro/retro-macos-keychain-prompt-2026-05-30.md`,
 `docs/specs/SPEC_MACOS_CEF_FRAMEWORK_BUNDLING_2026_05_28.md` (framework bundling — done),
 `docs/specs/SPEC_SUPPRESS_OS_CREDENTIAL_PROMPTS_2026_05_30.md` (keychain prompt — done, #1208).

@@ -1,6 +1,6 @@
 # AUDIT: SQLite Systems in AgentMux
 
-**Status:** Reference document, current as of `main` 2026-05-19
+**Status:** living — Reference document, current as of `main` 2026-05-19
 **Author:** AgentA
 **Companion specs:**
 - [`docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md`](./archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md) — proposes moving durable content to `~/.agentmux/shared/`. Read this audit first; the spec assumes its inventory.

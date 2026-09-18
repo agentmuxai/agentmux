@@ -1,7 +1,7 @@
 # SPEC: Tool preview scrollbar-to-edge padding removal
 
 **Date:** 2026-08-08
-**Status:** Implemented (same day)
+**Status:** Implemented (same day) — #2467
 **Scope:** `frontend/app/view/agent/styles/_document-nodes.scss`,
 `frontend/app/view/agent/styles/_tool-overlay-portal.scss`
 **Related:**

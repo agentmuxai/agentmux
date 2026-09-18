@@ -1,7 +1,7 @@
 # SPEC: Window-close reliability — fix the `backend_window_id` race
 
 **Date:** 2026-07-04
-**Status:** Implemented (this session) — see PR (linked once opened)
+**Status:** Implemented (this session) — see PR (linked once opened) — #1965
 **Author:** AgentA
 **Tracking:** `docs/retro/retro-window-lifecycle-leak-2026-07-04.md` (the incident this fixes), `docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §4 (SystemProcessInfo — the longer-term reconciliation follow-up this doesn't replace)
 

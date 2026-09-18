@@ -1,6 +1,7 @@
 # REPORT — context-menu gap audit: Swarm copy, agent-pane paste, and beyond
 
 **Date:** 2026-08-07
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Trigger:** Direct ask — add a Copy menu on Swarm right-click and a Paste
 menu on the agent-pane composer's right-click, then scour the app for the
 same class of gap.

@@ -1,7 +1,7 @@
 # Embedded Browser Panes — Linux & macOS Port
 
 **Date:** 2026-05-03
-**Status:** Spec / Proposal
+**Status:** proposed — Spec / Proposal
 **Repo state:** main @ `1d887341`, AgentMux v0.33.612
 **Author:** AgentC (research delegated to a subagent; full source-cited research at `/tmp/cef-pane-research.md` — keep that file alongside review of this spec)
 

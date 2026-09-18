@@ -1,9 +1,9 @@
 # Spec: Scroll Chaining for Nested Tool-Preview Regions
 
 **Date:** 2026-07-03
-**Status:** Phase 1 shipped (d190dff7 / #1956) and found insufficient by live
+**Status:** active — Phase 1 shipped (d190dff7 / #1956) and found insufficient by live
 reproduction on 2026-07-04; Phase 2 implemented same day. See "Addendum"
-at the bottom.
+at the bottom. — #1963
 **Related:** `docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md` (owns
 `AgentDocumentVirtualList.handleScroll` — this spec must not fight its stick-to-bottom
 gating), `frontend/app/view/agent/components/ToolBlock.tsx` (existing Ctrl+wheel zoom

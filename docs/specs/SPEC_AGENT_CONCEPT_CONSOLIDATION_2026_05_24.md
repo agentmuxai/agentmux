@@ -4,7 +4,7 @@
 
 **Date:** 2026-05-24
 **Author:** AgentA
-**Status:** Design analysis — answers a question the two-tier picker spec raised about whether we need this many "agent" types.
+**Status:** proposed — Design analysis — answers a question the two-tier picker spec raised about whether we need this many "agent" types.
 
 ---
 

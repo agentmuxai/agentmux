@@ -1,6 +1,6 @@
 # Spec: Named agent continuation — launch modal dropdown of existing agents
 
-**Status:** Spec (no implementation yet)
+**Status:** proposed — Spec (no implementation yet)
 **Owner:** AgentA
 **Date:** 2026-05-12
 **Driving requirement:** "When I launch an agent, the launch modal should let me select an agent I've already created and named, and continue working on it — same folder, same identity, same memory, same conversation history."

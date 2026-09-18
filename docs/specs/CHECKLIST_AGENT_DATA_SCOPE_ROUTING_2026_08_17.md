@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`)
-**Status:** Reference checklist — distilled from
+**Status:** living — Reference checklist — distilled from
 `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`'s P1-P5 after actually
 implementing steps 1-5 of that protocol (#2602, #2605, #2606, #2611, #2613). Every item below is grounded in
 a real bug hit while doing that work, not a hypothetical.

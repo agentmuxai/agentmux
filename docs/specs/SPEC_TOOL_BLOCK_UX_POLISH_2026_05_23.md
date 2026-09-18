@@ -1,7 +1,7 @@
 # SPEC: Tool Block UX Polish — Hover Delay, Collapse Animation, Post-Completion Hold, Thinking Label, Scroll Isolation
 
 **Date:** 2026-05-23  
-**Status:** Ready for implementation  
+**Status:** proposed — Ready for implementation
 **Files touched:** `ToolBlock.tsx`, `ToolOverlayLog.tsx`, `_document-nodes.scss`, `_tool-overlay-portal.scss`
 
 ---

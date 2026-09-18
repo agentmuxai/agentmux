@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (full analysis)
-**Status:** Ready to schedule
+**Status:** proposed — Ready to schedule
 **Owner:** asaf
 **Supersedes scope of:** `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` (that spec's "weak" single-writer
 becomes Phase 1 here; this spec is the committed end-goal)

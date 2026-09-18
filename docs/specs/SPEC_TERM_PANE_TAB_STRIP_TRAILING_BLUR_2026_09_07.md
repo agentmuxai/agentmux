@@ -5,7 +5,7 @@
 §2 records the decision and why the faithful-but-costly Option B (§2.2) was
 rejected rather than deferred: it would put the top terminal row under glass,
 breaking full-screen TUIs and changing the PTY's row count. If that tradeoff
-is ever reconsidered, §2.2 is the starting point.
+is ever reconsidered, §2.2 is the starting point. — #3079
 **Related:** `docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`
 (the agent-pane original — this spec deliberately reverses its "agent-pane-only"
 scope decision, see §1), `docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`

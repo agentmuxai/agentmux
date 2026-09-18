@@ -1,7 +1,7 @@
 # Spec: CEF UI Thread Dispatch for IPC Handlers
 
 **Date:** 2026-03-29
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Priority:** Critical — devtools, zoom, and transparency all blocked
 
 ---

@@ -4,7 +4,7 @@
 
 **Issue:** #88
 
-**Status:** Ready for implementation.
+**Status:** proposed — Ready for implementation.
 
 ---
 
