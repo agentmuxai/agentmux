@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27
 **Author:** AgentA
-**Status:** proposed — Design — multi-PR refactor proposal. No tracking discussion yet.
+**Status:** implemented — the whole R-series landed the day after this was written, as the one-PR-per-phase plan below describes: R.0 rename in #1100, R.3 `memory_bundles` #1116, R.4 `content`/`skills`/`history` #1126, R.2 `identities` #1127, R.5 `dual_write` #1128, R.6 `registry_mirror` #1129, and R.1 `agents` in #1135, whose subject reads "modularization complete". `wstore`/`WaveStore` no longer appear anywhere in `agentmux-srv/src`, so R.0's deprecated alias has since been retired too. `memory_bundles.rs` and `dual_write.rs` have been superseded by later work (`bundles.rs`/`bundle_versions.rs`, and the Phase 3a dual-write path itself); the rest of the extracted modules are still there under `backend/storage/`.
 **Related:** `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md` (Phase 3b reads from this same store; some methods retire when Phase 3c lands).
 
 ---

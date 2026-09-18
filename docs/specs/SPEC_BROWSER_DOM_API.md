@@ -1,6 +1,6 @@
 # SPEC: Browser-pane DOM API (`/agentmux/browser/*`)
 
-**Status:** draft
+**Status:** implemented — #453, the PR this doc was added in. The CDP-backed API is the `agentmux-cef/src/browser_api/` module (`mod.rs`, `resolver.rs`, `routes.rs`), whose header cites this spec. §2.2's non-goals are unchanged.
 Date: 2026-04-19
 Owner: AgentA
 Motivation: pixel-coordinate clicks against browser panes are a flaky
