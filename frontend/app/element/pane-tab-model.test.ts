@@ -16,7 +16,7 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
-import { describePaneTab } from "./pane-tab-model";
+import { createPaneTabMemory, describePaneTab, prunePaneTabMemory } from "./pane-tab-model";
 
 const iconFor = (view: string, meta: Record<string, unknown> = {}) =>
     describePaneTab({ blockId: `b-${view}`, view, meta: { view, ...meta }, ordinal: 1, liveViewModel: null }).icon;
@@ -44,5 +44,29 @@ describe("pane tab labels", () => {
     it("fall back to the widget-bar label for the view", () => {
         const tab = describePaneTab({ blockId: "b-a", view: "armory", meta: { view: "armory" }, ordinal: 1, liveViewModel: null });
         expect(tab.label).toBe("Armory");
+    });
+});
+
+describe("pane tab memory", () => {
+    const live = (blockId: string, name: string) =>
+        ({ blockId, view: "browser", meta: { view: "browser" }, ordinal: 1, liveViewModel: { viewName: () => name } }) as any;
+    const dormant = (blockId: string) =>
+        ({ blockId, view: "browser", meta: { view: "browser" }, ordinal: 1, liveViewModel: null }) as any;
+
+    it("keeps a tab's last live name once it goes dormant", () => {
+        const memory = createPaneTabMemory();
+        describePaneTab(live("b1", "Example Domain"), undefined, memory);
+        expect(describePaneTab(dormant("b1"), undefined, memory).label).toBe("Example Domain");
+    });
+
+    it("forgets tabs that are no longer in the pane, so it can't grow without bound", () => {
+        const memory = createPaneTabMemory();
+        describePaneTab(live("b1", "One"), undefined, memory);
+        describePaneTab(live("b2", "Two"), undefined, memory);
+
+        prunePaneTabMemory(memory, ["b2"]);
+
+        expect([...memory.names.keys()]).toEqual(["b2"]);
+        expect(describePaneTab(dormant("b1"), undefined, memory).label).not.toBe("One");
     });
 });

@@ -27,7 +27,7 @@ import { findNode } from "@/layout/lib/layoutNode";
 import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
-import { describePaneTab, PaneTabIconView, type PaneTabInfo } from "./pane-tab-model";
+import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 
 function sameIds(a: string[], b: string[]): boolean {
@@ -75,6 +75,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         undefined,
         { equals: sameIds }
     );
+    const tabMemory = createPaneTabMemory();
     const tabInfos = createMemo(() => {
         const inStack = new Set(stackIds());
         const extraLabels = new Map(extraTabs().map((t) => [t.blockId, t.label]));
@@ -96,10 +97,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 blockId,
                 describePaneTab(
                     { blockId, view, meta, ordinal, liveViewModel: blockId === activeId ? liveVm : null },
-                    extraLabels.get(blockId)
+                    extraLabels.get(blockId),
+                    tabMemory
                 )
             );
         }
+        prunePaneTabMemory(tabMemory, infos.keys());
         return infos;
     });
 
