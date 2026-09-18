@@ -18,10 +18,11 @@ Three add enforcement (relative-link resolution, the `docs/README.md` directory 
 citations widened from `docs/specs/` to any `docs/<dir>/`), each clearing the backlog it
 exposed — 45 broken links, a map advertising a directory deleted six weeks earlier, and 10
 code comments citing documents that were never committed. One folds an archive directory
-and writes down why the last split is deliberate. **This does not close the lifecycle and
-does not organise the repo's docs:** the ~171-file Status backlog is untouched by design,
-and the singleton-directory folding needs a taxonomy decision this report's own rules
-(`PLAN_DOCS_CLEANUP_EXECUTION` §1) forbid an agent from making alone.
+and writes down why the last split is deliberate. A fifth (#3370, this change) folds two singleton directories
+and normalises 17 Status lines. **This does not close the lifecycle and does not organise
+the repo's docs:** 626 of 1,488 docs are still non-compliant (§5.5a), and most of them are
+non-spec doc types the closed vocabulary was never designed to describe — which needs a
+decision about the *vocabulary*, not another cleanup pass.
 **Date:** 2026-09-16
 **Author:** Manoz (manoz-0803a)
 **Baseline:** `main` @ `65958f84e` (post-v0.56.2)
@@ -192,11 +193,21 @@ exactly that subtree, `check-docs-lifecycle.mjs` hardcodes the path, and two bui
 cite into it — so moving it forces an INDEX.md regeneration, which is not reproducible
 off-CI (a Windows run emits ~21 extra status buckets and a different row order than CI's).
 
-**Still open, and not attempted:** folding the singleton directories (`sessions/`,
-`providers/`, `api/`, `recovery/` — six files). Each is a judgement call about what a
-document *is*, which `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §1 rules out by
-construction: *"If an item requires a fresh judgement call about a doc's content, it is out
-of scope."* That constraint still holds, so this needs a human to decide the taxonomy first.
+**Singleton directories: two folded, three kept (#3370).** `docs/sessions/` (1 file, no
+inbound references) moved to `docs/status/`, and `docs/recovery/` (3 files) to
+`docs/incident/` — a fold `docs/README.md` already described as one category, so it
+required no new judgement about what those documents are. 18 directories became 17.
+
+`docs/api/`, `docs/cef-patches/` and `docs/providers/` were **kept**, each having a
+distinct audience or purpose (a user-facing App API guide; the vendored CEF patch set with
+its own README; a cross-provider reference cited from five places). The hardening spec only
+asks a singleton to fold when it does not have one.
+
+The constraint in `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §1 — *"If an item requires a
+fresh judgement call about a doc's content, it is out of scope"* — still binds, and it is
+what stops the remaining work: not the directory layout, but the `Status:` vocabulary
+(§5.5a), where 626 docs cannot be made compliant without either distorting their meaning or
+extending the enum for non-spec doc types. That is the decision still owed to a human.
 
 **So: the documentation lifecycle is not complete, and the repo's docs are not organised.**
 What exists now is enforcement that stops the known failure modes recurring, plus the
