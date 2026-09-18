@@ -18,6 +18,7 @@ use serde_json::json;
 use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
+    AiRateLimitResult, AppInfoResult, NoArgsReq,
     CommandBlockInputData, CommandControllerResyncData, CommandCreateSubBlockData,
     CommandDeleteSubBlockData, CommandEventReadHistoryData,
     CommandGetMetaData, CommandSetMetaData, CommandToolDecisionData,
@@ -775,89 +776,102 @@ fn publish_background_task_updated(broker: &crate::backend::mps::Broker, block_i
 fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
     // getfullconfig → return full config as JSON
     let config_watcher = state.config_watcher.clone();
-    engine.register_handler(
+    // The RESPONSE stays `serde_json::Value`, deliberately. Redaction runs on
+    // the serialized form (`redact_full_config_for_renderer` walks the JSON and
+    // strips secrets), so what goes on the wire is NOT `FullConfig` -- it is
+    // `FullConfig` minus fields that a type would still claim are there.
+    // Generating `FullConfig` here would produce a binding that promises the
+    // renderer secrets it will never receive, which is worse than `unknown`.
+    engine.register_typed(
         COMMAND_GET_FULL_CONFIG,
-        Box::new(move |_data, _ctx| {
+        move |_req: Option<NoArgsReq>, _ctx| {
             let cw = config_watcher.clone();
-            Box::pin(async move {
+            async move {
                 let config = cw.get_full_config();
-                match serde_json::to_value(config.as_ref()) {
-                    Ok(mut v) => {
-                        crate::backend::wconfig::redact_full_config_for_renderer(&mut v);
-                        Ok(Some(v))
-                    }
-                    Err(e) => Err(format!("failed to serialize config: {}", e)),
-                }
-            })
-        }),
+                let mut v = serde_json::to_value(config.as_ref())
+                    .map_err(|e| format!("failed to serialize config: {}", e))?;
+                crate::backend::wconfig::redact_full_config_for_renderer(&mut v);
+                Ok(v)
+            }
+        },
     );
 
     // routeannounce → log + no-op (fire-and-forget, may have no reqid)
-    engine.register_handler(
+    // `Value` request: fire-and-forget, may arrive with no reqid and any
+    // payload, and it only logs. A struct would start rejecting shapes this has
+    // always accepted.
+    engine.register_typed(
         COMMAND_ROUTE_ANNOUNCE,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
+        |data: serde_json::Value, _ctx| {
+            async move {
                 tracing::debug!("routeannounce: {:?}", data);
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // routeunannounce → no-op
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_ROUTE_UNANNOUNCE,
-        Box::new(|_data, _ctx| Box::pin(async move { Ok(None) })),
+        |_data: serde_json::Value, _ctx| async move { Ok(()) },
     );
 
     // eventsub → register subscription with the MPS broker
     let broker_sub = state.broker.clone();
     let conn_id_sub = conn_id.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_EVENT_SUB,
-        Box::new(move |data, _ctx| {
+        move |sub: crate::backend::mps::SubscriptionRequest, _ctx| {
             let broker = broker_sub.clone();
             let conn_id = conn_id_sub.clone();
-            Box::pin(async move {
-                let sub: crate::backend::mps::SubscriptionRequest =
-                    serde_json::from_value(data).map_err(|e| format!("eventsub: {e}"))?;
+            async move {
                 tracing::debug!("eventsub: event={} scopes={:?} allscopes={}", sub.event, sub.scopes, sub.allscopes);
                 broker.subscribe(&conn_id, sub);
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // eventunsub → unsubscribe from the MPS broker
     let broker_unsub = state.broker.clone();
     let conn_id_unsub = conn_id.clone();
-    engine.register_handler(
+    // The request is a BARE STRING, not an object -- the only command in the
+    // app shaped that way, which is exactly the sort of thing a hand-written
+    // stub gets wrong. Typing it as `String` makes the generated binding say
+    // so. `Option<String>` rather than `String` because the old handler
+    // answered a non-string payload with "" (no-op) rather than an error, and
+    // that tolerance is cheap to keep.
+    engine.register_typed(
         COMMAND_EVENT_UNSUB,
-        Box::new(move |data, _ctx| {
+        move |data: serde_json::Value, _ctx| {
             let broker = broker_unsub.clone();
             let conn_id = conn_id_unsub.clone();
-            Box::pin(async move {
+            async move {
+                // `as_str().unwrap_or("")` -- byte-identical to the untyped
+                // handler. A number/object/array is a silent no-op, as before,
+                // NOT a deserialize error.
                 let event_name = data.as_str().unwrap_or("").to_string();
                 if !event_name.is_empty() {
                     broker.unsubscribe(&conn_id, &event_name);
                 }
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // eventunsuball → unsubscribe all from the MPS broker
     let broker_unsub_all = state.broker.clone();
     let conn_id_unsub_all = conn_id.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_EVENT_UNSUB_ALL,
-        Box::new(move |_data, _ctx| {
+        move |_req: Option<NoArgsReq>, _ctx| {
             let broker = broker_unsub_all.clone();
             let conn_id = conn_id_unsub_all.clone();
-            Box::pin(async move {
+            async move {
                 broker.unsubscribe_all(&conn_id);
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // setmeta → update object metadata in the DB, broadcast update event
@@ -946,33 +960,27 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
     // waveinfo → return version and build info
     let version_info = state.version.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_APP_INFO,
-        Box::new(move |_data, _ctx| {
+        move |_req: Option<NoArgsReq>, _ctx| {
             let version = version_info.clone();
-            Box::pin(async move {
-                Ok(Some(serde_json::json!({
-                    "version": version,
-                })))
-            })
-        }),
+            async move { Ok(AppInfoResult { version }) }
+        },
     );
 
     // getwaveairatelimit → AgentMux has no rate limits; return unlimited/unknown
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_AI_RATE_LIMIT,
-        Box::new(|_data, _ctx| {
-            Box::pin(async move {
-                Ok(Some(serde_json::json!({
-                    "req": 9999,
-                    "reqlimit": 9999,
-                    "preq": 9999,
-                    "preqlimit": 9999,
-                    "resetepoch": 0,
-                    "unknown": true
-                })))
+        |_req: Option<NoArgsReq>, _ctx| async move {
+            Ok(AiRateLimitResult {
+                req: 9999,
+                reqlimit: 9999,
+                preq: 9999,
+                preqlimit: 9999,
+                resetepoch: 0,
+                unknown: true,
             })
-        }),
+        },
     );
 
     // controllerresync → load block from DB, create/restart controller with PTY
@@ -1055,21 +1063,19 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // `dispatch_blockinput` (closed 2026-09-16, previously `agent_lock`'s
     // documented "Known gap" — see its module doc history). See also
     // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_CONTROLLER_INPUT,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let cmd: CommandBlockInputData = serde_json::from_value(data)
-                    .map_err(|e| format!("controllerinput: {e}"))?;
+        move |cmd: CommandBlockInputData, _ctx| {
+            async move {
                 if blockcontroller::agent_lock::is_locked(&cmd.blockid) {
                     tracing::debug!(block_id = %cmd.blockid, "controllerinput: dropped — agent lock active");
-                    return Ok(None);
+                    return Ok(());
                 }
                 let input = parse_block_input(&cmd)?;
                 blockcontroller::send_input(&cmd.blockid, input, cmd.seq)?;
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // createsubblock → create a headless sub-block (no tab/layout entry)
@@ -1657,18 +1663,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
     // eventreadhistory → read persisted event history from the MPS broker
     let broker_history = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_EVENT_READ_HISTORY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandEventReadHistoryData, _ctx| {
             let broker = broker_history.clone();
-            Box::pin(async move {
-                let cmd: CommandEventReadHistoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("eventreadhistory: {e}"))?;
+            async move {
                 let max_items = if cmd.maxitems == 0 { 1024 } else { cmd.maxitems };
-                let events = broker.read_event_history(&cmd.event, &cmd.scope, max_items);
-                Ok(Some(serde_json::to_value(&events).unwrap_or_default()))
-            })
-        }),
+                Ok(broker.read_event_history(&cmd.event, &cmd.scope, max_items))
+            }
+        },
     );
 
     // setconfig → merge settings keys into settings.json AND update in-memory config immediately.
@@ -1807,6 +1810,64 @@ fn parse_block_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every no-argument stub on this connection sends `null`, not `{}`.
+    ///
+    /// `waveinfo`, `getfullconfig`, `eventunsuball`, `routeannounce` and
+    /// `routeunannounce` are all `client.rpcCall("...", null, opts)`. That is
+    /// the opposite of the assumption the earlier slices were built on -- those
+    /// stubs send `{}` -- and it is why these register `Option<NoArgsReq>`
+    /// rather than the bare struct: serde deserializes a struct only from an
+    /// object, so a bare `NoArgsReq` would reject every one of these calls
+    /// while compiling and passing every gate.
+    #[test]
+    fn the_no_argument_commands_accept_the_null_their_stubs_send() {
+        for payload in [serde_json::Value::Null, serde_json::json!({})] {
+            serde_json::from_value::<Option<crate::backend::rpc_types::NoArgsReq>>(payload.clone())
+                .unwrap_or_else(|e| panic!("{payload} should deserialize, got {e}"));
+        }
+        // ...and the bare struct really does reject null, so the Option is
+        // load-bearing rather than decoration.
+        assert!(
+            serde_json::from_value::<crate::backend::rpc_types::NoArgsReq>(serde_json::Value::Null)
+                .is_err(),
+            "if this ever passes, the Option wrappers here are redundant",
+        );
+    }
+
+    /// `eventunsub` takes a BARE STRING payload -- the only command in the app
+    /// shaped that way. Its stub is `data: string`.
+    ///
+    /// Registered as `serde_json::Value`, NOT `Option<String>`. reagent caught
+    /// that difference on #3348 and was right: the old handler read
+    /// `data.as_str().unwrap_or("")`, so a number/object/array was a silent
+    /// no-op, while `Option<String>` hard-errors on exactly those. Claiming it
+    /// "keeps that tolerance" was false. `Value` keeps it for real.
+    ///
+    /// This test now covers "anything else" rather than only null, which is
+    /// what its name always promised.
+    #[test]
+    fn eventunsub_takes_a_bare_string_and_tolerates_anything_else() {
+        // Mirrors the handler exactly: deserialize as Value, then as_str().
+        let name = |v: serde_json::Value| {
+            serde_json::from_value::<serde_json::Value>(v)
+                .expect("Value deserializes from anything")
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        assert_eq!(name(serde_json::json!("blockfile:mux")), "blockfile:mux");
+        // Each of these was a silent no-op before the migration and must stay one.
+        for junk in [
+            serde_json::Value::Null,
+            serde_json::json!(42),
+            serde_json::json!({ "event": "x" }),
+            serde_json::json!(["x"]),
+            serde_json::json!(true),
+        ] {
+            assert_eq!(name(junk.clone()), "", "{junk} must unsubscribe nothing, not error");
+        }
+    }
 
     /// Codex P1 on PR #3194: the frontend's own lock gate
     /// (`AgentShellSubblock.tsx` dropping `sendDataHandler` while

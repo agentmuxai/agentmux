@@ -28,6 +28,7 @@ mod misc;
 mod session;
 mod skill;
 mod toolchain;
+mod websocket;
 
 pub use agent::*;
 pub use block::*;
@@ -46,6 +47,7 @@ pub use misc::*;
 pub use session::*;
 pub use skill::*;
 pub use toolchain::*;
+pub use websocket::*;
 
 // ---- RpcMessage wire format ----
 
