@@ -6,6 +6,7 @@
 // Re-exported from global.ts for backward-compat (97 files import from that
 // module).
 
+import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
@@ -46,9 +47,41 @@ const blockComponentModelMap = new Map<string, BlockComponentModel>();
 // so they're never excluded.
 const dormantKeepAliveBlockIds = new Set<string>();
 
+// Reactive mirror of `dormantKeepAliveBlockIds`, per-blockId, lazily
+// created. `dormantKeepAliveBlockIds` itself stays a plain Set — every
+// existing reader of it (`getAllBlockComponentModels` etc.) is a point-in-time
+// snapshot read, not a reactive one, and changing that isn't needed here.
+// This exists for the opposite kind of consumer: something reactively
+// watching ONE specific blockId's own dormancy — added for agent keep-alive
+// (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's follow-up) so a
+// backgrounded-but-mounted agent tab can pause user-facing side effects
+// (auto-timeout answers, auto-retry) that must not fire while nobody can see
+// or interrupt them, and resume when the tab becomes visible again.
+const dormantSignals = new Map<string, [Accessor<boolean>, (v: boolean) => void]>();
+
+function dormantSignalFor(blockId: string): [Accessor<boolean>, (v: boolean) => void] {
+    let sig = dormantSignals.get(blockId);
+    if (!sig) {
+        sig = createSignal<boolean>(dormantKeepAliveBlockIds.has(blockId));
+        dormantSignals.set(blockId, sig);
+    }
+    return sig;
+}
+
+/**
+ * Reactive read of whether `blockId` is CURRENTLY a hidden, kept-alive stack
+ * member — see `setKeepAliveBlockDormant`'s doc comment for what that means.
+ * Defaults to `false` (not dormant) for any blockId never marked, which is
+ * correct both for a block that's simply active/visible and for one that
+ * doesn't live under a keep-alive pane type at all.
+ */
+export function isBlockDormant(blockId: string): Accessor<boolean> {
+    return dormantSignalFor(blockId)[0];
+}
+
 /**
  * Marks `blockId` as a currently-HIDDEN, kept-alive stack member (a
- * terminal tab that isn't the active one but stays mounted+registered
+ * terminal/agent tab that isn't the active one but stays mounted+registered
  * anyway) — called only by `pane-leaf-chrome.tsx`'s keep-alive rendering,
  * reactively, as a stack member's own visibility toggles. Clearing this
  * (dormant=false, including on that member's own unmount/tab-close) is
@@ -62,6 +95,7 @@ export function setKeepAliveBlockDormant(blockId: string, dormant: boolean) {
     } else {
         dormantKeepAliveBlockIds.delete(blockId);
     }
+    dormantSignals.get(blockId)?.[1](dormant);
 }
 
 export function registerBlockComponentModel(blockId: string, bcm: BlockComponentModel) {
@@ -85,6 +119,7 @@ export function unregisterBlockComponentModel(blockId: string, owner?: BlockComp
     // clear: a real unregistration means the dormancy marker (if any) can
     // never become meaningful again for this blockId.
     dormantKeepAliveBlockIds.delete(blockId);
+    dormantSignals.delete(blockId);
     cleanupBlockAtomCache(blockId);
 }
 
