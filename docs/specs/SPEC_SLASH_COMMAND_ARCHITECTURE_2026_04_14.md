@@ -1,7 +1,7 @@
 # SPEC — Slash Command Architecture
 
 **Date:** 2026-04-14
-**Status:** Draft
+**Status:** implemented — all four of §5's migration steps landed on 2026-04-14, the day this was written, as the four PRs it sequences: Step 1 registry + dispatch #379 (the PR this doc was added in), Step 2 `SlashCommandPicker.tsx` #381, Step 3 `SlashAutocomplete.tsx` #382, Step 4 `/help` panel #383. `frontend/app/view/agent/commands/` holds `registry.ts`, `dispatch.ts`, `parse.ts`, `types.ts` and the `global/` + `providers/` trees the spec describes. §2 ("What doesn't exist yet") is a snapshot of the morning it was written, not of today.
 **Owner:** AgentA
 **Scope:** `frontend/app/view/agent/` — the composer's slash command surface
 **Related:** PR #378 (minimal `/model` /`/effort` /`/permission-mode` dispatcher — the mechanism proof this spec grows into a real architecture)

@@ -5,7 +5,7 @@
 
 **Date:** 2026-08-20
 **Author:** AgentA
-**Status:** Proposed
+**Status:** implemented — #2681 (2026-08-20), the PR this doc was added in. Phase A is live end to end: `agentmux-bashwrap/src/bash_wrap.rs` publishes its own PID at spawn, `agentmux-srv/src/backend/pending_background_pids.rs` parks it, and `background_tasks.rs` records it. §5's non-goals are unchanged.
 **Depends on:** PR #2590 (`db_background_tasks` registry, merged 2026-08-16)
 **Blocks:** `SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md` (Phase B), `SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md` (Phase C)
 

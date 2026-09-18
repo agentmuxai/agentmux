@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-14
 **Author:** AgentA
-**Status:** Draft
+**Status:** implemented — #840 (2026-05-14), the PR this doc was added in. All four of §7's RPCs (`StartProviderAuth`, `PollProviderAuth`, `SubmitAuthCallback`, `CancelProviderAuth`) exist in `identity_handlers.rs` and `frontend/app/store/rpc-api/identity.ts`, with the session manager in `identity/auth_session.rs` and §4's per-provider landscape encoded in `identity/auth_patterns.rs`. §2's "Today's state" describes the world before that PR.
 **Companion to:** [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — that spec covers *where* OAuth tokens are stored and how they refresh. This spec covers *when in the user flow* OAuth happens and how it binds to the agent.
 
 ---

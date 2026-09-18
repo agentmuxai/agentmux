@@ -1,9 +1,19 @@
 # SPEC: Switching in-pane tabs must not repaint the pane header or tab bar
 
 **Date:** 2026-09-07
-**Status:** proposed — the analysis and the staged plan are the deliverable;
-the refactor itself (§5) is **not** implemented. Only §8's documentation fix
-ships with this spec. §2.2 is why: every consumer in the `<Block>`/`BlockFrame`
+**Status:** implemented — §5's Option B shipped over the following three days,
+after this Status line was written (it described the doc-only PR the spec rode
+in on, and was never revised). `frontend/app/tab/pane-leaf-chrome.tsx` and its
+test now own the narrower inner remount keyed on `NodeModel.activeBlockId`;
+`DisplayNodesWrapper` keys on `node.id` alone so the leaf subtree no longer
+remounts on a switch; `layoutStack.ts` no longer evicts a leaf's NodeModel; and
+`.tile-node` carries no reveal gating beyond magnify. Landing PRs: #3091 (§9's
+"PR TBD" — the NodeModel reactive-root leak), #3132 (stop evicting on an in-pane
+tab switch), #3136 (Agent ↔ History header/strip flash), #3151 (tab strip +
+header layout, remaining new-tab flash). Sections below are preserved as written
+and still read as forward-looking. §2.2's constraint — the reason the original
+Status deferred the work — was real and was what the above PRs had to solve:
+every consumer in the `<Block>`/`BlockFrame`
 tree is built on "this component instance owns this blockId for its lifetime",
 including `useWaveObjectValue(oref: string)`, which takes a plain string and
 refcounts it in `onCleanup` — it does not re-subscribe when a blockId changes.
@@ -251,7 +261,7 @@ place, with a pointer here.
 
 ---
 
-## 9. A real bug found while scoping Option B, fixed separately (PR TBD)
+## 9. A real bug found while scoping Option B, fixed separately (#3091)
 
 Tracing exactly what "evict the NodeModel" (`layoutStack.ts:80,104,145`)
 does to design a safer, smaller first slice of Option B surfaced a

@@ -1,7 +1,7 @@
 # SPEC — honest account-delete semantics: spawn gating, agent reconciliation, Armory truthfulness
 
 **Date:** 2026-07-14
-**Status:** proposed — Approved (user decision on §2 recorded this date); implementation dispatched
+**Status:** implemented — both dispatched PRs landed the same day this spec was written (2026-07-14). PR A (layer 3, §2): #2164 — `use_ambient_login` (schema v12) with fail-by-default spawn gating and the `m0017_ambient_login_grandfather` migration. PR B (layers 2+4, §3–§4): #2161 — `IdentityDeleteOutcome.affected_agents`, the pane credentials-revoked chip, and the Armory delete-time disclosure (`deleteDisclosureNotice`). §5's deferrals (provider-side token revocation, hard-stop-on-delete) remain deferred by design.
 **Governing analysis:** `docs/analysis/ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md`
 (layers 2.1–2.4). Layer 1 (cascade + token-dir cleanup) shipped in PR #2159.
 This spec covers the remaining layers 2 (running-agent reconciliation),

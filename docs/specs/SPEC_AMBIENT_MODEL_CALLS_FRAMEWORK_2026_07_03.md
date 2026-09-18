@@ -1,7 +1,7 @@
 # SPEC: A Unified Framework for Ambient (Non-User-Driven) Model Calls
 
 **Date:** 2026-07-03
-**Status:** Draft — proposal, not yet implemented
+**Status:** implemented — #1947 (2026-07-03), the PR this doc was added in. The AMC gateway is `agentmux-srv/src/ambient/`, and §4's migration plan is done through step 5: `invoke_cli_for_activity`'s direct spawn is gone (step 2), `term:activity` is split into `osc_title`/`ambient_summary` (step 4, see `osc_extractor.rs`), and `token-usage.ts` collapses ambient call sites into a `__ambient__` bucket (step 5). Step 6's `phaseToDisplayStatus` no longer exists under that name — the swarm view was since restructured — so it is neither verifiably fixed nor outstanding. Step 7 is a standing rule, not a task.
 **Related:** `agentmux-srv/src/server/app_api/session.rs`, `frontend/app/view/agent/hooks/useAgentActivitySummary.ts`,
 `frontend/app/view/agent/hooks/useBlockActivity.ts`, `frontend/app/view/swarm/`, `frontend/app/store/token-usage.ts`,
 `docs/specs/SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md`, `specs/SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29.md`,

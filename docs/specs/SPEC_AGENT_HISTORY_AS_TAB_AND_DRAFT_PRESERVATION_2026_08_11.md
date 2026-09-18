@@ -1,7 +1,7 @@
 # SPEC: Agent History as a pane tab, composer draft preservation, and a scrolling link row
 
 **Date:** 2026-08-11
-**Status:** proposed
+**Status:** implemented — #2539 (2026-08-11), the PR this doc was added in, which carried all three of §8's phases: P1's `AgentHistoryTabView` (`frontend/app/view/agent/history/`), P2's scrolling link-row node (`AgentDocumentView.tsx` cites §3.2), and P3's context-menu entry and draft preservation (`agent-model.ts` cites §3.3, `AgentFooter.tsx` cites §3.4). §6's open questions 2 and 3 are unresolved by design — 3 is explicitly blocked on §4.5 of the session-scoped-scrollback spec landing.
 **Severity:** Medium — UX correctness + recurring bug class
 **Supersedes:** §4.2 of `SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md`
 ("View-swap mechanism") — the `bodyMode: "live" | "history"` in-place swap this
