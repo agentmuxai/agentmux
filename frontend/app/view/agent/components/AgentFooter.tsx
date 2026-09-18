@@ -972,23 +972,35 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // ("send now") held message — the Claude-Code-CLI gesture (unsent, so a
         // true un-send). When nothing is queued, ArrowUp walks back through
         // previously SENT messages (shell-style history) and ArrowDown walks
-        // forward toward the live draft. Both directions gate on the active
-        // selection edge being at true absolute position 0 — not merely "on
-        // the first visual line" — so multiline editing of a recalled message
-        // (or extending/shrinking a selection with Shift held) still moves
-        // within the text normally, and only crosses into history once
-        // there's truly nowhere left to move. They share one gate (rather
-        // than Up-at-start/Down-at-end) because every recall parks the caret
-        // at position 0, so a repeated same- or opposite-direction press
-        // reads the same edge the previous recall just landed on — the one
-        // exception is landing back on the live draft, past the newest
-        // entry, where the caret goes to the end instead (it's the user's
-        // own in-progress text to resume typing, not a historical entry
-        // still being reviewed).
+        // forward toward the live draft. ArrowUp gates on the active selection
+        // edge being at true absolute position 0 — not merely "on the first
+        // visual line" — so multiline editing of a recalled message (or
+        // extending/shrinking a selection with Shift held) still moves within
+        // the text normally, and only crosses into history once there's truly
+        // nowhere left to move. Position 0 has no ambiguity for ArrowUp: it's
+        // always the very first character, regardless of how many lines
+        // follow, so every recall parks the caret there — letting a repeated
+        // ArrowUp step back continuously with one press per level.
+        //
+        // ArrowDown is NOT simply the mirror of that (gating on true end):
+        // position 0 is only "nothing left below" when the entry is
+        // single-line — a multi-line entry can have line two sitting right
+        // below an untouched position 0, which native ArrowDown still needs
+        // to reach. So ArrowDown fires at the true end (always safe, any line
+        // count) OR at true position 0 when the currently-displayed entry has
+        // no embedded newline — since most sent messages are single-line,
+        // this still lets a repeated ArrowDown step forward continuously
+        // right after an ArrowUp landed the caret at the front, without
+        // stranding a multi-line entry's later lines behind an early jump.
+        // The one placement exception either way: landing back on the live
+        // draft, past the newest entry, parks the caret at the END instead of
+        // the front — it's the user's own in-progress text to resume typing,
+        // not a historical entry still being reviewed.
         if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const empty = textareaRef.value.length === 0;
             const navigating = histPos < sentHistory.length;
-            const { first: caretAtStart } = caretAtSelectionEdge(textareaRef);
+            const { first: caretAtStart, last: caretAtEnd } = caretAtSelectionEdge(textareaRef);
+            const currentIsSingleLine = !textareaRef.value.includes("\n");
 
             // Empty composer: ArrowUp un-queues a held message before history.
             if (e.key === "ArrowUp" && empty) {
@@ -1016,14 +1028,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 return;
             }
 
-            // Newer: only while navigating, active selection edge at true
-            // position 0 — mirrors ArrowUp so a repeated ArrowDown immediately
-            // steps forward again too, since every recall (Up or Down) now
-            // lands the caret at the front. The one exception is the final
-            // step past the newest entry, back to the live draft: that caret
-            // goes to the END, since it's the user's own in-progress text to
-            // resume typing, not a historical entry being reviewed.
-            if (e.key === "ArrowDown" && navigating && caretAtStart) {
+            // Newer: only while navigating, and only once there's truly
+            // nowhere left below — the true end always qualifies; position 0
+            // also qualifies, but ONLY for a single-line entry (see the block
+            // comment above for why a multi-line entry can't use this
+            // shortcut). Past the newest entry, lands on the live draft with
+            // the caret at the END instead of the front.
+            if (e.key === "ArrowDown" && navigating && (caretAtEnd || (caretAtStart && currentIsSingleLine))) {
                 histPos++;
                 e.preventDefault();
                 const atLiveDraft = histPos >= sentHistory.length;

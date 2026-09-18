@@ -246,13 +246,13 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
         expect(ta.value).toBe(draft); // must not have been replaced
     });
 
-    it("gates ArrowDown on true position 0 too (mirrors ArrowUp), not just the first visual line", async () => {
-        // ArrowDown used to require the true END of content (the mirror
-        // image of ArrowUp's true-position-0 guard), back when every recall
-        // parked the caret at the end. Now that every recall parks the
-        // caret at the front (see the ArrowUp caret-placement fix), ArrowDown
-        // shares ArrowUp's true-position-0 guard instead — the caret it's
-        // reading was just placed at 0 by the previous recall.
+    it("requires the true end of a MULTI-LINE recalled entry before advancing, but accepts position 0 of a SINGLE-LINE one", async () => {
+        // reagent P1: position 0 is not "nowhere left to move" for a
+        // multi-line entry — line two is still sitting right below it, and
+        // native ArrowDown must be able to reach it. So ArrowDown only
+        // treats position 0 as a valid trigger when the currently-displayed
+        // entry is single-line (no embedded "\n"); a multi-line entry still
+        // requires the true end, exactly like before this feature's fix.
         const onSendMessage = vi.fn();
         render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
         const user = userEvent.setup();
@@ -267,20 +267,26 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
         keyOn(ta, "ArrowUp"); // caret already at 0 from the prior recall
         expect(ta.value).toBe("line one\nline two");
 
-        // Collapsed cursor mid-word on the first line — not yet at true
-        // position 0, so ArrowDown must move within the text natively
-        // instead of advancing history.
-        ta.setSelectionRange(4, 4);
+        // At true position 0 of this MULTI-LINE entry: line two is still
+        // below the caret, so ArrowDown must NOT advance — it needs to stay
+        // available for native down-line movement instead.
         keyOn(ta, "ArrowDown");
-        expect(ta.value).toBe("line one\nline two"); // untouched — not at true start yet
+        expect(ta.value).toBe("line one\nline two"); // untouched
 
-        // Now truly at position 0: advances forward to the next entry,
-        // caret landing at ITS start too.
-        ta.setSelectionRange(0, 0);
+        // Only once truly at the end of the (multi-line) content does it
+        // advance — landing on the next entry with the caret at ITS front.
+        ta.setSelectionRange("line one\nline two".length, "line one\nline two".length);
         keyOn(ta, "ArrowDown");
         expect(ta.value).toBe("second message");
         expect(ta.selectionStart).toBe(0);
         expect(ta.selectionEnd).toBe(0);
+
+        // "second message" is SINGLE-LINE: position 0 (where the caret was
+        // just placed) has nothing below it — there's no second line to
+        // strand — so ArrowDown advances immediately, no extra keypress
+        // needed to reach a true end that wouldn't add any information here.
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe(""); // past the newest entry — the stashed (empty) live draft
     });
 
     it("lands the caret at the front for each interim ArrowDown step, and at the end only when returning to the live draft", async () => {
