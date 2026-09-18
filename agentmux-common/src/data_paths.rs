@@ -868,17 +868,44 @@ pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
     }
 }
 
-/// `~/.agentmux/` root, or the test override via
-/// `AGENTMUX_HOME_OVERRIDE`. Falls back to error if no home dir
-/// can be resolved (rare — should only happen in stripped CI envs).
-fn resolve_root() -> Result<PathBuf, String> {
-    if let Ok(s) = std::env::var("AGENTMUX_HOME_OVERRIDE") {
-        if !s.is_empty() {
-            return Ok(PathBuf::from(s));
+/// The AgentMux root (`~/.agentmux`) — the single resolver for it.
+///
+/// Public because srv had its own copy (`backend/base.rs::get_mux_data_dir`)
+/// reading a *different* env var and failing differently: where this returns
+/// `Err`, that one fell back to `PathBuf::from("/")`, so a host with no
+/// resolvable home directory wrote to `/.agentmux` instead of refusing.
+/// A10 of docs/analysis/TRACKING_ARCHITECTURE_REFACTOR_A1_A15_2026_06_18.md.
+///
+/// Two env vars are honoured, in this order, because both already exist in
+/// the wild and silently dropping either would move where a live install
+/// finds its data:
+///
+/// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests.
+/// - `AGENTMUX_DATA_HOME` — srv's own, read at startup and relied on by the
+///   MSIX packaging path (`blockcontroller/shell/lifecycle.rs`). It is
+///   deliberately **stripped** from pane environments, not exported into them:
+///   it is one of the identity vars invariant I7 removes so a pane cannot
+///   inherit and resolve another instance's data dir
+///   (`backend/pane_env.rs`, test `the_identity_vars_that_caused_the_breach_are_stripped`).
+///
+/// NOT to be confused with `AGENTMUX_DATA_DIR`, which the launcher exports
+/// and which names the per-channel *data* directory
+/// (`<root>/channels/<channel>/data`), not the root. The similar names are
+/// exactly why srv ended up with a second resolver.
+pub fn agentmux_root() -> Result<PathBuf, String> {
+    for var in ["AGENTMUX_HOME_OVERRIDE", "AGENTMUX_DATA_HOME"] {
+        if let Ok(s) = std::env::var(var) {
+            if !s.is_empty() {
+                return Ok(PathBuf::from(s));
+            }
         }
     }
     let home = dirs::home_dir().ok_or_else(|| "dirs::home_dir() returned None".to_string())?;
     Ok(home.join(".agentmux"))
+}
+
+fn resolve_root() -> Result<PathBuf, String> {
+    agentmux_root()
 }
 
 /// Sanitize a string for use as a single filesystem path segment.
@@ -1057,6 +1084,67 @@ mod tests {
     /// HOME_OVERRIDE but the channel var is a separate axis).
     fn clear_channel_env() {
         std::env::remove_var("AGENTMUX_CHANNEL");
+    }
+
+    /// A10 compatibility guarantee. srv's old `get_mux_data_dir` read
+    /// AGENTMUX_DATA_HOME; this module's resolver read AGENTMUX_HOME_OVERRIDE.
+    /// Consolidating onto one resolver must not move where a live install
+    /// finds its data, so BOTH are honoured — and an install that only ever
+    /// set AGENTMUX_DATA_HOME must still resolve to exactly that path.
+    #[test]
+    fn agentmux_root_honours_srvs_env_var_for_existing_installs() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        let tmp = TempDir::new().expect("tempdir");
+        std::env::set_var("AGENTMUX_DATA_HOME", tmp.path());
+        let got = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(got, tmp.path(), "AGENTMUX_DATA_HOME must still win");
+    }
+
+    /// With neither var set the answer is `~/.agentmux` — unchanged from both
+    /// pre-consolidation resolvers, which is the case every default install is
+    /// in. Asserted against dirs::home_dir() rather than a literal so this
+    /// fails if the default layout ever moves.
+    #[test]
+    fn agentmux_root_defaults_to_home_dot_agentmux() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        let got = agentmux_root().expect("root resolves");
+        let want = dirs::home_dir().expect("home").join(".agentmux");
+        assert_eq!(got, want);
+    }
+
+    /// Precedence is documented, not accidental: HOME_OVERRIDE is this
+    /// module's test hook and wins, so a test that sets it is not silently
+    /// overridden by an AGENTMUX_DATA_HOME leaked from the ambient
+    /// environment.
+    #[test]
+    fn agentmux_root_prefers_home_override_over_data_home() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let a = TempDir::new().expect("tempdir");
+        let b = TempDir::new().expect("tempdir");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", a.path());
+        std::env::set_var("AGENTMUX_DATA_HOME", b.path());
+        let got = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(got, a.path());
+    }
+
+    /// An empty value is not a path. Both resolvers skipped empty strings
+    /// before; the consolidated one must too, or `AGENTMUX_DATA_HOME=```
+    /// in a shell profile would redirect every install to "".
+    #[test]
+    fn agentmux_root_ignores_empty_env_values() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "");
+        std::env::set_var("AGENTMUX_DATA_HOME", "");
+        let got = agentmux_root().expect("root resolves");
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_DATA_HOME");
+        assert_eq!(got, dirs::home_dir().expect("home").join(".agentmux"));
     }
 
     #[test]

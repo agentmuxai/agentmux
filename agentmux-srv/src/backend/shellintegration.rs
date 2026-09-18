@@ -141,7 +141,7 @@ pub fn integration_base_for(data_dir: &Path, home_dir: &Path) -> PathBuf {
 /// deployed, shared, last-writer-wins. Nothing sources it at shell startup;
 /// the rcfiles a terminal actually loads come from `integration_base`.
 pub fn documented_shell_root() -> PathBuf {
-    crate::backend::base::get_home_dir().join(".agentmux").join("shell")
+    crate::backend::base::get_mux_data_dir().join("shell")
 }
 
 /// `integration_base_for` bound to this process's real data dir and home.
