@@ -1022,7 +1022,7 @@ unsafe extern "system" fn win_event_callback(
             // detected. LOCATIONCHANGE fires once per WM_WINDOWPOSCHANGED, so a
             // stationary pool window never re-fires — no duplicate-report risk.
             //
-            // Ref: docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap A
+            // Ref: retro-window-count-stale-post-1701-2026-06-27 (never committed to this repo) §Gap A
             //      reagentx P1+P2 on PR #1803.
             // IsIconic guard: minimized windows report (-32000, -32000) from
             // GetWindowRect, which is below OFFSCREEN_POOL_THRESHOLD_X. Skip

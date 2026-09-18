@@ -254,7 +254,7 @@ async function resyncFromAuthorityAfterGap(attempt = 0): Promise<void> {
             // the snapshot. Retry once after a short delay: a busy event stream can
             // race every attempt indefinitely without this, leaving a stale count
             // permanently. One retry is sufficient for the common case.
-            // See docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap C.
+            // See retro-window-count-stale-post-1701-2026-06-27 (never committed to this repo) §Gap C.
             if (attempt === 0) setTimeout(() => void resyncFromAuthorityAfterGap(1), 500);
             return;
         }
@@ -309,7 +309,7 @@ export function startLauncherEventReducer(): void {
     // subsequent events arrived after a missed WindowClosed, so gapSeq never
     // bumped). Low cost — one RPC per 30s per renderer. Complements the
     // gap-triggered reconcile; does not replace it.
-    // See docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap C.
+    // See retro-window-count-stale-post-1701-2026-06-27 (never committed to this repo) §Gap C.
     // Reducer lives for the renderer's lifetime; interval is reclaimed on unload.
     setInterval(() => void resyncFromAuthorityAfterGap(), 30_000);
 }
