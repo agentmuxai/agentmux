@@ -279,6 +279,19 @@ jobs:
       - name: docs/ directory map is accurate
         run: node scripts/check-docs-dir-map.mjs
 
+      # Prevention for the thing the §5.6 reverse check keeps finding after the
+      # fact. Triaging 64 of its candidates by hand (#3384, #3385, #3386) found
+      # one cause behind most of them: the spec shipped INSIDE its own
+      # implementing PR, carrying a Status written before that PR merged.
+      #
+      # Fires only when this PR ADDS a doc AND source files in the same PR cite
+      # that doc by name -- not merely "adds a doc and touches source", which
+      # has real false positives (SPEC_DECISION_PROMPT rode in on an unrelated
+      # statusbar PR and `Draft` was the honest status). Replay against the
+      # historical commits is in the script's header.
+      - name: A new spec implemented by its own PR does not say it is unbuilt
+        run: node scripts/check-new-spec-status.mjs
+
       # The three gates below already existed as Taskfile `check:*` tasks but
       # were wired into nothing — defined, documented, and never run. Each
       # encodes a regression that already happened once (see the spec/retro in
