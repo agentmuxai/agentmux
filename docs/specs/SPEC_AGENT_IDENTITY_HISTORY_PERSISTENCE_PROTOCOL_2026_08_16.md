@@ -4,10 +4,10 @@
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`), at operator request
 **Status:** active — the protocol is partly adopted, and the code now cites it as
 the authority for decisions already made rather than as a proposal.
-`agentmux-common/src/data_paths.rs` points at §4.1 three times to explain why
-`identity_history_dir` is always-global while `identities_dir` is
-isolation-scoped — that is §4's step 2, the CREDENTIAL vs CONVERSATION HISTORY
-split. §4 step 4's fast index exists as `agentmux-srv/src/backend/history/index.rs`,
+§4's step 2 — the CREDENTIAL vs CONVERSATION HISTORY split — shipped in #2605
+the same day this was written, and `agentmux-common/src/data_paths.rs` now
+points at §4.1 three times to explain why `identity_history_dir` is
+always-global while `identities_dir` is isolation-scoped. §4 step 4's fast index exists as `agentmux-srv/src/backend/history/index.rs`,
 alongside the adapters. P1–P5 are standing principles rather than a build list;
 what remains genuinely open is their systematic application, not their adoption.
 **Ground truth basis:** `agentmuxai/agentmux` local checkout at `3705f83c3`
