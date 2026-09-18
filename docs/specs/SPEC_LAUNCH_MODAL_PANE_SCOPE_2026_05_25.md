@@ -145,4 +145,4 @@ Reagent + codex review. No portable smoke required — visual, no schema change.
 - [`launch-modal-rearchitecture-2026-05-01.md`](./launch-modal-rearchitecture-2026-05-01.md) — the previous launch-modal redesign; this spec narrows its scope
 - [`SPEC_MODAL_PANE_CLIP_2026_04_24.md`](./SPEC_MODAL_PANE_CLIP_2026_04_24.md) — Win32 HWND clip, unchanged
 - [`frontend/app/element/modal.tsx`](../../frontend/app/element/modal.tsx) — `PaneModalScope` context (already built, awaiting first caller)
-- [`frontend/app/tab/TabModalLayer.tsx`](../../frontend/app/tab/TabModalLayer.tsx) — pattern to mirror at pane scope
+- `frontend/app/tab/TabModalLayer.tsx` — pattern to mirror at pane scope

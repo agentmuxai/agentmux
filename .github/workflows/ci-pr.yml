@@ -238,6 +238,17 @@ jobs:
       - name: Spec citations resolve (changed files only)
         run: bash scripts/check-spec-citations.sh
 
+      # The other half of "a broken pointer is worse than none":
+      # check-spec-citations.sh catches a cited path naming docs/specs/<x>.md
+      # from anywhere; this catches a Markdown link that is wrong RELATIVE to
+      # the file it was written in. A link like `](specs/archive/Y.md)` in
+      # docs/reports/ contains no "docs/specs/" substring, so the citation gate
+      # cannot see it -- it has been dead since the top-level specs/ tree was
+      # folded in (#2920). First whole-tree run: 45 broken links in 27 files.
+      # Same changed-files scoping as every gate above, for the same reason.
+      - name: Doc links resolve (changed files only)
+        run: node scripts/check-doc-links.mjs
+
       # The three gates below already existed as Taskfile `check:*` tasks but
       # were wired into nothing — defined, documented, and never run. Each
       # encodes a regression that already happened once (see the spec/retro in

@@ -521,7 +521,7 @@ AgentMux uses **Tauri v2** (not Electron) with:
 - **Go** backend (agentmuxsrv sidecar)
 - **React** UI (Vite + TypeScript)
 
-See [docs/architecture/agentmux-components.md](docs/architecture/agentmux-components.md) for details.
+See `docs/architecture/agentmux-components.md` for details.
 
 ### Making Changes
 
