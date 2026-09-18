@@ -1,7 +1,7 @@
 # SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery
 
 **Date:** 2026-06-15
-**Status:** Draft — evidence captured, ready to implement
+**Status:** active — "ready to implement" was true for about a day. §5 Phase 1 shipped in #1451, the PR this doc was added in: `--permission-prompt-tool stdio` in `providers.rs`, the control demux and `pending_questions` map in `persistent.rs`, and `answer_question` replying with a `control_response`. §5 Phase 3 (§6's controller-aware muxbus delivery) shipped the next day in #1477, extended to subprocess/container agents in #2930; `reactive/handler.rs` cites it by name. **§5 Phase 2 is still open** — `persistent.rs` auto-allows every tool except AskUserQuestion, so non-auto-allowed `can_use_tool` requests are not yet routed to `AgentDecisionPanel`. One-shot/container AskUserQuestion remains out of scope as written.
 **Owner:** agent pane / sidecar (persistent controller)
 **Supersedes the delivery design in:** `SPEC_ASK_USER_QUESTION_2026_06_15.md` (its §2/§7 premise — "deliver a `tool_result` on stdin to answer AskUserQuestion" — is empirically **disproven**; see §2 below).
 **Related/unblocked:** `SPEC_DECISION_PROMPT_2026_04_24.md` (#551 tool-permission UI), `SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md` (Tier-1 injection coupling, §6).

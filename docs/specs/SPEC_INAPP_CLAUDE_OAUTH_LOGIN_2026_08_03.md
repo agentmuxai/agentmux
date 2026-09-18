@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 **Author:** Nark
-**Status:** PROPOSED (implemented — see note below)
+**Status:** implemented — #2410 (core session + launch surface) and #2414 (connect / re-login from Armory and Agent Stash), both 2026-08-04, one day after this spec was written. `frontend/app/view/agent/flows/run-provider-login.ts` is the implementation and `catalog.ts` cites this spec by name at three points.
 
 > **2026-08-07 audit note:** Implemented 4 days later —
 > `frontend/app/view/agent/providers/catalog.ts` directly cites and

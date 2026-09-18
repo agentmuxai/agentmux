@@ -1,9 +1,16 @@
 # Warden Auto-Controller: a continuation-nudging watcher for AgentMux agents
 
-**Status:** proposed — research + design proposal, not yet built or committed to. Written
+**Status:** implemented — §4's design was built, starting the same day. Written
 per request to (1) research external best practices, (2) propose terminology,
-(3) audit the current AgentMux architecture, (4) propose a design. Nothing in
-this document has been implemented.
+(3) audit the current AgentMux architecture, (4) propose a design; the closing
+"nothing in this document has been implemented" was accurate for a few hours
+and was never revised. `db_agents.auto_continue_enabled` (schema v17, #2555) is
+the per-agent opt-in §4.1 step 1 calls for, fail-by-default and toggled from
+the Warden Supervisor panel (`frontend/app/view/warden/`); the nudge itself
+goes through the `SupervisorNudge` MCP tool, subject to a server-side
+consecutive-nudge ceiling, and its argument surface was tightened in #2557
+(see `reactive/handler.rs`). §2.3's consent-chain-degradation concern is what
+that ceiling and the narrow scoping exist for.
 
 ## 1. The problem
 

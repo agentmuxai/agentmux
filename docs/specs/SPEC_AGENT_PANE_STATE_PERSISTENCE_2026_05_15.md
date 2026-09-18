@@ -1,6 +1,6 @@
 # SPEC: Agent-Pane Reducer State Persistence
 
-**Status:** Draft / implementing
+**Status:** implemented — #877 (2026-05-15), the PR this doc was added in. §8's phases 0–3 shipped together as planned: `HistoryRestored` is in `agent-document/reducer.ts`, `BlockfileWriteState`/`BlockfileReadState` in `rpc-api/block.ts` and `rpc_types/block.rs`, and `schemaVersion` is checked in `useHistoryPagination.ts`. Phase 4 is deferred by design ("unless empirical demand"), not outstanding. §11's follow-ups are written in the past tense of that same PR.
 **Date:** 2026-05-15
 **Author:** AgentA
 

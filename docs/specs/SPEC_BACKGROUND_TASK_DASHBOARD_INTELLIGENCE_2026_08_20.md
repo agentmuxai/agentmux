@@ -5,7 +5,7 @@
 
 **Date:** 2026-08-20
 **Author:** AgentA
-**Status:** Proposed
+**Status:** implemented — #2681 (2026-08-20), the PR this doc was added in, alongside Phase A (`SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md`). §3.1's read RPC and §3.2's `background-task-updated` MPS event are both live, cited from `rpc_types/block.rs`, `websocket.rs`, `muxspect_handlers.rs` and the frontend's `agent-pane-state` reducer, types and tests. §5's non-goals are unchanged.
 **Depends on:** `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` (Phase A), benefits from but does not strictly require `SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md` (Phase B) landing first
 **Addresses:** rung 4 items in `docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md` §3 (registry-as-reader), the still-open Swarm gap (§1's last row), and the `DockSnapshotCache` 1-hour TTL problem (§2.2)
 

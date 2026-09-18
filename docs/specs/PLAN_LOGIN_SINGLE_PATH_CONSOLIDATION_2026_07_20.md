@@ -1,7 +1,13 @@
 # Plan — collapse every provider-login code path onto one
 
 **Date:** 2026-07-20
-**Status:** proposed, not started. §7's open questions are now answered —
+**Status:** active — "not started" stopped being true two days later. §5 Phase 1
+(the tier-1 leak: `cancelCliLogin()` between tier 1 resolving `"no-url"` and
+tier 2 starting) shipped in #2255, the PR this doc was added in, and is at
+`run-provider-login.ts:499`. **Phase 2 onward has not started** — there is no
+`startAtTier` parameter anywhere, and `useGlobalLogin`/`loginViaTerminal` still
+carry their own independent bodies, so `runProviderLogin` is still not the only
+login implementation. §7's open questions are answered —
 see the update at the bottom of §5 phase 3 and the new §7 for what changed.
 **Context:** `docs/retro/retro-headless-login-browser-open-2026-07-20.md` and
 `docs/retro/retro-login-three-code-paths-2026-07-20.md`. Those two retros

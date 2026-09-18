@@ -1,6 +1,6 @@
 # Streaming bash runner — PreToolUse command rewrite
 
-**Status:** Proposed
+**Status:** active — §8's PR β, the core of this spec, shipped in #804 (the PR this doc was added in) as the `agentmux-bashwrap` crate: `bash_wrap.rs`, `hook.rs`, the `main.rs` subcommands and the `PreToolUse` entry `agent_config.rs` writes. PR α's overlay UI is also live (`ToolBlockOverlay.tsx`, `ToolOverlayLog.tsx`). **PR γ (RAF chunk coalescing) and PR δ (Codex + Gemini hook parity) have not shipped** — `useAgentStream.ts` has no animation-frame buffer, and `agent_config.rs` still writes only Claude's `.claude/hooks.json`, so streaming is Claude-only.
 **Owner:** AgentA
 **Date:** 2026-05-11
 **Replaces:** Phase 2 of [SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md](./SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) ("Connect stdout/stderr line streaming on the host side"), which was unimplementable as written.

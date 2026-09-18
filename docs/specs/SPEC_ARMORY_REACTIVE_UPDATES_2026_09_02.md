@@ -1,7 +1,7 @@
 # Spec: reactive updates across the Armory
 
 **Date:** 2026-09-02
-**Status:** Proposed
+**Status:** implemented — #2932 (2026-09-02), the PR this doc was added in, per `feedback_no_doc_only_prs`; the Status line was written before that PR merged and never revised. Personal Memory's fix and the wiring for the other four areas are live and cited from `native-memory-manager.tsx`, `mcp-model.ts`, `bundle-model.ts`, `global-bundle-model.ts` and each of their tests. The two Non-goals sections remain out of scope.
 **Motivated by:** direct question, then a direct request to broaden it —
 *"if you write a memory, will I see the update in Manoz in the armory? we
 want it reactive, so the stat shows up immediately"*, followed by *"build the

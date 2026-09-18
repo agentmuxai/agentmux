@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-24
 **Author:** AgentA
-**Status:** proposed — Design analysis — needs answers to the two decision points before implementation.
+**Status:** implemented — both decision points were answered before this doc shipped (see "Resolved design decisions" below), and the doc rode into the tree *inside* its own Phase 1 PR per `feedback_no_doc_only_prs`, which is why the Status line above it was never revised. Phase 1 (picker rewiring, `agent_def_create_from_template`, the `is_seeded` filter, `MyAgentsList`, the auto-promote migration): #1011. Phase 2 (`db_agent_definitions.user_hidden` + hide/unhide UI, Q2 Decision Y): #1012. Phase 3 — the full `db_agents` consolidation — was explicitly out of scope here and is tracked by `SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`.
 
 ---
 

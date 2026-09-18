@@ -1,7 +1,7 @@
 # SPEC: Agent pane forks + a cohesive auxiliary-pins architecture
 
 **Date:** 2026-06-15
-**Status:** Draft — architecture + best-practices (no code landed)
+**Status:** implemented — "no code landed" was true until #1462 landed it, the same day and the PR this doc was added in. The fork set is `frontend/app/view/agent/fork/` (`fork-set.ts`, `useForkSet.ts`, both with tests) and the shared auxiliary-pin primitive is in `PaneRow.tsx`, cited from `agent-model.ts` and `AgentLaunchModal.tsx`. §11's v1 non-goals are unchanged.
 **Scope:** Agent pane (`frontend/app/view/agent/**`), block/layout model, agent runtime
 **Related:** `SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md` (the top dock that just
 shipped), `specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md` (AgentInstance + fork),
