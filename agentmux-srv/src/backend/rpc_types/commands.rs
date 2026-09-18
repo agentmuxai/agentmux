@@ -282,7 +282,7 @@ pub const COMMAND_HIDE_NAMED_AGENT: &str = "hidenamedagent";
 /// conversation previews extracted from the filestore `output.state.json`
 /// snapshot. Powers the AgentPicker's "Recent sessions" surface so a
 /// pane crash that orphans a conversation becomes recoverable from
-/// normal UI. See `docs/recovery/MAKS_CONVERSATION_2026_05_23.md`.
+/// normal UI. See `docs/incident/MAKS_CONVERSATION_2026_05_23.md`.
 pub const COMMAND_LIST_RECENT_SESSIONS: &str = "listrecentsessions";
 
 // Agent definition branching

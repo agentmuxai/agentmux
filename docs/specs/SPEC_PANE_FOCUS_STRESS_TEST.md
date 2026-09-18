@@ -1,6 +1,6 @@
 # SPEC: Pane Focus Stress Test
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Motivation: single pane-click → address-bar-click → type passes smoke test

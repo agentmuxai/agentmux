@@ -89,7 +89,7 @@ Err(e) => {
 
 Phases 0, 1a (#3043, #3047), 1b, 1c (#3065), 2 (#3070), 3 (#3062), 5 (#3066) and 6 all shipped
 2026-09-07. Supporting artifacts verified present: `migrations/phase5_tests.rs`,
-`docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`, `srv_stderr::migration_failed_line`,
+`docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`, `srv_stderr::migration_failed_line`,
 `runner::doctor_report_for_instance`. **Only Phase 4 remains, and the spec itself calls it a
 product decision, not engineering.**
 

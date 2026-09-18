@@ -1,6 +1,6 @@
 # SPEC: Browser Pane Code Modularization
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Motivation: `browser_panes.rs` is 475 lines with four distinct concerns

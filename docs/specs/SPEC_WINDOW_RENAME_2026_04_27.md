@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-27
 **Author**: AgentA-asaf
-**Status**: Draft (proposed; not yet implemented)
+**Status:** Draft (proposed; not yet implemented)
 **Scope**: `frontend/app/statusbar/InstancePanel.tsx`, plus light backend support for persisting the user's chosen window name across restarts.
 
 ---

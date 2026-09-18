@@ -1,6 +1,6 @@
 # SPEC: Layout Healer Misses Rootnode-Is-Orphan Case
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Reported by: user on v0.33.263 (dev) after extended pane open/close cycling

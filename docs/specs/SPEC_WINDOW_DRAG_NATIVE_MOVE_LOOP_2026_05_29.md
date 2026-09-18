@@ -1,6 +1,6 @@
 ---
 title: Window drag — replace per-mousemove IPC with the OS native move loop
-status: Draft / Proposed
+**Status:** Draft / Proposed
 date: 2026-05-29
 author: AgentX
 front: window-drag (UX-latency umbrella #1161)
@@ -10,7 +10,7 @@ related:
   - "PR #1178 perf(airspace): region-cache (sibling, in-flight)"
   - "docs/specs/SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md (the DPI hand-correction this spec deletes)"
   - "Codex PR #734 (rounds 2-4: the race-guarding this spec deletes)"
-  - "docs/analysis/ANALYSIS_UX_LATENCY_THREE_FRONTS_2026_05_29.md (findings this spec implements)"
+  - "ANALYSIS_UX_LATENCY_THREE_FRONTS_2026_05_29 (findings this spec implements; never committed to this repo)"
 ---
 
 # Window drag → OS native move loop (Windows)

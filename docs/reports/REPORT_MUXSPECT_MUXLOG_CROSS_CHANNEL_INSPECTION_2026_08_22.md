@@ -1,7 +1,7 @@
 # Report: muxspect/muxlog cross-channel inspection gaps
 
 Date: 2026-08-22
-Status: draft — findings from a live debugging session, not yet a spec
+**Status:** draft — findings from a live debugging session, not yet a spec
 
 ## 1. Why this exists
 

@@ -1,6 +1,6 @@
 # SPEC: Editor File-Tree "Open" Actions (Open to the Side / Open in New Tab)
 
-Status: Draft
+**Status:** Draft
 Date: 2026-07-12
 Depends on: `SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md`, `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md`
 Closes gap in: `SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md` §Menu Definitions (File node),
