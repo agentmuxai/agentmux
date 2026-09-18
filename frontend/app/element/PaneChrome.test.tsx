@@ -625,22 +625,22 @@ describe("renderPaneChromeShell — resolves the OWNING tab's LayoutModel, never
 
     it("onActivate targets the node's own layoutModel even when the global lookup would return a different one", () => {
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
-        getLayoutModelForStaticTabSpy.mockReturnValue(distinctWrongModel());
+        const wrongModel = distinctWrongModel();
+        getLayoutModelForStaticTabSpy.mockReturnValue(wrongModel);
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
 
         headerCalls[0].onActivate("b2");
 
         expect(setActiveBlockInStack).toHaveBeenCalledWith(mockLayoutModel, "node-1", "b2");
-        expect(setActiveBlockInStack).not.toHaveBeenCalledWith(
-            expect.objectContaining({ treeState: expect.anything() }),
-            "node-1",
-            "b2"
-        );
-        // Belt-and-suspenders on the same assertion: literally confirm no
-        // call ever carried the wrong model as its first argument.
-        for (const call of setActiveBlockInStack.mock.calls) {
-            expect(call[0]).not.toBe(getLayoutModelForStaticTabSpy.mock.results[0]?.value);
-        }
+        // Direct identity check against the exact sentinel the global lookup
+        // was configured to return — captured in its own variable rather
+        // than read back off the spy, since the whole point of the OTHER
+        // test in this suite is that the spy is never even called (so
+        // `.mock.results` would be empty). An `objectContaining({ treeState:
+        // ... })` shape check would be useless here regardless: both the
+        // right and wrong model have a `treeState`, so it could never
+        // actually distinguish them.
+        expect(setActiveBlockInStack.mock.calls[0][0]).not.toBe(wrongModel);
     });
 
     it("onClose targets the node's own layoutModel even when the global lookup would return a different one", () => {
