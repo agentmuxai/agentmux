@@ -8,9 +8,10 @@ to be added once opened.
 contract makes a wrong one-time capture permanent),
 `docs/specs/SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md` (the
 deliberate `activate: false` new-tab sequencing that triggers this every
-time), `docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md` (unrelated
-fix landed the same day in the same file family — no interaction between
-the two).
+time). An unrelated, concurrently-developed fix in the same file family
+(agent-tab keep-alive in the pane tab strip) was in flight the same day on
+a separate branch/PR — no interaction between the two; not cited by path
+here since it hadn't merged as of this spec.
 
 ---
 
