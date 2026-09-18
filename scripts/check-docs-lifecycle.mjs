@@ -45,6 +45,12 @@ import { execSync } from "node:child_process";
 const ENUM = ["draft", "proposed", "active", "implemented", "living", "historical", "superseded"];
 const DIR = "docs/specs";
 const PR_CITED = /#\d{3,}/;
+// Archived specs are finished by definition; holding them to "implemented MUST
+// cite a PR" would manufacture a backlog nobody should burn down. docs-stale-
+// sweep already excludes archive/ for the same reason. Stated once and applied
+// to BOTH the working-tree and --since paths, because when only one of them
+// excluded a subtree the gate silently stopped protecting it (reagent P1, #3349).
+const EXCLUDED = /(^|\/)docs\/specs\/archive\//;
 
 const sh = (c, opts) => {
     try { return execSync(c, { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], maxBuffer: 512e6, ...opts }); }
@@ -63,7 +69,7 @@ if (REF) {
     const tree = (sh(`git ls-tree -r ${REF} -- ${DIR}`) || "")
         .split("\n").map((l) => l.trim()).filter(Boolean)
         .map((l) => { const m = l.match(/^\S+\s+blob\s+(\S+)\t(.+)$/); return m ? { sha: m[1], path: m[2] } : null; })
-        .filter((x) => x && x.path.endsWith(".md"));
+        .filter((x) => x && x.path.endsWith(".md") && !EXCLUDED.test(x.path));
     files = tree.map((t) => t.path);
     // Buffer, deliberately: cat-file reports sizes in BYTES. Slicing a decoded
     // string by them desynchronises at the first em-dash, and this corpus is
@@ -81,7 +87,15 @@ if (REF) {
         off = nl + 1 + size + 1;
     }
 } else {
-    files = fs.readdirSync(DIR).filter((f) => f.endsWith(".md")).map((f) => path.join(DIR, f));
+    const walk = (d, out = []) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const full = path.join(d, e.name);
+            if (e.isDirectory()) walk(full, out);
+            else if (e.name.endsWith(".md")) out.push(full);
+        }
+        return out;
+    };
+    files = walk(DIR).filter((f) => !EXCLUDED.test(f.replace(/\\/g, "/")));
 }
 const readFile = (f) => (REF ? (blobs.get(f.replace(/\\/g, "/")) ?? null) : fs.readFileSync(f, "utf8"));
 
@@ -156,7 +170,7 @@ const mb = sh("git merge-base origin/main HEAD") || sh("git merge-base main HEAD
 if (!mb) { console.log("\n(no merge-base with main available; skipping the ratchet)"); process.exit(0); }
 const baseRef = mb.trim();
 const touched = (sh(`git diff --name-only ${baseRef}...HEAD -- ${DIR}`) || "")
-    .split("\n").map((x) => x.trim()).filter((x) => x.endsWith(".md"));
+    .split("\n").map((x) => x.trim()).filter((x) => x.endsWith(".md") && !EXCLUDED.test(x));
 if (!touched.length) { console.log("\nRatchet: this branch touches no specs. ok"); process.exit(0); }
 
 const nowBad = offenders();
