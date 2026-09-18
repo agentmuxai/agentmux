@@ -15,10 +15,12 @@
  * silently excluded every pane in every background tab too).
  */
 
+import { createRoot } from "solid-js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
     getAllBlockComponentModelEntries,
     getAllBlockComponentModels,
+    isBlockDormant,
     registerBlockComponentModel,
     setKeepAliveBlockDormant,
     unregisterBlockComponentModel,
@@ -82,5 +84,65 @@ describe("getAllBlockComponentModels / getAllBlockComponentModelEntries", () => 
 
         registerBlockComponentModel("b1", { viewModel: { viewType: "term" } } as any);
         expect(getAllBlockComponentModels()).toHaveLength(1);
+    });
+});
+
+// SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: added alongside agent
+// keep-alive so a component (AgentQuestionPanel's auto-timeout,
+// useAgentFailure's auto-retry) can reactively pause while its own tab is
+// backgrounded, instead of only being queryable via the plain-Set snapshot
+// `getAllBlockComponentModels` already used.
+describe("isBlockDormant", () => {
+    it("defaults to false for a blockId never marked dormant", () => {
+        createRoot((dispose) => {
+            expect(isBlockDormant("never-marked")()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("reactively flips when setKeepAliveBlockDormant is called for that blockId", () => {
+        createRoot((dispose) => {
+            const dormant = isBlockDormant("b1");
+            expect(dormant()).toBe(false);
+
+            setKeepAliveBlockDormant("b1", true);
+            expect(dormant()).toBe(true);
+
+            setKeepAliveBlockDormant("b1", false);
+            expect(dormant()).toBe(false);
+
+            dispose();
+        });
+    });
+
+    it("tracks each blockId independently", () => {
+        createRoot((dispose) => {
+            const b1Dormant = isBlockDormant("b1");
+            const b2Dormant = isBlockDormant("b2");
+
+            setKeepAliveBlockDormant("b1", true);
+            expect(b1Dormant()).toBe(true);
+            expect(b2Dormant()).toBe(false);
+
+            dispose();
+        });
+    });
+
+    it("resets to false after unregisterBlockComponentModel, not stuck at a stale true", () => {
+        createRoot((dispose) => {
+            registerBlockComponentModel("b1", { viewModel: { viewType: "agent" } } as any);
+            const dormant = isBlockDormant("b1");
+            setKeepAliveBlockDormant("b1", true);
+            expect(dormant()).toBe(true);
+
+            unregisterBlockComponentModel("b1");
+
+            // A fresh read after unregistration — the accessor captured
+            // above was for the OLD signal instance (deleted alongside the
+            // rest of this blockId's bookkeeping); a new one is created
+            // false, matching a blockId that was never marked.
+            expect(isBlockDormant("b1")()).toBe(false);
+            dispose();
+        });
     });
 });

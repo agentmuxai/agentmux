@@ -28,11 +28,19 @@
  * permanent disarm §2.3/§5.1 rejected. Both triggers share one mechanism —
  * see the keyboard-pause spec below.
  *
+ * Also paused for as long as this panel's own agent tab is a backgrounded,
+ * kept-alive pane-tab-strip member (`isDormant` prop) — unbounded, unlike
+ * the flat 15s hover/keyboard pause, since there's no way for a user to
+ * "interact" with a tab they can't see. Re-arms a fresh countdown on reveal,
+ * same as every other re-arm here. See
+ * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
+ *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md,
- * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md,
+ * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
@@ -101,6 +109,24 @@ interface AgentQuestionPanelProps {
     pending: Accessor<ToolNode[]>;
     /** User answer. Caller advances the queue by transitioning the node. */
     onAnswer: (outcome: AnswerOutcome) => void | Promise<void>;
+    /**
+     * True while this panel's own agent tab is a hidden, kept-alive stack
+     * member (`block-component-registry.ts`'s `isBlockDormant`) — i.e. a
+     * background pane-tab-strip tab, not the one the user is currently
+     * looking at. Optional so every pre-existing call site/test (only ever
+     * one visible tab per pane before agent keep-alive existed) keeps
+     * working unchanged; defaults to "never dormant."
+     *
+     * Gates the auto-timeout the same way `hidden()`'s hover-pause already
+     * does (see the timer effect below): a hidden tab must not silently
+     * auto-answer a question the user was never shown. Unlike hover-pause
+     * this isn't a bounded grace window — it pauses for exactly as long as
+     * the tab stays backgrounded and re-arms a fresh countdown the moment
+     * it's revealed again, matching "fresh retrigger, not resumed from
+     * wherever it was paused." See
+     * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
+     */
+    isDormant?: Accessor<boolean>;
     /** Cancel — a real protocol-level decline (Cancel button / Escape), not a
      *  UI-only dismiss. Passed the declined question's `tool_use_id`, same
      *  pattern as `onAnswer` receiving the full outcome — the caller
@@ -396,7 +422,8 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     createEffect(() => {
         const r = request();
         void r?.tool_use_id; // touch so the effect re-runs on change, same as the reset effect
-        if (!r || hidden()) return; // paused while hidden; re-arms when hidden() flips false
+        const dormant = props.isDormant?.() ?? false;
+        if (!r || hidden() || dormant) return; // paused while hidden OR backgrounded; re-arms when either flips false
 
         setRemainingMs(autoTimeoutMs()); // fresh retrigger, not resumed from wherever it was paused
         const intervalId = setInterval(() => {

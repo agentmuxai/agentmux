@@ -336,6 +336,96 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
     });
 });
 
+// SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: once agent tabs stay mounted
+// while backgrounded (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES), an unmount no
+// longer implicitly kills this countdown — a hidden tab must not silently
+// fire doRetry() (re-sending a turn to the CLI) while nobody can see it.
+describe("useAgentFailure dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md)", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        __resetListeners();
+        vi.useFakeTimers();
+        vi.spyOn(Math, "random").mockReturnValue(0.5); // pin jitter to the nominal ladder values
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    const mkUIDormant = (onRetry: () => void, isDormant: () => boolean) => {
+        const { model, failure } = makeFakeModel();
+        const ui = useAgentFailure({
+            blockId: BLOCK_ID,
+            model,
+            failure,
+            isDormant,
+            onRetry,
+            onLoginAgain() {},
+            onLoginViaTerminal() {},
+            onOpenArmory() {},
+            onNewSession() {},
+        });
+        return { ui, model };
+    };
+
+    it("does not fire doRetry while dormant, even well past the rung's delay", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const [dormant] = createSignal(true);
+            mkUIDormant(onRetry, dormant);
+            await Promise.resolve();
+
+            failingTurn(); // arms the first 5s rung
+            vi.advanceTimersByTime(60_000); // far past every rung in the ladder
+
+            expect(onRetry).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("resumes ticking from where it left off once no longer dormant, not restarted", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const [dormant, setDormant] = createSignal(false);
+            mkUIDormant(onRetry, dormant);
+            await Promise.resolve();
+
+            failingTurn(); // arms the first 5s rung
+            vi.advanceTimersByTime(3_000); // 3 ticks elapsed — 2s of countdown left
+
+            setDormant(true);
+            vi.advanceTimersByTime(10_000); // would have fired long ago if unpaused
+            expect(onRetry).not.toHaveBeenCalled();
+
+            setDormant(false);
+            // Exactly the 2s that was left when it went dormant — not the
+            // full 5s rung restarted, and not counting any of the 10s spent
+            // dormant.
+            vi.advanceTimersByTime(1_000);
+            expect(onRetry).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1_000);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+
+            dispose();
+        });
+    });
+
+    it("defaults to never-dormant when isDormant is omitted (every pre-existing call site)", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            mkUI(onRetry); // no isDormant passed
+            await Promise.resolve();
+
+            failingTurn();
+            vi.advanceTimersByTime(5_000);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+
+            dispose();
+        });
+    });
+});
+
 describe("useAgentFailure — turnAttempted forwarding (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02)", () => {
     // The single most load-bearing invariant of the login-CTA consolidation.
     // One button now serves both the "never signed in" and "a turn got 401'd"
