@@ -41,6 +41,11 @@ pub struct DevAuthFile<'a> {
     pub instance: &'a str,
     pub data_dir: String,
     pub host_pid: u32,
+    /// CEF remote-debugging (CDP) port actually bound by THIS instance.
+    /// Not 9222/9223: those are only the preferred values, and the second
+    /// instance to start gets an OS-assigned port instead. Tooling must read
+    /// this rather than assume the constant, or it targets another instance.
+    pub debug_port: u16,
     pub created_at: String,
 }
 
@@ -57,6 +62,7 @@ pub fn write_dev_auth_file(
     ipc_token: &str,
     instance: &str,
     host_pid: u32,
+    debug_port: u16,
 ) -> Result<std::path::PathBuf, String> {
     let path = data_dir.join(FILE_NAME);
     let payload = DevAuthFile {
@@ -71,6 +77,7 @@ pub fn write_dev_auth_file(
         instance,
         data_dir: data_dir.to_string_lossy().into_owned(),
         host_pid,
+        debug_port,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
     let json = serde_json::to_string_pretty(&payload)
@@ -248,6 +255,7 @@ mod tests {
             "92d136fa-2e14-46d0-9ace-eddee320a35e",
             "v0.33.265",
             12345,
+            9222,
         )
         .expect("write authfile");
 
@@ -270,6 +278,7 @@ mod tests {
 
         // cleanup
         let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(parsed["debug_port"], 9222, "all-fields test must cover debug_port");
     }
 
     #[test]
@@ -277,11 +286,11 @@ mod tests {
         let dir = temp_dir("overwrite");
         let path1 = write_dev_auth_file(
             &dir, "old-key", "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3",
-            "old-token", "v0.0.1", 1,
+            "old-token", "v0.0.1", 1, 9222,
         ).unwrap();
         let path2 = write_dev_auth_file(
             &dir, "new-key", "127.0.0.1:11", "127.0.0.1:22", "127.0.0.1:33",
-            "new-token", "v0.0.2", 2,
+            "new-token", "v0.0.2", 2, 42149,
         ).unwrap();
         assert_eq!(path1, path2, "same path expected");
         let body = std::fs::read_to_string(&path2).unwrap();
@@ -312,7 +321,7 @@ mod tests {
         let dir = temp_dir("dacl");
         let path = write_dev_auth_file(
             &dir, "k", "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3",
-            "t", "v0.0.0", std::process::id(),
+            "t", "v0.0.0", std::process::id(), 9222,
         ).unwrap();
 
         unsafe {
@@ -393,5 +402,40 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// A second, separately-named test module: the one above is gated on
+// `feature = "test-authfile"` (its tests touch the real OS data dir), and with
+// that feature enabled both `mod tests` would be active at once — E0428, the
+// name `tests` defined twice. This test needs no feature because it writes to
+// a temp dir, so it must not be folded into that module either or it would
+// stop running by default.
+#[cfg(test)]
+mod debug_port_tests {
+    use super::*;
+
+    /// Tooling reads the CDP port from this file. If it is absent, every
+    /// consumer falls back to the 9222/9223 constant — which names whichever
+    /// instance won the race for it, not the one the caller meant. That is how
+    /// an agent attached a debugger to somebody else's running instance.
+    #[test]
+    fn the_authfile_publishes_the_debug_port() {
+        let tmp = std::env::temp_dir().join(format!("am-authfile-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let path = write_dev_auth_file(
+            &tmp, "key", "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3", "tok", "v0.0.0", 4242,
+            // Not 9222: the point is that the ACTUAL bound port is published.
+            42149,
+        )
+        .expect("write");
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["debug_port"], 42149);
+        assert_eq!(v["host_pid"], 4242);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

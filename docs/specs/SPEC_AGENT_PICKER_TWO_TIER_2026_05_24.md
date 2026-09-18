@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-24
 **Author:** AgentA
-**Status:** Design analysis — needs answers to the two decision points before implementation.
+**Status:** proposed — Design analysis — needs answers to the two decision points before implementation.
 
 ---
 

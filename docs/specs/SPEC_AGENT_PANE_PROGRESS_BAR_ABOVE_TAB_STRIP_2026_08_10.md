@@ -1,7 +1,7 @@
 # SPEC: Move the agent pane's marching-ants progress bar above the tab strip
 
 **Date:** 2026-08-10
-**Status:** implemented.
+**Status:** implemented. — #2526
 **Related:** `docs/specs/SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md` (§4 —
 original progress-bar design), `docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`
 (tab strip shrink-to-fit/transparency — a separate, already-shipped fix

@@ -1,5 +1,6 @@
 # Artifact Naming Analysis — Remove "cef" from Release Artifact Names
 **Date:** 2026-04-14
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 
 ## Background
 

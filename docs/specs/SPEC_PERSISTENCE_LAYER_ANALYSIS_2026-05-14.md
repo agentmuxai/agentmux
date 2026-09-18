@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-14
 **Author:** AgentX
-**Status:** Analysis (no decision yet)
+**Status:** historical — Analysis (no decision yet)
 **Triggered by:** the upcoming `Wave*` → `Mux*` rename PR includes a SQLite schema migration (`db_wave_file` → `db_mux_file`). Before paying that migration cost, sanity-check whether the persistence layer itself is the right shape.
 
 ---

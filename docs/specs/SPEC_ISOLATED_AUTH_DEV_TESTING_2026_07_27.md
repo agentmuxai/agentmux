@@ -1,7 +1,7 @@
 # Spec: Opt-in isolated auth for `task dev` testing
 
 **Date:** 2026-07-27
-**Status:** Implemented — defaults amended by `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (2026-08-06)
+**Status:** Implemented — defaults amended by `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (2026-08-06) — #2318
 **Related:** `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`,
 `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`
 

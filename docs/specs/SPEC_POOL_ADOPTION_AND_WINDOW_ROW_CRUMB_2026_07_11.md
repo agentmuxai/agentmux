@@ -1,7 +1,7 @@
 # SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification
 
 **Date:** 2026-07-11
-**Status:** Ready for implementation
+**Status:** proposed — Ready for implementation
 **Tracking:** session task #15 (the residuals deliberately left open by the
 window-pool coverage work, ~PR #1969 era, and referenced by
 `CloseWindowTask`'s "Known residual" comment in `agentmux-cef/src/ui_tasks/window.rs`)

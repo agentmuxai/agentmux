@@ -1,6 +1,6 @@
 # Source Maps in Portable Builds
 
-**Status:** Implemented  
+**Status:** Implemented — #1226
 **Date:** 2026-06-01
 
 ## Rule

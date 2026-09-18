@@ -121,6 +121,9 @@ impl LspSupervisor {
         );
 
         let mut cmd = Command::new(&resolved);
+        // A long-lived third-party language server. Not ours, not a helper, so it
+        // gets the strict policy — no instance identity, no API endpoint.
+        crate::backend::pane_env::sanitize_external_command(&mut cmd);
         // typescript-language-server, pyright-langserver, gopls — all use --stdio
         // by convention. rust-analyzer reads from stdio without a flag (the
         // flag is ignored). Safe to pass on all.

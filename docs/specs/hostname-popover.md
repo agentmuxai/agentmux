@@ -1,6 +1,6 @@
 # Hostname Popover — Network & Instance Info
 
-**Status:** Spec
+**Status:** proposed — Spec
 **Location:** Status bar, right side — click the hostname text
 
 ---

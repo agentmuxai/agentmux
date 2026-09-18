@@ -207,18 +207,19 @@ mod estart_race_tests {
     }
 }
 
-/// Run `agentmux-srv migrate` synchronously before spawning the daemon.
+/// Run `agentmux-srv migrate` as a standalone subprocess.
 ///
 /// The migration runner exits 0 (success / nothing to do) or 1 (failure).
-/// On failure the launcher should surface an error and not start the daemon.
+/// On failure the caller should surface an error and not bring srv back up.
 /// stdout lines are newline-delimited JSON progress events — consumed inline
 /// so sub-events are delivered to the splash before `stage_end` is sent.
 ///
-/// Not called during normal startup — migrations now run in-process inside srv
-/// via `run_pending_migrations` before ESTART is emitted. Preserved here as a
-/// fallback subprocess path (e.g. for a future recovery flow) but has no active
-/// callers.
-#[allow(dead_code)]
+/// NOT called during ordinary startup — migrations run in-process inside srv
+/// via `run_pending_migrations` before ESTART is emitted for the normal
+/// zero-pending boot. This is the explicit-upgrade path instead: its real
+/// caller is `upgrade::run_migration_upgrade`, part of the fast-startup
+/// redesign (`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`,
+/// issue #3258) — was dead code with no callers before that.
 pub async fn run_migrate(
     launcher_exe_dir: &Path,
     paths: &DataPaths,

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-29
 **Author:** AgentA
-**Status:** **Implemented (JS-driven).** The `HTTRANSPARENT` forwarder (Phase 1 below) was built and **abandoned** — it does not work on cef-rs 146. What shipped is the JS-driven approach in §0. Phases 2–3 remain future work.
+**Status:** **Implemented (JS-driven).** The `HTTRANSPARENT` forwarder (Phase 1 below) was built and **abandoned** — it does not work on cef-rs 146. What shipped is the JS-driven approach in §0. Phases 2–3 remain future work. — #1177
 **Investigation:** `docs/analysis/REPORT_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md`
 **Prior art:** #1132 (parked resize), #1159 (maximize-only, deferred this), #1173 (WM_SIZE resizes frontend child)
 **Platform:** Windows. Linux/macOS floater resize is a separate platform-parity task (the floater is a Win32 `WS_POPUP`). All new code is `#[cfg(target_os = "windows")]` on the host; the frontend driver is cross-platform-ready (it only needs the `get/set_window_rect` IPC, which currently no-ops off Windows).

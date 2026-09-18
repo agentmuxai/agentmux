@@ -1,7 +1,7 @@
 # SPEC — honest account-delete semantics: spawn gating, agent reconciliation, Armory truthfulness
 
 **Date:** 2026-07-14
-**Status:** Approved (user decision on §2 recorded this date); implementation dispatched
+**Status:** proposed — Approved (user decision on §2 recorded this date); implementation dispatched
 **Governing analysis:** `docs/analysis/ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md`
 (layers 2.1–2.4). Layer 1 (cascade + token-dir cleanup) shipped in PR #2159.
 This spec covers the remaining layers 2 (running-agent reconciliation),

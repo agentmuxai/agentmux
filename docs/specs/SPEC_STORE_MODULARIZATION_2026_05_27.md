@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27
 **Author:** AgentA
-**Status:** Design — multi-PR refactor proposal. No tracking discussion yet.
+**Status:** proposed — Design — multi-PR refactor proposal. No tracking discussion yet.
 **Related:** `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md` (Phase 3b reads from this same store; some methods retire when Phase 3c lands).
 
 ---

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-14
 **Type:** Responsive layout fix
-**Status:** Implemented
+**Status:** Implemented — #2577
 **Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx`,
 `frontend/app/view/agent/styles/_composer-strip.scss`
 

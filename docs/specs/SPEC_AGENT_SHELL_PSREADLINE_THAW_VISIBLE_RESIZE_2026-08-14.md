@@ -1,7 +1,7 @@
 # Agent shell drawer: PSReadLine thaw resize causes a visible ~9px width blip ~300-350ms after open
 
 **Date:** 2026-08-14
-**Status:** Implemented and empirically verified — see §7.
+**Status:** Implemented and empirically verified — see §7. — #2581
 **Owner:** Agent1
 **Area:** Agent pane / shell drawer terminal (`TermWrap`, `termwrap.ts`)
 

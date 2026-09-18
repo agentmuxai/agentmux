@@ -2,7 +2,7 @@
 
 **Author:** Opaz
 **Date:** 2026-09-17
-**Status:** implemented
+**Status:** implemented — #3302
 
 ---
 

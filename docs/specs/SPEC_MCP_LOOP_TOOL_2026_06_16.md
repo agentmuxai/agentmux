@@ -1,7 +1,7 @@
 # SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection
 
 **Date:** 2026-06-16
-**Status:** Implemented
+**Status:** Implemented — #1498
 **Author:** Naki
 **Related:** Claude Code's `/loop` skill (the analogue this mirrors); MuxBus `SendMessage`
 tool + `/agentmux/reactive/inject` (the delivery path reused)

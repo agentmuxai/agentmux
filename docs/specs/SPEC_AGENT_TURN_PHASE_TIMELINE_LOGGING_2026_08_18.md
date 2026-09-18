@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18
 **Author:** AgentA
-**Status:** Implemented
+**Status:** Implemented — #2653
 
 ---
 

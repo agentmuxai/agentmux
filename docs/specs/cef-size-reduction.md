@@ -1,6 +1,6 @@
 # CEF Portable Size Reduction Spec
 
-**Status:** Research complete, ready for implementation decisions
+**Status:** proposed — Research complete, ready for implementation decisions
 **Platforms:** Windows x64, macOS (arm64 + x86_64), Linux x64
 **Constraints:** GPU rendering must be preserved
 **Branch:** agentx/cef-integration (v0.32.110)

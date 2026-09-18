@@ -1,7 +1,7 @@
 # SPEC: Quick-fork an agent into a new pane-stack tab (hot clone, full identity)
 
 **Date:** 2026-08-21
-**Status:** Implemented (destination corrected 2026-08-22 — see correction notice below)
+**Status:** Implemented (destination corrected 2026-08-22 — see correction notice below) — #2746
 **Scope:** `AgentViewModel.getBodyContextMenuItems` (`agent-model.ts`), the
 pane's own block-stack (`frontend/layout/lib/layoutStack.ts`),
 `AgentDefinition`/`AgentInstance` model, Armory identity binding

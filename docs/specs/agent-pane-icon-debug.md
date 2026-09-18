@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-15  
 **Version:** v0.33.188  
-**Status:** Investigation in progress
+**Status:** draft — Investigation in progress
 
 ---
 

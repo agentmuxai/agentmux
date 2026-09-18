@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`), at operator request
-**Status:** Proposal — synthesizes two existing documents into a canonical protocol; not yet implemented or
+**Status:** proposed — Proposal — synthesizes two existing documents into a canonical protocol; not yet implemented or
 reviewed.
 **Ground truth basis:** `agentmuxai/agentmux` local checkout at `3705f83c3`
 (`agent3/bashwrap-persist-cwd-across-calls`), cross-checked against `origin/main` at `72aefad4d`.

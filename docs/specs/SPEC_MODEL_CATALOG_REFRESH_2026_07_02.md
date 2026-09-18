@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Type:** Implementation spec
-**Status:** Ready to schedule
+**Status:** proposed — Ready to schedule
 **Owner:** asaf
 **Scope:** `agentmux-srv` (model-catalog fetch + cache + RPC) and `frontend/app/view/agent`
 (registry overlay + dropdown convergence).

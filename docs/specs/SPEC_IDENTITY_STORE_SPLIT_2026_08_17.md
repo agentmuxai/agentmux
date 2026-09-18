@@ -3,7 +3,7 @@
 **Date:** 2026-08-17
 **Author:** AgentY (agent, `~/.agentmux/agents/agenty-0629j`), design confirmed with the human operator
 (robust fix approved; "engineering time is not a factor").
-**Status:** Approved design — implementation in progress, sequenced as several PRs (§6).
+**Status:** proposed — Approved design — implementation in progress, sequenced as several PRs (§6).
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main`. Every file:line citation below was independently
 verified, not taken from a sub-agent's report on faith.
 **Related:**

@@ -1,6 +1,6 @@
 # Dev-Build Environment Isolation
 
-**Status:** Implemented (core); UX gaps documented below  
+**Status:** Implemented (core); UX gaps documented below — #1776
 **Date:** 2026-06-24  
 **Owner:** AgentX  
 **Referenced by:** `agentmux-launcher/src/data_dir.rs` ("see SPEC_DEV_ENV_ISOLATION")

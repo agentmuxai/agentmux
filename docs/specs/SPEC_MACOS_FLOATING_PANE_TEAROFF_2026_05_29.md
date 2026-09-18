@@ -3,7 +3,7 @@
 **Date:** 2026-05-29
 **Repo state:** `main` @ `7e61fda3` (v0.40.0)
 **Author:** AgentO-asaf
-**Status:** Spec ready to implement (phased)
+**Status:** proposed — Spec ready to implement (phased)
 **Supersedes/refines:** [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md`](./SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) §3.2 (the macOS "C1" work block) — this spec refines the phasing after discovering that AgentMux's secondary windows are already frameless CEF Views windows, which makes the user-visible fix far cheaper than the NSPanel rewrite that spec assumed.
 **Related:** macOS bring-up PRs #1131, #1169, #1170, #1171, #1172, #1175 (all merged); the C1 work block remains open.
 

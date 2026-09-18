@@ -4,7 +4,7 @@
 > This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
 
 **Date:** 2026-09-01
-**Status:** Implemented (§1 corrected 2026-09-09 — stand-down reverted, see the notice below)
+**Status:** Implemented (§1 corrected 2026-09-09 — stand-down reverted, see the notice below) — #2921
 **Supersedes (in part):** `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.2,
 `SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md` (entirely — see §4)
 

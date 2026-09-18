@@ -1,6 +1,6 @@
 # SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone
 
-**Status:** active
+**Status:** active — PRs touching this work, newest first: #3129, #3124
 **Date:** 2026-09-09
 **Implemented:** §5.1 (P1 heartbeat), §5.2 (P2 threshold) and §5.4 (P4
 extraction) shipped together — see §8 for why they could not be split. §5.3

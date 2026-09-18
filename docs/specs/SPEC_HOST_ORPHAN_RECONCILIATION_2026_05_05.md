@@ -1,7 +1,7 @@
 # Host Orphan-Instance Reconciliation — 2026-05-05
 
 **Owner:** AgentA
-**Status:** spec
+**Status:** proposed — spec
 **Layer:** 2 (host) — coordinates with Layer 1 (launcher) via existing event bus
 **Master ref:** [`MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](./MASTER_REDUCER_STACK_STATUS_2026-05-05.md), specifically §4.3 (host reducer scope), §4.4 (browsers/pool scaffolding), §9.1 (cross-process dispatch blocker).
 

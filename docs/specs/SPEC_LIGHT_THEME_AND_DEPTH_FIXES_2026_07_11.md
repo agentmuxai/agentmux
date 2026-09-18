@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-11
 **Author:** Agent1
-**Status:** Phases 1–3 implemented (this PR); Phase 4 (light theme) implemented (this PR); Phases 5–7 not started
+**Status:** implemented — Phases 1–3 implemented (this PR); Phase 4 (light theme) implemented (this PR); Phases 5–7 not started — #2104
 **Related:** `frontend/app/theme.scss`, `frontend/app/themes/`, `frontend/app/components/context-menu.scss`, `frontend/app/block/titlebar.scss`, `schema/settings.json`, `frontend/app/menu/base-menus.ts`
 **Governing context:** `docs/analysis/ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md` (the research pass this spec turns into concrete work), `SPEC_TERMINAL_THEME_PENETRATION_2026_07_07.md` (terminal penetration — separately proposed and already shipped in PR #2010, 2026-07-08)
 

@@ -1,7 +1,7 @@
 # Secondary Windows: Switch from Native to CEF Views
 
 **Date:** 2026-04-02
-**Status:** Spec
+**Status:** proposed — Spec
 **Depends on:** PR #272 (CEF Views deferred show)
 **Problem:** Secondary windows (new window, tear-off) have no resize handlers
 

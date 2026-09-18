@@ -98,17 +98,30 @@ pub struct CommandControllerResyncData {
 }
 
 /// Matches Go's `CommandBlockInputData`
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandBlockInputData {
     pub blockid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub inputdata64: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub signame: String,
+    /// `Option<Value>` in Rust because this handler forwards it to the PTY
+    /// layer without inspecting it, but the shape IS known and the hand-written
+    /// declaration said so. Spelled inline rather than as `TermSize` because
+    /// that name is still an ambient global -- `#[ts(type)]` bypasses ts-rs
+    /// dependency tracking, so a named reference would generate an import that
+    /// resolves to nothing (the `DroneRun.block_states` trap from #3329).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "{ rows: number, cols: number }")]
     pub termsize: Option<serde_json::Value>,
     /// Per-TermViewModel monotonic counter for seq-based input ordering (optional, shell only).
+    ///
+    /// The hand-written `CommandBlockInputData` OMITTED this field entirely,
+    /// so no TypeScript caller could pass it without casting -- the generated
+    /// type surfaces it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub seq: Option<u64>,
 }
 
@@ -259,7 +272,8 @@ pub struct CommandListBackgroundTasksData {
 /// the running agent CLI via the Agent SDK control protocol (a `control_response`
 /// carrying `updatedInput.answers`). Spec:
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAgentAnswerData {
     pub blockid: String,
     /// The `AskUserQuestion` tool_use id the answer responds to (correlates with
@@ -268,7 +282,12 @@ pub struct CommandAgentAnswerData {
     /// The user's selections as a JSON object mapping each question's text to the
     /// chosen option label (a `[labels]` array for multiSelect, or free-text for
     /// "Other"). Becomes `updatedInput.answers` in the control_response.
+    /// `Value` in Rust because it is forwarded verbatim into the control
+    /// response, but the hand-written declaration knew the shape and keeping it
+    /// is not a downgrade: question text -> chosen label, an array for
+    /// multiSelect, or free text for "Other".
     #[serde(default)]
+    #[ts(type = "Record<string, string | string[]>")]
     pub answers: serde_json::Value,
 }
 

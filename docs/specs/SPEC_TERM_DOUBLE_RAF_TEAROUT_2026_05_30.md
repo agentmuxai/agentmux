@@ -1,6 +1,6 @@
 # SPEC: Remove the terminal Stage-1 RAF write-coalescer (double-rAF)
 
-**Status:** Implemented — pending Windows-10 verification before release
+**Status:** Implemented — pending Windows-10 verification before release — #1211
 **Date:** 2026-05-30
 **Author:** AgentY
 **PR:** #1211 (supersedes #1206, which added an opt-in flag — now removed)

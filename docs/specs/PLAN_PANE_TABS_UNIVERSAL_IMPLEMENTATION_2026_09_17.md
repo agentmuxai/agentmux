@@ -1,7 +1,7 @@
 # PLAN: Universal Pane Tabs — Implementation Task Breakdown
 
 **Date:** 2026-09-17
-**Status:** active
+**Status:** active — PRs touching this work, newest first: #3309
 **Companion (design):** `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`
 — read that first; this doc is the task-level execution plan for it, not a
 restatement of the design.

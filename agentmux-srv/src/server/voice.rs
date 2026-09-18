@@ -347,6 +347,8 @@ async fn transcribe_local_whisper(
     // whisper-cli: -nt no timestamps, -np no progress prints → transcript on
     // stdout; logs go to stderr.
     let mut cmd = tokio::process::Command::new(&cli);
+    // Third-party transcription CLI (whisper.cpp).
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
     cmd.arg("-m").arg(&model).arg("-f").arg(&wav_path).arg("-nt").arg("-np");
     if let Some(l) = lang {
         cmd.arg("-l").arg(l);

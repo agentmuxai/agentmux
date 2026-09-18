@@ -35,7 +35,19 @@ if (hasFlag("--help")) {
   --no-reload           Skip the initial Page.reload`);
     process.exit(0);
 }
-const CDP_PORT = parseInt(getArg("--cdp-port", "9223"), 10);
+// Resolve the CDP port from the instance's own authkey.dev rather than the
+// 9222/9223 constant. Those are only PREFERRED values: the second instance to
+// start takes an OS-assigned port, so the constant names whichever instance won
+// the race. Pass --cdp-port to override, or --instance <substring> to pick.
+// See tools/tests/lib/instance-discovery.mjs.
+const CDP_PORT_ARG = getArg("--cdp-port");
+const CDP_PORT = CDP_PORT_ARG
+    ? parseInt(CDP_PORT_ARG, 10)
+    : await (async () => {
+          const { resolveInstance, resolveCdpPort } = await import("./lib/instance-discovery.mjs");
+          const inst = resolveInstance({ match: getArg("--instance") });
+          return await resolveCdpPort(inst);
+      })();
 const CYCLES = parseInt(getArg("--cycles", "12"), 10);
 const TOGGLES = parseInt(getArg("--toggles", "6"), 10);
 const TOL = parseFloat(getArg("--tolerance-px", "1.5"));

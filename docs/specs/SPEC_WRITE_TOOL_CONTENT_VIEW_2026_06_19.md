@@ -1,7 +1,7 @@
 # SPEC: Write tool expanded content view
 
 **Date:** 2026-06-19
-**Status:** Planned (implemented — see note below)
+**Status:** implemented — Planned (implemented — see note below) — #1601
 **Author:** smike
 
 > **2026-08-07 audit note:** Implemented (`renderWrite()` in

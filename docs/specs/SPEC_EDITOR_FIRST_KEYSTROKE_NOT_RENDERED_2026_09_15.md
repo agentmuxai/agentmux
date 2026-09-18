@@ -1,7 +1,7 @@
 # Editor: the first keystroke after focusing is accepted but not rendered
 
 **Status:** implemented — root cause confirmed by live trace and fixed; C1 was
-correct, C2 and C3 are ruled out. See §3 and §6.
+correct, C2 and C3 are ruled out. See §3 and §6. — #3260
 **Date:** 2026-09-15
 **Severity:** HIGH — raised from Medium once the mechanism was confirmed. This
 is **silent data loss**, not a rendering annoyance: the first character typed

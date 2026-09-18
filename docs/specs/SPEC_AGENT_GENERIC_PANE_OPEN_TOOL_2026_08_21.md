@@ -1,6 +1,6 @@
 # Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool
 
-**Status:** design, not implemented.
+**Status:** proposed — design, not implemented.
 **Author:** AgentY
 **Date:** 2026-08-21
 **Related:** `agentmux-mcp/src/main.rs` (`OpenEditor`, `OpenMedia` — the direct

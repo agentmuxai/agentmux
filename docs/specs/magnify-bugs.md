@@ -4,7 +4,7 @@
 1. Magnify icon/button in pane titlebar is blank (invisible)
 2. Magnified pane appears behind other panes (e.g., agent pane blocking maximized forge)
 
-**Status:** Root causes identified.
+**Status:** proposed — Root causes identified.
 
 ---
 

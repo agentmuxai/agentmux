@@ -74,6 +74,13 @@ pub(crate) fn apply_working_dir(
             }
         }
     }
+    // Strip this instance's identity before applying the caller's overlay.
+    // `tokio::process::Command` inherits srv's environment wholesale, so an
+    // agent pane — and every process the agent launches from its shell tool —
+    // otherwise receives this instance's channel, data dir and cache dir.
+    // See `backend::pane_env`.
+    crate::backend::pane_env::sanitize_process_command(cmd);
+
     for (k, v) in env_vars {
         let expanded = crate::backend::base::expand_home_dir_safe(v);
         cmd.env(k, expanded.to_string_lossy().as_ref());

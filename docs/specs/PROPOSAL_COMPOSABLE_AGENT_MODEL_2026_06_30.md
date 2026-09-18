@@ -1,7 +1,7 @@
 # Proposal: A Composable Agent Model for the Armory
 
 **Date:** 2026-06-30
-**Status:** Proposal — for discussion (naming + IA decisions needed)
+**Status:** proposed — Proposal — for discussion (naming + IA decisions needed)
 **Author:** AgentX
 **Driver:** "I'd like a cleaner model… break out skills and MCP into the Trust Center… should we call them bundles? preset bundles? would a preset be a one-stop shop?" *(verbatim — the Trust Center → Armory rename came later, PR #1917)*
 **Related:** CLAUDE.md "Not widgets" (Identity / Presets); `db_memory_bundles`, `db_identity_bundles`; the per-agent identity provisioning work (`specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`); the agent App API identity/preset/memory handlers.

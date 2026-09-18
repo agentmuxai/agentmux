@@ -1,7 +1,7 @@
 # Default Agent Roster Spec
 
 **Date:** 2026-03-17
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 
 ---
 

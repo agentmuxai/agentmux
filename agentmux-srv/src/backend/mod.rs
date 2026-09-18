@@ -51,6 +51,7 @@ pub mod session_archive;
 pub mod session_backfill;
 pub mod shellexec;
 pub mod transcript_backfill;
+pub mod pane_env;
 pub mod shellintegration;
 pub mod sysinfo;
 pub mod storage;

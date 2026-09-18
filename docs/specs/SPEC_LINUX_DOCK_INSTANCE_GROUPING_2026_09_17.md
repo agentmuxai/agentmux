@@ -1,7 +1,7 @@
 # SPEC: Linux Dock/Taskbar Instance Grouping Fix
 
 **Date:** 2026-09-17
-**Status:** Implemented
+**Status:** Implemented — #3323
 **Area:** `agentmux-cef/src/app/window_settings.rs` · `scripts/install-linux-desktop.sh` ·
 `scripts/linux-apprun.sh` · `scripts/stage-linux-runtime.sh` · `scripts/build-appimage-linux.sh` ·
 `scripts/build-deb-linux.sh` · `scripts/build-rpm-linux.sh` · `assets/linux/agentmux.desktop`

@@ -1,5 +1,5 @@
 # SPEC: CEF Windows Renderer Sandbox — Phase 3
-**Status:** Approved for implementation
+**Status:** proposed — Approved for implementation
 **Issue:** #1374
 **Date:** 2026-06-20
 **Depends on:** SPEC_CEF_SANDBOX_2026_06_20.md (Phases 1+2, merged PR #1622)

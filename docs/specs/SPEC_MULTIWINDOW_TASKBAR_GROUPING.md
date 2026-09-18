@@ -1,6 +1,6 @@
 # SPEC: Multi-Window Taskbar Behaviour — Full Instances + Sub-Windows
 
-**Status:** Decision made — two distinct window types.
+**Status:** proposed — Decision made — two distinct window types.
 **Date:** 2026-04-17
 **Owner:** AgentA
 **Files:** `agentmux-cef/src/commands/window.rs`, `agentmux-cef/src/ui_tasks.rs`,

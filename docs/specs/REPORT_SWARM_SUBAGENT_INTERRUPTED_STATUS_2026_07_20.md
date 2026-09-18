@@ -1,6 +1,7 @@
 # REPORT — why every subagent under a long-running pane shows "Interrupted"
 
 **Date:** 2026-07-20
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Trigger:** Live observation after landing #2231/#2232/#2233 tonight — opened
 the agent pane "Lzop" (a long-running session with many prior Agent-tool
 calls) in the two-bucket Swarm pane and every single row displayed

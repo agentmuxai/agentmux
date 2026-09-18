@@ -1,6 +1,6 @@
 # Spec: Robust Multi-Window Uptime Clock Sync
 
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Date:** 2026-03-17
 **Component:** `frontend/app/statusbar/BackendStatus.tsx`
 

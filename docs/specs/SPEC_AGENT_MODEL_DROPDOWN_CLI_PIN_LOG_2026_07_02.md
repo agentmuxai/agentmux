@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Type:** Implementation spec
-**Status:** Ready to schedule
+**Status:** proposed — Ready to schedule
 **Owner:** asaf
 **Scope:** agent-pane composer strip + provider/CLI registry + activity log UI (frontend + srv).
 

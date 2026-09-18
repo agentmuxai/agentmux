@@ -1,6 +1,7 @@
 # REPORT — retro: the `npm ci` / `@emnapi` lockfile EUSAGE failure
 
 **Date:** 2026-08-07
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Trigger:** Two dependabot PRs (#2445 mermaid, #2446 js-yaml) both showed a
 failing `vitest` check with no apparent relation to either bump. Asked to
 "handle 2445/2446."

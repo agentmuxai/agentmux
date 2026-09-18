@@ -5,7 +5,7 @@
 AskUserQuestion demo, and while confirming them the scope grew to include a
 real Cancel (replacing the non-functional "Answer later"). See §7 for what
 that changed relative to §§2–4 below, which describe Accept Recommended as
-originally scoped and are otherwise accurate.
+originally scoped and are otherwise accurate. — #2950
 **Owner:** AgentY
 **Trigger:** User request (below) — add a button that submits every
 question's recommended option(s) in one click, instead of requiring the user

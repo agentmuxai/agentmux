@@ -1,9 +1,10 @@
 # REPORT — Agent Pane Architecture: Full Inventory & Modularization Analysis
 
 **Date:** 2026-07-31
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Type:** Architecture analysis (investigation only — no code changed by this report)
 **Trigger:** "Do an analysis of the agent pane, all the things that plug into it, should we do modularization/cleanup?"
-**Related:** `SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md` (this session's earlier, narrower finding — the stuck-"Working" bug and the "everything leaks" observation that prompted this deeper look), `REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md` (**pre-existing**, independently-written report that already diagnosed the backend half of this exact problem 9 days before this investigation), `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07-21.md` (the precedent fix — `CredentialBroker` — this report's recommendation follows the same playbook).
+**Related:** `SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md` (this session's earlier, narrower finding — the stuck-"Working" bug and the "everything leaks" observation that prompted this deeper look), `REPORT_PROCESS_ARCHITECTURE_STATE_AND_RETHINK_2026_07_22.md` (**pre-existing**, independently-written report that already diagnosed the backend half of this exact problem 9 days before this investigation), `docs/specs/REPORT_AUTH_ARCHITECTURE_STATE_AND_RETHINK_2026_07_21.md` (the precedent fix — `CredentialBroker` — this report's recommendation follows the same playbook).
 
 ---
 

@@ -1,7 +1,7 @@
 # SPEC: `FleetBulkStop` reaches cross-channel targets; LAN/WAN deliberately deferred
 
 **Date:** 2026-08-22
-**Status:** Implemented (cross-channel only)
+**Status:** Implemented (cross-channel only) — #2762
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-srv/src/server/app_api/fleet.rs`, `server/mod.rs`, `server/app_api/mod.rs`)
 **Diagnosis:** `docs/reports/REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md` §3.2

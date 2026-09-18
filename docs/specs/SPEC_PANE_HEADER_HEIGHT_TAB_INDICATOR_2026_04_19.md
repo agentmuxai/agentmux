@@ -1,6 +1,6 @@
 # SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge
 
-**Status:** Implemented  
+**Status:** Implemented — #452
 **Date:** 2026-04-19  
 **Owner:** AgentY
 

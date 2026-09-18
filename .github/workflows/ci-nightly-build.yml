@@ -170,6 +170,21 @@ jobs:
       - name: cargo test --workspace
         run: cargo test --workspace -- --test-threads=1
 
+      # agentmux-cef's `test-authfile` feature gates the authfile tests that
+      # touch the real OS data dir. Nothing built them: PR CI deliberately
+      # excludes agentmux-cef (CEF compile time — see ci-pr.yml's header), and
+      # the workspace run above does not enable non-default features. So that
+      # module could only rot, and it did — PR #3354 shipped a duplicate
+      # `mod tests` (E0428) and two stale call sites with the wrong argument
+      # count, and every one of them passed the Windows leg because the code
+      # was never compiled. Review caught them; CI could not have.
+      #
+      # The CEF build is already paid for by the steps above, so this is
+      # near-zero marginal cost, and nightly is the lane that owns
+      # agentmux-cef coverage.
+      - name: cargo test -p agentmux-cef --features test-authfile
+        run: cargo test -p agentmux-cef --features test-authfile -- --test-threads=1
+
   frontend:
     name: vitest
     runs-on: ubuntu-latest

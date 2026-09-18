@@ -1,6 +1,6 @@
 # Report: agent pane blank-load period + brain-logo loading indicator
 
-**Status:** Investigation complete — no code changed. Written to inform a
+**Status:** proposed — Investigation complete — no code changed. Written to inform a
 design before implementation.
 **Author:** AgentX
 **Date:** 2026-07-04

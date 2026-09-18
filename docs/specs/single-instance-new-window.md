@@ -1,7 +1,7 @@
 # Single Instance + New Window on Re-launch
 
 **Date:** 2026-04-02
-**Status:** Spec
+**Status:** proposed — Spec
 **Problem:** Double-clicking agentmux.exe when already running opens Chrome (CEF singleton) instead of a new window
 
 ## Current Behavior

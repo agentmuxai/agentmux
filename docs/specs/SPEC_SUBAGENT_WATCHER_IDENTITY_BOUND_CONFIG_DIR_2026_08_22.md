@@ -1,7 +1,7 @@
 # SPEC: subagent_watcher watches the identity-bound Claude config dir, not a stale spawn-time snapshot
 
 **Date:** 2026-08-22
-**Status:** Implemented
+**Status:** Implemented — #2757
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/identity/resolver/inject.rs`, `agentmux-srv/src/backend/subagent_watcher/parse.rs`, `agentmux-srv/src/server/reactive.rs`, `agentmux-srv/src/server/service/misc.rs`)
 **Diagnosis:** live repro during the follow-up to `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md` §4 (the original "dispatched subagent never appears in Swarm" bug)

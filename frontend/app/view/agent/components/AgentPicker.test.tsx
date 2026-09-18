@@ -28,7 +28,7 @@ vi.mock("@/app/store/rpc-api", () => {
         ListAgentDefinitionsCommand: vi.fn().mockResolvedValue([]),
         ListRecentSessionsCommand: vi.fn().mockResolvedValue([]),
         ListNamedAgentsCommand: vi.fn().mockResolvedValue([]),
-        InstallCheckCommand: vi.fn().mockResolvedValue({ installed: true }),
+        InstallCheckCommand: vi.fn().mockResolvedValue({ installed: true, version: null }),
         ResolvePrereqsCommand: vi.fn().mockResolvedValue({ results: [] }),
         // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
         // (#2594) — resolves to `undefined` by default so existing tests
@@ -105,7 +105,14 @@ vi.mock("../providers", () => ({
         if (id === "codex") {
             return {
                 id: "codex",
-                npmPackage: ["@openai/codex-cli"],
+                // A string, matching ProviderDefinition (`npmPackage: string`,
+                // providers/types.ts). This was an ARRAY until #3350 — which
+                // nothing caught, because the only consumer was
+                // `!prov.npmPackage || prov.npmPackage.length === 0` and both
+                // a 1-element array and a non-empty string satisfy that
+                // identically. The moment the value was passed through to an
+                // RPC rather than just length-checked, the lie surfaced.
+                npmPackage: "@openai/codex-cli",
                 cliCommand: "codex",
                 systemPrereqs: [{ tool: "git", label: "Git", installUrls: {}, installLinkText: {} }],
             };
@@ -506,7 +513,15 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
 
             await waitFor(() => expect(RpcApi.InstallCheckCommand).toHaveBeenCalled());
             const call = vi.mocked(RpcApi.InstallCheckCommand).mock.calls[0][1];
-            expect(call).toEqual({ providerId: "codex", cliCommand: "codex" });
+            // npmPackage rides along so the same round-trip can report the
+            // installed version for the card's upgrade hint (#3350). The point
+            // of this assertion is unchanged: every field must resolve from the
+            // EFFECTIVE launch provider (codex), never the drifted column.
+            expect(call).toEqual({
+                providerId: "codex",
+                cliCommand: "codex",
+                npmPackage: "@openai/codex-cli",
+            });
         });
 
         it("probes system prereqs against the bundle's provider, not the drifted column", async () => {
@@ -524,7 +539,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         });
 
         it("marks the just-installed (drifted) agent's own install cache via the resolved provider", async () => {
-            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false });
+            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null });
             // Explicit no-missing-prereqs default — `vi.clearAllMocks()`
             // in the outer `beforeEach` clears call history but not a
             // prior test's `.mockResolvedValue`, so this can't rely on

@@ -1,7 +1,7 @@
 # SPEC: Pane tab strip — compact (shrink-to-fit) sizing + double-click rename
 
 **Date:** 2026-07-22
-**Status:** Implemented — §4 resolved via option 2 (dedicated `renameagentdefinitiontitle` RPC)
+**Status:** Implemented — §4 resolved via option 2 (dedicated `renameagentdefinitiontitle` RPC) — #2282
 **Scope:** `frontend/app/element/PaneTabStrip.tsx` / `.scss` (shared strip), agent-pane fork
 tabs (`frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/fork/**`), terminal-pane
 tabs (`frontend/app/view/term/term.tsx`)

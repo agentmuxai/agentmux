@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-15
 **Status:** implemented — §3's design shipped in the same PR as this document.
-§5's first open question is resolved (clean exits only; see §6).
+§5's first open question is resolved (clean exits only; see §6). — #3253
 **Related:**
 `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` (close-on-exit for
 top-level panes, and §11's deliberate exclusion of sub-blocks — read that

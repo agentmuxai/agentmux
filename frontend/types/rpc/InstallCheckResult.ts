@@ -3,4 +3,17 @@
 /**
  * Result of `install.check`.
  */
-export type InstallCheckResult = { installed: boolean, };
+export type InstallCheckResult = { installed: boolean, 
+/**
+ * Version of the managed install, when it could be read. `None` means
+ * "not known" — never "current". The caller compares this against the
+ * provider's pin (see `frontend/app/view/agent/providers/version-drift.ts`),
+ * and an absent version must resolve to `unknown` rather than quietly
+ * looking up to date.
+ *
+ * Read from `package.json` rather than by running `<cli> --version`: the
+ * agent picker calls this once per card, and spawning a process per card
+ * to answer a question a file read already answers is not a trade worth
+ * making.
+ */
+version: string | null, };

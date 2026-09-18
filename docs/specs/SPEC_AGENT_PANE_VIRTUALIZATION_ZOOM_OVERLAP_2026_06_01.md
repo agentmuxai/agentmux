@@ -1,6 +1,6 @@
 # Agent-Pane Virtualization Overlap Under Zoom
 
-**Status:** Phase 1 (zoom) MERGED #1231; **Phase 1.5 (data-index measure race) is the dominant residual cause — §3.4 / §4.4**, fix verified live
+**Status:** active — Phase 1 (zoom) MERGED #1231; **Phase 1.5 (data-index measure race) is the dominant residual cause — §3.4 / §4.4**, fix verified live — #1233
 **Date:** 2026-06-01
 **Author:** AgentA
 **Tracking:** open

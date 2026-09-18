@@ -5,7 +5,7 @@ visual distinction at all — full uniformity): the user said "proceed" to a
 summary that named this as an open call rather than picking a specific
 option, so this was a judgment call, not an explicit confirmation — matches
 "we don't need separate Section and Memory" taken literally, but flagged
-here in case that reading was wrong.
+here in case that reading was wrong. — #3232
 **Date:** 2026-09-15
 **Verified against:** code as of `c00644790` (`frontend/app/view/global-bundle/
 global-bundle-manager.tsx`, `global-bundle-model.ts`) plus
