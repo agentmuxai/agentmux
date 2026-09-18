@@ -1,7 +1,7 @@
 # Spec: Stop the isolated Claude Code config dir from falling back to the host's `~/.claude/CLAUDE.md`
 
 **Date:** 2026-08-31
-**Status:** Proposed
+**Status:** implemented — #2854 (2026-08-31), the PR this doc was added in. `agentmux-srv/src/backend/providers.rs` cites it at three points, including in operator-facing text it emits ("not this file. See SPEC_ISOLATE_HOST_CLAUDE_MD…"), with the failure path in `agents/failure.rs` and `identity/resolver/errors.rs`.
 **Motivated by:** direct request to verify that AgentMux agents don't use
 the host's global Claude Code config — verification found a real, live
 leak, not just a documentation gap.

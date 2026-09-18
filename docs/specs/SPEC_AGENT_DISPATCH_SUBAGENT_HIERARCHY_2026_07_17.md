@@ -1,7 +1,7 @@
 # SPEC: two-level dispatch/member schema for subagents and workflows
 
 **Date:** 2026-07-17
-**Status:** Proposed — design only, no implementation yet.
+**Status:** implemented — #2208 (2026-07-17), the PR this doc was added in; "no implementation yet" was written before it merged. The two-level AgentDispatch/SubAgent hierarchy is in `agentmux-srv/src/backend/subagent_watcher/` (`types.rs`, with tests) and surfaced through `frontend/app/view/agent/activity/subagent-adapter.ts`.
 **Ask (verbatim):** "the subagents are actually subsubagents .. We want to keep
 track of the Agent and Workflow tool calls. each should produce one type of
 SubAgent entity, which then has SubSubAgents, unless you can think of a better

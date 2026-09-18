@@ -1,6 +1,6 @@
 # Report: agent/swarm pane loading, ambient-call flood, and stale status
 
-**Status:** active — the investigation was acted on, though not all of it.
+**Status:** active — the investigation was acted on (#2002, #2241), though not all of it.
 Finding 2 (subagent completion keyed off derived text) was fixed the same day in
 #2002, the PR this report was added in. Finding 1's mount-time reconciliation
 shipped in #2241: `reconcileTurnActive` in `agent-view.tsx` seeds `TurnPhase`
