@@ -481,6 +481,16 @@ type — and the response is where the drift risk actually lives. `widget.health
 `bundle.validate` and `listagents` are still on `register_handler` and could take the
 same treatment; that was left as a follow-up rather than done inside an unrelated slice.
 
+**`listagents` is on that list for a different reason than the other three, and this
+report twice failed to say so.** The widget pair and `bundle.validate` are there because
+they transform or leniently read their payload. `listagents` is there because it
+deliberately tolerates a null or malformed body from older clients that never sent one —
+`serde_json::from_value(data).unwrap_or_default()`, documented on its registration at
+`agentmux-srv/src/server/agent_handlers/mod.rs:1245`. A `Value` request preserves that
+exactly, which is why it is equally convertible. But the tolerance is about CLIENT VERSION
+SKEW rather than payload shape, and listing it beside the other three as though the
+rationale were shared is what made this unclear twice.
+
 #### 5.4d Where generating produces a WORSE type
 
 Four `block` structs are carved out (five before `createblock` was deleted as dead), and the
@@ -614,7 +624,9 @@ The effort was stopped deliberately at 72%, not abandoned. What remains untyped:
 `app_api/*` (bundle 12, agent_io 9, identity 4, memory 3 — MCP-facing, narrower blast
 radius), `agent_handlers/identity.rs` (6), the seven `websocket.rs` commands that drag in
 `ORef`/`MetaMapType`/`BlockDef`, and a handful of singles. Plus the two deliberate
-carve-outs (`bundle.validate`, `listagents`) that §5.4c's revised rule now makes
+carve-outs — `bundle.validate` (normalizes its payload before deserializing) and
+`listagents` (tolerates a null/malformed body from older clients; §5.4c) — that §5.4c's
+revised rule now makes
 convertible.
 
 The judgement: the highest-value surfaces are done, and the remaining commands are the
