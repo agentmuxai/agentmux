@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Author:** AgentY
-**Status:** proposed — Design analysis — needs answers to the two open questions below before implementation.
+**Status:** implemented — #2621 (2026-08-17), the PR this doc was added in. `AgentPickerFilterBar.tsx` (with tests) holds the filter/sort bar atop My Agents, keyed as `nameFilter`/`sortBy` and citing this spec. The "Open questions" section below was answered by that PR adopting its own stated recommendations — My Agents only, no autofocus — rather than by a separate decision; both remain a two-line change if the reasoning there stops holding.
 
 ---
 
