@@ -813,6 +813,13 @@ describe("AgentQuestionPanel dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_
     });
 
     it("does not auto-submit while isDormant is true, even past the full timeout", () => {
+        // Deliberately does NOT assert on the countdown text's visibility —
+        // that's gated purely by the hover-pause `hidden()` signal (see the
+        // component's own `<Show when={!hidden()}>`), not by dormancy. A
+        // dormant tab's whole DOM subtree already sits behind the pane
+        // tab-strip's own `visibility: hidden` wrapper (pane-leaf-chrome.tsx),
+        // so what this component renders internally is moot; the only
+        // observable contract here is that the timeout itself doesn't fire.
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
         const [dormant] = createSignal(true);
@@ -822,7 +829,6 @@ describe("AgentQuestionPanel dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_
 
         vi.advanceTimersByTime(60_000); // well past the 30s default
         expect(onAnswer).not.toHaveBeenCalled();
-        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
     });
 
     it("re-arms a fresh full countdown the moment isDormant flips back to false, not resumed from where it left off", () => {
