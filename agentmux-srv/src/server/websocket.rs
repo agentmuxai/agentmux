@@ -1201,7 +1201,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         },
     );
 
-    // tooldecision → reply to a per-tool-call permission gate.
+    // tooldecision → reply to a per-tool-call permission gate via the Agent SDK
+    // **control protocol** — the `AgentDecisionPanel` Allow/Deny buttons, once
+    // `should_route_to_decision_panel` (persistent.rs) is flipped on for real
+    // (that gate is currently hardcoded false, so `decide_tool_permission`
+    // below will fail every call today with "no pending tool-permission
+    // request" — expected until the Phase 2 policy decision is made; see
+    // that function's own doc comment).
     //
     // The original PR-3a draft tried to write `y\n` / `n\n` to the
     // subprocess's stdin via `blockcontroller::send_input`. Codex P1
@@ -1211,15 +1217,26 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // AgentInputCommand")`. The deeper truth is that AgentMux runs
     // the agent CLI in non-interactive `--print` mode — the CLI
     // never reads stdin and a y/n write would be a no-op even if
-    // the controller accepted it. See SPEC_DECISION_PROMPT
-    // _2026_04_24.md §9.1.
+    // the controller accepted it. Real delivery is the same
+    // control_response mechanism `agent.answer` uses below for
+    // AskUserQuestion. See SPEC_DECISION_PROMPT_2026_04_24.md §9.1
+    // and SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     //
-    // For now this handler accepts the decision, validates the
-    // payload, logs it (audit trail via `~/.agentmux/logs/`), and
-    // returns Ok. The actual delivery mechanism (rule-persistence
-    // for next-turn application, or interactive-mode subprocess
-    // launch with stdin write) is decided in PR-3b / PR-4 once we
-    // pick a CLI integration strategy.
+    // `cmd.request_id` is used here as the `tool_use_id` key
+    // `pending_permissions`/`decide_tool_permission` are keyed on — NOT
+    // as a separate correlator against the speculative
+    // `PermissionRequestEvent` §4.1 describes, which was never built.
+    // The eventual mechanism (still unbuilt — see the Phase 2 gate)
+    // correlates a `pending_approval` ToolNode by `tool_use_id`, exactly
+    // like AskUserQuestion's `awaiting_answer` already does; whatever
+    // populates that field on the frontend side should set it to the
+    // ToolNode's `tool_use_id`.
+    //
+    // `scope` is still validated but not yet acted on: §6's rules-
+    // persistence layer (`permissions.json`) does not exist anywhere in
+    // this tree. That is separate, still-open work — this PR only makes
+    // the *transport* (control_response delivery) real, not repeat-
+    // decision memory.
     engine.register_typed(
         COMMAND_TOOL_DECISION,
         move |cmd: CommandToolDecisionData, _ctx| async move {
@@ -1232,7 +1249,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         ));
                     }
                 }
-                // Validate scope so PR-3b's rules-persistence layer
+                // Validate scope so a future rules-persistence layer (§6)
                 // can trust the value without re-checking. Reagent P1
                 // round-3 on PR #557.
                 match cmd.scope.as_str() {
@@ -1250,9 +1267,20 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     outcome = %cmd.outcome,
                     scope = %cmd.scope,
                     has_feedback = cmd.feedback.is_some(),
-                    "[tooldecision] received (delivery mechanism deferred to PR-3b/PR-4)"
+                    "[tooldecision] delivering via control protocol"
                 );
-                Ok(())
+                let ctrl = blockcontroller::get_controller(&cmd.blockid)
+                    .ok_or_else(|| format!("tooldecision: no controller for block {}", cmd.blockid))?;
+                if let Some(persistent_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+                {
+                    persistent_ctrl.decide_tool_permission(cmd.request_id, &cmd.outcome, cmd.feedback)
+                } else {
+                    Err("tooldecision: UNSUPPORTED_CONTROLLER: per-tool permission decisions \
+                         require a persistent (host) agent; container/one-shot agents are not \
+                         yet supported (same limitation as agent.answer)".to_string())
+                }
         },
     );
 

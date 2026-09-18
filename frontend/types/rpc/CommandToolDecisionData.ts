@@ -2,16 +2,30 @@
 
 /**
  * Data for `tooldecision` — frontend's reply to a per-tool-call
- * permission gate. Today the backend validates the outcome and
- * logs the decision; actual delivery to the agent CLI is deferred
- * to PR-3b/PR-4 (rules persistence vs. interactive subprocess
- * path). Spec:
+ * permission gate. The backend validates the payload and delivers it
+ * to the agent CLI over the Agent SDK control protocol
+ * (`PersistentSubprocessController::decide_tool_permission`) — real
+ * delivery, not just logging, as of the Phase 2 plumbing landing.
+ * **Still inert in practice**: nothing populates a pending decision
+ * yet, because `should_route_to_decision_panel` (persistent.rs) is
+ * hardcoded false pending a product decision on which tools/modes
+ * should prompt at all (see that function's own doc comment — the
+ * spec's own §7 flags "permission chatter" as a real regression risk,
+ * not a hypothetical one). Spec:
  * docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
  */
 export type CommandToolDecisionData = { blockid: string, 
 /**
- * Opaque id matched against a `PermissionRequestEvent`. Echoed
- * in the audit log so the audit trail can be cross-referenced.
+ * The `tool_use_id` of the pending `can_use_tool` control_request —
+ * despite the field name, this does NOT correlate against the
+ * speculative `PermissionRequestEvent` §4.1 describes (that event
+ * type was never built). It is what
+ * `PersistentInner::pending_permissions` and
+ * `decide_tool_permission` key on, the same identifier
+ * AskUserQuestion's `awaiting_answer` flow already correlates on.
+ * Kept named `request_id` rather than renamed to avoid an
+ * unrelated frontend/TS-binding churn for a field whose producer
+ * (the still-unbuilt frontend event wiring) doesn't exist yet.
  */
 request_id: string, 
 /**
@@ -19,13 +33,16 @@ request_id: string,
  */
 outcome: "allow" | "deny", 
 /**
- * "once" / "session" / "project" / "global". Captured so the
- * rules-persistence layer (PR-3b) can write a matching rule
- * without re-asking the user.
+ * "once" / "session" / "project" / "global". Validated, but not yet
+ * acted on — no rules-persistence layer (§6, `permissions.json`)
+ * exists anywhere in this tree yet. A future PR that builds one can
+ * trust this value without re-validating it.
  */
 scope: "once" | "session" | "project" | "global", 
 /**
- * User-typed denial reason. Optional. Future PR will relay
- * this verbatim into the agent's next prompt.
+ * User-typed denial reason. Optional. Delivered verbatim to the
+ * agent CLI as the `deny` `control_response`'s `message`
+ * (`SPEC_DECISION_PROMPT_2026_04_24.md` G6) when present; a generic
+ * default is used otherwise.
  */
 feedback?: string, };
