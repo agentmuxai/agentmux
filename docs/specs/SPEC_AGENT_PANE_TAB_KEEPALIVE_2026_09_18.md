@@ -1,10 +1,10 @@
 # SPEC: Keep-alive for agent tabs in the pane tab strip
 
 **Date:** 2026-09-18
-**Status:** implemented — `"agent"` added to `pane-leaf-chrome.tsx`'s
-`KEEP_ALIVE_TYPES`, alongside the two dormancy-gated timer fixes this audit
-found were needed first (`AgentQuestionPanel`'s auto-timeout,
-`useAgentFailure`'s auto-retry).
+**Status:** implemented — PR #3391. `"agent"` added to
+`pane-leaf-chrome.tsx`'s `KEEP_ALIVE_TYPES`, alongside the two
+dormancy-gated timer fixes this audit found were needed first
+(`AgentQuestionPanel`'s auto-timeout, `useAgentFailure`'s auto-retry).
 **Related:** `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`
 (shipped the keep-alive machinery this reuses, scoped to `"term"` only, and
 is the source of the "not yet audited for keep-alive safety" warning this
