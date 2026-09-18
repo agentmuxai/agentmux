@@ -283,6 +283,39 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
         keyOn(ta, "ArrowDown");
         expect(ta.value).toBe("");
     });
+
+    it("lands the caret at position 0 after an ArrowUp recall, so a repeated ArrowUp immediately steps back again", async () => {
+        // Before this fix, setComposerValue always parked the caret at the
+        // END of the recalled text. Since ArrowUp only navigates further
+        // back when the caret is already at true position 0, a second
+        // consecutive ArrowUp press (with no manual caret reset in between,
+        // unlike the other tests in this file) would just move the caret
+        // back to 0 natively instead of recalling the next-older entry —
+        // requiring two ArrowUp presses per history step for a single-line
+        // message. Every other test here works around that by explicitly
+        // calling ta.setSelectionRange(0, 0) between presses; this test
+        // deliberately does not, to prove that workaround is no longer
+        // necessary.
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "first message", "second message", "third message");
+
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("third message");
+        expect(ta.selectionStart).toBe(0);
+        expect(ta.selectionEnd).toBe(0);
+
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("second message");
+        expect(ta.selectionStart).toBe(0);
+
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("first message");
+        expect(ta.selectionStart).toBe(0);
+    });
 });
 
 // Minimal AgentViewModel double — only the fields AgentFooter actually reads:

@@ -619,7 +619,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // writers: sets the uncontrolled value directly, then refreshes autocomplete
     // + the typing-scroll. Deliberately does NOT dispatch an `input` event, so
     // it never trips the history-cursor reset in handleInput.
-    const setComposerValue = (text: string): void => {
+    const setComposerValue = (text: string, caret: "start" | "end" = "end"): void => {
         if (!textareaRef) return;
         // Consumes the Esc-cleared snapshot — the undo-restore call below
         // reads `escClearedDraft` as its `text` argument BEFORE this runs, so
@@ -628,7 +628,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // supersede a stale snapshot the same way typing does.
         escClearedDraft = null;
         writeComposerValue(text);
-        textareaRef.setSelectionRange(text.length, text.length);
+        const pos = caret === "start" ? 0 : text.length;
+        textareaRef.setSelectionRange(pos, pos);
         setIsBangCmd(text.startsWith("!"));
         updateAutocomplete();
         props.onTyping?.();
@@ -997,12 +998,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // Shift+ArrowUp selection that hasn't reached the start yet).
             // Covers an empty composer, a partially typed draft (stashed into
             // histDraft, restorable with ArrowDown), and continuing further
-            // back while already navigating.
+            // back while already navigating. Caret lands back at position 0
+            // (not the end) so a repeated ArrowUp immediately steps back
+            // again instead of first having to re-reach the start.
             if (e.key === "ArrowUp" && histPos > 0 && caretAtStart) {
                 if (!navigating) histDraft = textareaRef.value; // stash the live draft
                 histPos--;
                 e.preventDefault();
-                setComposerValue(sentHistory[histPos]);
+                setComposerValue(sentHistory[histPos], "start");
                 return;
             }
 
