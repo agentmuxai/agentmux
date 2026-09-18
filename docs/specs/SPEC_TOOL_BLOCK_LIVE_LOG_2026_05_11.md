@@ -1,6 +1,6 @@
 # Tool block: live log popout + bottom action bar
 
-**Status:** Proposed
+**Status:** implemented — Phase 1 (types + reducer) shipped in #800, the PR this doc was added in, and Phase 3's overlay UI in #804 as that PR's "PR α" (see `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §8, which sequences the two specs together). §3.3 is cited from `agent-document/types.ts` and §3.4 from `ToolBlockOverlay.tsx`; `ToolOverlayLog.tsx` is the virtualized log beside it. §8's file follow-ups remain out of scope.
 **Owner:** AgentA
 **Date:** 2026-05-11
 **Driving observation:** *"the hover tool thing currently shows an array of buttons, that doesn't work. We want it to show the actual running result of the command (many have `&&` so we want the log as it is running, and the result once complete). We want reducer arch for this too. The buttons for branching and opening up other stuff, let's move them to the bottom of the log popout."*

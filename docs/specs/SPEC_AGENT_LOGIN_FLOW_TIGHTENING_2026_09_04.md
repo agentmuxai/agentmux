@@ -1,7 +1,7 @@
 # SPEC — Tighten the agent-pane login flow: auto-unblock on external bind, "Bind account" button
 
 **Date:** 2026-09-04
-**Status:** proposed — analysis complete, not yet implemented.
+**Status:** implemented — #2971 (2026-09-04), the PR this doc was added in; "not yet implemented" was written before it merged. Both issues shipped: §2's auto-unblock-on-external-bind is wired in `agent-view.tsx` and `useAgentControllerStatus.ts`, and §3's "Bind account" button is `failure/failure-accessory.ts` plus `failure/bind-account-candidates.ts`, each citing the subsection it implements. §5's non-goals are unchanged.
 **Repo:** agentmuxai/agentmux
 **Trigger:** Operator report, two related pieces of friction in the same flow:
 1. Starting an agent shows the login-required prompt. The user switches to the

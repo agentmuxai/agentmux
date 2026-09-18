@@ -1,7 +1,11 @@
 # SPEC: Surface `~/.claude/CLAUDE.md` (read-only) in Global Memory
 
 **Date:** 2026-08-24
-**Status:** proposed. **Note:** the file this spec targets in §1-§4 turned
+**Status:** implemented — #2794 (§5, the corrected design), then #2797 (§6's
+second read-only block for the ambient `~/.claude/CLAUDE.md`) and #2799 (§7's
+rename and grouping), all 2026-08-24/25. The body below already says "read §5
+for what actually shipped"; only this field hadn't caught up.
+**Note:** the file this spec targets in §1-§4 turned
 out to be the wrong one — see §5 for the corrected design (the CLAUDE.md
 at AgentMux's shared Claude provider config dir, not the ambient
 `~/.claude/CLAUDE.md`). Filename kept as-is since it's already referenced

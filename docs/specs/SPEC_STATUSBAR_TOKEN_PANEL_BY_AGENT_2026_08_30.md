@@ -1,7 +1,7 @@
 # Spec: Token stats panel — break out by agent + value-add details
 
 **Date:** 2026-08-30
-**Status:** Proposed
+**Status:** implemented — #2849 (2026-08-30), the PR this doc was added in. `frontend/app/statusbar/TokenBreakdownPopover.tsx` cites this spec and has tests, backed by `store/token-usage.ts`. The Non-goals section is unchanged.
 **Motivated by:** direct request — the status bar's token breakdown popover
 currently groups by provider/service only; break it out by agent instead,
 and identify what else is worth adding while touching this panel.

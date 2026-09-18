@@ -6,7 +6,7 @@
 **(shell · cron · subagent · …)**
 
 **Date:** 2026-06-15
-**Status:** Draft
+**Status:** active — most of it is built. Phase 1 (the shell adapter) shipped in #1428, the PR this doc was added in; `frontend/app/view/agent/activity/` now holds shell, subagent, tool and background adapters, the `PinnedActivity` types of §3, and Part B's auto-detect work (`sleep-detect.ts`, whose own header records that `REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md` §4.2 rejected text-matching as the classifier). **Part C (cron / "stays active") has no adapter** — `types.ts` says so directly: `cron` is in `ActivityKind` but nothing produces it.
 **Builds on:** `SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md` (Phases 1–2),
 `SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md` (stop / tree-kill, PR #1422),
 MSYS cwd fix (#1415), and the existing subagent stack

@@ -4,7 +4,8 @@
 //
 // The rules (docs-lifecycle hardening Phase 1, SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md):
 //
-//   R1  Status first word ∈ {draft,proposed,active,implemented,living,historical,superseded}
+//   R1  Status first word ∈ the closed enum below (kept in step with
+//       check-doc-status.sh's VALID — see the comment on ENUM)
 //   R2  `active`      MUST say what shipped (PR #s) and what remains
 //   R3  `implemented` MUST cite the implementing PR(s)
 //   R4  `superseded`  REQUIRES a Superseded-by: resolving to a real path
@@ -42,7 +43,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 
-const ENUM = ["draft", "proposed", "active", "implemented", "living", "historical", "superseded"];
+// Must stay in step with check-doc-status.sh's VALID. `retro` and `analysis`
+// were added to that gate in #3378 and not to this one, so for a week any doc
+// honestly marked with either failed R1 here while passing there — two gates
+// disagreeing about the same vocabulary, which is worse than one gate being
+// wrong. Found by this branch marking SPEC_BROWSER_PANE_LIFECYCLE `analysis`.
+const ENUM = [
+    "draft", "proposed", "active", "implemented",
+    "living", "historical", "superseded", "retro", "analysis",
+];
 const DIR = "docs/specs";
 const PR_CITED = /#\d{3,}/;
 // Archived specs are finished by definition; holding them to "implemented MUST

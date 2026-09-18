@@ -1,7 +1,19 @@
 # Spec: Modularize `frontend/app/view/agent/agent-view.tsx`
 
 **Date:** 2026-04-13
-**Status:** Draft — ready to execute in small steps
+**Status:** active — most of the extraction happened; the goal it was for did not.
+Landed: Step 1 (`AgentPicker`, #351), Step 2 (launch flow → `AgentLaunchModal`),
+Step 4 (`useAgentControllerStatus`), Step 5 (`useHistoryPagination`),
+Step 8 (`useInSessionSearch`), Step 9 (`useScrollToNode`),
+Step 10 (`useAgentKeyboard`). Not landed: Steps 3 (`useLaunchLogs`),
+6 (`useSessionDigest`), 7 (`useBookmarks`), 11 (`AgentPresentationHeader`),
+12 (the final collapse).
+
+**The target is further away than when this was written.** `agent-view.tsx` was
+1,182 lines and aimed at ≤300; it is now over 2,600. Seven extractions came out
+and more than that went back in. Anyone picking this up should treat the step
+list as still valid but re-measure first — the numbers in §"Target size" and in
+each step's "(~N lines out)" are all from the 2026-04-13 file.
 **Target:** `frontend/app/view/agent/agent-view.tsx` (1,182 lines) → ≤ 300 lines
 
 ---

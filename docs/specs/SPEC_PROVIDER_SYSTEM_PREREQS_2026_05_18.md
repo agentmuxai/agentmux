@@ -1,6 +1,6 @@
 # SPEC: Provider System-Tool Prerequisites
 
-**Status:** Draft
+**Status:** implemented — #908 (2026-05-19), the PR this doc was added in, shipped §4's Phase α: the `systemPrereqs` provider field, the `resolve_prereqs` RPC, `AgentPrereqModal`, and the `AgentPicker` gate between card click and install. Phase β's "extend" went further than the spec sketched — `systemPrereqs` now covers codex and others in `providers/catalog.ts`, not just claude and openclaw. β's item 8 (`copilot` → `gh`) is the one piece not done; it was always conditional on shipping that provider. §8's out-of-scope items are unchanged.
 **Date:** 2026-05-18
 **Author:** AgentA
 **Related:**

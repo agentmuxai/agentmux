@@ -1,7 +1,7 @@
 # SPEC: Ghost-Text Next-Prompt Suggestion — a Second Ambient Model Call Gateway Bind Point
 
 **Date:** 2026-07-03
-**Status:** Draft — investigation complete, design proposed, not yet implemented
+**Status:** implemented — #1961 (2026-07-03), the PR this doc was added in; "not yet implemented" was written before it merged. The backend side is in `rpc_types/session.rs` and `server/app_api/session.rs`, both citing this spec by name, and the composer-side ghost text is in `AgentFooter.tsx` with tests.
 **Related:** `agentmux-srv/src/ambient/mod.rs`, `agentmux-srv/src/server/app_api/session.rs`,
 `frontend/app/view/agent/hooks/useAgentActivitySummary.ts`,
 `frontend/app/view/agent/components/AgentFooter.tsx`,

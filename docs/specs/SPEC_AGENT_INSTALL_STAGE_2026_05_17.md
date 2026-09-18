@@ -1,6 +1,6 @@
 # SPEC: Agent Install Stage
 
-**Status:** Draft
+**Status:** active — §11's Phase α shipped in #889, the PR this doc was added in; `AgentInstallModal.tsx`'s own header says so ("Phase α … single-step"), backed by `install_handlers.rs` and its `install_chunk` stream. The install entry point ended up in `AgentPicker.tsx` rather than the separate `AgentInstallCard.tsx` the phase sketches, and there is no `agent-install-store` slice — the state machine lives in the modal. **Phase β (declarative `installRecipe` in provider config, multi-step, verify + doctor) has not shipped** — no `installRecipe` exists in either TypeScript or Rust.
 **Date:** 2026-05-17
 **Author:** AgentA
 **Related:** [`SPEC_OPENCLAW_AGENT_2026_05_17.md`](./SPEC_OPENCLAW_AGENT_2026_05_17.md) (§6 onboarding, made concrete here for ALL agents), [`SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`](./SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md) (reuses the same streaming-output primitive)

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-24
 **Author:** AgentA
-**Status:** Draft
+**Status:** implemented — #1020 (2026-05-25), the PR this doc was added in. The high-contrast user-input treatment and the startup-block collapse are in `stream-parser.ts`, `UserMessageBlock` and `AgentDocumentView.tsx`, with tests. The "Out of scope" section is unchanged.
 
 ---
 

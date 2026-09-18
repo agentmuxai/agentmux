@@ -1,6 +1,12 @@
 # SPEC: Browser Pane Lifecycle & State Machine
 
-**Status:** draft (analysis only — no code changes)
+**Status:** analysis — this was always analysis rather than a plan, and it is now
+load-bearing reference material rather than a proposal. `agentmux-cef` cites it
+for *what CEF does*, not for what to build: `browser_pane/wrapper.rs` quotes §8
+("`DoClose` is NOT …") at two separate tear-down sites, and
+`browser_panes/close.rs` cites the host-log traces recorded here. The bug in the
+header line — close pane, content still painted, keystrokes stuck — was fixed on
+the strength of this document. Keep it; do not implement it.
 Date: 2026-04-17
 Owner: AgentA
 Bug: "Close pane → DOM gone, but Chromium content still painted; keystrokes stuck in dead pane."

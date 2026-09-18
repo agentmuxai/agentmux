@@ -1,7 +1,7 @@
 # SPEC: Drag-and-drop files into Terminal and Agent panes
 
 **Date:** 2026-05-30
-**Status:** Draft
+**Status:** implemented — #1201 (2026-05-30), the PR this doc was added in. §3.3 is cited from `agentmux-cef/src/drag_stash.rs`, and the pane-side handling is in `agent-view.tsx`. §7's out-of-scope items are unchanged.
 **Owner:** Frontend + CEF host + sidecar
 **Scope:** drag-and-drop of files from the OS file manager (and inter-pane in v2) onto a Terminal or Agent pane, with both **host-local** and **containerised/remote** agents supported.
 
