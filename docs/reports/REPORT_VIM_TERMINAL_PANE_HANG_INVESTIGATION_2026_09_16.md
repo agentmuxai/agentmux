@@ -1,10 +1,7 @@
 # Report: "opening vim in a terminal makes the pane unresponsive" — not reproduced
 
 **Date:** 2026-09-16
-**Status:** investigation only — could not reproduce "unresponsive"; a related but
-distinct bug ("corrupted", not "unresponsive") was found independently by
-another agent (Maricon) and is fixed in **PR #3256** (open, not yet merged as
-of this report) — see §6.
+**Status:** historical — this investigation could not reproduce the freeze and its conclusions were superseded. Root cause was later found to be an esbuild miscompile of xterm's DECRQM handler, fixed in PR #3343; see docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md.
 **Author:** Opaz
 **Repo state:** main @ `d41a598` (v0.56.1, pulled fresh for this investigation)
 **Probed live** against a running instance (`v0.56.0`, `http://127.0.0.1:37393`,
