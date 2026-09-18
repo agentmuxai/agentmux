@@ -1,7 +1,16 @@
 # Spec: Per-Tool-Call Permission Decision Prompt
 
 **Date:** 2026-04-24
-**Status:** Draft, ready for implementation planning
+**Status:** active — partially built. §4's event model, §5's UX and §9.1's
+subprocess-stdin provider adapter shipped (`AgentDecisionPanel.tsx`,
+`useAgentDecisions.ts`, `claude-translator.ts`, `websocket.rs`), and the panel
+offers all four of §6's scopes. **§6's rule storage and §7's
+remember-last-options are not built** — there is no `permissions.json` reader or
+writer anywhere in the tree, so a `project`/`global` choice has nowhere durable
+to go. The missing transport for persistent Claude agents is also still missing:
+`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md` §5 Phase 2 was scoped to supply it
+and has not shipped — `persistent.rs` auto-allows every tool except
+AskUserQuestion, so nothing routes here on that path.
 **Owner:** AgentA
 **Tracks:** agentmuxai/agentmux#551 ("Decision prompt: per-tool-call
             permission UI for agent panes") + user follow-up:
