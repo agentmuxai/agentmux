@@ -6,7 +6,7 @@
 
 **Date:** 2026-04-08
 **Author:** AgentA
-**Related:** [white-screen-overnight-2026-04-08.md](../analysis/white-screen-overnight-2026-04-08.md)
+**Related:** [white-screen-overnight-2026-04-08.md](../../analysis/white-screen-overnight-2026-04-08.md)
 **Branch:** `agenta/gpu-recovery-cef-init`
 **Affects:** `agentmux-cef`, `frontend`
 

@@ -1,4 +1,4 @@
-> **⚠️ SUPERSEDED — 2026-06-13.** Retained for its design rationale and the inbound code/doc references that cite it. For the current, code-anchored architecture of agent data & cross-channel persistence, see **[ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md](../../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md)**.
+> **⚠️ SUPERSEDED — 2026-06-13.** Retained for its design rationale and the inbound code/doc references that cite it. For the current, code-anchored architecture of agent data & cross-channel persistence, see **[ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md)**.
 
 # Data directory status — where AgentMux writes things, 2026-05-09
 
@@ -79,7 +79,7 @@ The on-disk view confirms the spec landed: `~/.agentmux/dev/agenta-perf-baseline
 
 ## Cross-references
 
-- `docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original plan.
+- `docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original plan (since archived).
 - `agentmux-common/src/data_paths.rs` — the unified resolver.
 - `agentmux-launcher/src/data_dir.rs` — compat shim.
 - `agentmux-common/src/runtime_mode.rs` — the `AGENTMUX_RUNTIME_MODE` enum.

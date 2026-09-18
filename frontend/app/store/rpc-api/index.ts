@@ -61,6 +61,24 @@ export type {
     CommandBlockInputData,
 } from "./block";
 export type {
+    AgentConfigFile,
+    AgentStopInput,
+    CommandAgentInputData,
+    CommandAgentStopData,
+    CommandShellExecData,
+    CommandShellStatusData,
+    CommandShellStopData,
+    CommandSubprocessSpawnData,
+    CommandWriteAgentConfigData,
+    CommandWriteAgentConfigResult,
+    ShellExecInput,
+    ShellExecResult,
+    ShellStatusResult,
+    ShellStopResult,
+    SubprocessSpawnInput,
+    WriteAgentConfigInput,
+} from "./agent";
+export type {
     UnwatchMediaDirReq,
     WatchEditorFileReq,
     WatchMediaDirReq,

@@ -233,7 +233,7 @@ impl Store {
     /// flagged as missing ("`identity_list()` aborts entirely on the first
     /// unparseable row") after that incident; this closes it at the source
     /// instead of only patching the one wire-format mismatch that triggered
-    /// it. See `docs/analysis/ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md`.
+    /// it. See `ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04 (never committed to this repo)`.
     pub fn identity_list(
         &self,
         provider: Option<&str>,

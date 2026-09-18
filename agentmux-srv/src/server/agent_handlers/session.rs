@@ -79,7 +79,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // and that exact failure mode has already broken it to an
                 // empty list at least twice in production (PR #2296's oauth
                 // serde-tag mismatch; see
-                // docs/retro/retro-my-agents-fresh-channel-regression-2026_07_27.md
+                // retro-my-agents-fresh-channel-regression-2026_07_27 (never committed to this repo)
                 // §4/§9 rec 1). A single malformed row must degrade THAT
                 // source only, not the whole response — logged here so the
                 // next incident's log can actually show what happened

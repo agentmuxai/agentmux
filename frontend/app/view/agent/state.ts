@@ -66,7 +66,7 @@ export interface PendingMessage {
      * The PendingMessagesPanel gates its visibility on this flag so that
      * idle-send messages never flash in the amber queued zone — only messages
      * genuinely sitting behind a running turn should appear there.
-     * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+     * See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
      */
     enqueuedWhileBusy: boolean;
     /**

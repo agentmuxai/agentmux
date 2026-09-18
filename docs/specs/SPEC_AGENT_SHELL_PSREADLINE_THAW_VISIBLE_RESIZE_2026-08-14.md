@@ -55,7 +55,7 @@ this.thawTimeoutId = setTimeout(() => {
 ```
 
 This exists for a real, documented reason (issue #1042,
-`docs/analysis/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md` §7a): a
+`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md` §7a): a
 terminal that never gets a subsequent resize after its initial default-80→
 final-cols transition leaves PSReadLine's tracked cursor position
 desynced from xterm's actual cursor, on Windows/ConPTY specifically. The

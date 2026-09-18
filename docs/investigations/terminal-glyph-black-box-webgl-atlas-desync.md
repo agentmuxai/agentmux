@@ -195,7 +195,7 @@ oddity):**
   invalidated — conceptually the same failure mode as §3, one layer lower in the stack.
 
 **Already-known-but-distinct AgentMux-internal precedent:**
-`docs/analysis/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md` documents eight prior fix attempts at a
+`docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md` documents eight prior fix attempts at a
 *different* terminal rendering bug (cursor/glyph misalignment after rapid pane creation, not
 scattered black boxes). Its hypothesis list explicitly ruled out disabling WebGL as a fix for
 *that* bug (entry #6: "`term:disablewebgl: true` + DOM-only path; bug persists") — that result

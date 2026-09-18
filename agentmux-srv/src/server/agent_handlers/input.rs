@@ -786,17 +786,15 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     let event_bus_spawn = state.event_bus.clone();
     let filestore_spawn = state.filestore.clone();
     let boot_id_spawn = state.boot_id.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SUBPROCESS_SPAWN,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandSubprocessSpawnData, _ctx| {
             let mstore = mstore_spawn.clone();
             let broker = broker_spawn.clone();
             let event_bus = event_bus_spawn.clone();
             let filestore = filestore_spawn.clone();
             let boot_id = boot_id_spawn.clone();
-            Box::pin(async move {
-                let cmd: CommandSubprocessSpawnData =
-                    serde_json::from_value(data).map_err(|e| format!("subprocessspawn: {e}"))?;
+            async move {
                 tracing::info!(
                     block_id = %cmd.blockid,
                     cli = %cmd.cli_command,
@@ -857,9 +855,9 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     instance_id: String::new(),
                 };
                 subprocess_ctrl.spawn_turn(config)?;
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // agentinput → send message to agent (persistent or per-turn subprocess).
@@ -867,13 +865,11 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     // `AgentTurnDeps` (see its doc comment for why it is a named struct rather
     // than nine separate closure captures).
     let deps_ai = AgentTurnDeps::from_state(state);
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_INPUT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentInputData, _ctx| {
             let deps = deps_ai.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentInputData =
-                    serde_json::from_value(data).map_err(|e| format!("agentinput: {e}"))?;
+            async move {
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
                 run_agent_turn(
                     &deps,
@@ -883,18 +879,16 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     TurnRegistration::Register,
                 )
                 .await?;
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // agentstop → stop the running agent subprocess
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_STOP,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                let cmd: CommandAgentStopData =
-                    serde_json::from_value(data).map_err(|e| format!("agentstop: {e}"))?;
+        |cmd: CommandAgentStopData, _ctx| {
+            async move {
                 tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
                 match blockcontroller::get_controller(&cmd.blockid) {
                     Some(ctrl) => {
@@ -918,12 +912,16 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         ) {
                             sub.remove_agent(&name);
                         }
-                        Ok(None)
+                        Ok(())
                     }
-                    None => Ok(None),
+                    // Stopping a block with no controller is a no-op, not an
+                    // error: the UI cannot tell "already stopped" from "never
+                    // started", and either way the caller's intent is
+                    // satisfied.
+                    None => Ok(()),
                 }
-            })
-        }),
+            }
+        },
     );
 }
 

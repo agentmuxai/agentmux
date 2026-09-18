@@ -1,8 +1,8 @@
 # SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle
 
 **Date:** 2026-09-17
-**Status:** active — implemented on `clare/term-stats-badge-top-offset-and-toggle`,
-not yet merged. Update to `implemented` with the PR number once it lands.
+**Status:** active — shipping in PR #3353 (offset fix + `term:showstatsbadge` toggle).
+Update to `implemented` once it merges.
 
 ---
 

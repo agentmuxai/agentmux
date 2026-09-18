@@ -246,42 +246,112 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
         expect(ta.value).toBe(draft); // must not have been replaced
     });
 
-    it("symmetric ArrowDown/last-line case: requires true end of content, not just the last visual line", async () => {
+    it("requires the true end of a MULTI-LINE recalled entry before advancing, but accepts position 0 of a SINGLE-LINE one", async () => {
+        // reagent P1: position 0 is not "nowhere left to move" for a
+        // multi-line entry — line two is still sitting right below it, and
+        // native ArrowDown must be able to reach it. So ArrowDown only
+        // treats position 0 as a valid trigger when the currently-displayed
+        // entry is single-line (no embedded "\n"); a multi-line entry still
+        // requires the true end, exactly like before this feature's fix.
         const onSendMessage = vi.fn();
         render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
         const user = userEvent.setup();
         const ta = getComposer();
         await user.click(ta);
-        await sendMessages(ta, user, "first message", "second message");
+        await sendMessages(ta, user, "line one\nline two", "second message");
 
-        // Walk back to the oldest entry (two ArrowUps at true start). Note:
-        // editing the recalled text would reset histPos via handleInput
-        // (AgentFooter.tsx:580, exiting history mode on any edit) — this
-        // test stays purely within keyboard navigation to avoid that, since
-        // it's testing the ArrowDown boundary condition itself, not editing.
+        // Walk back to the oldest (multiline) entry.
         ta.setSelectionRange(0, 0);
         keyOn(ta, "ArrowUp");
         expect(ta.value).toBe("second message");
-        ta.setSelectionRange(0, 0);
+        keyOn(ta, "ArrowUp"); // caret already at 0 from the prior recall
+        expect(ta.value).toBe("line one\nline two");
+
+        // At true position 0 of this MULTI-LINE entry: line two is still
+        // below the caret, so ArrowDown must NOT advance — it needs to stay
+        // available for native down-line movement instead.
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe("line one\nline two"); // untouched
+
+        // Only once truly at the end of the (multi-line) content does it
+        // advance — landing on the next entry with the caret at ITS front.
+        ta.setSelectionRange("line one\nline two".length, "line one\nline two".length);
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe("second message");
+        expect(ta.selectionStart).toBe(0);
+        expect(ta.selectionEnd).toBe(0);
+
+        // "second message" is SINGLE-LINE: position 0 (where the caret was
+        // just placed) has nothing below it — there's no second line to
+        // strand — so ArrowDown advances immediately, no extra keypress
+        // needed to reach a true end that wouldn't add any information here.
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe(""); // past the newest entry — the stashed (empty) live draft
+    });
+
+    it("lands the caret at the front for each interim ArrowDown step, and at the end only when returning to the live draft", async () => {
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "first message", "second message", "third message");
+
+        await user.type(ta, "my draft");
+        ta.setSelectionRange(0, 0); // as if the user pressed Home first
+
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("third message");
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("second message");
+
+        // Coming back down: each interim step lands at the front too, so a
+        // repeated ArrowDown steps forward continuously just like ArrowUp.
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe("third message");
+        expect(ta.selectionStart).toBe(0);
+        expect(ta.selectionEnd).toBe(0);
+
+        // ...except the final step, past the newest entry back to the live
+        // draft — that one lands at the END, ready to keep typing where the
+        // user left off.
+        keyOn(ta, "ArrowDown");
+        expect(ta.value).toBe("my draft");
+        expect(ta.selectionStart).toBe("my draft".length);
+        expect(ta.selectionEnd).toBe("my draft".length);
+    });
+
+    it("lands the caret at position 0 after an ArrowUp recall, so a repeated ArrowUp immediately steps back again", async () => {
+        // Before this fix, setComposerValue always parked the caret at the
+        // END of the recalled text. Since ArrowUp only navigates further
+        // back when the caret is already at true position 0, a second
+        // consecutive ArrowUp press (with no manual caret reset in between,
+        // unlike the other tests in this file) would just move the caret
+        // back to 0 natively instead of recalling the next-older entry —
+        // requiring two ArrowUp presses per history step for a single-line
+        // message. Every other test here works around that by explicitly
+        // calling ta.setSelectionRange(0, 0) between presses; this test
+        // deliberately does not, to prove that workaround is no longer
+        // necessary.
+        const onSendMessage = vi.fn();
+        render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+        await sendMessages(ta, user, "first message", "second message", "third message");
+
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("third message");
+        expect(ta.selectionStart).toBe(0);
+        expect(ta.selectionEnd).toBe(0);
+
+        keyOn(ta, "ArrowUp");
+        expect(ta.value).toBe("second message");
+        expect(ta.selectionStart).toBe(0);
+
         keyOn(ta, "ArrowUp");
         expect(ta.value).toBe("first message");
-
-        // Collapsed cursor mid-word, not yet at the true end of "first message".
-        ta.setSelectionRange(2, 2);
-        keyOn(ta, "ArrowDown", { shiftKey: true });
-        expect(ta.value).toBe("first message"); // untouched — not at true end yet
-
-        // Now truly at the end: advances forward to the next entry.
-        ta.setSelectionRange("first message".length, "first message".length);
-        keyOn(ta, "ArrowDown");
-        expect(ta.value).toBe("second message");
-
-        // Past the newest entry: falls back to the stashed live draft (empty,
-        // since the composer was empty before entering history mode here —
-        // stashed once, on the very first ArrowUp above).
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-        keyOn(ta, "ArrowDown");
-        expect(ta.value).toBe("");
+        expect(ta.selectionStart).toBe(0);
     });
 });
 
