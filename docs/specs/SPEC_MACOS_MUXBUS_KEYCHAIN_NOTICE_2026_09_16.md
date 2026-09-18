@@ -1,9 +1,9 @@
 # SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access
 
 **Date:** 2026-09-16
-**Status:** implemented — agentmux side in PR #3271 (approved); agentmux-cloud
-companion side in `agentmux-cloud` PR #75 (review in progress, addressing the
-iOS/iPadOS UA false-positive and package.json version bump).
+**Status:** implemented — agentmux side in PR #3271; agentmux-cloud companion
+side in `agentmux-cloud` PR #75. Both merged 2026-09-16. **2026-09-18
+follow-up:** both notices' visual prominence was increased — see §5.
 **Repos touched:** `agentmuxai/agentmux` (desktop app) and `agentmuxai/agentmux-cloud`
 (hosted login-relay page). Cross-repo specs are kept in `agentmux`'s `docs/specs/`
 per existing precedent (see `SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`,
@@ -177,9 +177,35 @@ desktop side.)
   surfaces that render an equivalent "Connect"/"Sign in" button via the same
   `MuxBusController`? They share `useMuxBusStatus()`, so the `isMacOS()` gate
   would be identical; only the JSX insertion point differs per component.
-- Exact CSS class for the hint line in `HostPopover.tsx` — needs a look at
-  `_statusbar.scss` (or wherever this file's styles live) to match existing
-  muted/secondary-text conventions rather than inventing a new one.
+- ~~Exact CSS class for the hint line in `HostPopover.tsx`~~ — resolved 2026-09-18,
+  see §5: `.status-bar-popover-info-notice`, not the original muted-hint class.
 - Whether the login-relay note should be worded differently if `idpError` or
   the failure branch fires — currently scoped to the success path only, since
   a failed sign-in never reaches the point of writing to Keychain.
+
+## 5. 2026-09-18 follow-up: increase visual prominence
+
+Both notices originally shipped as muted secondary text — `.status-bar-popover-hint`
+(`font-size: 0.8em; opacity: 0.6;`) in the status bar, and a plain sentence
+appended to `<p id="detail">` on the login-relay page. Feedback: the message
+that this is *expected, benign OS behavior* (not a stray permission prompt)
+needs to actually be seen, not blend into ordinary secondary copy.
+
+**Status bar panel:** replaced the `.status-bar-popover-hint` div with a new
+`.status-bar-popover-info-notice` — a bordered, tinted callout (border-left
+accent + `color-mix(..., var(--info-color) 10%, transparent)` background),
+mirroring the existing `.identity-delete-notice` pattern
+(`frontend/app/view/identity/styles/_accounts.scss`) but using `--info-color`
+instead of `--warning-color`, since this is informational, not a warning. A
+🔒 icon leads the text, matching the plain-unicode-icon convention already
+used by `.agent-disconnected-banner`/`.identity-delete-notice`
+(`frontend/app/statusbar/HostPopover.tsx`, `frontend/app/statusbar/StatusBar.scss`).
+Copy unchanged.
+
+**Login-relay page:** the appended-sentence approach is replaced with a
+standalone `<div id="keychainNotice">`, hidden by default and shown (matching
+the existing macOS UA check) as its own bordered/tinted box below the detail
+paragraph, echoing the same visual language (purple accent matching
+`agentmux`'s own `--info-color` default) so the two surfaces read as one
+feature despite being in separate repos with no shared CSS
+(`agentmux-cloud/muxbus/server/src/login-relay.ts`). Copy unchanged.

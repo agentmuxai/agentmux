@@ -332,9 +332,14 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                         </Show>
                     </div>
                     <Show when={isMacOS() && !(muxbus.status()?.connected && muxbus.status()?.valid)}>
-                        <div class="status-bar-popover-hint">
-                            macOS will ask for Keychain access after you sign in — that's
-                            AgentMux securely storing your session.
+                        <div class="status-bar-popover-info-notice" role="status">
+                            <span class="status-bar-popover-info-notice-icon" aria-hidden="true">
+                                {"🔒"}
+                            </span>
+                            <span>
+                                macOS will ask for Keychain access after you sign in — that's
+                                AgentMux securely storing your session.
+                            </span>
                         </div>
                     </Show>
                     <Show when={muxbus.status()?.connected && muxbus.status()?.valid}>
