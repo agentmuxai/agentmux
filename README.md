@@ -52,6 +52,7 @@ AgentMux is an open-source agent operating environment. Run any agent as a first
 Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
 
 - **Multi-provider agent panes** — Claude Code, Codex, Gemini, GitHub Copilot, Qwen, Kimi, OpenClaw, and Pi as first-class providers, alongside **Terminal**, **Editor**, **Browser**, and **Sysinfo** panes. Structured views of tool calls, reasoning, and diffs — not a terminal wrapper.
+- **Universal pane tabs** — every pane is a generic container that can hold any mix of widgets as tabs, not just more of its own type. A pane's own tab strip *is* its header (one row, not a header-plus-strip stack), and its "+" opens a picker of every widget type — agent, terminal, browser, editor, sysinfo, swarm, drone, and the rest — so you build up an agent-plus-terminal-plus-browser workspace inside a single pane instead of endlessly splitting. Inspired by [cmux](https://github.com/manaflow-ai/cmux)'s `Workspace → Pane → Surface → Panel` model. See [Panes and tabs](#panes-and-tabs) below.
 - **Agents drive the workspace** — Via the App API, a running agent can open panes, rename tabs, navigate the layout, and message peer agents — over a typed local WebSocket. Agents are operators, not passengers.
 - **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
 - **Swarm** — A live two-level agent/subagent tree. Watch delegation chains and every subagent's activity in one view.
@@ -139,6 +140,33 @@ Every widget is pinned by default — the widget bar shows the full set directly
 | **Drone** | diagram-project | `drone` | Visual DAG-of-blocks drone engine |
 | **Help** | circle-question | `help` | Built-in documentation and help |
 | **Warden** | shield-halved | `warden` | Monitor and control agents across Host / LAN / Internet layers |
+
+### Panes and tabs
+
+Opening a widget from the widget bar puts it in its own **pane** — one leaf of
+the window's split layout. A pane isn't tied to one widget type, though: every
+pane is a generic container that holds an ordered list of tabs, and any of
+those tabs can be any widget. The pane's tab strip *is* its header (one row —
+icon, tabs, and the minimize/magnify/close controls together, not a header
+with a separate strip stacked under it), and the **"+"** on that strip opens a
+picker of every widget type in the table above. Pick one, and it's added as a
+new tab *in that same pane* — no new split, no growing tree. An agent pane
+with a terminal tab and a browser tab next to it, all in one pane, is a normal
+layout, not a special case.
+
+This generalizes what used to be a narrower mechanism scoped to agent forks
+and terminal shell-tabs (a "tab" used to only ever mean "another instance of
+the same widget type") into a single, universal pane/tab model across every
+widget in the app. Splitting the window into more panes is still there
+(drag a header to a pane's edge, or the widget bar's own click target) — tabs
+are the way to add breadth to a pane you already have, splits are the way to
+add more panes.
+
+Inspired by [cmux](https://github.com/manaflow-ai/cmux) (manaflow-ai) — an
+open-source terminal built for running multiple AI coding agents in parallel,
+whose `Workspace → Pane → Surface → Panel` hierarchy is functionally the same
+shape this generalizes AgentMux toward. Design rationale, terminology, and the
+full rollout plan: `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`.
 
 ### Not widgets — opened from elsewhere
 
