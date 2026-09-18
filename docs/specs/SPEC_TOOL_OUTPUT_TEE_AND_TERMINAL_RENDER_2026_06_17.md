@@ -1,7 +1,7 @@
 # SPEC: Tee redirected tool output to the feed + render tool output as a terminal
 
 **Date:** 2026-06-17
-**Status:** Implemented (smike) — F1 hook `tee` rewrite + F2 `TerminalOutput`. One
+**Status:** Implemented (smike) — F1 hook `tee` rewrite + F2 `TerminalOutput`. One — #1511
 deviation: `TerminalOutput` lives in `view/agent/components/` (next to the cap
 utilities and sibling renderers) rather than `element/`, so the view→element
 dependency direction stays correct; it imports `AnsiLine` from `element/`.

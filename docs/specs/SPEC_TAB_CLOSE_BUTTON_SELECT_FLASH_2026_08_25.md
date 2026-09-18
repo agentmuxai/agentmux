@@ -1,6 +1,6 @@
 # Tab close (X) button — spurious select flash
 
-**Status:** implemented — amended 2026-09-17 by §10. §§2-3 (click-bubble
+**Status:** implemented — amended 2026-09-17 by §10. §§2-3 (click-bubble — #3300
 race), §5 (double round trip), §6 (unbatched RPC-response application) and
 §7 (unbatched WS-push application) merged in PR #2811 (`c0eb56d87`) — all
 four were real defects, but the flash survived them. It was actually fixed

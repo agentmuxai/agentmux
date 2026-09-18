@@ -1,7 +1,7 @@
 # SPEC: PR title `Agent@host` prefix for shared-identity agents
 
 **Date:** 2026-08-22
-**Status:** Implemented
+**Status:** Implemented — #2743
 **Author:** Korp
 **Repos touched:** `agentmux` (this doc + `CLAUDE.md` agent-facing policy)
 **Related:** `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` (the existing

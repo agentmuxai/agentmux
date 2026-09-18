@@ -1,6 +1,6 @@
 # Editor: the first keystroke after focusing is accepted but not rendered
 
-**Status:** implemented — root cause confirmed by live trace and fixed; C1 was
+**Status:** implemented — root cause confirmed by live trace and fixed; C1 was — #3260
 correct, C2 and C3 are ruled out. See §3 and §6.
 **Date:** 2026-09-15
 **Severity:** HIGH — raised from Medium once the mechanism was confirmed. This

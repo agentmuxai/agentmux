@@ -1,6 +1,6 @@
 # Spec: Operator Config seeding (AgentMux-shipped, system-tier Global Memory)
 
-**Status:** implemented — manifest, seeder module, `bundle_upsert_system_
+**Status:** implemented — manifest, seeder module, `bundle_upsert_system_ — #3244
 with_version`, and the `bootstrap.rs` startup hook are all in place and
 tested. §6's open question (what to do with the Claude-only Provider Config
 placeholder) remains genuinely unresolved, deliberately, per that section.

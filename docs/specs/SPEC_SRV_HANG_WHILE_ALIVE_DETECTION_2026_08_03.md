@@ -1,7 +1,7 @@
 # SPEC: srv hang-while-alive detection (#942 family)
 
 **Date:** 2026-08-03
-**Status:** Implemented
+**Status:** Implemented — #942
 **Tracking:** #942 ("Service Supervision & Recovery"); closes the named
 non-goal in `SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11.md`: *"srv
 hang-while-alive detection (this covers exits; liveness probing for srv is

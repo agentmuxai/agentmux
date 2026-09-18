@@ -1,7 +1,7 @@
 # SPEC: Frosted-glass backdrop for the terminal pane tab strip
 
 **Date:** 2026-09-07
-**Status:** implemented — **Option A** (§2.1) shipped alongside this spec.
+**Status:** implemented — **Option A** (§2.1) shipped alongside this spec. — #3079
 §2 records the decision and why the faithful-but-costly Option B (§2.2) was
 rejected rather than deferred: it would put the top terminal row under glass,
 breaking full-screen TUIs and changing the PTY's row count. If that tradeoff

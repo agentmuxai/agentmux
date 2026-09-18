@@ -1,7 +1,7 @@
 # Spec: Make `settings.json` isolated-by-default for every non-`stable` channel
 
 **Date:** 2026-08-19
-**Status:** Implemented same day (Phase 1 + 2, this PR) — see §7 for what shipped.
+**Status:** Implemented same day (Phase 1 + 2, this PR) — see §7 for what shipped. — #2664
 **Precedent (same shape of decision, already shipped):** `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (amends `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`) — this spec follows that one's mechanism almost exactly, substituting `settings.json` for the identity store.
 **Related:** `docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md` is unrelated in subject but the same investigation session surfaced this — a fresh `task package` portable build was found to have `network:lan_discovery: true` even though the code's own default is `false`, traced to `settings.json` resolving to a single file shared by every channel on the machine.
 

@@ -1,7 +1,7 @@
 # SPEC: Benchmark Auth-File Discovery — Dev and Portable Instances
 
 **Date:** 2026-05-20  
-**Status:** Implemented (same PR as SPEC_DEAD_TERMINAL_PANE_2026_05_20.md)  
+**Status:** Implemented (same PR as SPEC_DEAD_TERMINAL_PANE_2026_05_20.md) — #951
 **Affected tooling:** `tools/tests/bench-term-echo.mjs`, `tools/tests/authfile.ps1`  
 **Affected host:** `agentmux-cef/src/main.rs`, `agentmux-cef/src/dev_authfile.rs`
 

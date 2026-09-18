@@ -1,7 +1,7 @@
 # SPEC: "Accept Recommended" button for AskUserQuestion
 
 **Date:** 2026-09-03
-**Status:** implemented — §5's questions were confirmed live via an actual
+**Status:** implemented — §5's questions were confirmed live via an actual — #2950
 AskUserQuestion demo, and while confirming them the scope grew to include a
 real Cancel (replacing the non-functional "Answer later"). See §7 for what
 that changed relative to §§2–4 below, which describe Accept Recommended as

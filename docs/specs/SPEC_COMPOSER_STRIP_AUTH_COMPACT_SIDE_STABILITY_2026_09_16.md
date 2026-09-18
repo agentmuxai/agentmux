@@ -1,7 +1,7 @@
 # SPEC: Composer Strip — Auth/Compact Side Stability Across the Row-Count Boundary
 
 **Date:** 2026-09-16
-**Status:** implemented — §4's design shipped as written (the `pinnedPairs`
+**Status:** implemented — §4's design shipped as written (the `pinnedPairs` — #3282
 generalization, §4.3), with `[{ leftKey: "auth", rightKey: "ctx" }]` wired
 at the one call site. Logic validated standalone (vitest is blocked locally
 by a pre-existing, unrelated `solid-refresh`/JSDOM environment issue — CI is

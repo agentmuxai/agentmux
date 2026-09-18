@@ -1,7 +1,7 @@
 # SPEC: Typing `exit` in a terminal pane doesn't close it — instead the shell respawns and appears to loop
 
 **Date:** 2026-09-15
-**Status:** implemented (§4b's respawn loop, §7-9 — shipped separately in
+**Status:** implemented (§4b's respawn loop, §7-9 — shipped separately in — #3225
 PR #3225; §4a's close-on-exit, §10-14. §11-12 and §14 correct real
 regressions found by live retest — read §12 before §11: it supersedes
 §11's guess about which pane was involved, and adds the 10s

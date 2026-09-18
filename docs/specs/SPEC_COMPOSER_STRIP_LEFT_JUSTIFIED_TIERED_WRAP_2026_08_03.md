@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 **Type:** Responsive layout fix
-**Status:** Implemented
+**Status:** Implemented — #2393
 **Owner:** Agent3
 **Scope:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` +
 `frontend/app/view/agent/styles/_composer-strip.scss`

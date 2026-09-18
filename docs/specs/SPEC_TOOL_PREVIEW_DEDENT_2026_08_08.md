@@ -1,7 +1,7 @@
 # SPEC: Tool preview common-indentation stripping (dedent)
 
 **Date:** 2026-08-08
-**Status:** implemented 2026-08-24. `stripCommonIndentSharedPrefix` was added
+**Status:** implemented 2026-08-24. `stripCommonIndentSharedPrefix` was added — #2780
 as a third exported helper (not spelled out in §3.1's two-function sketch) to
 keep the Edit call site's "one shared prefix across two related strings"
 concern inside this module rather than duplicated at the DiffViewer call

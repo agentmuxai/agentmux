@@ -1,7 +1,7 @@
 # Composer: Shift+ArrowUp triggers history recall before the top line is fully selected
 
 **Date:** 2026-08-11
-**Status:** Implemented — `AgentFooter.tsx`. The implementation simplified
+**Status:** Implemented — `AgentFooter.tsx`. The implementation simplified — #2540
 further than §4 proposed: once the requirement is "true absolute position,"
 the mirror-div visual-row measurement becomes unnecessary entirely (position
 0 is always visual row 0 regardless of wrapping) — the whole `caretVisualEdge`

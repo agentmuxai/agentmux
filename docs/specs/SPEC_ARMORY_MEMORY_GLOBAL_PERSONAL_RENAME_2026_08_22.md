@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-22
 **Author:** Camper
-**Status:** Implemented
+**Status:** Implemented — #2734
 **Motivated by:** direct request — abstract away, for the user, that the
 Armory currently exposes two structurally different backing systems under
 confusing names; present a single "Memory" concept split by scope instead.

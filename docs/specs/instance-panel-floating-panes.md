@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-11
 **Author:** Agent2
-**Status:** Implemented (this PR)
+**Status:** Implemented (this PR) — #2101
 **Surface:** version pill (status bar) → `InstancePanel` popover
 **Related:** `SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (issue #810),
 `SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01` (window alpha)

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Type:** Implementation spec
-**Status:** Implemented on branch `agenta/composer-strip-mode-toplevel` (Fix 1, 2, 3=Option A, 5, 6 +
+**Status:** Implemented on branch `agenta/composer-strip-mode-toplevel` (Fix 1, 2, 3=Option A, 5, 6 + — #1912
 tooltips). Deferred: Fix 4's *deeper* launch-time seeding (the user-visible symptom is resolved by Fix 1
 — see note below); live repro of Fix 5 (applied defensively per user direction, not yet confirmed running).
 **Owner:** asaf

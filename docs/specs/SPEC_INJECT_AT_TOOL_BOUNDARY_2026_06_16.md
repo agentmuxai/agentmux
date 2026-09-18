@@ -1,7 +1,7 @@
 # SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle
 
 **Date:** 2026-06-16
-**Status:** **Implemented** (Phase 3 of `SPEC_AGENT_CONTROL_PROTOCOL` — controller-aware
+**Status:** **Implemented** (Phase 3 of `SPEC_AGENT_CONTROL_PROTOCOL` — controller-aware — #1477
 delivery) on branch `agento/mid-turn-message-delivery`. Feasibility resolved empirically;
 cross-provider design below.
 

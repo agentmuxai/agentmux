@@ -2,7 +2,7 @@
 
 **Author:** Agent3
 **Created:** 2026-09-10
-**Status:** Implemented in two passes. Pass 1 (PtyShell/PtyShellInput/
+**Status:** Implemented in two passes. Pass 1 (PtyShell/PtyShellInput/ — #3177
 PtyShellResize/PtyShellRead/PtyShellStatus/PtyShellStop — `PtyShellSignal`
 also shipped in pass 1 but was removed the same day after Codex review, §6b)
 shipped

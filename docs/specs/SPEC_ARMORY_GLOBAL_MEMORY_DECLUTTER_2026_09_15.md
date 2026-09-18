@@ -1,6 +1,6 @@
 # Spec: Armory Global Memory — declutter to a simple file list
 
-**Status:** implemented — see the PR implementing this spec for the final
+**Status:** implemented — see the PR implementing this spec for the final — #3227
 shape; §4's "after" diagram and §3 matched the shipped UI in visual
 verification.
 **Date:** 2026-09-15

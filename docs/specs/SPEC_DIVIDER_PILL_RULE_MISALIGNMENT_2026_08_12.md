@@ -1,7 +1,7 @@
 # SPEC: Divider-Pill Rule Misalignment Fix
 
 **Date:** 2026-08-12
-**Status:** Implemented 2026-08-13
+**Status:** Implemented 2026-08-13 — #2563
 **Affects:** `context_compacted`, `session_outcome` transcript dividers
 
 **Correction (2026-08-13):** the original draft of this spec also listed

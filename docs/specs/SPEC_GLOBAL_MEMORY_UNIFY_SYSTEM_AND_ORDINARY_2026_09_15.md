@@ -1,6 +1,6 @@
 # Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan)
 
-**Status:** implemented. §2.2's open question resolved as option 1 (no
+**Status:** implemented. §2.2's open question resolved as option 1 (no — #3232
 visual distinction at all — full uniformity): the user said "proceed" to a
 summary that named this as an open call rather than picking a specific
 option, so this was a judgment call, not an explicit confirmation — matches

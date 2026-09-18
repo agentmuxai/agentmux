@@ -1,7 +1,7 @@
 # SPEC — Chrome-style window snap: drag-to-top maximize, border-drag vertical snap
 
 **Date:** 2026-09-04
-**Status:** implemented 2026-09-05 — both features built; pending live
+**Status:** implemented 2026-09-05 — both features built; pending live — #2986
 verification of the manual test plan in §6 (native Win32 message-loop code,
 not reachable by any test harness). See §7 for what shipped.
 **Repo:** agentmuxai/agentmux

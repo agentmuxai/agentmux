@@ -1,7 +1,7 @@
 # SPEC: Block identity bindings from resolving to a provider's ambient home dir
 
 **Date:** 2026-08-25
-**Status:** implemented.
+**Status:** implemented. — #2802
 
 ---
 

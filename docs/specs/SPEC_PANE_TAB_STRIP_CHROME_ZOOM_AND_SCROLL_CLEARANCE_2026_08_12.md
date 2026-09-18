@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12 (Part A corrected before implementation — see §A.0's
 note).
-**Status:** implemented, with two further correctness bugs caught in
+**Status:** implemented, with two further correctness bugs caught in — #2566
 PR #2566 review after this doc's own live verification missed them —
 fixed, not yet independently re-verified live a third time. History:
 

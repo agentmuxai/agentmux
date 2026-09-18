@@ -1,7 +1,7 @@
 # SPEC: jekt notification when a PR's CI run completes (pass or fail)
 
 **Date:** 2026-08-16
-**Status:** Implemented — `agentmux-cloud` PR #48 (merged, deployed)
+**Status:** Implemented — `agentmux-cloud` PR #48 (merged, deployed) — #2616
 **Author:** AgentX
 **Repos touched:** `agentmux-cloud` (implementation), `agentmux` (this doc)
 **Related:** `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` (agent-resolution

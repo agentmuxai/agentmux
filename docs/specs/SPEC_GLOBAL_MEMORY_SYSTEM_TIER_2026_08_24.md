@@ -1,7 +1,7 @@
 # SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry
 
 **Date:** 2026-08-24
-**Status:** implemented 2026-08-24. All of §3.1-§3.5 shipped as designed.
+**Status:** implemented 2026-08-24. All of §3.1-§3.5 shipped as designed. — #2782
 Rust: 106/106 `store::tests` pass (7 new), full 2763-test suite green.
 Frontend: `npx tsc --noEmit` clean, full 3060-test vitest suite green (7
 new). Manual live-pane verification (§5, "Manual") not done as part of this

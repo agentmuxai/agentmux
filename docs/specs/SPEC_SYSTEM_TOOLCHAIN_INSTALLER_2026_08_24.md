@@ -1,7 +1,7 @@
 # SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux
 
 **Date:** 2026-08-24
-**Status:** implemented 2026-08-24 — §3.1-§3.5 for git/Node/npm/Python
+**Status:** implemented 2026-08-24 — §3.1-§3.5 for git/Node/npm/Python — #2790
 across Windows/macOS/Linux (Phases 1+2 of §6). Backend: 6 new Rust unit
 tests, full 2774-test suite green. Frontend: `npx tsc --noEmit` clean,
 full 3092-test vitest suite green (5 new). §6.3's Phase 3 (bootstrapping a

@@ -1,7 +1,7 @@
 # SPEC: Agent pane — fix silent auto-scroll-follow drops, extend the message-list scrollbar past the Working/Host status rows
 
 **Date:** 2026-07-24
-**Status:** Implemented — except **§3.2**, superseded 2026-09-01 by
+**Status:** Implemented — except **§3.2**, superseded 2026-09-01 by — #2292
 `SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md`.
 
 > **§3.2 only.** The floating-overlay arrangement described there

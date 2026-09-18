@@ -1,7 +1,7 @@
 # SPEC: Window-Tab Creation Flashing — Root Cause and an Architecture Cleanup
 
 **Date:** 2026-09-16
-**Status:** implemented — §3's design shipped as written (`createTab`
+**Status:** implemented — §3's design shipped as written (`createTab` — #3300
 creates inactive, populates, then activates via the unmodified
 `setActiveTab`; the untargeted gate form retired). Typechecks clean, all
 21 existing `tab-reveal.test.ts` cases pass (updated for the retired

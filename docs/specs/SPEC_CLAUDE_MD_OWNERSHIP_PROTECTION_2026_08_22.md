@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-22
 **Author:** Camper
-**Status:** Implemented. The relative `@.claude/AGENTMUX_MEMORY.md` import
+**Status:** Implemented. The relative `@.claude/AGENTMUX_MEMORY.md` import — #2747
 (the design's one open question) was smoke-tested directly against the
 real Claude Code CLI (`claude -p`) before implementation — confirmed
 working as assumed.

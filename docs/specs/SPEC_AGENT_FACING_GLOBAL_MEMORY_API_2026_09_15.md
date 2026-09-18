@@ -1,6 +1,6 @@
 # Spec: Agent-facing Global Memory API (MCP tools to add/list/read a Global Memory entry)
 
-**Status:** implemented — Phases 0-2 (audit trail, REST routes, MCP tools).
+**Status:** implemented — Phases 0-2 (audit trail, REST routes, MCP tools). — #3237
 Phase 3 (the availability/gating open question) is UNRESOLVED — every agent
 gets these tools unconditionally today (option 1 from §2.4), matching
 native memory's own precedent, but that was not an explicit decision, just

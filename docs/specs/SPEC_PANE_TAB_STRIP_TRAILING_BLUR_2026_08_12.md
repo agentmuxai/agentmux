@@ -1,7 +1,7 @@
 # SPEC: Frosted-glass backdrop for the agent pane tab strip's trailing space
 
 **Date:** 2026-08-12
-**Status:** implemented and live-verified in `task dev` (blur radius
+**Status:** implemented and live-verified in `task dev` (blur radius — #2566
 revised from an initial `8px` proposal to `2px` after live feedback —
 see §1.3).
 **Related:** `docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md`
