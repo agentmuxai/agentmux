@@ -63,15 +63,33 @@ pub fn get_home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Get the AgentMux data directory.
-/// Uses `AGENTMUX_DATA_HOME` env var, or defaults to `~/.agentmux`.
+/// Get the AgentMux root directory (`~/.agentmux`).
+///
+/// Delegates to `agentmux_common::data_paths::agentmux_root`, which is the
+/// single resolver for this path. This function used to compute it itself,
+/// reading `AGENTMUX_DATA_HOME` where the common crate read
+/// `AGENTMUX_HOME_OVERRIDE` — two resolvers, two env vars, and two different
+/// answers if either was set. Both are now honoured by the one resolver, so
+/// an existing install finds its data exactly where it did before.
+/// A10 of docs/analysis/TRACKING_ARCHITECTURE_REFACTOR_A1_A15_2026_06_18.md.
+///
+/// The old local copy fell back to `PathBuf::from("/")` when `home_dir()`
+/// returned `None`, which meant a host with no resolvable home silently
+/// wrote to `/.agentmux`. That fallback is deliberately NOT preserved: the
+/// resolver returns `Err`, and rather than inventing a path this keeps the
+/// pre-existing shape of the API by falling back to the same `~/.agentmux`
+/// expression only when a home DOES exist. If it does not, writing to the
+/// filesystem root is never the right answer.
 pub fn get_mux_data_dir() -> PathBuf {
-    if let Ok(dir) = env::var(MUX_DATA_HOME_ENV) {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
+    match agentmux_common::data_paths::agentmux_root() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(
+                "cannot resolve the AgentMux root ({e}); falling back to a relative .agentmux rather than /"
+            );
+            PathBuf::from(".agentmux")
         }
     }
-    get_home_dir().join(".agentmux")
 }
 
 /// Migrate data from `~/.waveterm` to `~/.agentmux` if needed.

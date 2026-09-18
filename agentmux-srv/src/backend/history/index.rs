@@ -219,7 +219,7 @@ fn match_message(
 fn default_isolated_roots() -> Vec<PathBuf> {
     let shared = std::env::var_os("AGENTMUX_SHARED_DIR")
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".agentmux").join("shared")));
+        .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
     match shared {
         Some(s) => vec![s.join("providers"), s.join("identities")],
         None => Vec::new(),

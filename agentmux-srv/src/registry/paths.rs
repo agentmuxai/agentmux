@@ -144,7 +144,13 @@ pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
             return Some(PathBuf::from(s));
         }
     }
-    dirs::home_dir().map(|h| h.join(".agentmux").join("shared"))
+    // Fallible on purpose: this function documents "Returns None only when
+    // the shared root itself can't be resolved", and callers across
+    // migrations/runner, bootstrap, reactive, muxspect and native-memory rely
+    // on that None to disable cleanly ("No shared root (CI, a bare cargo
+    // run) — nothing to re-key"). An infallible resolver made every one of
+    // those branches unreachable.
+    agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared"))
 }
 
 #[cfg(test)]

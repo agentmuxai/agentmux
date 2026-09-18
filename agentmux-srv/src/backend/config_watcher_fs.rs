@@ -62,7 +62,9 @@ pub fn resolve_settings_dir() -> PathBuf {
             }
         }
     }
-    dirs::home_dir().unwrap_or_default().join(".agentmux")
+    // One resolver for the AgentMux root (A10) -- this used to compute it
+    // locally, which meant it ignored AGENTMUX_DATA_HOME entirely.
+    crate::backend::base::get_mux_data_dir()
 }
 
 /// Load settings.json from disk into the ConfigState.

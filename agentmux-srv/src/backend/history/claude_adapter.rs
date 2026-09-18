@@ -86,7 +86,7 @@ impl ClaudeHistoryAdapter {
         // ~/.agentmux/shared so discovery still works in plain/test contexts.
         let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
             .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".agentmux").join("shared")));
+            .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
         if let Some(shared) = &shared_dir {
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
             if let Ok(entries) = fs::read_dir(shared.join("identities")) {
