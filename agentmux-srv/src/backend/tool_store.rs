@@ -193,6 +193,10 @@ fn system_path_of(name: &str) -> Option<String> {
 fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
     let arg = version_arg.as_deref()?;
     let mut command = std::process::Command::new(cmd);
+    // `cmd` is a third-party binary, so it gets the strict policy for the same
+    // reason `open_browser` does (invariant I7) — short-lived and output-parsed
+    // is a weaker argument than "does not need our identity at all".
+    crate::backend::pane_env::sanitize_external_std_command(&mut command);
     command.arg(arg);
     #[cfg(windows)]
     {

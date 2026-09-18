@@ -181,6 +181,277 @@ pub fn sanitize_external_std_command(cmd: &mut std::process::Command) {
 }
 
 #[cfg(test)]
+mod spawn_site_coverage {
+    //! Invariant I7: an instance's identity must not be inheritable by the
+    //! processes it spawns.
+    //!
+    //! The tests below this module check the *policy* — which variables get
+    //! stripped. Nothing checked the *call sites*, and that is the gap that let
+    //! this class of bug survive five write-ups: the policy was never the hard
+    //! part, applying it at a NEW spawn site was. Both P0s on the original fix
+    //! were exactly that.
+    //!
+    //! # Why an exact inventory rather than "does this file sanitize?"
+    //!
+    //! The first version of this test asked, per file, whether any sanitizer
+    //! appeared anywhere in it. That is too weak, and reagent was right to
+    //! block on it (#3365 P1): a file that already sanitizes one command
+    //! passes wholesale, so a new unsanitized spawn added beside it is invisible
+    //! — and that describes most non-trivial spawn files in the crate.
+    //!
+    //! Per-*occurrence* matching does not work either, and `shell/lifecycle.rs`
+    //! shows why: it builds four `CommandBuilder`s as `c` and sanitizes once,
+    //! later, at a choke point as `cmd`. That is the correct pattern, and any
+    //! syntactic per-site rule flags it. Proving it needs dataflow analysis.
+    //!
+    //! So this pins the whole surface instead: every `(file, program)` pair that
+    //! constructs a process, with an exact count and a stated classification.
+    //! A new spawn anywhere changes the map and fails, regardless of what its
+    //! neighbours do. Removing one fails too, so the table cannot rot.
+    //!
+    //! Adding a spawn is then a two-line diff: sanitize it, and say so here.
+
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    /// Ways a process gets constructed in this crate.
+    const SPAWN_MARKERS: &[&str] = &["CommandBuilder::new", "process::Command::new", "Command::new("];
+
+    /// Recognised classifications. The prefix is load-bearing: `sanitized:`
+    /// entries are cross-checked against the file actually calling a sanitizer.
+    const CLASSES: &[&str] = &["sanitized:", "probe:", "test:", "own-exe:", "not a spawn:", "mixed:"];
+
+    /// Every process spawn in srv: `(file, program, count, classification)`.
+    ///
+    /// `program` is the literal text between `new(` and the first `,` or `)`,
+    /// which is stable across edits in a way line numbers are not.
+    const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
+        ("src/agents/runner.rs", "bin", 1,
+         "sanitized: agent CLI subprocess, sanitize_process_command"),
+        ("src/backend/blockcontroller/app_server.rs", "\"rustc\"", 1,
+         "test: builds the fixture server binary"),
+        ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,
+         "test: runs the fixture server built above; lives and dies with the test"),
+        ("src/backend/blockcontroller/app_server_controller.rs", "\"rustc\"", 1,
+         "test: compiles the same fixture server binary before exercising the controller"),
+        ("src/backend/blockcontroller/persistent.rs", "\"echo\"", 1,
+         "not a spawn: appears inside a comment explaining why `echo` cannot be spawned directly"),
+        ("src/backend/blockcontroller/shell/lifecycle.rs", "\"/bin/sh\"", 1,
+         "sanitized: Unix fallback shell, covered by the same single sanitize_pty_command"),
+        ("src/backend/blockcontroller/shell/lifecycle.rs", "\"cmd.exe\"", 1,
+         "sanitized: Windows fallback shell, covered by the same single sanitize_pty_command"),
+        ("src/backend/blockcontroller/shell/lifecycle.rs", "&cmd_str", 1,
+         "sanitized: pane PTY, one choke-point sanitize_pty_command covers all four builders here"),
+        ("src/backend/blockcontroller/shell/lifecycle.rs", "&shell_path", 1,
+         "sanitized: the configured login shell, covered by the same sanitize_pty_command"),
+        ("src/backend/blockcontroller/shell/pty.rs", "\"where\"", 2,
+         "probe: OS builtin PATH lookup, output parsed then discarded"),
+        ("src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
+         "test: disposable `sleep 30` made its own process-group leader, to prove a group-kill reaches an isolated group"),
+        ("src/backend/lsp/supervisor.rs", "&resolved", 1,
+         "sanitized: language server, sanitize_process_command"),
+        ("src/backend/mcp_probe.rs", "command", 1,
+         "sanitized: MCP server probe, sanitize_process_command"),
+        ("src/backend/process_tracker/registry.rs", "\"cmd\"", 1,
+         "test: disposable child for the job-object tracker"),
+        ("src/backend/process_tracker/registry.rs", "\"sh\"", 1,
+         "test: disposable child for the job-object tracker"),
+        ("src/backend/shell_node.rs", "\"cmd\"", 1,
+         "sanitized: persistent shell node, choke-point sanitize_process_command"),
+        ("src/backend/shell_node.rs", "\"sh\"", 1,
+         "sanitized: Unix branch of the same node, one sanitize_process_command covers both"),
+        ("src/backend/tool_store.rs", "\"where\"", 2,
+         "probe: Windows PATH lookup for a tool; output parsed for a path, never executed"),
+        ("src/backend/tool_store.rs", "\"which\"", 2,
+         "probe: Unix PATH lookup for a tool; output parsed for a path, never executed"),
+        ("src/backend/tool_store.rs", "cmd", 1,
+         "sanitized: probe_version runs a third-party binary, strict policy (this PR)"),
+        ("src/crash_monitor.rs", "&exe", 1,
+         "own-exe: re-spawns OUR OWN binary as the crash monitor; it must stay this instance, so inheritance is the requirement here, not the defect"),
+        ("src/server/cli_handlers.rs", "\"cmd\"", 1,
+         "sanitized: shell wrapper, sanitize_external_std_command"),
+        ("src/server/cli_handlers.rs", "\"npm\"", 1,
+         "sanitized: npm runs arbitrary postinstall scripts, sanitize_external_std_command"),
+        ("src/server/cli_handlers.rs", "\"where\"", 2,
+         "probe: Windows availability check for npm before install; runs nothing else"),
+        ("src/server/cli_handlers.rs", "\"which\"", 2,
+         "probe: Unix availability check for npm before install; runs nothing else"),
+        ("src/server/editor_handlers.rs", "\"explorer.exe\"", 1,
+         "sanitized: file manager, strict policy (I7 fix, this PR)"),
+        ("src/server/editor_handlers.rs", "\"open\"", 1,
+         "sanitized: file manager, strict policy (I7 fix, this PR)"),
+        ("src/server/editor_handlers.rs", "\"xdg-open\"", 1,
+         "sanitized: file manager, strict policy (I7 fix, this PR)"),
+        ("src/server/identity_auth_spawn.rs", "&cli_path", 2,
+         "sanitized: provider OAuth CLI, strict policy"),
+        ("src/server/identity_auth_spawn.rs", "cli_path", 1,
+         "sanitized: provider OAuth CLI, strict policy"),
+        ("src/server/install_handlers.rs", "cmd", 1,
+         "probe: resolve_tool_path, `where`/`which` only, never executes the tool"),
+        ("src/server/install_handlers.rs", "if cfg!(windows", 1,
+         "sanitized: installer shell, sanitize_external_command"),
+        ("src/server/shell_handlers.rs", "\"sh\"", 1,
+         "sanitized: /api/v1/shell/create runner, sanitize_process_command"),
+        ("src/server/system_install_handlers.rs", "\"apt-cache\"", 1,
+         "probe: package-manager availability query, no install"),
+        ("src/server/system_install_handlers.rs", "\"brew\"", 1,
+         "probe: package-manager availability query, no install"),
+        ("src/server/system_install_handlers.rs", "\"winget\"", 1,
+         "probe: package-manager availability query, no install"),
+        ("src/server/system_install_handlers.rs", "&step.program", 1,
+         "sanitized: package-manager install step, sanitize_external_command"),
+        ("src/server/system_install_handlers.rs", "program", 1,
+         "not a spawn: appears inside this module's header comment describing the argv rule"),
+        ("src/server/voice.rs", "&cli", 1,
+         "sanitized: voice CLI, sanitize_process_command"),
+        ("src/util.rs", "\"cmd\"", 3,
+         "mixed: one is open_browser's sanitized Windows branch; two are in this file's own #[cfg(test)] module"),
+        ("src/util.rs", "\"open\"", 1,
+         "sanitized: browser launch, strict policy (I7 fix, this PR)"),
+        ("src/util.rs", "\"xdg-open\"", 1,
+         "sanitized: browser launch, strict policy (I7 fix, this PR)"),
+    ];
+
+    fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rs_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// `Command::new(` must not match `AgentCommand::new(` — a substring hit
+    /// preceded by an identifier character is a different type.
+    fn line_spawns(line: &str) -> bool {
+        for marker in SPAWN_MARKERS {
+            let mut from = 0;
+            while let Some(idx) = line[from..].find(marker) {
+                let at = from + idx;
+                let prev_is_ident = at > 0
+                    && line[..at]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_');
+                if !prev_is_ident {
+                    return true;
+                }
+                from = at + marker.len();
+            }
+        }
+        false
+    }
+
+    /// The text between `new(` and the first `,` or `)`.
+    fn program_of(line: &str) -> String {
+        let Some(at) = line.find("new(") else { return "?".to_string() };
+        let rest = &line[at + 4..];
+        let end = rest.find([',', ')']).unwrap_or(rest.len());
+        rest[..end].trim().to_string()
+    }
+
+    fn actual_inventory() -> BTreeMap<(String, String), usize> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        rs_files(&root.join("src"), &mut files);
+        assert!(files.len() > 50, "source walk found only {} files — the walk is broken", files.len());
+
+        let mut map: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for file in &files {
+            let rel = file.strip_prefix(root).unwrap_or(file).to_string_lossy().replace('\\', "/");
+            // This file defines the sanitizers and names the markers; it does
+            // not spawn.
+            if rel.ends_with("backend/pane_env.rs") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(file) else { continue };
+            for line in src.lines() {
+                if line_spawns(line) {
+                    *map.entry((rel.clone(), program_of(line))).or_default() += 1;
+                }
+            }
+        }
+        map
+    }
+
+    #[test]
+    fn the_spawn_surface_matches_the_inventory_exactly() {
+        let actual = actual_inventory();
+        let expected: BTreeMap<(String, String), usize> = SPAWN_INVENTORY
+            .iter()
+            .map(|(f, p, c, _)| ((f.to_string(), p.to_string()), *c))
+            .collect();
+
+        let mut problems = Vec::new();
+        for (key, count) in &actual {
+            match expected.get(key) {
+                None => problems.push(format!(
+                    "NEW spawn site: {} -> Command::new({}) x{count}",
+                    key.0, key.1
+                )),
+                Some(exp) if exp != count => problems.push(format!(
+                    "COUNT changed: {} -> Command::new({}): inventory says {exp}, source has {count}",
+                    key.0, key.1
+                )),
+                _ => {}
+            }
+        }
+        for key in expected.keys() {
+            if !actual.contains_key(key) {
+                problems.push(format!("STALE entry (no longer in source): {} -> {}", key.0, key.1));
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "I7: srv's process-spawn surface changed.\n  {}\n\n\
+             If you added a spawn: apply the right `pane_env::sanitize_*` to it, then add \n\
+             it to SPAWN_INVENTORY with a classification. If you removed one, drop its row. \n\
+             The inventory is pinned deliberately — a new spawn must not be able to hide \n\
+             beside an already-sanitized one (#3365 P1). Background: \n\
+             docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md",
+            problems.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn every_inventory_row_is_classified_and_justified() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for (file, program, _, reason) in SPAWN_INVENTORY {
+            assert!(
+                CLASSES.iter().any(|c| reason.starts_with(c)),
+                "{file} -> {program}: reason must start with one of {CLASSES:?}, got {reason:?}"
+            );
+            assert!(
+                reason.len() > 30,
+                "{file} -> {program}: needs a real reason, got {reason:?}"
+            );
+            // A row claiming to be sanitized must be in a file that sanitizes.
+            // Cheap, and it catches a table that says one thing while the code
+            // does another.
+            if reason.starts_with("sanitized:") {
+                let src = std::fs::read_to_string(root.join(file)).expect("read inventory file");
+                assert!(
+                    SANITIZERS_FOR_AUDIT.iter().any(|s| src.contains(s)),
+                    "{file} -> {program} is classified `sanitized:` but the file calls no sanitizer"
+                );
+            }
+        }
+    }
+
+    const SANITIZERS_FOR_AUDIT: &[&str] = &[
+        "sanitize_pty_command",
+        "sanitize_process_command",
+        "sanitize_external_command",
+        "sanitize_external_pty_command",
+        "sanitize_external_std_command",
+    ];
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

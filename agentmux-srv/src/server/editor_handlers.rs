@@ -606,14 +606,29 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !canonical.starts_with(&canonical_home) {
                     return Err(format!("openinshell: path outside home directory"));
                 }
+                // The file manager is third-party and long-lived, and a user can
+                // launch anything from it — including another AgentMux build,
+                // which would then adopt THIS instance's channel and data dir
+                // (invariant I7; retro-env-inheritance-instance-isolation-breach
+                // -2026-09-17 §2.2). So: strict policy, not the pane keep-set.
                 #[cfg(target_os = "windows")]
-                { let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{}", canonical.display())).spawn(); }
+                {
+                    let mut cmd = std::process::Command::new("explorer.exe");
+                    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+                    let _ = cmd.arg(format!("/select,{}", canonical.display())).spawn();
+                }
                 #[cfg(target_os = "macos")]
-                { let _ = std::process::Command::new("open").arg("-R").arg(&canonical).spawn(); }
+                {
+                    let mut cmd = std::process::Command::new("open");
+                    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+                    let _ = cmd.arg("-R").arg(&canonical).spawn();
+                }
                 #[cfg(target_os = "linux")]
                 {
                     let target = if canonical.is_dir() { canonical.clone() } else { canonical.parent().unwrap_or(&canonical).to_path_buf() };
-                    let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
+                    let mut cmd = std::process::Command::new("xdg-open");
+                    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+                    let _ = cmd.arg(&target).spawn();
                 }
                 Ok(())
             }
