@@ -551,20 +551,26 @@ pub fn available_commit_gb() -> Option<f64> {
 // second, independently-drifting copy — this file just wires it into the
 // StatusBar telemetry payload.
 
-/// Collect pagefile-volume disk tracking: `disk:pagefile_volume:free_gb`,
-/// `:total_gb`, `:free_pct`, and `disk:pagefile_system_managed` (1.0/0.0).
+/// Windows watch volume: the drive backing the page file. Emits the
+/// platform-neutral `disk:watch:free_gb` / `:total_gb` / `:free_pct`, plus
+/// `disk:pagefile_system_managed` (1.0/0.0), which stays Windows-named
+/// because it is a page-file fact and its ABSENCE is what tells the status
+/// bar it is not on Windows (see the colour tri-state in
+/// SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18 §3.3).
+///
 /// No-op (keys absent) on non-Windows or any read failure — matches
-/// `get_commit_data`'s fail-open convention.
+/// `get_commit_data`'s fail-open convention. The Unix half of the same
+/// concept is `get_watch_volume_data` below.
 fn get_pagefile_volume_data(_values: &mut HashMap<String, f64>) {
     #[cfg(target_os = "windows")]
     {
         let (drive, system_managed) = agentmux_common::pagefile::pagefile_watch_target();
         if let Some((free_gb, total_gb)) = agentmux_common::pagefile::drive_free_total_gb(drive) {
-            _values.insert("disk:pagefile_volume:free_gb".to_string(), free_gb);
-            _values.insert("disk:pagefile_volume:total_gb".to_string(), total_gb);
+            _values.insert("disk:watch:free_gb".to_string(), free_gb);
+            _values.insert("disk:watch:total_gb".to_string(), total_gb);
             if total_gb > 0.0 {
                 _values.insert(
-                    "disk:pagefile_volume:free_pct".to_string(),
+                    "disk:watch:free_pct".to_string(),
                     (free_gb / total_gb) * 100.0,
                 );
             }
@@ -960,6 +966,74 @@ fn get_disk_data(disks: &Disks, elapsed_secs: f64, values: &mut HashMap<String, 
     values.insert("disk:total".to_string(), read_rate + write_rate);
 }
 
+/// Pick the mount whose path is the longest prefix of `target`.
+///
+/// Pure, and separated from `Disks` so it is testable without a real
+/// filesystem. Longest-prefix rather than first-match because several mounts
+/// legitimately prefix one path (`/` and `/home` both prefix
+/// `/home/yas/.agentmux`) and the most specific one is the filesystem whose
+/// free space actually constrains a write there.
+#[cfg(not(target_os = "windows"))]
+fn pick_watch_mount<'a>(mounts: &[&'a std::path::Path], target: &std::path::Path) -> Option<&'a std::path::Path> {
+    mounts
+        .iter()
+        .filter(|m| target.starts_with(m))
+        .max_by_key(|m| m.as_os_str().len())
+        .copied()
+}
+
+/// Unix watch volume: the mount backing AgentMux's data dir — where the
+/// store, logs and packaged builds land, so it is the volume whose filling up
+/// actually breaks this app.
+///
+/// Emits the same `disk:watch:*` summary and `disk:vol:<mount>:watch` /
+/// `:is_system_drive` markers the Windows path emits, so the status bar is
+/// platform-agnostic. Costs no syscall: it reads the `Disks` list already
+/// refreshed this tick, and reuses the free/total `get_disk_data` just
+/// computed rather than re-reading them.
+#[cfg(not(target_os = "windows"))]
+fn get_watch_volume_data(disks: &Disks, values: &mut HashMap<String, f64>) {
+    let data_dir = crate::backend::base::get_mux_data_dir();
+    let mounts: Vec<&std::path::Path> = disks.list().iter().map(|d| d.mount_point()).collect();
+    let root = std::path::Path::new("/");
+    let watch = pick_watch_mount(&mounts, &data_dir).unwrap_or(root);
+
+    write_watch_summary(watch, watch == root, values);
+}
+
+/// Summarise one already-collected volume as the watch target.
+///
+/// Reads the `disk:vol:<mount>:*` figures `get_disk_data` wrote rather than
+/// re-deriving them, which keeps the pill and the popover row arithmetically
+/// identical by construction. Pure w.r.t. the map, so the partial-tick
+/// behaviour below is testable.
+///
+/// A mount `get_disk_data` skipped (zero capacity, torn tick) has no figures
+/// to summarise: emit nothing rather than a fabricated 0, matching
+/// `parseDiskVolumes`, which drops partial volumes for the same reason.
+#[cfg(not(target_os = "windows"))]
+fn write_watch_summary(mount: &std::path::Path, is_system_drive: bool, values: &mut HashMap<String, f64>) {
+    let mount_str = mount.to_string_lossy();
+    let (Some(free_gb), Some(total_gb)) = (
+        values.get(&format!("disk:vol:{mount_str}:free_gb")).copied(),
+        values.get(&format!("disk:vol:{mount_str}:total_gb")).copied(),
+    ) else {
+        return;
+    };
+    if total_gb <= 0.0 {
+        return;
+    }
+
+    values.insert("disk:watch:free_gb".to_string(), free_gb);
+    values.insert("disk:watch:total_gb".to_string(), total_gb);
+    values.insert("disk:watch:free_pct".to_string(), (free_gb / total_gb) * 100.0);
+    values.insert(format!("disk:vol:{mount_str}:watch"), 1.0);
+    values.insert(
+        format!("disk:vol:{mount_str}:is_system_drive"),
+        if is_system_drive { 1.0 } else { 0.0 },
+    );
+}
+
 /// Read the telemetry interval from config, clamped to [MIN, MAX].
 fn get_interval_secs(config_watcher: &ConfigState) -> f64 {
     let val = config_watcher.get_settings().telemetry_interval;
@@ -1040,6 +1114,11 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
         get_commit_data(&mut values);
         net_state.get_net_data(&networks, &mut values);
         get_disk_data(&disks, elapsed_secs, &mut values);
+        // Must follow get_disk_data: it summarises the per-volume figures that
+        // call just wrote. The Windows equivalent already ran inside
+        // block_in_place above (it makes a real syscall); this one does not.
+        #[cfg(not(target_os = "windows"))]
+        get_watch_volume_data(&disks, &mut values);
 
         // Commit attribution: periodic in the steady state, or immediately
         // (debounced) when commit heads toward exhaustion — see
@@ -1256,5 +1335,95 @@ mod uptime_tests {
         let parsed: TimeSeriesData = serde_json::from_value(json).expect("deserialize");
         assert_eq!(parsed.ts, 7);
         assert_eq!(parsed.uptime_secs, None);
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod watch_volume_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// The case that motivated longest-prefix: `/` also prefixes the data
+    /// dir, and picking it would report free space on the wrong filesystem
+    /// whenever `/home` is separately mounted.
+    #[test]
+    fn longest_prefix_wins_over_root() {
+        let mounts = [Path::new("/"), Path::new("/home"), Path::new("/boot")];
+        let got = pick_watch_mount(&mounts, Path::new("/home/yas/.agentmux"));
+        assert_eq!(got, Some(Path::new("/home")));
+    }
+
+    #[test]
+    fn falls_back_to_root_when_nothing_more_specific_matches() {
+        let mounts = [Path::new("/"), Path::new("/boot")];
+        let got = pick_watch_mount(&mounts, Path::new("/home/yas/.agentmux"));
+        assert_eq!(got, Some(Path::new("/")));
+    }
+
+    #[test]
+    fn exact_mount_matches_itself() {
+        let mounts = [Path::new("/"), Path::new("/data")];
+        assert_eq!(pick_watch_mount(&mounts, Path::new("/data")), Some(Path::new("/data")));
+    }
+
+    /// A sibling must never match: `/home2` is not a prefix of `/home/yas`,
+    /// and a naive string `starts_with` would say it is.
+    #[test]
+    fn sibling_mount_is_not_a_prefix() {
+        let mounts = [Path::new("/home2")];
+        assert_eq!(pick_watch_mount(&mounts, Path::new("/home/yas")), None);
+    }
+
+    #[test]
+    fn empty_mount_list_yields_none() {
+        assert_eq!(pick_watch_mount(&[], Path::new("/home/yas")), None);
+    }
+
+    /// Summary keys are derived from what `get_disk_data` already wrote, so a
+    /// volume it skipped (zero capacity, torn tick) summarises to nothing
+    /// rather than a fabricated zero.
+    #[test]
+    fn partial_volume_emits_no_summary() {
+        let mut values: HashMap<String, f64> = HashMap::new();
+        // total_gb present, free_gb missing — a torn tick.
+        values.insert("disk:vol:/:total_gb".to_string(), 100.0);
+        write_watch_summary(Path::new("/"), true, &mut values);
+        assert!(!values.keys().any(|k| k.starts_with("disk:watch:")));
+    }
+
+    #[test]
+    fn zero_capacity_volume_emits_no_summary() {
+        let mut values: HashMap<String, f64> = HashMap::new();
+        values.insert("disk:vol:/:free_gb".to_string(), 0.0);
+        values.insert("disk:vol:/:total_gb".to_string(), 0.0);
+        write_watch_summary(Path::new("/"), true, &mut values);
+        assert!(!values.keys().any(|k| k.starts_with("disk:watch:")));
+    }
+
+    /// The percentage must be derived from the same figures the popover row
+    /// shows, or the pill and the row can disagree about the same drive.
+    #[test]
+    fn summary_matches_the_per_volume_figures() {
+        let mut values: HashMap<String, f64> = HashMap::new();
+        values.insert("disk:vol:/home:free_gb".to_string(), 35.0);
+        values.insert("disk:vol:/home:total_gb".to_string(), 350.0);
+        write_watch_summary(Path::new("/home"), false, &mut values);
+
+        assert_eq!(values["disk:watch:free_gb"], 35.0);
+        assert_eq!(values["disk:watch:total_gb"], 350.0);
+        assert!((values["disk:watch:free_pct"] - 10.0).abs() < 1e-9);
+        assert_eq!(values["disk:vol:/home:watch"], 1.0);
+        assert_eq!(values["disk:vol:/home:is_system_drive"], 0.0);
+    }
+
+    #[test]
+    fn root_watch_volume_is_marked_as_the_system_drive() {
+        let mut values: HashMap<String, f64> = HashMap::new();
+        values.insert("disk:vol:/:free_gb".to_string(), 1.9);
+        values.insert("disk:vol:/:total_gb".to_string(), 345.0);
+        write_watch_summary(Path::new("/"), true, &mut values);
+        assert_eq!(values["disk:vol:/:is_system_drive"], 1.0);
+        // The night this spec was written: 0.55% free, and nothing said so.
+        assert!(values["disk:watch:free_pct"] < 1.0);
     }
 }

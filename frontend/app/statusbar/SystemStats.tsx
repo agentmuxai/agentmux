@@ -8,7 +8,7 @@ import { Portal } from "solid-js/web";
 import { CpuCoresPopover } from "./CpuCoresPopover";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
 import { cpuColor } from "./cpu-color";
-import { diskTooltip, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
+import { diskTooltip, parseDiskVolumes, watchVolumeColor, type DiskVolume } from "./disk-volumes";
 
 type SysStats = {
     cpu: number;
@@ -21,9 +21,10 @@ type SysStats = {
     diskWrite: number;
     netSent: number;
     netRecv: number;
-    pagefileVolumeFreeGb: number | null;
-    pagefileVolumeFreePct: number | null;
-    pagefileSystemManaged: boolean;
+    watchVolumeFreeGb: number | null;
+    watchVolumeFreePct: number | null;
+    /** null off Windows — see watchVolumeColor's tri-state. */
+    pagefileSystemManaged: boolean | null;
 };
 
 function formatMemBytes(gb: number): string {
@@ -51,25 +52,6 @@ function commitColor(used: number, total: number): string {
     const ratio = used / total;
     if (ratio > 0.95) return "var(--error-color)";
     if (ratio > 0.85) return "var(--warning-color)";
-    return "var(--secondary-text-color)";
-}
-
-// SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 — the commit gauge above
-// only sees the SYMPTOM (commit near limit); it's blind to the CAUSE this
-// spec found: a system-managed page file wants to auto-grow toward
-// min(3×RAM, ⅛ volume) but silently can't if the volume it lives on is low
-// on free space, pinning the commit ceiling below what every other gauge
-// assumes. Thresholds match the spec's own numbers: <15% free is its
-// documented "crash risk" line; <8% is the free-space level the spec's
-// source incident actually crashed at (20.1 GB / 446 GB ≈ 4.5%, but 8% is
-// used here as a slightly less alarmist error line — the spec's own
-// worked example put "safe again" at ≥60-80 GB free on a ~450 GB volume,
-// i.e. ~13-18%, so 15%/8% brackets warning vs. already-in-the-danger-zone).
-// A FIXED-size page file isn't gated by free disk this way — never colored.
-function pagefileDiskColor(freePct: number | null, systemManaged: boolean): string {
-    if (freePct == null || !systemManaged) return "var(--secondary-text-color)";
-    if (freePct < 8) return "var(--error-color)";
-    if (freePct < 15) return "var(--warning-color)";
     return "var(--secondary-text-color)";
 }
 
@@ -171,9 +153,16 @@ const SystemStats = (): JSX.Element => {
                     diskWrite: vals["disk:write"] ?? 0,
                     netSent: vals["net:bytessent"] ?? 0,
                     netRecv: vals["net:bytesrecv"] ?? 0,
-                    pagefileVolumeFreeGb: vals["disk:pagefile_volume:free_gb"] ?? null,
-                    pagefileVolumeFreePct: vals["disk:pagefile_volume:free_pct"] ?? null,
-                    pagefileSystemManaged: (vals["disk:pagefile_system_managed"] ?? 0) > 0,
+                    watchVolumeFreeGb: vals["disk:watch:free_gb"] ?? null,
+                    watchVolumeFreePct: vals["disk:watch:free_pct"] ?? null,
+                    // Presence, not truthiness: an ABSENT key means "not
+                    // Windows", which is a different state from an explicit
+                    // false (fixed-size page file). Collapsing them mutes the
+                    // pill everywhere off Windows.
+                    pagefileSystemManaged:
+                        vals["disk:pagefile_system_managed"] != null
+                            ? vals["disk:pagefile_system_managed"] > 0
+                            : null,
                 });
                 setDiskVolumes(parseDiskVolumes(vals));
             },
@@ -237,10 +226,12 @@ const SystemStats = (): JSX.Element => {
                             PF {formatMemBytes(s().commitUsed)}/{formatMemBytes(s().commitTotal)}
                         </span>
                     </Show>
-                    {/* Free-space share of the page-file volume (usually the system
-                        drive — SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 is
-                        why THIS volume is the one watched, and the color thresholds
-                        still encode that risk). The tooltip is a short label only
+                    {/* Free-space share of the watched volume: the page-file drive on
+                        Windows (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 is why
+                        THAT volume, and the color thresholds still encode that risk),
+                        the mount backing the data dir elsewhere
+                        (SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18). The
+                        tooltip is a short label only
                         ("Free share of system drive (C:)"), matching the terse form
                         every other stat tooltip uses — no math, no live figures, and
                         no page-file mention (that significance belongs to the PF
@@ -248,22 +239,22 @@ const SystemStats = (): JSX.Element => {
                         the system-drive-vs-page-file-volume wording rule. Live figures
                         and the drive list live in the click-open panel, mirroring the
                         CPU per-core panel. Only rendered once the backend has a
-                        reading (Windows-only gauge;
-                        absent elsewhere). */}
-                    <Show when={s().pagefileVolumeFreePct != null}>
+                        reading — every platform emits one, but a torn first tick
+                        may not. */}
+                    <Show when={s().watchVolumeFreePct != null}>
                         <span class="stat-separator">|</span>
                         <button
                             type="button"
                             ref={diskButtonRef}
-                            class="stat-mono stat-pagefile-disk stat-disk-button"
-                            style={{ color: pagefileDiskColor(s().pagefileVolumeFreePct, s().pagefileSystemManaged) }}
+                            class="stat-mono stat-watch-disk stat-disk-button"
+                            style={{ color: watchVolumeColor(s().watchVolumeFreePct, s().pagefileSystemManaged) }}
                             onClick={toggleDiskPanel}
                             data-tip={diskTooltip(diskVolumes())}
                             aria-label="Free disk space, click for per-drive breakdown"
                             aria-haspopup="dialog"
                             aria-expanded={diskPanelOpen()}
                         >
-                            Disk {Math.round(s().pagefileVolumeFreePct!)}%
+                            Disk {Math.round(s().watchVolumeFreePct!)}%
                         </button>
                         <Show when={diskPanelOpen()}>
                             <Portal>

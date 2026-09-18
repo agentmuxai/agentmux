@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { diskFreeColor, diskTooltip, formatDiskGb, parseDiskVolumes } from "./disk-volumes";
+import { diskFreeColor, diskTooltip, formatDiskGb, parseDiskVolumes, watchVolumeColor } from "./disk-volumes";
 
 describe("parseDiskVolumes", () => {
     it("parses Windows mounts whose own colons/backslashes sit inside the key", () => {
@@ -33,7 +33,7 @@ describe("parseDiskVolumes", () => {
         const vols = parseDiskVolumes({
             cpu: 12,
             "disk:read": 1.5,
-            "disk:pagefile_volume:free_pct": 26,
+            "disk:watch:free_pct": 26,
             "disk:vol:C:\\:free_gb": 120,
             "disk:vol:C:\\:total_gb": 460,
             "disk:vol:C:\\:watch": 1,
@@ -124,5 +124,44 @@ describe("diskFreeColor", () => {
         expect(diskFreeColor(14, 100)).toBe("var(--warning-color)");
         expect(diskFreeColor(50, 100)).toBe("var(--secondary-text-color)");
         expect(diskFreeColor(1, 0)).toBe("var(--secondary-text-color)"); // no capacity → no judgment
+    });
+});
+
+describe("watchVolumeColor", () => {
+    const MUTED = "var(--secondary-text-color)";
+    const WARN = "var(--warning-color)";
+    const ERROR = "var(--error-color)";
+
+    it("has no reading until the backend sends one", () => {
+        expect(watchVolumeColor(null, null)).toBe(MUTED);
+        expect(watchVolumeColor(null, true)).toBe(MUTED);
+    });
+
+    it("colors a system-managed page-file volume by free share (Windows)", () => {
+        expect(watchVolumeColor(5, true)).toBe(ERROR);
+        expect(watchVolumeColor(12, true)).toBe(WARN);
+        expect(watchVolumeColor(50, true)).toBe(MUTED);
+    });
+
+    it("never colors a FIXED-size page-file volume — its growth is not disk-gated", () => {
+        // The Windows exception. Coloring here is a false alarm, and this is
+        // the regression the tri-state has to protect.
+        expect(watchVolumeColor(5, false)).toBe(MUTED);
+        expect(watchVolumeColor(0.5, false)).toBe(MUTED);
+    });
+
+    it("colors by free share off Windows, where no page file exists (null)", () => {
+        // The bug this replaced: `?? 0 > 0` parsed an absent key as false,
+        // which took this branch to the line above and muted a full disk.
+        expect(watchVolumeColor(0.55, null)).toBe(ERROR);
+        expect(watchVolumeColor(12, null)).toBe(WARN);
+        expect(watchVolumeColor(90, null)).toBe(MUTED);
+    });
+
+    it("agrees with the popover row color at the same free share", () => {
+        // The pill and the row for the same drive must not disagree.
+        expect(watchVolumeColor(5, null)).toBe(diskFreeColor(5, 100));
+        expect(watchVolumeColor(12, null)).toBe(diskFreeColor(12, 100));
+        expect(watchVolumeColor(50, null)).toBe(diskFreeColor(50, 100));
     });
 });
