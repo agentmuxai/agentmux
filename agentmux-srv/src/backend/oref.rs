@@ -13,18 +13,7 @@ use super::obj::VALID_OTYPES;
 
 /// Object reference combining a type name and UUID.
 /// Wire format: `"block:550e8400-e29b-41d4-a716-446655440000"`
-///
-/// `#[ts(as = "String")]` is load-bearing, not decoration. This struct has a
-/// hand-written `Serialize`/`Deserialize` pair (below) that emits and parses a
-/// single `"otype:oid"` STRING — the Rust shape and the wire shape deliberately
-/// disagree. Without this attribute ts-rs would faithfully generate
-/// `{ otype: string, oid: string }` from the struct, which is not what any
-/// client ever receives: it would be a confidently wrong binding, worse than
-/// none, and the compiler could not catch it because TypeScript would simply
-/// believe it. ts-rs documents this attribute for exactly this case — "when you
-/// have a custom serializer and deserializer".
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ts_rs::TS)]
-#[ts(as = "String")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct ORef {
     pub otype: String,
     pub oid: String,
