@@ -2,9 +2,14 @@
 
 **Date:** 2026-09-17
 **Author:** Opaz
-**Status:** active — root cause confirmed. Sender-side sanitization landed
-(`SPEC_PANE_ENV_ISOLATION_2026_09_17`); the ambient-credential redesign in §9.4
-and the I7 invariant in §9.5 remain open.
+**Status:** active — root cause confirmed. Shipped: sender-side sanitization
+(`SPEC_PANE_ENV_ISOLATION_2026_09_17`); the §9.5 **I7 invariant + enforcement
+test** (#3365), which also closed two spawn paths that were violating it live
+(`open_browser`, reveal-in-file-manager). Remaining: the §9.4
+ambient-credential redesign, designed in `SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18`
+(#3358) but not implemented; and the end-to-end check that launches a build
+from a pane and asserts it resolves its own channel and data dir — #3365
+enforces spawn-site coverage in source, not runtime behaviour.
 **Severity:** High — silent cross-instance data-dir/channel coupling, plus a live
 App API credential reaching every agent pane and its descendants
 **Scope:** all platforms; both pane types; all versions carrying `DataPaths::to_env_vars`
@@ -260,6 +265,17 @@ Ranked, and deliberately separable.
    processes it spawns" — with an enforcement test that launches a build from a
    pane and asserts it resolves its own channel and data dir. The absence of such
    a test is why five documents could identify this and none of them close it.
+
+   **Landed in #3365**, with one deliberate substitution: the enforcement test
+   checks *spawn-site coverage in source* (every `Command::new` either sanitizes
+   or is exempt with a stated reason) rather than launching a real build. That
+   targets the actual failure mode — both P0s on the original fix were a spawn
+   path nobody applied the strip to — and runs in the existing per-PR lanes
+   instead of needing a packaged artifact. The runtime check described above is
+   still worth having and belongs in the nightly lane; it is not a substitute
+   for this one, nor this for it. Auditing against the new invariant immediately
+   found two live violations (`util.rs::open_browser`, `editor_handlers.rs`
+   reveal-in-file-manager), both fixed in the same PR.
 6. **Reconcile the three contradictory specs** (§7).
 
 ## 10. What this does not explain
