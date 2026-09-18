@@ -1,6 +1,7 @@
 # Report: "New Window" startup color-flash sequence
 
 **Date:** 2026-07-14
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Author:** AgentX
 **Type:** Investigation report, with all three findings implemented in this same PR. See §8 for what shipped and what's a partial/lower-confidence mitigation vs. a complete fix.
 **Purpose:** The hamburger menu's "New Window" shows a visible sequence of solid-color changes before settling into the real UI, instead of one solid background with the pulsating brain-logo splash held until the app is truly ready to paint. This report traces exactly where each color in that sequence comes from and why, as a basis for a future ordering fix.

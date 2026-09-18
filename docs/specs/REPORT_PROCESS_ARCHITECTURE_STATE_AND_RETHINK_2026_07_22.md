@@ -1,6 +1,7 @@
 # AgentMux Process Architecture — Current State & Rethink
 
 **Date:** 2026-07-22
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Scope:** Every mechanism in AgentMux that tracks "is this long-running process/agent alive, and what is
 it doing" — across `agentmux-srv/src/backend/blockcontroller/`, `agentmux-srv/src/backend/process_tracker/`,
 `agentmux-srv/src/backend/reactive/`, and the frontend consumers in the Agent pane and Swarm overview —
