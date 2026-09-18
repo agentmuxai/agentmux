@@ -29,7 +29,7 @@ use bollard::container::{
 };
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
-use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
 
 /// Where the agent CLI's config dir lives inside the image (`CLAUDE_CONFIG_DIR`).
 pub const CONTAINER_CLAUDE_DIR: &str = "/home/agent/.claude";
@@ -434,32 +434,16 @@ impl ContainerManager {
         // that has ever run. Recreate on drift; the per-agent named volume
         // carries session/project state across the swap.
         let existing = match existing {
-            Some(_) if !self.mounts_match(container_name, spec).await => {
-                tracing::info!(
-                    container = container_name,
-                    "container mounts differ from the desired spec (credentials/workspace) — recreating"
-                );
-                let _ = self.stop(container_name, 10).await;
-                self.remove(container_name, true).await?;
-                None
-            }
-            // Same drift-and-recreate reasoning as the mount check above, for
-            // extra_hosts specifically: `create_and_start` sets
-            // host.docker.internal:host-gateway (reagent P1, PR #3393) so
-            // AGENTMUX_LOCAL_URL is reachable — but Docker cannot add an
-            // extra_hosts entry to an already-existing container, only at
-            // creation. Without this check, every container created before
-            // this fix shipped would silently never get it.
-            Some(_) if !self.extra_hosts_match(container_name).await => {
-                tracing::info!(
-                    container = container_name,
-                    "container extra_hosts missing host.docker.internal:host-gateway — recreating"
-                );
-                let _ = self.stop(container_name, 10).await;
-                self.remove(container_name, true).await?;
-                None
-            }
-            other => other,
+            Some(status) => match self.container_drift(container_name, spec).await {
+                Some(reason) => {
+                    tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
+                    let _ = self.stop(container_name, 10).await;
+                    self.remove(container_name, true).await?;
+                    None
+                }
+                None => Some(status),
+            },
+            None => None,
         };
 
         match existing {
@@ -857,11 +841,31 @@ impl ContainerManager {
     /// leaving the container alone. A spurious recreate kills a live agent and
     /// loses its container-local state, which is worse than one more restart on
     /// a stale mount.
-    async fn mounts_match(&self, container_name: &str, spec: &ContainerMountSpec) -> bool {
+    /// Single Docker inspect covering both drift checks below — mounts and
+    /// extra_hosts previously each did their own `inspect_container` round
+    /// trip, doubling the Docker-socket call on every `ensure_running` for
+    /// the common case of an already-compliant container (reagent P2 on PR
+    /// #3393). Returns a human-readable reason if either has drifted, or
+    /// `None` if the container matches (or the inspect itself failed —
+    /// fails safe, same as the two checks below always did: a spurious
+    /// recreate kills a live agent and loses its container-local state,
+    /// which is worse than one more restart on stale state we couldn't
+    /// even confirm).
+    async fn container_drift(&self, container_name: &str, spec: &ContainerMountSpec) -> Option<&'static str> {
         let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
-            return true;
+            return None;
         };
-        let Some(actual) = details.mounts else {
+        if !Self::mounts_match(&details, container_name, spec) {
+            return Some("mounts differ from the desired spec (credentials/workspace)");
+        }
+        if !Self::extra_hosts_match(&details) {
+            return Some("extra_hosts missing host.docker.internal:host-gateway");
+        }
+        None
+    }
+
+    fn mounts_match(details: &ContainerInspectResponse, container_name: &str, spec: &ContainerMountSpec) -> bool {
+        let Some(actual) = details.mounts.as_ref() else {
             return true;
         };
 
@@ -884,14 +888,9 @@ impl ContainerManager {
     /// the `host.docker.internal:host-gateway` entry `create_and_start` sets
     /// (reagent P1, PR #3393). Docker cannot add an extra_hosts entry to an
     /// already-existing container — only `mounts_match`'s recreate path can
-    /// actually fix a container that predates this. Same fail-open-to-true
-    /// reasoning as `mounts_match`: an inspect error must count as "assume
-    /// it's fine, don't force a spurious recreate," never as drift.
-    async fn extra_hosts_match(&self, container_name: &str) -> bool {
-        let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
-            return true;
-        };
-        let Some(extra_hosts) = details.host_config.and_then(|hc| hc.extra_hosts) else {
+    /// actually fix a container that predates this.
+    fn extra_hosts_match(details: &ContainerInspectResponse) -> bool {
+        let Some(extra_hosts) = details.host_config.as_ref().and_then(|hc| hc.extra_hosts.as_ref()) else {
             return false;
         };
         extra_hosts
