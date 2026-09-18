@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-02
 **Author:** Agent4
-**Status:** active — Phase A (D1 key publication + D5 signing primitives)
+**Status:** active — Phase A (D1 key publication + D5 signing primitives) — PRs touching this work, newest first: #3064, #2959
 shipped in #2959; Phase B (D2 verification, D4 `DELIVERY=channel`, the
 `channel-verified` relaxation) shipped 2026-09-07 — see §10.2. Phases C
 (enforcement) and D (escalation chaining) remain — see §10. Phases A and B are

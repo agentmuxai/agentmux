@@ -2,7 +2,7 @@
 
 **Author:** AgentX
 **Created:** 2026-09-07
-**Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7,
+**Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7, — PRs touching this work, newest first: #3231, #3176, #3172 (+5 more)
 plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
 verdict is **go** on targeting 152 directly — patches #1/#2/#3 are verified
 against real CEF/Chromium 152 source, and of the 18 fork-modified CEF files,

@@ -2,7 +2,7 @@
 
 **Author:** Vmer
 **Date:** 2026-09-15
-**Status:** active — `agentmux`'s own gaps implemented (this PR); `agentmux-docs`
+**Status:** active — `agentmux`'s own gaps implemented (this PR); `agentmux-docs` — PRs touching this work, newest first: #3240
 and `muxcode` fixes are open PRs, not yet merged. See §0 for current state.
 
 ---

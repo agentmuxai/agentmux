@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 **Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`)
-**Status:** active — **host tier shipped, WAN half still gated.** The host-tier HMAC layer
+**Status:** active — **host tier shipped, WAN half still gated.** The host-tier HMAC layer — PRs touching this work, newest first: #2565
 this document designed is live:
 `agentmux_common::jekt_sign` (`sign_jekt`/`verify_jekt`), per-agent key injection via
 `inject_jekt_signing_keys_into_mcp_json` (`agentmux-srv/src/backend/agent_config.rs:1312`,

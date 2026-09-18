@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 **Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`, `shared-infrastructure`)
-**Status:** active — §3 WAN P1-2 (reagent WAN signing) implemented 2026-08-14
+**Status:** active — §3 WAN P1-2 (reagent WAN signing) implemented 2026-08-14 — PRs touching this work, newest first: #3102, #2570
 — see "Implementation status" below. P0-1, P0-2, P1-1, P2-1 (WAN) and all of
 LAN remain proposed/not implemented. **The still-open WAN P0 findings remain
 blocker-severity; do not treat this as fully closed.**

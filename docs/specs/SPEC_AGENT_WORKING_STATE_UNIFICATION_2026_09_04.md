@@ -3,7 +3,7 @@
 > **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
 > This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
 
-**Status:** active — Phase 1 (bug 1.1) and a Phase-0-adjacent telemetry
+**Status:** active — Phase 1 (bug 1.1) and a Phase-0-adjacent telemetry — PRs touching this work, newest first: #2970
 extension implemented and merged; Phase 2 (bug 1.2) deliberately NOT
 re-attempted this pass — see the "What Phase 0 turned out to already be"
 and "Phase 2 status" notes below. Phases 3/4 not started.

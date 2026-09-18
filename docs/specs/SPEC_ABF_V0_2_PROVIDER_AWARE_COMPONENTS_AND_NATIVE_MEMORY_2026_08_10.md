@@ -1,7 +1,7 @@
 # Spec: ABF v0.2 — Provider-Aware Components + Native Memory
 
 **Date:** 2026-08-10
-**Status:** active — shipped: §2.1 `credentialProvider` (`bundle_export.rs:566`,
+**Status:** active — shipped: §2.1 `credentialProvider` (`bundle_export.rs:566`, — PRs touching this work, newest first: #3144
 `bundle_import.rs:232`), §2.2 keyed `components.instructions` (`bundle_export.rs:594`)
 from `instructions_by_provider` (`bundle_export.rs:392`), §2.3 `components.memory`
 (`app_api/bundle.rs:468`) with `bundle.export_for_agent`/`bundle.import_for_agent`,

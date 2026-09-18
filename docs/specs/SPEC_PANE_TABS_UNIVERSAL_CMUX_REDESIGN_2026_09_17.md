@@ -1,7 +1,7 @@
 # SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign)
 
 **Date:** 2026-09-17
-**Status:** active — design finalized, all open questions resolved (§7),
+**Status:** active — design finalized, all open questions resolved (§7), — PRs touching this work, newest first: #3309
 implementation underway on a dedicated branch. See
 `docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md` for the
 task-level breakdown. Not merged to main until tested locally and explicitly
