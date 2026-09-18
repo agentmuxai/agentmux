@@ -286,10 +286,25 @@
         padding: var(--space-0-5) 0;
     }
 
-    .status-bar-popover-hint {
-        font-size: 0.8em;
-        opacity: 0.6;
-        padding: 0 0 var(--space-0-5) 0;
+    // Informational callout — same border-left-accent + tinted-background
+    // treatment as .identity-delete-notice, but --info-color instead of
+    // --warning-color: this isn't a warning, it's a heads-up so an OS
+    // dialog the user didn't ask for doesn't read as suspicious.
+    .status-bar-popover-info-notice {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        margin: var(--space-1) 0;
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--info-color);
+        border-left-width: 3px;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--info-color) 10%, transparent);
+        font-size: 0.85em;
+
+        .status-bar-popover-info-notice-icon {
+            flex: none;
+        }
     }
 
     /* Toggle switch used in the LAN discovery row.
