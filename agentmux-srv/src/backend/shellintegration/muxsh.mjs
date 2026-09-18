@@ -426,7 +426,7 @@ async function apiCall(url, authKey, path, opts, notFoundHint) {
     return body;
 }
 
-async function main() {
+export async function main() {
     const parsed = parseArgs(process.argv.slice(2));
 
     if (parsed.help) {
