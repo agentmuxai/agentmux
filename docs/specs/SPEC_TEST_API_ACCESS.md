@@ -1,6 +1,6 @@
 # SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename)
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Motivation: external test harnesses (PowerShell, Node, Rust integration

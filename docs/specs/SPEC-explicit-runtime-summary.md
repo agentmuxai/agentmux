@@ -1,6 +1,6 @@
 # SPEC: Explicit Runtime Summary in Agent Control Bar
 
-Status: Draft
+**Status:** Draft
 Owner: TBD
 Date: 2026-04-20
 

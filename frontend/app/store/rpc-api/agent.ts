@@ -551,7 +551,7 @@ export const AgentApi = {
     // record with the filestore `output.state.json` snapshot for that
     // block, producing a conversation preview + node count so an
     // orphaned conversation (e.g. after a renderer crash) becomes
-    // recoverable from normal UI. See docs/recovery/MAKS_CONVERSATION_2026_05_23.md
+    // recoverable from normal UI. See docs/incident/MAKS_CONVERSATION_2026_05_23.md
     // and PR #977 for the underlying continueOfId reattach plumbing.
     // Response envelope (not a bare array) since the backend hardening in
     // session.rs — every one of its data sources now degrades to empty on

@@ -16,7 +16,7 @@
 describes the architecture as built, superseding the subprocess model the rest of
 this document designs. This section is that place; the sections below it are the
 original design and are kept for the rationale, with notes where they no longer
-match. Operator steps live in `docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`.
+match. Operator steps live in `docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`.
 
 | Concern | What ships | Where |
 |---|---|---|

@@ -1,6 +1,6 @@
 # SPEC: Editor Widget Default UX — Scratch File + Collapsed Tree
 
-Status: Draft
+**Status:** Draft
 Date: 2026-06-14
 Depends on: `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md`, `app-api-pane-open.md`
 Related: `SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md`

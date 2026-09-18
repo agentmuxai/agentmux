@@ -215,7 +215,7 @@ done, table is empty" shape behind
 `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`. It is the one
 migration-state answer to "why is this agent / definition / bundle missing
 after an upgrade" that `describe`'s `last_error` cannot give you. The command
-names the migration and the counts; `docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`
+names the migration and the counts; `docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`
 §4–§5 is what to do next.
 
 Read-only, like the CLI: it opens both tracking stores `SQLITE_OPEN_READ_ONLY`

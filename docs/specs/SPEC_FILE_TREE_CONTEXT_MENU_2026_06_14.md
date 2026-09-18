@@ -1,6 +1,6 @@
 # SPEC: File Tree Right-Click Context Menu
 
-Status: Draft
+**Status:** Draft
 Date: 2026-06-14
 Depends on: `SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md`
 Related: `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md`

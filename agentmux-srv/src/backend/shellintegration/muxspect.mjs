@@ -118,7 +118,7 @@ Usage:
                                   but the data isn't there", the failure the
                                   hardening spec was written about. Read-only.
                                   Exits 3 on any MISMATCH or error, matching
-                                  the CLI (docs/recovery/RUNBOOK_MIGRATION_
+                                  the CLI (docs/incident/RUNBOOK_MIGRATION_
                                   RECOVERY_2026_09_07.md §4).
   muxspect help                   this message
 
@@ -661,7 +661,7 @@ export function renderMigrations(data) {
         console.log(
             "At least one applied migration failed its post-condition. This is the " +
                 "\"marker says done, data isn't there\" shape — see " +
-                "docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md §4-§5 before touching anything. " +
+                "docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md §4-§5 before touching anything. " +
                 "Nothing here has been changed; this command is read-only.",
         );
     }

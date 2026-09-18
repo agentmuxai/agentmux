@@ -1,6 +1,6 @@
 # SPEC: Browser Pane Focus Lock
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Reported by: user, v0.33.262 (post Phase 4 modularization + install_pane_focus_redirect wire-up)

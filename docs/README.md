@@ -13,8 +13,7 @@ Project documentation organized by type.
 | `cef-build/` | Guides for building the patched `libcef.so` from source |
 | `cef-patches/` | Patches applied to the vendored CEF source |
 | `debug/` | Screenshots and captures attached to a specific investigation |
-| `sessions/` | Point-in-time session handoff notes |
-| `incident/`, `recovery/` | Incident write-ups and recovery runbooks |
+| `incident/` | Incident write-ups and recovery runbooks |
 | `investigations/` | Active bug investigations with reproduction steps |
 | `plans/` | Standalone implementation plans |
 | `providers/` | Provider (Claude/Codex/etc.) integration notes |

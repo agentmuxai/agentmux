@@ -1,6 +1,6 @@
 # SPEC: Rename `data-tauri-drag-region` → `data-drag-region`
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Motivation: the attribute is a Tauri-era name. AgentMux has been CEF-only
