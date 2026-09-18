@@ -959,10 +959,9 @@ mod tests {
         CommandReadEditorFileResult, CreateScratchFileReq, DeleteEditorFileReq, DirEntry,
     };
 
-    /// The four watchers record their types too, which leaves `writeagentconfig`
-    /// as the only untyped registration in this file -- and that is not an
-    /// editor command, it is the launch path, so it migrates with its own stub
-    /// in agent.ts rather than here.
+    /// The four watchers record their types too, and `writeagentconfig` migrates
+    /// in the same slice as its own agent.ts stub -- so this file is finished:
+    /// it has no untyped registrations left at all.
     ///
     /// `watcheditorfile` and `unwatcheditorfile` share one request type on
     /// purpose. They are not merely same-shaped: an unwatch that cannot name
@@ -1003,9 +1002,9 @@ mod tests {
         assert_eq!(wac["responseName"], "CommandWriteAgentConfigResult");
     }
 
-    /// The five read commands record their request and response types too, so
-    /// the only thing left untyped in this file is the four watchers (plus
-    /// `writeagentconfig`, which is not an editor command).
+    /// The five read commands record their request and response types too. With
+    /// the four watchers and `writeagentconfig` covered by the test above,
+    /// nothing in this file is left untyped.
     #[tokio::test]
     async fn register_typed_records_the_editor_read_commands() {
         let state = crate::server::tests::test_state();
