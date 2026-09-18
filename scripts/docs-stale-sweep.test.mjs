@@ -6,7 +6,7 @@
 // filesystem. Runs under vitest with the rest of the repo's .test.mjs files.
 
 import { describe, expect, it } from "vitest";
-import { classifyDoc, extractCitations, plausibleCitation, renderMarkdown, resolveCitation, statusOf } from "./docs-stale-sweep.mjs";
+import { classifyDoc, extractCitations, plausibleCitation, renderMarkdown, resolveCitation, statusOf, reverseCheck, buildCitationIndex } from "./docs-stale-sweep.mjs";
 
 describe("docs-stale-sweep statusOf", () => {
     it("takes the first word of the first Status line, lowercased, letters only", () => {
@@ -154,7 +154,100 @@ describe("docs-stale-sweep renderMarkdown", () => {
     });
 
     it("says so when nothing is flagged, and warns on a shallow clone", () => {
-        expect(renderMarkdown({ ...report, flagged: [] })).toContain("Nothing flagged.");
+        // Wording now names WHICH check found nothing, because the §5.6
+        // reverse check renders independently and either can be empty.
+        expect(renderMarkdown({ ...report, flagged: [] })).toContain("Nothing flagged by the staleness");
         expect(renderMarkdown({ ...report, shallow: true })).toContain("No git history was available");
+    });
+});
+
+describe("docs-stale-sweep reverseCheck (§5.6)", () => {
+    const idx = new Map([
+        ["SPEC_SHIPPED_2026_01_01", ["agentmux-srv/src/server/foo.rs"]],
+        ["SPEC_ALSO_SHIPPED_2026_01_02", ["frontend/app/a.ts", "frontend/app/b.ts"]],
+    ]);
+
+    it("flags a draft/proposed spec that source code cites by name", () => {
+        const r = reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "draft", idx);
+        expect(r).not.toBeNull();
+        expect(r.cited).toEqual(["agentmux-srv/src/server/foo.rs"]);
+
+        const p = reverseCheck("docs/specs/SPEC_ALSO_SHIPPED_2026_01_02.md", "proposed", idx);
+        expect(p.cited).toHaveLength(2);
+    });
+
+    it("does NOT flag 'active' — partial implementation is what it already claims", () => {
+        // This is the distinction that keeps the signal usable: `active` means
+        // "partially implemented, see what shipped", so being cited from source
+        // confirms it rather than contradicting it.
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "active", idx)).toBeNull();
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "implemented", idx)).toBeNull();
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "historical", idx)).toBeNull();
+    });
+
+    it("does not flag a draft nothing cites, or a doc with no Status", () => {
+        expect(reverseCheck("docs/specs/SPEC_NOBODY_CITES.md", "draft", idx)).toBeNull();
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", null, idx)).toBeNull();
+    });
+});
+
+describe("docs-stale-sweep buildCitationIndex (§5.6)", () => {
+    const tracked = [
+        "agentmux-srv/src/server/foo.rs",
+        "frontend/app/b.ts",
+        "docs/specs/SPEC_OTHER.md",
+        "README.md",
+    ];
+    const files = {
+        "agentmux-srv/src/server/foo.rs": "// see SPEC_TARGET_2026_01_01 for why",
+        "frontend/app/b.ts": "// unrelated",
+        "docs/specs/SPEC_OTHER.md": "cites SPEC_TARGET_2026_01_01 heavily",
+    };
+
+    it("indexes source citations and ignores docs citing each other", () => {
+        // docs/ is excluded on purpose: specs discuss each other constantly,
+        // and that says nothing about whether the thing shipped.
+        const idx = buildCitationIndex(".", tracked, ["SPEC_TARGET_2026_01_01"], (p) => files[p]);
+        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
+    });
+
+    it("skips unreadable files rather than aborting the sweep", () => {
+        const idx = buildCitationIndex(".", tracked, ["SPEC_TARGET_2026_01_01"], (p) => {
+            if (p === "frontend/app/b.ts") throw new Error("unreadable");
+            return files[p];
+        });
+        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
+    });
+});
+
+describe("docs-stale-sweep renderMarkdown — the two checks are independent", () => {
+    const base = {
+        generatedAt: "2026-09-18T00:00:00Z",
+        weeks: 8,
+        shallow: false,
+        counts: { docs: 1, noStatus: 0, terminal: 0, live: 1, stale: 0, flagged: 0, nonCanonicalStatus: 0, claimedUnbuilt: 1 },
+    };
+
+    it("renders the unbuilt-but-cited list even when NOTHING is flagged", () => {
+        // Regression: renderMarkdown used to `return` on flagged.length === 0,
+        // which swallowed every section below it — including this one, whose
+        // count was still printed in the summary table above. A report could
+        // claim 279 candidates and then show none of them.
+        const out = renderMarkdown({
+            ...base,
+            flagged: [],
+            claimedUnbuilt: [{ doc: "docs/specs/SPEC_FOO.md", status: "draft", cited: ["src/a.rs"] }],
+        });
+        expect(out).toContain("Says unbuilt");
+        expect(out).toContain("SPEC_FOO.md");
+        expect(out).toContain("src/a.rs");
+        // and it still says the OTHER check found nothing, rather than going quiet
+        expect(out).toContain("Nothing flagged by the staleness");
+    });
+
+    it("renders nothing-found for both checks without dropping either message", () => {
+        const out = renderMarkdown({ ...base, counts: { ...base.counts, claimedUnbuilt: 0 }, flagged: [], claimedUnbuilt: [] });
+        expect(out).toContain("Nothing flagged by the staleness");
+        expect(out).not.toContain("Says unbuilt");
     });
 });
