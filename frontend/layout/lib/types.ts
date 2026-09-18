@@ -6,6 +6,7 @@
 import type { Accessor } from "solid-js";
 import type { JSX } from "solid-js";
 import type { Properties as CSSProperties } from "csstype";
+import type { LayoutModel } from "./layoutModel";
 
 export enum NavigateDirection {
     Up = 0,
@@ -328,6 +329,36 @@ export interface NodeModel {
     blockNum: Accessor<number>;
     numLeafs: Accessor<number>;
     nodeId: string;
+    /**
+     * The `LayoutModel` that owns this leaf's own tab — i.e. the tab this
+     * pane actually lives in, NOT necessarily "whichever tab is globally
+     * active right now". Deliberately a plain field, captured once at
+     * construction from `getNodeModel`'s own `model` parameter (which IS
+     * the correct, tab-scoped model for this node by construction — no
+     * lookup, no timing dependency).
+     *
+     * Exists because `getLayoutModelForStaticTab()` (a non-reactive read of
+     * `atoms.activeTabId()`) is WRONG for a pane's own persistent chrome
+     * actions (`renderPaneChromeShell`'s "+"/close/switch handlers,
+     * `buildAgentPaneChromeModel`/`buildTermPaneChromeModel`'s own
+     * tab-switch/close, `PaneLeafChrome`'s stack lookup) whenever this
+     * leaf's tab isn't the one that happened to be globally active at the
+     * single moment chrome first constructed. That is not a rare race:
+     * `createTab()` (`tab-actions.ts`) builds a new tab's entire
+     * default-preset layout (`applyTabPreset`, including its default agent
+     * pane) while the tab is still `activate: false` — deliberately, per
+     * SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md — and only calls
+     * `setActiveTab` afterward. Any hoisted chrome that constructs during
+     * that window (which it always does, for the default agent pane) used
+     * to permanently latch the PREVIOUS tab's `LayoutModel`: every
+     * subsequent "+"/close/switch on that exact pane silently targeted the
+     * wrong tab's tree forever (a `findNode` miss with no error surfaced to
+     * the user — see docs/specs/SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
+     * This field removes the dependency on timing entirely: it is correct
+     * by construction, regardless of which tab was active when chrome
+     * mounted.
+     */
+    layoutModel: LayoutModel;
     /**
      * Deliberately a PLAIN, non-reactive field — captured once when this
      * NodeModel is created (see `layoutNodeModels.ts`'s `getNodeModel`), not

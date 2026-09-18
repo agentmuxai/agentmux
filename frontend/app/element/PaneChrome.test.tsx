@@ -109,11 +109,25 @@ const addWidgetAsPaneTab = vi.fn().mockResolvedValue(undefined); // real one is 
 const closeBlockInStack = vi.fn();
 const setActiveBlockInStack = vi.fn();
 let mockLayoutModel: any;
+// SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md — the real bug this
+// spy exists to catch: `renderPaneChromeShell` used to resolve its own
+// `layoutModel` via `getLayoutModelForStaticTab()` (whichever tab is
+// GLOBALLY active right now), not via `nodeModel.layoutModel` (the tab THIS
+// pane actually lives in). Those two silently diverge whenever a pane's
+// chrome first constructs before its own tab becomes active — e.g. every
+// new tab's default agent pane, seeded by `applyTabPreset` while the tab is
+// still `activate: false` (`tab-actions.ts`'s `createTab()`). The
+// production fix removed the import outright; this spy is the regression
+// guard — it must never be called again, from any test in this file,
+// including every pre-existing one above (none of them mock it a "right"
+// answer, so a reintroduced call would immediately return `undefined` and
+// throw when dereferenced).
+const getLayoutModelForStaticTabSpy = vi.fn();
 vi.mock("@/layout/index", () => ({
     addWidgetAsPaneTab: (...args: any[]) => addWidgetAsPaneTab(...args),
     closeBlockInStack: (...args: any[]) => closeBlockInStack(...args),
     setActiveBlockInStack: (...args: any[]) => setActiveBlockInStack(...args),
-    getLayoutModelForStaticTab: () => mockLayoutModel,
+    getLayoutModelForStaticTab: (...args: any[]) => getLayoutModelForStaticTabSpy(...args),
 }));
 
 vi.mock("@/layout/lib/layoutNode", () => ({
@@ -127,6 +141,15 @@ import { registerPaneTabDescriptor } from "./pane-tab-model";
 function fakeNodeModel(overrides: Record<string, any> = {}): any {
     return {
         nodeId: "node-1",
+        // `renderPaneChromeShell` reads `nodeModel.layoutModel` directly now
+        // (not `getLayoutModelForStaticTab()` — see that field's own doc
+        // comment, layout/lib/types.ts, and
+        // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md), so every
+        // fake NodeModel must carry whichever `mockLayoutModel` its own test
+        // already set up. Every call site below assigns `mockLayoutModel`
+        // before calling `fakeNodeModel()`, so this always picks up the
+        // right one.
+        layoutModel: mockLayoutModel,
         activeBlockId: () => "b1",
         isFocused: () => false,
         numLeafs: () => 1,
@@ -151,6 +174,7 @@ beforeEach(() => {
     addWidgetAsPaneTab.mockClear();
     closeBlockInStack.mockClear();
     setActiveBlockInStack.mockClear();
+    getLayoutModelForStaticTabSpy.mockClear();
     capturedOnSelect = undefined;
 });
 
@@ -551,5 +575,92 @@ describe("renderPaneChromeShell — rename", () => {
         await Promise.resolve();
 
         expect(headerCalls.at(-1).getLabel("b1")).toBe("Old");
+    });
+});
+
+// SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md — regression
+// coverage for a real, live bug: opening a brand-new tab and trying to add
+// a pane tab to its default agent pane was a silent no-op. Root cause: this
+// pane's chrome constructed while `applyTabPreset` was still seeding the new
+// tab's default layout — BEFORE `setActiveTab` ever ran (`tab-actions.ts`'s
+// `createTab()` deliberately keeps a new tab `activate: false` until its
+// preset finishes, per SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md).
+// `renderPaneChromeShell` used to resolve its own `layoutModel` via
+// `getLayoutModelForStaticTab()` (whichever tab is GLOBALLY active at that
+// moment — the OLD tab), latched forever per the chrome-stability design
+// (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) — so every
+// subsequent "+"/close/switch on that exact pane silently targeted the
+// wrong tab's tree: `pane.open` created a real block server-side every
+// time, but the pane's own `findNode` lookup could never find it (wrong
+// tree), so it went straight to the "orphaned, delete it" cleanup path
+// with no error surfaced to the user. Fixed by giving `NodeModel` its own
+// `layoutModel` field (layout/lib/types.ts), populated at construction from
+// whichever `LayoutModel` actually built it (`getNodeModel`,
+// layoutNodeModels.ts) — correct by construction, no timing dependency.
+describe("renderPaneChromeShell — resolves the OWNING tab's LayoutModel, never the globally-active one", () => {
+    // The direct repro: the node's own tab (`nodeModel.layoutModel`) is a
+    // DIFFERENT object than whatever "globally active tab" lookup would
+    // return — simulating a pane whose chrome constructed before its own
+    // tab became active. Every mutating action must operate on the node's
+    // own tab regardless.
+    function distinctWrongModel(): any {
+        return {
+            localTreeStateAtom: () => {},
+            treeState: { rootNode: { data: { blockStack: ["WRONG-TAB-BLOCK"] } } },
+        };
+    }
+
+    it("never calls getLayoutModelForStaticTab at all — not on render, not on add/close/activate", () => {
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        getLayoutModelForStaticTabSpy.mockReturnValue(distinctWrongModel());
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        headerCalls[0].onActivate("b2");
+        headerCalls[0].onClose("b2");
+        headerCalls[0].onAdd({ clientX: 1, clientY: 1 } as unknown as MouseEvent);
+        capturedOnSelect!({ meta: { view: "browser" } });
+
+        expect(getLayoutModelForStaticTabSpy).not.toHaveBeenCalled();
+    });
+
+    it("onActivate targets the node's own layoutModel even when the global lookup would return a different one", () => {
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        const wrongModel = distinctWrongModel();
+        getLayoutModelForStaticTabSpy.mockReturnValue(wrongModel);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        headerCalls[0].onActivate("b2");
+
+        expect(setActiveBlockInStack).toHaveBeenCalledWith(mockLayoutModel, "node-1", "b2");
+        // Direct identity check against the exact sentinel the global lookup
+        // was configured to return — captured in its own variable rather
+        // than read back off the spy, since the whole point of the OTHER
+        // test in this suite is that the spy is never even called (so
+        // `.mock.results` would be empty). An `objectContaining({ treeState:
+        // ... })` shape check would be useless here regardless: both the
+        // right and wrong model have a `treeState`, so it could never
+        // actually distinguish them.
+        expect(setActiveBlockInStack.mock.calls[0][0]).not.toBe(wrongModel);
+    });
+
+    it("onClose targets the node's own layoutModel even when the global lookup would return a different one", () => {
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        getLayoutModelForStaticTabSpy.mockReturnValue(distinctWrongModel());
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        headerCalls[0].onClose("b2");
+
+        expect(closeBlockInStack).toHaveBeenCalledWith(mockLayoutModel, "node-1", "b2");
+    });
+
+    it("onAdd (the '+' widget picker) targets the node's own layoutModel even when the global lookup would return a different one — the exact user-facing bug", () => {
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        getLayoutModelForStaticTabSpy.mockReturnValue(distinctWrongModel());
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        headerCalls[0].onAdd({ clientX: 1, clientY: 1 } as unknown as MouseEvent);
+        capturedOnSelect!({ meta: { view: "agent" } });
+
+        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "agent" } }, undefined);
     });
 });
