@@ -12,7 +12,8 @@ Project documentation organized by type.
 | `brand-icons/` | Logo/icon assets |
 | `cef-build/` | Guides for building the patched `libcef.so` from source |
 | `cef-patches/` | Patches applied to the vendored CEF source |
-| `handoff/`, `sessions/` | Point-in-time session handoff notes |
+| `debug/` | Screenshots and captures attached to a specific investigation |
+| `sessions/` | Point-in-time session handoff notes |
 | `incident/`, `recovery/` | Incident write-ups and recovery runbooks |
 | `investigations/` | Active bug investigations with reproduction steps |
 | `plans/` | Standalone implementation plans |
@@ -22,6 +23,11 @@ Project documentation organized by type.
 | `retro/` | Post-incident retrospectives |
 | `specs/` | Specs, design explorations, and implementation plans, from draft through implemented |
 | `status/` | Point-in-time subsystem status snapshots |
+
+This table is checked by `scripts/check-docs-dir-map.mjs` on every PR: every directory
+listed here must exist, and every directory under `docs/` must be listed. The
+former handoff directory was merged away in #2407, and its row survived here
+for six weeks afterwards — which is why the check now exists.
 
 Spec `**Status:**` lines use a closed vocabulary (`draft | proposed | active | implemented | living | historical | superseded`) — the rule, and the reader guardrail that goes with it, live in [`docs/specs/README.md`](specs/README.md#status-field).
 
