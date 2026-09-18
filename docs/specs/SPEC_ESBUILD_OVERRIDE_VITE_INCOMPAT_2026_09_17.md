@@ -1,7 +1,7 @@
 # SPEC: Remove the `esbuild >=0.28.2` override — it broke `task dev` and never protected the bundle
 
 **Date:** 2026-09-17
-**Status:** Implemented
+**Status:** implemented — PR #3360 (`404f8c9f`).
 **Related:** #3343 (`87d86ef1`, the vim/DECRQM fix that added the override),
 `docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md`,
 evanw/esbuild#4508
