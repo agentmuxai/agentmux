@@ -1,6 +1,11 @@
 # Architecture Refactor — Tracking & Handoff (A1–A15)
 
 **Created:** 2026-06-18 · **Owner of record:** smike · **Status:** living tracker
+**Board state (2026-09-18):** 13 of 15 done. **A2** is blocked on coordination, not
+work — the `agentmux-common` DTO extraction still collides with a5af #1498, and no
+DTO module exists in that crate yet. **A6** is half done: the mirror shipped, the
+scroll/expansion unification did not (see its row). A10 was marked open while
+already shipped; corrected below.
 **Source audit:** [`ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md`](ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md)
 (read it first — this doc is the actionable board on top of it; the audit holds the full
 file:line evidence and the six systemic themes.)
@@ -24,11 +29,11 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | ✅ **done** | #1566 | global.ts 1047→821 LOC; cycle broken; leaf violations fixed. |
 | A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
 | A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | ✅ **done** | #1564 | Backend `blockcontroller/`. Also fixed ACP session-id persist bug. |
-| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🟡 **mirror killed** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | AgentAtoms mirror removed, acceptance criterion met (2026-09-06). Remaining half — scroll/expansion unification — is SPEC_AGENT_PANE_LAYOUT_REDUCER render-path wiring; track it there. |
+| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🟡 **half done** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | Mirror half shipped 2026-09-06. The scroll/expansion half is NOT done: that spec §69 hands it to `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`, whose status reads "Phase 1 is the only one left". Do not close A6 on the mirror spec alone. |
 | A7 | Shared `ToolCorrelator` for translator tool-call/result | ★★★ | Low | Low | ✅ **done** | #1545 | `providers/tool-correlation.ts`. |
 | A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | ✅ **done** | #1554 | Backend `server/`. |
 | A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | ✅ **done** | #3044 | Busy predicate was already unified by the state-machine work (`isWorking`/`workingFromPhase`, 1 use left); #3044 routed the 11 raw dispatches + added a grep-shaped guard test. |
-| A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | 🟢 ready | — | Backend; touches where live data lives — migration care. |
+| A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | ✅ **done** | #3372 | One resolver (`agentmux_root()`); `AGENTMUX_DATA_HOME` + `AGENTMUX_HOME_OVERRIDE` reconciled; 7 ad-hoc sites routed through it. Fixed a latent bug on the way: srv fell back to `/` when no home resolved, writing to `/.agentmux`. |
 | A11 | Real `BlockRegistry` + registry-driven `ModalLayer` | ★★★ | Low-Med | Low | ✅ **done** | #1562 | Frontend `block/`, `element/`. |
 | A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | ✅ **done** | #1542, #1565 | StreamStalled removed; watchdogs NOT dead (skip); 65 dead COMMAND_* consts removed. |
 | A13 | Spec/doc hygiene (`INDEX.md`, merge dup dirs, archive) | ★★ | Med | Low | ✅ **done** | #1558 | Dirs merged; INDEX added; all path refs updated. |
@@ -162,7 +167,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Gotcha / blocker:** same gate as A6 (#1543).
 - **Status (2026-09-06):** ✅ done in #3044. By then the busy-selector half had already been resolved elsewhere — `isWorking`/`workingFromPhase` in `agent-pane-state/types.ts` is the single predicate since the state-machine PR G, and agent-view had one use left, not 17. The 11 raw `dispatch*` calls were still all there (7 hard `dispatchPane`, 2 `dispatchPaneIfRegistered`, 2 `dispatchDocIfRegistered`) and are now routed through `paneModel`; `agent-view-dispatch-via-pane-model.test.ts` pins the acceptance criterion. Blocker #1543 had merged long before.
 
-### A10 — Consolidate data-dir resolution onto `DataPaths` 🟢
+### A10 — Consolidate data-dir resolution onto `DataPaths` ✅
 - **Entry points:** canonical `agentmux-common/src/data_paths.rs:4-7` ("single source of truth") is
   bypassed by srv's own `backend/base.rs:62-154` + ad-hoc `dirs::home_dir().join(".agentmux")` at
   `config_watcher_fs.rs:41`, `main.rs:698-701,1293-1295`, `history/index.rs:19`,
@@ -172,6 +177,18 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   var names.
 - **Acceptance:** one path resolver; env vars reconciled; **migration check** that existing installs
   still find their data (Med risk — this is *where live data lives*).
+- **Status (2026-09-18):** ✅ done in #3372. `resolve_root` is now the public
+  `agentmux_root()` and honours BOTH env names, so no existing install moves; srv
+  delegates to it and seven ad-hoc sites route through it. The entry-point list
+  above was stale in two directions: `main.rs` had already been fixed, and four
+  sites it does not name turned up by grep. One apparent bypass was correct code
+  and deliberately left — `claude_adapter.rs:60` reads `~/.claude/projects`,
+  which is Claude's directory, not AgentMux's. The acceptance criterion is
+  covered by four tests, including one asserting that an install which only ever
+  set `AGENTMUX_DATA_HOME` still resolves to exactly that path.
+  Found on the way, and not in the audit: srv's resolver fell back to
+  `PathBuf::from("/")` when no home could be resolved, so such a host wrote to
+  `/.agentmux`. The board called this item "cleanup".
 
 ### A11 — Real `BlockRegistry` + registry-driven `ModalLayer` 🟢
 - **Entry points:** hardcoded `BlockRegistry` map at `frontend/app/block/block.tsx:47-61` (shadows the
