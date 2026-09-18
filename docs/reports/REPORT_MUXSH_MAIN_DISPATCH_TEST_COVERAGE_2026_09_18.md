@@ -1,6 +1,6 @@
 # Scope: `muxsh` main()/apiCall() test coverage — 2026-09-18
 
-**Status:** proposed → implementing this session
+**Status:** implemented — all 7 cases below shipped, `main()` exported for testability, full `muxsh` suite (100 tests) passing. — #3390
 **Why:** `muxsh.test.mjs`/`muxsh.contract.test.mjs` thoroughly cover `parseArgs`,
 `buildRequestBody`/`buildShellCreateBody`/`buildAgentSendBody`, and every
 `render*` function (477 + 131 lines of pure-logic tests against 541 lines of
