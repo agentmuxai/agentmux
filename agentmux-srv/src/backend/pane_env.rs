@@ -181,6 +181,170 @@ pub fn sanitize_external_std_command(cmd: &mut std::process::Command) {
 }
 
 #[cfg(test)]
+mod spawn_site_coverage {
+    //! Invariant I7: an instance's identity must not be inheritable by the
+    //! processes it spawns.
+    //!
+    //! The unit tests below this module check the *policy* — which variables
+    //! are stripped. Nothing checked the *call sites*, and that is the gap that
+    //! let this class of bug survive five separate write-ups: the policy was
+    //! never the hard part, remembering to apply it at a NEW spawn site was.
+    //! Both P0s on the original fix were exactly that — a spawn path nobody
+    //! had applied the strip to.
+    //!
+    //! So this walks srv's own source and fails when a file constructs a
+    //! process without either sanitizing or appearing in [`EXEMPT`] with a
+    //! stated reason. It is deliberately coarse (file granularity, substring
+    //! matching): a false positive costs one line and a sentence of
+    //! justification, a false negative costs another cross-instance breach.
+
+    use std::path::{Path, PathBuf};
+
+    /// Ways a process gets constructed in this crate.
+    const SPAWN_MARKERS: &[&str] = &["CommandBuilder::new", "process::Command::new", "Command::new("];
+
+    /// Applying any of these counts as covering the file.
+    const SANITIZERS: &[&str] = &[
+        "sanitize_pty_command",
+        "sanitize_process_command",
+        "sanitize_external_command",
+        "sanitize_external_pty_command",
+        "sanitize_external_std_command",
+    ];
+
+    /// Files that construct a process but must NOT be sanitized, each with the
+    /// reason. An entry here is a claim that inheriting this instance's
+    /// identity is either required or harmless — say which.
+    const EXEMPT: &[(&str, &str)] = &[
+        (
+            "src/crash_monitor.rs",
+            "Re-spawns our OWN exe as the crash monitor. It must stay the same              instance; stripping identity would point it at a different data dir              — inheritance is the requirement here, not the defect.",
+        ),
+        (
+            "src/backend/blockcontroller/shell/pty.rs",
+            "`where`/`which` PATH probes. Short-lived, output parsed and              discarded, no user-reachable descendants.",
+        ),
+        (
+            "src/backend/tool_store.rs",
+            "`where`/`which` PATH probes, same as shell/pty.rs.",
+        ),
+        (
+            "src/backend/process_tracker/registry.rs",
+            "Test-only: spawns `sh -c 'exit 0'` as a disposable child for the              job-object tracker test.",
+        ),
+        (
+            "src/backend/blockcontroller/app_server.rs",
+            "Test-only: fixture server binary + a `rustc` invocation that builds it.",
+        ),
+        (
+            "src/backend/blockcontroller/app_server_controller.rs",
+            "Test-only: `rustc` invocation building the same fixture.",
+        ),
+        (
+            "src/backend/blockcontroller/persistent.rs",
+            "No constructor — the marker appears only inside a comment about              why `echo` cannot be spawned directly.",
+        ),
+        (
+            "src/backend/blockcontroller/shell/tests.rs",
+            "Test-only: a disposable `sleep 30` made its own process-group \
+             leader, to prove a group-kill reaches an isolated group. Inherits \
+             nothing that outlives the test.",
+        ),
+    ];
+
+    fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rs_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// `Command::new(` must not match `AgentCommand::new(` — a substring hit
+    /// preceded by an identifier character is a different type.
+    fn contains_spawn_marker(src: &str) -> bool {
+        for marker in SPAWN_MARKERS {
+            let mut from = 0;
+            while let Some(idx) = src[from..].find(marker) {
+                let at = from + idx;
+                let prev_ok = at == 0
+                    || !src[..at]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_');
+                if prev_ok {
+                    return true;
+                }
+                from = at + marker.len();
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn every_spawn_site_either_sanitizes_or_is_exempt_with_a_reason() {
+        let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&src_root, &mut files);
+        assert!(files.len() > 50, "source walk found only {} files — walk is broken", files.len());
+
+        let mut offenders = Vec::new();
+        for file in &files {
+            let rel = file.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap_or(file);
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            // This file defines the sanitizers; it does not spawn.
+            if rel_str.ends_with("backend/pane_env.rs") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(file) else { continue };
+            if !contains_spawn_marker(&src) {
+                continue;
+            }
+            if SANITIZERS.iter().any(|s| src.contains(s)) {
+                continue;
+            }
+            if EXEMPT.iter().any(|(f, _)| *f == rel_str) {
+                continue;
+            }
+            offenders.push(rel_str);
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "I7: these files spawn a process without applying the pane-env policy, \n\
+             and are not exempt:\n  {}\n\n\
+             Either call the right `pane_env::sanitize_*` on the command, or add the \n\
+             file to EXEMPT in this module WITH a reason explaining why inheriting \n\
+             this instance's identity is required or harmless. Background: \n\
+             docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// An exemption naming a file that no longer exists is a stale claim, and
+    /// stale claims are how an allowlist quietly stops meaning anything.
+    #[test]
+    fn every_exemption_points_at_a_real_file_that_still_spawns() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for (rel, reason) in EXEMPT {
+            let path = root.join(rel);
+            assert!(path.exists(), "EXEMPT names a file that no longer exists: {rel}");
+            assert!(reason.len() > 30, "EXEMPT entry for {rel} needs a real reason, got: {reason:?}");
+            let src = std::fs::read_to_string(&path).expect("read exempt file");
+            assert!(
+                contains_spawn_marker(&src),
+                "{rel} no longer constructs a process — drop its EXEMPT entry rather than \
+                 leaving an exemption that grants nothing"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
