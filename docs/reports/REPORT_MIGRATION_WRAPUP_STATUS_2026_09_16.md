@@ -20,7 +20,7 @@ exposed — 45 broken links, a map advertising a directory deleted six weeks ear
 code comments citing documents that were never committed. One folds an archive directory
 and writes down why the last split is deliberate. A fifth (#3370, this change) folds two singleton directories
 and normalises 17 Status lines. **This does not close the lifecycle and does not organise
-the repo's docs:** 626 of 1,488 docs are still non-compliant (§5.5a), and most of them are
+the repo's docs:** 610 of the 1,483 scanned docs are still non-compliant (§5.5a), and most of them are
 non-spec doc types the closed vocabulary was never designed to describe — which needs a
 decision about the *vocabulary*, not another cleanup pass.
 **Date:** 2026-09-16
@@ -206,7 +206,7 @@ asks a singleton to fold when it does not have one.
 The constraint in `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §1 — *"If an item requires a
 fresh judgement call about a doc's content, it is out of scope"* — still binds, and it is
 what stops the remaining work: not the directory layout, but the `Status:` vocabulary
-(§5.5a), where 626 docs cannot be made compliant without either distorting their meaning or
+(§5.5a), where 610 docs cannot be made compliant without either distorting their meaning or
 extending the enum for non-spec doc types. That is the decision still owed to a human.
 
 **So: the documentation lifecycle is not complete, and the repo's docs are not organised.**
@@ -753,26 +753,28 @@ this backlog is surfaced, not repaired, and #3216's weekly sweep already reports
 
 #### 5.5a The backlog is three times bigger than this section says, because this section only counted specs
 
-Measured 2026-09-18 across **all 1,488 tracked `.md` under `docs/`** (excluding INDEX/README),
-not just `docs/specs/`:
+Measured 2026-09-18 across `docs/`: **1,489 tracked `.md`, of which 6 are INDEX/README and
+not themselves documents with a lifecycle — so 1,483 scanned**, not just `docs/specs/`.
+The rows below sum to that 1,483.
 
 | | count |
 |---|---:|
-| canonical `**Status:**` + a vocabulary word | 856 |
+| canonical `**Status:**` + a vocabulary word | 873 |
 | canonical line, non-vocabulary word | 208 |
-| other format, but the word IS in the vocabulary | 17 |
+| other format, but the word IS in the vocabulary | 1 |
 | other format, and the word is not | 46 |
 | no status declaration of any kind | 355 |
-| **total non-compliant** | **626** |
+| **scanned** | **1,483** |
+| **total non-compliant** | **610** |
 
 The gate is not specs-scoped — its `docs/` filter is applied in awk on the diff destination —
-so all 626 are in its blast radius the moment someone edits one.
+so all 610 are in its blast radius the moment someone edits one.
 
 **The reason most of them are non-compliant is not neglect.** The top non-vocabulary words are
 `root` x45 (`**Status:** root-caused; fix in ...`), `analysis` x25, `shipped` x11,
 `fixed` x7, `investigation` x6. Those are `docs/retro/` and `docs/analysis/` files, and the
 closed vocabulary — `draft | proposed | active | implemented | living | historical |
-superseded` — was designed for **specs**, which are 975 of the 1,488. A retro is not
+superseded` — was designed for **specs**, which are 974 of the 1,483 scanned. A retro is not
 "implemented"; it is a record of something that happened. Forcing it into a spec's lifecycle
 word makes the field less informative, not more.
 
@@ -804,8 +806,11 @@ wrong, and re-measuring strictly gives the table above:
   actually is. That is precisely the "confidently wrong status" trade
   `PLAN_DOCS_CLEANUP_EXECUTION` §4 warns against, arrived at from the other direction.
 
-So the mechanically-safe set is **17 docs**: the format is wrong, the word is already right,
-and fixing it changes no claim. Everything else in this table needs a human to read the doc.
+So the mechanically-safe set was **17 docs**: the format wrong, the word already right, and
+fixing it changing no claim. 16 are normalised in this PR — the 17th keeps its status in
+YAML frontmatter, where rewriting it to `**Status:**` broke the YAML, so it was reverted and
+left outside the gate like its sibling spec. That is why the row above reads 1, not 17.
+Everything else in this table needs a human to read the doc.
 
 ### 5.6 Automate §3's reverse check 🟢 **recommended**
 
