@@ -1,7 +1,7 @@
 # Report: Network system — architecture, DRYness, and a robust/high-performance LAN toggle
 
 **Date:** 2026-09-06
-**Status:** Draft — architecture review + design recommendation. Not implemented.
+**Status:** active — architecture review whose top recommendations shipped the same day. §9 item 1 (concurrent peer fan-out) is `query_peers_concurrently` in `lan_discovery.rs`, #3017; item 3's `LanListenerSupervisor` is `backend/lan_listeners.rs`, #3021, which cites this report in its module header and confirms Part I's central claim — LAN reachability is added by binding *additional* listeners alongside the untouched loopback ones, not by rebinding an active server. §7's naming observation is cited from `wconfig/state.rs`. **Items 5 (unify the tier-forward blocks) and 6 (resolve tier 4) have not shipped**, and §9's ordering note still applies: unify before adding tier 4, or cloud relay becomes a fourth copy.
 **Author:** Agent2
 **Companion:** `REPORT_LAN_TOGGLE_WITHOUT_RESTART_2026_09_06.md` (current-state
 analysis of the toggle bug). This report supersedes that one's §6
