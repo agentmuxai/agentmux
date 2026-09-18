@@ -286,12 +286,6 @@
         padding: var(--space-0-5) 0;
     }
 
-    .status-bar-popover-hint {
-        font-size: 0.8em;
-        opacity: 0.6;
-        padding: 0 0 var(--space-0-5) 0;
-    }
-
     // Informational callout — same border-left-accent + tinted-background
     // treatment as .identity-delete-notice, but --info-color instead of
     // --warning-color: this isn't a warning, it's a heads-up so an OS
