@@ -74,21 +74,31 @@ const HOISTS_OWN_CHROME = new Set([
 /**
  * Subset of `HOISTS_OWN_CHROME` whose stack members stay mounted
  * SIMULTANEOUSLY instead of being swapped one-at-a-time behind the inner
- * `<Key>` — every member's own `<Block>` (xterm instance, PTY connection,
- * ViewModel) is created once and never torn down again while it stays in
- * the stack; switching tabs just toggles which one is visible. Reported
- * live after the chrome-stability fix landed: with header/strip already
- * stable, a terminal tab switch still showed a brief spinner/re-render
- * flash from `block.tsx`'s ready()-gate cross-fade, since the inner `<Key>`
- * was STILL fully remounting `<Block>` (new `TermViewModel`, new xterm.js
- * instance) on every switch — editor's own file tabs never do this at all
- * (one persistent block, no remount), which is why editor felt "flawless"
- * by comparison. Scoped to `"term"` only for now: each terminal tab is a
- * genuinely separate backend-backed block with its own live PTY, unlike
- * agent's picker/history tabs, which have more entangled per-tab state
- * (quick-fork, launch-in-place) not yet audited for keep-alive safety.
+ * `<Key>` — every member's own `<Block>` (xterm instance/PTY connection for
+ * term; `AgentViewModel` + parsed document for agent) is created once and
+ * never torn down again while it stays in the stack; switching tabs just
+ * toggles which one is visible. Reported live after the chrome-stability fix
+ * landed: with header/strip already stable, a terminal tab switch still
+ * showed a brief spinner/re-render flash from `block.tsx`'s ready()-gate
+ * cross-fade, since the inner `<Key>` was STILL fully remounting `<Block>`
+ * (new `TermViewModel`, new xterm.js instance) on every switch — editor's
+ * own file tabs never do this at all (one persistent block, no remount),
+ * which is why editor felt "flawless" by comparison.
+ *
+ * `"agent"` added per SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md, after an
+ * explicit audit of the entangled per-tab state this set's own comment used
+ * to warn about (quick-fork, launch-in-place): both reset via mechanisms
+ * already internal to a single Block (an in-place `<Show when={agentId()}>`
+ * swap for launch-in-place; a `pushBlockOntoStack` for quick-fork), never by
+ * relying on the LEAF remounting the Block — so keep-alive doesn't disturb
+ * either. The one real behavior change the audit found: two user-facing
+ * timers (AgentQuestionPanel's auto-timeout, useAgentFailure's auto-retry)
+ * used to implicitly pause when a backgrounded tab unmounted; under
+ * keep-alive they'd otherwise keep running invisibly. Both are now
+ * explicitly gated on `isBlockDormant` instead of relying on that
+ * incidental pause — see each one's own doc comment.
  */
-const KEEP_ALIVE_TYPES = new Set(["term"]);
+const KEEP_ALIVE_TYPES = new Set(["term", "agent"]);
 
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;

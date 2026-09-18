@@ -20,6 +20,7 @@ import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
+import { isBlockDormant } from "@/app/store/block-component-registry";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
@@ -511,6 +512,12 @@ const AgentPresentationView = ({
     progressBarMount: () => HTMLDivElement | undefined;
 }): JSX.Element => {
     const block = model.blockAtom;
+    // True while this tab is a hidden, kept-alive pane-tab-strip member
+    // (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) rather than the one the
+    // user is looking at — threaded into AgentQuestionPanel's auto-timeout
+    // and useAgentFailure's auto-retry below so neither fires invisibly
+    // while backgrounded.
+    const dormant = isBlockDormant(model.blockId);
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -1900,6 +1907,7 @@ const AgentPresentationView = ({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
+        isDormant: dormant,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
@@ -2341,6 +2349,7 @@ const AgentPresentationView = ({
                 pending={pendingQuestions}
                 onAnswer={handleAnswer}
                 onCancel={handleCancel}
+                isDormant={dormant}
             />
 
             {/* Queue sits directly below the feed so the user's newly-

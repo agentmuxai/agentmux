@@ -381,3 +381,75 @@ describe("PaneLeafChrome — keep-alive (term)", () => {
         expect(screen.getByTestId("block-b2")).toBeInTheDocument();
     });
 });
+
+// SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: "agent" added to
+// KEEP_ALIVE_TYPES alongside "term" after auditing agent's own entangled
+// per-tab state (quick-fork, launch-in-place) for keep-alive safety — same
+// acceptance criteria as the term suite above, just for the other type.
+describe("PaneLeafChrome — keep-alive (agent)", () => {
+    it("keeps every stack member's Block mounted across a switch instead of remounting", async () => {
+        setBlockView("b1", "agent");
+        setBlockView("b2", "agent");
+        setBlockStack("node-1", ["b1", "b2"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        const blockB1Before = screen.getByTestId("block-b1");
+        const blockB2Before = screen.getByTestId("block-b2");
+        expect(renderPaneChromeCallCount.count).toBe(1);
+
+        setActiveBlockId("b2");
+
+        expect(screen.getByTestId("block-b1")).toBe(blockB1Before);
+        expect(screen.getByTestId("block-b2")).toBe(blockB2Before);
+        expect(renderPaneChromeCallCount.count).toBe(1);
+
+        setActiveBlockId("b1");
+        expect(screen.getByTestId("block-b1")).toBe(blockB1Before);
+        expect(screen.getByTestId("block-b2")).toBe(blockB2Before);
+    });
+
+    it("mounts a newly-pushed stack member immediately, before it's ever active", async () => {
+        setBlockView("b1", "agent");
+        setBlockView("b2", "agent");
+        setBlockStack("node-1", ["b1"]);
+        const [activeBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        expect(screen.queryByTestId("block-b2")).toBeNull();
+
+        setBlockStack("node-1", ["b1", "b2"]);
+
+        expect(screen.getByTestId("block-b1")).toBeInTheDocument();
+        expect(screen.getByTestId("block-b2")).toBeInTheDocument();
+    });
+
+    // The specific keep-alive mechanic AgentQuestionPanel/useAgentFailure's
+    // own dormancy-pause fixes depend on: a hidden stack member is marked
+    // dormant (visibility:hidden, pointer-events:none), not merely "not the
+    // active one" — see setKeepAliveBlockDormant's own call site below.
+    it("marks a hidden stack member's slot with visibility:hidden and pointer-events:none", async () => {
+        setBlockView("b1", "agent");
+        setBlockView("b2", "agent");
+        setBlockStack("node-1", ["b1", "b2"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        const slotFor = (blockId: string) => screen.getByTestId(`block-${blockId}`).parentElement as HTMLElement;
+        expect(slotFor("b1").style.visibility).toBe("visible");
+        expect(slotFor("b2").style.visibility).toBe("hidden");
+        expect(slotFor("b2").style.pointerEvents).toBe("none");
+
+        setActiveBlockId("b2");
+        expect(slotFor("b1").style.visibility).toBe("hidden");
+        expect(slotFor("b2").style.visibility).toBe("visible");
+    });
+});

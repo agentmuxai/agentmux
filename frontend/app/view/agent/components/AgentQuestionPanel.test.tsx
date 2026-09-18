@@ -798,3 +798,95 @@ describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCRO
         expect(scroll?.contains(submitBtn)).toBe(false);
     });
 });
+
+// SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: once agent tabs stay mounted
+// while backgrounded (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES), an unmount
+// no longer implicitly pauses this countdown — it must be paused explicitly
+// or it would auto-answer a question the user was never shown.
+describe("AgentQuestionPanel dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md)", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("does not auto-submit while isDormant is true, even past the full timeout", () => {
+        // Deliberately does NOT assert on the countdown text's visibility —
+        // that's gated purely by the hover-pause `hidden()` signal (see the
+        // component's own `<Show when={!hidden()}>`), not by dormancy. A
+        // dormant tab's whole DOM subtree already sits behind the pane
+        // tab-strip's own `visibility: hidden` wrapper (pane-leaf-chrome.tsx),
+        // so what this component renders internally is moot; the only
+        // observable contract here is that the timeout itself doesn't fire.
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        const [dormant] = createSignal(true);
+        render(() => (
+            <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} isDormant={dormant} />
+        ));
+
+        vi.advanceTimersByTime(60_000); // well past the 30s default
+        expect(onAnswer).not.toHaveBeenCalled();
+    });
+
+    it("re-arms a fresh full countdown the moment isDormant flips back to false, not resumed from where it left off", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        const [dormant, setDormant] = createSignal(true);
+        render(() => (
+            <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} isDormant={dormant} />
+        ));
+
+        // Backgrounded for far longer than the timeout would ever allow.
+        vi.advanceTimersByTime(120_000);
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        setDormant(false); // tab becomes the active one again
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(29_000);
+        expect(onAnswer).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("going dormant mid-countdown pauses it instead of losing the in-progress answer state", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        const [dormant, setDormant] = createSignal(false);
+        render(() => (
+            <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} isDormant={dormant} />
+        ));
+
+        // Clicking requires the pointer to be over the target first, so this
+        // also fires a real mouseenter — the panel is already hover-hidden by
+        // the time dormancy kicks in below, same as the merge test elsewhere
+        // in this file notes.
+        await user.click(screen.getByRole("radio", { name: /Red/ }));
+        vi.advanceTimersByTime(10_000); // still inside the 15s hover-hide window
+
+        setDormant(true);
+        vi.advanceTimersByTime(60_000); // would have long since fired if unpaused
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        setDormant(false);
+        vi.advanceTimersByTime(30_000); // fresh 30s window
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        // The user's manual selection survived the dormancy round-trip —
+        // the auto-fill never overwrote it.
+        expect(onAnswer.mock.calls[0][0].answers_map["Pick a color"]).toBe("Red");
+        expect(onAnswer.mock.calls[0][0].autoFilledCount).toBe(0);
+    });
+
+    it("defaults to never-dormant when isDormant is omitted (every pre-existing call site)", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+});
