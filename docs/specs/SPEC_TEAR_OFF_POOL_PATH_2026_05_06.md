@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-06
 **Owner:** AgentA
-**Status:** spec
+**Status:** proposed — spec
 **Related:** [`SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](./SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md), [`SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md`](./SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md)
 
 ---

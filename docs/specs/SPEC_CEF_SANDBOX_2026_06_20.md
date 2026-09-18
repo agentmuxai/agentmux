@@ -1,5 +1,5 @@
 # SPEC: Enable CEF Renderer Sandbox
-**Status:** Approved for implementation
+**Status:** proposed — Approved for implementation
 **Issue:** #1374
 **Date:** 2026-06-20
 **Author:** AgentMux Engineering

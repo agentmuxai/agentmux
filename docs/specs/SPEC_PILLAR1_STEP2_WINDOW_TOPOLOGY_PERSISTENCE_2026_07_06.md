@@ -3,7 +3,7 @@
 **Date:** 2026-07-06
 **Type:** Sized implementation spec (the deliverable `SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`
 called for as its own next step)
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Builds on:** #864 (layout single writer, merged 2026-07-06 — the hard prerequisite for this step)
 **Resolves:** Step 2 of the 6-step Pillar 1 sequence in `SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` §6
 

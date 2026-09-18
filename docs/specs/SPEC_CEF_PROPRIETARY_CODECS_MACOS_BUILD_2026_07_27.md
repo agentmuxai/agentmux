@@ -1,6 +1,14 @@
 # Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF)
 
 **Status:** implemented — build completed and tagged (see STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md); verified 2026-08-10.
+
+> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> requires an `implemented` Status to cite its PR. This one cannot, and a guess would
+> be worse than the gap: the only commit that set this Status was a bulk restamp
+> (or predates the PR-squash convention), so git alone does not identify who
+> shipped it. Candidates found in this doc's own body were checked and rejected —
+> they touch no related source. Verify against the code before trusting this line.
+
 **Author:** AgentO
 **Date:** 2026-07-27
 **Issue:** [agentmuxai/agentmux#2311](https://github.com/agentmuxai/agentmux/issues/2311)

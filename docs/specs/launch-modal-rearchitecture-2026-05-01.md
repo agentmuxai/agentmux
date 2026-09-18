@@ -1,7 +1,7 @@
 # Launch Agent Modal — Performance & Per-Tab Scoping
 
 **Date:** 2026-05-01
-**Status:** Spec / Proposal
+**Status:** proposed — Spec / Proposal
 **Repo state:** main @ `257bf0ff`, AgentMux v0.33.549
 **Author:** AgentC
 

@@ -268,6 +268,12 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut proc = {
                     let mut c = tokio::process::Command::new("sh");
                     c.args(["-c", &cmd.command]);
+                    // shellexec runs arbitrary agent-supplied commands and, per
+                    // the note below, fires on every MCP Shell tool call — so a
+                    // build started this way would otherwise adopt this
+                    // instance's channel and data dir. Same class as
+                    // shell_node.rs; see backend::pane_env.
+                    crate::backend::pane_env::sanitize_process_command(&mut c);
                     // CREATE_NO_WINDOW: console-flash suppression — on Windows
                     // this `sh` is Git Bash (console-subsystem), and srv is
                     // launched windowless, so without the flag every shellexec

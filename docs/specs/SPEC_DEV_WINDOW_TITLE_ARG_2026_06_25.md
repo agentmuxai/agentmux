@@ -2,6 +2,14 @@
 
 **Date:** 2026-06-25  
 **Status:** Implemented (this doc's own design shipped — confirmed by reading
+
+> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> requires an `implemented` Status to cite its PR. This one cannot, and a guess would
+> be worse than the gap: the only commit that set this Status was a bulk restamp
+> (or predates the PR-squash convention), so git alone does not identify who
+> shipped it. Candidates found in this doc's own body were checked and rejected —
+> they touch no related source. Verify against the code before trusting this line.
+
 current `main`: `Taskfile.yml`'s `dev`/`dev:serve` tasks carry `TITLE` →
 `VITE_DEV_TITLE` exactly as designed, and `frontend/app-init.ts` applies it via
 `UpdateObjectMeta` — status was never updated after landing, corrected here).

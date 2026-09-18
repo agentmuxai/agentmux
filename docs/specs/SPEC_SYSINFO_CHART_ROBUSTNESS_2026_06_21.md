@@ -1,7 +1,7 @@
 # Spec: Sysinfo CPU Chart Robustness
 
 **Date:** 2026-06-21  
-**Status:** Ready for implementation  
+**Status:** proposed — Ready for implementation
 **Files in scope:**
 - `frontend/app/view/sysinfo/sysinfo-model.ts`
 - `frontend/app/view/sysinfo/sysinfo-view.tsx`

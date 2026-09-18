@@ -1,6 +1,6 @@
 # AGENTMUX_LOCAL_URL Pane Injection
 
-**Status:** Approved
+**Status:** proposed — Approved
 **Date:** 2026-03-16
 **Author:** AgentY
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { useBlockAtom } from "@/app/store/global";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, type Accessor } from "solid-js";
@@ -56,7 +56,7 @@ function isMemorySubsection(v: unknown): v is MemorySubsection {
 
 export class ArmoryViewModel implements ViewModel {
     viewType = "armory";
-    renderPaneChrome = genericRenderPaneChrome;
+    renderPaneChrome = renderPaneChromeShell;
     // Suppresses BlockFrame's own inline header once chrome is hoisted —
     // required whenever a view type is added to pane-leaf-chrome.tsx's
     // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors

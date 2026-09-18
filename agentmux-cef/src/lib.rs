@@ -842,6 +842,34 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
 
     // Dev-only: write authkey.dev so external test harnesses can call
     // the service API without polling logs or driving the UI. Gate is
+    // Pick a FREE remote-debugging port instead of a fixed one: AgentMux runs
+    // many instances in parallel (isolation I1–I6), so a hardcoded port collides
+    // (WSAEADDRINUSE / 0x2740) and the 2nd+ instance gets no DevTools server →
+    // the browser DOM API (`/agentmux/browser/*`) can't connect. Prefer the
+    // conventional port (9223 dev / 9222 release) for muscle memory; fall back to
+    // an OS-assigned free port. Store the ACTUAL port so `browser_api` targets
+    // it. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §2.
+    let preferred: u16 = if is_dev { 9223 } else { 9222 };
+    let debug_port: u16 = {
+        use std::net::TcpListener;
+        if TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
+            preferred
+        } else {
+            TcpListener::bind(("127.0.0.1", 0))
+                .and_then(|l| l.local_addr())
+                .map(|a| a.port())
+                .unwrap_or(preferred)
+        }
+    };
+    *app_state.debug_port.lock() = debug_port;
+    tracing::info!("CEF remote-debugging port: {} (preferred {})", debug_port, preferred);
+
+    // Resolved BEFORE authkey.dev is written, so the file can publish it.
+    // Tooling used to hardcode 9222/9223, which silently targets whichever
+    // instance won the race rather than the one the caller meant — an agent
+    // attached a debugger to a DIFFERENT running instance that way. A
+    // well-known constant cannot identify an instance; the per-instance file
+    // can. See docs/specs/SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17.md.
     // Write authkey.dev for ALL runtime modes (dev, portable, installed).
     // The file lets bench-term-echo.mjs and the PowerShell test harnesses
     // discover the running instance without manual --ws-url / --auth-key flags.
@@ -870,6 +898,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
             &ipc_token,
             &instance,
             host_pid,
+            debug_port,
         ) {
             Ok(p) => tracing::info!("Wrote authkey file: {}", p.display()),
             Err(e) => tracing::warn!("Failed to write authkey file: {}", e),
@@ -951,27 +980,6 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     crate::commands::cleanup_legacy_context_dirs(&data_dir.to_string_lossy());
 
     // Configure CEF settings.
-    // Pick a FREE remote-debugging port instead of a fixed one: AgentMux runs
-    // many instances in parallel (isolation I1–I6), so a hardcoded port collides
-    // (WSAEADDRINUSE / 0x2740) and the 2nd+ instance gets no DevTools server →
-    // the browser DOM API (`/agentmux/browser/*`) can't connect. Prefer the
-    // conventional port (9223 dev / 9222 release) for muscle memory; fall back to
-    // an OS-assigned free port. Store the ACTUAL port so `browser_api` targets
-    // it. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §2.
-    let preferred: u16 = if is_dev { 9223 } else { 9222 };
-    let debug_port: u16 = {
-        use std::net::TcpListener;
-        if TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
-            preferred
-        } else {
-            TcpListener::bind(("127.0.0.1", 0))
-                .and_then(|l| l.local_addr())
-                .map(|a| a.port())
-                .unwrap_or(preferred)
-        }
-    };
-    *app_state.debug_port.lock() = debug_port;
-    tracing::info!("CEF remote-debugging port: {} (preferred {})", debug_port, preferred);
 
     // Route CEF's internal Chromium logging into our log dir alongside the
     // tracing-subscriber file. Without this, init failures leave an empty

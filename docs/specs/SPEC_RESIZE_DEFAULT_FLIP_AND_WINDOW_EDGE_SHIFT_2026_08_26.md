@@ -1,7 +1,7 @@
 # SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes
 
 **Date:** 2026-08-26
-**Status:** analysis + design — not implemented
+**Status:** proposed — analysis + design — not implemented
 **Author:** Loap (agent)
 **Tracking discussion:** repo owner, this session — "the default should be the
 relative resize that currently shift-resize does. The new feature is that when

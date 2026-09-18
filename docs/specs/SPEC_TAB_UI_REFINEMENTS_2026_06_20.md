@@ -1,7 +1,7 @@
 # SPEC: Tab UI Refinements
 
 **Date:** 2026-06-20  
-**Status:** Approved for implementation  
+**Status:** proposed — Approved for implementation
 **Scope:** `frontend/app/tab/`
 
 ---

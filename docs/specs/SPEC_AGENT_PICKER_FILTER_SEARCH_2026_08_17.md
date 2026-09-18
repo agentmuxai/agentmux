@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 **Author:** AgentY
-**Status:** Design analysis — needs answers to the two open questions below before implementation.
+**Status:** proposed — Design analysis — needs answers to the two open questions below before implementation.
 
 ---
 

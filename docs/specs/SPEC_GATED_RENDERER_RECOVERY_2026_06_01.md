@@ -1,6 +1,6 @@
 # Gated Renderer Recovery — Memory-Aware Crash Handling
 
-**Status:** Phase 1a implemented (PR #1229); Phases 1b/2/3 designed
+**Status:** active — Phase 1a implemented (PR #1229); Phases 1b/2/3 designed — #1229
 **Date:** 2026-06-01
 **Author:** AgentA
 **Tracking:** open — no PR yet

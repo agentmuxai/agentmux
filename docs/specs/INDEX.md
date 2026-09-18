@@ -261,6 +261,7 @@ partial list.
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
 | [`SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17`](SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md) | SPEC: External-link routing + single robust "Restore" recovery |
 | [`SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16`](SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md) | SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle |
+| [`SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17`](SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17.md) | SPEC: tooling must discover an instance, not assume a well-known port |
 | [`SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27`](SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md) | Spec: Opt-in isolated auth for `task dev` testing |
 | [`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14`](SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md) | SPEC: 24h TTL / rotation for the host-tier jekt signing key |
 | [`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15`](SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) | SPEC: LAN-tier Ed25519 jekt signing |
@@ -288,6 +289,7 @@ partial list.
 | [`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md) | SPEC: Durable, location-consistent, transparent native memory |
 | [`SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10`](SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md) | SPEC: Restore the ghost-text suggestion when the composer is cleared back to empty |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
+| [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
 | [`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) | SPEC: Pane tab strip — editor-style in-pane tabs for agent and terminal panes |
 | [`SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12`](SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md) | SPEC: Bind the pane tab strip to its own pane's zoom, and fix top scroll-clearance for short agent conversations |
@@ -454,6 +456,7 @@ partial list.
 | [`SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02`](SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02.md) | SPEC — Per-model effort-capability validation for the composer strip |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
 | [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
+| [`SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18`](SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md) | SPEC: panes should not hold the instance's API credential |
 | [`SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21`](SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21.md) | SPEC — Pane Minimize Button + Failed Tool Call Immediate Collapse |
 | [`SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27`](SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md) | SPEC — Pane Minimize: Column Dissolve on Full-Column Collapse |
 | [`SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24`](SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md) | SPEC — Pane Minimize Refinements |

@@ -1,7 +1,7 @@
 # SPEC: Open the agent-pane Shell drawer below the composer, not above it
 
 **Date:** 2026-08-08
-**Status:** Implemented (same-day PR; §3.2 corrected against live CDP verification before merge)
+**Status:** Implemented (same-day PR; §3.2 corrected against live CDP verification before merge) — #2466
 **Author:** Agent3 (agent)
 **Trigger:** User request — *"when opening the Shell button in the agent
 pane, we need the shell to open below (not above) the agent pane text

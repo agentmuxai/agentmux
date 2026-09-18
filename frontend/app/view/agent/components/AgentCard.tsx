@@ -22,6 +22,7 @@
 import { createMemo, onMount, Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import type { PinDrift } from "../providers/version-drift";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 interface AgentCardProps {
@@ -32,6 +33,15 @@ interface AgentCardProps {
      *  true = CLI present in the per-version cache.
      *  false = needs install — render the bottom-right ribbon. */
     installed: boolean | undefined;
+    /**
+     * How the installed CLI relates to the version AgentMux pins. Only
+     * `"behind-pin"` renders anything; every other state (including
+     * `"unknown"`, which is what a provider with no pin or no readable version
+     * resolves to) is deliberately silent. A card is a launch affordance, not
+     * a version dashboard — the Toolchain pane is where the full picture
+     * lives. See `../providers/version-drift.ts`.
+     */
+    drift?: PinDrift;
     /**
      * Opens the AgentLaunchModal (or Install modal) for this definition.
      * The synthetic `MouseEvent` is forwarded so the parent can read
@@ -140,6 +150,23 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             <Show when={props.installed === false}>
                 <span class="agent-card-install-ribbon" aria-hidden="true">
                     Click to install
+                </span>
+            </Show>
+            {/* Upgrade hint — only when the managed CLI is OLDER than the
+                version AgentMux validates against, which is the one case the
+                user can act on and the one most likely to reproduce bugs we
+                have already fixed. Deliberately not shown for `ahead-of-pin`
+                (untested but not broken) or when our own pin trails upstream
+                (ours to bump, nothing they can do). Not rendered at all while
+                the install ribbon is up: "not installed" already supersedes
+                "out of date", and two overlapping CTAs on one card is how the
+                install ribbon's own spec says not to do it. */}
+            <Show when={props.installed !== false && props.drift === "behind-pin"}>
+                <span
+                    class="agent-card-upgrade-badge"
+                    title="A newer CLI version is pinned by AgentMux — update it in the Toolchain pane"
+                >
+                    <i class="fa-solid fa-circle-up" /> Update available
                 </span>
             </Show>
             {/* Option E (PR #1008): "+ New" affordance — visible only

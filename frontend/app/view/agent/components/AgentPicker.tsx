@@ -48,6 +48,7 @@ import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { openOrFocusHistoryTab } from "../open-history-tab";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
+import { resolveDrift, type PinDrift } from "../providers/version-drift";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
@@ -233,6 +234,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     //   true      = present in the per-version cache
     //   false     = needs install — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
+    /** Per-definition CLI drift, resolved alongside the install check (same
+     *  round-trip). Absent = not checked yet, or a provider with no pin. */
+    const [driftState, setDriftState] = createSignal<Record<string, PinDrift | undefined>>({});
 
     // Phase 1 two-tier picker (reagent P2 on #1011): the auto-continue
     // session-state cache + probe lived here for the Option E PR-2
@@ -263,8 +267,21 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             const r = await RpcApi.InstallCheckCommand(TabRpcClient, {
                 providerId: prov.id,
                 cliCommand: prov.cliCommand,
+                // Lets the same round-trip answer "which version", so the card
+                // can show an upgrade hint without a second probe per card.
+                npmPackage: prov.npmPackage,
             });
             setInstallState((s) => ({ ...s, [agent.id]: r.installed }));
+            // Same predicate the Toolchain pane renders — the card must not
+            // develop its own opinion about what "behind" means.
+            setDriftState((s) => ({
+                ...s,
+                [agent.id]: resolveDrift({
+                    installed: r.version ?? undefined,
+                    pinned: prov.pinnedVersion,
+                    found: r.installed,
+                }).drift,
+            }));
         } catch {
             // Treat as needs-install — better to over-prompt than miss.
             setInstallState((s) => ({ ...s, [agent.id]: false }));
@@ -992,6 +1009,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         launching={launching() === agent.id}
                                         disabled={busy()}
                                         installed={installState()[agent.id]}
+                                        drift={driftState()[agent.id]}
                                         onLaunch={handleTemplateSelect}
                                         // Phase 2: right-click → Hide
                                         // template (Q2 Decision Y). Only

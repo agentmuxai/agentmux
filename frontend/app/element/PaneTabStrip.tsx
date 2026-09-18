@@ -85,7 +85,7 @@ export interface PaneTabStripProps<T> {
     /** The far-right `+` — omitted entirely when the pane type has no
      *  "add tab" action. Always pinned last regardless of tab count or
      *  strip scroll state. */
-    /** Optional MouseEvent param (universal Pane Tabs, GenericPaneChrome) —
+    /** Optional MouseEvent param (universal Pane Tabs, PaneChrome) —
      *  lets a caller position a widget picker at the click. Every existing
      *  caller passes a zero-arg closure, which stays valid since the param
      *  is optional and simply goes unused there. */

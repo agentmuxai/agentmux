@@ -1,7 +1,7 @@
 # Modal Cleanup — Migration Audit & Plan
 
 **Date:** 2026-05-01
-**Status:** Audit / Plan
+**Status:** historical — Audit / Plan
 **Repo state:** main @ `257bf0ff`, AgentMux v0.33.549
 **Author:** AgentC
 **Companion to:** `launch-modal-rearchitecture-2026-05-01.md`

@@ -1,7 +1,7 @@
 # SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28)
 
 **Author:** AgentA
-**Status:** Proposal — chosen pattern, ready to implement.
+**Status:** proposed — Proposal — chosen pattern, ready to implement.
 **Reporter:** user (this session) — "we want a reliable way to ensure we can iterate on patches during local dev work .. we tried other stuff, but it keeps breaking, can u research best practices."
 **Affected:** `Taskfile.yml` (`package`, `package:local`, `dev:local`), `scripts/package-portable.sh`, `scripts/bump-wrapper.sh` (no longer called by package), `agentmux-common/src/data_paths.rs` (data-dir keying), `CLAUDE.md` (the versioning section).
 **Supersedes:** the `task package` auto-commit-bump introduced to replace the old ephemeral `package:local`.

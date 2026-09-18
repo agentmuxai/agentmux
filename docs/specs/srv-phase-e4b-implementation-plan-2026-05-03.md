@@ -1,7 +1,7 @@
 # srv Phase E.4.B — Implementation Plan
 
 **Date:** 2026-05-03
-**Status:** Plan with grounded analysis. Forensic findings citations throughout.
+**Status:** proposed — Plan with grounded analysis. Forensic findings citations throughout.
 **Scope:** `agentmux-srv/` — make `LayoutState.rootnode` reducer-shaped on the Rust side
 **Reads-this-first:**
 - `docs/specs/SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md` — original spec; deferred E.4.B as "the hard part"

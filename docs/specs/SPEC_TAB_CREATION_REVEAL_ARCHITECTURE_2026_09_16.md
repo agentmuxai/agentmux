@@ -17,7 +17,7 @@ to switch to a different tab before activation, and the old unconditional
 fixed by capturing the active tab id BEFORE `CreateTab` fires and skipping
 activation if it's changed by the time `applyTabPreset` resolves (new tab
 stays created-but-inactive, reachable via the tab bar normally). Covered
-by a new `tab-actions.test.ts` (4 cases, all passing).
+by a new `tab-actions.test.ts` (4 cases, all passing). — #3300
 **Scope:** window-level tabs only (`frontend/app/workspace/workspace.tsx`,
 `frontend/app/store/tab-actions.ts`, `frontend/app/store/tab-reveal.ts`,
 `frontend/app/tab/tab-presets.ts`) — specifically the "+" new-tab creation

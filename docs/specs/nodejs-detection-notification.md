@@ -1,7 +1,7 @@
 # Spec: Node.js Detection & User Notification
 
 **Date:** 2026-03-19
-**Status:** Implementation Ready
+**Status:** proposed — Implementation Ready
 **Priority:** High — Codex and Gemini agents fail silently when Node.js is missing
 **Effort:** ~2 hours
 

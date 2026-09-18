@@ -1,7 +1,7 @@
 # SPEC — Tool Preview Refinements: Word-wrap + Independent Zoom
 
 **Date:** 2026-06-26  
-**Status:** Analysis complete — ready to implement
+**Status:** proposed — Analysis complete — ready to implement
 
 ---
 

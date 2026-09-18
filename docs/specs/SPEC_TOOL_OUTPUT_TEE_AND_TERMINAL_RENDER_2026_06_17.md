@@ -4,7 +4,7 @@
 **Status:** Implemented (smike) — F1 hook `tee` rewrite + F2 `TerminalOutput`. One
 deviation: `TerminalOutput` lives in `view/agent/components/` (next to the cap
 utilities and sibling renderers) rather than `element/`, so the view→element
-dependency direction stays correct; it imports `AnsiLine` from `element/`.
+dependency direction stays correct; it imports `AnsiLine` from `element/`. — #1511
 **Author:** analysis pass over `main` @ `f958fdd0`
 **Components:** `agentmux-bashwrap` (hook), `frontend/app/view/agent/components/*`, `frontend/app/element/ansiline.tsx`
 

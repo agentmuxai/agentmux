@@ -1,7 +1,7 @@
 # SPEC: Guard integration-test srv spawns (kill_on_drop / Job Object)
 
 **Date:** 2026-07-11
-**Status:** Ready for implementation
+**Status:** proposed — Ready for implementation
 **Tracking:** session task #16
 **Scope:** `agentmux-srv/tests/` (test infrastructure only — no product code)
 

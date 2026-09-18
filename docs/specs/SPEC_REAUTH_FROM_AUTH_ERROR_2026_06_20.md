@@ -1,7 +1,7 @@
 # SPEC: Re-authentication from Agent Auth Failure
 **Date:** 2026-06-20  
 **Author:** AgentA  
-**Status:** In progress (P2.3 merged #1592; P2.1 in PR)  
+**Status:** active — In progress (P2.3 merged #1592; P2.1 in PR) — #1604
 **Depends on:** SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §P1.1–P1.3 (merged #1589/#1590)
 
 > **Revision 2026-06-20 — "ReauthBrowserModal" replaced by an in-app browser

@@ -3,7 +3,7 @@
 **Status:** implemented — manifest, seeder module, `bundle_upsert_system_
 with_version`, and the `bootstrap.rs` startup hook are all in place and
 tested. §6's open question (what to do with the Claude-only Provider Config
-placeholder) remains genuinely unresolved, deliberately, per that section.
+placeholder) remains genuinely unresolved, deliberately, per that section. — #3244
 **Date:** 2026-09-15
 **Related:** `SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (the `is_system`
 isolation this spec builds on top of, unweakened), `SPEC_GLOBAL_MEMORY_

@@ -1,7 +1,7 @@
 # Armory Architecture
 
 **Date:** 2026-07-20
-**Status:** Reference document
+**Status:** living — Reference document
 **Scope:** Every current Armory entity — schema, RPC surface, UI, and how each
 binds to an agent. Written to give binding-mechanism decisions (starting with
 Startup Instructions) a consistent basis instead of being made ad hoc.

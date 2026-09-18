@@ -4,7 +4,7 @@
 **Type:** Implementation spec
 **Status:** Implemented on branch `agenta/composer-strip-mode-toplevel` (Fix 1, 2, 3=Option A, 5, 6 +
 tooltips). Deferred: Fix 4's *deeper* launch-time seeding (the user-visible symptom is resolved by Fix 1
-— see note below); live repro of Fix 5 (applied defensively per user direction, not yet confirmed running).
+— see note below); live repro of Fix 5 (applied defensively per user direction, not yet confirmed running). — #1912
 **Owner:** asaf
 **Scope:** agent pane composer strip + control bar (frontend only, `frontend/app/view/agent`).
 

@@ -1,6 +1,13 @@
 # SPEC: Split local-machine credentials out of `services/infra` into `services/local`
 
 **Status:** active — Phase 2 executed. `services/local` created (via `aws
+
+> **No implementing PR in this repo (checked 2026-09-17).** The work this spec
+> describes (`services/local` bucket creation) happened in the secrets infra, not
+> in `agentmux` — the only commit touching this file is #3290, which added the
+> spec itself and changed no source here. Cited as a gap rather than mis-attributed
+> to #3290, which implemented nothing.
+
 secretsmanager create-secret`, matching how `services/infra`/`dev`/`qa`/`prod`
 were all originally provisioned out-of-band — none are CDK-managed) and
 populated with the 7 migrated keys plus full

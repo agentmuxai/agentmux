@@ -8,7 +8,7 @@ what shipping Phases 0-2 with no additional gating defaults to. Also not
 built in this pass, deliberately: the read side of the audit trail
 (`bundle_version_list`/`bundle_version_get` exist and are tested, but no
 `GlobalMemoryHistory`/`Diff`/`Revert` MCP tool or Armory UI surfaces them
-yet — see `bundle_versions.rs`'s own module doc comment).
+yet — see `bundle_versions.rs`'s own module doc comment). — #3237
 **Date:** 2026-09-15
 **Verified against:** code as of `507071f8` (backend chain confirmed live by
 a dedicated research pass — see §1 for the exact files/methods, not

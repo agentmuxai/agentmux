@@ -1,7 +1,7 @@
 # Linux Taskbar Icon & Desktop Registration
 
 **Date:** 2026-05-03
-**Status:** Spec / Proposal
+**Status:** proposed — Spec / Proposal
 **Repo state:** main @ `6a8727c4`, AgentMux v0.33.591
 **Author:** AgentC
 

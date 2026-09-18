@@ -1,7 +1,7 @@
 # SPEC: macOS DMG Per-Build Channel Isolation
 
 **Date:** 2026-08-24
-**Status:** Implemented same day.
+**Status:** Implemented same day. — #3259
 **Precedent (same shape of decision, same author intent, already shipped):**
 `docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md` — this spec is
 the macOS follow-up that doc explicitly deferred: *"macOS gap (`task
