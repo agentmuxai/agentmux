@@ -619,7 +619,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // writers: sets the uncontrolled value directly, then refreshes autocomplete
     // + the typing-scroll. Deliberately does NOT dispatch an `input` event, so
     // it never trips the history-cursor reset in handleInput.
-    const setComposerValue = (text: string): void => {
+    const setComposerValue = (text: string, caret: "start" | "end" = "end"): void => {
         if (!textareaRef) return;
         // Consumes the Esc-cleared snapshot — the undo-restore call below
         // reads `escClearedDraft` as its `text` argument BEFORE this runs, so
@@ -628,7 +628,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // supersede a stale snapshot the same way typing does.
         escClearedDraft = null;
         writeComposerValue(text);
-        textareaRef.setSelectionRange(text.length, text.length);
+        const pos = caret === "start" ? 0 : text.length;
+        textareaRef.setSelectionRange(pos, pos);
         setIsBangCmd(text.startsWith("!"));
         updateAutocomplete();
         props.onTyping?.();
@@ -971,16 +972,35 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // ("send now") held message — the Claude-Code-CLI gesture (unsent, so a
         // true un-send). When nothing is queued, ArrowUp walks back through
         // previously SENT messages (shell-style history) and ArrowDown walks
-        // forward toward the live draft. The caret-at-start/end guards let
-        // multiline editing of a recalled message (or extending/shrinking a
-        // selection with Shift held) still move within the text normally, and
-        // only cross into history once there's truly nowhere left to move —
-        // i.e. the active selection edge is already at absolute position 0 (or
-        // the end of the content), not merely "on the first/last visual line."
+        // forward toward the live draft. ArrowUp gates on the active selection
+        // edge being at true absolute position 0 — not merely "on the first
+        // visual line" — so multiline editing of a recalled message (or
+        // extending/shrinking a selection with Shift held) still moves within
+        // the text normally, and only crosses into history once there's truly
+        // nowhere left to move. Position 0 has no ambiguity for ArrowUp: it's
+        // always the very first character, regardless of how many lines
+        // follow, so every recall parks the caret there — letting a repeated
+        // ArrowUp step back continuously with one press per level.
+        //
+        // ArrowDown is NOT simply the mirror of that (gating on true end):
+        // position 0 is only "nothing left below" when the entry is
+        // single-line — a multi-line entry can have line two sitting right
+        // below an untouched position 0, which native ArrowDown still needs
+        // to reach. So ArrowDown fires at the true end (always safe, any line
+        // count) OR at true position 0 when the currently-displayed entry has
+        // no embedded newline — since most sent messages are single-line,
+        // this still lets a repeated ArrowDown step forward continuously
+        // right after an ArrowUp landed the caret at the front, without
+        // stranding a multi-line entry's later lines behind an early jump.
+        // The one placement exception either way: landing back on the live
+        // draft, past the newest entry, parks the caret at the END instead of
+        // the front — it's the user's own in-progress text to resume typing,
+        // not a historical entry still being reviewed.
         if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const empty = textareaRef.value.length === 0;
             const navigating = histPos < sentHistory.length;
             const { first: caretAtStart, last: caretAtEnd } = caretAtSelectionEdge(textareaRef);
+            const currentIsSingleLine = !textareaRef.value.includes("\n");
 
             // Empty composer: ArrowUp un-queues a held message before history.
             if (e.key === "ArrowUp" && empty) {
@@ -997,21 +1017,28 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // Shift+ArrowUp selection that hasn't reached the start yet).
             // Covers an empty composer, a partially typed draft (stashed into
             // histDraft, restorable with ArrowDown), and continuing further
-            // back while already navigating.
+            // back while already navigating. Caret lands back at position 0
+            // (not the end) so a repeated ArrowUp immediately steps back
+            // again instead of first having to re-reach the start.
             if (e.key === "ArrowUp" && histPos > 0 && caretAtStart) {
                 if (!navigating) histDraft = textareaRef.value; // stash the live draft
                 histPos--;
                 e.preventDefault();
-                setComposerValue(sentHistory[histPos]);
+                setComposerValue(sentHistory[histPos], "start");
                 return;
             }
 
-            // Newer: only while navigating, active selection edge at the true
-            // end of content. Past the newest entry, restore the stashed draft.
-            if (e.key === "ArrowDown" && navigating && caretAtEnd) {
+            // Newer: only while navigating, and only once there's truly
+            // nowhere left below — the true end always qualifies; position 0
+            // also qualifies, but ONLY for a single-line entry (see the block
+            // comment above for why a multi-line entry can't use this
+            // shortcut). Past the newest entry, lands on the live draft with
+            // the caret at the END instead of the front.
+            if (e.key === "ArrowDown" && navigating && (caretAtEnd || (caretAtStart && currentIsSingleLine))) {
                 histPos++;
                 e.preventDefault();
-                setComposerValue(histPos >= sentHistory.length ? histDraft : sentHistory[histPos]);
+                const atLiveDraft = histPos >= sentHistory.length;
+                setComposerValue(atLiveDraft ? histDraft : sentHistory[histPos], atLiveDraft ? "end" : "start");
                 return;
             }
         }

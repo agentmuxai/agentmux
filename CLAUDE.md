@@ -236,7 +236,7 @@ This means:
 - `task dev` is always safe alongside a running portable instance.
 - **NEVER kill by image name** (`taskkill //im agentmux-cef.exe`) — it kills ALL instances. Always kill by PID.
 
-#### Isolation invariants (I1–I6)
+#### Isolation invariants (I1–I7)
 
 These are the contract that makes parallel instances safe — launching a new build
 must never crash a running one. Any change to the launcher's process/pipe/job code
@@ -258,10 +258,32 @@ must be reviewed against them (see
   class) embeds the `dir_hash`.
 - **I6 Data isolation** — instances of different `(channel, version)` never share a
   data/logs/cef-cache directory.
+- **I7 Non-inheritable identity** — an instance's identity must not be inheritable by
+  the processes it spawns. Every `AGENTMUX_*` variable naming *this* instance (channel,
+  data/config/cache dir, runtime mode, endpoint, credential) is stripped at the spawn
+  boundary; only the allowlist in `agentmux-srv/src/backend/pane_env.rs`
+  (`PANE_ENV_KEEP`) crosses into a pane, and third-party spawns get even that removed.
+
+I7 was added after I1–I6 failed to catch a live breach, and the reason is worth keeping
+in view: I1–I6 enumerate **named OS objects and directories**, and their stated threat
+model is "launching a new build must never *crash* a running one". Environment
+inheritance is neither an OS object nor a crash, and it runs the opposite way — the
+**new** instance is silently corrupted by the **old** one. A 0.56.3 build launched from
+a 0.56.2 pane inherited `AGENTMUX_CHANNEL` and wrote 20 MB into the wrong channel, with
+no error anywhere. Full analysis, including the five prior documents that identified
+this and left it open:
+`docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`.
 
 A reviewer reading a diff that touches `CreateJobObjectW`, `AssignProcessToJobObject`,
 `OpenProcess`/`TerminateProcess`, or pipe/event/window-class naming should confirm it
 upholds I1–I6.
+
+For I7 the reviewable moment is different: it is **any new process spawn**. Adding a
+`Command::new` / `CommandBuilder::new` anywhere in srv without a `pane_env::sanitize_*`
+call is the failure mode — both P0s on the original fix were precisely that. This is
+enforced by `spawn_site_coverage` in `pane_env.rs`, which walks srv's source and fails
+on an unsanitized spawn site that is not explicitly exempt with a stated reason. If that
+test fails on your PR, you added a spawn path: sanitize it, or exempt it and say why.
 
 ### Widgets
 
