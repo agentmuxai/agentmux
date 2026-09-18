@@ -33,6 +33,61 @@ export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | 
 export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit"> &
     Partial<Pick<CommandSearchAgentHistoryData, "limit">>;
 
+// The shell, agent-input and write-agent-config shapes are GENERATED from
+// their Rust definitions by ts-rs. This covers shell_handlers.rs,
+// agent_handlers/input.rs, and `writeagentconfig` -- the last untyped
+// registration in editor_handlers.rs, which lives there but is stubbed here.
+export type { AgentConfigFile } from "@/types/rpc/AgentConfigFile";
+export type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
+export type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
+export type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
+export type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
+export type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
+export type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
+export type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
+export type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
+export type { ShellExecResult } from "@/types/rpc/ShellExecResult";
+export type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
+export type { ShellStopResult } from "@/types/rpc/ShellStopResult";
+
+import type { AgentConfigFile } from "@/types/rpc/AgentConfigFile";
+import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
+import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
+import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
+import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
+import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
+import type { CommandSubprocessSpawnData } from "@/types/rpc/CommandSubprocessSpawnData";
+import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
+import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
+import type { ShellExecResult } from "@/types/rpc/ShellExecResult";
+import type { ShellStatusResult } from "@/types/rpc/ShellStatusResult";
+import type { ShellStopResult } from "@/types/rpc/ShellStopResult";
+
+/**
+ * What a `subprocessspawn` caller may send.
+ *
+ * `cli_args`, `working_dir` and `env_vars` are `#[serde(default)]` on
+ * non-`Option` Rust fields (a `Vec`, a `String` and a `HashMap`), so the
+ * server accepts them missing -- which ts-rs can only express for `Option<T>`.
+ */
+export type SubprocessSpawnInput = Omit<
+    CommandSubprocessSpawnData,
+    "cli_args" | "working_dir" | "env_vars"
+> &
+    Partial<Pick<CommandSubprocessSpawnData, "cli_args" | "working_dir" | "env_vars">>;
+
+/** `force` is `#[serde(default)]` on a `bool`; same limitation. */
+export type AgentStopInput = Omit<CommandAgentStopData, "force"> &
+    Partial<Pick<CommandAgentStopData, "force">>;
+
+/** `working_dir` is `#[serde(default)]` on a `String`; same limitation. */
+export type ShellExecInput = Omit<CommandShellExecData, "working_dir"> &
+    Partial<Pick<CommandShellExecData, "working_dir">>;
+
+/** `auto_allocate` is `#[serde(default)]` on a `bool`; same limitation. */
+export type WriteAgentConfigInput = Omit<CommandWriteAgentConfigData, "auto_allocate"> &
+    Partial<Pick<CommandWriteAgentConfigData, "auto_allocate">>;
+
 // The agent-instance shapes are GENERATED from their Rust definitions by
 // ts-rs. This covers agent_handlers/instance.rs.
 export type { AgentInstance } from "@/types/rpc/AgentInstance";
@@ -541,7 +596,7 @@ export const AgentApi = {
         return client.rpcCall("renameagentdefinitiontitle", data, opts);
     },
 
-    SubprocessSpawnCommand(client: RpcClient, data: CommandSubprocessSpawnData, opts?: RpcOpts): Promise<void> {
+    SubprocessSpawnCommand(client: RpcClient, data: SubprocessSpawnInput, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("subprocessspawn", data, opts);
     },
 
@@ -553,9 +608,9 @@ export const AgentApi = {
     // `!cmd` composer prefix. Returns buffered stdout/stderr after completion.
     ShellExecCommand(
         client: RpcClient,
-        data: { blockid: string; command: string; working_dir: string },
+        data: ShellExecInput,
         opts?: RpcOpts,
-    ): Promise<{ exit_code: number; stdout: string; stderr: string }> {
+    ): Promise<ShellExecResult> {
         return client.rpcCall("shellexec", data, opts);
     },
 
@@ -564,9 +619,9 @@ export const AgentApi = {
     // Returns { stopped: false } if the id is unknown / already exited.
     ShellStopCommand(
         client: RpcClient,
-        data: { shell_id: string },
+        data: CommandShellStopData,
         opts?: RpcOpts,
-    ): Promise<{ stopped: boolean }> {
+    ): Promise<ShellStopResult> {
         return client.rpcCall("shellstop", data, opts);
     },
 
@@ -585,9 +640,9 @@ export const AgentApi = {
     // its entire run (reagent P1 on PR #2770).
     ShellStatusCommand(
         client: RpcClient,
-        data: { shell_id: string },
+        data: CommandShellStatusData,
         opts?: RpcOpts,
-    ): Promise<{ known: boolean; running: boolean; exit_code?: number; line_count: number }> {
+    ): Promise<ShellStatusResult> {
         return client.rpcCall("shellstatus", data, opts);
     },
 
@@ -644,9 +699,9 @@ export const AgentApi = {
 
     WriteAgentConfigCommand(
         client: RpcClient,
-        data: CommandWriteAgentConfigData,
+        data: WriteAgentConfigInput,
         opts?: RpcOpts,
-    ): Promise<{ working_dir: string }> {
+    ): Promise<CommandWriteAgentConfigResult> {
         return client.rpcCall("writeagentconfig", data, opts);
     },
 };

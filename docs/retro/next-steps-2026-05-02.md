@@ -102,9 +102,9 @@ This unblocks PR #8 (H.8 durability) and PR #9 (H.9 wire-promote events) per the
 
 ## Memory updates already applied
 
-- [`reference_log_paths.md`](../../C--Systems/memory/reference_log_paths.md) — added portable-mode log path table
-- [`feedback_build_workflow.md`](../../C--Systems/memory/feedback_build_workflow.md) — corrected "portables run concurrently"
-- [`MEMORY.md`](../../C--Systems/memory/MEMORY.md) — same correction in Build Workflow section
+- `reference_log_paths.md` — added portable-mode log path table
+- `feedback_build_workflow.md` — corrected "portables run concurrently"
+- `MEMORY.md` — same correction in Build Workflow section
 
 ## What NOT to do
 

@@ -390,8 +390,8 @@ export class TermWrap {
             }
         });
 
-        // PSReadLine cursor-desync "thaw" — see #1042 / docs/analysis/archive/
-        // TERM_JUMBLE_STRUCTURED_2026_05_25.md §7a.
+        // PSReadLine cursor-desync "thaw" — see #1042 /
+        // docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md §7a.
         //
         // When a terminal is created without subsequent sibling-pane
         // splits, its only init-time resize is the default-80 → final

@@ -7,6 +7,7 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_SHELL_EXEC, COMMAND_SHELL_STOP, COMMAND_SHELL_STATUS,
     CommandShellExecData, ShellExecResult, CommandShellStopData, CommandShellStatusData,
+    ShellStopResult, ShellStatusResult,
 };
 use crate::backend::base::{expand_home_dir_safe, msys_to_windows_path};
 
@@ -17,18 +18,16 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // by the UI stop button on a running PersistentShellBlock. The runner then
     // publishes a `stopped` exit event.
     let shell_sessions_stop = state.shell_sessions.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SHELL_STOP,
-        Box::new(move |data, _ctx| {
+        move |req: CommandShellStopData, _ctx| {
             let registry = shell_sessions_stop.clone();
-            Box::pin(async move {
-                let req: CommandShellStopData = serde_json::from_value(data)
-                    .map_err(|e| format!("shellstop: {e}"))?;
+            async move {
                 let stopped = registry.stop(&req.shell_id);
                 tracing::info!(shell_id = %req.shell_id, stopped, "shellstop");
-                Ok(Some(serde_json::json!({ "stopped": stopped })))
-            })
-        }),
+                Ok(ShellStopResult { stopped })
+            }
+        },
     );
 
     // shellstatus → query a shell's current running state. Used by
@@ -46,29 +45,31 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // reagent P1 on PR #2770, a genuinely live shell misreported as already
     // exited). The frontend treats `known: false` as "don't correct."
     let shell_sessions_status = state.shell_sessions.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SHELL_STATUS,
-        Box::new(move |data, _ctx| {
+        move |req: CommandShellStatusData, _ctx| {
             let registry = shell_sessions_status.clone();
-            Box::pin(async move {
-                let req: CommandShellStatusData = serde_json::from_value(data)
-                    .map_err(|e| format!("shellstatus: {e}"))?;
-                match registry.get_status_if_known(&req.shell_id) {
-                    Some(s) => Ok(Some(serde_json::json!({
-                        "known": true,
-                        "running": s.running,
-                        "exit_code": s.exit_code,
-                        "line_count": s.line_count,
-                    }))),
-                    None => Ok(Some(serde_json::json!({
-                        "known": false,
-                        "running": false,
-                        "exit_code": null,
-                        "line_count": 0,
-                    }))),
-                }
-            })
-        }),
+            async move {
+                Ok(match registry.get_status_if_known(&req.shell_id) {
+                    Some(s) => ShellStatusResult {
+                        known: true,
+                        running: s.running,
+                        exit_code: s.exit_code,
+                        line_count: s.line_count,
+                    },
+                    // `known: false` with running/exit_code/line_count zeroed.
+                    // Not `Default::default()`: the zeros here are filler for
+                    // "we have nothing to say", and spelling them out keeps
+                    // that distinct from a shell that genuinely exited 0.
+                    None => ShellStatusResult {
+                        known: false,
+                        running: false,
+                        exit_code: None,
+                        line_count: 0,
+                    },
+                })
+            }
+        },
     );
 
     // shellexec → run a shell command and return output.
@@ -81,14 +82,12 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //                   command runs in the container's own working directory.
     let mstore_se = state.mstore.clone();
     let container_manager = state.container_manager.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SHELL_EXEC,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandShellExecData, _ctx| {
             let mstore = mstore_se.clone();
             let cm_opt = container_manager.clone();
-            Box::pin(async move {
-                let cmd: CommandShellExecData = serde_json::from_value(data)
-                    .map_err(|e| format!("shellexec: {e}"))?;
+            async move {
                 // Log block_id at info; keep the command at debug so secrets
                 // passed as CLI args (API tokens, passwords) don't land in
                 // ~/.agentmux/logs/ in plaintext.
@@ -224,9 +223,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         stdout: format_output(stdout_buf, MAX_OUTPUT),
                         stderr: format_output(stderr_buf, MAX_OUTPUT),
                     };
-                    return Ok(Some(
-                        serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?
-                    ));
+                    return Ok(result);
                 }
 
                 // ── Host agents ───────────────────────────────────────────────
@@ -391,15 +388,85 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     stdout: format_output(stdout_buf, MAX_OUTPUT),
                     stderr: format_output(stderr_buf, MAX_OUTPUT),
                 };
-                Ok(Some(serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?))
-            })
-        }),
+                Ok(result)
+            }
+        },
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// All three shell commands record their request and response types.
+    ///
+    /// `shellstop` and `shellstatus` previously answered inline
+    /// `json!({..})` literals, so the registry would have recorded `Value` for
+    /// both -- which is the shape of drift this migration exists to close.
+    #[tokio::test]
+    async fn register_typed_records_every_shell_command() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register_shell_handlers(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
+        };
+
+        for (cmd, req, resp) in [
+            (COMMAND_SHELL_EXEC, "CommandShellExecData", "ShellExecResult"),
+            (COMMAND_SHELL_STOP, "CommandShellStopData", "ShellStopResult"),
+            (COMMAND_SHELL_STATUS, "CommandShellStatusData", "ShellStatusResult"),
+        ] {
+            let row = find(cmd);
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert_eq!(row["responseName"], resp, "{cmd} response");
+        }
+    }
+
+    /// `exit_code` is always PRESENT and null, never omitted.
+    ///
+    /// The hand-written stub typed it `exit_code?: number`, but both arms of
+    /// the handler write the key unconditionally -- the unknown arm literally
+    /// wrote `"exit_code": null`. The generated type says `number | null`,
+    /// which is the honest shape, and this is the half of that claim TypeScript
+    /// cannot check.
+    ///
+    /// It matters here more than usual: `known: false` must stay
+    /// distinguishable from `running: false` (reagent P1 on #2770 -- collapsing
+    /// them misreported a live, still-registering shell as failed for its
+    /// entire run), and a caller reaching for `exit_code === undefined` as a
+    /// proxy for "unknown" would get the wrong answer either way.
+    #[test]
+    fn shellstatus_always_sends_exit_code_even_when_null() {
+        let unknown = ShellStatusResult {
+            known: false,
+            running: false,
+            exit_code: None,
+            line_count: 0,
+        };
+        let v = serde_json::to_value(&unknown).unwrap();
+        assert!(
+            v.get("exit_code").is_some(),
+            "exit_code must be present-and-null, not omitted: {v}",
+        );
+        assert!(v["exit_code"].is_null());
+        assert_eq!(v["known"], false);
+
+        let exited = ShellStatusResult {
+            known: true,
+            running: false,
+            exit_code: Some(0),
+            line_count: 12,
+        };
+        let v = serde_json::to_value(&exited).unwrap();
+        assert_eq!(v["exit_code"], 0, "a real exit 0 is not the same as unknown");
+        assert_eq!(v["known"], true);
+    }
+
     use crate::backend::rpc_types::RpcMessage;
     use crate::backend::shell_node::ShellStatusInfo;
     use parking_lot::Mutex;

@@ -1,6 +1,6 @@
 # Performance baseline — 2026-05-09
 
-**Status:** Findings retro (numerical baseline blocked on instrumentation gaps surfaced during the first measurement run)
+**Status:** historical — findings retro (numerical baseline blocked on instrumentation gaps surfaced during the first measurement run)
 **Owner:** AgentA
 **Spec:** [`docs/specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md`](../specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) — Phase 1
 **Driving observation:** Tab switching and pane resizing both have visibly long delays. AgentMux's brand promise is ultra-snappy responsiveness; this retro establishes the "what's actually happening" before any optimization PR.
@@ -64,7 +64,7 @@ The dev instance was killed at the end of this investigation. The next `task dev
 
 **Lesson:** the service API is the right driver (per the user's directive — "if you think you need windows-mcp, simply write the app API facility"), but harnesses need to handle the eventual-consistency model. Either poll until the expected state appears, or have the API return the post-update object.
 
-This pattern argues for the App API automation surface in [`SPEC_APP_API_AUTOMATION_SURFACE.md`](../specs/SPEC_APP_API_AUTOMATION_SURFACE.md): a higher-level `tab.create` that waits-and-returns is friendlier than the raw `WorkspaceService.CreateTab` + manual poll.
+This pattern argues for the App API automation surface in `SPEC_APP_API_AUTOMATION_SURFACE.md`: a higher-level `tab.create` that waits-and-returns is friendlier than the raw `WorkspaceService.CreateTab` + manual poll.
 
 ### Finding 4 — auth file path lookup needed unification
 
@@ -88,7 +88,7 @@ This pattern argues for the App API automation surface in [`SPEC_APP_API_AUTOMAT
 
 ### Pane resize (splitter drag)
 
-> Not driven this run — the service API doesn't expose `pane.resize` today (proposed in [`SPEC_APP_API_AUTOMATION_SURFACE.md`](../specs/SPEC_APP_API_AUTOMATION_SURFACE.md)). Manual capture would be subject to the same Finding 1/2 blockers.
+> Not driven this run — the service API doesn't expose `pane.resize` today (proposed in `SPEC_APP_API_AUTOMATION_SURFACE.md`). Manual capture would be subject to the same Finding 1/2 blockers.
 
 | Metric | Value | Target | Pass? |
 |---|---|---|---|
@@ -126,6 +126,6 @@ The click-driven numbers come after #2 (log pipe). Service-API numbers come afte
 ## Cross-references
 
 - `docs/specs/SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md` — Phase 1 mandate.
-- `docs/specs/SPEC_APP_API_AUTOMATION_SURFACE.md` — pushed alongside this retro; covers the harness primitives that make the numbers fast and reliable.
+- `SPEC_APP_API_AUTOMATION_SURFACE.md` — described here as pushed alongside this retro, but it never landed: no such file exists in the repo, and none was ever deleted from it. The harness primitives it was meant to cover are still unspecified. Left unlinked deliberately rather than repointed at a plausible-looking substitute.
 - Memory `feedback_user_drives_ui_for_baseline.md` — the broader principle (use App API, not pixel clicks).
 - `tools/tests/authfile.ps1` — auth path lookup unified in this branch.

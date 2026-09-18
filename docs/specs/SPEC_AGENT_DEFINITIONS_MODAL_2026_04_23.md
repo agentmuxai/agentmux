@@ -9,7 +9,7 @@
 - [default-agent-roster.md](./default-agent-roster.md) — host/container seed rosters
 - [container-agent-runtime.md](./container-agent-runtime.md) — container execution layer
 - [portable-agent-working-dirs.md](./portable-agent-working-dirs.md) — working-directory resolution
-- [SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md](../../specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md) — definition vs instance model
+- [SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md](SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md) — definition vs instance model
 
 ---
 

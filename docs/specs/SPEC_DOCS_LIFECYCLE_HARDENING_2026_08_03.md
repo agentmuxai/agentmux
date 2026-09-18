@@ -1,6 +1,6 @@
 # Docs Lifecycle Audit & Hardening Plan
 **Date:** 2026-08-03
-**Status:** active — Phase 0 shipped in PR #2394; Phase 1 (closed Status vocabulary) shipped 2026-08-10 in docs/specs/README.md together with a verified restamp of ~40 July-August specs; Phase 3 (generated `docs/specs/INDEX.md`, `scripts/gen-docs-index.sh`, enforced on PRs) shipped 2026-08; Phase 5 shipped 2026-09-07 — item 1 is `scripts/check-doc-status.sh` on every PR (Status enum + `Superseded-by:` must resolve), item 2 is `scripts/docs-stale-sweep.mjs` run weekly by `.github/workflows/docs-stale-sweep.yml`, which posts the triage list to one standing issue (label `docs-stale-sweep`); Phase 2 (directory consolidation) not started; Phase 4 partially covered by the reader guardrail in docs/specs/README.md. The ~360-file Status backlog (150 without a line, 210 non-canonical, measured 2026-09-06) is surfaced by the sweep and by INDEX.md but is NOT auto-fixed — by design, Part 4.
+**Status:** active — Phase 0 shipped in PR #2394; Phase 1 (closed Status vocabulary) shipped 2026-08-10 in docs/specs/README.md together with a verified restamp of ~40 July-August specs; Phase 3 (generated `docs/specs/INDEX.md`, `scripts/gen-docs-index.sh`, enforced on PRs) shipped 2026-08; Phase 5 shipped 2026-09-07 — item 1 is `scripts/check-doc-status.sh` on every PR (Status enum + `Superseded-by:` must resolve), item 2 is `scripts/docs-stale-sweep.mjs` run weekly by `.github/workflows/docs-stale-sweep.yml`, which posts the triage list to one standing issue (label `docs-stale-sweep`); Phase 2 (directory consolidation) not started; Phase 4 partially covered by the reader guardrail in docs/specs/README.md. The ~360-file Status backlog (150 without a line, 210 non-canonical, measured 2026-09-06) is surfaced by the sweep and by INDEX.md but is NOT auto-fixed — by design, Part 4. **2026-09-18:** Part 4 gained a fourth gate — `scripts/check-doc-links.mjs`, which resolves every relative Markdown link against the directory of the file containing it (`check-spec-citations.sh` only sees paths naming `docs/specs/`, so a link like `](specs/archive/Y.md)` written in `docs/reports/` was invisible to it and had been dead since the top-level `specs/` tree was folded in). First whole-tree run: **45 broken links across 27 files, now 0**. Phase 2 is also partly done by attrition rather than by plan: the duplicate top-level `specs/` tree and `docs/retros/` are both gone, so the four archive directories the audit found are now **two**: `docs/analysis/archive/` (6 files) was folded into `docs/archive/` on 2026-09-18, leaving `docs/specs/archive/` (61) and `docs/archive/` (33, now with a README documenting the rule). The remaining split is deliberate and documented in `docs/archive/README.md` — see the Phase 2 note below for why `docs/specs/archive/` is load-bearing tooling rather than merely a folder.
 **Scope:** `docs/` and `specs/` (both top-level trees)
 **Related:** [`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`](./SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) — written the same day, deliberately the same shape. Both audits found the identical underlying pattern: **a marker that claims a state (a migration flag / a `Status:` field) is trusted without ever being checked against ground truth, and nothing re-verifies it once written.** For migrations that's a stale `.flag` file; for docs it's a `Status: Draft` line nobody revisits. The hardening approach below deliberately mirrors that doc's phasing for the same reason: one-shot fixes rot, self-verifying systems don't.
 
@@ -114,6 +114,23 @@ Acceptance: `docs/retros/` no longer exists; `docs/README.md` contains no factua
 - Collapse the ~20 subdirectories toward a small, documented set: `specs/`, `reports/`, `retro/`, `architecture/`, `research/`, `archive/` (one, not four — fold `specs/archive/`, `docs/specs/archive/`, `docs/archive/`, `docs/analysis/archive/` into a single documented location, or explicitly document why more than one is needed if there's a real reason this audit didn't surface).
 - Fold the 9 singleton directories into whichever of the above they actually belong to; only keep a directory standalone if it's got a real, distinct purpose and its own README (matching the good examples: `docs/specs/README.md`, `docs/retro/README.md`).
 - This is explicitly lower priority than Phase 0/1 — it's cleanup, not a correctness fix, and moving ~1,100 files is exactly the kind of large mechanical change that should go through its own careful PR, not be bundled here.
+
+**2026-09-18 note on the archive half.** Two of the four archive directories are
+already gone (`specs/archive/` went with the top-level tree). Of the remaining
+three, `docs/analysis/archive/` (6 files) was folded into `docs/archive/` on
+2026-09-18, which is where the archive rule is now documented
+(`docs/archive/README.md`). `docs/specs/archive/` (61) is **not** moved, and the reason
+is worth recording so the next pass does not rediscover it: it is load-bearing
+tooling, not just a folder. `scripts/gen-docs-index.sh` scans `docs/specs/` and
+excludes exactly this subtree (its generated preamble even explains `archive/` to
+the reader); `scripts/check-docs-lifecycle.mjs` hardcodes
+`/(^|/)docs/specs/archive//`; two build scripts cite files inside it by path.
+Moving it means editing the generated INDEX.md preamble, which means regenerating
+INDEX.md — and `gen-docs-index.sh` is not reproducible across platforms (a Windows
+run emits ~21 extra status buckets and a different row order than CI's Linux run),
+so the regeneration has to happen somewhere that matches CI. That is a real
+constraint this audit did not surface, and it is why the spec's own escape hatch —
+"or explicitly document why more than one is needed" — applies here for now.
 
 ### Phase 3 — Auto-generated index (M)
 - Replace hand-maintained `docs/specs/INDEX.md` with a small script that walks `docs/specs/` (post-Phase-1), extracts `Status:`/`Superseded-by:`/date, and regenerates the index — so it's structurally impossible for it to silently go 6 weeks stale the way it did. Run it in CI on any `docs/specs/**` change, or as a pre-commit/pre-PR check.

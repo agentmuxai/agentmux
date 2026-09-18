@@ -4,7 +4,7 @@
 
 **Date:** 2026-06-18
 **Author:** Parko
-**Status:** Bugs fixed in this session (see §3)
+**Status:** historical — bugs fixed in the session this documents (see §3)
 
 ---
 

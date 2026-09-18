@@ -22,6 +22,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
+import type { ShellStatusResult } from "@/app/store/rpc-api";
 
 export interface UseShellNodeStreamOptions {
     blockId: string;
@@ -77,7 +78,7 @@ interface ShellNodeCreateData {
  * `shell:<id>` chunk-ring replay delivers its actual exit event.
  */
 export function shellStatusCorrection(
-    status: { known: boolean; running: boolean; exit_code?: number },
+    status: Pick<ShellStatusResult, "known" | "running" | "exit_code">,
     fallbackTimestamp: number,
 ): { status: "exited-ok" | "exited-err"; exitCode: number; exitedAt: number } | null {
     if (!status.known || status.running) return null;

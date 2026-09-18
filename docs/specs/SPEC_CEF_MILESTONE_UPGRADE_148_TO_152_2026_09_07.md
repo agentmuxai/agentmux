@@ -826,7 +826,7 @@ The `patched-libcef` feature comment cites `https://github.com/a5af/cef, branch 
 > `agentmuxai` org redirect. Re-point if 152 lands on a new branch.
 
 ### 7.3 A superseded root-cause doc — ✅ FIXED 2026-09-08
-`docs/analysis/archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md` attributes a Windows GPU failure to the fork's libcef being a non-official/DCHECK build. Its own tracking issue (#1345) retracts that: the real cause was a missing `supportedOS` manifest (#1354, merged 2026-06-11). The archived doc still reads as if the fork were at fault, which could mislead someone scoping this upgrade. Worth a status-correction header.
+`docs/archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md` attributes a Windows GPU failure to the fork's libcef being a non-official/DCHECK build. Its own tracking issue (#1345) retracts that: the real cause was a missing `supportedOS` manifest (#1354, merged 2026-06-11). The archived doc still reads as if the fork were at fault, which could mislead someone scoping this upgrade. Worth a status-correction header.
 
 > **Fixed:** the doc now opens with a RETRACTED banner stating the real cause
 > (missing `supportedOS` manifest, #1354) and explicitly warning against citing

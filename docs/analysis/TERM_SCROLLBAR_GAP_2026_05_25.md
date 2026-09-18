@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25
 **Author:** AgentA (Claude Opus 4.7)
-**Status:** Open. Multiple CSS attempts have failed.
+**Status:** active — open; multiple CSS attempts have failed.
 **Related:** [#1042](https://github.com/agentmuxai/agentmux/issues/1042) (term-jumble), [#1043](https://github.com/agentmuxai/agentmux/pull/1043) (PSReadLine thaw fix). The thaw fix is correct and shipping; this scrollbar issue is separate.
 
 ---
@@ -178,7 +178,7 @@ If none of the above are quick wins, **H4 (accept the gap)** is the rational sto
 
 - ✅ termwrap.ts H6 thaw fix (substantive, validated)
 - ⚠️ term.scss scrollbar attempts 1+2+3 (uncommitted; **should be removed before merge** because they don't actually fix the gap and may regress other layout cases)
-- ✅ docs/analysis/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md (the thaw analysis)
+- ✅ docs/archive/TERM_JUMBLE_STRUCTURED_2026_05_25.md (the thaw analysis)
 - ✅ This doc
 
 Before merging PR #1043, the scrollbar SCSS attempts should be reverted so the PR ships clean.
