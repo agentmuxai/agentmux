@@ -22,7 +22,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 import {
-    getLayoutModelForStaticTab,
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
@@ -444,7 +443,12 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
  * need to span. Tab labels live in term-pane-tab.ts.
  */
 export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
-    const layoutModel = getLayoutModelForStaticTab();
+    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — see that
+    // field's own doc comment (layout/lib/types.ts) and
+    // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md: this pane's
+    // own tab is not necessarily "whichever tab is globally active right
+    // now" at the moment chrome first constructs.
+    const layoutModel = nodeModel.layoutModel;
 
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;

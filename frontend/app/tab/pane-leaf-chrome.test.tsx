@@ -94,25 +94,28 @@ vi.mock("@/app/store/global", () => ({
 
 // Fake layout-tree lookup for `stackBlockIds` (pane-leaf-chrome.tsx) — the
 // keep-alive branch (term panes) reads a leaf's `data.blockStack` via
-// `getLayoutModelForStaticTab()` + `findNode()`. Reactive via a plain
-// signal so a test can push a new stack and see `stackBlockIds()`
-// re-derive, same as a real `localTreeStateAtom()` bump would.
-// Defaults to no configured node for a given nodeId — `stackBlockIds`
-// falls back to `[activeBlockId()]` in that case, so tests that never call
-// `setBlockStack` (every non-keep-alive one, and the single-member term
-// tests) see exactly the old single-entry list.
+// `nodeModel.layoutModel` + `findNode()` (NOT `getLayoutModelForStaticTab()`
+// — see that field's own doc comment, layout/lib/types.ts, for why: the
+// whole point is that a pane's own tab isn't necessarily "whichever tab is
+// globally active"). Reactive via a plain signal so a test can push a new
+// stack and see `stackBlockIds()` re-derive, same as a real
+// `localTreeStateAtom()` bump would. Defaults to no configured node for a
+// given nodeId — `stackBlockIds` falls back to `[activeBlockId()]` in that
+// case, so tests that never call `setBlockStack` (every non-keep-alive one,
+// and the single-member term tests) see exactly the old single-entry list.
 const [fakeTreeVersion, bumpFakeTreeVersion] = createSignal(0);
 const fakeNodesByNodeId = new Map<string, { data?: { blockStack?: string[] } }>();
 function setBlockStack(nodeId: string, blockStack: string[] | undefined) {
     fakeNodesByNodeId.set(nodeId, { data: { blockStack } });
     bumpFakeTreeVersion((v) => v + 1);
 }
-vi.mock("@/layout/index", () => ({
-    getLayoutModelForStaticTab: () => ({
-        localTreeStateAtom: () => fakeTreeVersion(),
-        treeState: { rootNode: {} as any },
-    }),
-}));
+// Shared fake `LayoutModel`, attached to every fake `NodeModel` below via its
+// own `layoutModel` field — mirrors how a real `NodeModel` always carries the
+// LayoutModel that actually constructed it (`getNodeModel`, layoutNodeModels.ts).
+const fakeLayoutModel = {
+    localTreeStateAtom: () => fakeTreeVersion(),
+    treeState: { rootNode: {} as any },
+} as any;
 vi.mock("@/layout/lib/layoutNode", () => ({
     findNode: (_root: unknown, nodeId: string) => fakeNodesByNodeId.get(nodeId),
 }));
@@ -132,6 +135,7 @@ function makeFakeNodeModel(overrides?: {
     return {
         blockId: "b1",
         nodeId: "node-1",
+        layoutModel: fakeLayoutModel,
         activeBlockId: overrides?.activeBlockId ?? (() => "b1"),
         activeViewModel: overrides?.activeViewModel ?? (() => null),
     } as unknown as NodeModel;
@@ -171,6 +175,7 @@ function makeRealisticNodeModel(overrides?: { activeBlockId?: () => string }): N
     return {
         blockId: "b1",
         nodeId: "node-1",
+        layoutModel: fakeLayoutModel,
         activeBlockId: overrides?.activeBlockId ?? (() => "b1"),
         activeViewModel: activeViewModelSig,
         setActiveViewModel,
