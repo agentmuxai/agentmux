@@ -749,8 +749,9 @@ not just `docs/specs/`:
 |---|---:|
 | canonical `**Status:**` + a vocabulary word | 856 |
 | canonical line, non-vocabulary word | 208 |
-| declares a status in a format the gate cannot read | 82 |
-| no status of any kind | 336 |
+| other format, but the word IS in the vocabulary | 17 |
+| other format, and the word is not | 46 |
+| no status declaration of any kind | 355 |
 | **total non-compliant** | **626** |
 
 The gate is not specs-scoped — its `docs/` filter is applied in awk on the diff destination —
@@ -778,10 +779,22 @@ status*", and `check-doc-status.sh` deliberately excludes pure renames for the s
 The 336 with no status at all cannot be fixed mechanically: setting one requires reading the
 doc and knowing what it is.
 
-The one subset that **is** safe to fix mechanically is the 82 that already declare a status
-and are merely mis-formatted (`Status: draft` unbolded, `## Status: Spec`, or a list item).
-Normalising those changes no claim — it only makes a claim the author already made visible to
-the gate.
+**Correction, same day.** The first version of this section said 82 docs "already declare a
+status and are merely mis-formatted", and called all 82 safe to normalise. Both halves were
+wrong, and re-measuring strictly gives the table above:
+
+- The 82 counted any line matching `Status` — including `# Status — Lifecycle & Crash
+  Architecture Program` (a document *title*) and a bare `### Status` section heading. Neither
+  declares anything. Requiring a colon and a non-empty value on the same line gives **63**.
+- Of those 63, only **17** carry a word already in the vocabulary. Normalising the other 46
+  would make things **worse**: the gate deliberately skips a file with no readable Status
+  line, so reformatting one whose word is `Root-caused` or `Spec` converts a file the gate
+  ignores into a file the gate fails — without anyone having decided what the doc's state
+  actually is. That is precisely the "confidently wrong status" trade
+  `PLAN_DOCS_CLEANUP_EXECUTION` §4 warns against, arrived at from the other direction.
+
+So the mechanically-safe set is **17 docs**: the format is wrong, the word is already right,
+and fixing it changes no claim. Everything else in this table needs a human to read the doc.
 
 ### 5.6 Automate §3's reverse check 🟢 **recommended**
 
