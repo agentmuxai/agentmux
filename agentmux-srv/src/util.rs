@@ -16,11 +16,20 @@
 /// here: `Command::arg` would apply MSVCRT-style quote escaping, which
 /// `cmd.exe`'s simpler quote-toggle parser does not understand and would
 /// re-break out of the quoted region.
+/// The spawned browser is a long-lived third-party process, so it gets the
+/// strict policy (`sanitize_external_std_command`), not the pane keep-set:
+/// `xdg-open` chains to whatever the desktop has registered, which can be a
+/// file manager or terminal from which another AgentMux build is launched —
+/// invariant I7, and the mechanism behind
+/// `docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`
+/// §2.2. On Linux the inherited values are also readable by any same-uid
+/// process via `/proc/PID/environ` for as long as the browser lives.
 pub fn open_browser(url: &str) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         let mut cmd = std::process::Command::new("cmd");
+        crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
         cmd.arg("/C").raw_arg(format!("start \"\" \"{url}\""));
         // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
         use agentmux_common::win32::CREATE_NO_WINDOW;
@@ -29,11 +38,15 @@ pub fn open_browser(url: &str) {
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg(url).spawn();
+        let mut cmd = std::process::Command::new("open");
+        crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+        let _ = cmd.arg(url).spawn();
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        let mut cmd = std::process::Command::new("xdg-open");
+        crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+        let _ = cmd.arg(url).spawn();
     }
 }
 
