@@ -56,11 +56,27 @@ export function registerPaneTabDescriptor(view: string, descriptor: PaneTabDescr
     descriptors.set(view, descriptor);
 }
 
-// Live names/favicons exist only while a tab is active (dormant non-terminal
-// tabs are unmounted), so the last value seen is kept per block — otherwise
-// a tab would change identity the moment another tab is added.
-const lastLiveName = new Map<string, string>();
-const lastFavicon = new Map<string, string>();
+/** Live names/favicons exist only while a tab is active (dormant
+ *  non-terminal tabs are unmounted), so each pane keeps the last value seen
+ *  per tab — otherwise a tab would change identity the moment another tab is
+ *  added. Owned by one pane's chrome and pruned to its current tabs. */
+export interface PaneTabMemory {
+    names: Map<string, string>;
+    favicons: Map<string, string>;
+}
+
+export function createPaneTabMemory(): PaneTabMemory {
+    return { names: new Map(), favicons: new Map() };
+}
+
+export function prunePaneTabMemory(memory: PaneTabMemory, liveIds: Iterable<string>): void {
+    const live = new Set(liveIds);
+    for (const map of [memory.names, memory.favicons]) {
+        for (const id of map.keys()) {
+            if (!live.has(id)) map.delete(id);
+        }
+    }
+}
 
 const ICON_COLOR_RE = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
 
@@ -85,25 +101,29 @@ function readLive<T>(accessor: unknown): T | undefined {
     return typeof accessor === "function" ? (accessor as () => T)() : undefined;
 }
 
-export function describePaneTab(ctx: PaneTabContext, labelOverride?: string): PaneTabInfo {
+export function describePaneTab(
+    ctx: PaneTabContext,
+    labelOverride?: string,
+    memory: PaneTabMemory = createPaneTabMemory()
+): PaneTabInfo {
     const d = ctx.view ? descriptors.get(ctx.view) : undefined;
 
     const liveName = readLive<string>(ctx.liveViewModel?.viewName);
-    if (typeof liveName === "string" && liveName.length > 0) lastLiveName.set(ctx.blockId, liveName);
+    if (typeof liveName === "string" && liveName.length > 0) memory.names.set(ctx.blockId, liveName);
     const liveFavicon = readLive<string>(ctx.liveViewModel?.viewFaviconUrl);
-    if (typeof liveFavicon === "string" && liveFavicon.length > 0) lastFavicon.set(ctx.blockId, liveFavicon);
+    if (typeof liveFavicon === "string" && liveFavicon.length > 0) memory.favicons.set(ctx.blockId, liveFavicon);
 
     const widget = widgetForView(ctx.view);
     const label =
         (ctx.meta?.["frame:title"] as string | undefined) ||
         labelOverride ||
         d?.label?.(ctx) ||
-        lastLiveName.get(ctx.blockId) ||
+        memory.names.get(ctx.blockId) ||
         widget?.label ||
         blockViewToName(ctx.view);
 
     const frameIcon = ctx.meta?.["frame:icon"] as string | undefined;
-    const favicon = lastFavicon.get(ctx.blockId);
+    const favicon = memory.favicons.get(ctx.blockId);
     const icon: PaneTabIcon =
         (frameIcon ? faIcon(frameIcon, ctx.meta) : undefined) ??
         d?.icon?.(ctx) ??
