@@ -154,7 +154,9 @@ describe("docs-stale-sweep renderMarkdown", () => {
     });
 
     it("says so when nothing is flagged, and warns on a shallow clone", () => {
-        expect(renderMarkdown({ ...report, flagged: [] })).toContain("Nothing flagged.");
+        // Wording now names WHICH check found nothing, because the §5.6
+        // reverse check renders independently and either can be empty.
+        expect(renderMarkdown({ ...report, flagged: [] })).toContain("Nothing flagged by the staleness");
         expect(renderMarkdown({ ...report, shallow: true })).toContain("No git history was available");
     });
 });
@@ -215,5 +217,37 @@ describe("docs-stale-sweep buildCitationIndex (§5.6)", () => {
             return files[p];
         });
         expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
+    });
+});
+
+describe("docs-stale-sweep renderMarkdown — the two checks are independent", () => {
+    const base = {
+        generatedAt: "2026-09-18T00:00:00Z",
+        weeks: 8,
+        shallow: false,
+        counts: { docs: 1, noStatus: 0, terminal: 0, live: 1, stale: 0, flagged: 0, nonCanonicalStatus: 0, claimedUnbuilt: 1 },
+    };
+
+    it("renders the unbuilt-but-cited list even when NOTHING is flagged", () => {
+        // Regression: renderMarkdown used to `return` on flagged.length === 0,
+        // which swallowed every section below it — including this one, whose
+        // count was still printed in the summary table above. A report could
+        // claim 279 candidates and then show none of them.
+        const out = renderMarkdown({
+            ...base,
+            flagged: [],
+            claimedUnbuilt: [{ doc: "docs/specs/SPEC_FOO.md", status: "draft", cited: ["src/a.rs"] }],
+        });
+        expect(out).toContain("Says unbuilt");
+        expect(out).toContain("SPEC_FOO.md");
+        expect(out).toContain("src/a.rs");
+        // and it still says the OTHER check found nothing, rather than going quiet
+        expect(out).toContain("Nothing flagged by the staleness");
+    });
+
+    it("renders nothing-found for both checks without dropping either message", () => {
+        const out = renderMarkdown({ ...base, counts: { ...base.counts, claimedUnbuilt: 0 }, flagged: [], claimedUnbuilt: [] });
+        expect(out).toContain("Nothing flagged by the staleness");
+        expect(out).not.toContain("Says unbuilt");
     });
 });

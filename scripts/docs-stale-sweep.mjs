@@ -346,10 +346,13 @@ export function renderMarkdown(report, limit = 60) {
     lines.push(`| live but with a non-canonical Status word | ${c.nonCanonicalStatus} |`);
     lines.push(`| **says draft/proposed, but source code cites it** | **${c.claimedUnbuilt ?? 0}** |`);
     lines.push("");
+    // NOTE: this used to `return` when nothing was flagged, which silently
+    // swallowed every section below it — including the §5.6 reverse check,
+    // whose count was still printed in the summary above. The two checks are
+    // independent: either can find something while the other finds nothing.
     if (report.flagged.length === 0) {
-        lines.push("Nothing flagged.");
-        return lines.join("\n") + "\n";
-    }
+        lines.push("Nothing flagged by the staleness/drift check.");
+    } else {
     lines.push(`## Flagged (${report.flagged.length}, sorted: missing citations, then most drift, then oldest)`);
     lines.push("");
     lines.push("| Doc | Status | Untouched | Cited files changed since | Cited files missing |");
@@ -374,7 +377,9 @@ export function renderMarkdown(report, limit = 60) {
         "`(+Nd)` = the cited file's last commit is N days after the doc's last commit. " +
             "A missing citation is the strongest signal: the doc points at a path that is not in the repo.",
     );
-        const unbuilt = report.claimedUnbuilt ?? [];
+        }
+
+    const unbuilt = report.claimedUnbuilt ?? [];
     if (unbuilt.length) {
         lines.push("");
         lines.push(`## Says unbuilt, but the code cites it (${unbuilt.length})`);
