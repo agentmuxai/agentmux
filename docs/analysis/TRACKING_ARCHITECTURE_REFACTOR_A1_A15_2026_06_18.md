@@ -1,11 +1,11 @@
 # Architecture Refactor — Tracking & Handoff (A1–A15)
 
 **Created:** 2026-06-18 · **Owner of record:** smike · **Status:** living tracker
-**Board state (2026-09-18):** 14 of 15 done. Only **A2** remains open, and it is
-blocked on coordination rather than work — the `agentmux-common` DTO extraction
-still collides with a5af #1498, and no DTO module exists in that crate yet.
-A6 and A10 were both marked incomplete on this board while already shipped;
-see their rows.
+**Board state (2026-09-18):** 13 of 15 done. **A2** is blocked on coordination, not
+work — the `agentmux-common` DTO extraction still collides with a5af #1498, and no
+DTO module exists in that crate yet. **A6** is half done: the mirror shipped, the
+scroll/expansion unification did not (see its row). A10 was marked open while
+already shipped; corrected below.
 **Source audit:** [`ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md`](ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md)
 (read it first — this doc is the actionable board on top of it; the audit holds the full
 file:line evidence and the six systemic themes.)
@@ -29,7 +29,7 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | ✅ **done** | #1566 | global.ts 1047→821 LOC; cycle broken; leaf violations fixed. |
 | A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
 | A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | ✅ **done** | #1564 | Backend `blockcontroller/`. Also fixed ACP session-id persist bug. |
-| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | ✅ **done** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | Shipped 2026-09-06; the spec reads `implemented — this PR`. This row said 🟡 partial for twelve days after it landed. |
+| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🟡 **half done** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | Mirror half shipped 2026-09-06. The scroll/expansion half is NOT done: that spec §69 hands it to `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`, whose status reads "Phase 1 is the only one left". Do not close A6 on the mirror spec alone. |
 | A7 | Shared `ToolCorrelator` for translator tool-call/result | ★★★ | Low | Low | ✅ **done** | #1545 | `providers/tool-correlation.ts`. |
 | A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | ✅ **done** | #1554 | Backend `server/`. |
 | A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | ✅ **done** | #3044 | Busy predicate was already unified by the state-machine work (`isWorking`/`workingFromPhase`, 1 use left); #3044 routed the 11 raw dispatches + added a grep-shaped guard test. |
