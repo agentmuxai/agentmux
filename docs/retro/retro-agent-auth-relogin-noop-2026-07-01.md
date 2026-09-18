@@ -3,7 +3,7 @@
 **Date:** 2026-07-01
 **Severity:** High (user-facing dead end — an agent pane can't recover from an auth lapse via the
 primary button offered)
-**Status:** Root-caused (ranked); fix not yet implemented
+**Status:** retro — Root-caused (ranked); fix not yet implemented
 **Reporter:** asaf
 **Component:** agent pane auth / re-auth flow (frontend `view/agent`, srv `identity`/`agents`)
 

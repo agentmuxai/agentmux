@@ -1,5 +1,7 @@
 # Retro: WRR back-of-queue `label_hint` race — 2026-05-02
 
+**Status:** retro
+
 ## Summary
 
 `wrr/win_event.rs::handle_event::EVENT_OBJECT_CREATE` peeked the back of `pending_window_creations` to label OS-level WM_CREATE events. The peek assumed at most one window create in flight at any time. When users create multiple windows in succession (rapid status-bar clicks, scripted creates, drag-tear-off bursts), multiple pending entries queue up, and back-of-queue returns the **same latest label for every WM_CREATE** until the queue drains.
@@ -97,4 +99,4 @@ Required before declaring fix successful: 0.33.59x build, rapid-fire ~10 status-
 
 - [`h7-freeze-fix-retro-2026-05-02.md`](./h7-freeze-fix-retro-2026-05-02.md) — the misdiagnosis that preceded this fix.
 - [`next-steps-2026-05-02.md`](./next-steps-2026-05-02.md) — Phase 2 in that doc was "Investigate `HwndWithoutBrowser` collision." This PR resolves it.
-- `docs/specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` — the "freeze" spec was wrong about the trigger (pane state); the actual trigger is concurrent `pending_window_creations` entries.
+- `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)` — the "freeze" spec was wrong about the trigger (pane state); the actual trigger is concurrent `pending_window_creations` entries.

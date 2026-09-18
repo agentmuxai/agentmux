@@ -4,7 +4,7 @@
 **Severity:** High (UX + resource leak; contributed to a wedged, unrecoverable session)
 **Area:** `agentmux-srv` process spawning (Windows)
 **Fix branch:** `agentc/fix-win-console-window-leak`
-**Status:** Root-caused, fixed, verified
+**Status:** retro — Root-caused, fixed, verified
 
 ---
 

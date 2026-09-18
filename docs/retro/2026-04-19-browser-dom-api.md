@@ -1,5 +1,7 @@
 # Retro: Browser DOM API + Stress Test Rewrite
 
+**Status:** retro
+
 Date: 2026-04-19
 Owner: AgentA
 

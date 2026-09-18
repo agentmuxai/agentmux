@@ -1,5 +1,7 @@
 # RETRO — release changelog / version-file desync (v0.38.0)
 
+**Status:** retro
+
 **Date:** 2026-05-22
 **Author:** AgentA
 **Severity:** Medium — no data lost; caught before a regressed release shipped, but it blocked the release pipeline and risked publishing a version *below* the changelog's latest entry.

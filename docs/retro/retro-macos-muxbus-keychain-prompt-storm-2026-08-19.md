@@ -1,5 +1,7 @@
 # Retro: "Always Allow" didn't stop the Keychain prompt on app launch
 
+**Status:** retro
+
 **Date:** 2026-08-19
 **Area:** `agentmux-srv/src/backend/storage/muxbus.rs`, `agentmux-srv/src/muxbus/cloud_subscriber.rs`
 

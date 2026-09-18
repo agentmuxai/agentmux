@@ -1,7 +1,7 @@
 # DnD File Drop: Retrospective & Re-Architecture
 
 **Date:** 2026-03-10
-**Status:** Rethinking after circular debugging loop
+**Status:** retro — Rethinking after circular debugging loop
 
 ---
 

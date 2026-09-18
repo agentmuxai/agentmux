@@ -3,7 +3,7 @@
 **Date:** 2026-07-26
 **Affected versions:** 0.54.4 (dev build, branch `agenta/deterministic-login-ux`); likely others — nothing found is version-specific
 **Severity:** High — blocks unattended dev-instance use past ~9.5 minutes; unresolved
-**Status:** Root cause NOT found. Multiple plausible mechanisms ruled out with hard evidence. Next diagnostic step identified (Process Monitor), not yet run.
+**Status:** retro — Root cause NOT found. Multiple plausible mechanisms ruled out with hard evidence. Next diagnostic step identified (Process Monitor), not yet run.
 
 ---
 

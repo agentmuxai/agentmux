@@ -1,5 +1,7 @@
 # RETRO — browser-pane close reports success but the CEF renderer survives (task #1 investigation)
 
+**Status:** retro
+
 > **STATUS: FIXED (same day).** See the "Root cause — CONFIRMED" addendum at the bottom: the primary
 > cause turned out to be a **cross-thread Win32 `DestroyWindow` silently failing** (owner-thread-only
 > API, return value never checked), not the parent-hierarchy-teardown theory §"Root cause" below

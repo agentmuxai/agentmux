@@ -1,5 +1,7 @@
 # Agent Pane — Extreme Typing Smoothness
 
+**Status:** analysis
+
 **Date:** 2026-04-12
 **Goal:** Keystrokes always render at display refresh rate, regardless of what else is happening in the pane.
 

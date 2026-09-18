@@ -1,7 +1,7 @@
 # Retro: Pane Drag-and-Drop Regression (SolidJS Migration) — v2
 
 **Date:** 2026-03-19
-**Status:** In Progress
+**Status:** retro — In Progress
 **Branch:** `agenta/fix-pane-dnd-v2`
 
 ---

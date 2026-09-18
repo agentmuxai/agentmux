@@ -1,7 +1,7 @@
 # Window Opacity Inconsistency — Investigation Report
 
 **Date:** 2026-04-02
-**Status:** Root causes identified, fix spec below
+**Status:** analysis — Root causes identified, fix spec below
 **Severity:** UX bug — opacity sometimes doesn't apply, worse with multiple windows
 
 ## Symptoms

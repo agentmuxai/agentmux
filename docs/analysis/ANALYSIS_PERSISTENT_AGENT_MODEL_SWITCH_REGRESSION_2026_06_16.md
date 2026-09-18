@@ -1,5 +1,7 @@
 # ANALYSIS: Model switch silently no-ops on running Claude agents (regression)
 
+**Status:** analysis
+
 **Date:** 2026-06-16
 **Author:** Naki
 **Severity:** regression — `/model`, `/effort`, `/permission-mode` (and the inline pickers)

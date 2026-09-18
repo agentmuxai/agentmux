@@ -3,7 +3,7 @@
 **Date:** 2026-05-30
 **Severity:** High (trust/UX showstopper + blocks first launch)
 **Surfaced by:** first launch of the signed `AgentMux.app` (v0.40.1) built via the new `task package:macos`.
-**Status:** root-caused; fix proposed (not yet applied).
+**Status:** retro — root-caused; fix proposed (not yet applied).
 
 ---
 

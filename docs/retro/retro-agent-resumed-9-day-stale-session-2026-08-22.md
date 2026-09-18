@@ -1,5 +1,7 @@
 # Retro: Reopening a Persistent Agent Silently Resumed a Session 9 Days Stale
 
+**Status:** retro
+
 **Date:** 2026-08-22
 **Severity:** High — no data loss on disk, but the user was talking to an
 agent that believed it was 9 days in the past, had no memory of ~9 days of

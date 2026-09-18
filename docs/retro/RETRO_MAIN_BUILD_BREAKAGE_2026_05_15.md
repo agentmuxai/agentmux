@@ -1,5 +1,7 @@
 # Retro: Main couldn't build after a clean session of merges
 
+**Status:** retro
+
 **Date:** 2026-05-15
 **Author:** AgentA
 **Related:** RFC #857 phases 0-3 (#860/#862/#865), 4 other-agent rebases (#866-#869), #873 (Taskfile YAML), #875 (launcher match arms)

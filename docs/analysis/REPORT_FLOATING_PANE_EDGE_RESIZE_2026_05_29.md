@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-29
 **Author:** AgentA
-**Status:** Investigation / implementation plan
+**Status:** analysis — Investigation / implementation plan
 **Symptom:** Hovering/dragging the edge of a torn-off floating pane does nothing — no resize cursor, no resize. It *looks* like it should work (the window is `WS_THICKFRAME` and the wndproc maps edge zones), but it's inert.
 
 ## TL;DR
@@ -48,7 +48,7 @@ The border math should reuse `floating_pane_wndproc`'s `RESIZE_BORDER_CSS` (6px,
 ## Specs / references
 - `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`, `…_CROSS_PLATFORM_2026-05-26.md` — floater design.
 - `docs/specs/SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md` — WxH badge.
-- `docs/specs/SPEC_PANE_STATE_REDUCER_2026-05-28.md` + `reducer/pane_window.rs` module doc — `ReportNormalRect`/`ReportOSPlacementChange` deferred phases.
+- `SPEC_PANE_STATE_REDUCER_2026-05-28.md (no longer in this repo)` + `reducer/pane_window.rs` module doc — `ReportNormalRect`/`ReportOSPlacementChange` deferred phases.
 - #1132 (parked resize+maximize, the original edge-resize attempt), #1159 (maximize-only, deferred edge-resize), #1173 (WM_SIZE resizes frontend child).
 
 ## Proposed plan (phased)

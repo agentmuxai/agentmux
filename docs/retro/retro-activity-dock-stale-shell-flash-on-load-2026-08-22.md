@@ -1,5 +1,7 @@
 # Retro: Activity Dock flashes stale shell rows on every pane load
 
+**Status:** retro
+
 **Date:** 2026-08-22
 **Severity:** Low for the original bug — cosmetic only, no data loss, nothing
 re-executed. It's the second time this exact symptom has been reported by the

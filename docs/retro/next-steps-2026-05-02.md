@@ -1,5 +1,7 @@
 # Next steps after the H.7 misdiagnosis — 2026-05-02
 
+**Status:** retro
+
 Companion to [`h7-freeze-fix-retro-2026-05-02.md`](./h7-freeze-fix-retro-2026-05-02.md). Read that first.
 
 ## What we're actually solving

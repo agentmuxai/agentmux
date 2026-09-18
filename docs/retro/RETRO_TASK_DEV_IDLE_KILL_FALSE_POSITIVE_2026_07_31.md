@@ -1,5 +1,7 @@
 # Retro: `task dev` (and any long-lived foreground GUI process) Gets Killed by `agentmux-bashwrap`'s Idle-Timeout Guard
 
+**Status:** retro
+
 **Date:** 2026-07-31
 **Severity:** Medium — agent-launched dev verification silently loses the app it just built; no data loss, but wastes a full build cycle and is confusing to diagnose without reading the bashwrap-side log line closely.
 **Observed by:** AgentA, while verifying PR #2371/#2373's merged fix via a fresh `task dev`.

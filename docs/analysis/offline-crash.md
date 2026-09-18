@@ -1,5 +1,7 @@
 # AgentMux "Offline" State — Root Cause Analysis & Spec
 
+**Status:** analysis
+
 **Date:** 2026-03-24
 **Versions affected:** v0.32.73 through v0.32.79 (all portable desktop builds)
 **Symptom:** Status bar shows red dot + "Offline" text, app becomes unresponsive

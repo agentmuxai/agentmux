@@ -6,7 +6,7 @@ v0.55.18, expecting a carry-over summary. None appeared — the pane started wit
 memory of prior work, no "New session started" divider, no visible warning of any kind.
 **Author:** AgentY (agent, `~/.agentmux/agents/agenty-0629j`), at operator request,
 live-investigating its own pane.
-**Status:** Symptom (§1) fully confirmed with direct forensic evidence and still stands.
+**Status:** retro — Symptom (§1) fully confirmed with direct forensic evidence and still stands.
 **The root-cause hypothesis chain in §3/§4/§5 below turned out to be a wrong turn** —
 see `docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md` §8 for the
 actual resolution: the credential-isolation gate is not broken; §4's "0 identity

@@ -1,5 +1,7 @@
 # Crash Analysis — Host `0x80000003` / Chromium GPU-process FATAL
 
+**Status:** analysis
+
 **Date:** 2026-05-20
 **Build:** `agentmux-0.34.0.exe` (host, PID 7276, ~29 h uptime)
 **Symptom:** Windows "Application Error" modal — *"The exception Breakpoint

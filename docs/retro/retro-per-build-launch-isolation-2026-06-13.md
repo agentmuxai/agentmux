@@ -1,5 +1,7 @@
 # Retro: Per-build launch isolation — completing the #1315 fix (2026-06-13)
 
+**Status:** retro
+
 **Author:** AgentX
 **Triggered by:** User observation — launching a freshly-built `task package` portable joined a still-running build of the same branch (and, when launched from inside an agent pane, adopted the *parent* instance's channel) instead of starting as its own instance.
 

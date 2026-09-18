@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-13
 **Goal:** custom agents created in any channel/version should appear in **every** channel/version (My Agents), and survive upgrades.
-**Status:** Root-caused. The cross-channel P0 work (#1383–#1390) ships, but the **migration that backfills existing agents into the global store is broken three ways**, so almost no agents become cross-channel. The read/merge path itself is sound.
+**Status:** analysis — Root-caused. The cross-channel P0 work (#1383–#1390) ships, but the **migration that backfills existing agents into the global store is broken three ways**, so almost no agents become cross-channel. The read/merge path itself is sound.
 
 ---
 

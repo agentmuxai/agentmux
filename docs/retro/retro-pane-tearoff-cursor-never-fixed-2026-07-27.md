@@ -1,5 +1,7 @@
 # Retro: pane tear-off shows the OS "no-drop" cursor on Windows — a fix that shipped for tabs was never ported to panes
 
+**Status:** retro
+
 **Date:** 2026-07-27
 **Severity:** Low — cosmetic, no functional breakage (the tear-off itself works), but reads as broken/unpolished on every single Windows pane drag.
 **Observed by:** user, while testing the floating-pane resize-hit-target fix (PR #2332).

@@ -1,7 +1,7 @@
 # Window Edge Resize Handlers — Analysis
 
 **Date:** 2026-04-02
-**Status:** Not working — windows cannot be resized by dragging edges
+**Status:** analysis — Not working — windows cannot be resized by dragging edges
 **Pane resize:** Works (internal SolidJS drag handles)
 
 ## Problem

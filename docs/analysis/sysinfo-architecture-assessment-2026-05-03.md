@@ -1,5 +1,7 @@
 # Sysinfo Architecture Assessment
 
+**Status:** analysis
+
 **Date:** 2026-05-03
 **Files reviewed:**
 - `frontend/app/view/sysinfo/sysinfo-plot.tsx` (159 LOC)

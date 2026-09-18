@@ -1,5 +1,7 @@
 # Retro: Answered `AskUserQuestion` silently reverted to the old collapsed row (PR #2630 follow-up)
 
+**Status:** retro
+
 **Date:** 2026-08-18
 **Owner:** AgentA
 **Area:** `frontend/app/store/agent-document/reducer.ts` (`mergeReplacement`), `frontend/app/view/agent/hooks/useAgentQuestions.ts`, `frontend/app/view/agent/components/AnsweredQuestionMessage.tsx`

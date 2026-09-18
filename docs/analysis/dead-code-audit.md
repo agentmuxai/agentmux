@@ -1,5 +1,7 @@
 # AgentMux Dead Code & Legacy Audit
 
+**Status:** analysis
+
 **Date:** 2026-03-09
 **Audited by:** Agent2
 

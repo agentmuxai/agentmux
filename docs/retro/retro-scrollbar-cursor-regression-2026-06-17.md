@@ -1,13 +1,13 @@
 # RETRO: The scrollbar-cursor "fix" that wasn't — inheritance, not deletion
 
 **Date:** 2026-06-17
-**Status:** Post-mortem. The original bug is **still live**, in a new shape, and the
+**Status:** retro — Post-mortem. The original bug is **still live**, in a new shape, and the
 guardrail we shipped now *blocks* the correct fix.
 **Scope:** `frontend/` cursor styling on scrollbars, app-wide.
 **Subjects:** PR #1453 (`fix(ui): scrollbars use the arrow cursor, not the link hand`)
 and PR #1455 (`chore(ui): cursor design tokens + utilities + scrollbar lint guard`),
 both landed 2026-06-15.
-**Prior art:** `docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md` (the plan these
+**Prior art:** `docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md` (the plan these
 two PRs executed).
 
 ---
@@ -74,7 +74,7 @@ The OverlayScrollbars handle was treated **differently** — it got an *explicit
     { "/-webkit-scrollbar/": ["cursor"] },
     { "message": "Scrollbars are scroll affordances, not links — never set `cursor`
        on a `::-webkit-scrollbar*` selector. Remove it so the thumb keeps the default
-       arrow (it inherits it). See docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md." }
+       arrow (it inherits it). See docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md." }
 ]
 ```
 
@@ -285,4 +285,4 @@ pseudo-elements**, because inheritance from the scroll host is otherwise unavoid
 `frontend/app/view/agent/styles/_document-nodes.scss` (132-141),
 `frontend/app/view/agent/styles/_tool-overlay-portal.scss` (34-37),
 `.stylelintrc.json` (15-22),
-`docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md`.
+`docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md`.

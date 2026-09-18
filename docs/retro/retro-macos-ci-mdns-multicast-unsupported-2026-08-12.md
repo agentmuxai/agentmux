@@ -1,5 +1,7 @@
 # Retro: macOS nightly CI red again — real mDNS test is environment-fragile, not flaky
 
+**Status:** retro
+
 **Date:** 2026-08-12
 **Owner:** Maop
 **Area:** `agentmux-srv/src/backend/lan_discovery.rs` (test-only), `.github/workflows/ci-nightly-build.yml`

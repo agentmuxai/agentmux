@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-01
 **Author:** AgentA
-**Status:** Forward plan — alternative framing to `next-steps-2026-05-01.md`
+**Status:** retro — Forward plan — alternative framing to `next-steps-2026-05-01.md`
 
 ---
 

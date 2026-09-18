@@ -1,5 +1,7 @@
 # Phase F+G Status — 2026-05-01
 
+**Status:** retro
+
 Snapshot at end of autonomous PR sequencer session.
 
 Version after merges: **0.33.560**.
@@ -60,7 +62,7 @@ Currently sagas in srv emit `IssueCmd::Host` events that go nowhere — they're 
 - Identity: who owns the pipe (launcher process? srv child?)
 - Reconnection on launcher restart (recovery walks unresolved sagas — does it re-issue or fail-them-out?)
 
-**Action:** spec doc first. Recommend `docs/specs/SPEC_CROSS_PROCESS_DISPATCH_2026-05-XX.md`. Pause autonomous work until user reviews spec.
+**Action:** spec doc first. Recommend `SPEC_CROSS_PROCESS_DISPATCH_2026-05-XX.md (no longer in this repo)`. Pause autonomous work until user reviews spec.
 
 ### Misc cleanup
 

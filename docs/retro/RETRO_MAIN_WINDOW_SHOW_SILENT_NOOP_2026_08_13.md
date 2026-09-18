@@ -1,5 +1,7 @@
 # Retro: main window's `on_load_end` show() silently no-ops, leaving a blank/grey window
 
+**Status:** retro
+
 **Date:** 2026-08-13
 **Severity:** High when it hits (app appears completely broken — blank grey
 window, no error anywhere) but intermittent, not deterministic.

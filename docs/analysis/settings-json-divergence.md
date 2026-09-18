@@ -1,5 +1,7 @@
 # Analysis: Why Dev and Production settings.json Look Wildly Different
 
+**Status:** analysis
+
 **Date:** 2026-03-14
 **Reported by:** asaf
 **Symptom:** Opening settings.json from the widget in dev mode shows ~14 lines of uncommented JSON. Opening it in production shows ~84 lines of commented JSONC template. They should come from the same template.

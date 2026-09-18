@@ -1,5 +1,7 @@
 # Retro: first message to a globally-known agent from a brand-new build/channel failed with a generic "Agent encountered an error"
 
+**Status:** retro
+
 **Date:** 2026-07-29
 **Severity:** Medium (message is lost and must be resent; the agent recovers on the very next send, but the failure is visible and unexplained)
 **Affected versions:** any persistent-controller agent (`agentmux-srv/src/backend/blockcontroller/persistent.rs`), any time its session is first resumed under a build/channel whose CLI install has never locally seen that session. First observed on the freshly-built `0.54.7+g38cc9ac99` portable, immediately after PR #2338 (fast-fail-send-while-unauthenticated) merged.

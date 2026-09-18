@@ -1,5 +1,7 @@
 # Retro: "session restore on reopen" was never a feature — it was a window-row leak, and fixing the leak exposed a deliberate destroy-on-close cascade
 
+**Status:** retro
+
 **Date:** 2026-08-13
 **Trigger:** User reported that AgentMux used to reopen with the same panes/tabs/Armory layout that were open when it was last closed, and that this stopped working. Expectation: "this is how it used to work," implying a regression to fix.
 **Finding:** No restore-on-quit feature was ever deliberately built. What looked like one was a side effect of a leaked-window bug that has since been correctly fixed. There is no dead/vestigial restore code to revive — closing the gap needs new, deliberate work (tracked in `docs/specs/SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`).

@@ -3,7 +3,7 @@
 **Date:** 2026-05-29
 **Repo state:** `main` @ `53d781af` (v0.40.0) + PR-in-flight macOS fixes (`agenta/macos-cef-framework-bundling`, HEAD `d4bd036f`)
 **Author:** AgentO-asaf
-**Status:** Diagnostic report, no patch — macOS tear-off is intentionally unimplemented and needs Phase 7 / Phase C1 work to make any drag-initiating gesture safe.
+**Status:** analysis — Diagnostic report, no patch — macOS tear-off is intentionally unimplemented and needs Phase 7 / Phase C1 work to make any drag-initiating gesture safe.
 **Related issue:** [#1138](https://github.com/agentmuxai/agentmux/issues/1138) (initial crash filing — same root cause; this expands it with code-path evidence)
 **Related specs:**
 - `docs/specs/SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md` — explicit "Out of scope: Floater on macOS / Linux. Windows-only initially."

@@ -2,7 +2,7 @@
 
 **Branch:** `agenta/fix-devtools-native-window`  
 **Date:** 2026-04-06  
-**Status:** Primary DevTools fix merged; secondary-window DevTools not working — root causes identified
+**Status:** analysis — Primary DevTools fix merged; secondary-window DevTools not working — root causes identified
 
 ---
 

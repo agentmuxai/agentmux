@@ -1,5 +1,7 @@
 # Report: Why "No diff available" always shows on Edit tool expansion
 
+**Status:** analysis
+
 **Date:** 2026-04-14
 **Severity:** Visible bug — every Edit tool expansion shows an error stub instead of the actual edit
 **Affected:** `frontend/app/view/agent/components/DiffViewer.tsx`,

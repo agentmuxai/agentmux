@@ -1,7 +1,7 @@
 # Analysis: Dev Vite port hardcoded in `resolve_frontend_base_url`
 
 **Date:** 2026-05-26
-**Status:** Fix landing in same PR
+**Status:** analysis — Fix landing in same PR
 
 ## TL;DR
 

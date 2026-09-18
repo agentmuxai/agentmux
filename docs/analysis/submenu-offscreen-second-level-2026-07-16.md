@@ -1,5 +1,7 @@
 # Second-level submenus escape the paintable-area framework
 
+**Status:** analysis
+
 **Date:** 2026-07-16
 **Symptom (user report):** right-click a pane header → hover **"Replace With..."** — the
 second-level submenu gets cut off at the window edge. The top-level menu is always

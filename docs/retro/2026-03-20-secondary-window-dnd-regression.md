@@ -1,4 +1,6 @@
 # Retro: Secondary Window DnD + Window Drag Regression
+
+**Status:** retro
 Date: 2026-03-20
 Author: AgentA
 

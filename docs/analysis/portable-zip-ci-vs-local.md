@@ -1,5 +1,7 @@
 # Analysis: CI vs Local Windows Portable ZIP
 
+**Status:** analysis
+
 **Date:** 2026-03-09
 **Author:** AgentX
 **Correction:** Initial analysis was inverted — the LOCAL build is correct, the CI build is broken.

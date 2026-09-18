@@ -1,5 +1,7 @@
 # Window Header Drag Dead Spots — Root Cause Analysis
 
+**Status:** analysis
+
 **Date:** 2026-03-09
 **Branch:** `agenta/drag-drop-files`
 **Files involved:** `useWindowDrag.ts`, `windowdrag.tsx`, `window-header.tsx`, `tabbar.tsx`

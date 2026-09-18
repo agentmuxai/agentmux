@@ -1,5 +1,7 @@
 # Retro: macOS Chrome Zoom Fix Broke Windows
 
+**Status:** retro
+
 **Date:** 2026-03-19
 **Severity:** High — chrome zoom completely broken on Windows
 **Time to detect:** ~30 minutes (user reported)

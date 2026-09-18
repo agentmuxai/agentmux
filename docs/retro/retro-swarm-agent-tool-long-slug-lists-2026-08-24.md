@@ -20,7 +20,7 @@ task text the tool call was invoked with, and because many calls share the
 same batch slug, a perfectly correct list of N distinct rows reads as "N
 copies of the same slug."
 
-**Status:** root-caused with a concrete, code-verified implementation path.
+**Status:** retro — root-caused with a concrete, code-verified implementation path.
 **No code changed in this pass** — investigation only, but §3 below is
 detailed enough to implement directly.
 

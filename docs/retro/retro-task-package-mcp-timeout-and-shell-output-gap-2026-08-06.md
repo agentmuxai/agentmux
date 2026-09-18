@@ -1,5 +1,7 @@
 # Retro: `task package` unbuildable via agent tooling — Bash-call timeout, `nohup` doesn't detach, MCP Shell output unreadable
 
+**Status:** retro
+
 **Date:** 2026-08-06
 **Severity:** Medium — blocked an agent-driven release build; user had to be asked how to proceed. No data loss, no incorrect merge (the code-side work — 3 PRs — completed correctly; only the *build artifact* step failed).
 **Observed by:** agenta (Claude agent) while producing a fresh desktop portable for v0.54.11

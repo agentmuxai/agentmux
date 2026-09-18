@@ -1,5 +1,7 @@
 # OOM Crash Analysis: FileStore Cache Memory Leak
 
+**Status:** analysis
+
 **Date:** 2026-03-24
 **Severity:** Critical — process crash (OOM)
 **Component:** `agentmuxsrv-rs` → `backend/storage/filestore/core.rs`

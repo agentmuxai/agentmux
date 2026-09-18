@@ -1,5 +1,7 @@
 # Analysis: New Windows Cannot Be Resized at Edges
 
+**Status:** analysis
+
 **Date:** 2026-03-31
 **Severity:** UX regression — secondary windows have no edge resize
 **Affects:** Windows only (multi-window is Windows-only currently)

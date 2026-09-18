@@ -1,5 +1,7 @@
 # Retro — Claude v2.1.x in-app login: the spawn can't open the browser (2026-06-23)
 
+**Status:** retro
+
 ## TL;DR
 We spent the session trying to make Claude's in-app login work by driving the CLI under
 our host PTY — first scraping the OAuth URL, then pivoting to `claude setup-token`

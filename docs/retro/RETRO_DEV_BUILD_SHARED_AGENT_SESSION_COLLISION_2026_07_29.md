@@ -1,5 +1,7 @@
 # Retro: a throwaway `task dev` test build resumed a live production agent session and spawned an unaware second turn
 
+**Status:** retro
+
 **Date:** 2026-07-29
 **Severity:** High (a second, independent agent process edited the same shared git working directory as the live production process, with neither aware of the other; only benign by luck of what the injected instruction happened to be)
 **Affected versions:** since P0.2/P0.3 made the agent registry/definitions/transcript store channel-independent (pre-dates this retro; exact PR not identified in this investigation).

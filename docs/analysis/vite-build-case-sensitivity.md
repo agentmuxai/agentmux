@@ -1,6 +1,6 @@
 # Vite Production Build Failure: Windows Path Case Sensitivity
 
-**Status:** Open
+**Status:** analysis — Open
 **Date:** 2026-04-09
 **Severity:** Build-breaking — portable builds cannot be produced
 **Affects:** `task cef:package:portable`, `task build:frontend`

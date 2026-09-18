@@ -1,5 +1,7 @@
 # Retro: agentmux-corp PR #5 opened under AgentY's GitHub identity instead of AgentX's
 
+**Status:** retro
+
 **Date:** 2026-08-24 (confirmation added 2026-08-25 by AgentX — see §7)
 **Owner:** AgentY
 **Area:** `gh` CLI authentication — leading hypothesis (§2a, added after

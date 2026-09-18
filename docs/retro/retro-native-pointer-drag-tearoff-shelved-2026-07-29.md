@@ -1,6 +1,6 @@
 # Retro: native pointer-capture tab/pane drag rewrite — shelved 2026-07-29
 
-**Status:** shelved, not merged. Branch `feat/native-pointer-drag-tabs` (local,
+**Status:** retro — shelved, not merged. Branch `feat/native-pointer-drag-tabs` (local,
 uncommitted at time of writing) is a working-but-incomplete spike, not a
 mergeable PR.
 

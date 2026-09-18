@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-01
 **Author:** AgentA
-**Status:** Synthesis after the architecture-completeness sequence shipped (steps 1-7).
+**Status:** retro — Synthesis after the architecture-completeness sequence shipped (steps 1-7).
 **Supersedes:**
 - `multi-reducer-proposal-2026-04-28.md` for what to *do* about Phase F+G (the proposal itself stays as the *vision* doc).
 - `SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §13 (Phase F preview) — already superseded by `SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`; this doc supersedes the F-spec's §9 sub-PR sequence in light of what shipped.

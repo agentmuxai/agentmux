@@ -1,5 +1,7 @@
 # Report: AgentX in AgentMux reports "no git identity" — root cause and claw bridge fix
 
+**Status:** analysis
+
 **Date:** 2026-04-14
 **Severity:** Startup warning — every AgentX pane launch shows it; blocks
 commits from inside the agent

@@ -1,5 +1,7 @@
 # Analysis — agent-pane live-log wraps at a fixed ~80 chars
 
+**Status:** analysis
+
 **Date:** 2026-05-23
 **Author:** AgentA
 **Severity:** Low (functional — readability annoyance, no data loss)

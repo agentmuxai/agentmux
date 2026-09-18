@@ -1,5 +1,7 @@
 # Retro: floating-pane resize hit-target shrank from 12px to 4px as a side effect
 
+**Status:** retro
+
 **Date:** 2026-07-27
 **Severity:** Low-medium — no crash/data-loss, but a persistent UX regression
 (resize handle "really hard to select") that shipped silently for a month.

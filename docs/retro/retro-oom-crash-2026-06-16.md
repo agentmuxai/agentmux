@@ -1,6 +1,6 @@
 # Retro / Post-mortem — AgentMux OOM crash (2026-06-16)
 
-**Status:** root cause confirmed · recovery gaps identified · recommendations below
+**Status:** retro — root cause confirmed · recovery gaps identified · recommendations below
 **Author:** AgentA
 **Date:** 2026-06-16
 **Severity:** P1 — the live dogfood session was lost (hard crash, no graceful exit)

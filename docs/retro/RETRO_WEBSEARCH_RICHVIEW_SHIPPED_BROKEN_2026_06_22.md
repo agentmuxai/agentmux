@@ -3,7 +3,7 @@
 **Date:** 2026-06-22
 **Discovered by:** Lark (agent pane live test — WebSearch result showed collapsed JSON)
 **PRs involved:** #1514 (registry foundation), #1601 (WebSearch cards + Write view)
-**Status:** Not yet fixed
+**Status:** retro — Not yet fixed
 
 ---
 
