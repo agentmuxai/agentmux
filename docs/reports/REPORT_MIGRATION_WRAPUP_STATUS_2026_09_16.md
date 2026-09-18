@@ -740,6 +740,49 @@ untyped bucket — after which the gate could start enforcing on them.
 Left undone deliberately: nothing here was auto-fixed. Part 4 of the hardening spec says
 this backlog is surfaced, not repaired, and #3216's weekly sweep already reports it.
 
+#### 5.5a The backlog is three times bigger than this section says, because this section only counted specs
+
+Measured 2026-09-18 across **all 1,488 tracked `.md` under `docs/`** (excluding INDEX/README),
+not just `docs/specs/`:
+
+| | count |
+|---|---:|
+| canonical `**Status:**` + a vocabulary word | 856 |
+| canonical line, non-vocabulary word | 208 |
+| declares a status in a format the gate cannot read | 82 |
+| no status of any kind | 336 |
+| **total non-compliant** | **626** |
+
+The gate is not specs-scoped — its `docs/` filter is applied in awk on the diff destination —
+so all 626 are in its blast radius the moment someone edits one.
+
+**The reason most of them are non-compliant is not neglect.** The top non-vocabulary words are
+`root` x45 (`**Status:** root-caused; fix in ...`), `analysis` x25, `shipped` x11,
+`fixed` x7, `investigation` x6. Those are `docs/retro/` and `docs/analysis/` files, and the
+closed vocabulary — `draft | proposed | active | implemented | living | historical |
+superseded` — was designed for **specs**, which are 975 of the 1,488. A retro is not
+"implemented"; it is a record of something that happened. Forcing it into a spec's lifecycle
+word makes the field less informative, not more.
+
+So there are two genuinely different problems filed under one number:
+
+1. **Specs that never got a Status, or got a free-text one** — the original backlog, and the
+   one the vocabulary fits.
+2. **Non-spec doc types the vocabulary does not describe** — which needs a decision about
+   whether to extend the enum (e.g. a `record` state for retros/analyses) or exempt those
+   directories, not a restamping campaign.
+
+**What must NOT happen to either:** `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §4 already
+ruled on this — an unverified bulk restamp "replaces *unknown status* with *confidently wrong
+status*", and `check-doc-status.sh` deliberately excludes pure renames for the same reason.
+The 336 with no status at all cannot be fixed mechanically: setting one requires reading the
+doc and knowing what it is.
+
+The one subset that **is** safe to fix mechanically is the 82 that already declare a status
+and are merely mis-formatted (`Status: draft` unbolded, `## Status: Spec`, or a list item).
+Normalising those changes no claim — it only makes a claim the author already made visible to
+the gate.
+
 ### 5.6 Automate §3's reverse check 🟢 **recommended**
 
 The "claims unbuilt, but its artifact is cited in source" query found three real corrections in
