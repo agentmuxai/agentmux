@@ -1,7 +1,7 @@
 # Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop)
 
 **Date:** 2026-07-10
-**Status:** Draft (v3 — field-testing addendum 2026-07-11, see end of file)
+**Status:** implemented — #2073 (2026-07-10), the PR this doc was added in, then reworked and hardened over the next two days in response to the field testing this doc records: #2079 (spring-loaded tabs), #2086 (cross-window tab remount), #2095 (drag stability + hover strobe, "field-testing round 1"), and later #2310 (macOS redock via CGEventTap). The v3 addendum at the end of this file is a *snapshot of an open bug on 2026-07-11*, not a description of current behaviour — its candidate causes were worked through in those PRs and the drag-session architecture was then redesigned in #2105. Live code: `frontend/layout/lib/crossTabDrag.ts`, `frontend/app/tab/droppable-tab.tsx`, `tabbar-dnd.ts`, `tab-reorder.ts`.
 **Repo state:** `main` @ `42b95715`
 **Scope:** In-window pane drag onto the tab bar (dropping a tile-layout pane onto a *different tab in the same window*). Cross-window drag (already handled by `DragOverlay`/`CrossWindowDragMonitor`) and touch/pen input are out of scope.
 

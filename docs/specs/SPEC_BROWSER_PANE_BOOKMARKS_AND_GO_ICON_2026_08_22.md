@@ -4,7 +4,7 @@
 **Type:** Two asks bundled in one doc — (1) a small presentational fix, ready to
 implement; (2) a design exploration for a bigger feature, **not yet approved
 for implementation**.
-**Status:** Draft
+**Status:** implemented — #2730 (2026-08-22), the PR this doc was added in. The store is `agentmux-srv/src/backend/bookmarks_store.rs`, exposed through `server/app_api/bookmarks.rs` and `frontend/app/store/rpc-api/bookmarks.ts`. The v1 non-goals are still out of scope.
 **Scope:** `frontend/app/view/browser/` (nav bar, view model), `frontend/app/store/browser-pane-state/`, potentially `settings.json`/`agentmux-srv` config plumbing for part 2.
 
 ---
