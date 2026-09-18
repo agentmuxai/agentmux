@@ -450,6 +450,28 @@ EOF
 )"
 ```
 
+### `gh pr edit` is currently broken — use the REST API
+
+`gh pr edit` fails on this `gh` (2.46.0) with:
+
+```
+GraphQL: Projects (classic) is being deprecated ... (repository.pullRequest.projectCards)
+```
+
+`gh` still queries `projectCards`, which GitHub has sunset, so **any** attempt to
+edit a PR body or title errors out — including adding the
+`<!-- agentmux:agent_id=... -->` tag to a PR you already opened. Nothing is
+written; the command just fails.
+
+Use the REST endpoint instead, which does not touch Projects:
+
+```bash
+scripts/gh-agent.sh api "repos/agentmuxai/agentmux/pulls/<n>" -X PATCH -F body=@body.md
+```
+
+`gh pr create` is unaffected — this only bites when editing after the fact,
+which is exactly what you need if you forgot the agent tag.
+
 ### Which GitHub account am I acting as?
 
 This machine runs multiple agents. Plain `gh` (with no token override) falls

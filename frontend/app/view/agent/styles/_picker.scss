@@ -356,6 +356,32 @@
             transform: scale(1.06);
         }
 
+        // Upgrade hint. Deliberately quieter than the install ribbon: that
+        // one is a CTA for a card you cannot use at all, this one is a note
+        // on a card that works fine — the agent launches either way, it just
+        // runs an older CLI than we validated. Top-right so it never collides
+        // with the ribbon or the "+ New" pill, both anchored bottom-right.
+        .agent-card-upgrade-badge {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            padding: 1px 6px;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            color: var(--warning-color, #c4a000);
+            background: color-mix(in srgb, var(--warning-color, #c4a000) 14%, transparent);
+            border: 1px solid color-mix(in srgb, var(--warning-color, #c4a000) 35%, transparent);
+            border-radius: 3px;
+            pointer-events: none;
+            z-index: 1;
+            user-select: none;
+
+            i {
+                font-size: 8px;
+            }
+        }
+
         // Option E (PR #1008): "+ New" affordance — visible only when
         // the agent has a current session and the default click would
         // auto-continue. Anchored bottom-right (where the install

@@ -1,7 +1,7 @@
 # SPEC: Web-search rich result view
 
 **Date:** 2026-06-19
-**Status:** Planned
+**Status:** proposed — Planned
 **Author:** smike
 **Related:** `frontend/app/view/agent/components/tool-renderers/SearchResults.tsx`,
              `frontend/app/view/agent/components/tool-renderers/search-results.ts`,

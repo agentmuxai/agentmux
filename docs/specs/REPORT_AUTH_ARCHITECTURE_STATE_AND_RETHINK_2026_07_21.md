@@ -1,6 +1,7 @@
 # AgentMux Auth Architecture — Current State & Rethink
 
 **Date:** 2026-07-21
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Scope:** Every OAuth/credential system in AgentMux — provider-CLI login, MuxBus/AgentMux Cloud, and the
 Armory service-account OAuth scaffold — as they exist today, plus external research into how comparable
 tools solve the same problems, plus a concrete target architecture.

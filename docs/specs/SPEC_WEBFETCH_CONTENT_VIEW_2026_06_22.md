@@ -1,7 +1,7 @@
 # SPEC: WebFetch content view
 
 **Date:** 2026-06-22
-**Status:** Planned (implemented — see note below)
+**Status:** implemented — Planned (implemented — see note below) — #1706
 **Author:** Lark
 
 > **2026-08-07 audit note:** Implemented (`WebFetchResult.tsx`, PR #1706).

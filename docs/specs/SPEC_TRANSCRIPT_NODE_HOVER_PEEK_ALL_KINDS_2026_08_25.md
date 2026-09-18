@@ -1,6 +1,6 @@
 # Spec: hover-to-peek on EVERY transcript node kind, 50ms delay
 
-**Status:** Implemented.
+**Status:** Implemented. — #2800
 
 **Trigger (verbatim):** "they actually always need to fire. reduce delay for
 50ms. Anytime you hover over the agent pane conversation history, there

@@ -562,6 +562,7 @@ impl Controller for ShellController {
 
             let mut c = CommandBuilder::new(&shell_path);
 
+
             // Apply shell-specific startup args (--rcfile, -File, etc.)
             if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home) {
                 for arg in &startup.extra_args {
@@ -597,11 +598,8 @@ impl Controller for ShellController {
                 c.env("AGENTMUX_LOCAL_URL", &local_url);
             }
 
-            // AGENTMUX is a plain "1" sentinel — wsh has been retired.
-            // Shell integrations check for the presence of AGENTMUX but no
-            // longer prepend a path to $PATH based on its value.
-            // See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
-            c.env("AGENTMUX", "1");
+            // The AGENTMUX sentinel is set by pane_env::sanitize_pty_command
+            // after the if/else, so every branch gets it — not just this one.
 
             // Wire AgentMux-managed tool dirs into the agent's PATH.
             //
@@ -730,6 +728,12 @@ impl Controller for ShellController {
 
             c
         };
+
+        // Applied to ALL THREE branches above, not just the interactive shell.
+        // The direct-spawn branch launches agent CLIs and the shell-wrapped `cmd`
+        // branch can launch anything; both inherited the full instance identity
+        // while this lived inside the third branch (ReAgent P0 on PR #3326).
+        crate::backend::pane_env::sanitize_pty_command(&mut cmd);
 
         // Set working directory if specified
         let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");

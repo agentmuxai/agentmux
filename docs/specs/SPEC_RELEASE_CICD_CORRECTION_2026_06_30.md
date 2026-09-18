@@ -1,7 +1,7 @@
 # Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication
 
 **Date:** 2026-06-30
-**Status:** Approved — implementing
+**Status:** proposed — Approved — implementing
 **Supersedes:** §3, §4.2, §4.3 of `SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md`
 **Scope:** agentmuxai/agentmux (`release.yml`), agentmuxai/agentmux-landing (`landing-deploy.yml`)
 

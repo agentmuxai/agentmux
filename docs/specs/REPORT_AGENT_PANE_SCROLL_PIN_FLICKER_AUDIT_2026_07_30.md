@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 **Author:** Agent3
-**Status:** Audit + research only — no code changed this pass. Recommends a follow-up implementation spec.
+**Status:** historical — Audit + research only — no code changed this pass. Recommends a follow-up implementation spec.
 **Scope reviewed:** `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`, `frontend/app/view/agent/virtualization/state.ts`, `frontend/app/view/agent/virtualization/anchor.ts`, `frontend/app/view/agent/components/MarkdownBlock.tsx`, `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/view/agent/stream-flush-queue.ts`, and the three prior scroll-follow passes: `docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`, `docs/specs/SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md`, and commit `30af99e8` (#2349, 2026-07-28).
 
 ---

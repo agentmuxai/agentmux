@@ -47,6 +47,20 @@ export type {
     WidgetHealthResult,
 } from "./misc";
 export type {
+    CommandEventReadHistoryData,
+    NoArgsReq,
+    SubscriptionRequest,
+} from "./workspace";
+export type {
+    AiRateLimitResult,
+    AppInfoResult,
+} from "./misc";
+export type {
+    CommandAgentAnswerData,
+    BlockInputInput,
+    CommandBlockInputData,
+} from "./block";
+export type {
     UnwatchMediaDirReq,
     WatchEditorFileReq,
     WatchMediaDirReq,

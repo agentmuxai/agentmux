@@ -1,6 +1,6 @@
 # Swarm ↔ Pane Two-Way Active-Row Sync
 
-**Status:** Implemented  
+**Status:** Implemented — #1721
 **Date:** 2026-06-23
 
 ---

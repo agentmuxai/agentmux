@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03
 **Status:** implemented, live-verified working (§7), and a P1 review finding
-on the chunking design fixed (§8).
+on the chunking design fixed (§8). — #2397
 **Context:** live-debugged on channel `local-main-b28b7a-9172ff88` (this
 machine, Windows) while checking whether GitHub PR-review jekt notifications
 were reaching that instance via the muxbus GitHub consumer

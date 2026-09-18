@@ -1,7 +1,7 @@
 # Spec: Container Agent Runtime
 
 **Date:** 2026-03-18
-**Status:** Design
+**Status:** proposed — Design
 **Priority:** High — container agents (1/2/3) are defined but can't run
 **Research:** See `docs/research-container-runtime-detection.md` for full platform-by-platform analysis
 

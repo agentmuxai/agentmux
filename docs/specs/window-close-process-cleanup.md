@@ -1,7 +1,7 @@
 # Window Close Process Cleanup Spec
 
 **Date:** 2026-04-04
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Priority:** P0 — orphaned processes accumulate and leak system resources
 
 ---

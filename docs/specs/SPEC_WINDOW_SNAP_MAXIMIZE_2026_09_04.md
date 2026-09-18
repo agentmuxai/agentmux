@@ -3,7 +3,7 @@
 **Date:** 2026-09-04
 **Status:** implemented 2026-09-05 — both features built; pending live
 verification of the manual test plan in §6 (native Win32 message-loop code,
-not reachable by any test harness). See §7 for what shipped.
+not reachable by any test harness). See §7 for what shipped. — #2986
 **Repo:** agentmuxai/agentmux
 **Trigger:** Operator request — dragging the AgentMux window to the top of the
 screen should offer to maximize it, and dragging a window *border* to the

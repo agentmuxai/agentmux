@@ -2,7 +2,7 @@
 
 **Author:** Vmer
 **Date:** 2026-09-16
-**Status:** active — Phases 1, 2a, and 2b are implemented (Phase 2b's real scope corrected during implementation, see §5.5/§5.6 — two commands originally planned there turned out not to be buildable as designed). Phase 3 not started.
+**Status:** active — Phases 1, 2a, and 2b are implemented (Phase 2b's real scope corrected during implementation, see §5.5/§5.6 — two commands originally planned there turned out not to be buildable as designed). Phase 3 not started. — PRs touching this work, newest first: #3281, #3263
 **Related:** `docs/specs/SPEC_MUXSH_CLI_2026_09_16.md` (Phase 1 — shipped, PR #3255, `muxsh open`/`muxsh web`), `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (the research this builds on), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import `wsh`'s literal command set), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (`muxopen`), `agentmux-docs/.../internals/agent-app-api.md`
 
 ---

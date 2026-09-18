@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27
 **Author:** AgentA
-**Status:** Design — bug fix for resumed-session UI inconsistency. No tracking discussion yet.
+**Status:** proposed — Design — bug fix for resumed-session UI inconsistency. No tracking discussion yet.
 
 ---
 

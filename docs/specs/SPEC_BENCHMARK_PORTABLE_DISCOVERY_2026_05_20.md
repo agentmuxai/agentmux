@@ -1,7 +1,7 @@
 # SPEC: Benchmark Auth-File Discovery — Dev and Portable Instances
 
 **Date:** 2026-05-20  
-**Status:** Implemented (same PR as SPEC_DEAD_TERMINAL_PANE_2026_05_20.md)  
+**Status:** Implemented (same PR as the dead-terminal-pane spec (since removed from the tree)) — #951
 **Affected tooling:** `tools/tests/bench-term-echo.mjs`, `tools/tests/authfile.ps1`  
 **Affected host:** `agentmux-cef/src/main.rs`, `agentmux-cef/src/dev_authfile.rs`
 
@@ -133,7 +133,7 @@ console.log('busy  p95:', fmt(b.busy.p95),  '->', fmt(a.busy.p95));
 
 ## Relationship to Dead-Terminal Spec
 
-`SPEC_DEAD_TERMINAL_PANE_2026_05_20.md` documents that dead terminals appear
+the dead-terminal-pane spec (since removed from the tree) documents that dead terminals appear
 under memory pressure (≥93% RAM). The benchmark is the instrument for catching
 **latency degradation** that precedes or accompanies that condition. Running
 `bench-term-echo.mjs --busy` when the system is under moderate pressure (70–85%)
@@ -147,6 +147,6 @@ A future CI step could fail if p95 exceeds a threshold, giving early warning.
 
 - `docs/specs/SPEC_TEST_API_ACCESS.md` §5–§6 — auth file format and security model
 - `docs/specs/SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md` — benchmark design
-- `docs/specs/SPEC_DEAD_TERMINAL_PANE_2026_05_20.md` — failure modes this workflow targets
+- the dead-terminal-pane spec (added in 62d50cb, since removed from the tree) — failure modes this workflow targets
 - `agentmux-cef/src/dev_authfile.rs` — auth file writer
 - `agentmux-cef/src/main.rs` — write gate (the `if is_dev {` block)

@@ -100,10 +100,45 @@ architectural decision — that needs a repo-owner call before anyone builds it.
 ### 2.3 Architecture refactor A1–A15 (#1549) — 13.5 of 15 ✅ **[verified]**
 
 - **A9 — done.** PR #3044 routed the 11 raw dispatches and added a guard test.
-- **A6 — half done.** PR #3054 killed the `AgentAtoms` mirror; `model.state`/`model.document`
-  are now the single reactive source, pinned by `agent-pane-view.test.ts`. The remaining half
-  (scroll/expansion unification) moved to `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`.
-- **A10** — unchanged, still self-annotated "safe to skip".
+- **A6 — done in substance; the "remaining half" was itself mostly already shipped.**
+  PR #3054 killed the `AgentAtoms` mirror; `model.state`/`model.document` are the single
+  reactive source, pinned by `agent-pane-view.test.ts`. This report previously described the
+  other half as "scroll/expansion unification, moved to
+  `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`", which implied that whole spec was pending.
+
+  **Re-verified against code 2026-09-17: it was not.** Of that spec's five phases, four had
+  shipped — Phase 3 (slice owns positions, TanStack retired) on **2026-06-05 in #1270**,
+  three days after the spec was written, and Phase 4 in #1281. Only Phase 1 remains, and it
+  reduces to **one component-local signal** (`MarkdownBlock.expanded`); the spec's other
+  named sources are either already routed, deleted, or out of scope by its own §3.4.
+
+  Why this was missed: that spec's `**Status:**` line still read *"Phase 0 implemented …
+  no render-path wiring yet"*. It was wrong for fifteen months, and this audit trusted it.
+  See §3.1.
+
+  Also note A6's own title — "collapse agent-pane 4 parallel state systems" — is misleading
+  today. The four surviving files are `agent-model`, `agent-mcp-model`, `agent-skill-model`
+  and `agent-native-memory-model`: four **different domains**, not four parallel systems for
+  the same state. The genuinely parallel thing was the mirror, and #3054 removed it.
+- **A10 — re-verified 2026-09-17, and the issue's own framing is slightly off.** It reads
+  "consolidate data-dir resolution onto `DataPaths`", which implies duplicated resolution
+  logic. There is not much: `agentmux-launcher`'s `DataPaths` is a documented compat shape
+  that *wraps* `agentmux_common::DataPaths` rather than re-resolving, and
+  `get_mux_data_dir()` (29 callers) is a different concept — the **global `~/.agentmux`
+  root**, which the agent registry, transcripts and definitions deliberately use
+  cross-channel (#1387–#1393), not the per-instance dirs `DataPaths` resolves.
+
+  What IS real: **two independent env overrides for the same root, each honoured by only
+  half the code.** `get_mux_data_dir()` reads `AGENTMUX_DATA_HOME`;
+  `DataPaths::resolve_root()` reads `AGENTMUX_HOME_OVERRIDE` (documented test-only). With
+  neither set — the normal case — both resolve to `~/.agentmux` and agree, which is why
+  nothing has broken. Set either one and the two halves disagree about where the root is.
+
+  Checked and NOT a live bug: `registry::write` takes `data_dir` as a parameter, so tests
+  inject a tempdir and do not write through `get_mux_data_dir()` into a real home.
+
+  Still fair to call low priority, but "safe to skip" undersells it — the finding above is
+  the part worth keeping if A10 is closed unfinished.
 
 All four agent-pane state files still exist, and **`agent-view.tsx` is now 3,017 lines** (1,282
 when A6 was filed, 2,730 at the 09-06 audit, 13 commits in the last 10 days). The file is still
@@ -154,6 +189,45 @@ implemented) returned **32 candidates**. Four were verified individually; three 
 definitively wrong and are corrected here (§4).
 
 This should be institutionalised rather than repeated by hand — §5.6.
+
+---
+
+### 3.1 The status-line trap — the sharpest instance of §3, found by falling into it
+
+§3 catalogues docs that describe the past. This one is worth its own entry because of *how*
+it misleads and *how cheap* the defence is.
+
+`SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` carried:
+
+> **Status:** Design resolved (§11); **Phase 0 implemented** — pure slice core + store + tests (no render-path wiring yet)
+
+Phase 3 landed three days later (#1270, 2026-06-05) and retired TanStack outright. The
+status line was never touched. Fifteen months on, **two independent readers took it at face
+value** — this report's own §2.3, and then a 2026-09-17 scoping pass that went as far as
+producing an ROI argument and a phase-by-phase work estimate for three phases that were
+already shipped. The error was only caught by running `grep -n tanstack package.json` and
+finding nothing.
+
+**Why the existing instrumentation cannot catch this.** `check-doc-status.sh` enforces the
+Status *vocabulary* (the closed enum) and that a `superseded` pointer resolves. Neither rule
+asks whether the status is TRUE, and no cheap rule can — truth here means "compare the
+document's claim to the shipped code", which is a judgement, not a grep.
+
+**The defence that does work, and costs nothing:** a spec that lists migration phases should
+record, per phase, **how to verify its state in one command** — not a single status line at
+the top. That spec now does:
+
+| phase | verify |
+|---|---|
+| 0 | `ls frontend/app/store/agent-pane-layout/` |
+| 2 | `grep -n "RowMeasured\|EstimateSet" …/AgentDocumentVirtualList.tsx` |
+| 3 | `grep -n tanstack package.json` returns nothing |
+
+**The rule for readers, which is the transferable part:** *a status line is the
+least-maintained line in any document and the first one a reader trusts.* Before planning
+work off a spec, check the artifact — the dependency, the exported symbol, the call site.
+It costs one command. Both times it was skipped here, the estimate was wrong by most of the
+work.
 
 ---
 
@@ -327,17 +401,35 @@ hand-maintained lines.** Roughly 5%.
 | block dead stubs | #3311 | **Deleted** 10 commands no handler serves. |
 | dead-stub sweep | #3312 | **Deleted** 55 more across misc/workspace/file. |
 | `misc` (muxbus, providers) | #3313 | 6 private structs promoted; 2 more commands left untyped by design. |
+| agent core (12 cmds) | #3327 | `getagentcontent` was recording `Value` in the registry despite an identical wire shape. |
+| template / fork (3 cmds) | #3328 | Finished `template.rs`; `Option<Req>` for both encodings of "no argument". |
+| Drone pane (6 cmds) | #3329 | Whole type surface; found ts-rs ignoring `serde(rename)` on a field. |
+| editor mutations (7 cmds) | #3331 | 14 shapes out of closure-local `struct Cmd`s. |
+| agent-instance (4 cmds) | #3332 | 9 fields typed `?:` that the server always sends. One deliberate behaviour change. |
+| editor reads (5 cmds) | #3333 | 4 "back-compat optional" fields the server has never omitted. |
+| agent-skills (4 cmds) | #3334 | Surfaced a create/update `skill_type` default asymmetry. Not fixed — product call. |
+| LSP (3 cmds) | #3330 | Three requests that existed only inside closures. |
+| editor watchers (4 cmds) | #3337 | Finished `editor_handlers.rs`. |
+| agent-history (3 cmds) | #3339 | No drift; clean. |
+| cli / toolchain / widget (7 cmds) | #3344 | Revised the §5.4c rule — see below. Third `ts(rename)` sighting. |
+| ts-rs claim correction | #3345 | Retracted a wrong claim this report repeated. See below. |
+| shell / agent-input (7 cmds) | #3342 | `exit_code?: number` where the key is always present-and-null. |
+| websocket (10 cmds) | #3348 | `MuxInfoData` promised 5 fields; the handler sends 1. |
 
-Measured 2026-09-17, same greps as the original numbers:
+Measured 2026-09-17 (end of the effort), same greps as the original numbers.
+`#3342` and `#3348` were still in review at the time of measurement, so the
+final two columns understate by ~17 commands:
 
-| metric | at report creation | now |
-|---|---|---|
-| `srv-types.d.ts` | 2,755 lines | **2,222** |
-| declared commands | 277 | **221** |
-| declared-but-unregistered | 69 | **14** |
-| generated bindings | 14 | **123** |
-| stub files importing generated types | 1 | **9 of 16** |
-| `register_typed` vs `register_handler` | 12 / 232 | **63 / 181** |
+| metric | at report creation | mid-effort | now |
+|---|---|---|---|
+| `srv-types.d.ts` | 2,755 lines | 2,222 | **1,698** |
+| declared commands | 277 | 221 | **221** |
+| declared-but-unregistered | 69 | 14 | **14** |
+| generated bindings | 14 | 123 | **280** |
+| stub files importing generated types | 1 | 9 of 16 | **15 of 18** |
+| `register_typed` vs `register_handler` | 12 / 232 | 63 / 181 | **170 / 66** |
+
+That is **72% of registrations typed**, from 5%. `srv-types.d.ts` is down 38%.
 
 #### 5.4b The finding that changed the plan: 25% of the stub surface was dead
 
@@ -376,9 +468,18 @@ now deliberate exceptions, and the pattern is consistent enough to be worth stat
   defaults — a missing `port` becomes `0`, which the handler answers with `{healthy:false}`
   rather than an error. A typed `Req` would turn that into a deserialization failure.
 
-**Rule:** a handler that transforms its payload before deserializing, or that deliberately
-accepts loose input, should keep its `Value` request and have only its **response** typed.
-That is where the drift risk actually lives.
+**Rule (revised 2026-09-17, #3344):** a handler that transforms its payload before
+deserializing, or that deliberately accepts loose input, should have its `Value` request
+**registered as `Value`** — not left on `register_handler`.
+
+The original rule said such handlers had to stay untyped entirely, which was stronger than
+necessary. `serde_json::Value` deserializes from *anything*, so `register_typed::<Value,
+Resp>` is exactly as tolerant as the untyped handler while still recording the response
+type — and the response is where the drift risk actually lives. `widget.health` and
+`widget.api` were converted this way in #3344.
+
+`bundle.validate` and `listagents` are still on `register_handler` and could take the
+same treatment; that was left as a follow-up rather than done inside an unrelated slice.
 
 #### 5.4d Where generating produces a WORSE type
 
@@ -426,6 +527,99 @@ dictate wire behaviour, since `default_detail()` exists so an omitted detail bec
 rather than `null`. **Expect this to recur:** any struct with a defaulted non-`Option` field
 that the frontend treats as optional is inexpressible, and the right answer is to leave it
 hand-written with a note on both sides, not to reshape the Rust to suit the tool.
+
+#### 5.4e Three ts-rs traps, one of which this report got wrong
+
+**Real, load-bearing: ts-rs ignores per-field and per-variant `#[serde(rename = "...")]`.**
+The field generates under its *Rust* name — a key nothing sends and nothing reads — and
+every gate stays green, because the generated file is internally consistent and simply
+describes a wire format that does not exist. Three sightings: `oauth_config_dir` (#3320),
+`FlowNode.type` → `node_type` (#3329), `pathSource` → `path_source` (#3344). All three
+were caught by *reading generated output*, not by any check. There is one now —
+`scripts/check-rpc-codegen-hygiene.mjs`, wired into `ci-pr.yml` beside the bindings gate.
+
+**Wrong, and retracted in #3345: ts-rs does NOT ignore `#[serde(rename_all)]`.** #3329
+added `#[ts(rename_all)]` to two enums with a comment asserting it did, and an earlier
+revision of this report repeated that. The claim was never tested — it was generalised from
+the per-field case above. Two counter-examples were already in the tree: `ToolStatus`
+(`rename_all = "snake_case"`, no `ts` attribute, generates a correct snake_case union) and
+`InstallStartReq` (`rename_all = "camelCase"`, generates `providerId`/`cliCommand`).
+Removing the redundant attributes left the generated output **byte-identical**, which is
+the proof they were inert.
+
+Worth recording as a method note: the first version of the scan for this matched
+`rename_all` too and reported 44 hits. Investigating them is what surfaced the error. A
+noisy check that gets read beats a quiet one that gets trusted.
+
+#### 5.4e-bis The four checks, and why none of them is `tsc`
+
+`scripts/check-rpc-codegen-hygiene.mjs` carries four checks, each written after the same
+defect got past review more than once. They share one property worth stating plainly:
+**every failure they catch compiles, typechecks, AND passes `check-rpc-bindings.sh`.**
+
+`cargo check` sees only the Rust half. `tsc` checks the frontend against the *generated*
+types, never against the backend — so a binding that describes a wire format nobody speaks
+typechecks cleanly on both sides. And the bindings gate verifies a generated file *exists*
+per type and is *current* with the Rust, which a file can be while still being wrong about
+the wire.
+
+| check | what it catches | prior sightings |
+|---|---|---|
+| ambient duplicates | a global shadowing its own generated replacement; consumers that do not import silently resolve to the stale one | #3318, #3320 (×2), #3327 |
+| `serde(rename)` without `ts(rename)` | a field generated under its Rust name — a key nothing sends and nothing reads | #3320, #3329, #3344 |
+| typed handler hand-serializing | registry records `Value` instead of the real response type; wire bytes identical, so nothing else notices | #3327, #3331 |
+| unused generated imports | leftovers from a migration | an earlier slice left nine |
+
+Two of the four had a **false-negative or false-positive bug of their own** before they
+were correct: the hand-serialize check originally matched `to_value` but not inline
+`json!`, and passed `movescratchfile` clean while a test caught it (#3331); the
+unused-import check ignored `X as XT` aliases and reported eleven healthy imports as dead.
+Both are worth knowing about — a check is a piece of software with its own defects, and an
+unexamined green is not evidence.
+
+#### 5.4f "No argument" has two encodings, and the stubs disagree
+
+An empty-struct `Req` rejects `null`; a unit `()` `Req` rejects `{}`. Which one breaks
+depends on the stub, and **the stubs are not consistent**: most send `{}`, but every
+no-argument stub on the websocket connection sends `null`
+(`client.rpcCall("waveinfo", null, opts)` and four more). The earlier slices assumed `{}`
+universally and would have broken those five.
+
+`Option<Req>` accepts both and is now the standard for any command that takes no argument.
+
+#### 5.4g Honest cost accounting
+
+Three of the most-cited findings from this effort — `oauth_config_dir`, `FlowNode.type`,
+`pathSource` — were bugs **the migration itself nearly introduced**. They were all caught
+before merge, but that is the migration paying down risk it created, not value it
+delivered. A fair ledger has to say so.
+
+The value that is unambiguously banked: 65 dead stubs deleted, 11 called-but-unregistered
+commands surfaced (§5.4b — still the most actionable item here), and a set of type lies
+corrected where the hand-written declaration disagreed with what the server actually sends
+(`AgentInstance`, `CommandReadEditorFileResult`, `ShellStatusResult.exit_code`,
+`MuxInfoData`, `CommandBlockInputData.seq`). Most of those were wrong in the *safe*
+direction — optional where the server always sends — which is why few produced live
+crashes.
+
+The forward value is the gate: `check-rpc-bindings.sh` now fails CI on Rust↔TS divergence
+for 72% of registrations. `rpc_types/` sees ~90 commits in 6 months, and this repo does
+sweeping identifier renames roughly every six weeks (Wave→Mux, Memory→Bundle,
+Preset→Bundle, Trust Center→Armory). A mass rename is exactly the operation where a
+hand-maintained mirror rots silently, and exactly what the gate now catches.
+
+#### 5.4h Stopping point
+
+The effort was stopped deliberately at 72%, not abandoned. What remains untyped:
+`app_api/*` (bundle 12, agent_io 9, identity 4, memory 3 — MCP-facing, narrower blast
+radius), `agent_handlers/identity.rs` (6), the seven `websocket.rs` commands that drag in
+`ORef`/`MetaMapType`/`BlockDef`, and a handful of singles. Plus the two deliberate
+carve-outs (`bundle.validate`, `listagents`) that §5.4c's revised rule now makes
+convertible.
+
+The judgement: the highest-value surfaces are done, and the remaining commands are the
+lowest value per unit of churn — every slice touches the same three shared files, so the
+rebase tax is constant regardless of slice size.
 
 **Cause 4 — real duplication, but abstracting it would be premature.** `McpCatalogModel` and
 `SkillCatalogModel` share 10 method names, and the bodies are near-identical (`saveDraft`
@@ -486,8 +680,11 @@ named code artifact” is necessary but not sufficient — the artifact has to c
 
 ### 5.8 `agent-view.tsx` 🟡
 
-3,017 lines and growing through the refactor meant to shrink it. A6's remaining half is tracked
-in `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`; nothing caps the file's growth meanwhile.
+**2,980 lines** as of 2026-09-17 — down 37 from the 3,017 this report first recorded, so it
+has stopped climbing, but that is a plateau and not evidence the underlying pressure is
+resolved. A6's genuinely-remaining work is Phase 1 of
+`SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` (one signal — see §2.3); nothing caps the
+file's growth meanwhile.
 
 ---
 
@@ -537,7 +734,7 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~45% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Ten domains migrated and 65 dead commands deleted (#3291–#3313). **221 stub functions across 16 files, 9 now importing generated types; 123 bindings; 63 `register_typed` vs 181 `register_handler`; `srv-types.d.ts` 2,755 → 2,222; declared-but-unregistered 69 → 14.** Six domains left: agent (51), workspace (26), identity (24), file (21), mcp (18), skill (16). See §5.4b (a quarter of the surface was dead), §5.4c (not every handler should be typed) and §5.4d (where generating produces a worse type). |
+| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~72% done, stopped deliberately; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Twenty-five domains migrated and 65 dead commands deleted (#3291–#3348). **15 of 18 stub files import generated types; 280 bindings; 170 `register_typed` vs 66 `register_handler`; `srv-types.d.ts` 2,755 → 1,698; declared-but-unregistered 69 → 14.** Stopped at 72% by decision, not exhaustion — remaining: `app_api/*` (28), `agent_handlers/identity.rs` (6), 7 `websocket.rs` commands needing `ORef`/`MetaMapType`/`BlockDef`. See §5.4b (a quarter of the surface was dead), §5.4c (revised: loose-input handlers take a `Value` request, not no typing), §5.4d (where generating produces a worse type), §5.4e (a claim this report got wrong), §5.4g (honest cost ledger) and §5.4h (why here). |
 | 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 

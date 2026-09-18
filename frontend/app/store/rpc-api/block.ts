@@ -6,6 +6,25 @@
 
 import { RpcClient } from "../rpc-client";
 
+export type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
+export type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
+
+import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
+import type { CommandBlockInputData } from "@/types/rpc/CommandBlockInputData";
+
+/**
+ * What a `controllerinput` caller may send.
+ *
+ * `inputdata64`, `signame`, `termsize` and `seq` are each optional on the
+ * wire -- a keystroke sends `inputdata64`, a resize sends `termsize`, a
+ * signal sends `signame`, and no caller sends all of them. The two `String`
+ * ones are `#[serde(default)]`, which ts-rs cannot mark optional, so the
+ * generated type calls them required; deriving restores what callers actually
+ * do. Only `blockid` is genuinely always present.
+ */
+export type BlockInputInput = Pick<CommandBlockInputData, "blockid"> &
+    Partial<Omit<CommandBlockInputData, "blockid">>;
+
 // The blockfile:* shapes are GENERATED from their Rust definitions by ts-rs.
 // The rest of this file is still hand-written: four commands
 // (controllerinput, controllerresync, agentanswer, createsubblock) have shapes
@@ -47,7 +66,7 @@ import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData"
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 
 export const BlockApi = {
-    ControllerInputCommand(client: RpcClient, data: CommandBlockInputData, opts?: RpcOpts): Promise<void> {
+    ControllerInputCommand(client: RpcClient, data: BlockInputInput, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerinput", data, opts);
     },
 

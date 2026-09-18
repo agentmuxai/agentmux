@@ -1,7 +1,7 @@
 # macOS CEF Framework Bundling for `task dev` and `task package:macos`
 
 **Date:** 2026-05-28
-**Status:** Spec / Proposal
+**Status:** proposed — Spec / Proposal
 **Repo state:** `main` @ `2abe5968` (after PR #1131 lands the macOS compile fix)
 **Author:** AgentO-asaf (a5af)
 **Related:** #1130 (compile fix, closed by #1131) — this is the next layer

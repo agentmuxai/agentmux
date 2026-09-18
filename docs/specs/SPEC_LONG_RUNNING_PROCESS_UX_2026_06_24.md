@@ -1,7 +1,7 @@
 # SPEC — Long-Running Process UX: Working Stuck + Red X
 
 **Date:** 2026-06-24
-**Status:** Analysis complete — fix coded, PR pending
+**Status:** proposed — Analysis complete — fix coded, PR pending
 
 ---
 

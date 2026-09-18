@@ -2,7 +2,7 @@
 
 **Author:** Agent3
 **Created:** 2026-09-10
-**Status:** Active — implementing
+**Status:** Active — implementing — PRs touching this work, newest first: #3159
 **Related:** `Taskfile.yml` (`artifacts:winget:publish:*`), `.github/workflows/release.yml` (commented-out `winget` job), `docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md`, `docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md`, `docs/specs/SPEC_MSIX_PACKAGING_2026_05_30.md` (the **separate, already-published** MSIX/Store identity — see §2)
 
 ---

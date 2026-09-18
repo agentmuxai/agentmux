@@ -1,7 +1,7 @@
 # SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict
 
 **Date:** 2026-08-22
-**Status:** Implemented
+**Status:** Implemented — #2750
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/backend/shellintegration/muxlog.mjs`)
 **Related:** Ext 6 of `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`

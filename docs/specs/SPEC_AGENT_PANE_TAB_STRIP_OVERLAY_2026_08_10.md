@@ -1,7 +1,7 @@
 # SPEC: Agent pane tab strip floats over the conversation, doesn't reserve a row
 
 **Date:** 2026-08-10
-**Status:** implemented.
+**Status:** implemented. — #2526
 **Related:** `docs/specs/SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md`
 (shrink-to-fit width + hide-single-tab-pill, already shipped, unchanged by
 this spec), `docs/specs/SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md`

@@ -176,6 +176,13 @@ pub(crate) async fn run_agent_with_bin(
     // streaming text_deltas — the translator skips the resulting
     // `partial: true` snapshots when building the transcript.
     let mut cmd = Command::new(bin);
+    // The drone one-shot agent spawn — sibling of the interactive agent pane in
+    // blockcontroller. `tokio::process::Command` inherits the parent environment
+    // wholesale, so without this every drone-launched CLI (and everything it
+    // shells out to) receives this instance's channel, data dir and cache dir.
+    // Same policy as the agent pane: the CLI is one of ours and may use the
+    // in-pane helpers, so the keep-set applies. (ReAgent P0, round 3, on #3326.)
+    crate::backend::pane_env::sanitize_process_command(&mut cmd);
     cmd.arg("--print")
         .arg("--output-format=stream-json")
         .arg("--verbose")

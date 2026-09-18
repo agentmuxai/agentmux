@@ -1,7 +1,7 @@
 # SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI
 
 **Date:** 2026-07-14
-**Status:** Part A implemented (this PR); Parts B–D proposed
+**Status:** active — Part A implemented (this PR); Parts B–D proposed — #2153
 **Motivation:** `docs/analysis/ANALYSIS_SUBAGENT_SPAWN_TAXONOMY_2026_07_14.md`
 §4 — Anthropic's own docs (`code.claude.com/docs/en/sessions`) state the JSONL
 transcript format "is internal to Claude Code and changes between versions, so

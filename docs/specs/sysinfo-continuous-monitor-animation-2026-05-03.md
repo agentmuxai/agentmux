@@ -1,7 +1,7 @@
 # Sysinfo Plot — Continuous-Monitor Animation
 
 **Date:** 2026-05-03
-**Status:** Analysis + spec draft. Brittleness assessment in §5 — read that first before deciding to build.
+**Status:** historical — Analysis + spec draft. Brittleness assessment in §5 — read that first before deciding to build.
 **Scope:** `frontend/app/view/sysinfo/sysinfo-plot.tsx`
 
 ## Problem

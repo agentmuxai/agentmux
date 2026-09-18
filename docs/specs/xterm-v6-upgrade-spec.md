@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-28
 **Author:** Agent1
-**Status:** Approved — implementing
+**Status:** proposed — Approved — implementing
 **Risk Level:** High — renderer pipeline change + private API usage
 
 ---

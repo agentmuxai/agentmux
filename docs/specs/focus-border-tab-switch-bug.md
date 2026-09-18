@@ -2,7 +2,7 @@
 
 **Bug:** Green focus border stops following the selected pane after switching between tabs. Clicking panes still fires focus state updates (confirmed via log pipe), but the CSS class `block-focused` is never toggled — the border stays grey.
 
-**Status:** Root cause identified via frontend log pipe instrumentation.
+**Status:** proposed — Root cause identified via frontend log pipe instrumentation.
 
 ---
 

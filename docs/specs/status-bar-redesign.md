@@ -2,7 +2,7 @@
 
 **Goal:** Replace the current sparse status bar with a dense, useful information display. Remove confusing "connection count" metric and add system/session stats that are actually valuable.
 
-**Status:** Ready for implementation.
+**Status:** proposed — Ready for implementation.
 
 ---
 
