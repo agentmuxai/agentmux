@@ -1,6 +1,6 @@
 # SPEC — Sound notifications subsystem
 
-**Status:** Draft v1 — for review
+**Status:** implemented, and past v1 — #1301 (2026-06-07), the PR this doc was added in. Its "fix(sounds)" title understates it: every file §7.1 lists exists under `frontend/app/notification/sound/`, wired through `agent-pane-state`'s reducer and `wconfig/types.rs`. §7 scoped v1 to turn-complete only and predicted further events would "drop in by adding entries to `SOUNDS`" — that is what happened; `sounds.ts` now carries 21, and #1607 added the blocked-for-input ambient tone. No `.ogg` assets are committed, so `synth-fallback.ts` is the live source rather than the sampled path Appendix B describes.
 **Date:** 2026-06-05
 **Author:** agent2
 **First use case:** play a "ding" when the agent pane's turn completes.
