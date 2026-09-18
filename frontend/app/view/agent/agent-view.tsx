@@ -45,7 +45,6 @@ import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
 import {
     closeBlockInStack,
-    getLayoutModelForStaticTab,
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
@@ -339,7 +338,14 @@ AgentBlockContent.displayName = "AgentBlockContent";
  * into. That slot is a generic capability — any view type can take it.
  */
 export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
-    const layoutModel = getLayoutModelForStaticTab();
+    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — see that
+    // field's own doc comment (layout/lib/types.ts) and
+    // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md: this pane's
+    // own tab is not necessarily "whichever tab is globally active right
+    // now" at the moment chrome first constructs (e.g. a brand-new tab's
+    // default agent pane, seeded by `applyTabPreset` before `setActiveTab`
+    // ever runs).
+    const layoutModel = nodeModel.layoutModel;
 
     // ReAgent P0 on this PR: resolving the owning node via
     // layoutModel.getNodeByBlockId(anchorBlockId) — anchorBlockId's own

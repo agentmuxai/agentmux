@@ -83,6 +83,11 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 };
                 model.nodeModelDisposers.set(nodeid, disposeThisNodeModel);
                 model.nodeModels.set(nodeid, {
+                // See NodeModel.layoutModel's own doc comment (types.ts) for
+                // why this must be `model` — the LayoutModel this exact call
+                // is already scoped to — and never re-derived from
+                // `atoms.activeTabId()` (SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
+                layoutModel: model,
                 additionalProps: addlPropsAtom,
                 innerRect: createMemo(() => {
                     const treeState = model.localTreeStateAtom();

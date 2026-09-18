@@ -4,7 +4,7 @@
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { MOS } from "@/app/store/global";
-import { getLayoutModelForStaticTab, type NodeModel } from "@/layout/index";
+import type { NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import { Key } from "@solid-primitives/keyed";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -239,8 +239,11 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // The full stack, reactive — same `localTreeStateAtom()` + live
     // `findNode` lookup pattern term.tsx's own `termTabs` and agent-view.tsx's
     // `stackTabs` already use, falling back to a single-entry list when this
-    // leaf hasn't split into a stack yet.
-    const layoutModel = getLayoutModelForStaticTab();
+    // leaf hasn't split into a stack yet. `nodeModel.layoutModel`, NOT
+    // `getLayoutModelForStaticTab()` — see that field's own doc comment
+    // (layout/lib/types.ts) for why the global "active tab" lookup is wrong
+    // here (SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
+    const layoutModel = nodeModel.layoutModel;
     const stackBlockIds = createMemo<string[]>(() => {
         layoutModel.localTreeStateAtom();
         const node = findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
