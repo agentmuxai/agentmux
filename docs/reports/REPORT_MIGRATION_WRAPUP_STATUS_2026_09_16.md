@@ -12,6 +12,16 @@ P0 that would have broken `bookmarks.list` on every call.
 **The shape of the remaining work changed materially on 2026-09-17** (§5.4b): a quarter of
 the stub surface turned out to be dead code, not un-migrated code. Remaining open items are
 §5.1-5.3 and §5.5-5.9.
+
+**2026-09-18 — docs lifecycle (§2.4, §5.5).** Four PRs landed: #3366, #3367, #3368, #3369.
+Three add enforcement (relative-link resolution, the `docs/README.md` directory map, and
+citations widened from `docs/specs/` to any `docs/<dir>/`), each clearing the backlog it
+exposed — 45 broken links, a map advertising a directory deleted six weeks earlier, and 10
+code comments citing documents that were never committed. One folds an archive directory
+and writes down why the last split is deliberate. **This does not close the lifecycle and
+does not organise the repo's docs:** the ~171-file Status backlog is untouched by design,
+and the singleton-directory folding needs a taxonomy decision this report's own rules
+(`PLAN_DOCS_CLEANUP_EXECUTION` §1) forbid an agent from making alone.
 **Date:** 2026-09-16
 **Author:** Manoz (manoz-0803a)
 **Baseline:** `main` @ `65958f84e` (post-v0.56.2)
@@ -144,10 +154,53 @@ All four agent-pane state files still exist, and **`agent-view.tsx` is now 3,017
 when A6 was filed, 2,730 at the 09-06 audit, 13 commits in the last 10 days). The file is still
 growing faster than the refactor meant to shrink it — §5.8.
 
-### 2.4 Docs lifecycle hardening — Phase 2 is all that's left ✅ **[verified]**
+### 2.4 Docs lifecycle hardening — three new gates; Phase 2 still partly open 🟡 **[verified]**
 
-Phase 5 shipped 2026-09-07 (#3068). Remaining: Phase 2 (directory consolidation); Phase 4
-partially covered by the reader guardrail in `docs/specs/README.md`.
+Phase 5 shipped 2026-09-07 (#3068).
+
+**Updated 2026-09-18.** This heading previously read *"Phase 2 is all that's left"*, and that
+was wrong in both directions: Part 4 was not finished either, and Phase 2 was further along
+than the spec recorded. Four PRs landed on 2026-09-18 — #3366, #3367, #3368, #3369.
+
+Three of them are Part 4 (enforcement), not Phase 2:
+
+| gate | catches | first-run backlog |
+|---|---|---|
+| `check-doc-links.mjs` (#3366) | relative Markdown links that do not resolve from the file they are written in | **45 broken links across 27 files → 0** |
+| `check-docs-dir-map.mjs` (#3368) | `docs/README.md`'s directory table vs the directories that actually exist | 2 → 0 |
+| `check-spec-citations.sh` widened (#3369) | citations naming any `docs/<dir>/x.md`, not only `docs/specs/` | 10 dangling code citations → 0 |
+
+The gap the first two close is specific and had been open a long time: `check-spec-citations.sh`
+only recognises a path containing `docs/specs/`, so a link written `](specs/archive/Y.md)` in
+`docs/reports/` was invisible to it, and resolved only from files that happened to sit in
+`docs/`. Those have been dead since the top-level `specs/` tree was folded in (#2920).
+
+**The finding that generalises beyond docs:** of the documents cited from source comments,
+five were never committed to this repo at all — no file, no deletion, nothing in history
+(`ANALYSIS_IDLE_SEND_RACE_2026_06_11` alone is cited from four frontend files). This is the
+same shape as `SPEC_APP_API_AUTOMATION_SURFACE.md`, which `perf-baseline-2026-05-09.md`
+described as *"pushed alongside this retro"*. A doc written in a working tree and never
+pushed leaves a citation that no amount of searching can satisfy. Before assuming a cited
+doc merely moved, check `git log --diff-filter=D --all` — for these five it returns nothing.
+
+**Phase 2 (directory consolidation) is partly done, and the rest is deliberate.** The audit
+counted four archive directories; two were already gone (`specs/archive/` left with the
+top-level tree), and #3367 folded `docs/analysis/archive/` into `docs/archive/`, leaving two.
+`docs/specs/archive/` stays on purpose and is documented in `docs/archive/README.md`: it is
+load-bearing tooling, not a folder. `gen-docs-index.sh` scans `docs/specs/` and excludes
+exactly that subtree, `check-docs-lifecycle.mjs` hardcodes the path, and two build scripts
+cite into it — so moving it forces an INDEX.md regeneration, which is not reproducible
+off-CI (a Windows run emits ~21 extra status buckets and a different row order than CI's).
+
+**Still open, and not attempted:** folding the singleton directories (`sessions/`,
+`providers/`, `api/`, `recovery/` — six files). Each is a judgement call about what a
+document *is*, which `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §1 rules out by
+construction: *"If an item requires a fresh judgement call about a doc's content, it is out
+of scope."* That constraint still holds, so this needs a human to decide the taxonomy first.
+
+**So: the documentation lifecycle is not complete, and the repo's docs are not organised.**
+What exists now is enforcement that stops the known failure modes recurring, plus the
+backlogs each gate exposed, cleared. The §5.5 backlog below is untouched by design.
 
 ### 2.5 Already fixed by the audit's own follow-up PR ✅ **[verified]**
 
@@ -656,6 +709,36 @@ offenders: `ready` ×35, `spec` ×33, `design` ×13, `approved`/`analysis` ×11.
 the burn-down. Issue **#3216** (`docs-stale-sweep`, auto-updated weekly, backed by
 `scripts/docs-stale-sweep.mjs`) already reports a wider 1,330-doc scan with 453 flagged — the
 instrumentation exists; the burn-down does not.
+
+**Re-measured 2026-09-18.** 912 specs (excluding `archive/`, INDEX, README):
+**134 with no canonical `**Status:**` line, 37 non-canonical — 171 total.**
+
+That is not comparable to the 357 above, and the difference should not be read as a
+burn-down. This scan requires a line matching `^**Status:**`; the method behind the 09-16
+figure is not recorded here, and its named top offenders do not survive re-measurement —
+`ready` x35 is now **zero** files and `spec` x33 is **one**. Either a restamp landed in
+between, or the two counts measure different things. Do not quote a delta until one method
+is written down; that is the same mistake §2.6 corrects in this report.
+
+**A finding that is new, and cheap to act on.** Of the 134 with no canonical Status line,
+**52 do declare a status** — just in a shape `check-doc-status.sh` cannot read:
+
+| form | count |
+|---|---|
+| `- **Status:** …` (list item) | 22 |
+| `Status: …` (unbolded) | 21 |
+| `## Status …` (heading) | 9 |
+| **genuinely no status at all** | **82** |
+
+This matters because the gate deliberately *skips* files with no Status line — adding one
+"requires knowing what the doc's state actually IS, which is a judgement call". That
+reasoning holds for the 82. It does **not** hold for the 52: those authors already made the
+judgement call and wrote it down, and only the formatting keeps it invisible. Normalising
+them is mechanical, needs no new decisions, and would move 52 of the 134 out of the
+untyped bucket — after which the gate could start enforcing on them.
+
+Left undone deliberately: nothing here was auto-fixed. Part 4 of the hardening spec says
+this backlog is surfaced, not repaired, and #3216's weekly sweep already reports it.
 
 ### 5.6 Automate §3's reverse check 🟢 **recommended**
 
