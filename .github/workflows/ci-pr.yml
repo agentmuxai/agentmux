@@ -125,7 +125,24 @@ jobs:
     # under GitHub's 360-minute default. Subsequent runs should be much
     # faster once Swatinem/rust-cache has an actual hit to restore — revisit
     # if warm-cache runs still land close to this ceiling.
-    timeout-minutes: 20
+    #
+    # 2026-09-18: revisited, on exactly that condition. Warm-cache runs drifted
+    # from 9-15 min (morning) to 18-19 min (afternoon) and started hitting the
+    # ceiling: two PRs were cancelled at exactly 20m0s and became unmergeable,
+    # because a timed-out job reports `cancelled`, a required check that never
+    # reports leaves branch protection unsatisfied, and nothing retries it.
+    #
+    # Measured across 30 runs before changing this, because the fix differs by
+    # cause: the slow runs were on THREE different agents unrelated branches
+    # (composer UI, env isolation, docs), so this is runner-pool variance, not
+    # one PR regressing the suite. Raising the ceiling is the right response to
+    # that; it would be the wrong response to a suite that is genuinely getting
+    # slower, so re-measure before assuming this line is still correct.
+    #
+    # 35 keeps the original intent — bound a genuine runner-pool hang well
+    # under GitHub s 360-minute default — while leaving ~80% headroom over the
+    # slowest observed healthy run rather than 5%.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
