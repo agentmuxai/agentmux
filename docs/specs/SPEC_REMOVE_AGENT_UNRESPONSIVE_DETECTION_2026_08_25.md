@@ -43,9 +43,9 @@ it renders), `frontend/app/view/agent/agent-view.tsx`,
 `frontend/app/store/agent-pane-state/{store,types}.ts` (or wherever the
 `retrying`/`resolved` resume-retry state actually lives, per implementer's
 own re-verification at build time).
-**Related:** `docs/specs/agent-health-design.md` (original design — to be
+**Related:** `docs/specs/archive/agent-health-design.md` (original design — to be
 archived), `docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md`
-(§2.7/§4 — where the Restart banner shipped), `docs/specs/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`
+(§2.7/§4 — where the Restart banner shipped), `docs/specs/archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`
 (the compaction false-positive patch — to be archived; **its own header
 still says "Implementation status: Not started," which is stale — the fix
 is fully shipped per `VERSION_HISTORY.md:58`; flagging the drift here so
@@ -296,8 +296,8 @@ of stale data until it's next cleared.
 
 Move to `docs/specs/archive/` (or annotate "superseded by this spec," per
 existing repo convention) once the removal ships:
-- `docs/specs/agent-health-design.md`
-- `docs/specs/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`
+- `docs/specs/archive/agent-health-design.md`
+- `docs/specs/archive/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md`
   (correct its stale "Implementation status: Not started" header on the
   way in, so the archive doesn't preserve a wrong claim)
 

@@ -140,7 +140,7 @@ zoom levels). Two separate pane-creation code paths both share context, for diff
       .request_context()
   ```
   This is a deliberate, documented tradeoff (see
-  `docs/specs/pane-shares-window-request-context-linux-2026-05-13.md`) made to avoid a
+  the Linux pane/window request-context note (since removed from the tree)) made to avoid a
   `ThemeService` observer-list crash when creating isolated per-pane contexts — **not** anything to
   do with zoom. It's a side effect: every browser pane in one window shares one profile, therefore
   one `HostZoomMap`, therefore one zoom level per host/domain across all of them.
@@ -169,7 +169,7 @@ the name is misleading, but this global scalar is not why browser-pane page zoom
 
 **Option A — Isolated `RequestContext` per browser pane.** Directly undoes the sharing that causes
 the bug. **Real risk:** this is exactly the change that was reverted/avoided to prevent the
-`ThemeService` crash documented in `pane-shares-window-request-context-linux-2026-05-13.md` — that
+`ThemeService` crash documented in the Linux pane/window request-context note (since removed from the tree) — that
 crash needs to be understood and either fixed at its root or confirmed not to reproduce anymore
 before this option is viable. Also has real cost: isolated contexts mean each browser pane gets its
 own cookie jar/cache — likely **undesirable** for most uses (a user probably wants their login
@@ -307,7 +307,7 @@ entirely, regardless of which native-side fix is chosen.
 - `docs/specs/zoom-architecture.md` (chrome-zoom options analysis; §5 per-pane architecture reference)
 - `docs/specs/per-pane-zoom-hover.md` (original hover-wheel-zoom spec; documents the
   non-terminal-pane gap as unresolved "TBD" at design time)
-- `docs/specs/pane-shares-window-request-context-linux-2026-05-13.md` (why browser panes share a
+- the Linux pane/window request-context note (since removed from the tree) (why browser panes share a
   `RequestContext` — the crash-avoidance tradeoff Issue 2's Option A would need to revisit)
 - `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md` (Armory pane structure, confirms it's a recent
   addition relative to the zoom allow-list's original scope)
