@@ -17,21 +17,16 @@ import { setTermPaneChromeModel, setTerminalViewComponent, TermViewModel } from 
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
-import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
-import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 import {
-    closeBlockInStack,
     getLayoutModelForStaticTab,
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { computeFocusRingBorderColor } from "@/app/block/blockframe";
-import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -442,11 +437,11 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
  * Terminal's opt-in to the ONE shared pane chrome
  * (`renderPaneChromeShell`) — see `PaneChromeModel` (custom.d.ts).
  * Everything the old `TermPaneChrome` component rendered around the
- * content (root box, focus ring, header row, ErrorBoundary) is the shared
- * chrome's job now; what stays here is only what is genuinely terminal's:
- * its tab model (shell tabs, rename, per-pane zoom), its connection
- * button, and the body wrapper its background image / runtime badge need
- * to span.
+ * content (root box, focus ring, header row, tabs, ErrorBoundary) is the
+ * shared chrome's job now; what stays here is only what is genuinely
+ * terminal's: focus hand-off on a tab switch, its connection button, the
+ * new-tab cwd, and the body wrapper its background image / runtime badge
+ * need to span. Tab labels live in term-pane-tab.ts.
  */
 export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
     const layoutModel = getLayoutModelForStaticTab();
@@ -454,123 +449,13 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
-    // Selection ring for the WHOLE pane (header + tab strip + content) — same
-    // fix as AgentPaneChrome's (agent-view.tsx), same underlying cause: see
-    // docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
-    // 2026_09_15.md, which flagged this as the same latent gap in
-    // TermPaneChrome, confirmed live. Mirrors BlockFrame_Default_Component's
-    // own `isFocused`/`isAlone` reads (blockframe.tsx) exactly, including
-    // the "single pane in the tab, focus carries no signal" suppression.
-    const isFocused = () => nodeModel.isFocused();
-    const isAlone = () => nodeModel.numLeafs() <= 1;
-
     // Tracks the CURRENTLY ACTIVE member, not the anchor — getMuxObjectAtom
     // inside a memo (not useMuxObjectValue), the reactive-oref pattern
     // established in #3134 for exactly this kind of switch-surviving reader.
     const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
 
-    // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
-    // `.block-mask` — reused so a custom `frame:activebordercolor`/
-    // `frame:hue`/`bg:bordercolor` still shows up on the outer ring below
-    // (codex P2, PR #3226) instead of always falling back to the plain
-    // accent/dim colors.
-    const ringBorderColor = createMemo(() => computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, atoms.tabAtom()?.meta));
-
-    interface TermTab {
-        blockId: string;
-        label: string;
-        /** Only set for a NON-term member of this pane'''s stack (added via
-         *  the generic "+" picker) — terminal tabs keep their existing
-         *  no-icon presentation. */
-        icon?: JSX.Element;
-    }
-    // Rename overrides, keyed by blockId — set synchronously by
-    // handleTermTabRenameConfirm so a just-renamed tab (including a dormant,
-    // non-active one whose block meta isn't reactively tracked here) reflects
-    // its new label immediately.
-    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
-    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
-    // Stable per-blockId object cache — reused across recomputes so a tab
-    // whose blockId/label didn't change keeps the SAME object reference.
-    // `<For>` in PaneTabStrip keys rows by item identity, and this memo
-    // reruns on EVERY switch (it reads `layoutModel.localTreeStateAtom()`,
-    // which `setActiveBlockInStack` bumps on every switch, not just on
-    // add/remove/rename). Without this cache, a plain `.map()` below
-    // handed `<For>` a brand-new object for every tab on every switch —
-    // indistinguishable from "the whole tab list changed" — so `<For>`
-    // tore down and recreated every pill's DOM node each time. Invisible
-    // on the plain-text inactive tabs, but visible as a flicker on the
-    // active one, which actually has a background highlight to flash.
-    // Reported live after PR #3157 shipped the header/strip stability fix.
-    const tabObjectCache = new Map<string, TermTab>();
-    const termTabs = createMemo<TermTab[]>(() => {
-        layoutModel.localTreeStateAtom();
-        const overrides = titleOverrides();
-        const node = getOwnNode();
-        // No stack yet (the common default — a single, never-split terminal)
-        // → synthesize this pane's own one-tab list rather than returning
-        // empty, so the strip always shows at least its own active entry.
-        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
-        // Position-based labels ("Terminal 1", "Terminal 2", …) as the
-        // fallback for an unnamed session. A user-set title (double-click to
-        // rename, persisted as meta["pane-title"]) wins when present, read
-        // via a non-reactive lookup since a dormant tab's block isn't
-        // mounted; `overrides` is what makes a just-performed rename show up
-        // immediately.
-        const seen = new Set<string>();
-        // Counts only the terminal members, so "Terminal 1/2/…" stays
-        // contiguous when a non-term tab (added via the generic "+" picker)
-        // sits between them rather than numbering around it.
-        let termIndex = 0;
-        const result = stack.map((id) => {
-            seen.add(id);
-            const bd = MOS.getObjectValue<Block>(MOS.makeORef("block", id));
-            const view = bd?.meta?.["view"] as string | undefined;
-            // A NON-term member — this pane's own "+" opens the generic
-            // widget picker now, so a terminal pane's stack can hold a
-            // sysinfo/browser/… tab like any other pane's. Label/icon it the
-            // way every generic pane does instead of calling it "Terminal N".
-            if (view && view !== "term") {
-                const genericLabel =
-                    overrides[id] ?? (bd?.meta?.["frame:title"] as string | undefined) ?? blockViewToName(view);
-                const icon = getBlockHeaderIcon((bd?.meta?.["frame:icon"] as string | undefined) ?? blockViewToIcon(view), bd);
-                const cachedGeneric = tabObjectCache.get(id);
-                if (cachedGeneric && cachedGeneric.label === genericLabel) return cachedGeneric;
-                const tab: TermTab = { blockId: id, label: genericLabel, icon };
-                tabObjectCache.set(id, tab);
-                return tab;
-            }
-            termIndex += 1;
-            const persistedTitle = bd?.meta?.["pane-title"] as string | undefined;
-            const label = overrides[id] ?? persistedTitle ?? `Terminal ${termIndex}`;
-            const cached = tabObjectCache.get(id);
-            if (cached && cached.label === label) return cached;
-            const tab: TermTab = { blockId: id, label };
-            tabObjectCache.set(id, tab);
-            return tab;
-        });
-        // Drop entries for tabs no longer in the stack so the cache doesn't
-        // grow unboundedly across a long session's worth of closed tabs.
-        for (const id of tabObjectCache.keys()) {
-            if (!seen.has(id)) tabObjectCache.delete(id);
-        }
-        return result;
-    });
-    // Only render tab pills once there's something to switch BETWEEN — a lone
-    // terminal shows just the "+".
-    const visibleTermTabs = createMemo(() => (termTabs().length > 1 ? termTabs() : []));
-
-    // Per-pane zoom for the strip itself, tracking whichever tab is active
-    // rather than the anchor's own block — same clamp TermViewModel's
-    // termZoomAtom applies (termViewModel.ts).
-    const tabStripZoomFactor = createMemo(() => {
-        const z = activeBlockData()?.meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
-
-    // None of these three hold a leaf reveal gate any more. The gates existed
-    // because each of these mutations used to force a WHOLE-LEAF remount
+    // No leaf reveal gate on a switch any more. The gate existed
+    // because a switch used to force a WHOLE-LEAF remount
     // (chrome included) — that no longer happens: pane-leaf-chrome.tsx's
     // inner <Key> rebuilds only the active member's own <Block>, and this
     // component stays mounted throughout. Keeping them would actively CAUSE
@@ -598,24 +483,6 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
             (nodeModel.activeViewModel?.() as { giveFocus?: () => void } | null)?.giveFocus?.();
         }
     };
-    const handleTermTabClose = (targetBlockId: string) => {
-        const node = getOwnNode();
-        if (!node) return;
-        void closeBlockInStack(layoutModel, node.id, targetBlockId);
-    };
-    // Double-click-to-rename — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
-    const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
-    const handleTermTabRenameConfirm = (targetBlockId: string, title: string) => {
-        setRenamingBlockId(null);
-        setTitleOverrides((prev) => ({ ...prev, [targetBlockId]: title }));
-        fireAndForget(() =>
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", targetBlockId),
-                meta: { "pane-title": title } as any,
-            }),
-        );
-    };
-
     // NOT stand-ins, unlike AgentPaneChrome's: TermViewModel sets
     // `manageConnection` to `!isCmd`, i.e. TRUE for every ordinary
     // terminal, so BlockFrame_Header really does render the connection
@@ -642,45 +509,13 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
                 return () => holder;
             })(),
     );
-    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-    // §4.1): the old headerElem/headerElemNoView (BlockFrame_Header instances,
-    // constructed inline here) are gone — PaneHeaderTabStrip now wraps
-    // BlockFrame_Header itself (blocktypes.ts's `leadingTabStrip` prop),
-    // still passing connBtnRef/changeConnModalAtom through unchanged, since
-    // BlockFrame_Header's own ConnectionButton slot (manageConnection, real
-    // for term) still renders exactly as before.
-    const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
-
-    // Factored out so the ErrorBoundary fallback can render the exact same
-    // header with `viewModel={null}` instead of duplicating every prop twice.
     return {
-        tabs: visibleTermTabs,
-        getId: (t: any) => t.blockId,
-        getLabel: (t: any) => t.label,
-        getIcon: (t: any) => t.icon,
-        // Both return true ("handled"): a terminal tab switch has to
-        // restore focus to the newly-active xterm, and close resolves the
-        // block's own owning node first.
+        // Returns true ("handled"): a terminal tab switch has to restore
+        // focus to the newly-active xterm.
         onActivate: (id: string) => {
             handleTermTabSwitch(id);
             return true;
         },
-        onClose: (id: string) => {
-            handleTermTabClose(id);
-            return true;
-        },
-        onTabDoubleClick: (t: any) => setRenamingBlockId(t.blockId),
-        renderLabel: (t: any) =>
-            renamingBlockId() === t.blockId ? (
-                <PaneTabRenameInput
-                    initialValue={t.label}
-                    onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
-                    onCancel={() => setRenamingBlockId(null)}
-                />
-            ) : (
-                <span class="pane-tab-label">{t.label}</span>
-            ),
-        zoomFactor: tabStripZoomFactor,
         // term's ConnectionButton (manageConnection, TermViewModel) is a
         // real live feature BlockFrame_Header renders — threaded through
         // unchanged.

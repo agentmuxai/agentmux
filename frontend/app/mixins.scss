@@ -35,6 +35,11 @@
     border-bottom: 1px solid var(--border-color);
     border-radius: var(--block-border-radius) var(--block-border-radius) 0 0;
 
+    // Tab pills start flush at the pane's left edge.
+    &.block-frame-default-header--has-tabstrip {
+        padding-left: 0;
+    }
+
     // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
     // §4.1) — mirrors .block-frame-default-header-iconview's own flex-item
     // role exactly (same shrink/overflow behavior), since this replaces it

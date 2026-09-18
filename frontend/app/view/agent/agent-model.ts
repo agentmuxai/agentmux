@@ -28,6 +28,7 @@ import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color"
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import "./agent-pane-tab";
 import { quickForkAgent } from "./quick-fork";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
