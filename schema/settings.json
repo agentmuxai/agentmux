@@ -72,6 +72,11 @@
         "term:predictiveecho:thresholdms": {
           "type": "number"
         },
+        "term:showstatsbadge": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the live CPU%/memory usage badge in the top-right corner of terminal panes."
+        },
         "term:agentmaxruntimehours": {
           "type": "number",
           "minimum": 0,
