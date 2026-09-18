@@ -1,7 +1,7 @@
 # Spec: Ctrl+Shift+Scroll zooms every pane in the window at once
 
 **Date:** 2026-09-07
-**Status:** Proposed
+**Status:** implemented — #3090 (2026-09-08), one day after this spec was written. `AppAllPanesZoomHandler` is in `app.tsx`, and all seven per-view Ctrl+Wheel handlers carry the `shiftKey` guard of §"Interaction with the duplicated per-view Ctrl+Wheel handlers" — including `helpview.tsx`, the seventh, which was found by Codex's review *on* that PR and fixed before it merged. Sections below that read as forward-looking ("the fix this spec implements") were written pre-merge and are kept as the record of what shipped. Option 2 of that section — consolidating the six `zoom.ts`-backed handlers onto shared helpers — was explicitly out of scope and remains open in [`REPORT_ZOOM_BINDINGS_AUDIT_2026_09_06.md`](../reports/REPORT_ZOOM_BINDINGS_AUDIT_2026_09_06.md).
 **Motivated by:** direct request — *"we want to add a feature where
 ctrl+shift+scroll anywhere not part of the chrome will cause all the panes
 to zoom in/out .. relative to where they are already at ... if over the
