@@ -73,7 +73,7 @@ AgentMux embeds Chromium via CEF — no system WebView2 or WebKitGTK required.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-> **Note — `libcef.so`:** Running on Linux requires a compatible `libcef.so`. `task package:linux` builds the AppImage with the pre-built binary from the CI artifact store. If you need to rebuild libcef for CEF patches (window drag, transparency), see [`docs/cef-build/build-patched-libcef.md`](docs/cef-build/build-patched-libcef.md).
+> **Note — `libcef.so`:** Running on Linux requires a compatible `libcef.so`. `task package:linux` builds the AppImage with the pre-built binary from the CI artifact store. If you need to rebuild libcef for CEF patches (window drag, transparency), see [`docs/cef-build/build-patched-libcef.md`](../cef-build/build-patched-libcef.md).
 ```
 
 ### 1.2 Add Linux build output tree to §Architecture
