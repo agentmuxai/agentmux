@@ -297,3 +297,49 @@ each failed step.
 - **Host-log only** (no sidecar log). If a failure looks like it
   lives in `agentmux-srv`, add a `-SrvLogPath` parameter — kept out
   for now to keep the harness narrow.
+
+## `vim-freeze-probe.mjs`
+
+Drives a **real terminal pane with real synthetic keystrokes** (CDP
+`Input.dispatchKeyEvent`) and checks they survive a full-screen alternate-screen
+program. Written to diagnose "vim freezes the pane", which turned out to be an
+esbuild miscompile of xterm's DECRQM handler
+(`docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md`).
+
+```bash
+# Drive vim end to end. Discover the port first — do NOT assume 9222/9223:
+node tools/tests/vim-freeze-probe.mjs --cdp-port <port>
+
+# ALWAYS run this first. It types a plain `echo > file` with no vim involved.
+node tools/tests/vim-freeze-probe.mjs --cdp-port <port> --control
+```
+
+**The control is not optional.** The first version of this probe reported
+"FREEZE REPRODUCED" against a pane it had never managed to focus — a false
+positive that looked exactly like the real bug. If `--control` fails, the
+harness is broken and the vim result means nothing. Two harness defects were
+found that way and are fixed here:
+
+- `el.focus()` sets DOM focus but does not drive the app's focused-pane routing,
+  so keystrokes reach `.xterm-helper-textarea` and are then discarded. The probe
+  clicks with a real `Input.dispatchMouseEvent` instead.
+- xterm.js does **not** take printable characters from `keydown` — it encodes
+  only the special keys itself and takes text from the textarea's `input` event.
+  So `keydown`+`char` per letter delivers real events that xterm correctly
+  ignores, and only the Enter arrives. Text goes through `Input.insertText`;
+  Enter/Escape keep the genuine keydown path.
+
+Ground truth is the **file vim writes**, not the screen: the WebGL renderer
+paints to a canvas that cannot be read back as text, so asserting on the
+rendered frame would assert on nothing.
+
+Other modes: `--recon` dumps the pane/block structure, `--eval <js>` evaluates
+in the page, `--cmd "<shell>"` types a command into a pane, `--block <id>`
+targets a specific pane.
+
+**Find the port with `lib/instance-discovery.mjs`**, never a constant — 9222/9223
+are only *preferred* values, and on a machine running several instances the
+constant names whichever one won the race. Attaching to the wrong instance is
+silent: it happened during this probe's own development, and clicks and
+keystrokes went into an unrelated live session.
+
