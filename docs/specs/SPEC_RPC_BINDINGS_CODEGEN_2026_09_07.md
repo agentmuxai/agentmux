@@ -1,6 +1,6 @@
 # SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv
 
-**Status:** proposed — the design for Phase 2 (steps 7–9) of `docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md`. No generator exists yet; this is the plan and the reasons for its shape.
+**Status:** active — the design for Phase 2 (steps 7–9) of `docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md`, now being executed. §3.1 (`register_typed` + the `RpcSchema` registry) landed in #3074 and §3.3's gate in #3078, both 2026-09-07; §3.4 step 2's handler-by-handler migration is ongoing (most recently #3342, 2026-09-18). **§3.2 was superseded in implementation:** rather than a `--dump-rpc-schema` mode emitting `frontend/types/rpc.gen.d.ts` and `rpc-api/gen/<domain>.ts`, ts-rs `#[ts(export)]` emits one file per type into `frontend/types/rpc/` as a side effect of `cargo test`, and `scripts/check-rpc-bindings.sh` gates freshness by asking git whether that tree is dirty. The hand-written `rpc-api/*.ts` stubs are still being deleted per domain as each migrates, as §3.4 describes.
 
 ## 1. Problem
 
