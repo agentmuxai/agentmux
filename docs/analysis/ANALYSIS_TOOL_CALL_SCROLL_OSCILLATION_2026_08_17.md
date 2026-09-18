@@ -21,7 +21,7 @@
 > §6 "needs a live repro" framing is simply no longer the blocker.
 
 **Date:** 2026-08-17
-**Status:** Root-cause analysis from direct code inspection + prior internal
+**Status:** analysis — Root-cause analysis from direct code inspection + prior internal
 docs. No code changed. One question (§6) needs a live repro this agent
 cannot drive (no GUI automation available in this environment — same
 limitation `PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md` §7 hit).

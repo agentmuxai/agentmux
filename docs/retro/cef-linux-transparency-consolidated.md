@@ -1,5 +1,7 @@
 # Linux Window Transparency — Consolidated Investigation
 
+**Status:** retro
+
 **Scope:** All investigation into `window:transparent=true` rendering on Linux/Wayland under CEF.  
 **Status as of 2026-06-25:** Partial (gaps/borders transparent, promoted pane layers opaque). Root cause for the remaining opacity is **known** but not yet patched.  
 **Source docs:** `cef-transparency-research-2026-05-10.md`, `cef-transparency-empirical-2026-05-11.md`, `cef-transparency-session-2-2026-05-11.md`, and memory `cef_transparency_root_cause.md`.

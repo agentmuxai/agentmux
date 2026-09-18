@@ -1,5 +1,7 @@
 # AgentMux Token Tax — Follow-up: P1–P4 Resolution + Empirical Cache Check
 
+**Status:** analysis
+
 **Date:** 2026-07-04
 **Follow-up to:** `docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md`
 **Author:** AgentA
@@ -63,7 +65,7 @@ Separately from CLAUDE.md/session-start overhead, this session also dug into whe
 
 ## 4b. Addendum — the actual `agentmux-docs` page (not checked when this report was first written)
 
-This report initially only used `docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md`, an internal analysis doc inside *this* repo. There is a separate, authoritative public docs repo, `agentmuxai/agentmux-docs` (docs.agentmux.ai) — cloned read-only afterward to check `src/content/docs/internals/conversation-overhead.md` directly. It corroborates everything above (two-layer model, `cache_control: ephemeral`, the `input + cache_creation + cache_read` formula) and adds facts worth folding in:
+This report initially only used `docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md`, an internal analysis doc inside *this* repo. There is a separate, authoritative public docs repo, `agentmuxai/agentmux-docs` (docs.agentmux.ai) — cloned read-only afterward to check `src/content/conversation-overhead.md (no longer in this repo)` directly. It corroborates everything above (two-layer model, `cache_control: ephemeral`, the `input + cache_creation + cache_read` formula) and adds facts worth folding in:
 
 - **Explicit cache-invalidation trigger list** (any of these forces the next turn-1 to pay full `cache_creation_input_tokens` again): soul/agentmd/memory-bundle content edited, a memory bundle added/removed, the skills index changing (skill installed/removed), a new session started without `--resume`, or the working directory changing (it feeds `{{WORKING_DIR}}` template substitution into the assembled CLAUDE.md). Anything touching P2's memory-bundle system is therefore also a cache-cost lever, not just a correctness one.
 - **AgentMux makes zero direct HTTP calls to any AI provider API** — all provider interaction is through the CLI subprocess via PTY. This bounds what AgentMux can ever do about per-turn overhead to: (a) what content it writes into CLAUDE.md, (b) CLI launch flags (P4's category), and (c) session lifecycle (fresh vs. `--resume`) — never direct `cache_control` placement, since AgentMux never builds the API request itself.
@@ -95,4 +97,4 @@ Both docs pages (the internal 2026-06-19 analysis and `agentmux-docs`' `conversa
 
 ## 6. `agentmux-docs` update
 
-Once this report's changes land on `main`, the corresponding public-docs PR against `agentmuxai/agentmux-docs` updates `src/content/docs/internals/conversation-overhead.md` with: the four corrected file-path citations from §4c, the `{{WORKING_DIR}}` dead-code caveat on the "working directory changes" invalidation trigger (open item #5 above — noted as currently inert rather than silently removed, since the fix direction isn't decided yet), and a new citation for the compaction-threshold constant (`context-window.ts:26`), which neither doc had pinned to a file before.
+Once this report's changes land on `main`, the corresponding public-docs PR against `agentmuxai/agentmux-docs` updates `src/content/conversation-overhead.md (no longer in this repo)` with: the four corrected file-path citations from §4c, the `{{WORKING_DIR}}` dead-code caveat on the "working directory changes" invalidation trigger (open item #5 above — noted as currently inert rather than silently removed, since the fix direction isn't decided yet), and a new citation for the compaction-threshold constant (`context-window.ts:26`), which neither doc had pinned to a file before.

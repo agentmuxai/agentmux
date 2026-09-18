@@ -1,5 +1,7 @@
 # Retro: Haiku per-turn activity summary never appears in pane header
 
+**Status:** retro
+
 **Date:** 2026-06-24  
 **Feature:** Per-turn live mini-summary in the agent pane top header  
 **Status of feature:** Fully wired frontend + backend, but silently broken — header always blank

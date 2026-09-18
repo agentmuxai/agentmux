@@ -1,5 +1,7 @@
 # Retro: Local portable builds re-coupled after version-isolation work (2026-06-09)
 
+**Status:** retro
+
 **Author:** AgentA
 **Triggered by:** User observation — `task package` build of main (0.43.1+g...) opened a second window in the running 0.43.2 instance instead of starting isolated.
 

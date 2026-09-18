@@ -1,7 +1,7 @@
 # Saga coordinator — location decision and robustness audit
 
 **Date:** 2026-04-30
-**Status:** Decision input for PR 3 (E.5.5+6 tear-off sagas).
+**Status:** retro — Decision input for PR 3 (E.5.5+6 tear-off sagas).
 **Audience:** anyone implementing or reviewing PR 3 / PR 4, or scoping Phase F.
 
 ---

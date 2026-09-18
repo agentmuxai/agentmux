@@ -1,5 +1,7 @@
 # Browser Pane: Black Appearance + UI Freeze on macOS/Linux
 
+**Status:** analysis
+
 > **RESOLVED — but on two different dates for the two platforms**
 > (resolution note added 2026-08-29, docs-cleanup Phase 4; the document
 > previously carried no indication it had been fixed at all):

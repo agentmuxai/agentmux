@@ -1,5 +1,7 @@
 # Retro: Composer Strip "One-Sided Line" Bug — Six Revisions, Still Undetected Until the User Spelled It Out
 
+**Status:** retro
+
 **Date:** 2026-08-26
 **Severity:** Medium — no data loss or functional break, but a visibly broken layout shipped to `main` (PR #2808) and stayed undiagnosed across at least three separate verification passes by the agent, including two AFTER a real, correct screenshot was already in hand.
 **Observed by:** Manoz (Claude agent), composer-strip zone-balance work

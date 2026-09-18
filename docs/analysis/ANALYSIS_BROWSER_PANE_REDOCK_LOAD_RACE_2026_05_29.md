@@ -1,5 +1,7 @@
 # Browser-pane "won't load after redock" — root cause + fix
 
+**Status:** analysis
+
 **Date:** 2026-05-29
 **Symptom:** After tearing a browser pane off into a floating window and re-docking it, the pane *sometimes* doesn't finish loading — it lands blank / in an error state.
 

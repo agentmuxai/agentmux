@@ -13,7 +13,7 @@ already has a reducer and was already fixed (see §2).
 (Finding 1 — the parent-pane fix this spec extends to subagents;
 Finding 2 — subagent completion detection, already fixed, confirmed
 in §2 below),
-`docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`
+`docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`
 (the "flood on reopen" mechanism this spec's Goal 2 targets — that
 report fixed row *count* via grouping; this spec fixes event *volume*
 and *correctness*, which grouping didn't touch),

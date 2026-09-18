@@ -1,5 +1,7 @@
 # White Screen Overnight — 2026-04-08
 
+**Status:** analysis
+
 **Reporter:** User (area54)
 **Investigator:** AgentA
 **Instances affected:** v0.33.62, v0.33.64, v0.33.73 (all 3 running portable instances)

@@ -1,5 +1,7 @@
 # Blank Panes: Orphaned Layout Nodes
 
+**Status:** analysis
+
 **Date:** 2026-04-09
 **Instance:** v0.33.69 dev (db at `%APPDATA%/ai.agentmux.cef.v0-33-69/db/wave.db`)
 

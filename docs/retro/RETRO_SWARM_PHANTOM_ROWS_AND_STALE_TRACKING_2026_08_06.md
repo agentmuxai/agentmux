@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06
 **Severity:** Regression, cross-instance (confirmed on a second machine, different OS)
-**Status:** Root cause hypothesized from source, NOT yet live-confirmed — needs a repro pass before any fix lands
+**Status:** retro — Root cause hypothesized from source, NOT yet live-confirmed — needs a repro pass before any fix lands
 
 ---
 

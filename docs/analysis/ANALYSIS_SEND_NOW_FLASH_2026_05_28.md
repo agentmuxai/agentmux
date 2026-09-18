@@ -1,7 +1,7 @@
 # Analysis: "Send now" button flashes on every send (2026-05-28)
 
 **Author:** AgentA
-**Status:** Bug confirmed, root cause identified, fix proposed.
+**Status:** analysis — Bug confirmed, root cause identified, fix proposed.
 **Reported by:** user (this session) — "it flashes a 'send now' panel even when the agent isn't busy."
 **Affected file:** `frontend/app/view/agent/agent-view.tsx:811-825`
 **Related spec:** `docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`

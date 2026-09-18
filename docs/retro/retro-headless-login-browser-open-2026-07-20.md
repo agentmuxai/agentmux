@@ -1,5 +1,7 @@
 # Retro — `/login` has a working browser-opener sitting unused right next to it
 
+**Status:** retro
+
 **Date:** 2026-07-20
 **Trigger:** Live repro — AgentA's pane hit Claude Code CLI's "Not logged in.
 Please run `/login`." banner. Running `/login` visibly did nothing: no

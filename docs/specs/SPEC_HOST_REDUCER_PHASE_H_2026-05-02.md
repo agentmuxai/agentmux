@@ -7,8 +7,8 @@
 
 **Companion docs:**
 - `docs/retro/reducer-architecture-current-state-2026-05-02.md` — verified current-state catalog (what IS in reducers, what isn't)
-- `docs/specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` — 2026-05-02 freeze investigation, dump analysis, why per-window-isolated RequestContext + browser panes triggers it
-- `docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md` — superseded by this spec; PR #651 to be closed
+- `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)` — 2026-05-02 freeze investigation, dump analysis, why per-window-isolated RequestContext + browser panes triggers it
+- `SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02` — superseded by this spec; PR #651 to be closed. The file is no longer in the repo.
 - `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md` — original F.1 spec; this is its successor
 - `docs/retro/migration-pattern.md` — the a→b→c→d→e ratchet used in B.5 and reused here
 
@@ -657,7 +657,7 @@ Honest list of things this spec doesn't fix:
 
 4. **Does the wire-promote in H.9 introduce launcher dependencies on host reducer events?** If yes, those become tightly coupled. Proposed: launcher sagas subscribe to specific events but don't require them (saga's `on_event` is a passive observer; missing events stall the saga without crash). This is the same shape as existing PoolRespawn / WindowCleanupCascade.
 
-5. **What happens to PR #651's smoke-test data and 16 unit tests?** Tests are reusable for H.6 (the reducer logic is similar; the watchdog code becomes deletion). Smoke data (the trace from 0.33.582 testing, dump from 0.33.580) is preserved in `docs/specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` for reference.
+5. **What happens to PR #651's smoke-test data and 16 unit tests?** Tests are reusable for H.6 (the reducer logic is similar; the watchdog code becomes deletion). Smoke data (the trace from 0.33.582 testing, dump from 0.33.580) is preserved in `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)` for reference.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-27
 **Severity:** P1 if it recurs (the entire custom-agent roster — ~24 agents including "AgentA" — appears wiped), but **not reproduced live** and **not currently explained by any bad data on this machine**
-**Status:** Partially root-caused. One architectural fragility is **confirmed** (by code reading) and **proven exploitable** (it already caused this exact symptom once, 2 days earlier, via PR #2296). A live server log from the user's *actual* reported session was found and analyzed, but it does not contain enough detail (no per-RPC-command tracing) to prove what the frontend rendered. Root cause for **this specific incident** is not pinned down — see §6 for the honest verdict.
+**Status:** retro — Partially root-caused. One architectural fragility is **confirmed** (by code reading) and **proven exploitable** (it already caused this exact symptom once, 2 days earlier, via PR #2296). A live server log from the user's *actual* reported session was found and analyzed, but it does not contain enough detail (no per-RPC-command tracing) to prove what the frontend rendered. Root cause for **this specific incident** is not pinned down — see §6 for the honest verdict.
 
 ---
 

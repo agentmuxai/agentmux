@@ -1,7 +1,7 @@
 # Retro: PR-D (tab-state-reducer) — premise doesn't fit the actual frontend
 
 **Date:** 2026-05-03
-**Status:** Plan stop-condition triggered. Writing this BEFORE proceeding so the architecture decision is captured.
+**Status:** retro — Plan stop-condition triggered. Writing this BEFORE proceeding so the architecture decision is captured.
 **Plan reference:** `docs/specs/frontend-reducer-implementation-plan-2026-05-03.md` PR-D (slice #7)
 
 ## What the plan said

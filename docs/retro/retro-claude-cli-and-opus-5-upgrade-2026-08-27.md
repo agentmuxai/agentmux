@@ -1,5 +1,7 @@
 # Retro: First Claude CLI + Model-Catalog Upgrade Done as a Deliberate Exercise
 
+**Status:** retro
+
 **Date:** 2026-08-27
 **Severity:** N/A — not an incident. This is the first time a Claude Code CLI /
 model-catalog bump was done as a scoped, retro'd exercise instead of an

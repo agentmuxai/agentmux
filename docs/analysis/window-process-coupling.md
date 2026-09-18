@@ -1,5 +1,7 @@
 # Window-Process Coupling Analysis
 
+**Status:** analysis
+
 **Date:** 2026-04-05
 
 ---

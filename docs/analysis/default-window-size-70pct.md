@@ -1,5 +1,7 @@
 # Analysis: Default Window Size 70% of Current Monitor
 
+**Status:** analysis
+
 **Date:** 2026-03-31
 
 ## Goal

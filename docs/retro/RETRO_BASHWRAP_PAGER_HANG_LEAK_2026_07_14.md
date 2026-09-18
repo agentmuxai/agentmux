@@ -1,5 +1,7 @@
 # Retro: `agentmux-bashwrap` Processes Leak Forever When a Command Invokes a Pager (2026-07-14)
 
+**Status:** retro
+
 ## What happened
 
 While investigating an unrelated build failure (see

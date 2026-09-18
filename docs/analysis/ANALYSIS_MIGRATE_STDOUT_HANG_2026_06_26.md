@@ -3,7 +3,7 @@
 **Date:** 2026-06-26  
 **Version affected:** 0.49.4 (first observed; likely present in prior versions)  
 **PR:** #1797 (`fix/migrate-stdout-hang`)  
-**Status:** Fixed
+**Status:** analysis — Fixed
 
 ---
 

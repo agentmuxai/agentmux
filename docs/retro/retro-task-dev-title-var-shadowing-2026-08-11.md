@@ -1,5 +1,7 @@
 # Retro: `task dev TITLE=...` silently ignored (go-task var-shadowing)
 
+**Status:** retro
+
 **Date:** 2026-08-11
 **Owner:** Agent3
 **Area:** `Taskfile.yml` (`dev`, `dev:serve` tasks) / dev window titling

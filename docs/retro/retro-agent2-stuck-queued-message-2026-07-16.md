@@ -1,5 +1,7 @@
 # Retro — Agent2 (stable channel) stuck in a "Queued" state; held message never flushed (2026-07-16)
 
+**Status:** retro
+
 ## TL;DR
 
 Agent2 (host/persistent, `stable` channel, v0.53.6) showed a queued message

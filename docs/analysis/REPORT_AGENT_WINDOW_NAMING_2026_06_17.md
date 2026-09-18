@@ -1,5 +1,7 @@
 # Can an agent set the window/taskbar name? (e.g. "Starter Workspace")
 
+**Status:** analysis
+
 **Date:** 2026-06-17
 **Question:** Does the agent-facing app API have a binding to set the OS window name as it appears in the taskbar, so an agent can launch `task dev` with a recognizable name for easy ID?
 **Short answer:** **No binding exists for agents today.** The native taskbar-title plumbing is fully implemented, but the only way to drive it is a frontend-reactive meta key (`window:displayname`) set over the WebSocket RPC by the in-app UI. There is **no MCP tool, no HTTP `/api/v1` endpoint, and no launch-time flag/env var.** Adding one is small — see §5.

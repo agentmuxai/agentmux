@@ -1,7 +1,7 @@
 # Analysis: agent-pane crash + status-bar uptime freeze (2026-05-28 PM)
 
 **Author:** AgentA
-**Status:** Diagnosed from live host + sidecar logs. Recurrence of a known crash class — sixth in a 9-day stretch of fixes for this same family.
+**Status:** analysis — Diagnosed from live host + sidecar logs. Recurrence of a known crash class — sixth in a 9-day stretch of fixes for this same family.
 **Reporter:** user (this session) — "we got a pane crash" + "the timing counter stopped (universal clock on bottom left of status bar)"
 **Build:** v0.39.2 (current portable, also the dev build)
 **Block id:** `ad77d90f-e99e-4423-94c6-e93b7d4acda5`

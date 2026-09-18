@@ -1,5 +1,7 @@
 # Portable Build Size Audit — 2026-04-12
 
+**Status:** retro
+
 **Prompting question:** Why is the `0.33.101` portable ZIP about 10 MB larger than "a couple versions back"?
 
 **Short answer:** It isn't growing now — the 10 MiB delta comes from a *single* commit on Mar 29 that added the ANGLE GPU DLLs back into the portable bundle. Every CEF portable built after that commit carries the same ~8 MB GPU cost. Since that commit, actual growth across ~2 weeks of shipping has been **~1 MiB**.

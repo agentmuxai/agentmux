@@ -1,5 +1,7 @@
 # Pane / Tab Tear Smoke-Test Findings — 2026-06-19
 
+**Status:** analysis
+
 Live diagnostic session: `task dev` on macOS 26 Tahoe (Darwin 25.5.0, arm64).
 Monitor filter: errors, warnings, perf, drag/tear/drop signals.
 

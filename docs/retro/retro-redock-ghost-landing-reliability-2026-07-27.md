@@ -1,5 +1,7 @@
 # Retro: floating-pane redock reliability — a 7-week-old structural fragility, not a single bug
 
+**Status:** retro
+
 **Date:** 2026-07-27
 **Severity:** Medium — no data loss, but a core interaction (drag a floating pane back into the layout) that's supposed to be reliable has degraded to "sometimes."
 **Observed by:** user, on the current dev instance, after previously experiencing this working well through a "whole set of PRs."

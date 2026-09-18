@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 **Trigger:** User report: "if minimized, it is supposed to slip under/over the other panes, that isnt happening." Direct questions: *why did we go backward?* and *is this a very hard problem?*
-**Status:** Root cause confirmed by re-reading the original spec chain. **Fixed** — slip-docking implemented as derived geometry (§4's proposed shape, built as designed): `resolveRowSlipTargets` + a docking pass in `updateTreeHelper` (`frontend/layout/lib/layoutGeometry.ts`). No tree mutation, no new persisted state; verified end-to-end against the exact user repro (agent/cpu/swarm — minimize cpu then swarm — asserts agent absorbs the full row width and right_col's chip stack docks onto agent's top, zero dead space) plus 11 unit tests for the slip-target resolution algorithm. 112 frontend tests green.
+**Status:** retro — Root cause confirmed by re-reading the original spec chain. **Fixed** — slip-docking implemented as derived geometry (§4's proposed shape, built as designed): `resolveRowSlipTargets` + a docking pass in `updateTreeHelper` (`frontend/layout/lib/layoutGeometry.ts`). No tree mutation, no new persisted state; verified end-to-end against the exact user repro (agent/cpu/swarm — minimize cpu then swarm — asserts agent absorbs the full row width and right_col's chip stack docks onto agent's top, zero dead space) plus 11 unit tests for the slip-target resolution algorithm. 112 frontend tests green.
 
 ---
 

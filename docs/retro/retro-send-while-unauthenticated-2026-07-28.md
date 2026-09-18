@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 **Severity:** P1 — directly reproduces the user-facing symptom the whole `agenta/remove-auto-login-trigger` effort (PR #2318) was supposed to eliminate, in a code path that effort never touched.
-**Status:** Root-caused and reproduced by direct code reading (not yet fixed — diagnostic retro only, per this repo's established retro convention).
+**Status:** retro — Root-caused and reproduced by direct code reading (not yet fixed — diagnostic retro only, per this repo's established retro convention).
 
 ---
 

@@ -1,5 +1,7 @@
 # Agent pane reducer-coverage audit
 
+**Status:** analysis
+
 **Date:** 2026-05-12
 **Owner:** AgentA
 **Driving question:** *"Should we first migrate the agent pane to 100% reducer before building the session-replay framework?"*

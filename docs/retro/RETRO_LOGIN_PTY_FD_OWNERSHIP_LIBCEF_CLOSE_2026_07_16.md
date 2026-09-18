@@ -3,7 +3,7 @@
 **Date:** 2026-07-16
 **Severity:** High (keystone auth blocker — every in-app provider login via
 `runCliLogin` on Linux crashes the CLI before it can print an OAuth URL)
-**Status:** Root-caused **and fixed** (this session); fix in `run_cli_login_pty`
+**Status:** retro — Root-caused **and fixed** (this session); fix in `run_cli_login_pty`
 **Component:** `agentmux-cef/src/commands/platform.rs` — `run_cli_login_pty`
 **Supersedes:** the Bun-crash theory in `docs/specs/SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` §2
 and the memory note `login_again_fd_crash` (both attribute the crash to Bun's

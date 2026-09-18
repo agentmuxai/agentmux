@@ -1,5 +1,7 @@
 # Retro: packaged macOS app crash-loops at startup when launched from a DMG
 
+**Status:** retro
+
 **Date:** 2026-06-21
 **Area:** macOS packaging / CEF host startup
 **Severity:** launch-blocking (app never opens a window)

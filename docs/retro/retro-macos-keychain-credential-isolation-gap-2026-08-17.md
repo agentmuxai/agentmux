@@ -1,5 +1,7 @@
 # Retro: macOS Claude Code sessions authenticate with zero linked identity accounts
 
+**Status:** retro
+
 **Date:** 2026-08-17
 **Area:** `agentmux-srv/src/identity/resolver/inject.rs`, `agentmux-cef/src/commands/platform.rs`, macOS Keychain credential storage in the upstream Claude Code CLI
 

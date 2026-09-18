@@ -1,7 +1,7 @@
 # Analysis: Plugin System, Widget Architecture & Messaging Integration Sizing
 
 **Date:** 2026-06-24  
-**Status:** Reference / Decision Document  
+**Status:** analysis — Reference / Decision Document
 **Covers:** Plugin system state, toolchain widget catalog, messaging integration sizing, installability options
 
 ---

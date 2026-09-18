@@ -1,5 +1,7 @@
 # Renderer Crash — agent:session:write_state OOM / Long-Task
 
+**Status:** analysis
+
 **Date observed:** 2026-06-12  
 **Log evidence:** `~/.agentmux/logs/agentmux-host-v0.44.1.log.2026-06-12`  
 **Crash count:** 1 today (08:17:18 UTC); 4 yesterday (14:06–14:11 UTC, three of which say `detail:"Out of Memory"`)

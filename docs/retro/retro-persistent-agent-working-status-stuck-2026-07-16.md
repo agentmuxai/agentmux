@@ -1,5 +1,7 @@
 # Retro — Agent1 (stable channel) showed ambiguous "Waiting…/Working…" for ~12h while a user-launched long-running dev process was attached (2026-07-16)
 
+**Status:** retro
+
 > **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
 > This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
 

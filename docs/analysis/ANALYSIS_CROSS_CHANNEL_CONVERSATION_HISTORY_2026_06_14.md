@@ -1,5 +1,7 @@
 # Cross-channel conversation history: why agents open empty, and how to fix it
 
+**Status:** analysis
+
 **Date:** 2026-06-14 · **Author:** AgentX · **Status:** Analysis + implementation plan
 
 ## 0. TL;DR

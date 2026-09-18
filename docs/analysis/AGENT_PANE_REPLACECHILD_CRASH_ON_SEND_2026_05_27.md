@@ -1,7 +1,7 @@
 # Agent pane replaceChild crash on send — root-cause investigation
 
 **Date:** 2026-05-27
-**Status:** Root cause hypothesized in §13 — **FALSIFIED** by §15. Investigation continues.
+**Status:** analysis — Root cause hypothesized in §13 — **FALSIFIED** by §15. Investigation continues.
 **Severity:** Hard blocker — agent pane crashes on every send
 **Reporter:** User testing v0.38.16 (then v0.38.15 + v0.38.11)
 

@@ -1,5 +1,7 @@
 # Retro: `/model` (and all slash commands) leave the pane stuck after use
 
+**Status:** retro
+
 **Date:** 2026-06-17  
 **Severity:** P1 — slash commands lock the input for ~30 seconds every time  
 **Affected:** Every `/model`, `/effort`, `/permission-mode`, `/bypass`, `/plan`, `/runtime` call  

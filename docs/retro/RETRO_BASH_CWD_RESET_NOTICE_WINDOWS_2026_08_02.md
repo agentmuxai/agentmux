@@ -4,7 +4,7 @@
 **Reported by:** Asaf (via Agent3), observed on a live Windows AgentMux session
 **Ground truth basis:** `agentmuxai/agentmux` `main` at commit `740303442` (pulled fresh for this
 investigation), reproduced live during the investigation itself.
-**Status:** Fixed — see §6.
+**Status:** retro — Fixed — see §6.
 
 ## 0. Symptom
 

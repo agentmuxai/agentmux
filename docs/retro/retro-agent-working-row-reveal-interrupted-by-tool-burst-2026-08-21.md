@@ -1,7 +1,7 @@
 # Retro: Tool-call bursts interrupt the agent-pane "thinking" shimmer/type-out
 
 **Date:** 2026-08-21
-**Status:** Root cause confirmed via direct code reading, not yet fixed.
+**Status:** retro — Root cause confirmed via direct code reading, not yet fixed.
 **Trigger:** operator report — "sometimes (not often) tool calls will
 interrupt agent thinking dialog... I believe its on a state reducer" —
 reproduced live in AgentY's pane.

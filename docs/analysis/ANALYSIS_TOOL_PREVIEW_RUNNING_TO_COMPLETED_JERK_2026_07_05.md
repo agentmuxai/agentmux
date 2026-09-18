@@ -1,7 +1,7 @@
 # ANALYSIS: Tool preview "jerk" on running → completed transition
 
 **Date:** 2026-07-05
-**Status:** Root causes confirmed by direct file inspection (see citations). Not previously
+**Status:** analysis — Root causes confirmed by direct file inspection (see citations). Not previously
 documented — `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` describes a different, already-fixed
 bug (native scroll-chaining dead zone / double-scrollbar); its own addendum explicitly says "Not a
 jerk, a dead zone" — that "jerk" refers to browser scroll-bounce feel, not this layout reflow.

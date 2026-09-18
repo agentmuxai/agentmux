@@ -1,7 +1,7 @@
 # Analysis: agent conversation composer shows the native red-squiggly spellcheck underline (2026-07-13)
 
 **Author:** Agent2
-**Status:** Root cause identified, fix implemented.
+**Status:** analysis — Root cause identified, fix implemented.
 **Reported by:** user — "in the conversation input in agent panes, we don't need the red squiggly line spell check."
 
 ## Symptom

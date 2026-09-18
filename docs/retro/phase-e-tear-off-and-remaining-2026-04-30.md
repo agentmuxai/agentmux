@@ -1,5 +1,7 @@
 # Reducer/wcore Consistency During E.2 Migration — Analysis + Plan
 
+**Status:** retro
+
 **Date:** 2026-04-30
 **Trigger:** Smoke regression in #618 (`agentmux-0.33.520`) — tear off tab to new window, click "+" tab, nothing happens. Same workspace's "+" works in the original window.
 

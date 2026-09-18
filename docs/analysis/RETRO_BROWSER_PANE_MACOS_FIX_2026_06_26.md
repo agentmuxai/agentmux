@@ -1,7 +1,7 @@
 # Retro: Browser Pane Black Screen + Mouse Freeze — macOS ObjC Fix Attempt
 **Date:** 2026-06-26  
 **Branch:** `fix/browser-pane-deferred-bounds-macos`  
-**Status:** ✅ FIXED — browser pane renders correctly as of v17 (2026-06-26 18:36)
+**Status:** analysis — ✅ FIXED — browser pane renders correctly as of v17 (2026-06-26 18:36)
 
 ---
 

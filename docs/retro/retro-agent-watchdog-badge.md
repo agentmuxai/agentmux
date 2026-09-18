@@ -1,5 +1,7 @@
 # Retro: Agent Watchdog + Runtime Badge
 
+**Status:** retro
+
 _Branch: fix/agent-watchdog-and-badge — 2026-03-26_
 
 ---

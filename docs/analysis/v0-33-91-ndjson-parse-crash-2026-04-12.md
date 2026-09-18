@@ -1,5 +1,7 @@
 # v0.33.91 NDJSON Parse Crash — Analysis
 
+**Status:** analysis
+
 **Date:** 2026-04-12
 **Instance:** v0.33.91 running AgentX agent pane
 **Symptom:** Frontend crash / unresponsive state during a Write tool call

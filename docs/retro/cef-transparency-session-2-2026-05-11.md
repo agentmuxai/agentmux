@@ -1,7 +1,7 @@
 # CEF Wayland transparency — session 2 deep dive
 
 **Date:** 2026-05-11 (afternoon session, 10:00–11:45 PDT)
-**Status:** Significant progress — body-only/gap regions now bleed wallpaper through. Multi-layer pane interiors STILL render opaque-white-backed despite the renderer's `LayerTreeHost::background_color` correctly being transparent. Root cause for the remaining opaque-pane case identified but not yet fixed: a Chromium-internal rasterization path applies an opaque clear color to layers when `contents_opaque=false` does not propagate to `requires_clear=true`.
+**Status:** retro — Significant progress — body-only/gap regions now bleed wallpaper through. Multi-layer pane interiors STILL render opaque-white-backed despite the renderer's `LayerTreeHost::background_color` correctly being transparent. Root cause for the remaining opaque-pane case identified but not yet fixed: a Chromium-internal rasterization path applies an opaque clear color to layers when `contents_opaque=false` does not propagate to `requires_clear=true`.
 
 **Branches:**
 - CEF fork: `a5af/cef` `agentmux/7680-drag-rightclick-and-transparency` (HEAD `3e041ad2f`)

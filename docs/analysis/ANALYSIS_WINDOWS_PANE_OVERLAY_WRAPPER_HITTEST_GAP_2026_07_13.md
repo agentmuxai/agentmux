@@ -1,5 +1,7 @@
 # Windows: widget "More" menu / hamburger menu render over panes but don't accept hover/click
 
+**Status:** analysis
+
 **Date:** 2026-07-13 · **Author:** Agent1 · **Trigger:** user report — AgentO's
 flyout-menu-over-browser-pane work (verified working on macOS) renders
 correctly on the `local-main-b28b7a-577e65c6` Windows instance, but hovering

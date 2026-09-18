@@ -3,7 +3,7 @@
 **Date:** 2026-07-27
 **Severity:** Medium (one widget unusable while the state persists — no data loss, no crash)
 **Area:** Renderer/compositor state, NOT Warden's own code (see §4 — Warden's DOM was proven healthy while the pane showed black)
-**Status:** Symptom resolved live (pane renders again, screenshot-verified). Root cause narrowed to a sticky renderer/rasterization condition, cleared by a full page reload; the precise trigger remains unproven. Two genuinely-broken things found and fixed/flagged along the way.
+**Status:** retro — Symptom resolved live (pane renders again, screenshot-verified). Root cause narrowed to a sticky renderer/rasterization condition, cleared by a full page reload; the precise trigger remains unproven. Two genuinely-broken things found and fixed/flagged along the way.
 
 ---
 

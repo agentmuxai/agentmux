@@ -1,5 +1,7 @@
 # RETRO — MSIX `PublisherDisplayName` regression (Store ingest rejection)
 
+**Status:** retro
+
 **Date:** 2026-05-30
 **Author:** AgentX
 **Severity:** Medium — no data lost, no bad artifact shipped to users, but it

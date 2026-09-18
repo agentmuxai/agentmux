@@ -1,5 +1,7 @@
 # Tear-Off Bug Investigation Status
 
+**Status:** analysis
+
 **Date:** 2026-04-07
 **Branch:** `agenta/fix-devtools-secondary` (PR #310)
 **Reported symptom:** Torn-off window shows red error text ("like AgentMux cannot log in") for ANY pane type (agent, terminal)

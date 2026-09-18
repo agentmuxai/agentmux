@@ -1,5 +1,7 @@
 # Retro: closing the LAST window ("main") never notified srv at all
 
+**Status:** retro
+
 **Date:** 2026-07-16
 **Severity:** Medium — permanent srv-side `db_window`/`db_workspace` row leak, resurrected by crash-reproject on every subsequent launch
 **Tracking:** `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md` §4c Round 3 (this fix)

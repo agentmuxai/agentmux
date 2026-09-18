@@ -1,5 +1,7 @@
 # SolidJS Migration Benchmark Results
 
+**Status:** analysis
+
 **Date:** 2026-03-14
 **Machine:** Windows 10 Pro, dev workstation
 **React version:** v0.31.109 (main branch, commit 1bacfb7)

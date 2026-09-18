@@ -7,7 +7,8 @@
 # THE RULES, both already adopted by the repo and neither previously enforced:
 #
 #   1. A doc's `**Status:**` line must begin with one of:
-#        draft | proposed | active | implemented | living | historical | superseded
+#        draft | proposed | active | implemented | living | historical |
+#        superseded | retro | analysis
 #   2. `superseded` REQUIRES a `**Superseded-by:**` line, and that pointer must
 #      resolve to a file that exists. The README's words: "a broken pointer is
 #      worse than none."
@@ -30,7 +31,7 @@
 
 set -uo pipefail
 
-VALID="draft proposed active implemented living historical superseded"
+VALID="draft proposed active implemented living historical superseded retro analysis"
 fail=0
 
 # ── Which files to check ────────────────────────────────────────────────────

@@ -1,5 +1,7 @@
 # Bug Report: Window Drag Cursor Drift
 
+**Status:** retro
+
 **Date:** 2026-05-07  
 **Symptom:** When dragging the title bar to move the window, the cursor's position on the bar drifts — it does not stay at the point where the user originally clicked.  
 **Severity:** P2 — noticeable UX regression, not a crash  

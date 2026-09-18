@@ -1,7 +1,7 @@
 # Analysis: How should the floating pane header drag the window?
 
 **Date:** 2026-05-27
-**Status:** Decision pending; recommendation = Option B
+**Status:** analysis — Decision pending; recommendation = Option B
 
 ## The problem
 
@@ -225,7 +225,7 @@ require threading floating-context awareness through to the shared
   the very top 4 px of the window, below DwmExtendFrameIntoClientArea's
   reach).
 - The VS Code drag-accept cursor problem (separate analysis at
-  `docs/analysis/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`).
+  `ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md (no longer in this repo)`).
 - Re-dock (Phase 4 per spec #810): dragging a floater back into the
   source window's tile layout to re-dock. Not yet implemented.
 

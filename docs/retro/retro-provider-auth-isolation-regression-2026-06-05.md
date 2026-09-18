@@ -1,5 +1,7 @@
 # Retro: How Provider Auth Isolation Regressed Into the "Validate-Spin" Bug
 
+**Status:** retro
+
 **Date:** 2026-06-05
 **Author:** AgentA
 **Trigger:** A freshly-created agent never authenticates — UI stuck "not

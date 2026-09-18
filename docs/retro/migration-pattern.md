@@ -1,6 +1,6 @@
 # Migration pattern: a→b→c→d→e ratchet (with sync-cache exception)
 
-**Status:** Reference. Read AFTER `phase-b-roadmap.md` if you're resuming Phase B work.
+**Status:** retro — Reference. Read AFTER `phase-b-roadmap.md` if you're resuming Phase B work.
 **Author:** AgentA.
 **Date:** 2026-04-28 (post-#592, post-multi-reducer decision).
 

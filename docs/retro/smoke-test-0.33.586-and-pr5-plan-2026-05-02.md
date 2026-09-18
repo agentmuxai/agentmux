@@ -1,5 +1,7 @@
 # Smoke Test Report — 0.33.586 (H.2 browsers ratchet complete)
 
+**Status:** retro
+
 **Date:** 2026-05-02
 **Build:** `agentmux-0.33.586-x64-portable` (main, post-PR-#660 merge)
 **Tester:** user

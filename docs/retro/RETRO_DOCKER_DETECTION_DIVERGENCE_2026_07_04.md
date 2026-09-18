@@ -1,5 +1,7 @@
 # Retro: Docker "installed" signal disagreed across the app
 
+**Status:** retro
+
 **Date:** 2026-07-04
 **Severity:** Medium (confusing UX, no data loss; workaround was to restart AgentMux, which wasn't even guaranteed to help)
 **Affected versions:** since #1576 introduced the daemon-liveness check for the create-from-template Container option — every release through v0.50.0.

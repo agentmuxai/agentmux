@@ -1,5 +1,7 @@
 # System Memory Analysis — 2026-06-25
 
+**Status:** analysis
+
 **Context:** AgentMux reported low system memory. Total process working set: ~9.3 GB.
 Known expected consumers: Traktor, AgentMux 0.49.1, VS Code.
 

@@ -1,7 +1,7 @@
 # Retro: PR-E1 (layout focus/magnify reducer) — already exists
 
 **Date:** 2026-05-03
-**Status:** Stop-condition triggered (second time today). Writing this BEFORE any more code.
+**Status:** retro — Stop-condition triggered (second time today). Writing this BEFORE any more code.
 **Plan reference:** `docs/specs/frontend-reducer-implementation-plan-2026-05-03.md` PR-E
 **Decision context:** User picked E1 (refactor-only) over E2 (refactor + srv sync) for smaller blast radius
 

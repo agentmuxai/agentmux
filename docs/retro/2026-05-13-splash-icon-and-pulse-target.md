@@ -1,5 +1,7 @@
 # Retro — splash icon + pulse target wrong on first ship
 
+**Status:** retro
+
 **Date:** 2026-05-13
 **PR shipped:** #822 (merged sha squashed onto main 09:45)
 **Smoke build:** 0.33.831 portable

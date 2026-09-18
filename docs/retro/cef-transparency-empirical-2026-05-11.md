@@ -1,7 +1,7 @@
 # CEF Wayland transparency — empirical test results
 
 **Date:** 2026-05-11 00:01 PDT (updated 05:30 PDT — patch committed + rebuild in flight)
-**Status:** Root cause identified, CEF source patch committed as `68e0dc668` ("views: complete the transparency cascade — propagate to WebContents") on the `agentmux/7680-drag-rightclick-and-transparency` branch. libcef.so rebuild in progress. AgentMux side flipped from `0xFF000000` → `0x00000000` at all three sites (CefSettings.background_color in main.rs, BrowserSettings.background_color in app.rs, `--background-color` CLI switch in app.rs).
+**Status:** retro — Root cause identified, CEF source patch committed as `68e0dc668` ("views: complete the transparency cascade — propagate to WebContents") on the `agentmux/7680-drag-rightclick-and-transparency` branch. libcef.so rebuild in progress. AgentMux side flipped from `0xFF000000` → `0x00000000` at all three sites (CefSettings.background_color in main.rs, BrowserSettings.background_color in app.rs, `--background-color` CLI switch in app.rs).
 **Related:** [`docs/research/cef-transparency-research-2026-05-10.md`](../research/cef-transparency-research-2026-05-10.md).
 
 ---

@@ -1,5 +1,7 @@
 # Retro: Portable v0.33.37 Failed to Launch
 
+**Status:** retro
+
 **Date:** 2026-04-04
 **Severity:** P0 — portable completely broken
 **Root cause:** Double `runtime/` path in sidecar binary resolution

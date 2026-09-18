@@ -1,5 +1,7 @@
 # Agent Build Diagnostics & Self-Kill Investigation
 
+**Status:** analysis
+
 ## TL;DR
 
 **The kill is usually unnecessary.** AgentMux uses version-scoped Tauri identifiers that make every

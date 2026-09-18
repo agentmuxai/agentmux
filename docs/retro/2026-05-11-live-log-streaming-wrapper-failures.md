@@ -4,7 +4,7 @@
 **Owner:** AgentA
 **Surface area:** `agentmux-bashwrap`, `agentmux-srv` (websocket + agent_config), `frontend/app/view/agent` log overlay
 **PR sequence:** #800 → #803 → #804 → #808 (replaceChild hotfix) → #813 (settings.json hotfix) → **next** (wrapper rewrite)
-**Status:** Streaming still doesn't work end-to-end at 0.33.808. This retro is being written while the wrapper rewrite (PR γ) is being planned.
+**Status:** retro — Streaming still doesn't work end-to-end at 0.33.808. This retro is being written while the wrapper rewrite (PR γ) is being planned.
 
 ---
 

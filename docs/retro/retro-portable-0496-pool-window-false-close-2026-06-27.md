@@ -1,5 +1,7 @@
 # Retro — Portable 0.49.6 Exits on Splash: Pool-Window False-Close from PR #1803
 
+**Status:** retro
+
 - **Date:** 2026-06-27
 - **Symptom:** Portable 0.49.6 shows splash then exits immediately (host respawns in a loop, never stays up)
 - **Root cause:** PR #1803's `EVENT_OBJECT_LOCATIONCHANGE` pool-move detector fires a false `report_window_closed` for every warm-pool window the moment it is positioned at `x=-20000`

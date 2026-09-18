@@ -3,7 +3,7 @@
 **Date:** 2026-07-02
 **Severity:** Medium (no crash this session; commit at 88–90% of limit, pagefile auto-grew to 27 GB — a
 degraded state that *precedes* the OOM kills seen in prior incidents)
-**Status:** Diagnosed; root cause is largely **outside AgentMux** (system/driver committed shared
+**Status:** retro — Diagnosed; root cause is largely **outside AgentMux** (system/driver committed shared
 memory). Corrects a measurement error in `SPEC_MEMORY_ANALYSIS_2026_06_26.md`. AgentMux-side
 follow-ups captured in `SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`.
 **2026-07-16 update:** §6.1's open question (driver *leak* vs live per-context commit) is resolved by a

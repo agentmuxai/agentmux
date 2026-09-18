@@ -1,7 +1,7 @@
 # CEF White Flash on Startup — Retro & Research
 
 **Date:** 2026-04-01
-**Status:** Close to solved — testbed confirms zero-flash with the right sequence
+**Status:** analysis — Close to solved — testbed confirms zero-flash with the right sequence
 **Blocker level:** Cosmetic (app works, UX issue)
 
 ## Problem

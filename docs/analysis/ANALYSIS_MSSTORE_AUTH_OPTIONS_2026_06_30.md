@@ -1,4 +1,6 @@
 # MS Store CI Auth — Research Findings
+
+**Status:** analysis
 **Date:** 2026-06-30
 **Question:** Can msstore CLI authenticate in CI without Entra admin access / using a personal Microsoft account?
 

@@ -1,5 +1,7 @@
 # Retro: Left-Click Drag + Right-Click Context Menu Coexistence on CEF/Wayland
 
+**Status:** retro
+
 **Date:** 2026-05-02
 **Outcome:** Both work. Native window drag from any HTCLIENT header element + standard contextmenu on the same element.
 

@@ -1,7 +1,7 @@
 # Pane Tear-Off: Root Cause — CEF Shared Renderer Process
 
 **Date:** 2026-03-31
-**Status:** ROOT CAUSE CONFIRMED
+**Status:** analysis — ROOT CAUSE CONFIRMED
 
 ---
 

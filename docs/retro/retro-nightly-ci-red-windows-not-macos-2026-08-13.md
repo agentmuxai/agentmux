@@ -1,5 +1,7 @@
 # Retro: last night's nightly CI was red, but not because of macOS
 
+**Status:** retro
+
 **Date:** 2026-08-13
 **Area:** `.github/workflows/ci-nightly-build.yml`, `agentmux-srv/tests/subprocess_io.rs`
 

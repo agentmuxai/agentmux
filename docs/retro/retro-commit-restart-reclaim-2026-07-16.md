@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-16
 **Severity:** Medium (commit hit 97% of limit — red in the status bar — during a normal multi-day session; no crash)
-**Status:** Measured and resolved (as attribution). The remaining work item is the already-specified renderer-reclaim fix (`SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md` §B.5), which this data promotes to the single highest-value memory fix.
+**Status:** retro — Measured and resolved (as attribution). The remaining work item is the already-specified renderer-reclaim fix (`SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md` §B.5), which this data promotes to the single highest-value memory fix.
 **Reporter:** asaf ("we are at red levels in the currently running agentmux instance … why does it grow? can we stop it somehow?")
 **Follows:** `docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md` — answers its §6.1 open question ("whether the driver *leaks* or merely commits a large per-context floor") with a controlled measurement.
 

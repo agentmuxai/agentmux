@@ -3,7 +3,7 @@
 **Date:** 2026-08-23
 **Area:** `agentmux-cef` (host/UI process) startup path, specifically the window
 brings up sequence — `client::lifecycle` / `browser_pane::callbacks` — on Windows.
-**Status:** live incident write-up, diagnostics captured after the fact are
+**Status:** retro — live incident write-up, diagnostics captured after the fact are
 incomplete (process was killed before a hang dump could be taken) — root cause
 is a strong, evidence-backed hypothesis, **not a confirmed, reproduced finding**.
 Flagging that distinction explicitly per this repo's own conventions (compare

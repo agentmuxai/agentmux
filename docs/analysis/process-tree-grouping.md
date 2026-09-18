@@ -1,5 +1,7 @@
 # Process Tree Grouping Analysis
 
+**Status:** analysis
+
 **Date:** 2026-04-05
 **Issue:** AgentMux processes appear as independent background processes in Task Manager instead of grouped under one app entry.
 

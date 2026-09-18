@@ -1,7 +1,7 @@
 # Deep Analysis: ViewModel createMemo Disposal Bug
 
 **Date:** 2026-03-29
-**Status:** Fix applied, pending verification
+**Status:** analysis — Fix applied, pending verification
 **Severity:** High — affects all ViewModels that use `createMemo` in their constructors
 
 ---

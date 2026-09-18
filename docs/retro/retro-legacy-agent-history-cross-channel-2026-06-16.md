@@ -3,7 +3,7 @@
 **Date:** 2026-06-16
 **Author:** AgentX
 **Severity:** P1 (history *appears* lost — it is intact but unreachable on open)
-**Status:** Root-caused (from on-disk data + code; no data lost). Fix pending.
+**Status:** retro — Root-caused (from on-disk data + code; no data lost). Fix pending.
 
 > **Correction kept on purpose:** my first pass blamed the registry's
 > `session_id: null`. That's a **separate** gap (provider `--resume` / *continue*),

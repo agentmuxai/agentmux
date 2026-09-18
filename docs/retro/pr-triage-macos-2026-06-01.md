@@ -1,5 +1,7 @@
 # macOS PR Triage — 2026-06-01
 
+**Status:** retro
+
 Generated from open PR audit. Verdict for each: **CLOSE** or **FIX** with specific steps.
 
 ---

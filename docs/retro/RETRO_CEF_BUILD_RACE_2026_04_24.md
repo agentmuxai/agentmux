@@ -1,5 +1,7 @@
 # Retro: CEF Build Extraction Race Condition (2026-04-24)
 
+**Status:** retro
+
 ## What happened
 
 `task package` regressed mid-day on 2026-04-24. v0.33.372 built successfully

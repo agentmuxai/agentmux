@@ -100,7 +100,7 @@ function flushPendingNodes() {
     // ↑ THIS THROWS if the cascade unregistered the pane-state slot.
 }
 ```
-**Status:** This is the exact site that crashed. Two consecutive dispatches across two stores; the first can cascade-dispose the second's slot.
+**Status:** analysis — This is the exact site that crashed. Two consecutive dispatches across two stores; the first can cascade-dispose the second's slot.
 
 ### 4.2 HIGH RISK — same pattern, undiagnosed but vulnerable
 

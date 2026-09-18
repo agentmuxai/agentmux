@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Author:** AgentA
-**Status:** Root cause confirmed (code + measured data). Fix not yet implemented — plan below.
+**Status:** analysis — Root cause confirmed (code + measured data). Fix not yet implemented — plan below.
 **Priority:** 🔴 Critical (user-flagged: "highest priority… it is critical").
 
 ---

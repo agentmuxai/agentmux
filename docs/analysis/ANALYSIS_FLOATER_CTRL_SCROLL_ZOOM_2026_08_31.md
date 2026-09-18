@@ -1,6 +1,6 @@
 # Analysis: Ctrl+Scroll zoom does not work in a torn-off floating pane
 
-**Status:** **Root cause localised by direct measurement — see §6.** The entire
+**Status:** analysis — **Root cause localised by direct measurement — see §6.** The entire
 in-page pipeline (DOM event → handler → RPC → read-back → font) is proven WORKING
 in a live floater. The failure is upstream of the renderer, in the OS→CEF input
 path. §2's focus hypothesis is dead; §4b is dead; §4a survives.

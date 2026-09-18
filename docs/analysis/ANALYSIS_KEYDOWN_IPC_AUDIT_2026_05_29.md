@@ -1,5 +1,7 @@
 # ANALYSIS — Keydown-path synchronous-IPC audit
 
+**Status:** analysis
+
 **Date:** 2026-05-29
 **Author:** AgentX
 **Scope:** Phase 0.2 of the input-first execution plan (follow-up to [discussion #1161](https://github.com/agentmuxai/agentmux/discussions/1161)), enforcing invariant **I2 — "No synchronous IPC on any input path, ever."**

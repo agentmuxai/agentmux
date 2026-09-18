@@ -1,7 +1,7 @@
 # Retro: Linux pane tear-off triggers from any click-drag, not just the header
 
 **Date:** 2026-06-20
-**Status:** Fix planned (see below)
+**Status:** retro — Fix planned (see below)
 
 ---
 

@@ -103,7 +103,7 @@ for f in "${files[@]}"; do
         echo "     Cites a doc that does not exist: $cite"
         bad=$((bad + 1))
         fail=1
-    done < <(grep -oE 'docs/[A-Za-z0-9_-]+/[A-Za-z0-9_./-]+\.md' "$f" 2>/dev/null | sort -u)
+    done < <(grep -oE '(^|[^A-Za-z0-9_./-])docs/[A-Za-z0-9_-]+/[A-Za-z0-9_./-]+\.md' "$f" 2>/dev/null | sed -E 's|^[^d]*(docs/)|\1|' | sort -u)
 done
 
 if [ "$fail" -ne 0 ]; then

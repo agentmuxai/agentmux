@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-12
 **Goal:** Silky-smooth typing. Keystroke handler <2ms, paint budget <16ms (60fps).
-**Status:** Root cause identified, primary fix shipped in v0.33.91.
+**Status:** analysis — Root cause identified, primary fix shipped in v0.33.91.
 
 ---
 

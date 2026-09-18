@@ -1,5 +1,7 @@
 # FlyoutMenu hover-delay forensics + remediation plan
 
+**Status:** analysis
+
 **Date:** 2026-05-10
 **Owner:** AgentA
 **Trigger:** User reported "unusual delay when hovering through items that does not appear in VSCode" on the hamburger menu (Theme / Opacity submenus on PR #791).

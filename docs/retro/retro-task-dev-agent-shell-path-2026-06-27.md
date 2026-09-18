@@ -1,5 +1,7 @@
 # Retro: `task dev` via Agent MCP Shell — Four Consecutive Failures on Windows
 
+**Status:** retro
+
 **Date:** 2026-06-27
 **Severity:** Medium — blocked agent-driven dev loop; user had to run manually
 **Observed by:** lzop-06239 (Claude agent) during zoom-persistence fix session

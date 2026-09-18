@@ -1,5 +1,7 @@
 # Retro: `task dev` Launch Failure — Orphaned Dev Process Within Same Agent Session
 
+**Status:** retro
+
 **Date:** 2026-06-23  
 **Severity:** Medium — subsequent `task dev` run fails if a prior one was not cleanly terminated  
 **Observed by:** Mazs during strip-redesign implementation session

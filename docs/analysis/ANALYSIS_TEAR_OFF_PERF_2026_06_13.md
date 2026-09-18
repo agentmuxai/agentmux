@@ -1,5 +1,7 @@
 # Tear-off performance & flash analysis — 2026-06-13
 
+**Status:** analysis
+
 **Symptom (user):** Tearing off a **pane** to a new window is slower than VSCode and "goes through a bunch of flash changes" instead of staying behind the pulsating brain splash. Suspected ordering issue. Minimum ask: hide the flashes behind the brain. Optimize **both** pane and tab tear-off, but **pane is the common case** and should be prioritized.
 
 **TL;DR**

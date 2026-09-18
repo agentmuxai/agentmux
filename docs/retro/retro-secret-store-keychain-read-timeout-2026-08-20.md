@@ -1,5 +1,7 @@
 # Retro: a stuck Keychain consent prompt could hang a caller indefinitely
 
+**Status:** retro
+
 **Date:** 2026-08-20
 **Area:** `agentmux-srv/src/identity/secret_store.rs`
 **Context:** follow-up to

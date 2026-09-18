@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-12
 **Plan:** `docs/plans/ultra-long-sessions.md`
-**Status:** COMPLETE — all four phases shipped to `main`
+**Status:** retro — COMPLETE — all four phases shipped to `main`
 **Version at completion:** 0.33.100
 **PRs:** #336, #338, #340, #341, #342
 

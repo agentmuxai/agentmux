@@ -1,5 +1,7 @@
 # CEF White Flash on Startup - Analysis & Solutions
 
+**Status:** analysis
+
 **Date:** 2026-03-31
 **Platform:** Windows 10/11, Rust CEF host (cef-rs)
 **Problem:** Brief white screen visible before CEF renders dark-themed content

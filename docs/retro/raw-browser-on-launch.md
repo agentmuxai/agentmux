@@ -1,5 +1,7 @@
 # Retro: AgentMux Shows Raw Browser Window on Launch
 
+**Status:** retro
+
 **Date:** 2026-03-31
 **Trigger:** Launching v0.33.14 portable build showed a bare web browser instead of the app UI.
 **Frequency:** Intermittent — happens on some launches, not all. More common on first run or slow I/O.

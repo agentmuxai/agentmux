@@ -1,5 +1,7 @@
 # Complete Analysis: Chrome Zoom Widget Shift Regression
 
+**Status:** retro
+
 **Date:** 2026-03-19
 **Issue:** Widgets shift left when chrome zoom > 1.0 on Windows
 

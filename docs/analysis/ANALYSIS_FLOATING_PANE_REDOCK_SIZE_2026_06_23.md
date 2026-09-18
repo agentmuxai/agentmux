@@ -1,7 +1,7 @@
 # ANALYSIS: Floating Pane Redock — Ghost vs. Actual Size Mismatch
 
 **Date:** 2026-06-23  
-**Status:** Root causes confirmed. Phase 4b implementation underway.
+**Status:** analysis — Root causes confirmed. Phase 4b implementation underway.
 
 ---
 

@@ -11,7 +11,7 @@
 
 ## 1. Problem
 
-The Agent App API (`app_api.rs`) is the only RPC surface agents can reach (the permission boundary in `docs/internals/agent-app-api.md` is explicit about this). It currently covers agent lifecycle, panes, file I/O, and sessions — but has **no identity, preset, or memory surface**.
+The Agent App API (`app_api.rs`) is the only RPC surface agents can reach (the permission boundary in `agent-app-api.md (no longer in this repo)` is explicit about this). It currently covers agent lifecycle, panes, file I/O, and sessions — but has **no identity, preset, or memory surface**.
 
 This means an agent cannot:
 - Register or update its own GitHub/Anthropic/AWS credential so the Trust Center shows it as connected

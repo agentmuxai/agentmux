@@ -1,5 +1,7 @@
 # Findings: `[wave-scroll-shrink]` Live Data From Two Running Instances (2026-08-22)
 
+**Status:** analysis
+
 Follow-up to `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`
 (which correlated a single dev-branch repro's 8 events). That dataset was
 one pane, one short session. This one is two currently-running "shared"

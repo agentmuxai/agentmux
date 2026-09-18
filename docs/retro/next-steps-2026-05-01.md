@@ -1,5 +1,7 @@
 # What's next (2026-05-01)
 
+**Status:** retro
+
 **Context:** Phase E.5 + F1.A + F1.B shipped; smoke confirmed state-correctness; drag UX is governed by the Chrome-faithful tear-off spec, Phases 2-7 unstarted.
 
 This is the forward plan. Read `docs/retro/phase-e-status-2026-05-01.md` for the consolidated status; this doc is just *what to work on next*.

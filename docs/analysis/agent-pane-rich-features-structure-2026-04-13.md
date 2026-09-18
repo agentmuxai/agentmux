@@ -1,5 +1,7 @@
 # Agent Pane Rich-Features Structural Analysis
 
+**Status:** analysis
+
 **Date:** 2026-04-13
 **Version under analysis:** 0.33.106 (main at `7e79510`)
 **Reported symptom:** Setting a bookmark, expanding the bookmarks panel, and clicking a saved bookmark causes **pane titles to disappear across the entire app and content to shift up**.

@@ -6,7 +6,7 @@
 **Trigger:** Hand cursor appearing on window controls, pane title-bars, hamburger menu, tab bars,
 status-bar items, floating-pane widgets, and menus — none of which are hyperlinks.
 
-**Related:** `docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md` (earlier analysis focused
+**Related:** `docs/archive/ANALYSIS_CURSOR_STYLING_2026_06_15.md` (earlier analysis focused
 specifically on scrollbars; the token layer and utility classes it proposed were shipped and
 are now in production — this document supersedes it for the broader pointer-cursor policy.)
 

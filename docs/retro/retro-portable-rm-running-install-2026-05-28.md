@@ -3,7 +3,7 @@
 **Date:** 2026-05-28
 **Severity:** High — visible to user as a 22-minute renderer crash loop in a long-running session.
 **Affected:** 0.39.1 portable, any version using the unguarded `rm -rf` in `scripts/package-portable.sh`.
-**Status:** Fix in this PR (package-portable guard). Two follow-up fixes tracked: `resolve_frontend_base_url` Result-typing, and `on_render_process_terminated` crash budget.
+**Status:** retro — Fix in this PR (package-portable guard). Two follow-up fixes tracked: `resolve_frontend_base_url` Result-typing, and `on_render_process_terminated` crash budget.
 
 ---
 

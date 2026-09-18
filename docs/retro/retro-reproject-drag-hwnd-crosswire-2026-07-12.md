@@ -1,5 +1,7 @@
 # Retro: dragging Window 2 moves Window 3 (HWND cross-wire after crash-reproject)
 
+**Status:** retro
+
 2026-07-12. Reported live, mid-session, on v0.53.2: 3 windows open at start
 (main + 2 recreated windows). Dragging the second window by its title bar
 visibly moved the third window instead.

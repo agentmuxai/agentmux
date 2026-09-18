@@ -1,5 +1,7 @@
 # Retro: `task dev` launched from a stale branch right after "get up to date" was already done
 
+**Status:** retro
+
 **Date:** 2026-08-19
 **Area:** agent workflow (git branch management / dev-instance launch), not app code
 

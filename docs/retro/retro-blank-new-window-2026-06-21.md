@@ -3,7 +3,7 @@
 **Date:** 2026-06-21
 **Severity:** Medium (functional regression; new windows are unusable until the user manually adds panes)
 **Area:** `agentmux-srv` window/workspace creation + frontend new-window bootstrap
-**Status:** Fixed (branch `agentc/fix-blank-new-window`)
+**Status:** retro — Fixed (branch `agentc/fix-blank-new-window`)
 **Repro:** v0.47.0 (`553ff39b`). Status bar → "+ Open another window" → window opens **blank**; expected the default 3-pane layout (agent + sysinfo + swarm).
 
 ---

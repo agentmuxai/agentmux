@@ -1,5 +1,7 @@
 # ANALYSIS — Open typing-perf tracking items + consolidation proposal
 
+**Status:** analysis
+
 **Date:** 2026-05-29
 **Owner:** Agent1
 **Scope:** open Issues + Discussions in `agentmuxai/agentmux` related to **typing/keystroke responsiveness** in the terminal and agent panes. Adjacent perf concerns (focus latency, pane open serialization, opacity drag, etc.) are explicitly out of scope and listed separately at the bottom.

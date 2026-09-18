@@ -1,6 +1,6 @@
 # Analysis: Agent-pane input lifecycle — stuck "Waiting", false-positive "Rate Limiting", and "Send now" removal (2026-07-06)
 
-**Status:** Root causes identified for all three issues; fixes described but not implemented (analysis-only per request).
+**Status:** analysis — Root causes identified for all three issues; fixes described but not implemented (analysis-only per request).
 **Reported by:** user — "If we are interrupted with a rate limit, I see the error, but the prompt stays in 'Waiting'. There are also times where it says 'Rate Limiting' when it clearly is not. Finally, we want to get rid of the 'Send Now' — instead, just queue send the message."
 **Related prior analysis:** `docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md` (the `isInterruptibleTurn` selector that gates "Send now" today was itself a fix for an earlier flashing bug in this same button — see Issue 3 below), `docs/analysis/ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER_2026_06_17.md`, `docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md`.
 

@@ -1,5 +1,7 @@
 # Retro: an unanswered Keychain prompt leaks one stuck thread per retry, not just one
 
+**Status:** retro
+
 **Date:** 2026-08-22
 **Area:** `agentmux-srv/src/muxbus/cloud_subscriber.rs`, `agentmux-srv/src/identity/secret_store.rs`
 **Context:** the predicted-but-untriggered risk flagged in

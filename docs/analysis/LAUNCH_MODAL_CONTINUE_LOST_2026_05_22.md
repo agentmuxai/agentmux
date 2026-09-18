@@ -1,5 +1,7 @@
 # Analysis — launch modal drops the continuation across the "+ New identity" round-trip
 
+**Status:** analysis
+
 **Date:** 2026-05-22
 **Author:** AgentA
 **Severity:** High (functional) — a continued agent silently falls out of Continue

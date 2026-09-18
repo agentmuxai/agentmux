@@ -3,7 +3,7 @@
 **Date:** 2026-06-16
 **Author:** AgentX
 **Severity:** P1 (every agent opens to a fresh/short conversation cross-channel; original intact but orphaned)
-**Status:** Root-caused. Display half fixed (#1472); continuity half + recovery pending.
+**Status:** retro — Root-caused. Display half fixed (#1472); continuity half + recovery pending.
 
 > Companion to `retro-legacy-agent-history-cross-channel-2026-06-16.md` (#1471),
 > which covered only the *display* half. This one covers the **full regression**:

@@ -1,5 +1,7 @@
 # Agent pane architecture report
 
+**Status:** analysis
+
 **Date:** 2026-05-10
 **Author:** AgentA
 **Trigger:** "take another deeper look into the structure of the agent pane dialog system" — investigating the reported "thinking blocks aligned horizontally / newlines clumped around tables and thinking entries" symptom.

@@ -4,7 +4,7 @@
 **Severity:** Low (cosmetic — no functional impact on startup)
 **Area:** `agentmux-launcher` macOS native splash (`splash_mac.rs`)
 **Related PR:** #2244 (`feat(launcher): macOS splash — add an "other" row closing the total-vs-items gap`, merged 2026-07-20, commit `27d45f5d`)
-**Status:** Root-caused (again) — not fixed. This retro exists because the earlier investigation's conclusion ("deferred") wasn't visible enough for Asaf to know the count-up bug was never in scope for #2244.
+**Status:** retro — Root-caused (again) — not fixed. This retro exists because the earlier investigation's conclusion ("deferred") wasn't visible enough for Asaf to know the count-up bug was never in scope for #2244.
 
 ---
 

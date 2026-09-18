@@ -1,4 +1,6 @@
 # Retro: Circular Import → Blank Loading Screen
+
+**Status:** retro
 Date: 2026-03-21
 Author: AgentA
 

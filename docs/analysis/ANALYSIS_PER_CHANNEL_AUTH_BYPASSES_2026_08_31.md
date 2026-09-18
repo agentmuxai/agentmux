@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31
 **Author:** AgentX
-**Status:** Investigation complete; fixed on this branch (PR #2878).
+**Status:** analysis — Investigation complete; fixed on this branch (PR #2878).
 **Revision:** #5 added 2026-08-31 after Codex's P1 review caught it — the
 original pass found only four.
 **Prompted by:** operator question — *"how are all my agents able to operate

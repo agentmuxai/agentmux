@@ -1,7 +1,7 @@
 # Sysinfo Pane Freeze — Root Cause Analysis
 
 **Date:** 2026-03-08
-**Status:** Identified, not yet fixed
+**Status:** analysis — Identified, not yet fixed
 
 ## Symptoms
 

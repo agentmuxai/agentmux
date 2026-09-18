@@ -1,5 +1,7 @@
 # Retro: Why Backend Crash Recovery Was Never Shipped
 
+**Status:** retro
+
 **Date:** 2026-03-24
 **Related:** [`OFFLINE_CRASH_ANALYSIS`](../analysis/offline-crash.md), PR #214, commit `15c9a1a`
 
@@ -37,7 +39,7 @@ An idle watchdog that killed the backend when WebSocket client count hit 0 for 3
 **Commit message said:**
 > "Updated spec with lessons learned and revised approach (heartbeat-based crash recovery instead of WS-based idle detection)."
 
-`docs/specs/backend-lifecycle.md` was updated with the heartbeat-based recovery plan. **The heartbeat-based recovery was never built.**
+`backend-lifecycle.md (no longer in this repo)` was updated with the heartbeat-based recovery plan. **The heartbeat-based recovery was never built.**
 
 ### March 23, 2026 — PR #214 merged (commit `63ef96b` / `ced3f87`)
 
@@ -117,7 +119,7 @@ The enriched `backend-terminated` event showed the exit code. It looked informat
 - **No crash dump collection** — 0xC0000409 crashes are completely opaque
 - **`restart_backend` command** — planned in backend resilience spec, not implemented
 - **`reconnectRpcClient`** — not implemented
-- **Heartbeat-based crash recovery** — specced in `docs/specs/backend-lifecycle.md`, not implemented
+- **Heartbeat-based crash recovery** — specced in `backend-lifecycle.md (no longer in this repo)`, not implemented
 - **`backendStatusAtom` init** — still `"running"`, should be `"connecting"`
 - **Version link** — still active when offline (spec said to suppress it)
 

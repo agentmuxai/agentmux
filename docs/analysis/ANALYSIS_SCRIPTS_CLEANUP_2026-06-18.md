@@ -1,5 +1,7 @@
 # Scripts Folder Cleanup & Release System Analysis — 2026-06-18
 
+**Status:** analysis
+
 ## Summary
 
 Two separate audits: (1) orphaned diagnostic scripts in `scripts/`, and (2) three bugs in the bump/release pipeline that caused repeated reagentx P0/P2 failures on PR #1548. Both are fixed in this PR.

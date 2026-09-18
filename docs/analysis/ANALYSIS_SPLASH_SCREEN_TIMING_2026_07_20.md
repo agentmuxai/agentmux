@@ -1,5 +1,7 @@
 # macOS Splash Screen — Countup Timing & the Total-vs-Items Gap
 
+**Status:** analysis
+
 **Date:** 2026-07-20
 **Scope:** `agentmux-launcher/src/splash_mac.rs` (macOS-native splash renderer) +
 `agentmux-launcher/src/startup_events.rs` (event model) + emitters in

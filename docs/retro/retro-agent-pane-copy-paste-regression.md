@@ -1,5 +1,7 @@
 # Retro: Agent Pane Copy/Paste Regression
 
+**Status:** retro
+
 **Date:** 2026-03-17
 **Severity:** Medium — core UX broken in agent pane
 **Introduced:** PR #148 (commit `8d3e867`, 2026-03-16)

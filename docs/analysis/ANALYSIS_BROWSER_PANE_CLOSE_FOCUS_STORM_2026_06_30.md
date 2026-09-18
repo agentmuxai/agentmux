@@ -1,5 +1,7 @@
 # Analysis: Browser pane close → stale WndProc subclass → infinite focus storm
 
+**Status:** analysis
+
 **Date:** 2026-06-30
 **Against:** local-main-b28b7a @ v0.49.8
 **Log:** `~/.agentmux/channels/local-main-b28b7a-50e8c174/versions/0.49.8/logs/agentmux-host-v0.49.8.log.2026-06-30`

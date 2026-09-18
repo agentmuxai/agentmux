@@ -1,5 +1,7 @@
 # Retro — ActivityDock error rows persisted forever ("racking up above the composer")
 
+**Status:** retro
+
 **Date:** 2026-07-24
 **Trigger:** User report, live: "i see the docks racking up above the model
 selector bar." Reported mid-session, after a stretch of background-shell-heavy

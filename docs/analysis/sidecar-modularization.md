@@ -1,5 +1,7 @@
 # Sidecar Modularization Analysis
 
+**Status:** analysis
+
 **Date:** 2026-03-24
 **File:** `src-tauri/src/sidecar.rs` (639 lines)
 **Question:** Is modularization worth doing, and if so, how?

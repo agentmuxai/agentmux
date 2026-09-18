@@ -1,5 +1,7 @@
 # Retro — Busy animation stuck indefinitely on 429 rate limit (2026-06-24)
 
+**Status:** retro
+
 ## TL;DR
 
 When Claude CLI hits a 429 and enters its own retry-backoff loop, the agent pane

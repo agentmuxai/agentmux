@@ -3,7 +3,7 @@
 **Date:** 2026-06-23  
 **Component:** `AgentFooter` — sent-message history recall (ArrowUp / ArrowDown)  
 **Severity:** UX regression — medium (affects any multi-line message typed without explicit newlines)  
-**Status:** Fixed
+**Status:** retro — Fixed
 
 ---
 

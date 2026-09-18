@@ -1,5 +1,7 @@
 # Retro: block-mount BrainSpinner overlay can get stuck visible forever
 
+**Status:** retro
+
 **Date:** 2026-08-23
 **Owner:** AgentY
 **Area:** `frontend/app/block/block.tsx` (`Block`'s `ready()` gate), `frontend/app/view/agent/agent-view.tsx` (`AgentPicker` -> `AgentPresentationView` cross-fade)

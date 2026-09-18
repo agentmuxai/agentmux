@@ -1,5 +1,7 @@
 # ANALYSIS: `backdrop-filter: blur` audit — input-first Phase 0.3
 
+**Status:** analysis
+
 **Date:** 2026-05-30
 **Author:** AgentY
 **Tracks:** [discussion #1161](https://github.com/agentmuxai/agentmux/discussions/1161) Phase 0 "cheap verified wins" → *blur audit*

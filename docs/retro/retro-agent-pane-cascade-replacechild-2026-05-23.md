@@ -1,5 +1,7 @@
 # Retro: Agent-pane cascade → replaceChild → blank-tab content area
 
+**Status:** retro
+
 **Date:** 2026-05-23
 **Author:** AgentA
 **Severity:** High — user-visible blank tab content with red error text; no in-app recovery

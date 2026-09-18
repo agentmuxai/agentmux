@@ -1,5 +1,7 @@
 # Reducer Architecture — Current State Report
 
+**Status:** retro
+
 **Date:** 2026-05-02
 **Branch reflected:** `main` HEAD `48ad4e58` (post-PR #650 merge)
 **Author:** AgentA

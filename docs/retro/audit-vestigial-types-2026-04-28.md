@@ -1,5 +1,7 @@
 # Audit: Vestigial WaveTerm/WaveMux Types in AgentMux
 
+**Status:** retro
+
 **Date:** 2026-04-28
 **Scope:** Pre-Phase-E cleanup audit. AgentMux was rebranded from WaveTerm; this surveys types, names, and abstractions that still mirror the WaveTerm era.
 **Method:** Static grep + read across `agentmux-srv`, `agentmux-cef`, `agentmux-launcher`, `agentmux-common`, `frontend/`, and `specs/`. No runtime tracing.

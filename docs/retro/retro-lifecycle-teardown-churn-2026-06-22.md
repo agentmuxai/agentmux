@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-22
 - **Severity:** High (recurring; orphaned process trees incl. live agents; "lifecycle corruption")
-- **Status:** Root *history* established; current fix still open (see §8). Tracking Discussion on the repo.
+- **Status:** retro — Root *history* established; current fix still open (see §8). Tracking Discussion on the repo.
 - **Scope:** the window-close → host-quit → launcher-teardown → process-reap chain on Windows (with macOS/Linux parity notes).
 
 ---

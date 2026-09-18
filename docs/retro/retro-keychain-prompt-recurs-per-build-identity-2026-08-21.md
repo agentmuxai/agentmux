@@ -1,5 +1,7 @@
 # Retro: the "fixed" Keychain prompt came back on the very next local build
 
+**Status:** retro
+
 **Date:** 2026-08-21
 **Area:** `scripts/package-macos.sh` (bundle identity), `agentmux-srv/src/identity/secret_store.rs`
 **Context:** continues the same investigation as

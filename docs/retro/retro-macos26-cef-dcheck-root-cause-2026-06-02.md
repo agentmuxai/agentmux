@@ -1,5 +1,7 @@
 # Retro: the macOS 26 crash saga was a CEF build-config bug (DCHECKs enabled)
 
+**Status:** retro
+
 **Date:** 2026-06-02
 **Severity:** P0 — crash on every pane drag / window close on macOS 26
 **Resolution:** rebuild from-source CEF with `dcheck_always_on=false` (production config)

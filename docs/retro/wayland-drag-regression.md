@@ -1,5 +1,7 @@
 # Retro: Wayland Drag/Button Regression — Broke Twice
 
+**Status:** retro
+
 ## Timeline
 
 ### Break 1: Buttons dead after removing GDK_BACKEND=x11

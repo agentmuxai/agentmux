@@ -8,7 +8,7 @@ generations deep through `agentmux-bashwrap.exe`/MSYS bash). The launcher
 exited in well under a second, exit code 1, zero stdout/stderr, and never
 created its per-build-channel data directory at all — no window, no log
 line, nothing to debug from.
-**Status:** Root-caused and reproducibly confirmed/fixed by launch method
+**Status:** retro — Root-caused and reproducibly confirmed/fixed by launch method
 (not yet fixed in source — filing for follow-up).
 
 ---

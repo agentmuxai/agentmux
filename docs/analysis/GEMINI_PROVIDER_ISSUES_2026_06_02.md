@@ -1,7 +1,7 @@
 # Gemini provider — auth loop + two latent codex-class bugs
 
 **Date:** 2026-06-02
-**Status:** diagnosed; fixes proposed (2 quick code fixes + 1 deeper auth-orchestration fix)
+**Status:** analysis — diagnosed; fixes proposed (2 quick code fixes + 1 deeper auth-orchestration fix)
 **Area:** agent provider auth orchestration (`cli_handlers`) + arg construction + output translation
 
 A Gemini agent pane "doesn't do anything once loaded and never logged in." Three
