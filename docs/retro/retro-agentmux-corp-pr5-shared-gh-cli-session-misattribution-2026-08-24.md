@@ -84,7 +84,11 @@ instead of another plausible-but-unproven theory:
 
 ```
 $ echo $GH_TOKEN
-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
+ghp_[REDACTED 2026-09-18 — this was a real classic PAT, see
+docs/specs/SPEC_CROSS_REPO_CREDENTIAL_EXPOSURE_REMEDIATION_2026_09_17.md
+finding #2 for tracking. Content redaction only; the original value
+remains recoverable from git history until an explicit history rewrite,
+tracked separately in that spec's §5.]
 ```
 
 **My own (agenty's) shell already has `GH_TOKEN`/`GITHUB_TOKEN` set** —
