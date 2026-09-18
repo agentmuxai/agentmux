@@ -436,6 +436,17 @@ struct PersistentInner {
     /// AskUserQuestion; consumed by `answer_question` to build the matching
     /// `control_response`. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     pending_questions: HashMap<String, (String, serde_json::Value)>,
+    /// Ordinary (non-AskUserQuestion) tool-permission `can_use_tool`
+    /// control_requests awaiting a user decision: `tool_use_id ->
+    /// (request_id, tool_name, input JSON)`. Filled by
+    /// `park_tool_permission_request` when `should_route_to_decision_panel`
+    /// says so; consumed by `decide_tool_permission` to build the matching
+    /// `control_response`. Structurally the sibling of `pending_questions`
+    /// above — same in-memory-only, per-controller-instance lifetime — but
+    /// currently always empty in production: `should_route_to_decision_panel`
+    /// is hardcoded `false` pending the Phase 2 policy decision
+    /// (SPEC_DECISION_PROMPT_2026_04_24.md, SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §5).
+    pending_permissions: HashMap<String, (String, String, serde_json::Value)>,
 }
 
 impl PersistentInner {
@@ -818,6 +829,94 @@ fn build_deny_resume_message(message: &str) -> String {
     )
 }
 
+/// Whether a `can_use_tool` control_request for `tool_name` (anything except
+/// AskUserQuestion, which is always parked separately — see
+/// `handle_control_frame`) should be routed to the frontend decision panel
+/// instead of auto-allowed.
+///
+/// **Hardcoded to `false` — deliberately inert.** This is the one remaining
+/// product decision `SPEC_DECISION_PROMPT_2026_04_24.md` Phase 2 and
+/// `SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md` §5 Phase 2 both leave open,
+/// and it is NOT safe to default it to "route everything non-trivial" —
+/// that spec's own §7 risk section says so directly:
+///
+/// > Permission chatter: `--permission-mode default` may route many tools
+/// > through `can_use_tool`. Mitigation: auto-allow in the handler (Phase 1);
+/// > consider `--permission-mode acceptEdits` or allow-rules to cut volume.
+///
+/// `--permission-mode default` is the mode baked into every persistent
+/// Claude agent's launch args today (`static CLAUDE` in
+/// `agentmux-srv/src/backend/providers.rs`), and it routes most non-trivial
+/// tool calls through this control_request. Flipping this function to
+/// unconditionally `true` would turn every persistent Claude agent into a
+/// prompt-per-tool-call experience the instant it ships — a real regression,
+/// not a hypothetical one, and not something an engineering change should
+/// decide unilaterally.
+///
+/// The parking/decide mechanism this gate controls —
+/// `park_tool_permission_request` below and
+/// `PersistentSubprocessController::decide_tool_permission` — is complete
+/// and independently tested (see `tool_permission_tests` below); flipping
+/// this gate on is a policy call about which tools or modes actually
+/// warrant a prompt (a risk-tiering scheme per
+/// `SPEC_DECISION_PROMPT_2026_04_24.md`'s own speculative `risk` field,
+/// `--permission-mode acceptEdits` instead of `default`, or persisted
+/// allow-rules per that spec's §6 — none of which exist yet), not an
+/// engineering task this function should pre-empt.
+fn should_route_to_decision_panel(_tool_name: &str) -> bool {
+    false
+}
+
+/// Park an ordinary (non-AskUserQuestion) tool-permission `can_use_tool`
+/// control_request into `PersistentInner::pending_permissions`, mirroring
+/// how AskUserQuestion is parked into `pending_questions` two branches up in
+/// `handle_control_frame` — same in-memory-only, per-controller-instance
+/// lifetime, and the same "process respawned" failure mode on decide
+/// (`PersistentSubprocessController::decide_tool_permission`'s error text
+/// explains it the same way `answer_question`'s does).
+///
+/// Currently unreachable in production: `should_route_to_decision_panel`
+/// always returns `false`, so `handle_control_frame` never calls this. Kept
+/// as its own function (rather than inlined, unlike the AskUserQuestion
+/// branch) specifically so it can be unit tested directly, independent of
+/// that gate.
+fn park_tool_permission_request(
+    inner: &Arc<Mutex<PersistentInner>>,
+    tool_use_id: String,
+    request_id: String,
+    tool_name: String,
+    input: serde_json::Value,
+) {
+    let mut guard = inner.lock().unwrap();
+    guard
+        .pending_permissions
+        .insert(tool_use_id, (request_id, tool_name, input));
+}
+
+/// Compose the directive follow-up message used by the tool-permission
+/// dead-air fallback (mirrors `build_answer_resume_message` /
+/// `build_deny_resume_message`'s directive tone — resume the task, don't
+/// wait for further input — but for an ordinary tool-permission decision
+/// rather than an AskUserQuestion answer).
+fn build_tool_decision_resume_message(tool_name: &str, outcome: &str, feedback: Option<&str>) -> String {
+    if outcome == "allow" {
+        format!(
+            "[AgentMux] Your earlier request to use `{tool_name}` was approved, but the \
+             turn had already ended, so this is delivered here as a follow-up. Resume the \
+             task you were working on — the tool call is approved; do not wait for further \
+             input."
+        )
+    } else {
+        let reason = feedback.unwrap_or("Denied by user.");
+        format!(
+            "[AgentMux] Your earlier request to use `{tool_name}` was declined, but the \
+             turn had already ended, so this is delivered here as a follow-up. Resume the \
+             task you were working on without using that tool — do not wait for further \
+             input. The user's response was: \"{reason}\""
+        )
+    }
+}
+
 impl PersistentSubprocessController {
     pub fn new(
         tab_id: String,
@@ -850,6 +949,7 @@ impl PersistentSubprocessController {
                 kill_tx: None,
                 spawn_generation: 0,
                 pending_questions: HashMap::new(),
+                pending_permissions: HashMap::new(),
             })),
             broker,
             event_bus,
@@ -2423,6 +2523,129 @@ impl PersistentSubprocessController {
         Ok(())
     }
 
+    /// Decide a parked ordinary tool-permission request via the Agent SDK
+    /// **control protocol** — the eventual `AgentDecisionPanel` Allow/Deny
+    /// buttons, once `should_route_to_decision_panel` is flipped on (Phase 2,
+    /// `SPEC_DECISION_PROMPT_2026_04_24.md` / `SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`
+    /// §5). Mirrors `answer_question`/`deny_question` exactly — same
+    /// `pending_*` map lookup/removal, same dead-air safety net — combined
+    /// into one method because the frontend's `tool:decision` RPC already
+    /// carries `outcome` as a single field rather than two separate
+    /// commands.
+    ///
+    /// `outcome` must be `"allow"` or `"deny"` — validated by the caller
+    /// (`websocket.rs`'s `tooldecision` handler) before this is reached, the
+    /// same division of responsibility as that handler's existing `scope`
+    /// validation. An unrecognized value is treated as `"deny"` (fail
+    /// closed) rather than panicking or silently allowing.
+    ///
+    /// On allow, `updatedInput` echoes the ORIGINAL input verbatim — this
+    /// method does not support editing the call before approving it (no UI
+    /// for that exists; `SPEC_DECISION_PROMPT_2026_04_24.md` never scoped
+    /// one). On deny, `feedback` becomes the CLI-facing `message`
+    /// (`SPEC_DECISION_PROMPT`'s G6: "Denials carry user-typed feedback
+    /// verbatim to the agent"); a caller with no feedback gets a generic
+    /// default so the model still learns the call was refused.
+    ///
+    /// See `answer_question`'s doc comment for the `pending_permissions`
+    /// in-memory-only caveat (a fresh controller instance — pane reopen, any
+    /// process respawn — starts with an empty map) and for why the error
+    /// text names the tool_use_id and the likely cause.
+    pub fn decide_tool_permission(
+        &self,
+        tool_use_id: String,
+        outcome: &str,
+        feedback: Option<String>,
+    ) -> Result<(), String> {
+        let (request_id, tool_name, input, tx) = {
+            let mut inner = self.inner.lock().unwrap();
+            let (rid, tool_name, input) = inner
+                .pending_permissions
+                .remove(&tool_use_id)
+                .ok_or_else(|| format!(
+                    "no pending tool-permission request for tool_use_id {tool_use_id} — this \
+                     controller instance never recorded it (process likely respawned since the \
+                     request was made, e.g. a pane close/reopen); the caller should redeliver \
+                     as a follow-up message"
+                ))?;
+            let tx = inner
+                .stdin_tx
+                .as_ref()
+                .ok_or("persistent process not running (cannot deliver decision)")?
+                .clone();
+            (rid, tool_name, input, tx)
+        };
+
+        let allow = outcome == "allow";
+        let response_body = if allow {
+            serde_json::json!({
+                "behavior": "allow",
+                "updatedInput": input,
+                "toolUseID": tool_use_id,
+            })
+        } else {
+            serde_json::json!({
+                "behavior": "deny",
+                "message": feedback.clone().unwrap_or_else(|| "Denied by user.".to_string()),
+                "toolUseID": tool_use_id,
+            })
+        };
+        let control_response = serde_json::json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": request_id,
+                "response": response_body,
+            }
+        });
+
+        // Snapshot stdout activity BEFORE sending, same reasoning as
+        // answer_question/deny_question (codex review on #1536).
+        let stdout_seq = Arc::clone(&self.stdout_seq);
+        let before_seq = stdout_seq.load(Ordering::Relaxed);
+
+        tx.try_send(control_response.to_string())
+            .map_err(|e| format!("control_response send failed: {e}"))?;
+
+        // Dead-air safety net — identical mechanism to answer_question's /
+        // deny_question's (the CLI can abandon a pending tool_use whose turn
+        // already ended regardless of whether the decision was allow or deny).
+        let inner = Arc::clone(&self.inner);
+        let block_id = self.block_id.clone();
+        let resume_msg = build_tool_decision_resume_message(&tool_name, outcome, feedback.as_deref());
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
+            if stdout_seq.load(Ordering::Relaxed) != before_seq {
+                return;
+            }
+            let line = serde_json::json!({
+                "type": "user",
+                "message": { "role": "user", "content": resume_msg }
+            })
+            .to_string();
+            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            match stdin_tx {
+                Some(stdin_tx) if stdin_tx.try_send(line).is_ok() => {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        tool_use_id = %tool_use_id,
+                        fallback_ms = ANSWER_RESUME_FALLBACK_MS,
+                        "tool-permission decision did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
+                    );
+                }
+                Some(_) => tracing::warn!(
+                    block_id = %block_id,
+                    "tool-permission dead-air fallback: stdin send failed"
+                ),
+                None => tracing::warn!(
+                    block_id = %block_id,
+                    "tool-permission dead-air fallback skipped: process not running"
+                ),
+            }
+        });
+        Ok(())
+    }
+
     /// Push a raw NDJSON line to the live stdin (used to emit control_responses
     /// from the stdout-reader task, which only holds an `Arc<Mutex<Inner>>`).
     fn push_stdin(inner: &Arc<Mutex<PersistentInner>>, line: String) {
@@ -2435,11 +2658,13 @@ impl PersistentSubprocessController {
     /// Handle a control-protocol frame from the CLI's stdout. `control_request`
     /// of subtype `can_use_tool`: AskUserQuestion is **parked** (the frontend
     /// panel — rendered from the assistant stream — answers it via
-    /// `answer_question`); every other tool is **auto-allowed** to preserve the
-    /// current bypass/yolo UX (Phase 1; Phase 2 routes these to the decision
-    /// prompt, #551). `control_response` frames (replies to requests we initiate,
-    /// none today) are logged and dropped. These frames are NOT conversation
-    /// output and never reach the blockfile.
+    /// `answer_question`); every other tool is routed to
+    /// `should_route_to_decision_panel`, which today always says no, so it is
+    /// **auto-allowed** to preserve the current bypass/yolo UX (Phase 1; see
+    /// that function's own doc comment for why Phase 2, #551, isn't simply
+    /// "flip it to true"). `control_response` frames (replies to requests we
+    /// initiate, none today) are logged and dropped. These frames are NOT
+    /// conversation output and never reach the blockfile.
     /// Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §4.2.
     fn handle_control_frame(
         kind: &str,
@@ -2488,6 +2713,13 @@ impl PersistentSubprocessController {
                     .insert(tool_use_id.clone(), (request_id, questions));
             }
             tracing::info!(block_id = %block_id, tool_use_id = %tool_use_id, "AskUserQuestion parked; awaiting user answer");
+        } else if should_route_to_decision_panel(tool_name) {
+            // PHASE2-GATE: unreachable in production today (see that
+            // function's doc comment). Park exactly like AskUserQuestion
+            // above; the eventual AgentDecisionPanel Allow/Deny answers via
+            // `PersistentSubprocessController::decide_tool_permission`.
+            park_tool_permission_request(inner, tool_use_id.clone(), request_id, tool_name.to_string(), input);
+            tracing::info!(block_id = %block_id, tool_use_id = %tool_use_id, tool_name = %tool_name, "tool-permission request parked; awaiting user decision");
         } else {
             // Auto-allow every other tool (preserve today's bypass UX).
             let resp = serde_json::json!({
@@ -4979,6 +5211,144 @@ mod send_input_tests {
         );
     }
 
+    // ── Phase 2 gate: tool-permission parking + decision (SPEC_DECISION_PROMPT_2026_04_24.md) ──
+    //
+    // should_route_to_decision_panel is hardcoded false in production, so
+    // park_tool_permission_request/decide_tool_permission are unreachable
+    // from handle_control_frame today. These tests call them DIRECTLY
+    // (both are in scope via `use super::*;`), independent of that gate —
+    // exercising the mechanism without relying on, or changing, today's
+    // default auto-allow behavior.
+
+    // Pins the gate itself: whatever tool name is asked about, today's
+    // answer must be "auto-allow", not "prompt". This is the test that
+    // would need to change (deliberately, not by accident) the day this
+    // gate is flipped on for real.
+    #[test]
+    fn should_route_to_decision_panel_is_inert_for_any_tool_today() {
+        for tool in ["Bash", "Edit", "Write", "WebFetch", "AskUserQuestion", ""] {
+            assert!(
+                !should_route_to_decision_panel(tool),
+                "gate must stay false for {tool:?} until the Phase 2 policy decision is made"
+            );
+        }
+    }
+
+    // decide_tool_permission spawns the dead-air fallback task
+    // (tokio::spawn) as part of every call, same as answer_question/
+    // deny_question — needs a running runtime even though this test never
+    // waits out that 4s fallback itself (this crate doesn't enable tokio's
+    // test-util feature; see status_heartbeat_republishes_while_active's own
+    // comment above for why a virtual clock isn't available here).
+    #[tokio::test]
+    async fn parking_then_deciding_allow_sends_the_original_input_back_unmodified() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        park_tool_permission_request(
+            &c.inner,
+            "tu-1".to_string(),
+            "req-1".to_string(),
+            "Bash".to_string(),
+            serde_json::json!({ "command": "ls" }),
+        );
+
+        c.decide_tool_permission("tu-1".to_string(), "allow", None)
+            .expect("a freshly-parked request must be decidable");
+
+        let sent = rx.try_recv().expect("decide_tool_permission must write to stdin");
+        let parsed: serde_json::Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(parsed["type"], "control_response");
+        assert_eq!(parsed["response"]["request_id"], "req-1");
+        let inner_resp = &parsed["response"]["response"];
+        assert_eq!(inner_resp["behavior"], "allow");
+        assert_eq!(inner_resp["toolUseID"], "tu-1");
+        // The original input comes back byte-for-byte — this method has no
+        // "edit before approving" UI (none exists yet).
+        assert_eq!(inner_resp["updatedInput"], serde_json::json!({ "command": "ls" }));
+
+        // Consumed on decide — a second decide on the same id must fail,
+        // same lifecycle as answer_question/deny_question.
+        assert!(c.decide_tool_permission("tu-1".to_string(), "allow", None).is_err());
+    }
+
+    #[tokio::test]
+    async fn parking_then_deciding_deny_carries_user_feedback_verbatim() {
+        // SPEC_DECISION_PROMPT_2026_04_24.md G6: "Denials carry user-typed
+        // feedback verbatim to the agent."
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        park_tool_permission_request(
+            &c.inner,
+            "tu-2".to_string(),
+            "req-2".to_string(),
+            "Bash".to_string(),
+            serde_json::json!({ "command": "rm -rf /tmp/x" }),
+        );
+
+        c.decide_tool_permission("tu-2".to_string(), "deny", Some("too risky, use trash instead".to_string()))
+            .expect("a freshly-parked request must be decidable");
+
+        let sent = rx.try_recv().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&sent).unwrap();
+        let inner_resp = &parsed["response"]["response"];
+        assert_eq!(inner_resp["behavior"], "deny");
+        assert_eq!(inner_resp["message"], "too risky, use trash instead");
+        assert_eq!(inner_resp["toolUseID"], "tu-2");
+    }
+
+    #[tokio::test]
+    async fn deciding_deny_with_no_feedback_still_tells_the_model_it_was_refused() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(4);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+        park_tool_permission_request(
+            &c.inner,
+            "tu-3".to_string(),
+            "req-3".to_string(),
+            "Write".to_string(),
+            serde_json::json!({}),
+        );
+
+        c.decide_tool_permission("tu-3".to_string(), "deny", None).unwrap();
+
+        let sent = rx.try_recv().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(parsed["response"]["response"]["message"], "Denied by user.");
+    }
+
+    /// Same shape as answer_question_on_untracked_tool_use_id_is_descriptive
+    /// below — a fresh controller instance (pane reopen, any process
+    /// respawn) has an empty pending_permissions map.
+    #[test]
+    fn decide_tool_permission_on_untracked_tool_use_id_is_descriptive() {
+        let c = controller();
+        let err = c
+            .decide_tool_permission("tu-unknown".to_string(), "allow", None)
+            .unwrap_err();
+        assert!(
+            err.contains("tu-unknown") && err.contains("respawned"),
+            "error should name the tool_use_id and explain the likely cause, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn tool_decision_resume_message_names_the_tool_and_the_outcome() {
+        let allow_msg = build_tool_decision_resume_message("Bash", "allow", None);
+        assert!(allow_msg.contains("Bash"));
+        assert!(allow_msg.contains("approved"));
+        assert!(allow_msg.contains("Resume the task"));
+
+        let deny_msg = build_tool_decision_resume_message("Write", "deny", Some("no"));
+        assert!(deny_msg.contains("Write"));
+        assert!(deny_msg.contains("declined"));
+        assert!(deny_msg.contains("\"no\""));
+    }
+
     // `turn_active` on the runtime status snapshot must track the health
     // monitor's active-turn flag directly — this is the signal the frontend
     // seeds TurnPhase from at mount instead of always defaulting to Idle
@@ -6919,6 +7289,7 @@ mod resume_poison_tests {
             kill_tx: None,
             spawn_generation: 0,
             pending_questions: HashMap::new(),
+            pending_permissions: HashMap::new(),
         }
     }
 
