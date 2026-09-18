@@ -1910,7 +1910,7 @@ const AgentPresentationView = ({
         // is the message that initiated the turn (false). The panel only shows
         // messages with enqueuedWhileBusy:true, preventing the idle-send race
         // where the message flashed in the amber zone between Streaming
-        // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+        // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
         const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
         // Captured BEFORE TurnStart for the same reason wasAlreadyWorking is:
         // TurnStart unconditionally clears state.failure (reducer.ts), so a

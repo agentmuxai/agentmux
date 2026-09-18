@@ -177,7 +177,7 @@ only recognises a path containing `docs/specs/`, so a link written `](specs/arch
 
 **The finding that generalises beyond docs:** of the documents cited from source comments,
 five were never committed to this repo at all — no file, no deletion, nothing in history
-(`ANALYSIS_IDLE_SEND_RACE_2026_06_11` alone is cited from four frontend files). This is the
+(`ANALYSIS_IDLE_SEND_RACE_2026_06_11` alone is cited from five frontend files). This is the
 same shape as `SPEC_APP_API_AUTOMATION_SURFACE.md`, which `perf-baseline-2026-05-09.md`
 described as *"pushed alongside this retro"*. A doc written in a working tree and never
 pushed leaves a citation that no amount of searching can satisfy. Before assuming a cited
@@ -776,8 +776,8 @@ So there are two genuinely different problems filed under one number:
 **What must NOT happen to either:** `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §4 already
 ruled on this — an unverified bulk restamp "replaces *unknown status* with *confidently wrong
 status*", and `check-doc-status.sh` deliberately excludes pure renames for the same reason.
-The 336 with no status at all cannot be fixed mechanically: setting one requires reading the
-doc and knowing what it is.
+The 355 with no status declaration at all cannot be fixed mechanically: setting one requires
+reading the doc and knowing what it is.
 
 **Correction, same day.** The first version of this section said 82 docs "already declare a
 status and are merely mis-formatted", and called all 82 safe to normalise. Both halves were
