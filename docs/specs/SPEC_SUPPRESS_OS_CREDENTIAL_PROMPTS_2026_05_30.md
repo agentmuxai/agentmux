@@ -1,7 +1,7 @@
 # Spec: Never request OS credential / keychain access (all runtime modes)
 
 **Date:** 2026-05-30
-**Status:** Spec → implementation
+**Status:** proposed — Spec → implementation
 **Related:** `docs/retro/retro-macos-keychain-prompt-2026-05-30.md` (the incident this fixes)
 
 ---

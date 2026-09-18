@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-26
 **Author:** AgentA
-**Status:** Report — analysis only, no code changes. Synthesizes 6 parallel research passes.
+**Status:** historical — Report — analysis only, no code changes. Synthesizes 6 parallel research passes.
 **Ground truth basis:** `agentmuxai/agentmux` `main` at commit `35af4958`, pulled fresh for this report.
 **Scope note (read this first):** [`docs/reports/REPORT_LARGE_FILE_MODULARIZATION_SCAN_2026_07_22.md`](../reports/REPORT_LARGE_FILE_MODULARIZATION_SCAN_2026_07_22.md)
 already did a systematic 84-file scan answering *"should this file be split?"* — it explicitly scopes itself as

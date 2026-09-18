@@ -2,7 +2,7 @@
 
 **Goal:** Route `console.log/warn/error` from the frontend (WebView) to a log file on disk, so backend tooling and developers can inspect UI behavior without opening DevTools.
 
-**Status:** Implemented.
+**Status:** Implemented. — #128
 
 ---
 

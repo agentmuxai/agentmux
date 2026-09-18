@@ -1,6 +1,6 @@
 # Spec: Host vs Container Agent Differentiation
 **Date:** 2026-06-18  
-**Status:** Ready for implementation  
+**Status:** proposed — Ready for implementation
 **Author:** parko-0617i
 
 ---

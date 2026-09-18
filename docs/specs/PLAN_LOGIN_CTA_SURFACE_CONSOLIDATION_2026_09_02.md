@@ -1,7 +1,7 @@
 # Plan — consolidate the agent pane's two (really three) separate login CTAs
 
 **Date:** 2026-09-02
-**Status:** implemented — Phases 1-3 shipped.
+**Status:** implemented — Phases 1-3 shipped. — #2951
 **Repo:** agentmuxai/agentmux
 **Trigger:** User report — the agent pane shows *two separate login buttons*: a
 blue "Log in" button, and a row of buttons that includes "Login Again". They

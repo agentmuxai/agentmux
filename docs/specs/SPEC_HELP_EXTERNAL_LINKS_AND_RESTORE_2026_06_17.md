@@ -1,7 +1,7 @@
 # SPEC: External-link routing + single robust "Restore" recovery
 
 **Date:** 2026-06-17
-**Status:** Implemented (this branch)
+**Status:** Implemented (this branch) — #1547
 **Area:** `agentmux-cef` (host: popup routing), `frontend` (startup recovery UI)
 **Related:** `SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md`, `SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md`
 

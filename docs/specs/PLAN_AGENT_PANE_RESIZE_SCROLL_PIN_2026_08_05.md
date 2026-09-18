@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-05
 **Author:** AgentX (agent)
-**Status:** Updated 2026-08-05 (same day) — H1 disproven and the scroll-pin
+**Status:** draft — Updated 2026-08-05 (same day) — H1 disproven and the scroll-pin
 JS logic empirically validated via a new real-component test suite
 (`AgentDocumentVirtualList.resize.test.tsx`, 5/5 passing against unmodified
 `main`). See §3.5. No code fix has been made to `AgentDocumentVirtualList.tsx`

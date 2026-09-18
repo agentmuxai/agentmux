@@ -118,7 +118,8 @@ pub struct FileOpts {
 }
 
 /// Matches Go's `CommandEventReadHistoryData`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandEventReadHistoryData {
     pub event: String,
     pub scope: String,

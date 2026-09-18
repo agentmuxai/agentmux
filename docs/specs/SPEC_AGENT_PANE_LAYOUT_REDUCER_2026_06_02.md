@@ -1,6 +1,7 @@
 # Agent-Pane Layout State Machine — unify zoom + virtualization + tool-expansion into one reducer
 
-**Status:** Design resolved (§11); **Phase 0 implemented** — pure slice core + store + tests (no render-path wiring yet)
+**Status:** implemented — Phases 0, 2, 3 (#1270), 4 (#1281) shipped; **Phase 1 is the only one left** (§6)
+**Last verified against code:** 2026-09-17 (see §6 — each phase now carries how to check it)
 **Date:** 2026-06-02
 **Author:** AgentA
 **Tracking:** issue #1235 (the drift this eliminates); builds on PRs #1231/#1233/#1234
@@ -288,26 +289,72 @@ reducer would add state with no layout meaning.
 
 ## 6. Migration phases (each independently shippable + verifiable)
 
-- **Phase 0 — shadow.** Add the slice (state+reducer+store) and dispatch into it
+> **Do not read this list as a to-do.** Four of the five phases shipped. Each
+> entry below records how to VERIFY its state in ~10 seconds, because the status
+> line at the top of this file said "Phase 0 implemented, no render-path wiring
+> yet" for fifteen months after Phase 3 landed, and two separate readers
+> (including the 2026-09-16 migration wrap-up audit) took it at face value and
+> reported Phases 1–3 as outstanding. A status line is the least-maintained line
+> in any spec and the first one a reader trusts.
+
+- **Phase 0 — shadow. ✅ SHIPPED.** Add the slice (state+reducer+store) and dispatch into it
   from the existing render path, but **keep rendering from TanStack.** Log
   divergence between slice `positions()` and TanStack measurements. Goal: validate
   the model against live traffic with zero user-visible change. Ship behind the
   existing dev-only instrumentation.
-- **Phase 1 — unify expansion (§5).** Move `collapsed/pinned/hold/hover/cancel`
+  *Verify:* `frontend/app/store/agent-pane-layout/` exists (reducer + types + tests).
+
+- **Phase 1 — unify expansion (§5). 🟡 THE ONLY PHASE LEFT, and smaller than this
+  entry implies — see the audit note below it.** Move `collapsed/pinned/hold/hover/cancel`
   into the slice; components dispatch `UserExpanded/UserCollapsed`. **This alone removes the
   component-local desync** and makes expansion testable. Still TanStack-measured.
-- **Phase 2 — route measurement (4.1-A).** `estimateSize`/`measureElement` read/
+  *Verify:* `grep -rn "UserExpanded\|UserCollapsed" frontend/app --include=*.tsx`
+  — today the only hits are the slice's own tests, so nothing dispatches them.
+
+  **Audit 2026-09-17 — three of the five scattered sources in §5 are already
+  resolved.** `documentState.collapsedNodes`/`pinnedNodes` reach the slice via
+  `ExpansionResolved` (dispatched from `AgentDocumentVirtualList`);
+  `ToolBlock.postCompletionHold` no longer exists; and
+  `UserMessageBlock.hovering` is **out of scope by this spec's own §3.4
+  resolution** — it renders through `PeekOverlay`, Portal-mounted at
+  `document.body`, and overlay is presentational, not a layout state.
+
+  What actually remains is **one signal**: `MarkdownBlock.expanded`
+  (`createSignal(false)`, toggled by an `onClick`, never synced to
+  `documentState`) whose `<Show when={expanded()}>` renders body **in flow** —
+  so it changes a row's height with no reducer action, exactly the §1 disease.
+
+- **Phase 2 — route measurement (4.1-A). ✅ SHIPPED.** `estimateSize`/`measureElement` read/
   dispatch through the slice; measurements keyed by `(nodeId, state)` (INV-3).
   Kills the `0`/`784` cross-state contamination.
-- **Phase 3 — slice owns positions (4.1-B).** Replace `getVirtualItems()` with the
+  *Verify:* `grep -n "RowMeasured\|EstimateSet" frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`
+
+- **Phase 3 — slice owns positions (4.1-B). ✅ SHIPPED 2026-06-05, #1270** —
+  three days after this spec was written. Replace `getVirtualItems()` with the
   prefix-sum windowing selector. **Overlap becomes structurally impossible
   (INV-1).** Retire TanStack from the agent pane; delete the data-index ref race,
   the undefined-virtualItem guard, and `shouldMeasureDuringScroll` workarounds.
-- **Phase 4 — formalize zoom (INV-2).** Single ÷zoom at the `RowMeasured` boundary;
+  *Verify:* `grep -n tanstack package.json` returns nothing — the dependency is
+  gone, not merely unused. `AgentDocumentVirtualList` renders from
+  `layoutView().rows`.
+
+- **Phase 4 — formalize zoom (INV-2). ✅ SHIPPED 2026-06-05, #1281.** Single ÷zoom at the `RowMeasured` boundary;
   remove any other zoom reads from the layout path; assert `zoom-changed-no-relayout`.
+
+  *Verify:* `git log --oneline -S "zoom-normalize" -- frontend/app/view/agent`
 
 Phases 1–3 each close a distinct bug class from §1; Phase 3 is the one that closes
 #1235.
+
+**A caution on that claim, added 2026-09-17.** Phase 3 shipped on 2026-06-05, and
+agent-pane layout bugs did **not** stop: #2370, #2427, #2538, #2834, #2853 and
+#2887 all landed afterwards. Reading them, they are mostly *scroll anchoring* and
+*expansion* rather than the overlap (INV-1) Phase 3 makes structurally impossible
+— which is consistent with Phase 3 having worked and the remaining pain being
+somewhere this spec does not model. Do not cite "Phases 1–3 close these bug
+classes" as a forward-looking ROI argument without re-checking which class a
+given bug actually belongs to; that argument was made once on this spec's
+authority and the evidence did not support it.
 
 ---
 

@@ -1,7 +1,7 @@
 # Phase 4a Re-dock — MVP scope decision
 
 **Date:** 2026-05-27
-**Status:** Decision pending
+**Status:** proposed — Decision pending
 **Parent spec:** [`SPEC_FLOATING_PANE_REDOCK_2026-05-27.md`](./SPEC_FLOATING_PANE_REDOCK_2026-05-27.md)
 
 ## Why this doc

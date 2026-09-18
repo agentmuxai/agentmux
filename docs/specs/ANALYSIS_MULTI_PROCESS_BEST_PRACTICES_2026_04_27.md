@@ -1,6 +1,7 @@
 # ANALYSIS: Multi-Process Desktop App State Management — Best Practices
 
 **Date:** 2026-04-27
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Author:** AgentC (via research subagent)
 **Purpose:** Background research feeding
 `SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md`. Documents the prior

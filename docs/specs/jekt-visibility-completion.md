@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10
 **Author:** Agent2
-**Status:** Implemented (this PR)
+**Status:** Implemented (this PR) — #2077
 **Parent spec:** `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (completes §3.1 for
 persistent agents, implements §3.2)
 **Builds on:** PR #2031 (Phase 3 — `JektBubble` renders `[JEKT:...]` markers)

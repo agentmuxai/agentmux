@@ -1,6 +1,6 @@
 # SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI
 
-**Status:** Approved — implementing auth half
+**Status:** proposed — Approved — implementing auth half
 **Author:** AgentA
 **Date:** 2026-06-20
 **Extends / hardens:** `SPEC_PROVIDER_PINNED_AUTH_2026_06_05.md` (#1291), `provider-auth-isolation.md` (2026-03-21)

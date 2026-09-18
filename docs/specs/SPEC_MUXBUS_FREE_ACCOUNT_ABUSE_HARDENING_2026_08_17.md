@@ -1,7 +1,7 @@
 # SPEC: muxbus free-account abuse hardening — closing the sign-up/messaging backdoors
 
 **Date:** 2026-08-17
-**Status:** Partially implemented — see §10. Gaps 2 and 3 both partial (the write-path check/rate-limit shipped for each; gap 2's enforcement flip and gap 3's actual bulk-signup defense — CAPTCHA/pre-sign-up gating — remain open); gap 1's fix deliberately deferred pending real evidence.
+**Status:** active — Partially implemented — see §10. Gaps 2 and 3 both partial (the write-path check/rate-limit shipped for each; gap 2's enforcement flip and gap 3's actual bulk-signup defense — CAPTCHA/pre-sign-up gating — remain open); gap 1's fix deliberately deferred pending real evidence. — #2619
 **Author:** AgentX
 **Repos touched:** `agentmux-cloud` (all implementation), `agentmux` (this doc; status-bar network panel UI is unaffected — no changes needed there)
 **Related:** `SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md` (the quota system this spec builds on — §6 of that doc already flagged gap #1 below as its own explicit prerequisite, never closed), `SPEC_FREE_TIER_PRICING_2026_06_21.md` (free-tier limits, implemented), `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` (Phase 1, partially landed), `PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (documents gap #2 below as never-deployed), `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §5.1 (the account-scoped M2M client *design* — that spec's own status header still marks this "proposed/not implemented" as of 2026-08-13/14; §2 below cites the actual running code directly rather than relying on that header, since the two disagree — see §2's footnote)

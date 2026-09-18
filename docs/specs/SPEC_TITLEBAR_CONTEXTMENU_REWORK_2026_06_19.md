@@ -1,7 +1,7 @@
 # Spec: Title Bar Context Menu Rework & Reusable PopoverMenu
 
 **Date:** 2026-06-19  
-**Status:** Approved — implementing  
+**Status:** proposed — Approved — implementing
 **Scope:** `frontend/app/element/popover-menu.tsx` (new), `frontend/app/element/popover-menu.scss` (new), `frontend/app/window/titlebar-context-menu.tsx` (new), `frontend/app/window/window-header.tsx`, `frontend/app/window/action-widgets.tsx`, `frontend/app/menu/base-menus.ts`
 
 ---

@@ -1,5 +1,38 @@
 # AgentMux Version History
 
+## 0.56.5 — 2026-09-17
+
+- shell integration deploys per-instance instead of a machine-global dir, so two running versions stop overwriting each other's scripts
+- feat(panes): universal pane tabs — unified header/tab-strip row for agent and terminal panes
+- feat(panes): extend the unified pane header/tab-strip to every widget type
+- Generate the tool-status wire types from Rust
+- fix(linux): stop two isolated instances from sharing one dock icon
+- AppImage extract-once cache is keyed per build, so a freshly built portable no longer silently re-runs an older build's binary
+- panes no longer inherit the instance's identity env vars, so a build launched from a pane keeps its own channel and data dir
+- Generate the agent-definition wire types; surface two fields and eleven wrong optionals
+- generate the template/fork rpc wire types from rust and migrate the last three template handlers
+- generate the drone pane wire types from rust and migrate all six drone commands to typed registration
+- generate the LSP rpc wire types from rust and migrate the three lsp commands to typed registration
+- generate the editor file-tree mutation wire types from rust and migrate seven commands
+- generate the agent-instance wire types from rust and migrate the four crud commands
+- generate the editor read wire types from rust and migrate five more editor commands
+- generate the agent-skill wire types from rust and migrate the four skill commands
+- feat(panes): every pane's + opens the generic widget picker
+- generate the editor watcher wire types and migrate the last four editor commands
+- refactor(panes): collapse agent/term chrome into one shared pane chrome
+- generate the agent-history wire types from rust and migrate the three history commands
+- fix(agent-pane): backgrounded work releases the composer, and the send path honours it
+- terminal no longer freezes in packaged builds: drop the obsolete safari13 build target, which made esbuild miscompile xterm's DECRQM handler
+- generate the cli, toolchain and widget wire types and migrate seven commands
+- chore(providers): bump five CLI pins to current upstream
+- correct a wrong claim about ts-rs and serde rename_all, dropping three redundant attributes
+- feat(toolchain): surface version drift against the pin, automatically
+- feat(agent-picker): show an upgrade hint on cards whose CLI is behind the pin
+- fix(panes): new terminal tab opens in the current tab's cwd
+- feat(launcher): quiesce+migrate primitive for the upgrade flow (P1a)
+- tooling discovers the CEF debug port from authkey.dev instead of assuming 9222/9223, which could target a different running instance
+- local Linux portables keep their source maps again, so packaged-build stack traces symbolicate instead of reporting a minified offset
+
 ## 0.56.4 — 2026-09-17
 
 - test(tools): pane-load.mjs — hand repro for cross-pane input lag

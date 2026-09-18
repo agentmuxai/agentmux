@@ -1,6 +1,7 @@
 # Report: Haiku ambient-summary ghost text populates outside genuine turn completion
 
 **Date:** 2026-07-20
+**Status:** historical — a record of a past investigation, not a plan. Status added 2026-09-17; the doc itself was never restamped, so spot-verify before relying on any claim in it.
 **Author:** AgentX
 **Type:** Investigation report + fix, shipped in the same PR.
 **Purpose:** The agent pane header's Haiku-generated "ghost text" mini-summary (`term:ambient_summary`) is supposed to populate once per completed agent turn. In practice it populates "at all sorts of times." This report traces the exact over-trigger paths and fixes them by switching the trigger from the frontend's own `TurnPhase.kind === "Done"` to the backend-authoritative `turn_active` edge.

@@ -1,7 +1,7 @@
 # SPEC — Relax TIER=sensitive for cryptographically-verified WAN jekts
 
 **Date:** 2026-08-14
-**Status:** implemented, confirmed by the repo owner in-conversation before implementation (see §3)
+**Status:** implemented, confirmed by the repo owner in-conversation before implementation (see §3) — #2576
 **Depends on:** `docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` (LAN/WAN `TRUST=network-claimed` model), `docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` (host-tier `sig_verified` precedent), the reagent Ed25519 WAN-signing work (same date range — `agentmux_common::jekt_sign::verify_reagent_jekt`, `server/reactive.rs::verify_reagent_signature`, `cloud_subscriber.rs`'s in-process equivalent).
 
 ## 1. What changed

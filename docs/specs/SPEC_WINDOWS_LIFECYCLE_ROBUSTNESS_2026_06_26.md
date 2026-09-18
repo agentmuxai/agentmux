@@ -1,5 +1,5 @@
 # Windows Lifecycle Robustness — Surviving External Termination
-**Status:** P0 partially implemented (see §5); P1 proposed  
+**Status:** active — P0 partially implemented (see §5); P1 proposed — #1799
 **Date:** 2026-06-26  
 **Author:** AgentA  
 **Adversarial review:** 2026-06-26 (13 findings; see §7)  

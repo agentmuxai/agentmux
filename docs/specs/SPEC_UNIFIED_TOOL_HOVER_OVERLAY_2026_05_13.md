@@ -1,6 +1,6 @@
 # Spec: Unified tool-block hover overlay (no double-popup)
 
-**Status:** Spec (no implementation yet)
+**Status:** proposed — Spec (no implementation yet)
 **Owner:** AgentA
 **Date:** 2026-05-13
 **Driving requirement:** "I see two separate popups now — the time strip and the live-log overlay. Merge them into one. Put the time at the bottom of the live-log."

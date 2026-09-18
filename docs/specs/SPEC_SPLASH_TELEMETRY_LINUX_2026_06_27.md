@@ -1,7 +1,7 @@
 # SPEC: Splash Startup Telemetry — Linux
 
 **Date:** 2026-06-27
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Area:** `agentmux-launcher/src/splash_linux/` · `src/main.rs`
 **Depends on:** `SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md` (Windows reference impl)
 

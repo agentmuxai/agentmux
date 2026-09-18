@@ -1,6 +1,6 @@
 # Windows Firewall Popup — Root Cause & Fix
 
-**Status:** Root cause identified, fix is trivial
+**Status:** proposed — Root cause identified, fix is trivial
 **Impact:** Annoying UX — user can click Cancel and app works fine
 
 ---

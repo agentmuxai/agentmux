@@ -1,5 +1,5 @@
 # SPEC: Agent Waiting Ambient Sound
-**Status:** Proposal  
+**Status:** proposed — Proposal
 **Date:** 2026-06-19  
 **Area:** Notifications / Sound / Agent Pane  
 

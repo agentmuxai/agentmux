@@ -1,6 +1,6 @@
 # Local MessageBus Architecture
 
-**Status:** Proposal
+**Status:** proposed — Proposal
 **Date:** 2026-03-04
 **Author:** AgentX
 

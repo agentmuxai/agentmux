@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`)
-**Status:** Report — root cause confirmed and code-cited end to end; proposed fix is a design, not yet
+**Status:** historical — Report — root cause confirmed and code-cited end to end; proposed fix is a design, not yet
 implemented. No code changes in this PR.
 **Ground truth basis:** `agentmuxai/agentmux` local checkout at `3705f83c3`
 (`agent3/bashwrap-persist-cwd-across-calls`, 210 commits behind `origin/main`) cross-checked against

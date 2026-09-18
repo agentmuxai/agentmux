@@ -1,7 +1,7 @@
 # Spec: Eliminate Window Drag Dead Spots
 
 **Date:** 2026-03-18
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Priority:** High — core UX feel
 
 ---

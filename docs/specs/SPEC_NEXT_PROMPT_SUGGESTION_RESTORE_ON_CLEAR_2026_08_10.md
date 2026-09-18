@@ -1,7 +1,7 @@
 # SPEC: Restore the ghost-text suggestion when the composer is cleared back to empty
 
 **Date:** 2026-08-10
-**Status:** implemented.
+**Status:** implemented. — #2515
 **Amends:** `docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md` §4.3,
 specifically its second bullet ("must clear the instant the user starts
 typing"). Everything else in that spec — the AMC gateway wiring, the
