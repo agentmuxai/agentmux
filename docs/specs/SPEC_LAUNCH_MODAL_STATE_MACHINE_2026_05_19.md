@@ -1,6 +1,6 @@
 # SPEC: Launch Modal — State Machine Hardening
 
-**Status:** Draft
+**Status:** implemented — both of §4's stages landed on 2026-05-19. Stage 1 (lifting `AuthFlowController` out of `PreLaunchAuthPanel`, removing the blank dropdown entry, the `identity-bindings-changed` event) shipped in #916, the PR this doc was added in; Stage 2's `frontend/app/store/launch-flow-state/` slice shipped in #917 and `AgentLaunchModal.tsx` now reads its form and submit state from it, down to two remaining `createSignal` calls. §7's out-of-scope items are all still out of scope.
 **Date:** 2026-05-19
 **Author:** AgentA
 **Related:**

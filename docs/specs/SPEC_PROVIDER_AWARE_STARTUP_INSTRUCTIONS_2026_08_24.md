@@ -1,7 +1,7 @@
 # SPEC: Provider-aware startup instructions filename + visibility in Global Memory
 
 **Date:** 2026-08-24
-**Status:** proposed
+**Status:** implemented — #2788 (2026-08-24), the PR this doc was added in, the same day as the system tier it builds on. `ProviderConfig::startup_instructions_filename` is in `providers.rs` citing §2, alongside the project-instructions read-path superset, and `agent-config-builder.ts` resolves the per-provider filename. §5's out-of-scope items are unchanged, and §6's two gaps (OpenClaw's working-directory mapping, Antigravity's circumstantial `GEMINI.md` inference) are carried forward exactly as flagged — surfaced by this spec, not introduced by it.
 **Builds on:** `docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (system
 tier, implemented same day) and
 `docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`

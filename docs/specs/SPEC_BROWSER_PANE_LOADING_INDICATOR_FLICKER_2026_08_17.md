@@ -1,8 +1,8 @@
 # SPEC — Browser pane: stop the loading-brain flicker / page-hide flashing
 
 **Date:** 2026-08-17
-**Type:** Analysis + architecture proposal (root-caused via code investigation — no code shipped yet)
-**Status:** Draft
+**Type:** Analysis + architecture proposal (root-caused via code investigation; shipped — see Status)
+**Status:** implemented — #2642 (2026-08-17), the PR this doc was added in. The fix lives in `agentmux-cef` across `browser_pane/callbacks.rs`, `client/lifecycle.rs`, `client/navigation.rs` and `state/mod.rs`, all citing this spec. The scope/non-goals section is unchanged.
 **Scope:** `agentmux-cef/src/client/navigation.rs`, `agentmux-cef/src/browser_pane/callbacks.rs` (Rust, CEF LoadHandler wiring) + `frontend/app/view/browser/browser-model.ts`, `browser-view.tsx`, `frontend/app/store/browser-pane-state/reducer.ts` (frontend loading-state plumbing and spinner rendering).
 
 ## Problem

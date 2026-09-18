@@ -1,6 +1,6 @@
 # SPEC: Browser Pane HTTP Basic / Digest Auth
 
-**Status:** Draft
+**Status:** implemented, and past §4's deferred phase. Phases α and β shipped in #906 (2026-05-19), the PR this doc was added in: `agentmux-cef/src/browser_pane/auth.rs`, the IPC commands, `BrowserAuthModal.tsx` and the realm-keyed cache in `use-browser-auth.ts`. Phase γ's first item — the persisted credential store — was later built too, as `agentmux-srv/src/identity/browser_credential_store.rs` in #2824 (2026-08-29), reusing `identity::secret_store`'s existing keyring rather than adding keychain code. γ's remaining items (proxy auth, client-cert auth, NTLM/Negotiate) are still deferred.
 **Date:** 2026-05-18
 **Author:** AgentA
 **Related:**
