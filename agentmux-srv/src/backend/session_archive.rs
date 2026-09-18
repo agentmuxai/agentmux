@@ -318,7 +318,7 @@ fn bytecount_lines(data: &[u8]) -> u64 {
 
 /// Returns `~/.agentmux/archives/`, or `None` if the home directory cannot be determined.
 pub fn default_archive_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".agentmux").join("archives"))
+    Some(crate::backend::base::get_mux_data_dir().join("archives"))
 }
 
 // ---------------------------------------------------------------------------

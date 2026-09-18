@@ -548,7 +548,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     let snapshots_dir = std::env::var_os("AGENTMUX_HOME_OVERRIDE")
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| base::get_home_dir().join(".agentmux"))
+        .unwrap_or_else(base::get_mux_data_dir)
         .join("snapshots");
     match maybe_snapshot_pre_migration(
         &db_dir,

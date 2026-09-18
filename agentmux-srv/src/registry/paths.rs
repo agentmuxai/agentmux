@@ -144,7 +144,7 @@ pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
             return Some(PathBuf::from(s));
         }
     }
-    dirs::home_dir().map(|h| h.join(".agentmux").join("shared"))
+    Some(crate::backend::base::get_mux_data_dir().join("shared"))
 }
 
 #[cfg(test)]
