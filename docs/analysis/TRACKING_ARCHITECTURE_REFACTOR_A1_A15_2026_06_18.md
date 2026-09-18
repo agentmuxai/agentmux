@@ -167,7 +167,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Gotcha / blocker:** same gate as A6 (#1543).
 - **Status (2026-09-06):** ✅ done in #3044. By then the busy-selector half had already been resolved elsewhere — `isWorking`/`workingFromPhase` in `agent-pane-state/types.ts` is the single predicate since the state-machine PR G, and agent-view had one use left, not 17. The 11 raw `dispatch*` calls were still all there (7 hard `dispatchPane`, 2 `dispatchPaneIfRegistered`, 2 `dispatchDocIfRegistered`) and are now routed through `paneModel`; `agent-view-dispatch-via-pane-model.test.ts` pins the acceptance criterion. Blocker #1543 had merged long before.
 
-### A10 — Consolidate data-dir resolution onto `DataPaths` 🟢
+### A10 — Consolidate data-dir resolution onto `DataPaths` ✅
 - **Entry points:** canonical `agentmux-common/src/data_paths.rs:4-7` ("single source of truth") is
   bypassed by srv's own `backend/base.rs:62-154` + ad-hoc `dirs::home_dir().join(".agentmux")` at
   `config_watcher_fs.rs:41`, `main.rs:698-701,1293-1295`, `history/index.rs:19`,
@@ -177,6 +177,18 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   var names.
 - **Acceptance:** one path resolver; env vars reconciled; **migration check** that existing installs
   still find their data (Med risk — this is *where live data lives*).
+- **Status (2026-09-18):** ✅ done in #3372. `resolve_root` is now the public
+  `agentmux_root()` and honours BOTH env names, so no existing install moves; srv
+  delegates to it and seven ad-hoc sites route through it. The entry-point list
+  above was stale in two directions: `main.rs` had already been fixed, and four
+  sites it does not name turned up by grep. One apparent bypass was correct code
+  and deliberately left — `claude_adapter.rs:60` reads `~/.claude/projects`,
+  which is Claude's directory, not AgentMux's. The acceptance criterion is
+  covered by four tests, including one asserting that an install which only ever
+  set `AGENTMUX_DATA_HOME` still resolves to exactly that path.
+  Found on the way, and not in the audit: srv's resolver fell back to
+  `PathBuf::from("/")` when no home could be resolved, so such a host wrote to
+  `/.agentmux`. The board called this item "cleanup".
 
 ### A11 — Real `BlockRegistry` + registry-driven `ModalLayer` 🟢
 - **Entry points:** hardcoded `BlockRegistry` map at `frontend/app/block/block.tsx:47-61` (shadows the

@@ -13,7 +13,18 @@ use super::obj::VALID_OTYPES;
 
 /// Object reference combining a type name and UUID.
 /// Wire format: `"block:550e8400-e29b-41d4-a716-446655440000"`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+///
+/// `#[ts(as = "String")]` is load-bearing, not decoration. This struct has a
+/// hand-written `Serialize`/`Deserialize` pair (below) that emits and parses a
+/// single `"otype:oid"` STRING — the Rust shape and the wire shape deliberately
+/// disagree. Without this attribute ts-rs would faithfully generate
+/// `{ otype: string, oid: string }` from the struct, which is not what any
+/// client ever receives: it would be a confidently wrong binding, worse than
+/// none, and the compiler could not catch it because TypeScript would simply
+/// believe it. ts-rs documents this attribute for exactly this case — "when you
+/// have a custom serializer and deserializer".
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ts_rs::TS)]
+#[ts(as = "String")]
 pub struct ORef {
     pub otype: String,
     pub oid: String,
@@ -108,6 +119,30 @@ impl<'de> Deserialize<'de> for ORef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The binding ts-rs emits for ORef must be `string`, because that is what
+    /// the wire carries. Both halves are asserted together on purpose: if
+    /// either the TS name or the serialized form drifts, the other pins it.
+    ///
+    /// Why this needs guarding at all: ts-rs derives from the STRUCT shape, and
+    /// the `serde-compat` feature (see agentmux-srv/Cargo.toml) only reads
+    /// serde ATTRIBUTES — rename_all, skip_serializing_if and friends. It
+    /// cannot see a hand-written `impl Serialize`, which is exactly what ORef
+    /// has. Without `#[ts(as = "String")]` the generated type would be
+    /// `{ otype: string, oid: string }`: a shape no client ever receives, that
+    /// TypeScript would nonetheless believe, and that no compiler on either
+    /// side could catch.
+    #[test]
+    fn ts_binding_is_a_string_because_the_wire_is_a_string() {
+        assert_eq!(<ORef as ts_rs::TS>::name(), "string");
+
+        let oref = ORef::new("block", "550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            serde_json::to_string(&oref).unwrap(),
+            "\"block:550e8400-e29b-41d4-a716-446655440000\"",
+            "the wire form the binding above claims to describe"
+        );
+    }
 
     #[test]
     fn test_oref_roundtrip() {
