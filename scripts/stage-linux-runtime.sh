@@ -141,14 +141,31 @@ fi
 #        for next to its binary. ---
 cp -r dist/frontend "$STAGING_ROOT/usr/bin/frontend"
 
-# Strip frontend source maps from the release artifact (debug-only, ~28 MB).
-# Mirrors the STRIP_MAPS policy for release builds
-# (docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md): the app runs identically;
-# only prod-stack-trace symbolication is lost.
-_maps=$(find "$STAGING_ROOT/usr/bin/frontend" -name '*.map' | wc -l)
-if [ "$_maps" -gt 0 ]; then
-    find "$STAGING_ROOT/usr/bin/frontend" -name '*.map' -delete
-    echo "Stripped $_maps source-map file(s) from the staged runtime"
+# Strip frontend source maps — RELEASE ONLY (~28 MB).
+#
+# This block used to run unconditionally, which contradicted both its own
+# comment and SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md: "`task package` (local
+# portable) — maps included", "`task package:release` — maps stripped". Windows
+# gets this right (`${STRIP_MAPS:-0}` in scripts/package.sh); Linux ignored the
+# variable entirely, so every local Linux portable shipped without maps.
+#
+# That is not cosmetic. vite.config.ts sets `sourcemap: true` specifically so
+# frontend/log/source-map-resolver.ts can rewrite raw error.stack positions into
+# original-file frames before they reach the host log
+# (SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md §7.1). Stripping the maps leaves
+# that resolver with nothing: a packaged build reports crashes as
+# `index-<hash>.js (190)` plus a 404 for the map.
+#
+# It cost real time. Diagnosing the vim/DECRQM terminal freeze
+# (docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md) meant
+# symbolicating by hand against a map recovered from dist/ — the exact work the
+# resolver exists to do automatically.
+if [ "${STRIP_MAPS:-0}" = "1" ]; then
+    _maps=$(find "$STAGING_ROOT/usr/bin/frontend" -name '*.map' | wc -l)
+    if [ "$_maps" -gt 0 ]; then
+        find "$STAGING_ROOT/usr/bin/frontend" -name '*.map' -delete
+        echo "Stripped $_maps source-map file(s) from the staged runtime (STRIP_MAPS=1)"
+    fi
 fi
 
 # --- 6. Schema (optional — only present if `task copy:schema` ran) ---
