@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-15
 **Type:** Feature (design proposal — not yet implemented)
-**Status:** Draft
+**Status:** implemented — #2599 (2026-08-16), the PR this doc was added in. `agentmux-cef/src/client/context_menu.rs` is the `ContextMenuHandler` body, scoped to `is_browser_pane` exactly as "Scope / caveats" requires so the main app's own right-click menu is untouched, and `getBodyContextMenuItems()` is wired through `blockframe.tsx`. The v1 exclusions (Save As, Save Image As, spell-check, Cast) are still excluded, and the Linux question that section raises was left as written — it was flagged for verification during implementation, not decided here.
 **Scope:** `agentmux-cef` (new `ContextMenuHandler` impl, browser-pane only) +
 `frontend/app/view/browser/browser-model.ts` (new `getBodyContextMenuItems`
 implementation) + `frontend/app/block/blockframe.tsx` (no change expected —
