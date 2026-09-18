@@ -3,7 +3,6 @@
 
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { DragOverlay } from "@/app/element/dragoverlay";
-import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
 import {
     snapshot as layoutSnapshot,
     registerPane as registerLayoutPane,
