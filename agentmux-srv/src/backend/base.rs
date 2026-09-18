@@ -85,7 +85,7 @@ pub fn get_mux_data_dir() -> PathBuf {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(
-                "cannot resolve the AgentMux root ({e}); falling back to a                  relative .agentmux in the current directory rather than /"
+                "cannot resolve the AgentMux root ({e}); falling back to a relative .agentmux rather than /"
             );
             PathBuf::from(".agentmux")
         }

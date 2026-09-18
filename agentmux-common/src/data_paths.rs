@@ -868,9 +868,6 @@ pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
     }
 }
 
-/// `~/.agentmux/` root, or the test override via
-/// `AGENTMUX_HOME_OVERRIDE`. Falls back to error if no home dir
-/// can be resolved (rare — should only happen in stripped CI envs).
 /// The AgentMux root (`~/.agentmux`) — the single resolver for it.
 ///
 /// Public because srv had its own copy (`backend/base.rs::get_mux_data_dir`)
@@ -884,9 +881,12 @@ pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
 /// finds its data:
 ///
 /// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests.
-/// - `AGENTMUX_DATA_HOME` — srv's, exported into pane environments
-///   (`backend/pane_env.rs`) and relied on by the MSIX packaging path
-///   (`blockcontroller/shell/lifecycle.rs`).
+/// - `AGENTMUX_DATA_HOME` — srv's own, read at startup and relied on by the
+///   MSIX packaging path (`blockcontroller/shell/lifecycle.rs`). It is
+///   deliberately **stripped** from pane environments, not exported into them:
+///   it is one of the identity vars invariant I7 removes so a pane cannot
+///   inherit and resolve another instance's data dir
+///   (`backend/pane_env.rs`, test `the_identity_vars_that_caused_the_breach_are_stripped`).
 ///
 /// NOT to be confused with `AGENTMUX_DATA_DIR`, which the launcher exports
 /// and which names the per-channel *data* directory
