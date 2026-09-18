@@ -2424,9 +2424,11 @@ const AgentPresentationView = ({
                     <BrainSpinner fading={historyLoaded()} />
                 </div>
             </Show>
-            {/* Gradient progress bar — 3px, marching-ants shimmer while
-                working, hidden at rest. Colors derived from --accent-color
-                via color-mix() so it adapts to all themes. Portaled into a
+            {/* Gradient progress bar — marching-ants shimmer traced around
+                the full pane perimeter while working, hidden at rest.
+                Color matches the pane's own selection-ring color (not a
+                fixed --accent-color) via --progress-bar-color, set on
+                .agent-pane-stack (agent-view.scss). Portaled into a
                 slot AgentPaneChrome owns, between the tab strip and the
                 content (its own row, never overlapping either), bridged
                 through this AgentViewModel instance's progressBarMount
