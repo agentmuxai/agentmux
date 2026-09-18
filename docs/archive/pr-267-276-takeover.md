@@ -10,7 +10,7 @@
 
 ## PR #267: fix(win11): pane focus ring — DOM renderer + backdrop-filter
 
-**Status:** Approved by reagent, needs splitting
+**Status:** historical — was approved by reagent and pending a split; superseded by events
 **Branch:** `agentx/fix-win11-pane-focus-highlight`
 
 ### What it does (4 changes bundled together)
