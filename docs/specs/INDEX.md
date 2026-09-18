@@ -610,7 +610,6 @@ partial list.
 | [`cef-ui-thread-dispatch`](cef-ui-thread-dispatch.md) | Spec: CEF UI Thread Dispatch for IPC Handlers |
 | [`chrome-zoom-pane-headers`](chrome-zoom-pane-headers.md) | Spec: Chrome Zoom Includes Pane Headers |
 | [`clipboard-cef-impl`](clipboard-cef-impl.md) | Clipboard for CEF — Implementation Spec |
-| [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
 | [`default-agent-roster`](default-agent-roster.md) | Default Agent Roster Spec |
 | [`drag-drop-files-into-panes`](drag-drop-files-into-panes.md) | Spec: Drag & Drop Files Into Panes |
 | [`embedded-browser-panes-linux-macos-2026-05-03`](embedded-browser-panes-linux-macos-2026-05-03.md) | Embedded Browser Panes — Linux & macOS Port |
@@ -961,6 +960,7 @@ partial list.
 | [`SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13`](SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13.md) | SPEC — active-tab color line: stop at the tab strip's right edge, not the viewport edge |
 | [`SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14`](SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14.md) | SPEC: Persistence layer analysis — keep SQLite, or move? |
 | [`browser-pane-state-catalog`](browser-pane-state-catalog.md) | Browser pane state catalog |
+| [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
 | [`modal-cleanup-migration-2026-05-01`](modal-cleanup-migration-2026-05-01.md) | Modal Cleanup — Migration Audit & Plan |
 | [`service-update-consolidation`](service-update-consolidation.md) | Analysis: Consolidate Object Update Return Paths |
 | [`sysinfo-continuous-monitor-animation-2026-05-03`](sysinfo-continuous-monitor-animation-2026-05-03.md) | Sysinfo Plot — Continuous-Monitor Animation |
