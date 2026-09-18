@@ -333,6 +333,15 @@ impl ShellNodeRunner {
             c
         };
 
+        // This runner backs POST /api/v1/shell/create — the MCP `Shell` tool,
+        // which CLAUDE.md names as the way for an agent to launch `task dev` /
+        // `task package`. Without this it inherited agentmux-srv's full
+        // AGENTMUX_* environment, so a build started here adopted the LAUNCHING
+        // instance's channel and data dir: the exact failure this is meant to
+        // prevent, on the most likely path for it to happen. Missed by the
+        // first revision of the fix and caught in review (ReAgent P0 on #3326).
+        crate::backend::pane_env::sanitize_process_command(&mut child_cmd);
+
         // Only set the working directory if it actually exists. The cwd is
         // normalized upstream (handle_shell_create → base::normalize_working_dir),
         // but a stale or mistyped path would otherwise make the spawn fail hard

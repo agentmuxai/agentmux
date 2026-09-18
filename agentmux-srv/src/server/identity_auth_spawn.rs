@@ -121,6 +121,12 @@ pub(crate) fn spawn_auth_cli(
         // Spawn the CLI. kill_on_drop guarantees cleanup if our
         // task is aborted (cancel path).
         let mut cmd = Command::new(&cli_path);
+        // A provider OAuth CLI is a third-party, network-connected binary.
+        // Without this it inherits srv's whole AGENTMUX_* environment — channel,
+        // data dir, cache dir, and this instance's API endpoint. Stricter than
+        // the pane policy: not even the in-pane helper keep-set applies here.
+        // (ReAgent P0, round 2, on PR #3326.)
+        crate::backend::pane_env::sanitize_external_command(&mut cmd);
         cmd.args(&auth_login_args)
             .envs(&auth_env)
             .stdin(Stdio::piped())
@@ -434,6 +440,9 @@ fn spawn_auth_cli_pty(
     };
 
     let mut cmd = CommandBuilder::new(&cli_path);
+    // Same as the non-PTY path above: CommandBuilder seeds from vars_os(), so
+    // without this the provider CLI inherits the full instance identity.
+    crate::backend::pane_env::sanitize_external_pty_command(&mut cmd);
     for a in &auth_login_args {
         cmd.arg(a);
     }
@@ -717,6 +726,10 @@ async fn confirm_authenticated(
     use std::process::Stdio;
     use tokio::process::Command;
     let mut c = Command::new(cli_path);
+    // The third spawn of this same provider CLI in this file — the auth-check
+    // poll driven from the OAuth drain loop. Same strict policy as the other
+    // two. (ReAgent P0, round 4, on #3326.)
+    crate::backend::pane_env::sanitize_external_command(&mut c);
     c.args(args)
         .envs(env)
         .stdin(Stdio::null())

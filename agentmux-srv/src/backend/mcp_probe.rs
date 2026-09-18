@@ -129,6 +129,8 @@ async fn probe_stdio(config: &Value) -> ProbeResult {
         .unwrap_or_default();
 
     let mut cmd = Command::new(command);
+    // An arbitrary command from MCP server config — third-party by definition.
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
     cmd.args(&args)
         .envs(env)
         .stdin(Stdio::piped())
