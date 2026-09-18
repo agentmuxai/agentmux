@@ -26,10 +26,10 @@ describe("agent pane tab", () => {
         expect(agentTabIcon({ agentId: "claude" })).toEqual({ kind: "provider", provider: "claude" });
     });
 
-    it("an unlaunched picker tab still has an icon and reads as a new agent", () => {
+    it("an unlaunched picker tab still has an icon and reads as 'Agent' (PR #3341)", () => {
         const tab = describeAgent({});
         expect(tab.icon).toEqual({ kind: "fa", name: "sparkles" });
-        expect(tab.label).toBe("New Agent");
+        expect(tab.label).toBe("Agent");
         expect(tab.rename).toBeUndefined();
     });
 
