@@ -31,7 +31,7 @@ first line of a subagent's JSONL transcript:
 > subagent's own JSONL first line's `"slug"` field
 > (`subagent_watcher.rs:1004-1012`); if the CLI didn't write one, it falls
 > back to the raw `agentId` hash (`:1013-1027`)."
-> — `docs/specs/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md:45-48`
+> — `docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md:45-48`
 
 AgentMux reads this field (`agentmux-srv/src/backend/subagent_watcher/parse.rs`)
 but does not invent it. So "remove the generator" is not an available fix —
@@ -87,7 +87,7 @@ shipped for the Swarm pane.
 This is not a case of nobody noticing. It was raised and consciously deferred
 **twice**:
 
-**2026-07-07** — `docs/specs/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`,
+**2026-07-07** — `docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md`,
 "Resolution of the open questions," §1:
 
 > "**Standalone `SubagentView` pane: kept, not retired.** Discovered during
@@ -276,7 +276,7 @@ change).
 
 ## 9. Related docs
 
-- `docs/specs/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md` — first
+- `docs/specs/archive/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md` — first
   "kept, not retired" decision (§1 resolution).
 - `docs/specs/SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md` — second,
   still-unresolved flag (§6).

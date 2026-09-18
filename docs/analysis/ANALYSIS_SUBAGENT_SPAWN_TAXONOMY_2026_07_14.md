@@ -8,7 +8,7 @@ observed in AgentMux's own code (`agentmux-srv/src/backend/subagent_watcher.rs`,
 Anthropic's official Claude Code docs (`code.claude.com/docs/en/*`) and
 CHANGELOG.
 **Related:** `docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`,
-`docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`,
+`docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md`,
 `docs/specs/SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md`, memory
 `agentmux-swarm-duplicate-subagent-groups.md`.
 

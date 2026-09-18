@@ -99,4 +99,4 @@ Required before declaring fix successful: 0.33.59x build, rapid-fire ~10 status-
 
 - [`h7-freeze-fix-retro-2026-05-02.md`](./h7-freeze-fix-retro-2026-05-02.md) — the misdiagnosis that preceded this fix.
 - [`next-steps-2026-05-02.md`](./next-steps-2026-05-02.md) — Phase 2 in that doc was "Investigate `HwndWithoutBrowser` collision." This PR resolves it.
-- `docs/specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` — the "freeze" spec was wrong about the trigger (pane state); the actual trigger is concurrent `pending_window_creations` entries.
+- `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md (no longer in this repo)` — the "freeze" spec was wrong about the trigger (pane state); the actual trigger is concurrent `pending_window_creations` entries.

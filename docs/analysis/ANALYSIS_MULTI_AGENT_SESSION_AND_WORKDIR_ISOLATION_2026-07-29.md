@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29
 **Status:** analysis — Discussion / analysis — no code change yet. Written to seed a fresh planning conversation, not as a committed plan.
-**Prompted by:** `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — a throwaway `task dev` build resumed a live production agent session and spawned an independent second process that ran real `git checkout` in the same physical working directory as the first.
+**Prompted by:** `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — a throwaway `task dev` build resumed a live production agent session and spawned an independent second process that ran real `git checkout` in the same physical working directory as the first.
 
 ## TL;DR
 
@@ -81,7 +81,7 @@ Sketch the lease interface (§2.2) in more detail — schema for the registry ro
 
 ## References
 
-- `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — the incident this analysis follows up on, including reflog evidence of the working-directory collision.
+- `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — the incident this analysis follows up on, including reflog evidence of the working-directory collision.
 - `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — the shipped `clone_id` data-dir isolation this builds on.
 - `agentmux-common/src/runtime_mode.rs` — `RuntimeMode::Dev`, `derive_clone_id`.
 - `agentmux-srv/src/registry/paths.rs` — `resolve_global_shared_root`, `resolve_shared_registry_dir`, `resolve_shared_definitions_dir`.

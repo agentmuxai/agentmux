@@ -307,7 +307,7 @@ as Phase 7 of the original spec.
 - `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` —
   why we have JS-driven drag today and the trade-offs vs. pragmatic-dnd
   for the floater header.
-- `docs/analysis/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`
+- `ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md (no longer in this repo)`
   — why external apps still show "accept" cursors during cross-window
   drag; the floating pane re-dock will inherit this limitation
   (cosmetic).

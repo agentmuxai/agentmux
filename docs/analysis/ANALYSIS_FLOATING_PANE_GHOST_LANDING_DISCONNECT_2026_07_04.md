@@ -290,4 +290,4 @@ splice and wrap branches.
 | `docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md` | Original Phase 4 spec (ghost + cross-window highlight goal). |
 | `docs/specs/SPEC_FLOATING_PANE_REDOCK_PHASE_4A_SCOPING_2026-05-27.md` | MVP scoping that deferred direction-aware landing to "Phase 4b" (now shipped; size accuracy still open — this doc's Root Cause 1/2). |
 | `docs/specs/SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md` | Argues point-fixes on this subsystem keep recurring; this doc's Fix B (carve-from-target) is a structural rather than symptomatic change, in that spirit. |
-| `docs/specs/SPEC_PANE_COLOR_PANEL_TOPLEVEL_2026_07_01.md` | Checked — unrelated (pane-header color popover anchoring, not drag/dock). |
+| `SPEC_PANE_COLOR_PANEL_TOPLEVEL_2026_07_01.md (no longer in this repo)` | Checked — unrelated (pane-header color popover anchoring, not drag/dock). |

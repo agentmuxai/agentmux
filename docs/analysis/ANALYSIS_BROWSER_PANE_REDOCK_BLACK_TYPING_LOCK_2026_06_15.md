@@ -189,7 +189,7 @@ A redock that **bypasses the block-removal saga** doesn't dispose the slice-#9 s
 - `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md`
 - `docs/analysis/ANALYSIS_PANE_OPEN_CLOSE_ANIMATION_2026_05_29.md`
 - `docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`
-- `docs/specs/SPEC_PHANTOM_BROWSER_PANE_RECOVERY.md` (branch `agenta/spec-phantom-browser-pane-recovery`)
+- `SPEC_PHANTOM_BROWSER_PANE_RECOVERY.md (no longer in this repo)` (branch `agenta/spec-phantom-browser-pane-recovery`)
 - `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md` §8.15
 
 **Relevant merged PRs:** #1112 (MVP redock), #1156 (pane reflow), #1166 (deterministic redock-onto-main), #1168 (deterministic re-create-after-close), #1133 (stale-HWND eviction), #1249 (redock dwell/velocity gate).

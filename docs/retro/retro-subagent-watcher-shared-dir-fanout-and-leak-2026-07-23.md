@@ -61,7 +61,7 @@ Isolating one burst (`18:04:57.634` → `18:05:01.523`), a *single* underlying c
 
 ### Bug A — `watch_agent()`'s filesystem watch isn't scoped to the calling agent's own files
 
-`agentmux-srv/src/backend/subagent_watcher.rs`, `watch_agent()` (~line 407 onward) sets up a `notify` watcher, recursively, on the agent's resolved Claude `config_dir`. Per `docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md` Finding 3, any agent **without an explicit per-identity bundle override** resolves to the single shared default path: `~/.agentmux/shared/providers/claude/`. `Agent1`, `Agent2`, `Agent3`, `AgentX`, `AgentY`, and `Camper` all use the default provider auth, so all six independently registered a recursive watch on the *same physical directory tree*.
+`agentmux-srv/src/backend/subagent_watcher.rs`, `watch_agent()` (~line 407 onward) sets up a `notify` watcher, recursively, on the agent's resolved Claude `config_dir`. Per `docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md` Finding 3, any agent **without an explicit per-identity bundle override** resolves to the single shared default path: `~/.agentmux/shared/providers/claude/`. `Agent1`, `Agent2`, `Agent3`, `AgentX`, `AgentY`, and `Camper` all use the default provider auth, so all six independently registered a recursive watch on the *same physical directory tree*.
 
 The live-watch dispatch loop (lines ~565-609) captures `parent_agent`/`parent_block_id` once per `watch_agent()` call and, for every path the shared `notify` watcher reports changed — with no check that the changed file actually belongs to a subagent spawned within *that* watcher's own agent/session — calls:
 

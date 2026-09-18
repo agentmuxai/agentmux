@@ -154,8 +154,8 @@ using `setmeta` — it's correct and lower-overhead for that one otype.
    event variant nobody's gotten around to wiring up yet, with no signal
    that it's incomplete.
 4. **Document the two-mechanism split explicitly** in
-   `docs/internals/agent-app-api.md` (or a new
-   `docs/architecture/OBJECT_REACTIVITY.md`) so the next person doesn't
+   `agent-app-api.md (no longer in this repo)` (or a new
+   `OBJECT_REACTIVITY.md (no longer in this repo)`) so the next person doesn't
    have to trace three files under CDP live-testing to discover it, as
    this retro's own investigation did.
 
