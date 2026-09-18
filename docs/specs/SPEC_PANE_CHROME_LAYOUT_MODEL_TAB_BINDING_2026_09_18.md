@@ -1,8 +1,7 @@
 # SPEC: A pane's chrome must resolve its own tab's LayoutModel, never "whichever tab is globally active"
 
 **Date:** 2026-09-18
-**Status:** implemented — see `docs/specs/README.md`'s vocabulary; PR number
-to be added once opened.
+**Status:** implemented — PR #3392.
 **Related:** `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`
 (the chrome-stability design whose "constructed once, never remounts"
 contract makes a wrong one-time capture permanent),
