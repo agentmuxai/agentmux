@@ -556,6 +556,8 @@ fn spawn_system_install_task(
         );
 
         let mut cmd = Command::new(&step.program);
+        // An arbitrary install program from a recipe step.
+        crate::backend::pane_env::sanitize_external_command(&mut cmd);
         cmd.args(&step.args);
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
