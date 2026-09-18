@@ -48,6 +48,15 @@ import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
 import type { ToolchainPackage } from "@/types/rpc/ToolchainPackage";
 import type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
 
+// The connection-scoped event/config shapes are GENERATED from Rust by ts-rs.
+export type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
+export type { NoArgsReq } from "@/types/rpc/NoArgsReq";
+export type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
+
+import type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
+import type { NoArgsReq } from "@/types/rpc/NoArgsReq";
+import type { SubscriptionRequest } from "@/types/rpc/SubscriptionRequest";
+
 // The tool-status shapes are GENERATED from their Rust definitions by ts-rs.
 // The rest of this file is still hand-written: workspace spans four handler
 // files and is being migrated one at a time.

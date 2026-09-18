@@ -4,6 +4,7 @@
 import { isBlank } from "@/util/util";
 import { Subject } from "rxjs";
 import { sendRawRpcMessage } from "./ws";
+import type { SubscriptionRequest } from "@/app/store/rpc-api";
 
 type MuxEventSubject = {
     handler: (event: MuxEvent) => void;
