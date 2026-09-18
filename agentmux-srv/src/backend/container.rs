@@ -191,6 +191,27 @@ fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec) -> Vec<Mou
     mounts
 }
 
+/// Rewrite a host-loopback `AGENTMUX_LOCAL_URL` (e.g. `http://127.0.0.1:PORT`)
+/// into something a container's network namespace can actually reach.
+///
+/// `docker exec` over the Docker socket never inherits the host process's
+/// env the way a host subprocess does, so a container agent gets no sidecar
+/// URL at all unless one is explicitly injected — and injecting the
+/// loopback value verbatim would be reachable from the srv process but not
+/// from inside the container. `host.docker.internal` is resolvable from
+/// Docker Desktop (macOS/Windows) automatically, and from native Linux via
+/// the `extra_hosts: host.docker.internal:host-gateway` entry
+/// `create_and_start` sets — see #2939 workstream 1.
+///
+/// Only rewrites `127.0.0.1`/`localhost`; any other host (already a real
+/// hostname/IP, or already `host.docker.internal`) passes through
+/// unchanged, so this is safe to call unconditionally.
+pub fn rewrite_local_url_for_container(local_url: &str) -> String {
+    local_url
+        .replace("127.0.0.1", "host.docker.internal")
+        .replace("localhost", "host.docker.internal")
+}
+
 /// Env var names that reference host-filesystem paths and must NOT be forwarded
 /// into a container via `docker exec -e`. The container image supplies its own
 /// values for these (e.g. `CLAUDE_CONFIG_DIR=/home/agent/.claude` baked in).
@@ -980,6 +1001,15 @@ impl ContainerManager {
                 mounts: Some(all_mounts),
                 // Security: no host network, no privileged mode.
                 network_mode: Some("bridge".to_string()),
+                // Lets the container reach the sidecar (agentmux-srv) via
+                // `host.docker.internal`, which `run_agent_turn`/`agent_io`'s
+                // container branch rewrites AGENTMUX_LOCAL_URL to (see
+                // #2939 workstream 1). Docker Desktop (macOS/Windows) already
+                // resolves this name automatically; `host-gateway` is what
+                // makes it resolve on native Linux's default bridge network
+                // too, where nothing does this by default. Harmless no-op
+                // where Docker Desktop already handles it.
+                extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                 ..Default::default()
             }),
             ..Default::default()
@@ -1150,6 +1180,39 @@ mod tests {
     fn test_container_name_for_slug() {
         assert_eq!(container_name_for_slug("my-agent"), "agentmux-my-agent");
         assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
+    }
+
+    // ── AGENTMUX_LOCAL_URL rewrite for container reachability ───────────────
+    // See #2939 workstream 1.
+
+    #[test]
+    fn rewrites_loopback_ip_to_host_docker_internal() {
+        assert_eq!(
+            rewrite_local_url_for_container("http://127.0.0.1:54321"),
+            "http://host.docker.internal:54321"
+        );
+    }
+
+    #[test]
+    fn rewrites_localhost_to_host_docker_internal() {
+        assert_eq!(
+            rewrite_local_url_for_container("http://localhost:54321"),
+            "http://host.docker.internal:54321"
+        );
+    }
+
+    #[test]
+    fn leaves_a_non_loopback_host_unchanged() {
+        // Already a real hostname/IP, or already host.docker.internal —
+        // must pass through unchanged, not get mangled.
+        assert_eq!(
+            rewrite_local_url_for_container("http://192.168.1.5:54321"),
+            "http://192.168.1.5:54321"
+        );
+        assert_eq!(
+            rewrite_local_url_for_container("http://host.docker.internal:54321"),
+            "http://host.docker.internal:54321"
+        );
     }
 
     // ── Credential + workspace mounts ───────────────────────────────────────
