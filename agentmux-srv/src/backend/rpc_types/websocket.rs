@@ -10,10 +10,10 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Request for the three commands that ignore their payload: `appinfo`,
-/// `getwaveairatelimit` and `eventunsuball`.
+/// Request for the four commands that ignore their payload: `appinfo`,
+/// `getwaveairatelimit`, `eventunsuball` and `getfullconfig`.
 ///
-/// One type for all three rather than three identical empty structs: there is
+/// One type for all four rather than four identical empty structs: there is
 /// nothing to diverge, and three names for "no arguments" is noise. Registered
 /// as `Option<Self>`, which is what makes both encodings of "no argument"
 /// deserialize — the stub sends `{}`, a client that omits `data` sends `null`,

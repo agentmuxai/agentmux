@@ -1443,15 +1443,6 @@ declare global {
         meta: {[key: string]: any};
     };
 
-    // wshrpc.MuxInfoData
-    type MuxInfoData = {
-        version: string;
-        clientid: string;
-        buildtime: string;
-        configdir: string;
-        datadir: string;
-    };
-
     // vdom.MuxKeyboardEvent
     type MuxKeyboardEvent = {
         type: "keydown"|"keyup"|"keypress"|"unknown";

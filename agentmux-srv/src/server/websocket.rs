@@ -843,11 +843,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // that tolerance is cheap to keep.
     engine.register_typed(
         COMMAND_EVENT_UNSUB,
-        move |event_name: Option<String>, _ctx| {
+        move |data: serde_json::Value, _ctx| {
             let broker = broker_unsub.clone();
             let conn_id = conn_id_unsub.clone();
             async move {
-                let event_name = event_name.unwrap_or_default();
+                // `as_str().unwrap_or("")` -- byte-identical to the untyped
+                // handler. A number/object/array is a silent no-op, as before,
+                // NOT a deserialize error.
+                let event_name = data.as_str().unwrap_or("").to_string();
                 if !event_name.is_empty() {
                     broker.unsubscribe(&conn_id, &event_name);
                 }
@@ -1833,17 +1836,37 @@ mod tests {
     }
 
     /// `eventunsub` takes a BARE STRING payload -- the only command in the app
-    /// shaped that way. Its stub is `data: string`, and the old handler read
-    /// `data.as_str().unwrap_or("")`, so a non-string payload was a silent
-    /// no-op rather than an error. `Option<String>` keeps exactly that.
+    /// shaped that way. Its stub is `data: string`.
+    ///
+    /// Registered as `serde_json::Value`, NOT `Option<String>`. reagent caught
+    /// that difference on #3348 and was right: the old handler read
+    /// `data.as_str().unwrap_or("")`, so a number/object/array was a silent
+    /// no-op, while `Option<String>` hard-errors on exactly those. Claiming it
+    /// "keeps that tolerance" was false. `Value` keeps it for real.
+    ///
+    /// This test now covers "anything else" rather than only null, which is
+    /// what its name always promised.
     #[test]
     fn eventunsub_takes_a_bare_string_and_tolerates_anything_else() {
-        let got: Option<String> =
-            serde_json::from_value(serde_json::json!("blockfile:mux")).unwrap();
-        assert_eq!(got.as_deref(), Some("blockfile:mux"));
-
-        let none: Option<String> = serde_json::from_value(serde_json::Value::Null).unwrap();
-        assert!(none.is_none(), "null unsubscribes nothing, as before");
+        // Mirrors the handler exactly: deserialize as Value, then as_str().
+        let name = |v: serde_json::Value| {
+            serde_json::from_value::<serde_json::Value>(v)
+                .expect("Value deserializes from anything")
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        assert_eq!(name(serde_json::json!("blockfile:mux")), "blockfile:mux");
+        // Each of these was a silent no-op before the migration and must stay one.
+        for junk in [
+            serde_json::Value::Null,
+            serde_json::json!(42),
+            serde_json::json!({ "event": "x" }),
+            serde_json::json!(["x"]),
+            serde_json::json!(true),
+        ] {
+            assert_eq!(name(junk.clone()), "", "{junk} must unsubscribe nothing, not error");
+        }
     }
 
     /// Codex P1 on PR #3194: the frontend's own lock gate

@@ -80,7 +80,7 @@ export const MiscApi = {
         return client.rpcCall("recordtevent", data, opts);
     },
 
-    // Answers `{ version }` and nothing else. The hand-written `MuxInfoData`
+    // Answers `{ version }` and nothing else. The hand-written `MuxInfoData` (now deleted)
     // this used to return also declared `clientid`, `buildtime`, `configdir`
     // and `datadir` -- four fields the handler has never sent. Nothing reads
     // them (this command has no caller at all today), so the generated type is
