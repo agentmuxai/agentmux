@@ -43,6 +43,7 @@ if ((globalThis as any).__nowMinuteInterval != null) clearInterval((globalThis a
 import { computeTheme, DefaultTermTheme } from "./termutil";
 import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
+import "./term-pane-tab";
 
 let _terminalViewComponent: ViewComponent = null;
 

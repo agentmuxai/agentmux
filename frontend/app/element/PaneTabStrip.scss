@@ -213,16 +213,41 @@
     }
 }
 
-// Optional, per-tab (getIcon prop) — omitted entirely when a caller doesn't
-// pass getIcon (agent/term today), so this never affects their layout.
+// One fixed box for every icon kind (font icon, brand logo, favicon), so a
+// tab's icon is the same size regardless of its source or how many tabs
+// exist. Scales only with the zoom of whatever contains the strip.
 .pane-tab-icon {
+    --pane-tab-icon-size: 14px;
     display: flex;
     align-items: center;
-    flex-shrink: 0;
+    justify-content: center;
+    flex: 0 0 var(--pane-tab-icon-size);
+    width: var(--pane-tab-icon-size);
+    height: var(--pane-tab-icon-size);
+    font-size: 12px;
+    line-height: 1;
 
     i {
-        font-size: 11px;
+        margin: 0;
         opacity: 0.5;
+    }
+
+    .pane-tab--active & i {
+        opacity: 0.8;
+    }
+
+    // ProviderLogo sizes its SVG via font-size / its <img> via attributes;
+    // pin both to the box so a logo can never out-size a font icon.
+    .provider-logo,
+    img,
+    svg {
+        width: var(--pane-tab-icon-size);
+        height: var(--pane-tab-icon-size);
+        font-size: var(--pane-tab-icon-size);
+    }
+
+    img {
+        object-fit: contain;
     }
 }
 

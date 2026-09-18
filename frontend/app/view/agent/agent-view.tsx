@@ -4,7 +4,6 @@
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
-import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import {
     snapshot as layoutSnapshot,
     registerPane as registerLayoutPane,
@@ -30,7 +29,6 @@ import {
     getApi,
     getBlockMetaKeyAtom,
     openOrFocusPaneByView,
-    pushNotification,
     refocusNode,
     MOS,
 } from "@/app/store/global";
@@ -46,8 +44,6 @@ import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { computeFocusRingBorderColor } from "@/app/block/blockframe";
-import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import {
     closeBlockInStack,
     getLayoutModelForStaticTab,
@@ -362,20 +358,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // (layout/lib/types.ts).
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
-    // Selection ring for the WHOLE pane (header + progress bar + content) —
-    // see docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
-    // 2026_09_15.md. .block-mask (blockframe.tsx/block.scss) only paints a
-    // ring around the nested, switch-scoped <Block> below — it can't cover
-    // this outer, persistent shell once chrome is hoisted out of it. Mirrors
-    // BlockFrame_Default_Component's own `isFocused`/`isAlone` reads
-    // (blockframe.tsx) exactly, including the same "single pane in the tab
-    // means focus carries no signal, suppress the ring" rule — without
-    // isAlone, a single-agent-pane tab would show a permanently-lit ring
-    // since it's effectively always the focused pane.
-    const isFocused = () => nodeModel.isFocused();
-    const isAlone = () => nodeModel.numLeafs() <= 1;
-
-    // Block-scoped reads (agentId/isHistoryTab/zoom) must track the
+    // Block-scoped reads (agentId) must track the
     // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
     // ViewModel instance first rendered this chrome) — getMuxObjectAtom
     // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
@@ -383,63 +366,11 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // (frontend/app/store/mos.ts's own doc comments explain why).
     const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
     const agentId = () => activeBlockData()?.meta?.["agentId"];
-    const isHistoryTab = () => !!activeBlockData()?.meta?.[HISTORY_TAB_FOR_META_KEY];
 
-    // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
-    // `.block-mask` — reused so a custom `frame:activebordercolor`/
-    // `frame:hue`/`bg:bordercolor` still shows up on the OUTER ring below
-    // (codex P2, PR #3226) instead of always falling back to the plain
-    // accent/dim colors.
-    const ringBorderColor = createMemo(() => computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, atoms.tabAtom()?.meta));
-
-    // Codex P1 on this PR: noHeader (agent-model.ts) suppresses
-    // BlockFrame's own inline header once hoisted, but nothing was
-    // rendering a REPLACEMENT — losing the pane's title, Stash, and
-    // minimize/magnify/close controls permanently the moment a leaf's
-    // pane went agent-typed at all. BlockFrame_Header (exported from
-    // blockframe.tsx specifically for this — see PR #3134's own doc
-    // comments) is reused directly here rather than reimplemented, reading
-    // the reactive `activeBlockId` accessor above instead of a frozen
-    // `nodeModel.blockId`. `changeConnModalAtom`/`connBtnRef` are inert
-    // stand-ins, not wired to any real modal state: AgentViewModel never
-    // sets `manageConnection`, so BlockFrame_Header's own connection-button
-    // branch never renders for an agent pane regardless. This is dead code
-    // waiting to matter, not truly inert forever (ReAgent, this PR): if a
-    // future caller ever sets `manageConnection` on an AgentViewModel, the
-    // button would render but silently do nothing, since these stand-ins
-    // aren't wired to real per-block modal state. Wire a real
-    // `changeConnModalAtom` (mirroring `useBlockAtom` keyed on
-    // `activeBlockId()`) at that point — don't assume this comment alone
-    // will be noticed.
-    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-    // §4.1): the old headerElem/headerElemNoView (BlockFrame_Header instances)
-    // and their changeConnModalAtom/connBtnRef stand-ins are gone —
-    // PaneHeaderTabStrip now wraps the whole BlockFrame_Header itself
-    // (blocktypes.ts's `leadingTabStrip` prop), which never needed
-    // connBtnRef/changeConnModalAtom passed in for agent in the first place
-    // (those only feed BlockFrame_Header's own ConnectionButton, which
-    // AgentViewModel never renders since it never sets `manageConnection`
-    // — see the comment that used to sit here about that).
-    const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
-
-    // In-pane tabs — rendered here (not inside AgentBlockContent) so the
-    // strip stays visible whether the active member is a launched
-    // conversation OR a blank/picker tab (AgentPicker, no agentId yet).
-    // Previously the strip lived only in AgentPresentationView and was
-    // driven solely by fork lineage, so clicking "+" (which pushes a blank,
-    // agentId-less block onto this pane's stack) swapped the ENTIRE pane to
-    // AgentPicker with no strip at all — the just-open tab (e.g. "Camper")
-    // had no visible pill to switch back to. Report: 2026-08-09.
-    //
-    // Two independent sources are merged into one tab list:
-    //  - "stack" tabs: every block in this pane's own blockStack (Phase 2 of
-    //    SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3) — always
-    //    present, agentId or not. This is the primary source and mirrors
-    //    term.tsx's termTabs.
-    //  - "fork" tabs: conversations sharing this one's `parent_id` lineage
-    //    that are open in ANOTHER top-level pane (Phase 3/4) — kept as
-    //    additional pills, deduped against the stack by blockId, so
-    //    cross-pane fork-switching keeps working.
+    // Fork tabs: conversations sharing this one's `parent_id` lineage that
+    // are open in ANOTHER top-level pane, shown as extra pills (PaneChrome
+    // dedupes them against this pane's own stack) so cross-pane
+    // fork-switching keeps working.
     const [openDefinitions] = useOpenDefinitionMap();
     // ReAgent P2: reads the active ViewModel's OWN agentDefinitions
     // (agent-model.ts) instead of calling useAgentDefinitions() again here
@@ -455,135 +386,13 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // with no open blockId anywhere can't be jumped to, so it isn't offered.
     const switchableForks = createMemo(() => forks().filter((f) => f.isActive || !!f.blockId));
 
-    interface PaneTab {
-        blockId: string;
-        label: string;
-        /** AgentDefinition id, when this tab has launched an agent — stays
-         *  undefined for a still-blank picker tab (nothing to rename). */
-        definitionId?: string;
-        /** A read-only history-reader tab (openOrFocusHistoryTab) — never
-         *  double-click-renamable (that flow renames the shared
-         *  AgentDefinition, which a history tab must never touch) and
-         *  always labeled distinctly from its live sibling tab. */
-        isHistoryTab?: boolean;
-        /** Only set for a NON-agent member of this pane's stack (added via
-         *  the generic "+" picker) — agent tabs keep their existing
-         *  no-icon presentation. */
-        icon?: JSX.Element;
-    }
-    // Rename overrides, keyed by blockId — set synchronously by
-    // handleTabRenameConfirm below so a just-renamed tab (including a
-    // dormant, non-active member whose block meta isn't reactively tracked
-    // here) reflects its new label immediately, without waiting on the
-    // SetMetaCommand round-trip (term.tsx's titleOverrides precedent).
-    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
-    // Stable per-blockId object cache, shared across stackTabs/combinedTabs
-    // — mirrors term.tsx's tabObjectCache (same bug, same fix, reported live
-    // on the terminal pane first): `stackTabs` reruns on EVERY switch (it
-    // reads `layoutModel.localTreeStateAtom()`, bumped by every stack
-    // mutation, not just add/remove/rename), and a plain `.map(labelForBlock)`
-    // handed `<For>` (inside PaneTabStrip) a brand-new object per tab every
-    // time, indistinguishable from "the whole tab list changed" — so every
-    // pill's DOM node got torn down and recreated on every switch. Reusing
-    // the previous object when nothing about that tab actually changed lets
-    // `<For>` keep the DOM node in place and just update its `active` prop.
-    const paneTabObjectCache = new Map<string, PaneTab>();
-    function cachedTab(id: string, next: PaneTab): PaneTab {
-        const cached = paneTabObjectCache.get(id);
-        if (
-            cached &&
-            cached.label === next.label &&
-            cached.definitionId === next.definitionId &&
-            cached.isHistoryTab === next.isHistoryTab
-        ) {
-            return cached;
-        }
-        paneTabObjectCache.set(id, next);
-        return next;
-    }
-    const labelForBlock = (id: string): PaneTab => {
-        // The currently ACTIVE member reads its own reactive block meta
-        // (activeBlockData, already memoized above); every other (dormant)
-        // stack member isn't the active read target — read its
-        // last-persisted meta directly, same as term.tsx's termTabs does.
-        const meta = id === activeBlockId() ? activeBlockData()?.meta : MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta;
-        const view = meta?.["view"] as string | undefined;
-        // A NON-agent member — this pane's own "+" opens the generic widget
-        // picker now, so an agent pane's stack can hold a sysinfo/browser/…
-        // tab like any other pane's. Label/icon it the way every generic
-        // pane does rather than through the agent-specific
-        // agentName/definitionId path below, which would render a Sysinfo
-        // tab as "Agent".
-        if (view && view !== "agent") {
-            const genericLabel = (meta?.["frame:title"] as string | undefined) ?? blockViewToName(view);
-            return cachedTab(id, {
-                blockId: id,
-                label: titleOverrides()[id] ?? genericLabel,
-                icon: getBlockHeaderIcon(
-                    (meta?.["frame:icon"] as string | undefined) ?? blockViewToIcon(view),
-                    MOS.getObjectValue<Block>(MOS.makeORef("block", id))
-                ),
-            });
-        }
-        const definitionId = meta?.["agentId"] as string | undefined;
-        const isHistoryTabFlag = !!meta?.[HISTORY_TAB_FOR_META_KEY];
-        if (isHistoryTabFlag) {
-            // Deliberately ignores titleOverrides/agentName — a history
-            // tab is never user-renamed (see PaneTab.isHistoryTab) and
-            // must read distinctly from its live sibling, which carries
-            // the same copied agentName in its own meta.
-            return cachedTab(id, { blockId: id, label: "History", isHistoryTab: true });
-        }
-        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "Agent";
-        return cachedTab(id, { blockId: id, label, definitionId });
-    };
-    const stackTabs = createMemo<PaneTab[]>(() => {
-        // Reactive dependency: re-derive whenever ANY layout mutation
-        // happens (matches term.tsx's termTabs).
-        layoutModel.localTreeStateAtom();
-        const node = getOwnNode();
-        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
-        return stack.map(labelForBlock);
-    });
-    const combinedTabs = createMemo<PaneTab[]>(() => {
-        const stack = stackTabs();
-        const stackIds = new Set(stack.map((t) => t.blockId));
-        const extras = switchableForks()
-            .filter((f) => f.blockId && !stackIds.has(f.blockId))
-            .map((f) => cachedTab(f.blockId!, { blockId: f.blockId!, label: f.title, definitionId: f.definitionId }));
-        // Drop cache entries for blockIds no longer present anywhere in this
-        // pane's tabs, so it doesn't grow unboundedly across a long
-        // session's worth of closed tabs/forks.
-        const liveIds = new Set([...stackIds, ...extras.map((t) => t.blockId)]);
-        for (const id of paneTabObjectCache.keys()) {
-            if (!liveIds.has(id)) paneTabObjectCache.delete(id);
-        }
-        return [...stack, ...extras];
-    });
-    // Only render tab pills once there's something to switch BETWEEN — a
-    // lone conversation shows just the "+" (no pill for itself). The
-    // moment a 2nd tab exists, both (including the first) appear.
-    const visibleTabs = createMemo(() => (combinedTabs().length > 1 ? combinedTabs() : []));
-    // Every pane's strip (title + "+") is always shown — agent used to hide
-    // it on a fresh, unlaunched picker pane (tab-strip-visibility.ts,
-    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md), but that made it the
-    // one widget type whose header behaved differently from every other
-    // pane (every PaneChrome-driven type, and term, always show
-    // "+"). Repo-owner-confirmed: agent should be no different.
-    // Per-pane zoom for the tab strip itself — mirrors
-    // AgentPresentationView's own zoomFactor memo (term:zoom block meta +
-    // clamp, further down this file). Simply activeBlockData()?.meta now —
-    // this component renders the tab strip for the whole stack, and
-    // activeBlockData is already keyed off activeBlockId(), so it already
-    // tracks whichever tab is actually active rather than the anchor's own
-    // original block. Not a shared computation with AgentPresentationView's
-    // own memo, which lives in a child component out of scope here
-    // (SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §A.3).
-    const tabStripZoomFactor = createMemo(() => {
-        const z = activeBlockData()?.meta?.["term:zoom"];
-        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
-        return Math.max(0.5, Math.min(2.0, z));
-    });
+    // Forks open in ANOTHER pane appear as extra pills after this pane's own
+    // stack members, labeled with their branch/definition title.
+    const extraTabs = () =>
+        switchableForks()
+            .filter((f) => !!f.blockId)
+            .map((f) => ({ blockId: f.blockId!, label: f.title }));
+
     // Activating a tab has two cases, both "switch," neither "create": (1)
     // the target block already lives in THIS pane's own block-stack — swap
     // the active member in place; (2) a fork open as its own separate
@@ -633,58 +442,6 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
         if (!node) return;
         void closeBlockInStack(layoutModel, node.id, targetBlockId);
     };
-    // Double-click a tab to rename it (only meaningful once it has launched
-    // an agent — a still-blank picker tab has nothing to rename). TWO writes
-    // are required (reagent P1 on PR #2488): stack-tab labels read
-    // `block.meta.agentName` (labelForBlock above), which
-    // RenameAgentDefinitionTitleCommand does NOT touch — it renames only the
-    // AgentDefinition row (name/branch_label), which is what fork tabs and
-    // the picker's agent list read. Writing only the definition left a
-    // stack tab's pill (and its pane title) showing the stale name forever;
-    // writing only block meta would leave fork tabs/the picker stale. The
-    // titleOverrides entry gives the pill its new label synchronously.
-    const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
-    const handleTabRenameConfirm = async (tab: PaneTab, title: string): Promise<void> => {
-        setRenamingBlockId(null);
-        if (!tab.definitionId) return;
-        const prevOverride = titleOverrides()[tab.blockId];
-        setTitleOverrides((prev) => ({ ...prev, [tab.blockId]: title }));
-        // Definition rename FIRST — it's the authoritative store (fork tabs,
-        // AgentPicker). If it fails, nothing has been written anywhere:
-        // roll back the optimistic override and stop, so the two stores
-        // can't diverge (reagent P2 on PR #2488 round 6 — the old order
-        // could land the meta write and then fail the rename, leaving the
-        // stack pill and fork tabs permanently showing different names).
-        try {
-            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: tab.definitionId, title });
-        } catch (e: unknown) {
-            setTitleOverrides((prev) => {
-                const next = { ...prev };
-                if (prevOverride === undefined) delete next[tab.blockId];
-                else next[tab.blockId] = prevOverride;
-                return next;
-            });
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "Rename failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-            return;
-        }
-        // Denormalized copy the stack pill + pane title read. If THIS write
-        // fails after a successful rename, the kept titleOverrides entry
-        // still shows the new name for the rest of the session; the meta
-        // catches up on the agent's next launch (launchAgentDefinition
-        // rewrites agentName from the definition).
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", tab.blockId),
-            meta: { agentName: title } as any,
-        }).catch(() => {});
-    };
-
     // Progress-bar mount handoff — bridges chrome's own DOM slot to
     // whichever AgentViewModel is CURRENTLY active (nodeModel.activeViewModel(),
     // see that field's own doc comment in types.ts for why this can't read
@@ -701,15 +458,8 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
             vm?.setProgressBarMount?.(null);
         });
     });
-    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-    // §4.1) — factored out so the ErrorBoundary fallback below can render
-    // the exact same header with `viewModel={null}` (mirrors the old
-    // headerElemNoView pattern) instead of duplicating every prop twice.
     return {
-        tabs: visibleTabs,
-        getId: (t: any) => t.blockId,
-        getLabel: (t: any) => t.label,
-        getIcon: (t: any) => t.icon,
+        extraTabs,
         // Both return true ("handled"): an agent tab may live in a
         // DIFFERENT pane (a fork open as its own top-level pane), so
         // activating/closing it isn't necessarily this pane's own stack
@@ -723,18 +473,6 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
             handleTabClose(id);
             return true;
         },
-        onTabDoubleClick: (t: any) => t.definitionId && setRenamingBlockId(t.blockId),
-        renderLabel: (t: any) =>
-            renamingBlockId() === t.blockId && t.definitionId ? (
-                <PaneTabRenameInput
-                    initialValue={t.label}
-                    onConfirm={(title) => void handleTabRenameConfirm(t, title)}
-                    onCancel={() => setRenamingBlockId(null)}
-                />
-            ) : (
-                <span class="pane-tab-label">{t.label}</span>
-            ),
-        zoomFactor: tabStripZoomFactor,
         rootClass: "agent-pane-stack",
         contentClass: "agent-pane-stack-content",
         // The marching-ants turn-progress bar. Empty div; its only content
