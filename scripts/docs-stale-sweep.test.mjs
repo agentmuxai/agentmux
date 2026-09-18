@@ -6,7 +6,7 @@
 // filesystem. Runs under vitest with the rest of the repo's .test.mjs files.
 
 import { describe, expect, it } from "vitest";
-import { classifyDoc, extractCitations, plausibleCitation, renderMarkdown, resolveCitation, statusOf } from "./docs-stale-sweep.mjs";
+import { classifyDoc, extractCitations, plausibleCitation, renderMarkdown, resolveCitation, statusOf, reverseCheck, buildCitationIndex } from "./docs-stale-sweep.mjs";
 
 describe("docs-stale-sweep statusOf", () => {
     it("takes the first word of the first Status line, lowercased, letters only", () => {
@@ -156,5 +156,64 @@ describe("docs-stale-sweep renderMarkdown", () => {
     it("says so when nothing is flagged, and warns on a shallow clone", () => {
         expect(renderMarkdown({ ...report, flagged: [] })).toContain("Nothing flagged.");
         expect(renderMarkdown({ ...report, shallow: true })).toContain("No git history was available");
+    });
+});
+
+describe("docs-stale-sweep reverseCheck (§5.6)", () => {
+    const idx = new Map([
+        ["SPEC_SHIPPED_2026_01_01", ["agentmux-srv/src/server/foo.rs"]],
+        ["SPEC_ALSO_SHIPPED_2026_01_02", ["frontend/app/a.ts", "frontend/app/b.ts"]],
+    ]);
+
+    it("flags a draft/proposed spec that source code cites by name", () => {
+        const r = reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "draft", idx);
+        expect(r).not.toBeNull();
+        expect(r.cited).toEqual(["agentmux-srv/src/server/foo.rs"]);
+
+        const p = reverseCheck("docs/specs/SPEC_ALSO_SHIPPED_2026_01_02.md", "proposed", idx);
+        expect(p.cited).toHaveLength(2);
+    });
+
+    it("does NOT flag 'active' — partial implementation is what it already claims", () => {
+        // This is the distinction that keeps the signal usable: `active` means
+        // "partially implemented, see what shipped", so being cited from source
+        // confirms it rather than contradicting it.
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "active", idx)).toBeNull();
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "implemented", idx)).toBeNull();
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", "historical", idx)).toBeNull();
+    });
+
+    it("does not flag a draft nothing cites, or a doc with no Status", () => {
+        expect(reverseCheck("docs/specs/SPEC_NOBODY_CITES.md", "draft", idx)).toBeNull();
+        expect(reverseCheck("docs/specs/SPEC_SHIPPED_2026_01_01.md", null, idx)).toBeNull();
+    });
+});
+
+describe("docs-stale-sweep buildCitationIndex (§5.6)", () => {
+    const tracked = [
+        "agentmux-srv/src/server/foo.rs",
+        "frontend/app/b.ts",
+        "docs/specs/SPEC_OTHER.md",
+        "README.md",
+    ];
+    const files = {
+        "agentmux-srv/src/server/foo.rs": "// see SPEC_TARGET_2026_01_01 for why",
+        "frontend/app/b.ts": "// unrelated",
+        "docs/specs/SPEC_OTHER.md": "cites SPEC_TARGET_2026_01_01 heavily",
+    };
+
+    it("indexes source citations and ignores docs citing each other", () => {
+        // docs/ is excluded on purpose: specs discuss each other constantly,
+        // and that says nothing about whether the thing shipped.
+        const idx = buildCitationIndex(".", tracked, ["SPEC_TARGET_2026_01_01"], (p) => files[p]);
+        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
+    });
+
+    it("skips unreadable files rather than aborting the sweep", () => {
+        const idx = buildCitationIndex(".", tracked, ["SPEC_TARGET_2026_01_01"], (p) => {
+            if (p === "frontend/app/b.ts") throw new Error("unreadable");
+            return files[p];
+        });
+        expect(idx.get("SPEC_TARGET_2026_01_01")).toEqual(["agentmux-srv/src/server/foo.rs"]);
     });
 });

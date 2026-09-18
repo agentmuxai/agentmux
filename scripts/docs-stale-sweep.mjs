@@ -39,6 +39,16 @@ const TERMINAL_STATUSES = new Set(["historical", "superseded"]);
 const CANONICAL_STATUSES = new Set(["draft", "proposed", "active", "implemented", "living", "historical", "superseded"]);
 const CITATION_EXTS = "rs|ts|tsx|mjs|cjs|js|sh|json|yml|yaml|toml|md";
 
+// Statuses that assert the thing is NOT built. `active` is deliberately
+// excluded: it means "partially implemented", so being cited from source is
+// exactly what it predicts, not a contradiction.
+const UNBUILT_STATUSES = new Set(["draft", "proposed"]);
+
+// Source extensions for the reverse check. Narrower than CITATION_EXTS on
+// purpose: `.md` is excluded because docs cite each other constantly and a
+// spec being discussed in another doc says nothing about whether it shipped.
+const SOURCE_EXTS = new Set(["rs", "ts", "tsx", "mjs", "cjs", "js"]);
+
 /**
  * Pull the Status word out of a doc's text the same way gen-docs-index.sh
  * does: first `**Status:**` line, first word, lowercased, letters only.
@@ -66,6 +76,66 @@ export function extractCitations(text) {
     const bare = new RegExp("(?:^|[\\s(])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\\.(?:" + CITATION_EXTS + "))(?=[\\s):,;]|$)", "gm");
     for (const m of text.matchAll(bare)) out.add(normalize(m[1]));
     return [...out].filter(plausibleCitation);
+}
+
+/**
+ * §3's reverse check, institutionalised (§5.6 of
+ * REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md).
+ *
+ * The sweep's main pass asks "does this doc claim to be current while the code
+ * it cites moved?". This asks the opposite and cheaper question: **does a doc
+ * claim it is UNBUILT while source code cites it by name?** Somebody
+ * implemented it and did not come back to the Status line.
+ *
+ * Why it earns its place: §3.1 records a spec that read "Phase 0 implemented
+ * ... no render-path wiring yet" for fifteen months after Phase 3 landed. Two
+ * independent readers believed it; the second got as far as an ROI argument
+ * and a phase-by-phase estimate for three phases that had already shipped.
+ * A hand-run version of this query surfaced 32 candidates in one pass.
+ *
+ * This is a SIGNAL, not a gate, and the report is explicit about why: deciding
+ * whether a status is true means comparing a claim to shipped code, which is a
+ * judgement and not a grep. So the output is a triage list for a human, and
+ * nothing here fails a build.
+ *
+ * @param {string} docPath   repo-relative path of the doc
+ * @param {string|null} status  its Status word, already normalised
+ * @param {Map<string, string[]>} citedFrom  spec basename -> source files naming it
+ * @returns {{cited: string[]}|null} null when the doc is not a candidate
+ */
+export function reverseCheck(docPath, status, citedFrom) {
+    if (status === null || !UNBUILT_STATUSES.has(status)) return null;
+    const base = docPath.split("/").pop().replace(/\.md$/, "");
+    const cited = citedFrom.get(base);
+    if (!cited || cited.length === 0) return null;
+    return { cited };
+}
+
+/**
+ * Build `spec basename -> [source files naming it]` in one pass over tracked
+ * source. Matching is on the basename without extension, because that is how
+ * code comments cite specs in this repo ("see SPEC_FOO_2026_01_01").
+ */
+export function buildCitationIndex(root, trackedList, docBasenames, readFile) {
+    const index = new Map();
+    const sources = trackedList.filter((p) => {
+        const ext = p.split(".").pop();
+        return SOURCE_EXTS.has(ext) && !p.startsWith("docs/");
+    });
+    for (const src of sources) {
+        let text;
+        try {
+            text = readFile(src);
+        } catch {
+            continue;
+        }
+        for (const base of docBasenames) {
+            if (!text.includes(base)) continue;
+            if (!index.has(base)) index.set(base, []);
+            index.get(base).push(src);
+        }
+    }
+    return index;
 }
 
 function normalize(token) {
@@ -199,7 +269,15 @@ export function sweep({ root = process.cwd(), weeks = 8, now = Math.floor(Date.n
     const touched = lastTouchedMap(root);
     const docs = trackedList.filter((p) => p.startsWith("docs/") && p.endsWith(".md") && !p.split("/").includes("archive"));
 
+    // §5.6's reverse check needs one pass over source before the doc loop:
+    // which spec names appear in code at all.
+    const docBasenames = docs.map((d) => d.split("/").pop().replace(/\.md$/, ""));
+    const citationIndex = buildCitationIndex(root, trackedList, docBasenames, (p) =>
+        fs.readFileSync(path.join(root, p), "utf8"),
+    );
+
     const results = [];
+    const claimedUnbuilt = [];
     let noStatus = 0;
     let terminal = 0;
     for (const doc of docs) {
@@ -209,12 +287,15 @@ export function sweep({ root = process.cwd(), weeks = 8, now = Math.floor(Date.n
             noStatus += 1;
             continue;
         }
+        const rev = reverseCheck(doc, status, citationIndex);
+        if (rev) claimedUnbuilt.push({ doc, status, cited: rev.cited });
         if (TERMINAL_STATUSES.has(status)) {
             terminal += 1;
             continue;
         }
         results.push(classifyDoc({ doc, text, touched, tracked, byBasename, now, weeks }));
     }
+    claimedUnbuilt.sort((a, b) => b.cited.length - a.cited.length);
     const flagged = results.filter((r) => r.flagged);
     flagged.sort((a, b) => b.missing.length - a.missing.length || b.drifted.length - a.drifted.length || b.ageDays - a.ageDays);
     return {
@@ -229,8 +310,10 @@ export function sweep({ root = process.cwd(), weeks = 8, now = Math.floor(Date.n
             stale: results.filter((r) => r.stale).length,
             flagged: flagged.length,
             nonCanonicalStatus: results.filter((r) => !r.canonical).length,
+            claimedUnbuilt: claimedUnbuilt.length,
         },
         flagged,
+        claimedUnbuilt,
     };
 }
 
@@ -261,6 +344,7 @@ export function renderMarkdown(report, limit = 60) {
     lines.push(`| terminal (historical/superseded), not judged | ${c.terminal} |`);
     lines.push(`| no Status line at all (see \`docs/specs/INDEX.md\`) | ${c.noStatus} |`);
     lines.push(`| live but with a non-canonical Status word | ${c.nonCanonicalStatus} |`);
+    lines.push(`| **says draft/proposed, but source code cites it** | **${c.claimedUnbuilt ?? 0}** |`);
     lines.push("");
     if (report.flagged.length === 0) {
         lines.push("Nothing flagged.");
@@ -290,6 +374,30 @@ export function renderMarkdown(report, limit = 60) {
         "`(+Nd)` = the cited file's last commit is N days after the doc's last commit. " +
             "A missing citation is the strongest signal: the doc points at a path that is not in the repo.",
     );
+        const unbuilt = report.claimedUnbuilt ?? [];
+    if (unbuilt.length) {
+        lines.push("");
+        lines.push(`## Says unbuilt, but the code cites it (${unbuilt.length})`);
+        lines.push("");
+        lines.push(
+            "A `draft`/`proposed` Status means the thing is not built. These are named" +
+            " in source anyway, so somebody built it and did not come back to the Status" +
+            " line. Not proof — a comment can cite a spec it is only planning against —" +
+            " but each is cheap to settle by opening the file it is cited from.",
+        );
+        lines.push("");
+        lines.push("| doc | status | cited from |");
+        lines.push("|---|---|---|");
+        for (const u of unbuilt.slice(0, limit)) {
+            const where = u.cited.slice(0, 3).join(", ") + (u.cited.length > 3 ? ` (+${u.cited.length - 3})` : "");
+            lines.push(`| \`${u.doc}\` | ${u.status} | ${where} |`);
+        }
+        if (unbuilt.length > limit) {
+            lines.push("");
+            lines.push(`_${unbuilt.length - limit} more not shown._`);
+        }
+    }
+
     return lines.join("\n") + "\n";
 }
 
