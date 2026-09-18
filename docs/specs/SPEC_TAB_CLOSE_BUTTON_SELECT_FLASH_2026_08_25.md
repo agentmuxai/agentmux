@@ -1,11 +1,11 @@
 # Tab close (X) button — spurious select flash
 
-**Status:** implemented — amended 2026-09-17 by §10. §§2-3 (click-bubble — #3300
+**Status:** implemented — amended 2026-09-17 by §10. §§2-3 (click-bubble
 race), §5 (double round trip), §6 (unbatched RPC-response application) and
 §7 (unbatched WS-push application) merged in PR #2811 (`c0eb56d87`) — all
 four were real defects, but the flash survived them. It was actually fixed
 by §8 (**optimistic tab removal** — the strip stops depending on backend
-update ordering at all) and §9 (**targeted reveal gate**), merged in PR
+update ordering at all) and §9 (**targeted reveal gate**), merged in PR — #3300
 #2818 (`a2fbe5b4d`). §10 (2026-09-17) keeps §8/§9's fix intact — the flash
 class they closed does not reopen — but revises WHEN §8's optimistic hide
 fires, after it produced its own, different visible transition in practice.

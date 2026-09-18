@@ -1,7 +1,7 @@
 # SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux
 
 **Date:** 2026-08-24
-**Status:** implemented 2026-08-24 — §3.1-§3.5 for git/Node/npm/Python — #2790
+**Status:** implemented 2026-08-24 — §3.1-§3.5 for git/Node/npm/Python
 across Windows/macOS/Linux (Phases 1+2 of §6). Backend: 6 new Rust unit
 tests, full 2774-test suite green. Frontend: `npx tsc --noEmit` clean,
 full 3092-test vitest suite green (5 new). §6.3's Phase 3 (bootstrapping a
@@ -16,7 +16,7 @@ other "implemented, live-environment check still pending" PRs. `uv` and
 Docker are intentionally excluded from the executable-install catalog
 (script-based install / interactive GUI installer — different risk
 profile, not requested); their existing link+copy-command rows are
-unchanged.
+unchanged. — #2790
 **Related:** `docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md` (shipped
 P0-P1: PATH enrichment + read-only Toolchain modal; **this spec implements
 its deferred P3** — "one-click brew install… P3 add-on, not yet shipped" —

@@ -45,10 +45,19 @@ const byStatus = {};
 for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const rel = f.replace(/\\/g, "/");
-    const m = src.match(/^\*\*Status:\*\*\s*(.+)$/m);
-    if (!m) { v.noStatus.push(rel); continue; }
-
-    const line = m[1].trim();
+    // Read the WHOLE Status value, not just its first physical line. A Status
+    // that wraps carries its evidence (PR numbers, what shipped, what remains)
+    // on the continuation lines as often as the first, and a first-line-only
+    // regex both under-counts compliance and tempts an editing pass into
+    // appending mid-sentence. Both bugs happened here before this was fixed.
+    const lines = src.split("\n");
+    const si = lines.findIndex((l) => /^\*\*Status:\*\*/.test(l));
+    if (si < 0) { v.noStatus.push(rel); continue; }
+    const isCont = (l) =>
+        l !== undefined && l.trim() !== "" && !/^\*\*[A-Z]/.test(l) && !/^[#>|]/.test(l) && !/^\s*[-*]\s/.test(l);
+    let se = si;
+    while (isCont(lines[se + 1])) se++;
+    const line = lines.slice(si, se + 1).join(" ").replace(/^\*\*Status:\*\*\s*/, "").trim();
     const first = line.split(/[\s—–-]+/)[0].toLowerCase().replace(/[^a-z]/g, "");
     if (!ENUM.includes(first)) { v.R1.push(`${rel}  "${line.slice(0, 60)}"`); continue; }
     byStatus[first] = (byStatus[first] || 0) + 1;

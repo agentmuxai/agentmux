@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-21
 **Author:** Camper
-**Status:** active — Phase A implemented. Phase B/C's CLAUDE.md jekt rule change — #2765
+**Status:** active — Phase A implemented. Phase B/C's CLAUDE.md jekt rule change
 confirmed live 2026-08-22 — see `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
 and `CLAUDE.md`'s jekt security rules section. Phase B's policy
 infrastructure and jekt-rule enforcement are now implemented — see
@@ -21,7 +21,7 @@ gap. Phase C (WAN) tier enforcement now also implemented — see
 `muxbus::cloud_subscriber`, which bypasses `handle_reactive_inject`/HTTP
 entirely). Phase C's own WAN-specific differences (settings-UI guidance,
 no-cache `ask` approval, bench-tuned `max_lines`) are all N/A until the
-same deferred auto-responder/settings-UI pieces above are built.
+same deferred auto-responder/settings-UI pieces above are built. — #2765
 **Motivated by:** direct request — agents need a fast way to see what every
 other agent (this host, other channels on this host, LAN, connected WAN) is
 currently saying/doing, without manual filesystem archaeology or a

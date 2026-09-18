@@ -1,8 +1,8 @@
 # SPEC: Hover-pause for the AskUserQuestion auto-timeout countdown
 
 **Date:** 2026-08-10
-**Status:** implemented — see §9 for a TDD-driven revision made during — #2514
-implementation, before this PR opened.
+**Status:** implemented — see §9 for a TDD-driven revision made during
+implementation, before this PR opened. — #2514
 **Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`
 (implemented, PR #2441, verified in code 2026-08-10). This spec amends only
 that spec's *timer-arming* logic (§2.3). Its recommended-option detection

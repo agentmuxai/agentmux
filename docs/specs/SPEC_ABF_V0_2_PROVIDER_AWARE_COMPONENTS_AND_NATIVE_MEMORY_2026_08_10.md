@@ -1,7 +1,7 @@
 # Spec: ABF v0.2 — Provider-Aware Components + Native Memory
 
 **Date:** 2026-08-10
-**Status:** active — shipped: §2.1 `credentialProvider` (`bundle_export.rs:566`, — PRs touching this work, newest first: #3144
+**Status:** active — shipped: §2.1 `credentialProvider` (`bundle_export.rs:566`,
 `bundle_import.rs:232`), §2.2 keyed `components.instructions` (`bundle_export.rs:594`)
 from `instructions_by_provider` (`bundle_export.rs:392`), §2.3 `components.memory`
 (`app_api/bundle.rs:468`) with `bundle.export_for_agent`/`bundle.import_for_agent`,
@@ -14,7 +14,7 @@ Revised after Codex review on
 PR #2517 found four real implementability gaps in the first draft (all
 credited inline below, matching this repo's own `Codex P1, PR #NNNN`
 citation convention) — not disputed, all four were correct and are folded
-into the design as shipped in this revision.
+into the design as shipped in this revision. — PRs touching this work, newest first: #3144
 **Relationship to prior work:** builds on
 `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` (the
 original ABF proposal, §5) and

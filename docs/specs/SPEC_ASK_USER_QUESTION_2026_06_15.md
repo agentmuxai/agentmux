@@ -1,9 +1,9 @@
 # SPEC: AskUserQuestion — interactive agent questions in the agent pane
 
 **Date:** 2026-06-15
-**Status:** active — Phase 1 shipped (persistent agents, tool_result). Phase 2 shipped — #1539
+**Status:** active — Phase 1 shipped (persistent agents, tool_result). Phase 2 shipped
 (one-shot/container agents — follow-up delivery; the resume+tool_result mechanism
-was empirically disproven, see §10.1).
+was empirically disproven, see §10.1). — #1539
 **Owner:** Agent pane (frontend stream/reducer/render) + sidecar (controller stdin delivery)
 **Related:** `SPEC_DECISION_PROMPT_2026_04_24.md` (sibling feature — tool *permission* gating, distinct from this), `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.md` (agent→app callback precedent)
 

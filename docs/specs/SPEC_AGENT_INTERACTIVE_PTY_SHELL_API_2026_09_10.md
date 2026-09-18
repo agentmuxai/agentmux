@@ -2,7 +2,7 @@
 
 **Author:** Agent3
 **Created:** 2026-09-10
-**Status:** Implemented in two passes. Pass 1 (PtyShell/PtyShellInput/ — #3177
+**Status:** Implemented in two passes. Pass 1 (PtyShell/PtyShellInput/
 PtyShellResize/PtyShellRead/PtyShellStatus/PtyShellStop — `PtyShellSignal`
 also shipped in pass 1 but was removed the same day after Codex review, §6b)
 shipped
@@ -12,7 +12,7 @@ just compiled; see §9. Pass 2 (this revision, repo owner's explicit follow-up
 request) changed the model entirely: `PtyShell` now attaches to the SAME
 shell a human's composer-drawer session already uses (or will use), with a
 short, self-expiring lock keeping the two from typing over each other. See
-§10 for the full pass-2 design and what it changed from pass 1.
+§10 for the full pass-2 design and what it changed from pass 1. — #3177
 **Scope:** New MCP tool(s) letting an agent drive a real, PTY-backed shell —
 create it, send it input (including control characters/signals), read its
 current screen state, resize it, stop it — entirely through backend RPC,

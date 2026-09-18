@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-12 (Part A corrected before implementation — see §A.0's
 note).
-**Status:** implemented, with two further correctness bugs caught in — #2566
+**Status:** implemented, with two further correctness bugs caught in
 PR #2566 review after this doc's own live verification missed them —
-fixed, not yet independently re-verified live a third time. History:
+fixed, not yet independently re-verified live a third time. History: — #2566
 
 1. An earlier draft bound to the wrong zoom control entirely (global
    chrome zoom, `--zoomfactor`) — implemented, live-verified, then

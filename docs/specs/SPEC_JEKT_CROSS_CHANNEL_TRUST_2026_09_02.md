@@ -2,13 +2,13 @@
 
 **Date:** 2026-09-02
 **Author:** Agent4
-**Status:** active — Phase A (D1 key publication + D5 signing primitives) — PRs touching this work, newest first: #3064, #2959
+**Status:** active — Phase A (D1 key publication + D5 signing primitives)
 shipped in #2959; Phase B (D2 verification, D4 `DELIVERY=channel`, the
 `channel-verified` relaxation) shipped 2026-09-07 — see §10.2. Phases C
 (enforcement) and D (escalation chaining) remain — see §10. Phases A and B are
 strictly additive: A publishes a public key and adds two then-unused functions,
 B can only move a message from `self-declared` to `channel-verified`, so no
-message's `TRUST=` can get *worse* until Phase C.
+message's `TRUST=` can get *worse* until Phase C. — PRs touching this work, newest first: #3064, #2959
 **Related (all real, all shipped):**
 `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (marker format, tier rules),
 `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` (host-tier HMAC),

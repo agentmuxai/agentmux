@@ -1,13 +1,13 @@
 # SPEC: Typing `exit` in a terminal pane doesn't close it — instead the shell respawns and appears to loop
 
 **Date:** 2026-09-15
-**Status:** implemented (§4b's respawn loop, §7-9 — shipped separately in — #3225
+**Status:** implemented (§4b's respawn loop, §7-9 — shipped separately in
 PR #3225; §4a's close-on-exit, §10-14. §11-12 and §14 correct real
 regressions found by live retest — read §12 before §11: it supersedes
 §11's guess about which pane was involved, and adds the 10s
 `FLUSHER_DRAIN_TIMEOUT` half of the reported "hang". §13 takes the close
 from ~4s to immediate; §14 is why the pane still didn't visually
-disappear until the layout bridge gained an arm for it.)
+disappear until the layout bridge gained an arm for it.) — #3225
 **Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
 `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
 

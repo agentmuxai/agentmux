@@ -1,8 +1,8 @@
 # Spec: Armory Global Memory — declutter to a simple file list
 
-**Status:** implemented — see the PR implementing this spec for the final — #3227
+**Status:** implemented — see the PR implementing this spec for the final
 shape; §4's "after" diagram and §3 matched the shipped UI in visual
-verification.
+verification. — #3227
 **Date:** 2026-09-15
 **Verified against:** `2da71583a` (code, not spec prose).
 **Related:** `SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` (system-tier entries,

@@ -1,8 +1,8 @@
 # SPEC: A single content-resize contract for the agent pane
 
 **Date:** 2026-08-31
-**Status:** Active. Steps 1-3 of §5 landed (real code, not just this document); — PRs touching this work, newest first: #2962, #2868
-steps 4-6 still pending.
+**Status:** Active. Steps 1-3 of §5 landed (real code, not just this document);
+steps 4-6 still pending. — PRs touching this work, newest first: #2962, #2868
 **Supersedes as the recommended next step:** `ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md` §7's "fix B",
 which called for this but deferred scoping it.
 

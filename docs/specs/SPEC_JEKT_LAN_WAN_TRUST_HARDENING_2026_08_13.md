@@ -2,10 +2,10 @@
 
 **Date:** 2026-08-13
 **Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`, `shared-infrastructure`)
-**Status:** active — §3 WAN P1-2 (reagent WAN signing) implemented 2026-08-14 — PRs touching this work, newest first: #3102, #2570
+**Status:** active — §3 WAN P1-2 (reagent WAN signing) implemented 2026-08-14
 — see "Implementation status" below. P0-1, P0-2, P1-1, P2-1 (WAN) and all of
 LAN remain proposed/not implemented. **The still-open WAN P0 findings remain
-blocker-severity; do not treat this as fully closed.**
+blocker-severity; do not treat this as fully closed.** — PRs touching this work, newest first: #3102, #2570
 **Trigger:** User directive, after `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` shipped host-tier signing: "we need to get secure lan and wan tier, especially wan tier, it is a blocker." Then, after discovering this AgentMux instance had never completed muxbus login (root cause of "reagent's PR review jekts never arrive"): "lets get this system operational with the proper security for lan/wan, best practices... secure reagent jekt is top priority."
 **Builds on:** `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` (host-tier HMAC signing, shipped), `agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (the still-inert Cognito M2M binding check this spec elevates to P0), `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` (prior roadmap; this spec supersedes its Phase 1/3 sequencing based on what's now confirmed live in code, not just planned).
 

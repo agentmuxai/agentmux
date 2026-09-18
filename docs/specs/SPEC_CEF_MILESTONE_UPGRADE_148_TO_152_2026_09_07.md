@@ -2,7 +2,7 @@
 
 **Author:** AgentX
 **Created:** 2026-09-07
-**Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7, — PRs touching this work, newest first: #3231, #3176, #3172 (+5 more)
+**Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7,
 plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
 verdict is **go** on targeting 152 directly — patches #1/#2/#3 are verified
 against real CEF/Chromium 152 source, and of the 18 fork-modified CEF files,
@@ -20,7 +20,7 @@ conflicts. Both files that had drifted merged cleanly because our changes and
 upstream's sit in different regions. Branch `7977` is now a genuine
 integration branch (was the bare upstream mirror until 2026-09-09 — both
 feature branches, `agentmux/7977-process-requirement` and
-`agentmux/7977-drag-rightclick-and-transparency`, are merged into it).
+`agentmux/7977-drag-rightclick-and-transparency`, are merged into it). — PRs touching this work, newest first: #3231, #3176, #3172 (+5 more)
 **Phases C/E/F/G not started; Windows built (`libcef.dll`, boot-verified);
 macOS/Linux not built — `agentmuxai/cef` has no CI, so this is the only
 compile signal that exists.**

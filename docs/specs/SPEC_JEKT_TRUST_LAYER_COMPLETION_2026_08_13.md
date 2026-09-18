@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 **Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`)
-**Status:** active — **host tier shipped, WAN half still gated.** The host-tier HMAC layer — PRs touching this work, newest first: #2565
+**Status:** active — **host tier shipped, WAN half still gated.** The host-tier HMAC layer
 this document designed is live:
 `agentmux_common::jekt_sign` (`sign_jekt`/`verify_jekt`), per-agent key injection via
 `inject_jekt_signing_keys_into_mcp_json` (`agentmux-srv/src/backend/agent_config.rs:1312`,
@@ -13,7 +13,7 @@ been citing this document as the **source of truth for shipped jekt trust behavi
 body text is deliberately left as written: it describes the pre-implementation state and is
 still the clearest account of *why* the layer exists. The LAN and cross-channel tiers built on
 top of it are their own specs (`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`,
-`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`).
+`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`). — PRs touching this work, newest first: #2565
 **Still open — §1.2 Gap A, the other half of this spec’s own title:** the WAN binding check
 (`agentmux-cloud` `checkAgentBinding`) is built but **inert** — it only warns, because
 `ENFORCE_AGENT_BINDING` is not set in any CDK/Lambda environment config, and §4.1/§6 still

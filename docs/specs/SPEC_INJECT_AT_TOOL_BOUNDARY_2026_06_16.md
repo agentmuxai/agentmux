@@ -1,9 +1,9 @@
 # SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle
 
 **Date:** 2026-06-16
-**Status:** **Implemented** (Phase 3 of `SPEC_AGENT_CONTROL_PROTOCOL` — controller-aware — #1477
+**Status:** **Implemented** (Phase 3 of `SPEC_AGENT_CONTROL_PROTOCOL` — controller-aware
 delivery) on branch `agento/mid-turn-message-delivery`. Feasibility resolved empirically;
-cross-provider design below.
+cross-provider design below. — #1477
 
 > **Update (post-pull):** main now ships Claude as a **persistent** controller (the Agent
 > Control Protocol Phase 1 landed: `--permission-prompt-tool stdio --permission-mode default`,

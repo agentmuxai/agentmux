@@ -2,10 +2,10 @@
 
 **Date:** 2026-08-22
 **Author:** Camper
-**Status:** Implemented. The relative `@.claude/AGENTMUX_MEMORY.md` import — #2747
+**Status:** Implemented. The relative `@.claude/AGENTMUX_MEMORY.md` import
 (the design's one open question) was smoke-tested directly against the
 real Claude Code CLI (`claude -p`) before implementation — confirmed
-working as assumed.
+working as assumed. — #2747
 **Motivated by:** direct request, following the Armory "Global Memory" rename
 (`SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md`) — Global Memory
 is supposed to represent "the global rules agents follow," but a project's

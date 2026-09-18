@@ -1,12 +1,12 @@
 # SPEC: Tool preview common-indentation stripping (dedent)
 
 **Date:** 2026-08-08
-**Status:** implemented 2026-08-24. `stripCommonIndentSharedPrefix` was added — #2780
+**Status:** implemented 2026-08-24. `stripCommonIndentSharedPrefix` was added
 as a third exported helper (not spelled out in §3.1's two-function sketch) to
 keep the Edit call site's "one shared prefix across two related strings"
 concern inside this module rather than duplicated at the DiffViewer call
 site. Live-pane visual verification (§5) not yet done as of this PR — see
-the PR body for why, and do it before/at merge if practical.
+the PR body for why, and do it before/at merge if practical. — #2780
 
 Two issues found by reagent review on PR #2780, both fixed same-day: (1)
 `renderWrite` was calling the Read-specific numbered-line dedent variant on

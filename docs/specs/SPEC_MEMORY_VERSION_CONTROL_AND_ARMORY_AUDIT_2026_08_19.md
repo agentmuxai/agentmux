@@ -1,7 +1,7 @@
 # Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory)
 
 **Date:** 2026-08-19
-**Status:** implemented same-day, uncommitted (working tree only — no PR — #2674
+**Status:** implemented same-day, uncommitted (working tree only — no PR
 opened, per instructions not to push without being asked). Revised twice
 before implementation: first moved the visibility surface from Warden to
 Stash/Armory and added the out-of-band `~/.claude` write-tracking

@@ -1,7 +1,7 @@
 # SPEC: Composer Strip — Auth/Compact Side Stability Across the Row-Count Boundary
 
 **Date:** 2026-09-16
-**Status:** implemented — §4's design shipped as written (the `pinnedPairs` — #3282
+**Status:** implemented — §4's design shipped as written (the `pinnedPairs`
 generalization, §4.3), with `[{ leftKey: "auth", rightKey: "ctx" }]` wired
 at the one call site. Logic validated standalone (vitest is blocked locally
 by a pre-existing, unrelated `solid-refresh`/JSDOM environment issue — CI is
@@ -16,7 +16,7 @@ row was emitted unconditionally, bypassing the per-pair capacity check the
 generic two-pointer pairs already have — an over-width pair would still
 `flex-wrap` into two physical one-sided lines despite the row's data
 formally having both sides filled (fixed: same capacity check, split into
-two one-sided rows preserving each member's own side when it doesn't fit).
+two one-sided rows preserving each member's own side when it doesn't fit). — #3282
 **Affects:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` —
 the `auth` slot ("Logged in" / "Not logged in") and the `ctx` slot's Compact
 button.

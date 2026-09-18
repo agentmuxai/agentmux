@@ -1,13 +1,13 @@
 # Composer: Shift+ArrowUp triggers history recall before the top line is fully selected
 
 **Date:** 2026-08-11
-**Status:** Implemented — `AgentFooter.tsx`. The implementation simplified — #2540
+**Status:** Implemented — `AgentFooter.tsx`. The implementation simplified
 further than §4 proposed: once the requirement is "true absolute position,"
 the mirror-div visual-row measurement becomes unnecessary entirely (position
 0 is always visual row 0 regardless of wrapping) — the whole `caretVisualEdge`
 function was replaced with a two-line pure position check,
 `caretAtSelectionEdge`, rather than layering a position check on top of the
-existing measurement. See the function's own doc comment for the reasoning.
+existing measurement. See the function's own doc comment for the reasoning. — #2540
 **Owner:** Agent3
 **Area:** Agent pane composer (`AgentFooter.tsx`) — sent-message history
 recall vs. text selection
