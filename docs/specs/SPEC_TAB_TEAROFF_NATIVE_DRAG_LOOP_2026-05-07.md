@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-07
 **Owner:** AgentA
-**Status:** SPEC ONLY — never built, never tried in this codebase
+**Status:** proposed — SPEC ONLY — never built, never tried in this codebase
 **Predecessors:** PR #727 (size match), PR #730 (position match + threshold), [`RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md`](./RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md)
 **Effort estimate:** 2-3 days Win32 only, 5-8 days cross-platform (Win/macOS/X11/Wayland)
 

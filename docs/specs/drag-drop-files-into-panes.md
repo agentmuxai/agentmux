@@ -1,6 +1,6 @@
 # Spec: Drag & Drop Files Into Panes
 
-**Status:** Ready for implementation
+**Status:** proposed — Ready for implementation
 **Date:** 2026-03-08
 
 ## Problem

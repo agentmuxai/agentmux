@@ -1,7 +1,7 @@
 # SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup
 
 **Date:** 2026-07-09
-**Status:** Approved — open questions resolved, ready to implement
+**Status:** proposed — Approved — open questions resolved, ready to implement
 **Author:** Agent2
 **Trigger:** User request — *"switch the Bypass/Model/effort dropups with a single panel dropup ... think of good names for the button. The panel includes all the options and models and effort, listed out efficiently."*
 **Revision note:** This spec was originally drafted against a stale checkout that predated commit `9f86d917` (#1922, *"Mode/Model/Effort drop-ups (replace native `<select>`)"*) and its dependents (#1912, #1920, #1926). That work already replaced the old native `<select>`s with three separate `FlyoutMenu`-based drop-up pills directly in `AgentComposerStrip`. This revision retargets the same consolidation goal at that current architecture. §2 (naming) and §9 (resolved open questions) are unaffected by the retarget and carry over unchanged; everything else is rewritten.

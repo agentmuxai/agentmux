@@ -1,7 +1,7 @@
 # SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks
 
 **Date:** 2026-06-09  
-**Status:** Design / Pre-implementation  
+**Status:** proposed — Design / Pre-implementation
 **Scope:** `frontend/app/view/agent/`
 
 ---

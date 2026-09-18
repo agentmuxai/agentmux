@@ -1,7 +1,7 @@
 # Spec: Scroll Chaining for Nested Tool-Preview Regions
 
 **Date:** 2026-07-03
-**Status:** Phase 1 shipped (d190dff7 / #1956) and found insufficient by live
+**Status:** active — Phase 1 shipped (d190dff7 / #1956) and found insufficient by live — #1963
 reproduction on 2026-07-04; Phase 2 implemented same day. See "Addendum"
 at the bottom.
 **Related:** `docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md` (owns

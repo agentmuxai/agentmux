@@ -1,7 +1,7 @@
 # SPEC: srv supervision via host recycle (#942 Phase 2)
 
 **Date:** 2026-07-11
-**Status:** Ready for implementation
+**Status:** proposed — Ready for implementation
 **Tracking:** #942 Phase 2 ("srv supervision"); supersedes that spec's
 `SrvManager` sketch for the srv case
 **Scope:** `agentmux-launcher/src/supervisor/windows.rs` (+ unix mirror later)

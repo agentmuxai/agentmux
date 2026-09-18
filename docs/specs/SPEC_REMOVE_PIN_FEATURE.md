@@ -1,6 +1,6 @@
 # SPEC: Remove Tab Pinning, Uniform Inter-Tab Separator
 
-**Status:** Spec — not implemented.
+**Status:** proposed — Spec — not implemented.
 **Date:** 2026-04-18
 **Owner:** AgentA
 

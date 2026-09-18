@@ -1,6 +1,6 @@
 # Spec: AgentMux Isolated Claude/Anthropic Authentication
 
-**Status:** Research / Design
+**Status:** draft — Research / Design
 **Date:** 2026-03-21
 **Author:** Research via Claude Code agent
 

@@ -1,6 +1,6 @@
 # Report: Is there a standard for Armory-style agent capability bundles? Research + proposal (2026-07-16)
 
-**Status:** Research report + standard proposal — no implementation yet.
+**Status:** draft — Research report + standard proposal — no implementation yet.
 **Author:** Agent3
 **Method:** Four deep-research harness passes + a code-level inventory of
 the Armory's actual schemas on `main` @ `e6ec3c42`.

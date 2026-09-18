@@ -1,6 +1,6 @@
 # Report — Armory Ctrl+Wheel Zoom (missing) + Browser Pane Zoom (not per-instance)
 
-**Status:** Analysis only — no code written yet (per explicit request: "lets analyze and write a
+**Status:** historical — Analysis only — no code written yet (per explicit request: "lets analyze and write a
 report to file").
 **Trigger:** user request — "we need zoom (ctrl-wheel) inside the armory, and it also needs to be
 decoupled from instances of the browser pane. if I have a couple browser panes open, the zoom is

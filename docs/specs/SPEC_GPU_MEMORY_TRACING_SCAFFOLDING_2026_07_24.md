@@ -9,7 +9,7 @@ obvious explanations holds. The next step that can actually narrow this further 
 memory trace during confirmed-idle hours — process-level counters (`Private Bytes`, `Committed
 Bytes`) cannot see inside the GPU process's own allocator, which is exactly where the
 "unattributed" bucket lives.
-**Status:** Tier 2 (§2.2) implemented, PR #2294 (2 rounds of real review fixes: UI-thread
+**Status:** active — Tier 2 (§2.2) implemented, PR #2294 (2 rounds of real review fixes: UI-thread — #2294
 marshaling, dev-gating, path confinement — see PR thread). **Run live, same day, after fixing
 the separate `task dev` Gap B PATH blocker** (see §6 — that fix was a prerequisite, not part of
 this spec, but is what made a live run possible at all). Real capture executed: `begin_gpu_trace`

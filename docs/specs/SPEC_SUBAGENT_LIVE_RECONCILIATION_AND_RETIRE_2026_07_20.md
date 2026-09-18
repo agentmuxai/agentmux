@@ -1,7 +1,7 @@
 # SPEC — live subagent reconciliation + Retire action (best-practices plan)
 
 **Date:** 2026-07-20
-**Status:** Phase A shipped (#2234, merged). Phase B (#2235, this PR) implements
+**Status:** active — Phase A shipped (#2234, merged). Phase B (#2235, this PR) implements — #2235
 the rest of this doc.
 **Builds on:** `docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md`
 (closes its Open Question 1; makes a fresh product decision on Open

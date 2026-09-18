@@ -1,6 +1,6 @@
 # Report: agent/swarm pane loading, ambient-call flood, and stale status
 
-**Status:** Investigation complete — no code changed. Written to inform an
+**Status:** proposed — Investigation complete — no code changed. Written to inform an
 architecture decision before implementation.
 **Author:** AgentX
 **Date:** 2026-07-07

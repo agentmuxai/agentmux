@@ -1,7 +1,7 @@
 # SPEC — Pane Minimize Caret Not Flipping
 
 **Date:** 2026-06-24
-**Status:** Root cause confirmed
+**Status:** proposed — Root cause confirmed
 
 ---
 

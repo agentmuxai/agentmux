@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27
 **Author:** AgentA
-**Status:** Design — perf investigation + multi-phase remediation plan.
+**Status:** proposed — Design — perf investigation + multi-phase remediation plan.
 
 ---
 

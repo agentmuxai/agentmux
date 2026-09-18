@@ -1,7 +1,7 @@
 # SPEC: OpenEditor — collapsed file-tree + floating-pane support
 
 **Date:** 2026-06-16
-**Status:** In progress
+**Status:** draft — In progress
 **Author:** Naki
 **Repo HEAD at analysis:** `bb255fda`
 **Related:** [[SPEC_FLOATING_PANE_TEAROFF_2026_05_11]], [[SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29]],

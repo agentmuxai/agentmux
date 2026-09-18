@@ -1,7 +1,7 @@
 # SPEC: LAN discovery peer metadata gets clobbered blank by TXT-less mDNS re-resolutions
 
 **Date:** 2026-08-16
-**Status:** Root cause confirmed, fix implemented and verified with new unit
+**Status:** implemented — Root cause confirmed, fix implemented and verified with new unit — #2598
 tests (all passing — see §5) in `agentmux-srv/src/backend/lan_discovery.rs`
 (not yet committed/PR'd)
 **Reported by:** repo owner, live session — network panel showed blank hostname

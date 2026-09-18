@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-21
 **Author:** Camper
-**Status:** Phase A implemented. Phase B/C's CLAUDE.md jekt rule change
+**Status:** active — Phase A implemented. Phase B/C's CLAUDE.md jekt rule change — #2765
 confirmed live 2026-08-22 — see `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
 and `CLAUDE.md`'s jekt security rules section. Phase B's policy
 infrastructure and jekt-rule enforcement are now implemented — see

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Type:** Correction + implementation spec
-**Status:** Ready to schedule
+**Status:** proposed — Ready to schedule
 **Owner:** asaf
 **Scope:** Corrects `SPEC_MEMORY_ANALYSIS_2026_06_26.md`'s attribution; specifies the AgentMux-side
 memory fixes that survive the correction. See `docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`

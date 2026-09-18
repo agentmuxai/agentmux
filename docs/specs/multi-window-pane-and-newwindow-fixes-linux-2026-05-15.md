@@ -1,6 +1,6 @@
 # Multi-window correctness on Linux: pane RequestContext, new-window client, tab-switch overlay visibility
 
-**Status:** Spec — implemented in this PR
+**Status:** implemented — Spec — implemented in this PR — #881
 **Date:** 2026-05-15
 **Owner:** asafebgi@gmail.com
 **Branch:** `agentu/multi-window-fixes` off `main`

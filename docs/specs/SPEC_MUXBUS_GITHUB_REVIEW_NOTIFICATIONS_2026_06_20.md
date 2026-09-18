@@ -1,7 +1,7 @@
 # SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP)
 
 **Date:** 2026-06-20
-**Status:** Planned (superseded in part — see note below)
+**Status:** proposed — Planned (superseded in part — see note below)
 **Author:** smike
 
 > **2026-08-07 note:** §3.2 and §5's "Priority: extracted ID > static

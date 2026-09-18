@@ -1,6 +1,6 @@
 # CEF 148 — Linux Drag/Right-Click/Transparency Forward-Port
 
-**Status:** Spec only — no PRs yet
+**Status:** proposed — Spec only — no PRs yet
 **Date:** 2026-06-04
 **Author:** AgentU
 **Tracking:** Will land as a sequence of PRs against `agentmuxai/cef`, `a5af/cef-dll-sys`, and `agentmuxai/agentmux`. See §8.

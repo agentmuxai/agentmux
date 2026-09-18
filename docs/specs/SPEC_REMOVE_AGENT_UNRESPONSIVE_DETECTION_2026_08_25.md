@@ -1,7 +1,7 @@
 # SPEC: Agent-pane status cleanup — remove "unresponsive" detection, consolidate Reconnecting/Compacting/Working
 
 **Date:** 2026-08-25
-**Status:** Both parts shipped and merged to main (2026-08-27).
+**Status:** implemented — Both parts shipped and merged to main (2026-08-27). — #2826
 - **Part 1 (removal):** PR #2825 (merged) — includes a fixup commit
   restoring container-exec failure classification, a real regression Codex
   caught in review (container-backed agents had silently lost their only

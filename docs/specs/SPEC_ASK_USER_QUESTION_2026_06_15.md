@@ -1,7 +1,7 @@
 # SPEC: AskUserQuestion — interactive agent questions in the agent pane
 
 **Date:** 2026-06-15
-**Status:** Phase 1 shipped (persistent agents, tool_result). Phase 2 shipped
+**Status:** active — Phase 1 shipped (persistent agents, tool_result). Phase 2 shipped — #1539
 (one-shot/container agents — follow-up delivery; the resume+tool_result mechanism
 was empirically disproven, see §10.1).
 **Owner:** Agent pane (frontend stream/reducer/render) + sidecar (controller stdin delivery)
