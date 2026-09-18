@@ -8,7 +8,7 @@
 **Date:** 2026-05-25
 **Author:** AgentA (Claude Opus 4.7)
 **Tracking issue:** [#1042](https://github.com/agentmuxai/agentmux/issues/1042)
-**Related history doc:** [`docs/terminal-jumbled-startup-investigation.md`](../../archive/terminal-jumbled-startup-investigation.md) (the original timeline + the PR-#1040 follow-up section)
+**Related history doc:** [`docs/terminal-jumbled-startup-investigation.md`](terminal-jumbled-startup-investigation.md) (the original timeline + the PR-#1040 follow-up section)
 **Methodology note:** `feedback_3strikes_term_jumble.md` (agent memory — internal)
 
 ---
