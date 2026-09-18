@@ -1,5 +1,7 @@
 # What is the hover popup on an agent tool/output line?
 
+**Status:** analysis
+
 **Date:** 2026-06-15
 **Answer in one line:** It's the **`NodeHoverStrip`** — a per-row, CSS-only **hover strip** (not a tooltip, not a JS popover) that fades into the **top-right of each conversation row** and shows the line's **timestamp** plus an **expand/collapse** button.
 

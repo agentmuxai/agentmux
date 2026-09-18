@@ -1,5 +1,7 @@
 # Retro: PR #70 — opener:allow-open-path Scope Regression
 
+**Status:** retro
+
 **Date:** 2026-03-08
 **Severity:** P1 (settings button broken)
 **Introduced by:** PR #70 (`agentx/clickable-links`), commit `65c1a81`

@@ -1,5 +1,7 @@
 # Agent Pane Typing Lag — Trace Analysis & Fix
 
+**Status:** analysis
+
 **Date:** 2026-04-12
 **Version under test:** 0.33.105 portable
 **Trace file:** `~/Desktop/Trace-20260412T232248.json.gz` (17 MB uncompressed)

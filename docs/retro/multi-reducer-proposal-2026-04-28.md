@@ -1,5 +1,7 @@
 # Multi-reducer architecture (accepted direction)
 
+**Status:** retro
+
 > **STATUS UPDATE (2026-04-28):** Originally written as a proposal; **direction accepted** later same day. This is now the agreed long-term plan. Sequencing: finish Phase B with the scaffolding model (per `b5-migration-architecture-2026-04-28.md`), then Phase D (snapshot/replay), then Phase E (srv reducer), then Phase F (host reducer — retires the scaffolding model). See `phase-b-roadmap.md` for current state.
 
 **Author:** AgentA.

@@ -1,6 +1,6 @@
 # Root-Cause Analysis: Terminal Right-Edge Gap (zoom-dependent width)
 
-**Status:** Complete — empirically verified against the live dev build via CDP
+**Status:** analysis — Complete — empirically verified against the live dev build via CDP
 **Author:** AgentX
 **Date:** 2026-06-10
 **Companion spec:** `docs/specs/SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10.md`

@@ -1,5 +1,7 @@
 # Phase F+G Status — 2026-05-01
 
+**Status:** retro
+
 Snapshot at end of autonomous PR sequencer session.
 
 Version after merges: **0.33.560**.

@@ -1,5 +1,7 @@
 # Theme System: Light Theme & Depth Gaps — Research Report
 
+**Status:** analysis
+
 **Date:** 2026-07-07
 **Scope:** Two questions — (1) does a light theme exist / what's needed to add one, (2) where does the theme system fail to "penetrate," especially the terminal, and what other nooks exist.
 **Method:** Three parallel codebase research passes (theme architecture, terminal/xterm integration, hardcoded-color sweep).

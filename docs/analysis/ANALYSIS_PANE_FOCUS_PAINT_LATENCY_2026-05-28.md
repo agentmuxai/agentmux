@@ -1,7 +1,7 @@
 # Analysis: Pane click-to-focus-border paint latency
 
 **Date:** 2026-05-28
-**Status:** Investigation (no code change yet)
+**Status:** analysis — Investigation (no code change yet)
 **Scope:** Time from `mousedown`/`click` on a pane → visible focused-border
 color change on `.block-mask`.
 

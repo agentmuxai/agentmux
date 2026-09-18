@@ -1,5 +1,7 @@
 # Retro: Floater drag state bugs — PR #1276 / #1280
 
+**Status:** retro
+
 **Date:** 2026-06-05
 **PRs:** #1279 (spec), #1280 (implementation)
 **Symptom:** Redock broken on Windows; dragging state permanently stuck on macOS/Linux; unexpected floater closes when maximising; stale drop-target overlays after Esc.

@@ -1,7 +1,7 @@
 # Retro: Win10 Scroll Flash Investigation
 
 **Date range:** ~v0.32.73 – v0.32.88+
-**Status:** Monitoring — no flash observed in recent sessions (long testing needed to close)
+**Status:** retro — Monitoring — no flash observed in recent sessions (long testing needed to close)
 **PRs:** #206, #208 (merged) · #210, #215 (closed, superseded) · #227 (open, pending merge)
 
 ---

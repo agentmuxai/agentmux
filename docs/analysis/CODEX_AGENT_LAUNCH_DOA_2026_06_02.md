@@ -1,7 +1,7 @@
 # Codex agent DOA — Claude-shaped runtime args leak into the codex command
 
 **Date:** 2026-06-02
-**Status:** root-caused; fix in `frontend/app/view/agent/buildRuntimeArgs.ts`
+**Status:** analysis — root-caused; fix in `frontend/app/view/agent/buildRuntimeArgs.ts`
 **Severity:** codex agents are **completely non-functional** (process exits <100 ms on every launch)
 **Area:** agent provider arg construction (translator-unification, RFC #753 Phase 1.5)
 

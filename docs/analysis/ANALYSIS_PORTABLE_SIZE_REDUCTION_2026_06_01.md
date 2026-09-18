@@ -1,4 +1,6 @@
 # Portable Build Size Analysis — v0.41.0
+
+**Status:** analysis
 **Date:** 2026-06-01  
 **Build:** agentmux-0.41.0+g1f9447e1.20260601T094812-x64-portable.zip  
 **ZIP size:** 171 MB | **Extracted:** ~410 MB

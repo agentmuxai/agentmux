@@ -1,7 +1,7 @@
 # Bug Report — Agent Pane Zoom Persistence Not Working
 
 **Date:** 2026-06-25
-**Status:** Root cause confirmed, fix identified
+**Status:** analysis — Root cause confirmed, fix identified
 **Area:** Agent pane / per-agent zoom storage
 
 ---

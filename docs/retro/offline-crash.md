@@ -1,5 +1,7 @@
 # Retro: Why Backend Crash Recovery Was Never Shipped
 
+**Status:** retro
+
 **Date:** 2026-03-24
 **Related:** [`OFFLINE_CRASH_ANALYSIS`](../analysis/offline-crash.md), PR #214, commit `15c9a1a`
 

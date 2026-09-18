@@ -1,5 +1,7 @@
 # Findings: Tool-Call Scroll Oscillation — Correlated Live Repro Data (2026-08-21)
 
+**Status:** analysis
+
 > **SUPERSEDED IN SCALE by
 > `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`**
 > (added 2026-08-29, docs-cleanup Phase 4). This document correlates **8

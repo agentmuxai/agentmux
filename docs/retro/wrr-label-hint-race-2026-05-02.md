@@ -1,5 +1,7 @@
 # Retro: WRR back-of-queue `label_hint` race — 2026-05-02
 
+**Status:** retro
+
 ## Summary
 
 `wrr/win_event.rs::handle_event::EVENT_OBJECT_CREATE` peeked the back of `pending_window_creations` to label OS-level WM_CREATE events. The peek assumed at most one window create in flight at any time. When users create multiple windows in succession (rapid status-bar clicks, scripted creates, drag-tear-off bursts), multiple pending entries queue up, and back-of-queue returns the **same latest label for every WM_CREATE** until the queue drains.

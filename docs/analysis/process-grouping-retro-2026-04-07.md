@@ -1,5 +1,7 @@
 # Process Grouping Retro — 2026-04-07
 
+**Status:** analysis
+
 **Session:** AgentA  
 **Trigger:** User reported "processes not grouped under AgentMux CEF in Task Manager"  
 **Resolution:** False alarm — grouping was working correctly in v0.33.57

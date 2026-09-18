@@ -1,5 +1,7 @@
 # Retro: cross-channel jekt to a live agent silently and permanently failed
 
+**Status:** retro
+
 **Date:** 2026-08-17
 **Reporter:** repo owner, live in an agent session
 **Investigator:** Loap

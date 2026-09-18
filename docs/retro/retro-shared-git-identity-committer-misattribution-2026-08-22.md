@@ -1,5 +1,7 @@
 # Retro: shared machine-wide git identity misattributes every agent's commits to AgentY
 
+**Status:** retro
+
 **Date:** 2026-08-22
 **Owner:** AgentY
 **Area:** local git config (this machine) / `agentmux-cloud`'s github-consumer

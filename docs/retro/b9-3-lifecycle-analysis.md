@@ -1,6 +1,6 @@
 # Why does AgentMux need a "host should quit" saga?
 
-**Status:** Architectural analysis. Written 2026-04-29 after multiple smoke iterations on B.9.3.
+**Status:** retro — Architectural analysis. Written 2026-04-29 after multiple smoke iterations on B.9.3.
 **Author:** AgentA.
 **Goal:** zoom out far enough that the design choices become obvious. Diagrams from launch → tab tear → close → quit.
 

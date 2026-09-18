@@ -3,7 +3,7 @@
 **Date:** 2026-07-23
 **Severity:** Medium (data-quality/resource leak — no crash, but corrupts the Swarm data model and leaks OS watch handles + tokio tasks indefinitely)
 **Area:** `agentmux-srv/src/backend/subagent_watcher.rs` (since split into `subagent_watcher/` submodules by #2283, landed after this investigation but before this fix — the fix below targets the new module layout)
-**Status:** Root-caused and fixed. See the companion PR for the code change.
+**Status:** retro — Root-caused and fixed. See the companion PR for the code change.
 
 ---
 

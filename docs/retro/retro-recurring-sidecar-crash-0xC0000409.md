@@ -1,5 +1,7 @@
 # Retro: Recurring Sidecar Crash — `0xC0000409` / `STATUS_STACK_BUFFER_OVERRUN`
 
+**Status:** retro
+
 **Date:** 2026-03-27
 **Affected versions:** v0.32.73, v0.32.79, v0.32.84, v0.32.92 (confirmed), likely others
 **Severity:** Critical — sidecar terminates silently, all terminal I/O and RPC lost

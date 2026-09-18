@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-22
 - **Severity:** Medium (UX regression; prompts for a capability we never use)
-- **Status:** Resolved — PR #1713 removes `AgentMux Helper (Alerts).app` from the bundle (option A)
+- **Status:** retro — Resolved — PR #1713 removes `AgentMux Helper (Alerts).app` from the bundle (option A)
 - **Scope:** macOS only — `AgentMux Helper (Alerts).app` notification registration
 
 ---

@@ -1,7 +1,7 @@
 # Analysis: Floating-pane tear-off — what's in, what's needed
 
 **Date:** 2026-05-26
-**Status:** Investigation (no code change yet)
+**Status:** analysis — Investigation (no code change yet)
 **Companion to:** `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`
 
 ## TL;DR

@@ -3,7 +3,7 @@
 **Date:** 2026-07-02
 **Severity:** Medium (UX regression/incompleteness — not data-loss, but the requested behavior was
 explicitly specified and shipped incorrectly)
-**Status:** Root-caused; fix not yet implemented (design in
+**Status:** retro — Root-caused; fix not yet implemented (design in
 `SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md`)
 **Reporter:** asaf
 **Component:** agent pane composer strip / details region (`frontend/app/view/agent`)

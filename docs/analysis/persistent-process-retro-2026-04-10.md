@@ -1,5 +1,7 @@
 # Persistent Process Mode — Debug Retro (2026-04-10)
 
+**Status:** analysis
+
 **Goal:** Replace per-turn subprocess with persistent long-running CLI process
 using `--input-format stream-json` for bidirectional communication.
 

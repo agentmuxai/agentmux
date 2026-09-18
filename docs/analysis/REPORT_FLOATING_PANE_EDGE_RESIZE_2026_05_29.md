@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-29
 **Author:** AgentA
-**Status:** Investigation / implementation plan
+**Status:** analysis — Investigation / implementation plan
 **Symptom:** Hovering/dragging the edge of a torn-off floating pane does nothing — no resize cursor, no resize. It *looks* like it should work (the window is `WS_THICKFRAME` and the wndproc maps edge zones), but it's inert.
 
 ## TL;DR

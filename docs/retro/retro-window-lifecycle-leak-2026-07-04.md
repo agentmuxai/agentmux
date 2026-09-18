@@ -1,5 +1,7 @@
 # RETRO — window close never reaches the reducer; launcher's open-window mirror also drifts
 
+**Status:** retro
+
 **Date:** 2026-07-04
 **Author:** AgentA
 **Severity:** High — `state.windows` (the reducer's canonical window map) is effectively write-only in current production usage; the user-visible "(N)" window-count chip and its expanded panel drift upward and never recover; directly relevant to the pagefile/memory-growth investigation that prompted the test that surfaced this.

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-01
 **Author:** AgentA
-**Status:** Snapshot — companion to `phase-e-status-2026-05-01.md` and `next-steps-2026-05-01.md`
+**Status:** retro — Snapshot — companion to `phase-e-status-2026-05-01.md` and `next-steps-2026-05-01.md`
 
 ---
 

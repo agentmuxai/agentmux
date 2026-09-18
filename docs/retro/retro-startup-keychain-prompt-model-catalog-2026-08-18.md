@@ -1,5 +1,7 @@
 # Retro: opening AgentMux on macOS prompted for the Keychain password
 
+**Status:** retro
+
 **Date:** 2026-08-18
 **Area:** `agentmux-srv/src/backend/model_catalog.rs`, `agentmux-srv/src/server/providers_handlers.rs`, `frontend/app-init.ts`
 

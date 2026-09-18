@@ -1,5 +1,7 @@
 # PTY Duplicate Output & Color Offset Debug — 2026-04-03
 
+**Status:** analysis
+
 ## Symptom
 - Duplicate characters in xterm output (some chars duplicated, others dropped)
 - Color highlighting at wrong offsets

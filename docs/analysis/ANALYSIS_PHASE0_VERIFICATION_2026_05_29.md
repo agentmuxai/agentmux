@@ -1,5 +1,7 @@
 # ANALYSIS — Input-first Phase 0 verification + bench harness
 
+**Status:** analysis
+
 **Date:** 2026-05-29
 **Author:** AgentX
 **Context:** Phase 0 of the input-first execution plan ([discussion #1161](https://github.com/agentmuxai/agentmux/discussions/1161)). Records the bench-harness scaffolding (0.1, shipped here) and the verification findings for the 0.3 "cheap wins" — several of which turn out to need **runtime/visual confirmation on the running app**, i.e. they are past the autonomous boundary.

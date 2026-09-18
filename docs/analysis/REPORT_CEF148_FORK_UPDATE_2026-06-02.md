@@ -1,5 +1,7 @@
 # CEF 148 fork update + 7680→7778 customization audit
 
+**Status:** analysis
+
 **Date:** 2026-06-02
 **Repo:** `agentmuxai/cef` (fork of `chromiumembedded/cef`)
 **Local CEF tree:** `~/cef-build/chromium/chromium/src/cef` @ upstream `0d9d52a65` (148.0.7778.180)

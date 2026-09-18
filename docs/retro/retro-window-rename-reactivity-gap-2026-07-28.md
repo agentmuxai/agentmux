@@ -1,5 +1,7 @@
 # Retro: renaming a window via the raw `setmeta` RPC silently doesn't update the live UI
 
+**Status:** retro
+
 ## What happened
 
 Asked to rename "Window 1" to "agent3 work" using the app API, I connected

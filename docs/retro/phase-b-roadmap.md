@@ -1,6 +1,6 @@
 # Phase B roadmap (canonical, post-#605)
 
-**Status:** **Phase B is DONE** as of 2026-04-29 (PR #605 merged). All sub-phases (B.1–B.9 + B.8 exit) shipped. Next: Phase D (durability/resync) → Phase E (srv reducer) → Phase F (host reducer + scaffolding retirement). See `docs/retro/multi-reducer-status-2026-04-29.md` for the full architectural status and forward plan.
+**Status:** retro — **Phase B is DONE** as of 2026-04-29 (PR #605 merged). All sub-phases (B.1–B.9 + B.8 exit) shipped. Next: Phase D (durability/resync) → Phase E (srv reducer) → Phase F (host reducer + scaffolding retirement). See `docs/retro/multi-reducer-status-2026-04-29.md` for the full architectural status and forward plan.
 **Author:** AgentA.
 **Read first if resuming Phase B work**, then `b5-migration-architecture-2026-04-28.md` and `multi-reducer-proposal-2026-04-28.md`.
 

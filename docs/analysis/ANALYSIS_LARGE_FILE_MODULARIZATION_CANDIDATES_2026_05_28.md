@@ -1,7 +1,7 @@
 # Analysis: Large-file modularization candidates (2026-05-28)
 
 **Author:** AgentA
-**Status:** Survey doc + detailed sub-PR carve plans. R.1 of store.rs landed today; this updated revision adds full plans for the remaining 4 candidates.
+**Status:** analysis — Survey doc + detailed sub-PR carve plans. R.1 of store.rs landed today; this updated revision adds full plans for the remaining 4 candidates.
 **Related:** [SPEC_STORE_MODULARIZATION_2026_05_27.md](../specs/SPEC_STORE_MODULARIZATION_2026_05_27.md) — the playbook R.2–R.6 followed for `store.rs`.
 
 ---

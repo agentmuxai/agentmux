@@ -1,5 +1,7 @@
 # Browser-Pane Airspace — Architecture Reassessment
 
+**Status:** analysis
+
 **Date:** 2026-05-30 · **Author:** AgentX · **Trigger:** runtime test of #1178 on Windows surfaced
 "right-click context menus appear wrong around browser panes — black spots in offset menus, menus
 sometimes hidden."

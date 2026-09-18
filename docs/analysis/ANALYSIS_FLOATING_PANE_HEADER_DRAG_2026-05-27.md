@@ -1,7 +1,7 @@
 # Analysis: How should the floating pane header drag the window?
 
 **Date:** 2026-05-27
-**Status:** Decision pending; recommendation = Option B
+**Status:** analysis — Decision pending; recommendation = Option B
 
 ## The problem
 

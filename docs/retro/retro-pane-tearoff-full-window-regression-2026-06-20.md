@@ -1,5 +1,7 @@
 # Retro: Pane Tear-Off Produces Full Window With Tabs
 
+**Status:** retro
+
 **Date**: 2026-06-20  
 **Severity**: P1 regression — core floating-pane UX broken  
 **Introduced by**: PR #1610 — Pane tear-off pool (macOS/Linux), merged ~2026-06-19  

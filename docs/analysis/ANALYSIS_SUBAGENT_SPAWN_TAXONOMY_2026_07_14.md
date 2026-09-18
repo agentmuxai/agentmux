@@ -1,7 +1,7 @@
 # Subagent spawn taxonomy: every way a subagent can come into existence
 
 **Date:** 2026-07-14
-**Status:** Reference doc — informs Swarm pane data-model design, not itself a spec
+**Status:** analysis — Reference doc — informs Swarm pane data-model design, not itself a spec
 **Scope:** Every distinct shape a Claude Code CLI subagent-spawn can take, as
 observed in AgentMux's own code (`agentmux-srv/src/backend/subagent_watcher.rs`,
 `frontend/app/view/swarm/swarm-model.ts`) and as documented/confirmed by

@@ -1,5 +1,7 @@
 # Phase E Multi-Reducer Migration — Status & Design Report
 
+**Status:** retro
+
 **Date:** 2026-04-30
 **Branch state:** `main` at `e716a97a`
 **Phase E PRs open:** none (loop paused)

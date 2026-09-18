@@ -1,5 +1,7 @@
 # Retro: GHCR Push 403 — container build never shipped
 
+**Status:** retro
+
 **Date:** 2026-06-18  
 **Severity:** Medium (build pipeline broken since first run; no prod image ever published)  
 **Affected versions:** v0.45.0, v0.46.0, v0.46.4 (all container builds since workflow was introduced in #1347)

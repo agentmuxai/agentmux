@@ -1,5 +1,7 @@
 # Retro — fixing "no login URL" in two named call sites left a third, unnamed one broken
 
+**Status:** retro
+
 **Date:** 2026-07-20
 **Trigger:** Live verification of `retro-headless-login-browser-open-2026-07-20`'s
 fix. A fresh portable build (0.54.1, containing that fix) was launched

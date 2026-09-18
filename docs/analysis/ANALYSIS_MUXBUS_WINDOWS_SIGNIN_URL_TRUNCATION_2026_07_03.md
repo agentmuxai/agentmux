@@ -1,7 +1,7 @@
 # ANALYSIS: MuxBus Cloud sign-in fails on Windows — OAuth URL truncated by `cmd /C start`
 
 **Date:** 2026-07-03
-**Status:** **RESOLVED — shipped in #1938** (`fix(muxbus): quote Windows
+**Status:** analysis — **RESOLVED — shipped in #1938** (`fix(muxbus): quote Windows
 browser-open URL so cmd.exe doesn't truncate it at the first &`). Verified
 2026-08-29 (docs-cleanup Phase 4): `agentmux-srv/src/util.rs`'s
 `open_browser` now builds `start "" "{url}"` via `raw_arg`, with a comment

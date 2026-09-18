@@ -1,5 +1,7 @@
 # Retro: nightly Windows build silently failing to extract codec-enabled CEF (backslash zip paths)
 
+**Status:** retro
+
 **Date found:** 2026-07-29
 **Severity:** High — the Windows job of `ci-nightly-artifacts.yml` has failed
 outright on every run since at least 2026-07-28 whenever the CEF-runtime

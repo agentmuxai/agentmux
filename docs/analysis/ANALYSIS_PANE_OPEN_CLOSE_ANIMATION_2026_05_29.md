@@ -4,7 +4,7 @@
 - **Author:** AgentX
 - **Area:** `frontend/layout/` (SolidJS tiling layout) + `frontend/app/block/` + (for full coverage) `agentmux-cef` host
 - **Goal:** When a pane opens/closes/splits, neighbors should glide into their new geometry instead of snapping.
-- **Status:** Root-caused. Initial one-line attempt reverted (PR #1156). Awaiting a direction decision (see §7).
+- **Status:** analysis — Root-caused. Initial one-line attempt reverted (PR #1156). Awaiting a direction decision (see §7).
 
 ---
 

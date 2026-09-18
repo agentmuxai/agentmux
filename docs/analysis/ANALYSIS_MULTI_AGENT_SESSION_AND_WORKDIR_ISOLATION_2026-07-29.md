@@ -1,7 +1,7 @@
 # Analysis: multi-agent session ownership + working-directory isolation (host, sandbox, LAN/WAN)
 
 **Date:** 2026-07-29
-**Status:** Discussion / analysis — no code change yet. Written to seed a fresh planning conversation, not as a committed plan.
+**Status:** analysis — Discussion / analysis — no code change yet. Written to seed a fresh planning conversation, not as a committed plan.
 **Prompted by:** `docs/retros/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — a throwaway `task dev` build resumed a live production agent session and spawned an independent second process that ran real `git checkout` in the same physical working directory as the first.
 
 ## TL;DR

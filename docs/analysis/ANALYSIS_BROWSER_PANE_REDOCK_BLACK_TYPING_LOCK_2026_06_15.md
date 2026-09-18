@@ -1,5 +1,7 @@
 # Analysis: Browser-pane redock → black page, no URL, global typing lock
 
+**Status:** analysis
+
 **Date:** 2026-06-15
 **Against:** main @ `91bc8bf2`
 **Symptom (reported):** Redocking a browser pane (drag a floating/torn-off browser pane back into a docked position) yields a **black page with no URL**, and **typing is locked everywhere** — every pane (agent, terminal, even the address bar) stops accepting keystrokes. The only recovery is to **open another window and come back**, after which typing works again everywhere.

@@ -1,5 +1,7 @@
 # WebSocket Robustness in CEF
 
+**Status:** analysis
+
 **Date:** 2026-04-02
 **Trigger:** UI freeze during testing — WebSocket disconnected, frontend went unresponsive
 

@@ -1,5 +1,7 @@
 # Polling Landscape Analysis — AgentMux
 
+**Status:** analysis
+
 **Date:** 2026-06-23  
 **Scope:** All timer-based repeating work in frontend (TS/SolidJS) and backend (Rust/tokio)  
 **Question:** Is a unified polling framework worth building?

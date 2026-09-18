@@ -1,5 +1,7 @@
 # Retro: Chrome Zoom Cross-Platform Regression Chain
 
+**Status:** retro
+
 **Date:** 2026-03-19
 **Severity:** High — chrome zoom broken on Windows
 **Root cause:** Linux fix inadvertently changed Windows zoom behavior by moving CSS logic to JS

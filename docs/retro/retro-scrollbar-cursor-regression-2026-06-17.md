@@ -1,7 +1,7 @@
 # RETRO: The scrollbar-cursor "fix" that wasn't — inheritance, not deletion
 
 **Date:** 2026-06-17
-**Status:** Post-mortem. The original bug is **still live**, in a new shape, and the
+**Status:** retro — Post-mortem. The original bug is **still live**, in a new shape, and the
 guardrail we shipped now *blocks* the correct fix.
 **Scope:** `frontend/` cursor styling on scrollbars, app-wide.
 **Subjects:** PR #1453 (`fix(ui): scrollbars use the arrow cursor, not the link hand`)

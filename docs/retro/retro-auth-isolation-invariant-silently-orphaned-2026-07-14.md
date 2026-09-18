@@ -1,5 +1,7 @@
 # Retro — the "never use the user's global auth" invariant existed, was written down, and was silently orphaned by an unrelated refactor
 
+**Status:** retro
+
 **Date:** 2026-07-14
 **Trigger:** Live repro during auth stress-testing (documented in
 `docs/analysis/ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md`):

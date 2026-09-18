@@ -1,7 +1,7 @@
 # ANALYSIS: Floating Pane Ghost-to-Landing Disconnect
 
 **Date:** 2026-07-04
-**Status:** Root causes confirmed by direct file inspection (see citations). Builds on and
+**Status:** analysis — Root causes confirmed by direct file inspection (see citations). Builds on and
 supersedes the sizing portion of `ANALYSIS_FLOATING_PANE_REDOCK_SIZE_2026_06_23.md`, whose
 Phase 4b fix is now shipped. This document identifies what Phase 4b did **not** fix, plus a
 mechanical failure mode never previously documented.

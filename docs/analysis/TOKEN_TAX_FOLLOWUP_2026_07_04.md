@@ -1,5 +1,7 @@
 # AgentMux Token Tax — Follow-up: P1–P4 Resolution + Empirical Cache Check
 
+**Status:** analysis
+
 **Date:** 2026-07-04
 **Follow-up to:** `docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md`
 **Author:** AgentA

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 **Severity:** High — the entire app (not just a window) died and stayed dead until manually relaunched.
-**Status:** Root-caused; two fixes implemented (this PR + a companion launcher PR).
+**Status:** retro — Root-caused; two fixes implemented (this PR + a companion launcher PR).
 
 ## 1. What the user saw
 

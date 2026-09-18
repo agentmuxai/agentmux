@@ -1,5 +1,7 @@
 # Analysis: Chrome Zoom + DnD Keep Reverting on Windows
 
+**Status:** retro
+
 **Date:** 2026-03-19
 **Problem:** Chrome zoom icons shift left + pane DnD broken on Windows — regresses every time Linux or macOS agent touches shared files
 

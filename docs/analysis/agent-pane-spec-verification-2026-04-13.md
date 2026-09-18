@@ -155,7 +155,7 @@ Spec §7 (PR 3): "This PR wires the existing **global** identity UI into the per
 
 ### 3.3 Item #3 — Auto-login on first open
 
-- **Status:** **⧗ pending** — not started. Requires changes inside `launch-flow.ts` Phase 2. Spec marks this as highest risk; scheduled to ship last.
+- **Status:** analysis — **⧗ pending** — not started. Requires changes inside `launch-flow.ts` Phase 2. Spec marks this as highest risk; scheduled to ship last.
 
 ### 3.4 Item #4 — Tool `running` state on one line
 

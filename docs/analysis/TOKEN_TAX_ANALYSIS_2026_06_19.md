@@ -1,4 +1,6 @@
 # AgentMux Context Analysis
+
+**Status:** analysis
 **Date:** 2026-06-19 | **Version:** v0.46.5
 
 ---

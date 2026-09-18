@@ -1,6 +1,6 @@
 # Window Reality Reconciliation (WRR) — design
 
-**Status:** Design draft. Awaiting answers to open questions before B.9.1 implementation.
+**Status:** retro — Design draft. Awaiting answers to open questions before B.9.1 implementation.
 **Author:** AgentA.
 **Date:** 2026-04-28 (post-#599 / B.6.1 saga).
 

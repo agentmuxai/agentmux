@@ -1,7 +1,7 @@
 # Account deletion does not deauthenticate anything — auth lifecycle gap
 
 **Date:** 2026-07-14
-**Status:** Report — live-reproduced, not yet fixed
+**Status:** analysis — Report — live-reproduced, not yet fixed
 **Repro:** During auth stress-testing on a fresh `task dev` (v0.53.5, main
 `1d5fa3f5`): user deleted the Anthropic account(s) in **Armory → Accounts**;
 a running Claude agent **kept responding**, still fully authenticated.

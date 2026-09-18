@@ -1,5 +1,7 @@
 # Retro: MSVC C1083 in `libcef_dll_wrapper` — Actual Root Cause: Windows MAX_PATH (2026-07-14)
 
+**Status:** retro
+
 **TL;DR (added after the fact — read this first):** the title and most of
 this document describe a build-parallelism theory that was thoroughly
 tested and **disproven**. The real, confirmed root cause is Windows'

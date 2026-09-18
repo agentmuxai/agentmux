@@ -1,5 +1,7 @@
 # CI Workflow Catalog — What We Have, What's Redundant, What to Cut
 
+**Status:** analysis
+
 **Date:** 2026-07-18
 **Primary scope:** `agentmuxai/agentmux` `.github/workflows/` (12 registered workflows)
 **Also checked:** `agentmuxai/agentmux-builder`, `agentmuxai/agentmux-landing`,

@@ -1,7 +1,7 @@
 # Frontend Build Uses Tauri Vite Config
 
 **Date:** 2026-04-02
-**Status:** Known issue — not causing immediate breakage but worth addressing
+**Status:** analysis — Known issue — not causing immediate breakage but worth addressing
 **Discovered during:** Clipboard CEF implementation
 
 ## Finding

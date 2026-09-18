@@ -1,5 +1,7 @@
 # Bug: Right-click context menu stops working on empty tab after closing all panes
 
+**Status:** analysis
+
 **Date:** 2026-04-09
 **Severity:** UX bug — blocks discoverability of widget launcher
 

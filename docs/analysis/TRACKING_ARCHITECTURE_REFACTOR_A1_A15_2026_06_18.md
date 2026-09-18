@@ -202,7 +202,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Approach:** add `docs/specs/INDEX.md` (subsystem → current authoritative spec); merge the duplicate
   dirs; archive superseded per-incident specs.
 - **Acceptance:** one index exists; no duplicate-named dirs; superseded specs archived.
-- **Status:** ✅ dirs merged; `docs/specs/INDEX.md` added; all stale path refs updated.
+- **Status:** analysis — ✅ dirs merged; `docs/specs/INDEX.md` added; all stale path refs updated.
 
 ### A14 — Shared FE event-name constants 🟢
 - **Entry points:** Rust centralises WPS/wave-event names (`backend/wps.rs:22-54`,

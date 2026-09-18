@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-28
 **Severity:** P2 — cosmetic/trust issue (a live user-facing surface the team believed was retired), not data loss or a crash
-**Status:** Root-caused and **fully removed** (updated 2026-07-28, same day). Initial diagnosis proposed re-homing the in-transcript click into the Swarm pane (§6 Option B below); the user's explicit follow-up direction was narrower and stronger — no replacement pane, no replacement inline indicator, full removal of the click-to-open scaffold and the raw-slug-bearing inline chip. See §9 for what actually shipped.
+**Status:** retro — Root-caused and **fully removed** (updated 2026-07-28, same day). Initial diagnosis proposed re-homing the in-transcript click into the Swarm pane (§6 Option B below); the user's explicit follow-up direction was narrower and stronger — no replacement pane, no replacement inline indicator, full removal of the click-to-open scaffold and the raw-slug-bearing inline chip. See §9 for what actually shipped.
 
 ---
 

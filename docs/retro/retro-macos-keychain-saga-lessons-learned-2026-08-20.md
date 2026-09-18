@@ -1,5 +1,7 @@
 # Retro: what the macOS Keychain prompt saga actually taught us
 
+**Status:** retro
+
 **Date:** 2026-08-20
 **Area:** `agentmux-srv/src/backend/storage/muxbus.rs`, `agentmux-srv/src/identity/secret_store.rs`
 **Context:** synthesizes three prior retros from this same investigation —

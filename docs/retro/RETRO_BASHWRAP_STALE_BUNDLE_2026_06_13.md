@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-13
 **Severity:** High (masked a real fix; caused repeated "still broken" cycles)
-**Status:** Root-caused. Immediate stopgap applied. Deterministic fix proposed (not yet shipped).
+**Status:** retro — Root-caused. Immediate stopgap applied. Deterministic fix proposed (not yet shipped).
 
 ---
 

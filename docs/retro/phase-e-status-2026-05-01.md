@@ -175,7 +175,7 @@ Cross-references the gap audit at `saga-coordinator-location-analysis-2026-04-30
 
 #### E.2c.5b — TypeScript renderer dispatcher
 - Install `window.__agentmux_srv_event` handler (the host bridge already forwards events; renderer just needs to route them into atom domains).
-- Status: not started. Spec is in `SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §6.6.
+- **Status:** retro — not started. Spec is in `SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §6.6.
 - Estimated effort: ~150 LOC TS.
 
 #### E.4 — Layout state arms

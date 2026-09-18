@@ -1,7 +1,7 @@
 # CSS Sub-Pixel Rendering — 2024-2026 Best-Practice Playbook
 
 **Date:** 2026-04-26
-**Status:** Research findings (no implementation yet)
+**Status:** retro — Research findings (no implementation yet)
 **Trigger:** Tab/separator distance inconsistency (see
             `RETRO_TAB_SEPARATOR_DISTANCE_2026_04_26.md`). User
             wanted research into industry-wide solutions and a
