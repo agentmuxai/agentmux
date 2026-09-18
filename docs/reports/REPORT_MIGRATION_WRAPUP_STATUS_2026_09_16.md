@@ -486,7 +486,7 @@ report twice failed to say so.** The widget pair and `bundle.validate` are there
 they transform or leniently read their payload. `listagents` is there because it
 deliberately tolerates a null or malformed body from older clients that never sent one —
 `serde_json::from_value(data).unwrap_or_default()`, documented on its registration at
-`agentmux-srv/src/server/agent_handlers/mod.rs:1245`. A `Value` request preserves that
+`agentmux-srv/src/server/agent_handlers/core.rs:64-70`. A `Value` request preserves that
 exactly, which is why it is equally convertible. But the tolerance is about CLIENT VERSION
 SKEW rather than payload shape, and listing it beside the other three as though the
 rationale were shared is what made this unclear twice.
