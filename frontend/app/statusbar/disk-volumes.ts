@@ -95,12 +95,48 @@ export function diskTooltip(volumes: DiskVolume[]): string {
 /**
  * Row color by free share: red under 8% free, amber under 15%, muted
  * otherwise — same brackets the Disk readout itself uses
- * (SystemStats.tsx::pagefileDiskColor), so a drive that turns the pill
- * amber shows the same amber inside the popover.
+ * (watchVolumeColor below), so a drive that turns the pill amber shows the
+ * same amber inside the popover.
  */
 export function diskFreeColor(freeGb: number, totalGb: number): string {
     if (totalGb <= 0) return "var(--secondary-text-color)";
     const freePct = (freeGb / totalGb) * 100;
+    if (freePct < 8) return "var(--error-color)";
+    if (freePct < 15) return "var(--warning-color)";
+    return "var(--secondary-text-color)";
+}
+
+/**
+ * Color for the status-bar Disk pill.
+ *
+ * Thresholds come from SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2: the
+ * commit gauge sees only the SYMPTOM (commit near its limit) and is blind to
+ * the cause that spec found — a system-managed page file wants to auto-grow
+ * toward min(3xRAM, 1/8 volume) and silently cannot when its volume is low,
+ * pinning the commit ceiling below what every other gauge assumes. <15% free
+ * is that spec's documented crash-risk line; <8% is where its source incident
+ * actually crashed (20.1 GB / 446 GB), used here as the less alarmist error
+ * line. They double as sane generic low-disk brackets, which is why the
+ * non-Windows pill reuses them unchanged.
+ *
+ * `systemManaged` is deliberately TRI-STATE, and conflating two of its values
+ * is a real bug rather than a style point
+ * (SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18 §3.3):
+ *
+ *   true  — Windows, system-managed page file: growth IS gated by free space.
+ *   false — Windows, FIXED-size page file: growth is not gated this way, so
+ *           coloring it would be a false alarm. Never colored.
+ *   null  — not Windows: there is no page file in the model at all, so the
+ *           exception does not apply and the thresholds do.
+ *
+ * Parsing an absent `disk:pagefile_system_managed` as `false` (what
+ * `?? 0 > 0` used to do) collapses null into false, which would render a
+ * permanently-muted Linux pill — a disk at 0.5% free showing in the same
+ * color as one at 90%.
+ */
+export function watchVolumeColor(freePct: number | null, systemManaged: boolean | null): string {
+    if (freePct == null) return "var(--secondary-text-color)";
+    if (systemManaged === false) return "var(--secondary-text-color)";
     if (freePct < 8) return "var(--error-color)";
     if (freePct < 15) return "var(--warning-color)";
     return "var(--secondary-text-color)";
