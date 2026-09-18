@@ -545,6 +545,56 @@ pub fn mux_obj_from_json<T: StoreObj>(data: &[u8]) -> Result<T, serde_json::Erro
 
 #[cfg(test)]
 mod tests {
+    /// This crate defines `BlockDef` and `FileDef` TWICE — here, and again in
+    /// `backend/wconfig/types.rs` for widgets. The pairs differ in Rust:
+    /// `obj` uses `Option<HashMap<..>>` / `Option<..>` where `wconfig` uses a
+    /// plain `HashMap`. They are nonetheless wire-identical, because every
+    /// field on both carries `skip_serializing_if`, so an absent map and an
+    /// empty one both vanish.
+    ///
+    /// That is worth pinning rather than assuming, for two reasons.
+    ///
+    /// The frontend has ONE hand-written contract for each
+    /// (`frontend/types/srv-types.d.ts`, `type BlockDef = { files?, meta? }`,
+    /// still tagged `// waveobj.BlockDef` from the Go original). Both Rust
+    /// structs currently satisfy it. If either drifts — someone drops a
+    /// `skip_serializing_if`, or makes a field required — one of them starts
+    /// lying to that contract and nothing else would say so.
+    ///
+    /// And when the `websocket.rs` commands are eventually typed, two structs
+    /// sharing a name would generate two `BlockDef.ts` files into the same
+    /// export directory, one silently overwriting the other. Knowing the shapes
+    /// agree is the precondition for merging them, or for choosing either as
+    /// canonical. This test does not fix the duplication; it stops it becoming
+    /// a divergence while nobody is looking.
+    #[test]
+    fn block_def_and_file_def_serialize_identically_in_both_modules() {
+        use crate::backend::wconfig::types as wc;
+
+        // Empty: both must omit every field, not emit nulls or empty maps.
+        let a = serde_json::to_string(&super::BlockDef::default()).unwrap();
+        let b = serde_json::to_string(&wc::BlockDef::default()).unwrap();
+        assert_eq!(a, "{}", "obj::BlockDef default must serialize to {{}}");
+        assert_eq!(a, b, "the two BlockDef structs disagree on the empty case");
+
+        let a = serde_json::to_string(&super::FileDef::default()).unwrap();
+        let b = serde_json::to_string(&wc::FileDef::default()).unwrap();
+        assert_eq!(a, "{}", "obj::FileDef default must serialize to {{}}");
+        assert_eq!(a, b, "the two FileDef structs disagree on the empty case");
+
+        // Populated: same keys, same shape. Content is the only always-present
+        // scalar, so it is enough to prove the field names line up.
+        let mut oa = super::FileDef::default();
+        oa.content = "x".into();
+        let mut ob = wc::FileDef::default();
+        ob.content = "x".into();
+        assert_eq!(
+            serde_json::to_string(&oa).unwrap(),
+            serde_json::to_string(&ob).unwrap(),
+            "the two FileDef structs disagree once populated"
+        );
+    }
+
     use super::*;
 
     #[test]
