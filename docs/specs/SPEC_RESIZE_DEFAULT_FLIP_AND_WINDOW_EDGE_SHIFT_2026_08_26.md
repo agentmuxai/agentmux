@@ -1,7 +1,7 @@
 # SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes
 
 **Date:** 2026-08-26
-**Status:** proposed — analysis + design — not implemented
+**Status:** implemented — #2822 (2026-08-27), the day after this was written. §2's flip (plain drag group-resizes, Shift resizes a single border) is cited from `frontend/layout/lib/layoutResize.ts:368`, and §3.4's window-edge handling from `agentmux-cef/src/client/wndproc.rs`. §3.6's out-of-scope items are unchanged; the Chrome-style drag-to-top maximize that arrived later in #2986 is separate work on the same surface.
 **Author:** Loap (agent)
 **Tracking discussion:** repo owner, this session — "the default should be the
 relative resize that currently shift-resize does. The new feature is that when

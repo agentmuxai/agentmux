@@ -1,7 +1,7 @@
 # SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification
 
 **Date:** 2026-07-11
-**Status:** proposed — Ready for implementation
+**Status:** active — Residuals 1 and 2 are built. Residual 1's pool adoption of foreign `window-{uuid}` labels is in `agentmux-cef/src/commands/window_pool.rs`, which names this spec and this residual in `cache_pool_window_view`'s doc comment; Residual 2's `Window.meta["host:label"]` crumb is written and read across `client/helpers.rs`, `window_pool.rs`, `server/service/window_create.rs` and `window_query.rs`. **Residual 3 is still open** — it asks for verification of the close path on macOS/Linux, and the code is still Windows-only by construction (`cache_pool_window_view` is `#[cfg(target_os = "windows")]`), so "believed" has not become "verified".
 **Tracking:** session task #15 (the residuals deliberately left open by the
 window-pool coverage work, ~PR #1969 era, and referenced by
 `CloseWindowTask`'s "Known residual" comment in `agentmux-cef/src/ui_tasks/window.rs`)
