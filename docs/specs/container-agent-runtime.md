@@ -1,7 +1,16 @@
 # Spec: Container Agent Runtime
 
 **Date:** 2026-03-18
-**Status:** proposed — Design
+**Status:** historical — pre-implementation planning doc, superseded in practice
+by the real shipped implementation and by `agentmuxai/agentmux#2939` (the
+current, actively-maintained tracker for this feature). Kept for history only;
+do not follow this doc's design choices. Concretely stale: references the old
+`agentmuxsrv-rs` crate name (now `agentmux-srv`), the pre-rename "Forge" UI
+(now "Armory"), and a `bollard`-crate execution design the real implementation
+does not use (it shells `docker exec` directly — see `container.rs`,
+`container_spawn.rs`). Corrected 2026-09-18 during a consolidation pass; the
+original "proposed — Design" header had never been updated since 2026-03-18
+despite the feature having since shipped and moved on architecturally.
 **Priority:** High — container agents (1/2/3) are defined but can't run
 **Research:** See `docs/research-container-runtime-detection.md` for full platform-by-platform analysis
 
