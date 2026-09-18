@@ -2,8 +2,9 @@
 
 **Date:** 2026-04-24
 **Status:** active — partially built. §4's event model, §5's UX and §9.1's
-subprocess-stdin provider adapter shipped (`AgentDecisionPanel.tsx`,
-`useAgentDecisions.ts`, `claude-translator.ts`, `websocket.rs`), and the panel
+subprocess-stdin provider adapter shipped in #556 (the v1 decision panel) and
+#557 (`tool:decision` IPC + stdin write) — see `AgentDecisionPanel.tsx`,
+`useAgentDecisions.ts`, `claude-translator.ts` and `websocket.rs`. The panel
 offers all four of §6's scopes. **§6's rule storage and §7's
 remember-last-options are not built** — there is no `permissions.json` reader or
 writer anywhere in the tree, so a `project`/`global` choice has nowhere durable
