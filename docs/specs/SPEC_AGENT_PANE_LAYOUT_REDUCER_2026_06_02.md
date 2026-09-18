@@ -1,6 +1,6 @@
 # Agent-Pane Layout State Machine — unify zoom + virtualization + tool-expansion into one reducer
 
-**Status:** implemented — Phases 0, 2, 3, 4 shipped; **Phase 1 is the only one left** (§6)
+**Status:** implemented — Phases 0, 2, 3 (#1270), 4 (#1281) shipped; **Phase 1 is the only one left** (§6)
 **Last verified against code:** 2026-09-17 (see §6 — each phase now carries how to check it)
 **Date:** 2026-06-02
 **Author:** AgentA

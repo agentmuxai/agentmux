@@ -1,6 +1,14 @@
 # SPEC — Armory: eliminate split-screen list+detail layouts, single-pane at every width
 
 **Status:** implemented — `frontend/app/element/primitive-list-detail.tsx` (+ its `.scss`) is
+
+> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> requires an `implemented` Status to cite its PR. This one cannot, and a guess would
+> be worse than the gap: the only commit that set this Status was a bulk restamp
+> (or predates the PR-squash convention), so git alone does not identify who
+> shipped it. Candidates found in this doc's own body were checked and rejected —
+> they touch no related source. Verify against the code before trusting this line.
+
 this document’s design and cites it by name; it renders exactly one of {list, detail} at any
 pane width, and is used by Armory’s Bundles/Skills/MCP Servers tabs plus `AgentMcpModal`,
 `AgentSkillsModal` and `AgentNativeMemoryModal`. Restamped 2026-09-16 (was "Draft — spec only,
