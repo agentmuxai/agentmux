@@ -4,7 +4,9 @@
 # docs/specs/PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md §7 (why this exists)
 # docs/specs/README.md ("a broken pointer is worse than none")
 #
-# THE RULE: if a file names `docs/specs/<something>.md`, that file must exist.
+# THE RULE: if a file names `docs/<dir>/<something>.md`, that file must exist.
+# Widened 2026-09-18 from `docs/specs/` only, after a source comment citing a
+# moved `docs/analysis/` path slipped past both this gate and check-doc-links.mjs.
 #
 # This repo cites specs from code comments constantly, which is a good habit —
 # it is often the only link between a design and its implementation. It is also
@@ -77,6 +79,12 @@ for f in "${files[@]}"; do
         # scanning them is how a gate becomes slow enough to be resented.
         *.png|*.jpg|*.jpeg|*.gif|*.ico|*.svg|*.pdf|*.zip|*.lock) continue ;;
         node_modules/*|target/*|dist/*) continue ;;
+        # Test data and the docs gates own header comments name docs/ paths
+        # that are deliberately fake -- bundle_export.rs asserts on docs/a.md,
+        # docs-stale-sweep.test.mjs on docs/fixtures/*.md, and check-doc-links.mjs
+        # quotes docs/reports/X.md while explaining itself. Firing on those is
+        # the false positive that gets a gate switched off.
+        *test*|*fixtures*|scripts/check-*) continue ;;
     esac
     checked=$((checked + 1))
 
@@ -87,12 +95,15 @@ for f in "${files[@]}"; do
     while IFS= read -r cite; do
         [ -z "$cite" ] && continue
         case "$cite" in *[\*\?\[]*) continue ;; esac
+        # docs/en/... is Anthropic published documentation site (the Claude
+        # Code hooks reference), not a path in this repo tree.
+        case "$cite" in docs/en/*) continue ;; esac
         [ -e "$cite" ] && continue
         echo "FAIL $f"
-        echo "     Cites a spec that does not exist: $cite"
+        echo "     Cites a doc that does not exist: $cite"
         bad=$((bad + 1))
         fail=1
-    done < <(grep -oE 'docs/specs/[A-Za-z0-9_./-]+\.md' "$f" 2>/dev/null | sort -u)
+    done < <(grep -oE 'docs/[A-Za-z0-9_-]+/[A-Za-z0-9_./-]+\.md' "$f" 2>/dev/null | sort -u)
 done
 
 if [ "$fail" -ne 0 ]; then

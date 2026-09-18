@@ -17,7 +17,7 @@
  * (`enqueuedWhileBusy: false`) initiated the current turn and must never
  * appear here, regardless of phase. This closes the race where the panel
  * would flash between Streaming promotion and agent-message-accepted.
- * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+ * See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
  *
  * See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
  *

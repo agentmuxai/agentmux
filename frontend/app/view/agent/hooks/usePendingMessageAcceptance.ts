@@ -90,7 +90,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
             // TurnStart was already dispatched in handleSendMessage —
             // a second fire here regresses Streaming → Submitting and
             // re-arms the 30 s submit timeout unnecessarily.
-            // See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+            // See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
             const currentPhase = paneSnapshot(opts.blockId)?.turnPhase;
             const needsTurnStart =
                 currentPhase?.kind === "Done" ||

@@ -663,7 +663,7 @@ export type AgentPaneCommand =
            * idle sends. Stored on the PendingMessage entry and used by
            * PendingMessagesPanel to gate visibility — idle-send messages
            * must never flash in the amber queued zone.
-           * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+           * See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
            */
           enqueuedWhileBusy: boolean;
       }

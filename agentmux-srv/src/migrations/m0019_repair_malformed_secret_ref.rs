@@ -8,7 +8,7 @@
 //! `\\` per separator). Not reproducible from any write path in this
 //! codebase (`Store::identity_upsert` always `serde_json::to_string`s
 //! correctly) — see
-//! `docs/analysis/ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md`
+//! `ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04 (never committed to this repo)`
 //! §7 for the full incident.
 //!
 //! Global-scoped (touches the shared store directly, like

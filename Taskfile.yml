@@ -1139,7 +1139,7 @@ tasks:
                   # the deterministic port, and --strictPort then strands every
                   # relaunch. Reap it best-effort; if the port is STILL held we treat
                   # it as a genuinely foreign process and fail as before. See
-                  # docs/retro/retro-dev-instance-vite-orphan-port-2026-06-16.md.
+                  # retro-dev-instance-vite-orphan-port-2026-06-16 (never committed to this repo).
                   echo "[dev] Port $AGENTMUX_VITE_PORT busy — reaping a stale Vite if present…"
                   if [ "{{OS}}" = "windows" ]; then
                     pid="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
