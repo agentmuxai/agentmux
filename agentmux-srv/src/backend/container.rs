@@ -443,6 +443,22 @@ impl ContainerManager {
                 self.remove(container_name, true).await?;
                 None
             }
+            // Same drift-and-recreate reasoning as the mount check above, for
+            // extra_hosts specifically: `create_and_start` sets
+            // host.docker.internal:host-gateway (reagent P1, PR #3393) so
+            // AGENTMUX_LOCAL_URL is reachable — but Docker cannot add an
+            // extra_hosts entry to an already-existing container, only at
+            // creation. Without this check, every container created before
+            // this fix shipped would silently never get it.
+            Some(_) if !self.extra_hosts_match(container_name).await => {
+                tracing::info!(
+                    container = container_name,
+                    "container extra_hosts missing host.docker.internal:host-gateway — recreating"
+                );
+                let _ = self.stop(container_name, 10).await;
+                self.remove(container_name, true).await?;
+                None
+            }
             other => other,
         };
 
@@ -862,6 +878,25 @@ impl ContainerManager {
             let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })
+    }
+
+    /// Whether an existing container's `HostConfig.extra_hosts` already has
+    /// the `host.docker.internal:host-gateway` entry `create_and_start` sets
+    /// (reagent P1, PR #3393). Docker cannot add an extra_hosts entry to an
+    /// already-existing container — only `mounts_match`'s recreate path can
+    /// actually fix a container that predates this. Same fail-open-to-true
+    /// reasoning as `mounts_match`: an inspect error must count as "assume
+    /// it's fine, don't force a spurious recreate," never as drift.
+    async fn extra_hosts_match(&self, container_name: &str) -> bool {
+        let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
+            return true;
+        };
+        let Some(extra_hosts) = details.host_config.and_then(|hc| hc.extra_hosts) else {
+            return false;
+        };
+        extra_hosts
+            .iter()
+            .any(|h| h == "host.docker.internal:host-gateway")
     }
 
     /// Returns the container status string ("running", "exited", …) or `None` if not found.
