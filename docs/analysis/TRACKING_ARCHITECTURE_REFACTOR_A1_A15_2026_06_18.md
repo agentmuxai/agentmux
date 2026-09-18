@@ -1,6 +1,11 @@
 # Architecture Refactor — Tracking & Handoff (A1–A15)
 
 **Created:** 2026-06-18 · **Owner of record:** smike · **Status:** living tracker
+**Board state (2026-09-18):** 14 of 15 done. Only **A2** remains open, and it is
+blocked on coordination rather than work — the `agentmux-common` DTO extraction
+still collides with a5af #1498, and no DTO module exists in that crate yet.
+A6 and A10 were both marked incomplete on this board while already shipped;
+see their rows.
 **Source audit:** [`ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md`](ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md)
 (read it first — this doc is the actionable board on top of it; the audit holds the full
 file:line evidence and the six systemic themes.)
@@ -24,11 +29,11 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | ✅ **done** | #1566 | global.ts 1047→821 LOC; cycle broken; leaf violations fixed. |
 | A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
 | A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | ✅ **done** | #1564 | Backend `blockcontroller/`. Also fixed ACP session-id persist bug. |
-| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🟡 **mirror killed** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | AgentAtoms mirror removed, acceptance criterion met (2026-09-06). Remaining half — scroll/expansion unification — is SPEC_AGENT_PANE_LAYOUT_REDUCER render-path wiring; track it there. |
+| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | ✅ **done** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | Shipped 2026-09-06; the spec reads `implemented — this PR`. This row said 🟡 partial for twelve days after it landed. |
 | A7 | Shared `ToolCorrelator` for translator tool-call/result | ★★★ | Low | Low | ✅ **done** | #1545 | `providers/tool-correlation.ts`. |
 | A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | ✅ **done** | #1554 | Backend `server/`. |
 | A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | ✅ **done** | #3044 | Busy predicate was already unified by the state-machine work (`isWorking`/`workingFromPhase`, 1 use left); #3044 routed the 11 raw dispatches + added a grep-shaped guard test. |
-| A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | 🟢 ready | — | Backend; touches where live data lives — migration care. |
+| A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | ✅ **done** | #3372 | One resolver (`agentmux_root()`); `AGENTMUX_DATA_HOME` + `AGENTMUX_HOME_OVERRIDE` reconciled; 7 ad-hoc sites routed through it. Fixed a latent bug on the way: srv fell back to `/` when no home resolved, writing to `/.agentmux`. |
 | A11 | Real `BlockRegistry` + registry-driven `ModalLayer` | ★★★ | Low-Med | Low | ✅ **done** | #1562 | Frontend `block/`, `element/`. |
 | A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | ✅ **done** | #1542, #1565 | StreamStalled removed; watchdogs NOT dead (skip); 65 dead COMMAND_* consts removed. |
 | A13 | Spec/doc hygiene (`INDEX.md`, merge dup dirs, archive) | ★★ | Med | Low | ✅ **done** | #1558 | Dirs merged; INDEX added; all path refs updated. |
