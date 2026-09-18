@@ -37,7 +37,10 @@ registerPaneTabDescriptor("agent", {
         // to read distinctly.
         if (meta?.[HISTORY_TAB_FOR_META_KEY]) return "History";
         const name = meta?.["agentName"];
-        return typeof name === "string" && name.length > 0 ? name : "New Agent";
+        // Repo-owner call (PR #3341): the unlaunched-picker fallback reads
+        // "Agent", not "New Agent" — both fallbacks (pane title and tab)
+        // must agree, and a launched agent still shows its real name.
+        return typeof name === "string" && name.length > 0 ? name : "Agent";
     },
     icon: ({ meta }) => agentTabIcon(meta),
     renamer: ({ blockId, meta }) => {
