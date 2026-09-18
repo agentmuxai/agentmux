@@ -8,7 +8,7 @@
 interrupt path. This spec **builds on** existing work — it is not a
 green-field design.
 **Related (must-read first):**
-`docs/specs/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md` (the audit this
+`docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md` (the audit this
 spec extends), GitHub issue **#728** (the 6 gaps the audit produced),
 `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md` (where this
 slice sits in the broader reducer stack), `SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md`
