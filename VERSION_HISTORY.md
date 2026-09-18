@@ -2174,7 +2174,7 @@
 - perf(pane-focus): skip updateTree for FocusNode + drop diag console.logs
 - Two small, all-cross-platform wins on the click → focused-border-paint
 - chain (issue #1136, full analysis in
-- `docs/analyses/ANALYSIS_PANE_FOCUS_PAINT_LATENCY_2026-05-28.md`):
+- `docs/analysis/ANALYSIS_PANE_FOCUS_PAINT_LATENCY_2026-05-28.md`):
 - - **Skip `updateTree()` for `FocusNode` actions**
 -   (`frontend/layout/lib/layoutModel.ts`). The reducer previously ran
 -   a full rebalance + per-leaf transform recompute after every action.
