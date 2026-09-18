@@ -972,16 +972,23 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // ("send now") held message — the Claude-Code-CLI gesture (unsent, so a
         // true un-send). When nothing is queued, ArrowUp walks back through
         // previously SENT messages (shell-style history) and ArrowDown walks
-        // forward toward the live draft. The caret-at-start/end guards let
-        // multiline editing of a recalled message (or extending/shrinking a
-        // selection with Shift held) still move within the text normally, and
-        // only cross into history once there's truly nowhere left to move —
-        // i.e. the active selection edge is already at absolute position 0 (or
-        // the end of the content), not merely "on the first/last visual line."
+        // forward toward the live draft. Both directions gate on the active
+        // selection edge being at true absolute position 0 — not merely "on
+        // the first visual line" — so multiline editing of a recalled message
+        // (or extending/shrinking a selection with Shift held) still moves
+        // within the text normally, and only crosses into history once
+        // there's truly nowhere left to move. They share one gate (rather
+        // than Up-at-start/Down-at-end) because every recall parks the caret
+        // at position 0, so a repeated same- or opposite-direction press
+        // reads the same edge the previous recall just landed on — the one
+        // exception is landing back on the live draft, past the newest
+        // entry, where the caret goes to the end instead (it's the user's
+        // own in-progress text to resume typing, not a historical entry
+        // still being reviewed).
         if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const empty = textareaRef.value.length === 0;
             const navigating = histPos < sentHistory.length;
-            const { first: caretAtStart, last: caretAtEnd } = caretAtSelectionEdge(textareaRef);
+            const { first: caretAtStart } = caretAtSelectionEdge(textareaRef);
 
             // Empty composer: ArrowUp un-queues a held message before history.
             if (e.key === "ArrowUp" && empty) {
@@ -1009,12 +1016,18 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 return;
             }
 
-            // Newer: only while navigating, active selection edge at the true
-            // end of content. Past the newest entry, restore the stashed draft.
-            if (e.key === "ArrowDown" && navigating && caretAtEnd) {
+            // Newer: only while navigating, active selection edge at true
+            // position 0 — mirrors ArrowUp so a repeated ArrowDown immediately
+            // steps forward again too, since every recall (Up or Down) now
+            // lands the caret at the front. The one exception is the final
+            // step past the newest entry, back to the live draft: that caret
+            // goes to the END, since it's the user's own in-progress text to
+            // resume typing, not a historical entry being reviewed.
+            if (e.key === "ArrowDown" && navigating && caretAtStart) {
                 histPos++;
                 e.preventDefault();
-                setComposerValue(histPos >= sentHistory.length ? histDraft : sentHistory[histPos]);
+                const atLiveDraft = histPos >= sentHistory.length;
+                setComposerValue(atLiveDraft ? histDraft : sentHistory[histPos], atLiveDraft ? "end" : "start");
                 return;
             }
         }
