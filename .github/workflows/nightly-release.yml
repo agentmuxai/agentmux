@@ -12,7 +12,11 @@ name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 # a5af/shared-infrastructure's gh-reporter Lambda instead — it already runs
 # reliably on its own AWS EventBridge schedule (every 30 min, not just
 # nightly) and already has the GitHub API credentials this needs. See
-# a5af/shared-infrastructure's docs/specs/GH_REPORTER_RELEASE_AUTO_TAG_SPEC_2026_08_24.md
+# GH_REPORTER_RELEASE_AUTO_TAG_SPEC_2026_08_24.md, in the private
+# a5af/shared-infrastructure repo's specs directory (named without a
+# repo-relative path: it is not a file here, and a path-shaped reference to
+# another repository is the dangling pointer check-spec-citations.sh exists
+# to catch),
 # for the design, and docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md
 # in this repo for the original (now superseded, for the tagging half only)
 # design.
