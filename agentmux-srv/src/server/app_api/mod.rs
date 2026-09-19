@@ -164,6 +164,59 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         return pane::open_pane_floating(state, &mstore, &event_bus, cmd.view, tab_id, meta).await;
     }
 
+    // Stack path (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3): create
+    // the block directly as a new tab of the pane holding
+    // `stack_onto_block_id`, in one reducer step, then tell the frontend with
+    // a queued `stackpush` action. Replaces `skip_placement` + a frontend
+    // push, whose gap could leave the block in no pane.
+    if let Some(target) = cmd.stack_onto_block_id.clone().filter(|t| !t.is_empty()) {
+        let tab_id = resolve_tab_id_for_block(&mstore, &target)
+            .map_err(|e| format!("pane.open: stack_onto_block_id: {e}"))?;
+        let meta_val = serde_json::to_value(&meta)
+            .map_err(|e| format!("pane.open: stack_onto_block_id: meta serialize: {e}"))?;
+        let events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::CreateBlockInStack {
+                tab_id: tab_id.clone(),
+                target_block_id: target.clone(),
+                meta: meta_val,
+                activate: true,
+            },
+        )
+        .await;
+        if let Some(msg) = events.iter().find_map(|e| match e {
+            agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        }) {
+            return Err(format!("pane.open: {msg}"));
+        }
+        let block_id = events
+            .iter()
+            .find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "pane.open: CreateBlockInStack emitted no BlockCreated".to_string())?;
+        for ev in &events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                tracing::warn!("pane.open: stack_onto_block_id: mstore apply failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &events);
+        if let Err(e) =
+            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target).await
+        {
+            tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
+        }
+        tracing::info!(block_id = %block_id, target = %target, view = %cmd.view, "pane.open: block created as a pane tab");
+        return Ok(PaneOpenResult {
+            block_id,
+            tab_id,
+            view: cmd.view,
+            created: true,
+        });
+    }
+
     // Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
     // §4.2): create the block through the reducer, same as the docked path
     // below, but return immediately — no layout action, no tear_off_block
@@ -2671,6 +2724,7 @@ mod pane_open_reducer_tests {
             floating: None,
             meta: None,
             skip_placement: None,
+            stack_onto_block_id: None,
             reuse_editor_pane: None,
         };
         let res = open_pane(&state, cmd).await.expect("open_pane docked");
@@ -2700,6 +2754,97 @@ mod pane_open_reducer_tests {
     /// docked path) but leave the tab's layout tree completely untouched —
     /// the caller is about to attach it to an existing leaf's block-stack,
     /// not give it its own tile.
+    #[tokio::test]
+    async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
+        // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3: created and
+        // placed in one step, plus a queued `stackpush` for the frontend.
+        let state = test_state();
+        let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let anchor = dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::json!({ "view": "agent" }) },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        dispatch_apply(
+            &state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "pane".into(),
+                    data: Some(agentmux_common::LayoutNodeData { block_id: anchor.clone(), ..Default::default() }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        let cmd = CommandPaneOpenData {
+            view: "agent".into(),
+            file: None,
+            url: None,
+            cwd: None,
+            title: None,
+            tab_id: None,
+            split_direction: None,
+            split_reference_block_id: None,
+            focus: None,
+            tree_expanded: None,
+            floating: None,
+            meta: Some({
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            }),
+            skip_placement: None,
+            stack_onto_block_id: Some(anchor.clone()),
+            reuse_editor_pane: None,
+        };
+        let res = open_pane(&state, cmd).await.expect("open_pane stack_onto_block_id");
+        assert!(res.created);
+        assert_eq!(res.tab_id, tab_id, "tab derived from the target block");
+
+        {
+            let s = state.srv_state.lock().await;
+            assert!(s.tabs[&tab_id].block_ids.contains(&res.block_id));
+            let data = s.tabs[&tab_id].rootnode.as_ref().unwrap().data.clone().unwrap();
+            assert_eq!(data.block_stack, vec![anchor.clone(), res.block_id.clone()]);
+            assert_eq!(data.block_id, res.block_id, "the new tab is visible");
+        }
+        let tab = state.mstore.must_get::<crate::backend::obj::Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+        let actions = layout.pendingbackendactions.unwrap_or_default();
+        assert!(
+            actions.iter().any(|a| a.actiontype == "stackpush" && a.blockid == res.block_id && a.targetblockid == anchor),
+            "frontend told via a queued stackpush: {actions:?}"
+        );
+        // The persisted tree agrees with the reducer (single writer).
+        let persisted = layout.rootnode.expect("tree persisted");
+        assert_eq!(persisted.data.unwrap().block_stack, vec![anchor, res.block_id]);
+    }
+
     #[tokio::test]
     async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         let state = test_state();
@@ -2750,6 +2895,7 @@ mod pane_open_reducer_tests {
                 m
             }),
             skip_placement: Some(true),
+            stack_onto_block_id: None,
             reuse_editor_pane: None,
         };
         let res = open_pane(&state, cmd).await.expect("open_pane skip_placement");
@@ -2786,6 +2932,7 @@ mod pane_open_reducer_tests {
             floating: None,
             meta: None,
             skip_placement: None,
+            stack_onto_block_id: None,
             reuse_editor_pane,
         }
     }

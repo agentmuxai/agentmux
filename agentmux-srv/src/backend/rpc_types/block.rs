@@ -612,6 +612,16 @@ pub struct CommandPaneOpenData {
     /// see `frontend/layout/lib/layoutStack.ts`'s `pushBlockOntoStack`,
     /// docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.2).
     pub skip_placement: Option<bool>,
+    /// Create the block directly as a new tab of the pane that holds this
+    /// block (visible or background), in ONE reducer step
+    /// (`Command::CreateBlockInStack`) — the block never exists without a
+    /// pane, unlike `skip_placement` + a frontend push, which could be
+    /// interrupted in between. The frontend is told via a queued `stackpush`
+    /// layout action. Takes precedence over `skip_placement` and split
+    /// placement; `floating` still wins (checked first).
+    /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack_onto_block_id: Option<String>,
     /// `Some(true)`, `view: "editor"` only: if the caller (identified by
     /// `split_reference_block_id`) already has an Editor pane open in its
     /// own tab, push `file` into that pane as a new tab instead of creating
@@ -796,6 +806,7 @@ mod app_api_manifest_contract_tests {
             floating: None,
             meta: None,
             skip_placement: None,
+            stack_onto_block_id: None,
             reuse_editor_pane: None,
         };
         let value = serde_json::to_value(&instance).expect("CommandPaneOpenData must serialize");

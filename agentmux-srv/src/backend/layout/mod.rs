@@ -183,6 +183,68 @@ pub fn find_leaf_containing_block<'a>(tree: &'a LayoutNode, block_id: &str) -> O
         .find_map(|child| find_leaf_containing_block(child, block_id))
 }
 
+/// Which tab becomes visible once the one at `removed_idx` of the ORIGINAL
+/// stack is gone: the nearest eligible member to its right, else the nearest
+/// to its left. `remaining` is the stack with it removed; `eligible` filters
+/// (e.g. "still exists"). The one rule every removal path uses — frontend
+/// `removeMemberFromStack` mirrors it (`frontend/layout/lib/stackMembers.ts`).
+/// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.6.
+pub fn next_visible_member(
+    remaining: &[String],
+    removed_idx: usize,
+    eligible: impl Fn(&String) -> bool,
+) -> Option<String> {
+    let split = removed_idx.min(remaining.len());
+    remaining[split..]
+        .iter()
+        .find(|m| eligible(m))
+        .or_else(|| remaining[..split].iter().rev().find(|m| eligible(m)))
+        .cloned()
+}
+
+/// Add `block_id` to the tab stack of the pane holding `target_block_id`
+/// (as its visible tab or a background member). A pane with no stack yet
+/// becomes a two-member stack. Already a member → only (re)activated if
+/// asked. Returns false when no pane holds `target_block_id`.
+/// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2 (`LayoutStackPush`).
+pub fn push_stack_member(tree: &mut LayoutNode, target_block_id: &str, block_id: &str, activate: bool) -> bool {
+    if let Some(data) = tree.data.as_mut() {
+        if data.block_id == target_block_id || data.block_stack.iter().any(|b| b == target_block_id) {
+            if data.block_stack.is_empty() {
+                data.block_stack = vec![data.block_id.clone()];
+                data.active_block_id = data.block_id.clone();
+            }
+            if !data.block_stack.iter().any(|b| b == block_id) {
+                data.block_stack.push(block_id.to_string());
+            }
+            if activate {
+                data.block_id = block_id.to_string();
+                data.active_block_id = block_id.to_string();
+            }
+            return true;
+        }
+    }
+    tree.children
+        .iter_mut()
+        .any(|child| push_stack_member(child, target_block_id, block_id, activate))
+}
+
+/// Make `block_id` the visible tab of the pane whose stack holds it.
+/// Returns false when no pane's stack holds it.
+/// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2 (`LayoutStackActivate`).
+pub fn activate_stack_member(tree: &mut LayoutNode, block_id: &str) -> bool {
+    if let Some(data) = tree.data.as_mut() {
+        if leaf_members(data).iter().any(|m| m == block_id) {
+            data.block_id = block_id.to_string();
+            if !data.block_stack.is_empty() {
+                data.active_block_id = block_id.to_string();
+            }
+            return true;
+        }
+    }
+    tree.children.iter_mut().any(|child| activate_stack_member(child, block_id))
+}
+
 /// Remove `block_id` from the stack of the leaf holding it, WITHOUT removing
 /// the leaf, when that leaf has other members. If it was the visible tab, the
 /// right-hand neighbour becomes visible (the new last member when it was
@@ -200,7 +262,7 @@ pub fn remove_stack_member(tree: &mut LayoutNode, block_id: &str) -> bool {
             }
             let next: Vec<String> = members.into_iter().filter(|m| m != block_id).collect();
             if data.block_id == block_id || data.active_block_id == block_id {
-                let visible = next[idx.min(next.len() - 1)].clone();
+                let visible = next_visible_member(&next, idx, |_| true).expect("next is non-empty");
                 data.block_id = visible.clone();
                 data.active_block_id = visible;
             }
@@ -308,12 +370,13 @@ fn reactivate_dangling_active_stack_members(
         if !data.block_stack.is_empty() && !live_block_ids.contains(&data.block_id) {
             // Drop the dangling active member from the stack — it's gone
             // either way, whether or not a live sibling survives it.
+            // Its replacement follows the same right-hand-neighbour rule as
+            // every other removal (`next_visible_member`) — this used to pick
+            // the FIRST live member, disagreeing with the frontend.
+            let dead_idx = data.block_stack.iter().position(|id| id == &data.block_id).unwrap_or(0);
             data.block_stack.retain(|id| id != &data.block_id);
-            if let Some(replacement) = data
-                .block_stack
-                .iter()
-                .find(|id| live_block_ids.contains(*id))
-                .cloned()
+            if let Some(replacement) =
+                next_visible_member(&data.block_stack, dead_idx, |id| live_block_ids.contains(id))
             {
                 data.block_id = replacement.clone();
                 data.active_block_id = replacement;
@@ -520,6 +583,21 @@ pub fn validate_layout_invariants(root: &Option<LayoutNode>) -> Vec<String> {
         // I8 — sizes are positive.
         if !is_root && !(node.size > 0.0) {
             violations.push(format!("NONPOSITIVE_SIZE @ {}: size={}", short(&node.id), node.size));
+        }
+        // I10 — a pane's tab stack is consistent: the visible block is a
+        // member, `active_block_id` agrees with it, and no block appears
+        // twice (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.1, I2).
+        if let Some(data) = node.data.as_ref().filter(|d| !d.block_stack.is_empty()) {
+            if !data.block_stack.contains(&data.block_id) {
+                violations.push(format!("STACK_VISIBLE_NOT_MEMBER @ {}", short(&node.id)));
+            }
+            if !data.active_block_id.is_empty() && data.active_block_id != data.block_id {
+                violations.push(format!("STACK_ACTIVE_MISMATCH @ {}", short(&node.id)));
+            }
+            let unique: std::collections::HashSet<&String> = data.block_stack.iter().collect();
+            if unique.len() != data.block_stack.len() {
+                violations.push(format!("STACK_DUPLICATE_MEMBER @ {}", short(&node.id)));
+            }
         }
         for c in &node.children {
             walk(c, false, violations);

@@ -1491,3 +1491,86 @@ fn prune_active_member_repair_composes_with_a_sibling_leaf_that_is_fully_danglin
     assert_eq!(data.block_id, "b2");
     assert_eq!(data.block_stack, vec!["b2".to_string()]);
 }
+
+// ── pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2, §3.6) ─────
+
+fn strings(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn next_visible_member_prefers_the_right_hand_neighbour_then_the_left() {
+    // [a, b, c] with b removed → c; with c removed → b (the new last).
+    assert_eq!(next_visible_member(&strings(&["a", "c"]), 1, |_| true), Some("c".into()));
+    assert_eq!(next_visible_member(&strings(&["a", "b"]), 2, |_| true), Some("b".into()));
+    // Ineligible neighbours are skipped, right side first.
+    assert_eq!(next_visible_member(&strings(&["a", "x", "c"]), 1, |m| m != "x"), Some("c".into()));
+    assert_eq!(next_visible_member(&strings(&["a", "x"]), 1, |m| m != "x"), Some("a".into()));
+    assert_eq!(next_visible_member(&strings(&["x"]), 0, |m| m != "x"), None);
+}
+
+#[test]
+fn a_dangling_visible_tab_is_replaced_by_its_right_hand_live_neighbour() {
+    // Used to pick the FIRST live member ("a"), disagreeing with the
+    // frontend's right-neighbour rule. Visible "b" dies → "c".
+    let mut root = Some(leaf_with_stack("pane", "b", &["a", "b", "c"], 1.0));
+    prune_dangling_block_refs(&mut root, &live(&["a", "c"]));
+    let data = root.unwrap().data.unwrap();
+    assert_eq!(data.block_id, "c");
+    assert_eq!(data.active_block_id, "c");
+    assert_eq!(data.block_stack, strings(&["a", "c"]));
+}
+
+#[test]
+fn push_stack_member_turns_a_single_block_pane_into_a_stack() {
+    let mut root = leaf("pane", "a", 1.0);
+    assert!(push_stack_member(&mut root, "a", "b", true));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["a", "b"]));
+    assert_eq!(data.block_id, "b");
+    assert_eq!(data.active_block_id, "b");
+}
+
+#[test]
+fn push_stack_member_finds_the_pane_by_a_background_member_and_can_stay_in_the_background() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("other", "z", 1.0), leaf_with_stack("pane", "a", &["a", "b"], 1.0)],
+    );
+    assert!(push_stack_member(&mut root, "b", "c", false));
+    let data = root.children[1].data.clone().unwrap();
+    assert_eq!(data.block_stack, strings(&["a", "b", "c"]));
+    assert_eq!(data.block_id, "a", "not activated");
+    assert!(!push_stack_member(&mut root, "missing", "d", true), "no pane holds the target");
+}
+
+#[test]
+fn push_stack_member_does_not_duplicate_an_existing_member() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b"], 1.0);
+    assert!(push_stack_member(&mut root, "a", "b", true));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["a", "b"]));
+    assert_eq!(data.block_id, "b");
+}
+
+#[test]
+fn activate_stack_member_switches_the_visible_tab() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b"], 1.0);
+    assert!(activate_stack_member(&mut root, "b"));
+    let data = root.data.clone().unwrap();
+    assert_eq!((data.block_id.as_str(), data.active_block_id.as_str()), ("b", "b"));
+    assert!(!activate_stack_member(&mut root, "nope"));
+}
+
+#[test]
+fn invariants_flag_an_inconsistent_stack() {
+    let mut bad = leaf_with_stack("pane", "a", &["b", "b"], 1.0);
+    bad.data.as_mut().unwrap().active_block_id = "b".into();
+    let violations = validate_layout_invariants(&Some(bad));
+    assert!(violations.iter().any(|v| v.starts_with("STACK_VISIBLE_NOT_MEMBER")), "{violations:?}");
+    assert!(violations.iter().any(|v| v.starts_with("STACK_ACTIVE_MISMATCH")), "{violations:?}");
+    assert!(violations.iter().any(|v| v.starts_with("STACK_DUPLICATE_MEMBER")), "{violations:?}");
+    assert!(validate_layout_invariants(&Some(leaf_with_stack("ok", "a", &["a", "b"], 1.0))).is_empty());
+}

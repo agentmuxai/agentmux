@@ -36,3 +36,21 @@ export function removeMemberFromStack(data: TabLayoutData, blockId: string): boo
     }
     return true;
 }
+
+/**
+ * Add `blockId` to its leaf's stack in place (a leaf with no stack becomes a
+ * two-member stack), optionally as the visible tab. Mirrors the backend's
+ * `push_stack_member` (`agentmux-srv/src/backend/layout/mod.rs`), so a
+ * `stackpush` action from `CreateBlockInStack` lands the same way on both
+ * sides. The caller commits the tree.
+ * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+ */
+export function addMemberToStack(data: TabLayoutData, blockId: string, activate: boolean): void {
+    const stack = effectiveStack(data);
+    data.blockStack = stack.includes(blockId) ? [...stack] : [...stack, blockId];
+    if (!data.activeBlockId) data.activeBlockId = data.blockId;
+    if (activate) {
+        data.activeBlockId = blockId;
+        data.blockId = blockId;
+    }
+}
