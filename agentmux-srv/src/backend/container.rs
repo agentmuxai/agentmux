@@ -818,29 +818,6 @@ impl ContainerManager {
         desired
     }
 
-    /// Does the existing container already carry exactly the mounts `spec` asks
-    /// for? Used to decide whether an agent that is already up has to be
-    /// recreated to pick up (or lose) credentials and a workspace.
-    ///
-    /// Compares the owned set in BOTH directions — a mount that should now be
-    /// ABSENT is drift too, not just a missing or changed one. That case is the
-    /// security-relevant one (reagent P1 on PR #2933): unbinding an agent's
-    /// Armory account is a normal transition that never reaches
-    /// `SpawnGateError::MissingCredentials` (that gate fires when credentials
-    /// are expected and missing, not when an agent legitimately has none). A
-    /// presence-only check would leave the old account's `.credentials.json`
-    /// bind-mounted and WRITABLE in the running container forever, so every
-    /// later turn would keep authenticating — and refreshing tokens — as the
-    /// account the operator just unbound.
-    ///
-    /// Only this module's own targets are considered; the caller's extra
-    /// `container_volumes` are ignored, so a user adding an unrelated mount is
-    /// never a reason to destroy and rebuild their container underneath them.
-    ///
-    /// Fails SAFE: any inspect error or missing data returns `true` ("matches"),
-    /// leaving the container alone. A spurious recreate kills a live agent and
-    /// loses its container-local state, which is worse than one more restart on
-    /// a stale mount.
     /// Single Docker inspect covering both drift checks below — mounts and
     /// extra_hosts previously each did their own `inspect_container` round
     /// trip, doubling the Docker-socket call on every `ensure_running` for
@@ -864,6 +841,28 @@ impl ContainerManager {
         None
     }
 
+    /// Does the existing container already carry exactly the mounts `spec` asks
+    /// for? Used to decide whether an agent that is already up has to be
+    /// recreated to pick up (or lose) credentials and a workspace.
+    ///
+    /// Compares the owned set in BOTH directions — a mount that should now be
+    /// ABSENT is drift too, not just a missing or changed one. That case is the
+    /// security-relevant one (reagent P1 on PR #2933): unbinding an agent's
+    /// Armory account is a normal transition that never reaches
+    /// `SpawnGateError::MissingCredentials` (that gate fires when credentials
+    /// are expected and missing, not when an agent legitimately has none). A
+    /// presence-only check would leave the old account's `.credentials.json`
+    /// bind-mounted and WRITABLE in the running container forever, so every
+    /// later turn would keep authenticating — and refreshing tokens — as the
+    /// account the operator just unbound.
+    ///
+    /// Only this module's own targets are considered; the caller's extra
+    /// `container_volumes` are ignored, so a user adding an unrelated mount is
+    /// never a reason to destroy and rebuild their container underneath them.
+    ///
+    /// Fails SAFE: missing mount data on the passed-in inspect result returns
+    /// `true` ("matches"), leaving the container alone — the inspect-error case
+    /// itself is now handled once, by `container_drift`'s caller.
     fn mounts_match(details: &ContainerInspectResponse, container_name: &str, spec: &ContainerMountSpec) -> bool {
         let Some(actual) = details.mounts.as_ref() else {
             return true;
