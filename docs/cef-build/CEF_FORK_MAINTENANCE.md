@@ -228,7 +228,7 @@ Notes that have already caused confusion:
 
 
 The root cause of §1.1 is branch reuse after merge. The repo-level rule for
-this lives in [`CLAUDE.md`](../../CLAUDE.md) under Git Workflow:
+this is:
 
 > **Never reuse a branch after its PR is merged.**
 
