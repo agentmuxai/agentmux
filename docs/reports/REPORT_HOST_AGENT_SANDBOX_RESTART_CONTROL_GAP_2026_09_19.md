@@ -1,7 +1,7 @@
 # Report: a host agent has no safe way to restart a sandbox agent — the only reachable path destroys its container, its conversation, and any config fix in flight
 
 **Date:** 2026-09-19
-**Status:** investigated, not yet implemented — this documents the gap, it does not close it
+**Status:** analysis — this documents the gap, it does not close it
 **Author:** Camper
 **Repo state:** main @ `ffdfa4aa3` ("fix(container): ship agentmux-mcp/agentmux-bashwrap in the sandbox image (#2939)", PR #3427)
 **Probed live** against a running instance (`narko`), with a real container-type
