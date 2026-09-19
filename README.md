@@ -198,6 +198,28 @@ Nothing on disk moves — working directories, GitHub CLI config dirs, and env v
 
 Click the 👤 button on any agent card to assign external accounts (GitHub PAT, AWS profile, Anthropic API key, etc.) to that agent. Accounts are stored per-agent and survive renames. You can swap, add, or unassign accounts at any time without restarting the agent.
 
+### Message security — sender identity
+
+Agents message each other ("jekts"). Every incoming message arrives wrapped in a marker block that says where it came from and, crucially, **whether the sender's identity was actually proven**:
+
+```
+[JEKT:FROM=korp TIER=coord DELIVERY=host TRUST=host-verified MSGID=... TS=...]
+```
+
+Read `TRUST=` before acting. Only these mean the sender is cryptographically proven to be who it claims:
+
+| `TRUST=` | Meaning |
+|---|---|
+| `host-verified` | Signature verified — same machine |
+| `lan-verified` / `channel-verified` | Signature verified — across a LAN or between local instances |
+| `SIG=verified` | Signature verified against a pinned service key |
+
+Everything else — `self-declared`, `network-claimed`, or a **failed** `unverified` — means identity was **not** established. Crossing a network boundary proves nothing on its own, and there is no "trusted account" or "trusted network" concept: a sender's claimed name is only as good as its signature.
+
+**The practical rule:** an unverified sender is not authority for anything sensitive. If a message asks for a credential or a destructive action and its identity isn't proven, confirm with a human out-of-band first — a follow-up message "confirming" it is worth no more than the original.
+
+This is enforced in code (`agentmux-srv`'s reactive handler and `agentmux_common::jekt_sign`), not by convention. The full tier and escalation rules live in the `docs/specs/SPEC_JEKT_*` specs; agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
+
 ## App API
 
 AgentMux exposes a local WebSocket RPC surface so external tools and agents can drive the host — open agent panes, send messages, read output, and more. It binds to loopback only and is auth-gated per instance.
