@@ -196,13 +196,18 @@ impl TrackerHandle for JobObjectTracker {
     }
 
     fn list_members(&self) -> Vec<TrackedProcess> {
-        self.query_pids()
-            .into_iter()
+        let pids = self.query_pids();
+        if pids.is_empty() {
+            return Vec::new();
+        }
+        let parents = query_parent_pids();
+        pids.into_iter()
             .map(|pid| TrackedProcess {
                 pid,
                 command: query_command_line(pid),
                 rss_bytes: query_rss(pid),
                 started_at_ms: 0, // deferred; uses NtQueryInformationProcess — skip for v1
+                parent_pid: parents.get(&pid).copied(),
             })
             .collect()
     }
@@ -293,6 +298,34 @@ fn query_command_line(pid: u32) -> String {
             .to_string_lossy()
             .into_owned()
     }
+}
+
+/// pid → parent pid for every process on the system, from one Toolhelp
+/// snapshot. Empty on failure (callers then treat lineage as unknown).
+fn query_parent_pids() -> std::collections::HashMap<u32, u32> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut out = std::collections::HashMap::new();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return out;
+        }
+        let mut entry: PROCESSENTRY32W = zeroed();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                out.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    out
 }
 
 fn query_rss(pid: u32) -> u64 {

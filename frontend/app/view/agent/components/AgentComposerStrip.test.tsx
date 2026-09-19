@@ -133,38 +133,39 @@ describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
 });
 
 describe("AgentComposerStrip — zone-assignment identity stability (reagent P1 on PR #2808)", () => {
-    it("keeps the Mode/Model/Effort dropdown open when an unrelated slot's own state changes (e.g. a tracked process count ticking)", async () => {
+    it("keeps the Mode/Model/Effort dropdown open when an unrelated slot's own state changes (e.g. the ctx slot appearing)", async () => {
         // Before this fix, <For> iterated the FRESH {key,side,render}
         // objects `slots()` allocates on every recompute — any unrelated
-        // prop change (processCount here) gave every slot a brand-new
+        // prop change (contextTokens here) gave every slot a brand-new
         // object identity, so <For> destroyed and recreated ALL of them,
         // including AgentRuntimeDropup (which owns its own `open` signal).
         // That silently closed this exact dropdown. `<For>` now iterates
         // stable string keys (see `slotByKey`'s doc comment in
         // AgentComposerStrip.tsx) — this test would fail against the old
-        // behavior (aria-expanded resets to "false" after setProcessCount).
-        const [processCount, setProcessCount] = createSignal(0);
+        // behavior (aria-expanded resets to "false" after setContextTokens).
+        const [contextTokens, setContextTokens] = createSignal<number | null>(null);
         render(() => (
             <AgentComposerStrip
                 {...baseProps}
                 blockId="block-1"
                 blockAtom={() => undefined}
-                processCount={processCount()}
+                contextTokens={contextTokens()}
+                contextWindow={200_000}
             />
         ));
 
         await userEvent.click(screen.getByRole("button", { name: /Runtime settings/i }));
         expect(screen.getByRole("button", { name: /Runtime settings/i }).getAttribute("aria-expanded")).toBe("true");
 
-        setProcessCount(1);
-        // Proves the update actually reached the DOM (the process badge is
-        // gated on processCount > 0) before trusting the assertion below —
+        setContextTokens(40_000);
+        // Proves the update actually reached the DOM (the ctx slot is gated
+        // on contextTokens) before trusting the assertion below —
         // otherwise a no-op re-render would make this test pass for the
         // wrong reason regardless of whether the underlying bug is fixed.
-        await screen.findByText("1");
+        await screen.findByText(/40k/i);
 
         // Deliberately RE-QUERIES rather than reusing the button reference
-        // from before setProcessCount: if the fix regresses and the trigger
+        // from before setContextTokens: if the fix regresses and the trigger
         // gets destroyed/recreated, the OLD (now-detached) node would still
         // report its last "aria-expanded=true" forever, making a reused
         // reference pass for the wrong reason regardless of the real bug.
@@ -812,33 +813,38 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
         expect(precedes(compact, ctxText)).toBe(true);
     });
 
-    it("orders a passive slot INSIDE an interactive one on the right side (ctx inward of the process badge)", () => {
-        // auth is pinned LEFT as of Rev 9 (SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md),
-        // so it no longer shares the right side with the process badge —
-        // this exercises the same passive-inward-of-interactive property
-        // with ctx instead (passive here: no onCompact, so no Compact
-        // button renders and the slot's own `interactive` flag is false).
-        // authStatus is still set so auth's pinned-left placement fills
-        // the left side and the "left must never be completely empty"
-        // fallback never fires — without it, that fallback would promote
-        // some right-side slot to the left instead, changing which slots
-        // actually share this row with the badge.
+    it("orders a passive slot INSIDE an interactive one on the right side (ctx inward of Shell)", () => {
+        // ctx is passive here: no onCompact, so no Compact button renders
+        // and the slot's own `interactive` flag is false. authStatus is set
+        // so auth's pinned-left placement (Rev 9,
+        // SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md)
+        // fills the left side and the "left must never be completely
+        // empty" fallback never fires — without it, that fallback would
+        // promote some right-side slot to the left instead, changing which
+        // slots actually share this row with Shell.
         const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="authenticated" processCount={2} contextTokens={40_000} contextWindow={200_000} />
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" agentMode="host" contextTokens={40_000} contextWindow={200_000} />
         ));
         const ctxText = container.querySelector(".agent-composer-strip-ctx")!;
-        const badge = container.querySelector(".agent-composer-strip-process-badge")!;
+        const shell = screen.getByRole("button", { name: /Shell/i });
         expect(ctxText.closest(".agent-composer-strip-row-right")).not.toBeNull();
-        expect(precedes(ctxText, badge)).toBe(true);
+        expect(precedes(ctxText, shell)).toBe(true);
     });
 
-    it("keeps Shell the outermost element of the right edge", () => {
-        const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="authenticated" processCount={2} agentMode="host" />
+    it("keeps Shell the outermost element of the right edge, outside an interactive ctx slot", () => {
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                authStatus="authenticated"
+                agentMode="host"
+                onCompact={() => {}}
+                contextTokens={40_000}
+                contextWindow={200_000}
+            />
         ));
         const shell = screen.getByRole("button", { name: /Shell/i });
-        const badge = container.querySelector(".agent-composer-strip-process-badge")!;
-        expect(precedes(badge, shell)).toBe(true);
+        const compact = screen.getByRole("button", { name: "Compact" });
+        expect(precedes(compact, shell)).toBe(true);
     });
 
     it("mirrors the hostShell slot's internal order when it lands on the LEFT (degenerate one-slot case): Shell outermost-left, HOST badge inward", () => {
