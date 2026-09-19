@@ -1,7 +1,7 @@
 # SPEC: Fix misleading guidance when a second `task dev` instance collides
 
 **Date:** 2026-09-19
-**Status:** implemented.
+**Status:** implemented — PR #3429.
 **Related:** `docs/reports/REPORT_SCREENSHOT_TOOLING_ISOLATED_INSTANCE_SETUP_BLOCKERS_2026_09_19.md`
 (Attempts 1-3 — the live repro this spec fixes), `docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md`
 (the task that surfaced it).
