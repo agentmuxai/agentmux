@@ -305,7 +305,7 @@ pub(crate) async fn open_agent_impl(
                             &block_for_resync, &tab_id, None, true, true,
                             Some(broker.clone()), Some(event_bus.clone()), Some(mstore.clone()),
                             Some(filestore.clone()), mstore.shared_agent_registry(),
-                            app_state.boot_id.clone(),
+                            app_state.boot_id.clone(), &app_state.auth_key,
                         );
                     }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
@@ -521,6 +521,32 @@ pub(crate) async fn open_agent_impl(
                 // prevent. A block with no registered controller (e.g. right
                 // after an app restart, before anything has resynced) is not
                 // "live" and doesn't block seeding.
+                // A block of this agent that is mid-close has already left
+                // CONTROLLER_REGISTRY but its process may still be exiting
+                // (up to the close's grace period). Wait for it, so the check
+                // below sees it gone AND no second `--resume` starts on the
+                // session while the old process still holds it
+                // (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §9.6).
+                let closing_blocks: Vec<String> = mstore
+                    .get_all::<Block>()
+                    .map(|blocks| {
+                        blocks
+                            .into_iter()
+                            .filter(|b| {
+                                obj::meta_get_string(&b.meta, "agentId", "") == agent.id
+                                    && blockcontroller::is_closing(&b.oid)
+                            })
+                            .map(|b| b.oid)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for closing in &closing_blocks {
+                    blockcontroller::wait_closing_stopped(
+                        closing,
+                        blockcontroller::SHUTDOWN_GRACE + std::time::Duration::from_secs(2),
+                    )
+                    .await;
+                }
                 let agent_live_elsewhere = mstore.get_all::<Block>()
                     .map(|blocks| {
                         blocks.iter().any(|b| {
@@ -747,6 +773,7 @@ pub(crate) async fn open_agent_impl(
                     Some(filestore.clone()),
                     mstore.shared_agent_registry(),
                     app_state.boot_id.clone(),
+                    &app_state.auth_key,
                 )?;
 
                 // 10. Broadcast block + tab + layout updates to frontend
