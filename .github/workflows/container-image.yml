@@ -89,7 +89,12 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: docker/
+          # Repo root, not docker/ — the mcp-builder stage in
+          # Dockerfile.agent-agentmux needs the whole Cargo workspace to
+          # build agentmux-mcp/agentmux-bashwrap (#2939 workstream 1). The
+          # root .dockerignore keeps the actual context small (excludes
+          # target/, dist/, node_modules/, .git/, docs/, etc.).
+          context: .
           file: docker/Dockerfile.agent-agentmux
           push: true
           # amd64 + arm64: native performance on Apple Silicon (OrbStack/Colima/Docker Desktop)

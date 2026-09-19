@@ -1,0 +1,31 @@
+# Docker build context excludes for docker/Dockerfile.agent-agentmux.
+#
+# The build context is the repo root (see .github/workflows/container-image.yml
+# and the multi-stage `mcp-builder` stage in docker/Dockerfile.agent-agentmux,
+# which needs the whole Cargo workspace present to resolve `-p agentmux-mcp
+# -p agentmux-bashwrap`). Without this file, `docker build` tars up local
+# build artifacts too (a dev `target/` directory alone can be 100+ GB) —
+# these are never needed inside the image and would make every build
+# (local or CI) absurdly slow.
+#
+# Mirrors the relevant entries in .gitignore, plus .git itself (git ignores
+# itself implicitly for git operations, but Docker does not).
+.git/
+target/
+dist/
+dist-dev/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/bindings/
+bindings/
+out/
+artifacts/
+docs/
+docsite/
+test-results/
+backend-test/
+src-tauri/
+agentmux-cef/cef_binary/
+agentmux-cef/resources/
+*.log
