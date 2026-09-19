@@ -65,7 +65,7 @@ without first closing the host they're embedded in. We can't assume a
 clean environment.
 
 We cannot ask agents to kill or restart the host they're running inside
-(see `CLAUDE.md` "Host Process Safety").
+(never kill AgentMux by image name — always by PID, since multiple instances share binary names).
 
 ## Resolution
 

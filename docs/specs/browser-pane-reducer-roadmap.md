@@ -31,7 +31,7 @@ Goal: every state write, every IPC event, every reactive read of the URL/title/f
 
 ### Logs to add
 
-All routed through `console.log` (which goes through `fe_log_structured` → host log per `CLAUDE.md`'s "Console Logs Go to the Backend" note). Tag every line with `[browser-pane:diag]` + the blockId prefix so they're greppable.
+All routed through `console.log` (which goes through `fe_log_structured` → host log per the console-logging convention (frontend `console.log` is bridged to the host log via `fe_log_structured`; see `docs/MUXLOG.md`) — formerly "Console Logs Go to the Backend" note). Tag every line with `[browser-pane:diag]` + the blockId prefix so they're greppable.
 
 #### In `BrowserViewModel`
 
