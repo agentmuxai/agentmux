@@ -117,29 +117,38 @@ jobs:
             | sed 's/^/@a5af\/secrets latest: /'
           rm -f /tmp/.npmrc
 
-      - name: "PAT #3 — LANDING_DEPLOY_TOKEN: can we reach the dispatch target?"
+      # .permissions.push is meaningless for an App installation token -- the
+      # first version of this step asserted it and got `false` even though the
+      # installation demonstrably holds contents:write. So assert the real
+      # capability instead of reading a field.
+      #
+      # Safe: agentmux-landing's landing-deploy.yml subscribes ONLY to
+      # `types: [release]` (verified in that repo). An event type nothing
+      # subscribes to is accepted by the API and triggers no workflow.
+      - name: "PAT #3 - LANDING_DEPLOY_TOKEN: really send a no-op dispatch"
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           set -euo pipefail
-          # Deliberately NOT sending a dispatch — that would deploy the site.
-          # A dispatch needs contents:write on the target repo, so prove we
-          # hold exactly that, without firing it.
-          PERM=$(gh api repos/agentmuxai/agentmux-landing --jq '.permissions.push')
-          echo "push permission on agentmux-landing: $PERM"
-          [ "$PERM" = "true" ] || { echo "::error::no write access — dispatch would 404"; exit 1; }
+          gh api --method POST             -H "Accept: application/vnd.github+json"             /repos/agentmuxai/agentmux-landing/dispatches             -f event_type=agentmux-app-token-smoke             -F client_payload[note]="smoke test - nothing subscribes to this type"
+          echo "dispatch accepted - contents:write on agentmux-landing confirmed"
 
-      - name: "PAT #4 — NIGHTLY_TAG_PAT: can we write refs on this repo?"
+      # Same reasoning as #3. Creating and deleting a BRANCH ref is safe here:
+      # release.yml and container-image.yml both trigger only on TAGS
+      # (v[0-9]+.[0-9]+.[0-9]+ and v*), so a branch fires nothing. A tag would
+      # have cut a real release.
+      - name: "PAT #4 - NIGHTLY_TAG_PAT: really create and delete a ref"
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           set -euo pipefail
-          # Again not actually pushing a tag. Pushing one would trigger
-          # release.yml and container-image.yml for real.
-          PERM=$(gh api repos/agentmuxai/agentmux --jq '.permissions.push')
-          echo "push permission on agentmux: $PERM"
-          [ "$PERM" = "true" ] || { echo "::error::cannot push refs — tag push would fail"; exit 1; }
-          echo "note: an App token DOES trigger on:push workflows — GitHub's"
+          REF="refs/heads/ci/app-token-probe-${GITHUB_RUN_ID}"
+          cleanup() { gh api --method DELETE "/repos/agentmuxai/agentmux/git/${REF}" >/dev/null 2>&1                         && echo "cleaned up: $REF" || echo "note: nothing to clean up"; }
+          trap cleanup EXIT
+          SHA=$(gh api repos/agentmuxai/agentmux/git/refs/heads/main --jq '.object.sha')
+          gh api --method POST /repos/agentmuxai/agentmux/git/refs             -f ref="$REF" -f sha="$SHA" --jq '.ref' | sed 's/^/created: /'
+          echo "ref write confirmed - NIGHTLY_TAG_PAT is replaceable"
+          echo "note: an App token DOES trigger on:push workflows. GitHub's"
           echo "anti-recursion rule is scoped to GITHUB_TOKEN's identity, which"
           echo "is why this can replace NIGHTLY_TAG_PAT at all."
 
