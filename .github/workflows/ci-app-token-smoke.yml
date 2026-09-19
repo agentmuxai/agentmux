@@ -1,0 +1,122 @@
+# Proves a GitHub App installation token can do everything the four CI PATs
+# currently do, BEFORE any production workflow is changed.
+#
+# Why this exists: CEF_RUNTIME_TOKEN, A5AF_PACKAGES_TOKEN, LANDING_DEPLOY_TOKEN
+# and NIGHTLY_TAG_PAT are only exercised by release/build workflows that are
+# slow, expensive, or actually cut a release. Migrating all four and finding
+# out at the next release that one of them is broken is the failure mode we
+# are explicitly trying to avoid — LANDING_DEPLOY_TOKEN in particular fails
+# SILENTLY (fire-and-forget dispatch; the release job stays green while the
+# site goes stale).
+#
+# So: prove the mechanism once, cheaply, with non-mutating checks.
+#
+# Every step here is READ-ONLY. Nothing is pushed, published, dispatched, or
+# tagged. Delete this workflow once the migration is done and verified.
+name: App token smoke test
+
+on:
+  workflow_dispatch:
+  # workflow_dispatch only fires for workflows already on the default branch,
+  # so it cannot verify this file before it merges — which is exactly when the
+  # verification is worth having. This path-scoped pull_request trigger runs it
+  # on the migration PR itself and nowhere else. Same-repo branch, so org
+  # secrets are available (they would not be from a fork).
+  pull_request:
+    paths:
+      - '.github/workflows/ci-app-token-smoke.yml'
+
+permissions: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint an App installation token
+        id: app
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: agentmuxai
+          # Scope the minted token to only what these jobs touch, rather than
+          # the App's full installation. The private key can mint broader
+          # tokens; the token this job actually holds should not be broader
+          # than its work.
+          repositories: |
+            agentmux
+            cef
+            agentmux-landing
+
+      - name: What permissions did we actually get?
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          echo "::group::identity"
+          gh api user 2>&1 | head -5 || echo "(expected: installation tokens are not users)"
+          echo "::endgroup::"
+          # x-oauth-scopes is empty for App tokens; the useful signal is that
+          # the per-repo calls below succeed.
+          gh api rate_limit --jq '.rate.limit' | sed 's/^/rate limit: /'
+
+      - name: "PAT #1 — CEF_RUNTIME_TOKEN: read agentmuxai/cef releases"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release list --repo agentmuxai/cef --limit 1 --json tagName --jq '.[0].tagName')
+          [ -n "$TAG" ] || { echo "::error::no release tag returned"; exit 1; }
+          echo "latest cef release: $TAG"
+          # the real workflows download an asset; prove asset listing works too
+          gh release view "$TAG" --repo agentmuxai/cef --json assets \
+            --jq '.assets | length | "assets: \(.)"'
+
+      - name: "PAT #2 — A5AF_PACKAGES_TOKEN: authenticate to GitHub Packages"
+        env:
+          NPM_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/.npmrc <<EOF
+          @a5af:registry=https://npm.pkg.github.com
+          //npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+          EOF
+          # read-only: resolve versions, install nothing
+          npm view @a5af/secrets version --userconfig /tmp/.npmrc \
+            | sed 's/^/@a5af\/secrets latest: /'
+          rm -f /tmp/.npmrc
+
+      - name: "PAT #3 — LANDING_DEPLOY_TOKEN: can we reach the dispatch target?"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Deliberately NOT sending a dispatch — that would deploy the site.
+          # A dispatch needs contents:write on the target repo, so prove we
+          # hold exactly that, without firing it.
+          PERM=$(gh api repos/agentmuxai/agentmux-landing --jq '.permissions.push')
+          echo "push permission on agentmux-landing: $PERM"
+          [ "$PERM" = "true" ] || { echo "::error::no write access — dispatch would 404"; exit 1; }
+
+      - name: "PAT #4 — NIGHTLY_TAG_PAT: can we write refs on this repo?"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Again not actually pushing a tag. Pushing one would trigger
+          # release.yml and container-image.yml for real.
+          PERM=$(gh api repos/agentmuxai/agentmux --jq '.permissions.push')
+          echo "push permission on agentmux: $PERM"
+          [ "$PERM" = "true" ] || { echo "::error::cannot push refs — tag push would fail"; exit 1; }
+          echo "note: an App token DOES trigger on:push workflows — GitHub's"
+          echo "anti-recursion rule is scoped to GITHUB_TOKEN's identity, which"
+          echo "is why this can replace NIGHTLY_TAG_PAT at all."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### App token smoke test"
+            echo ""
+            echo "Proves one App installation token covers all four CI PATs."
+            echo "All checks read-only — nothing pushed, published or dispatched."
+          } >> "$GITHUB_STEP_SUMMARY"
