@@ -48,6 +48,22 @@ jobs:
             cef
             agentmux-landing
 
+      # Installation tokens are PER-ACCOUNT. The first token is scoped to the
+      # agentmuxai installation and cannot see anything under a5af — proven by
+      # the first run of this workflow, which failed with
+      #   403 permission_denied: The requested installation does not exist.
+      # when asking npm.pkg.github.com for @a5af/secrets.
+      # The @a5af npm scope lives under the a5af account, so it needs its own
+      # token from the a5af installation. This is the main design consequence
+      # for the migration: the build workflows need TWO tokens, not one.
+      - name: Mint an App installation token for the a5af account
+        id: app_a5af
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: a5af
+
       - name: What permissions did we actually get?
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -73,7 +89,8 @@ jobs:
 
       - name: "PAT #2 — A5AF_PACKAGES_TOKEN: authenticate to GitHub Packages"
         env:
-          NPM_TOKEN: ${{ steps.app.outputs.token }}
+          # a5af-scoped token, NOT the agentmuxai one — see the mint step above
+          NPM_TOKEN: ${{ steps.app_a5af.outputs.token }}
         run: |
           set -euo pipefail
           cat > /tmp/.npmrc <<EOF
