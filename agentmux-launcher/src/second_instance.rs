@@ -133,25 +133,40 @@ fn forward_host_cmd_impl(
 /// IPC socket key (`hash.rs`'s `data_dir_hash16`, keyed on
 /// `CARGO_PKG_VERSION`/`AGENTMUX_BUILD_LABEL` at compile time) — it does
 /// NOT change the CEF profile/data directory, which for dev mode is keyed
-/// on git branch alone (`agentmux-common/src/data_paths.rs`'s
-/// `resolve_channel_and_dir`, called with `honor_env_channel=false` for
-/// dev launches; `runtime_mode.rs`'s `detect_branch` reruns `git
-/// rev-parse` itself). Two same-branch dev instances collide on CEF's own
-/// `SingletonLock` inside that directory regardless of version — reproduced
-/// live: a real rebuild under a bumped version got a new launcher socket
-/// and STILL hit `CEF early exit (process singleton or similar)` on the
-/// unchanged, branch-keyed data dir. The only actual fix is a different
-/// branch (or a worktree checked out to one) — named directly here instead
-/// of pointing at a command that cannot solve this specific problem.
+/// on `(branch, clone_id)` — NOT version — via
+/// `agentmux-common/src/data_paths.rs`'s `resolve_channel_and_dir`
+/// (`honor_env_channel=false` for dev launches). `clone_id`
+/// (`runtime_mode.rs`'s `derive_clone_id`) is a hash of the CLONE'S OWN
+/// CANONICAL WORKSPACE-ROOT PATH — git-worktree-aware by design, so a
+/// second worktree of the SAME branch already gets a distinct `clone_id`
+/// and therefore a distinct data dir, with no branch switch needed;
+/// `resolve_channel_and_dir` folds both into the one `channel` string this
+/// function receives (`format!("dev-{branch}-{clone_id}")` — confirmed by
+/// reading that call site directly). Two dev instances collide on CEF's
+/// own `SingletonLock` only when BOTH branch and clone/workspace path are
+/// identical — reproduced live: a real rebuild under a bumped version, run
+/// from the unchanged clone path on the unchanged branch, got a new
+/// launcher socket and STILL hit `CEF early exit (process singleton or
+/// similar)` on the unchanged data dir. The fix is a different branch OR a
+/// different clone/worktree path (either one changes `channel`) — named
+/// directly here instead of pointing at a command that cannot solve this
+/// specific problem. (ReAgent P1 on this PR: an earlier revision of this
+/// message claimed branch was the ONLY lever, which is what this revision
+/// corrects — verified against `resolve_channel_and_dir`'s actual source,
+/// not just re-asserted.)
 fn print_dev_instance_collision(channel: &str, data_dir: &std::path::Path, socket_path: &str) {
     eprintln!(
-        "AgentMux dev instance already running for branch \"{channel}\".\n\
-         Data-dir isolation is keyed on git branch, not build version — a\n\
-         `task dev:local` version bump will NOT let a second instance run\n\
-         alongside this one (it only changes this launcher's own IPC socket\n\
-         key, not the CEF profile directory below). To run a second dev\n\
-         instance concurrently, check out — or add a worktree for — a\n\
-         DIFFERENT branch and run `task dev` there instead.\n\
+        "AgentMux dev instance already running for channel \"{channel}\"\n\
+         (dev-<branch>-<clone_id>, where clone_id identifies THIS checkout's\n\
+         own workspace-root path). Data-dir isolation is keyed on branch AND\n\
+         clone/workspace path together, not build version — a `task dev:local`\n\
+         version bump will NOT let a second instance run alongside this one\n\
+         from this same checkout on this same branch (it only changes this\n\
+         launcher's own IPC socket key, not the CEF profile directory below).\n\
+         To run a second dev instance concurrently, either check out a\n\
+         DIFFERENT branch, or run `task dev` from a DIFFERENT clone/worktree\n\
+         path (even on this same branch — clone/worktree path alone is\n\
+         enough to change the channel above).\n\
          Data dir: {}\n\
          Socket:   {socket_path}",
         data_dir.display()

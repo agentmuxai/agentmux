@@ -4,9 +4,9 @@
 **Status:** retro — a live-as-it-happened record. Attempts 1/3's root
 cause is fixed by `docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md`;
 the rest (Attempts 2, 4-8) are recorded findings, not yet acted on.
-**Context:** Building `scripts/ui-screenshots/` (see
-`docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md`) needed a clean,
-isolated AgentMux instance — no real conversations/accounts — to capture
+**Context:** Building a UI-manual screenshot tool (`scripts/ui-screenshots/`,
+not yet landed as of this report — not cited by path here for that reason)
+needed a clean, isolated AgentMux instance — no real conversations/accounts — to capture
 manual screenshots against. Getting a second instance running turned into
 most of the actual time spent on this task (§Attempts 1-5). Once capturing
 against the live primary instance instead (the fallback — see §Outcome),
@@ -220,9 +220,10 @@ capturing against the already-running **primary** instance instead
 that shouldn't show real conversation content) surfaced a second, distinct
 blocker class — not about instance isolation at all, about **driving the
 UI reliably once you have a target**. Recorded here because it's the more
-generally useful finding of the two, and because it directly informed the
-separate `docs/specs/SPEC_AGENT_MOUSE_SCREEN_CONTROL_2026_09_19.md` written
-the same session.
+generally useful finding of the two, and because it's the concrete
+motivating evidence for a separate cross-platform mouse/screen-control
+design this same session's work led into — not cited by path here since
+it hadn't landed as of this report.
 
 ## Attempt 6: fuzzy text-matching click landed on the wrong element, with a real side effect
 
