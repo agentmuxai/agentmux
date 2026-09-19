@@ -107,6 +107,10 @@ async fn main() {
     // `bootstrap::install_close_on_exit_handler`'s doc comment.
     bootstrap::install_close_on_exit_handler(&state);
 
+    // Backstop for agent blocks left in a tab but in no pane — see
+    // `sagas::orphan_reaper`'s module doc.
+    sagas::orphan_reaper::install(&state);
+
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.

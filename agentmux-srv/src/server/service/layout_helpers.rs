@@ -79,7 +79,7 @@ pub(crate) async fn setup_torn_off_block_layout(
 ///
 /// SPEC_864 Phase 4 — appends through the reducer
 /// (`queue_layout_actions_via_reducer`), not `store.update`.
-pub(super) async fn queue_target_layout_insert(
+pub(crate) async fn queue_target_layout_insert(
     state: &super::super::AppState,
     target_tab_id: &str,
     block_id: &str,
