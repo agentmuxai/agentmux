@@ -63,6 +63,11 @@ jobs:
           app-id: ${{ secrets.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
           owner: a5af
+          # Least privilege, same as the agentmuxai mint above. @a5af/secrets
+          # is published from a5af/dev-tools, so that is the only repo this
+          # token needs. Without this it would span the whole a5af
+          # installation (127 repos) for one `npm view`.
+          repositories: dev-tools
 
       - name: What permissions did we actually get?
         env:
