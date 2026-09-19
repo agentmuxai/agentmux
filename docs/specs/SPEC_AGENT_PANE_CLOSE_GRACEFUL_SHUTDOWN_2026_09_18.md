@@ -229,8 +229,9 @@ whole.
 Keep removing the pane from the UI immediately; a 5s wait before the pane
 disappears would feel broken. The backend saga owns completion:
 
-- A failed or rejected close is reported to the user, not swallowed (today the
-  error is dropped by `fireAndForget` with only a `[BUG-TRACE]` log line).
+- A failed or rejected close is reported to the user, not swallowed (today
+  `onClose` runs `closeNode` through `fireAndForget`, `frontend/util/util.ts:87`,
+  which catches the error, logs it to the console, and shows the user nothing).
 - If the saga cannot complete, the reaper (§4.9) finishes the job.
 
 ### 4.6 One confirmation for the whole pane
