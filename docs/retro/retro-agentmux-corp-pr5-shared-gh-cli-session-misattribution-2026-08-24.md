@@ -86,7 +86,7 @@ instead of another plausible-but-unproven theory:
 
 ```
 $ echo $GH_TOKEN
-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
+ghp_REDACTED_SEE_PRIVATE_INVENTORY
 ```
 
 **My own (agenty's) shell already has `GH_TOKEN`/`GITHUB_TOKEN` set** —

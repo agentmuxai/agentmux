@@ -1,5 +1,14 @@
 # SPEC: Trust Center Centered Modals + Identity/Memory Seed
 
+> **Redacted 2026-09-18.** This archived spec originally included the AWS
+> account ID and the per-agent Secrets Manager key names. This repository is
+> public, so those were replaced with placeholders; the real values live in
+> the private `shared-infrastructure` repository, in its credential
+> inventory standard. Note that git history still
+> contains the original values - they are identifiers, not credentials, and
+> nothing disclosed can authenticate.
+
+
 > **Archived 2026-07-12.** Historical — modal-centering refactor + one-time credential/memory seed script, both complete. Consolidated tracking: issue #2024.
 
 **Date:** 2026-06-19  
@@ -109,13 +118,13 @@ Per-agent assignment stored as JSON blob in `db_agent_definitions.accounts`:
 
 | Agent | Display name | GitHub PAT secret | AWS profile | AWS account |
 |---|---|---|---|---|
-| agent1 | Agent1 GitHub | `services/infra → gh-token-agent1` | `Agent1` | `050544946291` |
-| agent2 | Agent2 GitHub | `services/infra → gh-token-agent2` | `Agent2` | `050544946291` |
-| agent3 | Agent3 GitHub | `services/infra → gh-token-agent3` | `Agent3` | `050544946291` |
-| agent4 | Agent4 GitHub | `services/infra → gh-token-agent4` | `Agent4` | `050544946291` |
-| agent5 | Agent5 GitHub | `services/infra → gh-token-agent5` | `Agent5` | `050544946291` |
-| agentx | AgentX GitHub | `services/infra → gh-token-agentx` | `AgentX` | `050544946291` |
-| agenty | AgentY GitHub | `services/infra → gh-token-agenty` | `AgentY` | `050544946291` |
+| agent1 | Agent1 GitHub | `(see private inventory)` | `Agent1` | `(redacted)` |
+| agent2 | Agent2 GitHub | `(see private inventory)` | `Agent2` | `(redacted)` |
+| agent3 | Agent3 GitHub | `(see private inventory)` | `Agent3` | `(redacted)` |
+| agent4 | Agent4 GitHub | `(see private inventory)` | `Agent4` | `(redacted)` |
+| agent5 | Agent5 GitHub | `(see private inventory)` | `Agent5` | `(redacted)` |
+| agentx | AgentX GitHub | `(see private inventory)` | `AgentX` | `(redacted)` |
+| agenty | AgentY GitHub | `(see private inventory)` | `AgentY` | `(redacted)` |
 
 **GitHub account `secret_ref`:**
 ```json
@@ -138,7 +147,7 @@ Per-agent assignment stored as JSON blob in `db_agent_definitions.accounts`:
 {
   "profile": "Agent1",
   "region": "us-east-1",
-  "account_id": "050544946291"
+  "account_id": "REDACTED"
 }
 ```
 
@@ -181,7 +190,7 @@ for (const agent of AGENTS) {
     id: "", provider: "aws", kind: "role",
     display_name: `${agent.name} AWS`,
     secret_ref: JSON.stringify({ backend: "env_ref", env_var: "AWS_PROFILE" }),
-    context: JSON.stringify({ profile: agent.awsProfile, region: "us-east-1", account_id: "050544946291" }),
+    context: JSON.stringify({ profile: agent.awsProfile, region: "us-east-1", account_id: "REDACTED" }),
   });
 
   // 5. Assign to agent
