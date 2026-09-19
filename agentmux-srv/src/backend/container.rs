@@ -29,7 +29,7 @@ use bollard::container::{
 };
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
-use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
 
 /// Where the agent CLI's config dir lives inside the image (`CLAUDE_CONFIG_DIR`).
 pub const CONTAINER_CLAUDE_DIR: &str = "/home/agent/.claude";
@@ -189,6 +189,27 @@ fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec) -> Vec<Mou
         });
     }
     mounts
+}
+
+/// Rewrite a host-loopback `AGENTMUX_LOCAL_URL` (e.g. `http://127.0.0.1:PORT`)
+/// into something a container's network namespace can actually reach.
+///
+/// `docker exec` over the Docker socket never inherits the host process's
+/// env the way a host subprocess does, so a container agent gets no sidecar
+/// URL at all unless one is explicitly injected — and injecting the
+/// loopback value verbatim would be reachable from the srv process but not
+/// from inside the container. `host.docker.internal` is resolvable from
+/// Docker Desktop (macOS/Windows) automatically, and from native Linux via
+/// the `extra_hosts: host.docker.internal:host-gateway` entry
+/// `create_and_start` sets — see #2939 workstream 1.
+///
+/// Only rewrites `127.0.0.1`/`localhost`; any other host (already a real
+/// hostname/IP, or already `host.docker.internal`) passes through
+/// unchanged, so this is safe to call unconditionally.
+pub fn rewrite_local_url_for_container(local_url: &str) -> String {
+    local_url
+        .replace("127.0.0.1", "host.docker.internal")
+        .replace("localhost", "host.docker.internal")
 }
 
 /// Env var names that reference host-filesystem paths and must NOT be forwarded
@@ -413,16 +434,16 @@ impl ContainerManager {
         // that has ever run. Recreate on drift; the per-agent named volume
         // carries session/project state across the swap.
         let existing = match existing {
-            Some(_) if !self.mounts_match(container_name, spec).await => {
-                tracing::info!(
-                    container = container_name,
-                    "container mounts differ from the desired spec (credentials/workspace) — recreating"
-                );
-                let _ = self.stop(container_name, 10).await;
-                self.remove(container_name, true).await?;
-                None
-            }
-            other => other,
+            Some(status) => match self.container_drift(container_name, spec).await {
+                Some(reason) => {
+                    tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
+                    let _ = self.stop(container_name, 10).await;
+                    self.remove(container_name, true).await?;
+                    None
+                }
+                None => Some(status),
+            },
+            None => None,
         };
 
         match existing {
@@ -797,6 +818,29 @@ impl ContainerManager {
         desired
     }
 
+    /// Single Docker inspect covering both drift checks below — mounts and
+    /// extra_hosts previously each did their own `inspect_container` round
+    /// trip, doubling the Docker-socket call on every `ensure_running` for
+    /// the common case of an already-compliant container (reagent P2 on PR
+    /// #3393). Returns a human-readable reason if either has drifted, or
+    /// `None` if the container matches (or the inspect itself failed —
+    /// fails safe, same as the two checks below always did: a spurious
+    /// recreate kills a live agent and loses its container-local state,
+    /// which is worse than one more restart on stale state we couldn't
+    /// even confirm).
+    async fn container_drift(&self, container_name: &str, spec: &ContainerMountSpec) -> Option<&'static str> {
+        let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
+            return None;
+        };
+        if !Self::mounts_match(&details, container_name, spec) {
+            return Some("mounts differ from the desired spec (credentials/workspace)");
+        }
+        if !Self::extra_hosts_match(&details) {
+            return Some("extra_hosts missing host.docker.internal:host-gateway");
+        }
+        None
+    }
+
     /// Does the existing container already carry exactly the mounts `spec` asks
     /// for? Used to decide whether an agent that is already up has to be
     /// recreated to pick up (or lose) credentials and a workspace.
@@ -816,15 +860,11 @@ impl ContainerManager {
     /// `container_volumes` are ignored, so a user adding an unrelated mount is
     /// never a reason to destroy and rebuild their container underneath them.
     ///
-    /// Fails SAFE: any inspect error or missing data returns `true` ("matches"),
-    /// leaving the container alone. A spurious recreate kills a live agent and
-    /// loses its container-local state, which is worse than one more restart on
-    /// a stale mount.
-    async fn mounts_match(&self, container_name: &str, spec: &ContainerMountSpec) -> bool {
-        let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
-            return true;
-        };
-        let Some(actual) = details.mounts else {
+    /// Fails SAFE: missing mount data on the passed-in inspect result returns
+    /// `true` ("matches"), leaving the container alone — the inspect-error case
+    /// itself is now handled once, by `container_drift`'s caller.
+    fn mounts_match(details: &ContainerInspectResponse, container_name: &str, spec: &ContainerMountSpec) -> bool {
+        let Some(actual) = details.mounts.as_ref() else {
             return true;
         };
 
@@ -841,6 +881,21 @@ impl ContainerManager {
             let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })
+    }
+
+    /// Whether an existing container's `HostConfig.extra_hosts` already has
+    /// the `host.docker.internal:host-gateway` entry `create_and_start` sets
+    /// (reagent P1, PR #3393). Docker cannot add an extra_hosts entry to an
+    /// already-existing container — only `container_drift`'s recreate path
+    /// (via `ensure_running_locked`) can actually fix a container that
+    /// predates this.
+    fn extra_hosts_match(details: &ContainerInspectResponse) -> bool {
+        let Some(extra_hosts) = details.host_config.as_ref().and_then(|hc| hc.extra_hosts.as_ref()) else {
+            return false;
+        };
+        extra_hosts
+            .iter()
+            .any(|h| h == "host.docker.internal:host-gateway")
     }
 
     /// Returns the container status string ("running", "exited", …) or `None` if not found.
@@ -980,6 +1035,15 @@ impl ContainerManager {
                 mounts: Some(all_mounts),
                 // Security: no host network, no privileged mode.
                 network_mode: Some("bridge".to_string()),
+                // Lets the container reach the sidecar (agentmux-srv) via
+                // `host.docker.internal`, which `run_agent_turn`/`agent_io`'s
+                // container branch rewrites AGENTMUX_LOCAL_URL to (see
+                // #2939 workstream 1). Docker Desktop (macOS/Windows) already
+                // resolves this name automatically; `host-gateway` is what
+                // makes it resolve on native Linux's default bridge network
+                // too, where nothing does this by default. Harmless no-op
+                // where Docker Desktop already handles it.
+                extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                 ..Default::default()
             }),
             ..Default::default()
@@ -1150,6 +1214,39 @@ mod tests {
     fn test_container_name_for_slug() {
         assert_eq!(container_name_for_slug("my-agent"), "agentmux-my-agent");
         assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
+    }
+
+    // ── AGENTMUX_LOCAL_URL rewrite for container reachability ───────────────
+    // See #2939 workstream 1.
+
+    #[test]
+    fn rewrites_loopback_ip_to_host_docker_internal() {
+        assert_eq!(
+            rewrite_local_url_for_container("http://127.0.0.1:54321"),
+            "http://host.docker.internal:54321"
+        );
+    }
+
+    #[test]
+    fn rewrites_localhost_to_host_docker_internal() {
+        assert_eq!(
+            rewrite_local_url_for_container("http://localhost:54321"),
+            "http://host.docker.internal:54321"
+        );
+    }
+
+    #[test]
+    fn leaves_a_non_loopback_host_unchanged() {
+        // Already a real hostname/IP, or already host.docker.internal —
+        // must pass through unchanged, not get mangled.
+        assert_eq!(
+            rewrite_local_url_for_container("http://192.168.1.5:54321"),
+            "http://192.168.1.5:54321"
+        );
+        assert_eq!(
+            rewrite_local_url_for_container("http://host.docker.internal:54321"),
+            "http://host.docker.internal:54321"
+        );
     }
 
     // ── Credential + workspace mounts ───────────────────────────────────────

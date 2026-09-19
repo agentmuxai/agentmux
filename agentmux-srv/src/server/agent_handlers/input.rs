@@ -598,6 +598,27 @@ pub async fn run_agent_turn(
                 workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
             };
 
+            // AGENTMUX_LOCAL_URL is never explicitly set in env_vars for a host
+            // agent either (see the PATH-block comment above) — a host
+            // subprocess just inherits it from this process's own env
+            // (bootstrap.rs). `docker exec` over the Docker socket never
+            // inherits host process env, so a container agent gets no sidecar
+            // URL at all unless it's injected here. Rewritten to
+            // host.docker.internal (routable from inside the container via
+            // the extra_hosts entry `create_and_start` sets — see
+            // container.rs) since the loopback address this process sees is
+            // not reachable from the container's own network namespace.
+            // #2939 workstream 1 (host integration) — this alone doesn't
+            // finish that workstream: agentmux-mcp/agentmux-bashwrap also
+            // need to actually exist in the container image, which they do
+            // not yet.
+            if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
+                env_vars.insert(
+                    "AGENTMUX_LOCAL_URL".to_string(),
+                    crate::backend::container::rewrite_local_url_for_container(&local_url),
+                );
+            }
+
             // Ensure container is alive (pull image if needed — P1b).
             if let Err(e) = cm
                 .ensure_running(
