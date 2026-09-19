@@ -161,5 +161,5 @@ Expected: log line shows
 
 - #695 — `RuntimeMode` + `DataPaths` primitives
 - #696 — switch launcher/host/srv onto the new primitives
-- `docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original
+- `docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original
   unification spec; this is a follow-up.
