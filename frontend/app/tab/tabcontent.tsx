@@ -14,7 +14,12 @@ import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/s
 import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
-import { createMemo, Show } from "solid-js";
+import { ConfirmModal } from "@/app/element/confirm-modal";
+import { busyMembers, describeBusyMember, type BusyMember, type PaneCloseProbe } from "@/app/tab/pane-close-guard";
+import { pushFlashError } from "@/app/store/flash-notifications";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 /**
@@ -30,6 +35,17 @@ function buildEmptyTabMenu(): ContextMenuItem[] {
     return buildPaneWidgetMenuItems(wmap, settings, (blockdef) => void createBlock(blockdef));
 }
 
+/** Live probes for the pane-close confirmation (`pane-close-guard.ts`). */
+const paneCloseProbe: PaneCloseProbe = {
+    turnActive: async (blockId) => (await services.BlockService.GetControllerStatus(blockId))?.turn_active ?? null,
+    processCount: async (blockId) =>
+        (await RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: blockId })).processes.length,
+    name: (blockId) => {
+        const meta = MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta;
+        return (meta?.["agentName"] as string) || (meta?.["agentId"] as string) || "An agent";
+    },
+};
+
 function TabContent(props: { tabId: string }): JSX.Element {
     const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
     const tabAtom = createMemo(() => MOS.getMuxObjectAtom<Tab>(oref()));
@@ -39,6 +55,16 @@ function TabContent(props: { tabId: string }): JSX.Element {
         const settings = atoms.settingsAtom();
         return settings["window:tilegapsize"];
     });
+
+    const [pendingClose, setPendingClose] = createSignal<{
+        busy: BusyMember[];
+        resolve: (close: boolean) => void;
+    } | null>(null);
+    const answerPendingClose = (close: boolean) => {
+        const pending = pendingClose();
+        setPendingClose(null);
+        pending?.resolve(close);
+    };
 
     const tileLayoutContents = createMemo<TileLayoutContents>(() => {
         const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
@@ -67,8 +93,28 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 return result;
             } catch (err) {
                 getApi().sendLog(`[BUG-TRACE] onNodeDelete ERROR: ${err}`);
+                // The pane is already gone from the UI; the close runs through
+                // `fireAndForget`, which would only log this. Tell the user —
+                // an agent may still be running (spec §4.5). The orphan reaper
+                // finishes the job if it can't be retried from here.
+                pushFlashError({
+                    id: "",
+                    icon: "triangle-exclamation",
+                    title: "Couldn't fully close the pane",
+                    message: String(err),
+                    expiration: Date.now() + 10_000,
+                });
                 throw err;
             }
+        }
+
+        // One confirmation for the whole pane when an agent in it is
+        // mid-turn or has tracked processes running (spec §4.6).
+        async function beforeNodeDelete(data: TabLayoutData): Promise<boolean> {
+            const blockIds = effectiveStack(data).filter(Boolean);
+            const busy = await busyMembers(blockIds, paneCloseProbe);
+            if (busy.length === 0) return true;
+            return new Promise<boolean>((resolve) => setPendingClose({ busy, resolve }));
         }
 
         return {
@@ -76,6 +122,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
             renderPreview,
             tabId: props.tabId,
             onNodeDelete,
+            beforeNodeDelete,
             gapSizePx: tileGapSize(),
         };
     });
@@ -121,6 +168,23 @@ function TabContent(props: { tabId: string }): JSX.Element {
                 >
                     <EmptyTabIdentity />
                 </Show>
+            </Show>
+            <Show when={pendingClose()}>
+                {(pending) => (
+                    <ConfirmModal
+                        open={true}
+                        title="Close this pane?"
+                        description="Closing stops these agents. A turn in progress is interrupted, and processes they started are stopped."
+                        confirmLabel="Close"
+                        destructive
+                        onConfirm={() => answerPendingClose(true)}
+                        onCancel={() => answerPendingClose(false)}
+                    >
+                        <ul class="list-disc pl-5 text-sm">
+                            <For each={pending().busy}>{(m) => <li>{describeBusyMember(m)}</li>}</For>
+                        </ul>
+                    </ConfirmModal>
+                )}
             </Show>
         </div>
     );
