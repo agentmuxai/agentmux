@@ -108,6 +108,16 @@ pub struct ShellController {
     /// mirroring `PersistentController`/`SubprocessController`'s existing
     /// filestore wiring.
     pub(super) filestore: Option<Arc<FileStore>>,
+    /// This instance's API auth key, re-injected into the spawned PTY as
+    /// `AGENTMUX_AUTH_KEY` (see `lifecycle.rs`) so `muxsh`/`muxspect`/
+    /// `muxopen`/`muxlog`, run by a human from a plain Terminal-widget pane,
+    /// can authenticate the same way an agent pane's process already does
+    /// (`PersistentSpawnConfig`/`SubprocessSpawnConfig`'s own `env_vars`).
+    /// Can't be read back from the process env at spawn time the way
+    /// `AGENTMUX_LOCAL_URL` is — `config.rs` deliberately scrubs it from
+    /// this process's own environment right after startup (PR #801) — so it
+    /// has to be threaded in explicitly instead.
+    pub(super) auth_key: String,
 }
 
 impl ShellController {
@@ -120,6 +130,7 @@ impl ShellController {
         event_bus: Option<Arc<EventBus>>,
         mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
+        auth_key: String,
     ) -> Self {
         Self {
             controller_type,
@@ -146,6 +157,7 @@ impl ShellController {
             event_bus,
             mstore,
             filestore,
+            auth_key,
         }
     }
 
