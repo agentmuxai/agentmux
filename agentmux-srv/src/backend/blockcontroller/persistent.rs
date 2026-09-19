@@ -7836,16 +7836,22 @@ rl.on("close", () => {
         (c, broker)
     }
 
+    /// Wait until the stub is actually running: it has printed its init line
+    /// and the controller captured the session id from it. A bare pid isn't
+    /// enough — node can take seconds to start on a loaded CI runner, and the
+    /// timing assertions must not include that.
     async fn wait_for_pid(c: &PersistentSubprocessController) {
-        for _ in 0..100 {
-            if c.inner.lock().unwrap().current_pid.is_some() {
-                // Let the stub print its init line and read the message.
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        for _ in 0..300 {
+            let ready = {
+                let g = c.inner.lock().unwrap();
+                g.current_pid.is_some() && g.session_id.as_deref() == Some("stub-session")
+            };
+            if ready {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        panic!("stub process never started");
+        panic!("stub process never became ready");
     }
 
     fn failures(broker: &mps::Broker, block_id: &str) -> usize {
@@ -7887,6 +7893,15 @@ rl.on("close", () => {
         let Some(stub) = stub_path() else { return };
         let (c, _broker) = start("blk-shutdown-idle", "idle", &stub);
         wait_for_pid(&c).await;
+        // The stub answers the message with a `result`, ending the turn. Node
+        // startup on a loaded CI runner can take seconds — wait for it rather
+        // than assume.
+        for _ in 0..200 {
+            if !c.health_monitor.is_active_turn() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         assert!(!c.health_monitor.is_active_turn(), "precondition: idle");
 
         let started = std::time::Instant::now();
