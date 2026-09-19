@@ -472,6 +472,58 @@ mod tests {
         );
     }
 
+    /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2: deleting one tab
+    /// of a stacked pane (e.g. a terminal tab whose shell exited —
+    /// close-on-exit runs this saga) keeps the pane and its other tabs. It
+    /// used to delete the whole leaf, leaving the sibling (an agent, say)
+    /// running with no pane.
+    #[tokio::test]
+    async fn deleting_one_tab_of_a_stacked_pane_keeps_the_pane_and_its_sibling() {
+        let (state, _ws_id, tab_id, agent) = seed().await;
+        let term = dispatch_apply(
+            &state,
+            agentmux_common::ipc::Command::CreateBlock {
+                tab_id: tab_id.clone(),
+                meta: serde_json::Value::Null,
+            },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        dispatch_apply(
+            &state,
+            agentmux_common::ipc::Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "pane".into(),
+                    data: Some(agentmux_common::LayoutNodeData {
+                        block_id: term.clone(),
+                        block_stack: vec![agent.clone(), term.clone()],
+                        active_block_id: term.clone(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        run(&state, tab_id.clone(), term.clone()).await.unwrap();
+
+        let s = state.srv_state.lock().await;
+        assert!(s.blocks.contains_key(&agent), "sibling block survives");
+        let leaf = s.tabs[&tab_id].rootnode.as_ref().expect("the pane survives");
+        let data = leaf.data.as_ref().unwrap();
+        assert_eq!(data.block_stack, vec![agent.clone()]);
+        assert_eq!(data.block_id, agent, "the sibling becomes the visible tab");
+    }
+
     #[tokio::test]
     async fn rejects_when_block_not_found() {
         let (state, _ws_id, tab_id, _block_id) = seed().await;

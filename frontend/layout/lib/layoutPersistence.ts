@@ -6,6 +6,7 @@ import { fireAndForget } from "@/util/util";
 import { isTileDragInFlight } from "./dragInFlight";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
+import { removeMemberFromStack } from "./stackMembers";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -245,6 +246,18 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                     );
                     break;
                 }
+            }
+
+            // The action names ONE block. `getNodeByBlockId` also matches a
+            // background tab of a stacked pane, so deleting the leaf here
+            // removed every other tab with it — each sibling's block (agents
+            // included) left running with no pane. A terminal tab whose shell
+            // exits (close-on-exit → delete_block → this action) did exactly
+            // that. Remove just this block from the stack; the leaf goes only
+            // when it was the last member.
+            // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2, §3.4.
+            if (leaf?.data && removeMemberFromStack(leaf.data, action.blockid)) {
+                break; // committed by processPendingBackendActions' updateTree + persist
             }
 
             if (leaf) {
