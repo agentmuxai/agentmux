@@ -103,6 +103,33 @@ pub(crate) async fn queue_target_layout_insert(
         .await
 }
 
+/// Tell the frontend that `block_id` was added — already, in the reducer — as
+/// the visible tab of the pane holding `target_block_id`
+/// (`Command::CreateBlockInStack`). Matches
+/// `LayoutTreeActionType.StackPush = "stackpush"` in
+/// `frontend/layout/lib/types.ts`. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+pub(crate) async fn queue_target_stack_push(
+    state: &super::super::AppState,
+    tab_id: &str,
+    block_id: &str,
+    target_block_id: &str,
+) -> Result<(), String> {
+    let action = LayoutActionData {
+        actiontype: "stackpush".to_string(),
+        actionid: uuid::Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize: None,
+        nodesizefraction: None,
+        indexarr: None,
+        focused: true,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: target_block_id.to_string(),
+        position: String::new(),
+    };
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
+}
+
 /// Phase 4b/4c — enqueue a directional split action on the TARGET tab's
 /// `LayoutState.pendingbackendactions` so the redocked block lands in
 /// the exact slot the ghost overlay previewed.

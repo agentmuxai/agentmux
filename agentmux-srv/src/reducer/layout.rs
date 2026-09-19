@@ -499,6 +499,106 @@ pub(super) fn handle_layout_queue_backend_actions(
 // commands/events already exist; this wires them.
 
 /// `Event::Error` for an unknown tab.
+// ── Pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2) ─────────
+
+/// Apply a pane-tab edit to the tab's tree and emit the tree-only
+/// `LayoutTreeReplaced` (no slices: focus, magnify, leaf order and the
+/// pending-action queue are untouched). `edit` returns false when it found
+/// nothing to act on.
+fn stack_tree_edit(
+    state: &mut State,
+    op: &str,
+    tab_id: String,
+    correlation_id: String,
+    not_found: String,
+    edit: impl FnOnce(&mut agentmux_common::LayoutNode) -> bool,
+) -> Vec<Event> {
+    let applied = match state.tabs.get_mut(&tab_id) {
+        None => return unknown_tab(state, op, &tab_id),
+        Some(tab) => tab.rootnode.as_mut().is_some_and(edit),
+    };
+    if !applied {
+        return op_error(state, format!("{op}: {not_found} (tab {tab_id})"));
+    }
+    let new_tree = state.tabs.get(&tab_id).and_then(|tab| tab.rootnode.clone());
+    let violations = crate::backend::layout::validate_layout_invariants(&new_tree);
+    if !violations.is_empty() {
+        tracing::error!(tab_id = %tab_id, op, violations = ?violations, "layout-doctor: invariant violation(s) after a pane-tab edit");
+    }
+    let v = state.bump_version();
+    vec![Event::LayoutTreeReplaced {
+        tab_id,
+        new_tree,
+        correlation_id,
+        slices: None,
+        version: v,
+    }]
+}
+
+pub(super) fn handle_layout_stack_push(
+    state: &mut State,
+    tab_id: String,
+    target_block_id: String,
+    block_id: String,
+    activate: bool,
+    correlation_id: String,
+) -> Vec<Event> {
+    // Only a block that lives in this tab may join one of its panes.
+    if state.blocks.get(&block_id).map(|b| b.tab_id.as_str()) != Some(tab_id.as_str()) {
+        return op_error(state, format!("LayoutStackPush: block {block_id} is not in tab {tab_id}"));
+    }
+    let not_found = format!("no pane holds block {target_block_id}");
+    stack_tree_edit(state, "LayoutStackPush", tab_id, correlation_id, not_found, |root| {
+        crate::backend::layout::push_stack_member(root, &target_block_id, &block_id, activate)
+    })
+}
+
+pub(super) fn handle_layout_stack_activate(
+    state: &mut State,
+    tab_id: String,
+    block_id: String,
+    correlation_id: String,
+) -> Vec<Event> {
+    let not_found = format!("no pane holds block {block_id}");
+    stack_tree_edit(state, "LayoutStackActivate", tab_id, correlation_id, not_found, |root| {
+        crate::backend::layout::activate_stack_member(root, &block_id)
+    })
+}
+
+/// Create a block and place it in a pane's tab stack in one step. Placement
+/// is validated FIRST: if no pane holds `target_block_id`, nothing is created
+/// — a block never exists without a pane.
+pub(super) fn handle_create_block_in_stack(
+    state: &mut State,
+    tab_id: String,
+    target_block_id: String,
+    meta: serde_json::Value,
+    activate: bool,
+) -> Vec<Event> {
+    let Some(tab) = state.tabs.get(&tab_id) else {
+        return unknown_tab(state, "CreateBlockInStack", &tab_id);
+    };
+    let placeable = tab
+        .rootnode
+        .as_ref()
+        .is_some_and(|root| crate::backend::layout::find_leaf_containing_block(root, &target_block_id).is_some());
+    if !placeable {
+        return op_error(
+            state,
+            format!("CreateBlockInStack: no pane holds block {target_block_id} (tab {tab_id})"),
+        );
+    }
+    let mut events = super::block::handle_create_block(state, tab_id.clone(), meta);
+    let Some(block_id) = events.iter().find_map(|e| match e {
+        Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+        _ => None,
+    }) else {
+        return events; // the create itself failed; its Error event says why
+    };
+    events.extend(handle_layout_stack_push(state, tab_id, target_block_id, block_id, activate, String::new()));
+    events
+}
+
 fn unknown_tab(state: &mut State, op: &str, tab_id: &str) -> Vec<Event> {
     let v = state.bump_version();
     vec![Event::Error {
@@ -2598,6 +2698,111 @@ mod tests {
 
         assert!(matches!(events[0], Event::LayoutNodeDeleted { .. }), "got {:?}", events);
         assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    // ── Pane tabs (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2) ──────
+
+    /// §2.1: the block is created AND placed in one reducer step — there is
+    /// no state in which it exists without a pane.
+    #[test]
+    fn create_block_in_stack_creates_and_places_in_one_step() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "anchor");
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("pane", "anchor"));
+
+        let events = update(
+            &mut state,
+            Command::CreateBlockInStack {
+                tab_id: tab_id.clone(),
+                target_block_id: "anchor".into(),
+                meta: serde_json::json!({ "view": "agent" }),
+                activate: true,
+            },
+            &ctx(1),
+        );
+        let new_id = events
+            .iter()
+            .find_map(|e| match e {
+                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .expect("block created");
+        assert!(
+            events.iter().any(|e| matches!(e, Event::LayoutTreeReplaced { slices: None, .. })),
+            "placed in the same step: {events:?}"
+        );
+        assert!(state.blocks.contains_key(&new_id));
+        assert!(state.tabs[&tab_id].block_ids.contains(&new_id));
+        let data = state.tabs[&tab_id].rootnode.as_ref().unwrap().data.clone().unwrap();
+        assert_eq!(data.block_stack, vec!["anchor".to_string(), new_id.clone()]);
+        assert_eq!(data.block_id, new_id);
+    }
+
+    #[test]
+    fn create_block_in_stack_creates_nothing_when_no_pane_holds_the_target() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "anchor");
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("pane", "anchor"));
+        let blocks_before = state.blocks.len();
+        let tab_blocks_before = state.tabs[&tab_id].block_ids.clone();
+
+        let events = update(
+            &mut state,
+            Command::CreateBlockInStack {
+                tab_id: tab_id.clone(),
+                target_block_id: "missing".into(),
+                meta: serde_json::Value::Null,
+                activate: true,
+            },
+            &ctx(1),
+        );
+        assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+        assert_eq!(state.blocks.len(), blocks_before, "no block without a pane");
+        assert_eq!(state.tabs[&tab_id].block_ids, tab_blocks_before, "nothing added to the tab");
+    }
+
+    #[test]
+    fn layout_stack_push_rejects_a_block_from_another_tab() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "anchor");
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("pane", "anchor"));
+        let events = update(
+            &mut state,
+            Command::LayoutStackPush {
+                tab_id: tab_id.clone(),
+                target_block_id: "anchor".into(),
+                block_id: "stranger".into(),
+                activate: true,
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+        assert!(state.tabs[&tab_id].rootnode.as_ref().unwrap().data.as_ref().unwrap().block_stack.is_empty());
+    }
+
+    #[test]
+    fn layout_stack_activate_switches_the_visible_tab() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "a");
+        seed_block(&mut state, &tab_id, "b");
+        let mut leaf = leaf_node("pane", "a");
+        leaf.data.as_mut().unwrap().block_stack = vec!["a".into(), "b".into()];
+        leaf.data.as_mut().unwrap().active_block_id = "a".into();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf);
+
+        let events = update(
+            &mut state,
+            Command::LayoutStackActivate {
+                tab_id: tab_id.clone(),
+                block_id: "b".into(),
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(events.as_slice(), [Event::LayoutTreeReplaced { .. }]), "got {events:?}");
+        let data = state.tabs[&tab_id].rootnode.as_ref().unwrap().data.clone().unwrap();
+        assert_eq!((data.block_id.as_str(), data.active_block_id.as_str()), ("b", "b"));
     }
 
     #[test]

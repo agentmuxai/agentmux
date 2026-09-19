@@ -571,6 +571,34 @@ pub enum Command {
         block_id: String,
         correlation_id: String,
     },
+    /// Add `block_id` to the tab stack of the pane holding
+    /// `target_block_id`, optionally as the visible tab.
+    /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2.
+    LayoutStackPush {
+        tab_id: String,
+        target_block_id: String,
+        block_id: String,
+        activate: bool,
+        correlation_id: String,
+    },
+    /// Make `block_id` the visible tab of the pane whose stack holds it.
+    LayoutStackActivate {
+        tab_id: String,
+        block_id: String,
+        correlation_id: String,
+    },
+    /// Create a block AND place it in the tab stack of the pane holding
+    /// `target_block_id`, in one reducer step — the block never exists
+    /// without a pane (the two-step `pane.open { skip_placement }` + frontend
+    /// push could be interrupted in between, orphaning it).
+    /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2.
+    CreateBlockInStack {
+        tab_id: String,
+        target_block_id: String,
+        #[serde(default)]
+        meta: serde_json::Value,
+        activate: bool,
+    },
     /// Reparent a node to a new parent at the given child index.
     LayoutMoveNode {
         tab_id: String,
