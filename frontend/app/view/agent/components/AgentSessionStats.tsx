@@ -69,7 +69,8 @@ function formatDuration(ms: number): string {
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
     const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m ${s % 60}s`;
+    // No trailing "0s" on a round minute (ReAgent P2 on #3436).
+    if (m < 60) return s % 60 === 0 ? `${m}m` : `${m}m ${s % 60}s`;
     const h = Math.floor(m / 60);
     return `${h}h ${m % 60}m`;
 }

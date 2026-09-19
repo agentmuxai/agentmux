@@ -1246,8 +1246,8 @@ export class SwarmViewModel implements ViewModel {
 
         // When a reactive-handler agent (Claude Code pane) registers or
         // unregisters, refresh the block list. These events are distinct from
-        // agent:process-added / agent:process-exited so useProcessCount doesn't
-        // treat reactive registrations as phantom OS processes.
+        // agent:process-added / agent:process-exited so useTrackedProcesses
+        // doesn't treat reactive registrations as phantom OS processes.
         const unsubReactiveReg = muxEventSubscribe({
             eventType: "agent:reactive-registered",
             handler: () => void this.loadTrackedBlocks(),

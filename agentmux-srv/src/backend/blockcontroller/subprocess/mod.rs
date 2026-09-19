@@ -275,6 +275,8 @@ impl SubprocessController {
             shellprocstatus: inner.proc_status.clone(),
             shellprocconnname: "local".to_string(),
             shellprocexitcode: inner.proc_exit_code,
+            shellprocpid: None,
+            shellprocname: String::new(),
             spawn_ts_ms: None,
             is_agent_pane: false,
             turn_active,
