@@ -45,6 +45,29 @@ pub const PERSISTENT_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 
+/// What the process-waiter task's kill arm is asked to do.
+#[derive(Debug, Clone, Copy)]
+enum KillRequest {
+    /// Kill now.
+    Force,
+    /// Close stdin (EOF), wait for the process to exit until the deadline,
+    /// then kill.
+    Graceful(std::time::Instant),
+}
+
+/// The Claude control-protocol interrupt
+/// (docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md). Ends the turn in
+/// progress — measured at ~2s, with `result: error_during_execution` — while
+/// leaving the process and session alive (pane-close spec §5.1).
+fn interrupt_control_request_line() -> String {
+    serde_json::json!({
+        "type": "control_request",
+        "request_id": format!("agentmux-shutdown-{}", uuid::Uuid::new_v4()),
+        "request": { "subtype": "interrupt" },
+    })
+    .to_string()
+}
+
 /// Draws the next process-wide registration nonce (≥ 1) for a persistent
 /// spawn's muxbus/registry registrations — see the doc comment at the
 /// `my_registration_nonce` binding in `spawn_process` for why this is a
@@ -411,7 +434,20 @@ struct PersistentInner {
     /// Channel to send messages to the stdin writer task.
     stdin_tx: Option<mpsc::Sender<String>>,
     /// Handle to kill the process.
-    kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    kill_tx: Option<tokio::sync::oneshot::Sender<KillRequest>>,
+    /// Set by [`Controller::shutdown`] to the spawn generation it is closing,
+    /// BEFORE it interrupts the turn. The interrupted turn ends in an
+    /// `is_error: true` result (`error_during_execution`) that is the stop we
+    /// asked for, not a failure — the stdout reader must not classify it,
+    /// raise a failure banner, or feed it to the stale-`--resume` retry
+    /// machine (spec §9.4).
+    shutdown_generation: Option<u64>,
+    /// Set by the kill arm the moment a requested stop's process has exited:
+    /// `(spawn generation, killed)`. `killed` = it had to be force-killed
+    /// (graceful deadline passed, or a forced stop). Watched by `shutdown`,
+    /// which must not wait on the kill arm's later cleanup (that can take
+    /// seconds when a descendant holds stdout open).
+    stop_exit: Option<(u64, bool)>,
     /// Monotonic counter bumped once per `spawn_process` call (in the same
     /// lock acquisition as stashing `pending_resume_retry`), uniquely
     /// identifying that one spawn attempt for the rest of this controller
@@ -947,6 +983,8 @@ impl PersistentSubprocessController {
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
+                shutdown_generation: None,
+                stop_exit: None,
                 spawn_generation: 0,
                 pending_questions: HashMap::new(),
                 pending_permissions: HashMap::new(),
@@ -2938,7 +2976,7 @@ impl PersistentSubprocessController {
             crate::backend::process_tracker::registry::track_spawned(&self.block_id, pid);
         }
 
-        let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
+        let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<KillRequest>();
         let stdin = child.stdin.take()
             .ok_or_else(|| format!("[persistent] stdin not captured for block {}", self.block_id))?;
         let stdout = child.stdout.take()
@@ -3368,7 +3406,15 @@ impl PersistentSubprocessController {
                             }
                         }
                     }
+                    // A turn WE interrupted to close the pane ends in an
+                    // `is_error: true` result (`error_during_execution`).
+                    // That is the requested stop, not a failure: treat it
+                    // as an ordinary end of turn — no failure banner, no
+                    // stale-`--resume` retry tracking (pane-close spec §9.4).
+                    let closing_this_generation = is_result_frame
+                        && inner_read.lock().unwrap().shutdown_generation == Some(my_generation_read);
                     let is_error_result = is_result_frame
+                        && !closing_this_generation
                         && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
                     // reagentx P0 on PR #2371: the real CLI's stream-json
                     // protocol embeds `session_id_field` on EVERY event,
@@ -4129,15 +4175,17 @@ impl PersistentSubprocessController {
                         }
                     }
                 }
-                Ok(force) = kill_rx => {
+                Ok(request) = kill_rx => {
+                    let graceful_deadline = match request {
+                        KillRequest::Force => None,
+                        KillRequest::Graceful(deadline) => Some(deadline),
+                    };
                     tracing::info!(
                         block_id = %block_id_wait,
-                        force = force,
+                        force = graceful_deadline.is_none(),
                         "persistent process kill requested"
                     );
-                    if force {
-                        let _ = child.kill().await;
-                    } else {
+                    if let Some(deadline) = graceful_deadline {
                         // Graceful: drop stdin to send EOF, then wait briefly
                         {
                             let mut inner = inner_wait.lock().unwrap();
@@ -4165,12 +4213,20 @@ impl PersistentSubprocessController {
                             inner.pending_send_messages.clear();
                             inner.spawning_in_progress = false;
                         }
-                        tokio::select! {
-                            _ = child.wait() => {}
-                            _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                        // Wait until the caller's deadline (a close shares
+                        // one deadline across every agent it stops — spec
+                        // §9.2), then kill.
+                        let killed = tokio::select! {
+                            _ = child.wait() => false,
+                            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
                                 let _ = child.kill().await;
+                                true
                             }
-                        }
+                        };
+                        inner_wait.lock().unwrap().stop_exit = Some((my_generation_wait, killed));
+                    } else {
+                        let _ = child.kill().await;
+                        inner_wait.lock().unwrap().stop_exit = Some((my_generation_wait, true));
                     }
 
                     // reagentx P1 on PR #2371: mirror the child.wait() arm's
@@ -4402,8 +4458,23 @@ impl PersistentSubprocessController {
     }
 
     pub fn stop_process(&self, force: bool) -> Result<(), String> {
+        let request = if force {
+            KillRequest::Force
+        } else {
+            KillRequest::Graceful(std::time::Instant::now() + super::SHUTDOWN_GRACE)
+        };
+        self.request_stop(request)
+    }
+
+    fn request_stop(&self, request: KillRequest) -> Result<(), String> {
+        Self::request_stop_on(&self.inner, request)
+    }
+
+    /// [`request_stop`] over just the shared state, for the `'static`
+    /// future [`Controller::shutdown`] returns.
+    fn request_stop_on(inner_arc: &Arc<Mutex<PersistentInner>>, request: KillRequest) -> Result<(), String> {
         let kill_tx = {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = inner_arc.lock().unwrap();
             // Recorded unconditionally, not only when `kill_tx` is already
             // `None` — codex P1 on PR #2360 (round 16, commit ce1642d90):
             // `stop_process` can race a process that already exited (a
@@ -4423,7 +4494,7 @@ impl PersistentSubprocessController {
             inner.kill_tx.take()
         };
         if let Some(tx) = kill_tx {
-            let _ = tx.send(force);
+            let _ = tx.send(request);
         }
         Ok(())
     }
@@ -4550,6 +4621,81 @@ impl Controller for PersistentSubprocessController {
             Self::set_status(&mut inner, new_status);
         }
         Ok(())
+    }
+
+    /// Pane-close shutdown (spec §9.3), built on the Phase 0 measurements
+    /// (§5.1): EOF alone does NOT end a running turn — the CLI finishes it
+    /// first — but the control-protocol interrupt ends it in ~2s, and EOF
+    /// then exits the process in ~0.5s. So: interrupt an active turn, wait
+    /// for its result, EOF, and force-kill only at the deadline.
+    fn shutdown(&self, deadline: std::time::Instant) -> super::ShutdownFuture {
+        use super::StopOutcome;
+        const POLL: std::time::Duration = std::time::Duration::from_millis(50);
+        let inner = Arc::clone(&self.inner);
+        let health = Arc::clone(&self.health_monitor);
+        let block_id = self.block_id.clone();
+        Box::pin(async move {
+            let (generation, stdin_tx) = {
+                let mut g = inner.lock().unwrap();
+                if g.current_pid.is_none() {
+                    // Never spawned (lazy), or already gone. A spawn still in
+                    // flight is killed by the caller's tracker drop.
+                    return StopOutcome::NotRunning;
+                }
+                // Nothing queued may start a new turn after the interrupt.
+                g.pending_send_messages.clear();
+                // Before the interrupt: its `is_error` result is our stop,
+                // not a failure (§9.4).
+                g.shutdown_generation = Some(g.spawn_generation);
+                g.stop_exit = None;
+                (g.spawn_generation, g.stdin_tx.clone())
+            };
+
+            if health.is_active_turn() {
+                if let Some(tx) = stdin_tx.as_ref() {
+                    if tx.send(interrupt_control_request_line()).await.is_ok() {
+                        // Leave a second for EOF + exit after the turn ends.
+                        let turn_deadline = deadline
+                            .checked_sub(std::time::Duration::from_secs(1))
+                            .unwrap_or(deadline);
+                        while health.is_active_turn() && std::time::Instant::now() < turn_deadline {
+                            tokio::time::sleep(POLL).await;
+                        }
+                    }
+                }
+            }
+            // Our clone of the stdin sender would keep stdin open — EOF needs
+            // every sender gone.
+            drop(stdin_tx);
+            let _ = Self::request_stop_on(&inner, KillRequest::Graceful(deadline));
+
+            // The kill arm records the exit the moment it happens; allow a
+            // little past the deadline for the forced kill itself.
+            let give_up = deadline + std::time::Duration::from_secs(2);
+            loop {
+                {
+                    let g = inner.lock().unwrap();
+                    if let Some((gen, killed)) = g.stop_exit {
+                        if gen == generation {
+                            return if killed { StopOutcome::Killed } else { StopOutcome::Exited };
+                        }
+                    }
+                    // Exited on its own through the natural-exit arm, or was
+                    // replaced — either way this process is gone.
+                    if g.spawn_generation != generation || g.current_pid.is_none() {
+                        return StopOutcome::Exited;
+                    }
+                }
+                if std::time::Instant::now() >= give_up {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        "agent_shutdown: no exit recorded by the deadline; the caller's tracker drop will kill it"
+                    );
+                    return StopOutcome::Killed;
+                }
+                tokio::time::sleep(POLL).await;
+            }
+        })
     }
 
     fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
@@ -7287,6 +7433,8 @@ mod resume_poison_tests {
             current_pid: None,
             stdin_tx: None,
             kill_tx: None,
+            shutdown_generation: None,
+            stop_exit: None,
             spawn_generation: 0,
             pending_questions: HashMap::new(),
             pending_permissions: HashMap::new(),
@@ -7608,5 +7756,177 @@ mod agent_id_tests {
 
         ctrl.set_agent_id(None);
         assert_eq!(ctrl.agent_id(), None);
+    }
+}
+
+/// `Controller::shutdown` against a real process: a small node script that
+/// speaks just enough stream-json to stand in for the Claude CLI, with the
+/// behaviour measured in the pane-close spec §5.1 — a running turn survives
+/// EOF, the interrupt ends it with `result: error_during_execution`, EOF
+/// then exits with code 1.
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+    use crate::backend::blockcontroller::{Controller, StopOutcome};
+
+    const STUB: &str = r#"
+const mode = process.argv[2];
+const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+const rl = require("readline").createInterface({ input: process.stdin });
+out({ type: "system", subtype: "init", session_id: "stub-session" });
+rl.on("line", (line) => {
+  let m;
+  try { m = JSON.parse(line); } catch { return; }
+  if (m.type === "control_request" && m.request && m.request.subtype === "interrupt") {
+    out({ type: "control_response", response: { subtype: "success", request_id: m.request_id } });
+    if (mode !== "stubborn") {
+      out({ type: "result", subtype: "error_during_execution", is_error: true, session_id: "stub-session" });
+    }
+    return;
+  }
+  if (m.type === "user" && mode === "idle") {
+    out({ type: "result", subtype: "success", is_error: false, result: "ok", session_id: "stub-session" });
+  }
+  // "turn" / "stubborn": the turn never finishes on its own.
+});
+rl.on("close", () => {
+  if (mode === "stubborn") { setInterval(() => {}, 1000); } else { process.exit(1); }
+});
+"#;
+
+    /// `None` (test skipped with a note) when `node` isn't on PATH.
+    fn stub_path() -> Option<std::path::PathBuf> {
+        // A PATH lookup, not `node --version`: a probe spawn would be one more
+        // unsanitized spawn site for `pane_env`'s I7 inventory to flag.
+        let has_node = std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path)
+                .any(|dir| dir.join("node").is_file() || dir.join("node.exe").is_file())
+        });
+        if !has_node {
+            eprintln!("shutdown_tests: `node` not on PATH — skipping");
+            return None;
+        }
+        let path = std::env::temp_dir().join(format!("agentmux-shutdown-stub-{}.js", uuid::Uuid::new_v4()));
+        std::fs::write(&path, STUB).unwrap();
+        Some(path)
+    }
+
+    fn start(block_id: &str, mode: &str, stub: &std::path::Path) -> (PersistentSubprocessController, Arc<mps::Broker>) {
+        let broker = Arc::new(mps::Broker::new());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.to_string(),
+            Some(Arc::clone(&broker)),
+            None,
+            None,
+            None,
+        );
+        let config = PersistentSpawnConfig {
+            cli_command: "node".to_string(),
+            cli_args: vec![stub.to_string_lossy().to_string(), mode.to_string()],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        let msg = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
+        c.send_message(msg.to_string(), config).unwrap();
+        (c, broker)
+    }
+
+    /// Wait until the stub is actually running: it has printed its init line
+    /// and the controller captured the session id from it. A bare pid isn't
+    /// enough — node can take seconds to start on a loaded CI runner, and the
+    /// timing assertions must not include that.
+    async fn wait_for_pid(c: &PersistentSubprocessController) {
+        for _ in 0..300 {
+            let ready = {
+                let g = c.inner.lock().unwrap();
+                g.current_pid.is_some() && g.session_id.as_deref() == Some("stub-session")
+            };
+            if ready {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("stub process never became ready");
+    }
+
+    fn failures(broker: &mps::Broker, block_id: &str) -> usize {
+        broker
+            .read_event_history(mps::EVENT_AGENT_FAILURE, &format!("block:{block_id}"), 10)
+            .len()
+    }
+
+    #[tokio::test]
+    async fn never_spawned_is_not_running() {
+        let c = PersistentSubprocessController::new("tab".into(), "blk-never".into(), None, None, None, None);
+        let outcome = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(1)).await;
+        assert_eq!(outcome, StopOutcome::NotRunning);
+    }
+
+    /// Mid-turn: EOF alone would let the turn run on (§5.1). The interrupt
+    /// ends it, the process exits well inside the deadline, and the
+    /// interrupted turn's `is_error` result is NOT reported as a failure.
+    #[tokio::test]
+    async fn mid_turn_is_interrupted_and_exits_without_a_failure() {
+        let Some(stub) = stub_path() else { return };
+        let block_id = "blk-shutdown-midturn";
+        let (c, broker) = start(block_id, "turn", &stub);
+        wait_for_pid(&c).await;
+        assert!(c.health_monitor.is_active_turn(), "precondition: a turn is running");
+
+        let started = std::time::Instant::now();
+        let outcome = c.shutdown(started + std::time::Duration::from_secs(5)).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome, StopOutcome::Exited, "must exit on its own, not be killed");
+        assert!(elapsed < std::time::Duration::from_secs(3), "took {elapsed:?}");
+        assert_eq!(failures(&broker, block_id), 0, "a requested stop is not a failure");
+        let _ = std::fs::remove_file(stub);
+    }
+
+    #[tokio::test]
+    async fn idle_exits_on_eof() {
+        let Some(stub) = stub_path() else { return };
+        let (c, _broker) = start("blk-shutdown-idle", "idle", &stub);
+        wait_for_pid(&c).await;
+        // The stub answers the message with a `result`, ending the turn. Node
+        // startup on a loaded CI runner can take seconds — wait for it rather
+        // than assume.
+        for _ in 0..200 {
+            if !c.health_monitor.is_active_turn() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(!c.health_monitor.is_active_turn(), "precondition: idle");
+
+        let started = std::time::Instant::now();
+        let outcome = c.shutdown(started + std::time::Duration::from_secs(5)).await;
+        assert_eq!(outcome, StopOutcome::Exited);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "took {:?}", started.elapsed());
+        let _ = std::fs::remove_file(stub);
+    }
+
+    /// A process that ignores both the interrupt and EOF is killed at the
+    /// deadline — not before, and not long after.
+    #[tokio::test]
+    async fn stubborn_process_is_killed_at_the_deadline() {
+        let Some(stub) = stub_path() else { return };
+        let (c, _broker) = start("blk-shutdown-stubborn", "stubborn", &stub);
+        wait_for_pid(&c).await;
+
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_millis(1500);
+        let outcome = c.shutdown(deadline).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome, StopOutcome::Killed);
+        assert!(elapsed >= std::time::Duration::from_millis(1400), "killed early: {elapsed:?}");
+        assert!(elapsed < std::time::Duration::from_secs(4), "killed late: {elapsed:?}");
+        let _ = std::fs::remove_file(stub);
     }
 }

@@ -457,4 +457,42 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
         expect(slotFor("b1").style.visibility).toBe("hidden");
         expect(slotFor("b2").style.visibility).toBe("visible");
     });
+
+    // Reproduced live: a pane went permanently blank — no header, no
+    // content, no spinner, no error — while its own block data was fully
+    // intact (confirmed via direct inspection of the running app). Root
+    // cause: `viewModelSlots` entries are created LAZILY, only inside
+    // `keepAliveNodeModelFor` (itself only called once `content`'s `<For>`
+    // actually mounts that blockId's `<Block>`). `chromeVm` subscribes to a
+    // slot via `viewModelSlots.get(id)?.get()` — but `undefined?.get()`
+    // short-circuits, so if `chromeVm` evaluates before that mount has
+    // happened, it reads NOTHING reactive and its latch permanently settles
+    // on `null`: nothing it read can ever change to wake it up again, even
+    // once the real Block mounts moments later and populates the slot.
+    //
+    // Every OTHER test in this file calls `setBlockView` BEFORE `render()`,
+    // so `effectiveViewType()` already resolves to "agent"/"term" on the
+    // very FIRST synchronous render — `content`'s eager construction (a
+    // plain `const`, not deferred) happens to populate the slot before
+    // `chromeVm` is even declared, by sheer source-order luck. That's not
+    // block.tsx's real timing: block meta streams in from srv
+    // ASYNCHRONOUSLY, so `effectiveViewType()` is empty on the first
+    // render and only resolves LATER via a genuine reactive update — the
+    // one ordering this test exercises, and the only one that actually
+    // reproduces the bug.
+    it("does not permanently blank out when the view type resolves asynchronously, after the leaf has already rendered once unhoisted", async () => {
+        setBlockView("b1", undefined); // meta hasn't arrived yet — matches block.tsx's real first render
+        const [activeBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        expect(screen.queryByTestId("chrome-root")).toBeNull(); // not hoisted yet — expected
+
+        // Simulates the block's meta arriving from srv a tick later.
+        setBlockView("b1", "agent");
+
+        expect(screen.getByTestId("chrome-root")).toBeInTheDocument();
+        expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
+    });
 });

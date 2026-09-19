@@ -277,7 +277,7 @@ AgentClaw needs a workspace directory on host. The forge engine should create it
 
 ```
 ~/.claw/agentclaw-workspace/
-├── CLAUDE.md           # Task context (populated via Forge content tab)
+├── CLAUDE.md           # generated per-agent context file (Forge content tab)
 └── .mcp.json           # MCP server config (optional — openclaw has its own)
 ```
 

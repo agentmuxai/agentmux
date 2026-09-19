@@ -118,7 +118,7 @@ pub async fn run(
     // §4.2). Deleting first left the controller's own exit cleanup writing
     // to a block that no longer existed. After `emit_saga_started`, so a
     // saga-start collision still has no side effect (round 1 below).
-    super::close_pane::shutdown_before_delete(state, &block_id);
+    super::close_pane::shutdown_agents(state, std::slice::from_ref(&block_id)).await;
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id.clone())).await;
     // Controller-kill ordering. Three rounds of bot review:
@@ -470,6 +470,58 @@ mod tests {
             "expected a queued 'delete' pendingbackendactions entry for the pruned block \
              (matches LayoutTreeActionType.DeleteNode in frontend/layout/lib/types.ts), got: {actions:?}"
         );
+    }
+
+    /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2: deleting one tab
+    /// of a stacked pane (e.g. a terminal tab whose shell exited —
+    /// close-on-exit runs this saga) keeps the pane and its other tabs. It
+    /// used to delete the whole leaf, leaving the sibling (an agent, say)
+    /// running with no pane.
+    #[tokio::test]
+    async fn deleting_one_tab_of_a_stacked_pane_keeps_the_pane_and_its_sibling() {
+        let (state, _ws_id, tab_id, agent) = seed().await;
+        let term = dispatch_apply(
+            &state,
+            agentmux_common::ipc::Command::CreateBlock {
+                tab_id: tab_id.clone(),
+                meta: serde_json::Value::Null,
+            },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        dispatch_apply(
+            &state,
+            agentmux_common::ipc::Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "pane".into(),
+                    data: Some(agentmux_common::LayoutNodeData {
+                        block_id: term.clone(),
+                        block_stack: vec![agent.clone(), term.clone()],
+                        active_block_id: term.clone(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        run(&state, tab_id.clone(), term.clone()).await.unwrap();
+
+        let s = state.srv_state.lock().await;
+        assert!(s.blocks.contains_key(&agent), "sibling block survives");
+        let leaf = s.tabs[&tab_id].rootnode.as_ref().expect("the pane survives");
+        let data = leaf.data.as_ref().unwrap();
+        assert_eq!(data.block_stack, vec![agent.clone()]);
+        assert_eq!(data.block_id, agent, "the sibling becomes the visible tab");
     }
 
     #[tokio::test]
