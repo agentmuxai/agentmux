@@ -255,6 +255,14 @@ jobs:
       - name: Spec citations resolve (changed files only)
         run: bash scripts/check-spec-citations.sh
 
+      # The repo-level CLAUDE.md was removed (#3403); its content moved to
+      # README/BUILD/CONTRIBUTING and the specs. This gate stops a living doc
+      # from pointing back at it. Dated records (analysis/retro/reports/status
+      # and *_YYYY_MM_DD.md) are deliberately exempt — their references were
+      # correct when written. Whole-tree, not changed-files: it runs in <1s.
+      - name: No living doc references the removed CLAUDE.md
+        run: bash scripts/check-claude-md-references.sh
+
       # The other half of "a broken pointer is worse than none":
       # check-spec-citations.sh catches a cited path naming docs/specs/<x>.md
       # from anywhere; this catches a Markdown link that is wrong RELATIVE to
