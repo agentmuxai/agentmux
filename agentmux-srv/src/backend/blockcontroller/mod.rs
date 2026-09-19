@@ -597,6 +597,7 @@ pub fn resync_controller(
     filestore: Option<Arc<FileStore>>,
     registry: Option<Arc<crate::registry::Registry>>,
     boot_id: Arc<str>,
+    auth_key: &str,
 ) -> Result<(), String> {
     let block_id = &block.oid;
     let block_meta = &block.meta;
@@ -728,6 +729,7 @@ pub fn resync_controller(
                 event_bus,
                 mstore,
                 filestore,
+                auth_key.to_string(),
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
@@ -1056,7 +1058,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, Arc::from("test-boot"));
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, Arc::from("test-boot"), "test-key");
         assert!(result.is_ok(), "resync_controller failed: {result:?}");
 
         assert_eq!(
@@ -1194,7 +1196,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"));
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
         assert!(result.is_ok());
     }
 
@@ -1211,7 +1213,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"));
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }
