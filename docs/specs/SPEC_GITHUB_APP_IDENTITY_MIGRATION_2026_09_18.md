@@ -5,8 +5,9 @@
 **Status:** draft — proof-of-concept built and tested against live data; nothing wired into
 the actual auth path yet. One human action item (§3) is a hard prerequisite before
 this can go further for the `agenty` identity specifically.
-**Related:** `docs/standards/CREDENTIAL_INVENTORY.md` (§2 — the per-agent PAT catalog this
-replaces), `docs/specs/REPORT_KEY_ROTATION_STRATEGY_2026_09_18.md` (the original
+**Related:** the private `shared-infrastructure` repo's credential inventory
+standard (§2 — the per-agent PAT catalog this replaces) and its key-rotation
+strategy report (the original
 "move automation off PATs" recommendation), `docs/specs/archive/SPEC_TRUST_CENTER_MODALS_IDENTITY_MEMORY_SEED_2026_06_19.md`
 (the original design that provisioned the App credentials this spec finally wires up),
 `docs/specs/SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md` (already anticipates

@@ -994,8 +994,8 @@ trust-anchor/profile/role identifiers, private-CA locations, secret
 key-names paired with the values or hosts they unlock, and internal
 network addresses.
 
-Those belong in the **private** `shared-infrastructure` repository
-(`docs/specs/`, `docs/standards/CREDENTIAL_INVENTORY.md`). Public docs
+Those belong in the **private** `shared-infrastructure` repository — its
+specs directory, and its credential inventory standard. Public docs
 here may reference a private spec **by name**, so a reader knows it exists
 and where to look, but must not restate its contents.
 
