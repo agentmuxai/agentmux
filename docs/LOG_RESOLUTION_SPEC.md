@@ -435,7 +435,7 @@ After all changes, the behavior should be identical across modes:
 
 ---
 
-## Part 5: After Implementation — CLAUDE.md Update
+## Part 5: After Implementation — documentation update
 
 ```markdown
 ### Log Access (zero lookup)
@@ -471,7 +471,7 @@ Never glob for log files. Never guess paths. Use the pointer files.
 | 6 | Heartbeat refreshes host pointer | `memory_heartbeat.rs:16` | 5 | P1 |
 | 7 | 7-day log retention on startup | Both `main.rs` init_logging | 15 | P2 |
 | 8 | `muxlog` shell helper | `shellintegration/{bash,zsh,pwsh,fish}` | ~20/script | P2 |
-| 9 | CLAUDE.md documentation | `CLAUDE.md` | 15 | P2 |
+| 9 | Log-access documentation | `docs/MUXLOG.md` | 15 | P2 |
 
 **Total P0 effort:** ~14 lines of Rust across 3 files.
 **Total P1 effort:** ~40 lines (launcher logging + heartbeat pointer refresh).
