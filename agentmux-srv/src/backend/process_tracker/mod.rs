@@ -87,9 +87,10 @@ fn is_shell(p: &TrackedProcess) -> bool {
 /// Rule: drop roots and `conhost`; keep a process iff walking its parents
 /// inside the job passes through a shell before reaching a root. A root
 /// that is itself a shell (terminal blocks) counts as that shell. A chain
-/// that leaves the job before reaching a root (the parent exited — e.g. a
-/// dev server whose launching shell is gone) is kept: those orphans are
-/// exactly what the user needs to see.
+/// that hits a parent no longer in the job — a launching shell that exited
+/// (`npm run dev &`), or a root that exited (a terminal's shell, a
+/// respawned CLI) — is kept: those orphans are exactly what the user needs
+/// to see.
 pub fn agent_started(members: Vec<TrackedProcess>, roots: &HashSet<u32>) -> Vec<TrackedProcess> {
     let by_pid: HashMap<u32, &TrackedProcess> = members.iter().map(|p| (p.pid, p)).collect();
     let keep: HashSet<u32> = members
@@ -104,7 +105,9 @@ pub fn agent_started(members: Vec<TrackedProcess>, roots: &HashSet<u32>) -> Vec<
                 }
                 let Some(parent) = cur.parent_pid else { return true };
                 if roots.contains(&parent) {
-                    return by_pid.get(&parent).is_some_and(|r| is_shell(r));
+                    // A root that has exited leaves an orphan like any other
+                    // missing parent — keep it (ReAgent P1 on #3430).
+                    return by_pid.get(&parent).is_none_or(|r| is_shell(r));
                 }
                 match by_pid.get(&parent) {
                     Some(next) => cur = next,
@@ -307,6 +310,13 @@ mod tests {
         let mut members = idle_claude();
         members.push(proc(40, Some(39), r"C:\Program Files\nodejs\node.exe"));
         assert_eq!(pids(&agent_started(members, &HashSet::from([10]))), vec![40]);
+    }
+
+    #[test]
+    fn orphan_of_an_exited_root_still_counts() {
+        // A terminal's shell (root 80) backgrounded a server, then exited.
+        let members = vec![proc(81, Some(80), r"C:\Program Files\nodejs\node.exe")];
+        assert_eq!(pids(&agent_started(members, &HashSet::from([80]))), vec![81]);
     }
 
     #[test]
