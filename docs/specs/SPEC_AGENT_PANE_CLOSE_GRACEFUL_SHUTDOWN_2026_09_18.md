@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-18
 **Status:** active — Phase 0 measured (§5.1), Phase 1 implemented in #3402 (§5.2);
-Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3 in
-progress (§10).
+Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3
+implemented in #3419, #3421, #3422 (§10).
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
 (the continuity guarantee this spec protects),
