@@ -81,7 +81,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 Platform-specific:
-- **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see CLAUDE.md)
+- **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see [BUILD.md](./BUILD.md))
 - **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
 - **Linux:** Build essentials, `apt install cmake ninja-build build-essential libwayland-dev libxkbcommon-dev libgtk-3-dev libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf2.0-dev libatk1.0-dev` — see [Linux guide](docs/linux.md)
 
