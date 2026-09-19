@@ -59,6 +59,14 @@ ss2.png
 screenshot*.png
 nul
 
+# scripts/ui-screenshots/ capture output — timestamped run directories of
+# PNGs for the UI manual. Deliberately not committed (see
+# docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md §5): a person
+# curating the manual copies the specific images they want to keep into the
+# manual's own asset directory under a stable name, rather than every
+# capture run's raw output living in git history.
+docs/manual/screenshots/
+
 # AppImage build artifacts (assembled in build/AgentMux.AppDir/ before being bundled by appimagetool)
 /build/AgentMux.AppDir/
 
