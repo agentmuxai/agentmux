@@ -137,7 +137,7 @@ exists.
 
 ### 3.5 The close confirmation is bypassed and too narrow
 
-`useAgentCloseConfirm` (`frontend/app/view/agent/hooks/useAgentCloseConfirm.ts`)
+`useAgentCloseConfirm` (in `frontend/app/view/agent/hooks/`, removed in Phase 3 — §10.3)
 replaces `onClose` on the agent's own `nodeModel`. That object is a spread copy
 made by `PaneLeafChrome` (`frontend/app/tab/pane-leaf-chrome.tsx:181`, or `:238`
 for kept-alive tabs, which agent panes use since
@@ -688,3 +688,36 @@ system is needed.
     deadline. The tests skip, with a note, if `node` isn't on PATH.
   - `close_pane::tests` covers concurrency, the last-tab guard refusing
     without stopping anything, window-tab close, and the closing-wait signal.
+
+## 10. Phase 3 as implemented
+
+(§10.1 and §10.2, the orphan reaper and the reopen guard, land in their own
+PRs.)
+
+### 10.3 One confirmation per pane, and close failures surfaced (§4.5, §4.6)
+
+**Confirmation.**
+- **Where the hook is:** the layout asks
+  `LayoutModel.beforeNodeDelete(data) → Promise<boolean>` before it closes
+  anything. It is called from `closeNode`, for the whole pane, and from
+  `closeBlockInStack`, for one tab. It is supplied by `tabcontent.tsx`
+  through `TileLayoutContents`, the same way `onNodeDelete` is.
+- **What it checks:** `tabcontent` probes every member of the closing leaf:
+  `turn_active` from `GetControllerStatus`, and tracked processes from
+  `AgentProcessListCommand` (`frontend/app/tab/pane-close-guard.ts`,
+  `busyMembers`).
+- **What the user sees:**
+  - If any member is busy, one `ConfirmModal` lists each agent, for example
+    "Posa — mid-turn, 2 processes running". Cancel keeps the pane.
+  - An idle pane closes with no prompt.
+  - A probe that fails counts as "not busy", so a broken status lookup can
+    never make a pane impossible to close.
+- **What was removed:** `useAgentCloseConfirm` is deleted. It patched `onClose`
+  on the agent view's copy of the NodeModel, which the pane header's × never
+  reads (§3.5, confirmed in `pane-leaf-chrome.tsx`: the chrome gets the leaf's
+  own `nodeModel`). Its "kill the tree first" step is no longer needed: the
+  graceful close drops the tracker after the process exits.
+
+**Close failures surfaced.** When `ClosePane` fails, `onNodeDelete` shows a
+flash error ("Couldn't fully close the pane") instead of only logging through
+`fireAndForget`. If the close can't finish, the orphan reaper does.

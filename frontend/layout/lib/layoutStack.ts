@@ -175,6 +175,14 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         return;
     }
 
+    // Same confirmation as closing the whole pane, scoped to this one tab.
+    if (model.beforeNodeDelete) {
+        if (!(await model.beforeNodeDelete({ blockId } as TabLayoutData))) return;
+        // The tree may have changed while the prompt was open.
+        const current = findNode(model.treeState.rootNode, nodeId);
+        if (current !== node || !effectiveStack(node.data).includes(blockId)) return;
+    }
+
     // Right-hand neighbour becomes visible if `blockId` was (stackMembers.ts).
     // No dispose here anymore — the leaf's NodeModel survives active-member
     // churn regardless of whether the closed member was active or

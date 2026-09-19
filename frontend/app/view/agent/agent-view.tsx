@@ -40,7 +40,6 @@ import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -90,7 +89,6 @@ import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
 import { useActivityLog } from "./hooks/useActivityLog";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
-import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
@@ -1407,15 +1405,6 @@ const AgentPresentationView = ({
     // platforms without a real tracker. See `hooks/useProcessCount.ts`.
     const processCount = useProcessCount(model.blockId);
 
-    // Pane-close confirm: when the user closes this pane with tracked
-    // processes still alive, intercept the layout's `onClose` and raise
-    // a ConfirmModal. See hooks/useAgentCloseConfirm.ts.
-    const { closeConfirm, setCloseConfirm, handleCloseConfirmAccept } = useAgentCloseConfirm({
-        blockId: model.blockId,
-        model,
-        processCount,
-    });
-
     // Subscribe to subprocess output and parse into DocumentNodes.
     // Mutations dispatch through agent-document-store; the reducer there
     // owns dedup against in-flight history loads and the truncate-suppress
@@ -2612,21 +2601,6 @@ const AgentPresentationView = ({
                     </div>
                 </Show>
             </div>
-            <Show when={closeConfirm()}>
-                {(info) => (
-                    <ConfirmModal
-                        open={true}
-                        title="Close pane?"
-                        description={`This agent has ${info().count} ${
-                            info().count === 1 ? "process" : "processes"
-                        } still running. Close and kill them all?`}
-                        confirmLabel="Close and kill"
-                        destructive
-                        onConfirm={handleCloseConfirmAccept}
-                        onCancel={() => setCloseConfirm(null)}
-                    />
-                )}
-            </Show>
         </div>
     );
 };

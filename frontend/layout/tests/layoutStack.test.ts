@@ -361,6 +361,52 @@ describe("layoutStack", () => {
             expect(effectiveStack(onNodeDelete.mock.calls[0][0]).sort()).toEqual(["b1", "b2", "b3"]);
         });
 
+        // SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6: the
+        // pane-level confirmation. Cancel keeps everything; confirm proceeds.
+        it("cancelling the pane-close confirmation keeps the pane and deletes nothing", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            const beforeNodeDelete = vi.fn().mockResolvedValue(false);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = beforeNodeDelete;
+
+            await closeNode(model, nodeId);
+
+            expect(beforeNodeDelete).toHaveBeenCalledTimes(1);
+            expect(effectiveStack(beforeNodeDelete.mock.calls[0][0]).sort()).toEqual(["b1", "b2"]);
+            expect(model.treeState.rootNode).toBeDefined();
+            expect(onNodeDelete).not.toHaveBeenCalled();
+        });
+
+        it("cancelling the confirmation for one tab keeps that tab", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = vi.fn().mockResolvedValue(false);
+
+            await closeBlockInStack(model, nodeId, "b2");
+
+            expect(model.treeState.rootNode!.data!.blockStack).toEqual(["b1", "b2"]);
+            expect(onNodeDelete).not.toHaveBeenCalled();
+        });
+
+        it("confirming the pane-close proceeds with the close", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = vi.fn().mockResolvedValue(true);
+
+            await closeNode(model, nodeId);
+
+            expect(model.treeState.rootNode).toBeUndefined();
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+        });
+
         it("closing one tab of a stack hands onNodeDelete only that tab", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");

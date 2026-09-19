@@ -58,6 +58,12 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
         return;
     }
 
+    // One confirmation for the whole pane, when something in it is still
+    // running (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6).
+    if (model.beforeNodeDelete && !(await model.beforeNodeDelete(nodeToDelete.data))) {
+        return;
+    }
+
     if (nodeId === model.magnifiedNodeId) {
         magnifyNodeToggle(model, nodeId);
     }

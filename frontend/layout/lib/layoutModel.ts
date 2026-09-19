@@ -177,6 +177,13 @@ export class LayoutModel {
      */
     onNodeDelete?: (data: TabLayoutData) => Promise<void>;
     /**
+     * Asked before a pane (or one tab of its stack) is closed. Resolve false
+     * to keep it open — the pane-level close confirmation
+     * (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6). `data`
+     * is the closing leaf's data, or `{ blockId }` for one stack member.
+     */
+    beforeNodeDelete?: (data: TabLayoutData) => Promise<boolean>;
+    /**
      * The size of the gap between nodes in CSS pixels.
      */
     gapSizePx: SignalAtom<number>;
@@ -559,6 +566,7 @@ export class LayoutModel {
         this.renderContent = contents.renderContent;
         this.renderPreview = contents.renderPreview;
         this.onNodeDelete = contents.onNodeDelete;
+        this.beforeNodeDelete = contents.beforeNodeDelete;
         if (contents.gapSizePx !== undefined) {
             this.gapSizePx._set(contents.gapSizePx);
         }
