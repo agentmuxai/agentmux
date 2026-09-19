@@ -3,7 +3,8 @@
 **Date:** 2026-09-18
 **Author:** Agenty (agent, `~/.agentmux/agents/agenty-0629j`), per direct request from the human operator
 **Status:** draft — proof-of-concept built and tested against live data; nothing wired into
-the actual auth path yet. One human action item (§3) is a hard prerequisite before
+the actual auth path yet. The human action item in §3 was a hard prerequisite and
+has since been completed (2026-09-18); it is retained below as the record of what
 this can go further for the `agenty` identity specifically.
 **Related:** the private `shared-infrastructure` repo's credential inventory
 standard (§2 — the per-agent PAT catalog this replaces) and its key-rotation
@@ -61,15 +62,25 @@ off-by-60-seconds problem, not a real clock or "too far in the future" issue.
 Confirmed by testing: `iat = now, exp = now + 540` works reliably; `iat = now
 - 60, exp = now + 600` does not.
 
-**Confirmed gap for `agenty` specifically:** the App's permission grant is
-missing `pull_requests`. A live probe (`POST /repos/.../pulls` with an
-intentionally-invalid branch, to distinguish a permission failure from a data
-validation failure) returned `403 Resource not accessible by integration` —
-a real, confirmed permission gap, not a bug in the request. **This is isolated
-to `agenty`** — `agent1` and `agentx`'s Apps were checked the same way and
-both already have `pull_requests` in their granted permission set. Whatever
-process created `agenty-workflow` produced a narrower grant than the others;
-this needs the one-time fix in §3 before `agenty` can fully move off its PAT.
+**Gap for `agenty` — found, then RESOLVED 2026-09-18.** The App's grant was
+originally missing `pull_requests`, confirmed by a live probe (`POST
+/repos/.../pulls` with an intentionally-invalid branch, to separate a
+permission failure from a data-validation one) returning `403 Resource not
+accessible by integration`.
+
+Fixing it took two separate steps, which is worth recording because the first
+alone looks sufficient and isn't: the permission had to be added to the **App
+definition**, and then **separately accepted at the installation** — an
+installation keeps the permission set it was granted at install time until a
+human approves the change. Until that second step, the API keeps reporting
+the old grant and the 403 persists in a way that looks like the first fix
+didn't work.
+
+A second, unrelated cause of the same 403 surfaced later: the App was
+installed only on `a5af`, so any token minted for an `agentmuxai` repo was
+from the wrong installation. Both are fixed; `agenty` now mints tokens
+carrying `pull_requests: write` for both accounts, and this spec's own PR was
+opened and commented on through that path as `agenty-workflow[bot]`.
 
 Granted permissions found across the checked Apps, for reference:
 
@@ -81,7 +92,7 @@ Granted permissions found across the checked Apps, for reference:
 | `agent4` | `actions, contents, issues, members, metadata, packages, pull_requests, statuses, workflows` |
 | `agent5` | `actions, contents, issues, members, metadata, packages, pull_requests, statuses, workflows` |
 | `agentx` | `actions, contents, issues, members, metadata, organization_administration, packages, pull_requests, statuses, workflows` |
-| `agenty` | `actions, contents, issues, members, metadata, organization_administration, packages, statuses, workflows` — **missing `pull_requests`** |
+| `agenty` | `actions, contents, issues, members, metadata, organization_administration, packages, pull_requests, statuses, workflows` — `pull_requests` added 2026-09-18, see below |
 
 **Phase 0's verification is now complete for all seven App identities.**
 `agenty` is confirmed the sole outlier — every other agent (`agent1`–`agent5`,
@@ -207,10 +218,11 @@ approve a permission increase on an existing App through the web UI:
 2. ~~Build Phase 1's `gh-agent.sh` wiring~~ — **done and tested 2026-09-18**
    (§4 Phase 1). Every agent with an App identity now uses it by default for
    anything routed through `gh-agent.sh`; agents without one are unaffected.
-3. **Next:** validate `agenty` end-to-end (Phase 2) once §3's permission fix
-   lands — the wiring already works for it (`app:agenty-workflow-key`
-   resolves and authenticates correctly), the only remaining unknown is
-   `pull_requests` specifically.
+3. ~~Validate `agenty` end-to-end once §3's permission fix lands~~ —
+   **done 2026-09-18.** The grant was fixed (App definition + installation
+   acceptance), the App was additionally installed on `agentmuxai`, and
+   `agenty` now creates PRs and posts comments through it as
+   `agenty-workflow[bot]`.
 4. Roll Phase 2/3 out to the other App-identity agents one at a time.
 5. Run Phase 4 (the shared root credential → reagent's App) in parallel,
    independently of the per-agent timeline.
