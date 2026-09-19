@@ -8,6 +8,8 @@
 `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (the agent shares this shell),
 `docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md` (pane-close confirmation, which uses the same process list),
 `docs/specs/SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md` (the History tab),
+`docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md` (the Mode/Model/Effort panel that gains the Session section),
+`docs/specs/SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md` (removed the strip stats that `sessionTotals` used to feed),
 PR #3430 (process list now counts only agent-started processes; composer `⚙ N` badge removed).
 
 ---
@@ -68,12 +70,48 @@ Until #3430 the composer's `⚙ N` badge tried to do this. It counted the agent'
 | interrupted / resume-failed banners | A notice row at the **top of the composer region**, above `AgentComposerStrip`, always visible while the flag is set. Same Dismiss behavior (clears the meta). | They describe what the next message will do, so they belong next to the composer. |
 | large-session banner (≥500k lines) + Archive | Same notice row. | It is an actionable warning about the conversation. |
 | archived banner + Restore / Export | Same notice row while archived. | Same reasoning. |
-| Session → Archive · Export | Pane body context menu, next to "Agent History" / "Quick Fork": **Archive Session**, **Export Session…**. Claude only, same gating as today (lineCount > 0, not archived). | Rare, deliberate actions; the context menu already hosts the sibling "Agent History". |
+| Session → Archive · Export | A new **Session** section at the bottom of the Mode/Model/Effort dropup (`AgentRuntimeDropup`), below Effort, carrying session stats as well (§3.1). Claude only, same gating as today (lineCount > 0, not archived). | User direction (2026-09-19). That panel is already the pane's "what is this agent right now" surface, and its trigger sits in the same composer strip the drawer opens from. |
 | History → View full history | Dropped from the drawer. Already in the context menu and in `AgentDocumentView`. | Duplicate entry point. |
 
-**Implementation.** Split `AgentControlBar.tsx` into `AgentSessionNotices` (the four banners, rendered in the composer region) and context-menu items built in `getBodyContextMenuItems`. The `.agent-session-row*` / `.agent-session-btn` styles in `_control-bar.scss` go away with the rows. The dead `.agent-process-badge` block (`_control-bar.scss:346-378`, unused since the control-bar badge was removed) is deleted in the same change.
+**Implementation.** Split `AgentControlBar.tsx` into `AgentSessionNotices` (the four banners, rendered in the composer region) and the dropup's Session section (§3.1). `AgentControlBar` itself goes away. The `.agent-session-row*` / `.agent-session-btn` styles move to the dropup's stylesheet; the dead `.agent-process-badge` block (`_control-bar.scss:346-378`, unused since the control-bar badge was removed) is deleted in the same change.
 
-**Open question Q1:** does the user want Archive/Export in the context menu, or in the pane header's `⋯` menu? The spec assumes the context menu because "Agent History" already lives there.
+### 3.1 The dropup's Session section
+
+`AgentRuntimeDropup` renders a `role="listbox"` of Mode/Model/Effort options, with the close button as a **sibling** of the listbox (an interactive non-option inside a listbox is invalid for assistive tech — see that file's own comment). The Session section follows the same rule: it is a sibling block **after** the listbox, not a fourth section inside it, so the arrow-key option walk and `applySelection` indexing are untouched.
+
+```
+┌ Mode ─────────────────────────┐
+│ ✓ bypass                      │
+├ Model ────────────────────────┤
+│ ✓ opus 5                      │
+├ Effort ───────────────────────┤
+│ ✓ high                        │
+├ Session ──────────────────────┤   ← new, outside the listbox
+│ $2.41 · 37 turns · 18m        │
+│ 1.2M in (89% cached) · 46k out│
+│ ctx 104k / 200k (52%)         │
+│ 12 483 lines · 2h 14m ago     │
+│ [Archive]  [Export]           │
+└───────────────────────────────┘
+```
+
+**Stats shown** (user direction: "include stats"). Every value already exists in the pane; none needs a new backend field:
+
+| Line | Source | Notes |
+|---|---|---|
+| cost · turns · duration | `paneModel.state.sessionTotals` (`SessionStats.cost_usd`, `num_turns`, `duration_ms`) | Cumulative over the pane's lifetime, summed at each TurnEnd. **Currently rendered nowhere** — `sessionTotals` lost its only consumer when `SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md` removed the strip's center stats. This section gives it a home again. |
+| input / output tokens, cache share | `sessionTotals.input_tokens`, `output_tokens`, and the cache split (`fresh_input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`) | Cache share = `cache_read / input`. It is what explains a cheap turn vs an expensive one (REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18 §2.2). Omitted for providers that report no split. |
+| context fill | `paneModel.state.lastContextTokens` + the provider's context window | Same numbers as the strip's ctx text, spelled out with the percentage. |
+| session size · last activity | `session:line_count`, `session:last_activity_ms`, `session:start_ts_ms` meta | The line count also drives the ≥500k warning, which stays a banner (§3). |
+| archived | `session:archived_at` | When archived, the section shows "Archived <when>" and swaps Archive for **Restore**. |
+
+Cost/turns are Claude-only in practice (`cost_usd` comes from `result.cost_usd`); a missing value renders as `—` rather than `$0`, so codex/gemini panes do not claim a false zero.
+
+**Buttons.** `[Archive]` / `[Export]` / `[Restore]` call the same `SessionArchiveCommand` / `SessionExportCommand` / `SessionRestoreCommand` as today's drawer rows, including the existing in-flight disable and toast behavior. They are real buttons, focusable, after the listbox in Tab order (close button → options → Session buttons).
+
+**Panel behavior.** The panel already stays open on selection (§9.2 of the dropup's own spec) and closes on focus leaving it — the Session buttons are inside the panel, so clicking them must not close it. Export opens a save dialog, which moves focus out of the document; `handleFocusChange` must not treat that as "focus left" (same guard the close path already needs). Covered by a test in Phase 1.
+
+**Growth.** This makes the panel taller. It is `Portal`-floated upward from the trigger, so on a short pane it must flip to a scrollable panel rather than clip — the Session section is the part that scrolls out of view first, since the options are what keyboard navigation walks.
 
 ## 4. The info panel
 
@@ -182,7 +220,7 @@ No per-process work for the collapsed line beyond what the poller already does.
 ## 6. Phases
 
 **Phase 1: move out, move in** (frontend plus one backend field).
-1. `AgentSessionNotices` in the composer region; Archive/Export in the context menu; delete the drawer's Session/History rows (§3).
+1. `AgentSessionNotices` in the composer region; the dropup's Session section with stats + Archive/Export/Restore (§3.1); delete the drawer's Session/History rows and `AgentControlBar` (§3).
 2. `AgentShellInfoPanel` collapsed line: shell half (status, PID, uptime, cwd, agent lock) and agent-started count + RSS. Add `shellprocpid` to the runtime status.
 3. `useTrackedProcesses` replaces `useProcessCount`.
 4. Tests:
@@ -190,7 +228,10 @@ No per-process work for the collapsed line beyond what the poller already does.
    - count half hidden at 0;
    - `confidence: "none"` degrade;
    - notices render outside the drawer (drawer closed, banner still visible);
-   - context-menu entries gated like today's rows.
+   - Session section gated like today's rows (hidden at lineCount 0; Restore instead of Archive when archived);
+   - the section renders outside the `role="listbox"`, and arrow-key navigation still walks only Mode/Model/Effort options;
+   - clicking Archive/Export does not close the panel;
+   - missing `cost_usd` renders `—`, not `$0`.
 
 **Phase 2: table + stop.**
 1. `parent_pid` and real `started_at_ms` on the RPC.
@@ -207,7 +248,7 @@ No per-process work for the collapsed line beyond what the poller already does.
 
 ## 7. Open questions
 
-- **Q1:** Archive/Export: body context menu (assumed) or pane header menu?
+- ~~**Q1:** Archive/Export: body context menu or pane header menu?~~ **Resolved (2026-09-19, user):** neither — a new Session section at the bottom of the Mode/Model/Effort dropup, with stats (§3.1).
 - **Q2:** Should "Started from this shell" exist at all, or should the drawer only show the agent's processes? Processes the user runs are visible in the terminal itself. The value is in background jobs (`&`) that scrolled away.
-- **Q3:** Should closing the drawer (not the pane) offer to stop agent-started processes? The proposal is **no**: the drawer is a view, and pane close already has the #3422 confirmation.
+- ~~**Q3:** Should closing the drawer offer to stop agent-started processes?~~ **Resolved (2026-09-19, user):** no. "closing drawer does nothing to processes it didnt start, its just a temporary shell drawer." Closing the drawer is a view toggle and never touches any process — not the ones the agent started, and not the ones started from the drawer shell, which keep running behind the collapsed drawer exactly as they do today. Only pane close (the #3422 confirmation) and the explicit stop controls in §4.2 end anything.
 - **Q4:** The pane-close confirmation lists "N processes running" but not what they are. Once the table exists, should that dialog reuse the row format?
