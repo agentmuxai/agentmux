@@ -68,6 +68,49 @@ if REMOTE_URL="$(git remote get-url origin 2>/dev/null)"; then
     fi
 fi
 
+# The remote is only a fallback. An installation token is scoped to ONE
+# account, so deriving the target purely from the current directory breaks
+# every cross-org call: `gh api repos/a5af/dev-tools/...` run from inside the
+# agentmuxai checkout mints an agentmuxai token and gets a bare 404, which
+# reads as "that repo doesn't exist" rather than "wrong account". A PAT had no
+# such constraint, so this would be a straight regression if left unhandled -
+# and it's the thing blocking removal of the PAT tier entirely.
+#
+# So when the caller names an owner explicitly, that always wins over the
+# directory we happen to be sitting in.
+for ((i = 1; i <= $#; i++)); do
+    arg="${!i}"
+    from_repo_flag=0
+
+    case "$arg" in
+        -R|--repo)
+            next_i=$((i + 1))
+            [[ $next_i -le $# ]] || continue
+            arg="${!next_i}"
+            from_repo_flag=1
+            ;;
+        --repo=*)
+            arg="${arg#--repo=}"
+            from_repo_flag=1
+            ;;
+    esac
+
+    # A bare OWNER/REPO is ONLY accepted as the value of -R/--repo. Matching it
+    # anywhere in argv would be actively harmful: branch names routinely contain
+    # a slash, so `gh pr create --head security/some-fix` would be read as owner
+    # "security", repo "some-fix", and we would mint a token for an account that
+    # does not exist. `gh api` paths are unambiguous and safe to match anywhere.
+    if [[ $from_repo_flag -eq 1 && "$arg" =~ ^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$ ]]; then
+        TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO="${BASH_REMATCH[2]}"; break
+    elif [[ "$arg" =~ ^repos/([^/]+)/([^/]+) ]]; then
+        TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO="${BASH_REMATCH[2]}"; break
+    elif [[ "$arg" =~ ^orgs/([^/]+) ]]; then
+        # Org-scoped call with no repo: mint for that org, and leave TARGET_REPO
+        # empty so the reachability probe is skipped - there is no repo to probe.
+        TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO=""; break
+    fi
+done
+
 TOKEN=""
 USED_KEY=""
 AUTH_MODE=""
