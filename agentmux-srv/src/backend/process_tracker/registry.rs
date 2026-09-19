@@ -235,8 +235,11 @@ mod tests {
     // assignment failed with Access Denied — in the shipped app too (no
     // production log ever shows "assigned process to job"). Nested jobs are
     // fine; the access mask wasn't. Keep this test running so it can't
-    // silently break again.
+    // silently break again. Windows-only: elsewhere `new_tracker` is still
+    // the membership-less stub, so there is nothing to observe (Codex P1 on
+    // #3425).
     #[test]
+    #[cfg(windows)]
     fn ensure_tracker_and_assign_process_track_a_real_short_lived_child() {
         // Uses a fresh, non-global `AgentProcessRegistry` (not `track_spawned`'s
         // `global()` path) so this doesn't touch the process-wide `GLOBAL`
