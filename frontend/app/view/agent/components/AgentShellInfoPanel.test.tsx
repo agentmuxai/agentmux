@@ -54,8 +54,13 @@ const proc = (pid: number, command: string, rss = 0): TrackedProcessInfo => ({
 
 const publishStatus = (data: Record<string, unknown>) => statusHandler?.({ data });
 
+// A real Windows path: one backslash per separator. Passed as an expression
+// rather than a JSX string attribute, because attribute literals are raw text
+// — there, a doubled backslash stays doubled instead of escaping.
+const CWD = "C:\\repo\\app";
+
 const renderPanel = () =>
-    render(() => <AgentShellInfoPanel blockId="block-1" shellSubBlockId="sub-1" cwd="C:\\repo\\app" />);
+    render(() => <AgentShellInfoPanel blockId="block-1" shellSubBlockId="sub-1" cwd={CWD} />);
 
 describe("AgentShellInfoPanel", () => {
     afterEach(cleanup);
@@ -76,7 +81,7 @@ describe("AgentShellInfoPanel", () => {
         expect(screen.getByText("pwsh")).toBeInTheDocument();
         expect(screen.getByText("pid 18432")).toBeInTheDocument();
         expect(screen.getByText("12m")).toBeInTheDocument();
-        expect(screen.getByText(/repo.app/)).toBeInTheDocument();
+        expect(screen.getByText(CWD)).toBeInTheDocument();
     });
 
     it("surfaces a non-zero exit and drops the uptime", () => {
