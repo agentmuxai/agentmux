@@ -453,10 +453,21 @@ pub(crate) async fn handle_close_pane(
         .map(|a| a.agent_id)
         .unwrap_or_else(|| target_block_id.clone());
 
-    let tab_id = {
+    // The whole pane the target lives in — every member of its tab stack, not
+    // just the target (#3202; SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.1).
+    let pane_block_ids = {
         let s = state.srv_state.lock().await;
         match s.blocks.get(&target_block_id) {
-            Some(b) => b.tab_id.clone(),
+            Some(b) => s
+                .tabs
+                .get(&b.tab_id)
+                .and_then(|t| t.rootnode.as_ref())
+                .and_then(|root| {
+                    crate::backend::layout::find_leaf_containing_block(root, &target_block_id)
+                })
+                .and_then(|leaf| leaf.data.as_ref())
+                .map(crate::backend::layout::leaf_members)
+                .unwrap_or_else(|| vec![target_block_id.clone()]),
             None => {
                 let err = format!("block not found: {target_block_id}");
                 if is_cross_pane {
@@ -471,7 +482,7 @@ pub(crate) async fn handle_close_pane(
         }
     };
 
-    let result = crate::sagas::delete_block::run(&state, tab_id, target_block_id.clone()).await;
+    let result = crate::sagas::close_pane::run(&state, pane_block_ids).await;
 
     if is_cross_pane {
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -628,6 +639,64 @@ mod close_pane_tests {
         assert_eq!(entry.target_agent, target_id);
         assert!(entry.success);
         assert_eq!(entry.reason.as_deref(), Some("verifying the fix"));
+    }
+
+    /// #3202: closing a pane through the MCP tool closes every tab in it, not
+    /// just the targeted block — even when the target is a background tab.
+    #[tokio::test]
+    async fn close_closes_every_tab_in_the_target_s_pane() {
+        let state = test_state();
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-stack-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let auth = sign_auth(&state, &caller_id);
+
+        let (tab_id, visible) = seed(&state).await;
+        let background = dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        dispatch_apply(
+            &state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "leaf".into(),
+                    data: Some(agentmux_common::LayoutNodeData {
+                        block_id: visible.clone(),
+                        block_stack: vec![visible.clone(), background.clone()],
+                        active_block_id: visible.clone(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            axum::Json(ClosePaneRequest { auth, block_id: Some(background.clone()), reason: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&visible), "visible tab closed with its pane");
+        assert!(!s.blocks.contains_key(&background), "background tab closed with its pane");
+        assert!(s.tabs[&tab_id].block_ids.is_empty());
+        assert!(s.tabs[&tab_id].rootnode.is_none(), "pane removed");
+        assert!(s.blocks.contains_key(&caller_block), "caller untouched");
     }
 
     #[tokio::test]

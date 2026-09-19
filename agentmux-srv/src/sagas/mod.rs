@@ -49,6 +49,7 @@
 //   (gap; Phase F).
 // * Saga state across srv restart (gap; Phase F+).
 
+pub mod close_pane;
 pub mod delete_block;
 pub mod delete_tab;
 pub mod delete_workspace;
