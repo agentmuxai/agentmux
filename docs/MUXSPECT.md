@@ -96,8 +96,9 @@ identical data.
 
 This is Phase A of `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
 — it does not reach LAN or WAN conversation content (Phase B/C, not yet
-built, and gated on an explicit repo-owner-confirmed addition to
-`CLAUDE.md`'s jekt security rules before they can be).
+built, and gated on the jekt security rules in
+`docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` — those
+rules are now live in code as of PR #2764, so this gate is satisfied).
 
 ## Finding which instance has a block/agent (`find`)
 
