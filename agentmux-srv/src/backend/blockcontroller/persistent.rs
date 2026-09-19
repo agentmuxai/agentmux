@@ -2808,6 +2808,54 @@ impl PersistentSubprocessController {
         // provider that echoes back whatever --resume it was given as its
         // first stdout line, even when that id turns out to be unreachable.
         let mut attempted_resume_sid: Option<String> = None;
+        // One session, one process. Resuming a session another live process
+        // is still running on — the agent's other pane, or one that is
+        // closing and hasn't exited yet — puts two CLIs on one transcript.
+        // Refuse instead: the user closes the other one (or waits the few
+        // seconds a close takes) and tries again. Covers every reopen path
+        // (picker reattach, launch modal, MCP), not just `agent.open`
+        // (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.7).
+        let requested_sid = if config.resume_flag.is_empty() {
+            None
+        } else {
+            self.inner.lock().unwrap().session_id.clone()
+        };
+        // Check and claim must be one step: the check reads other
+        // controllers' `current_pid`, which a concurrent resume of the same
+        // session only sets further down this function. Held from here until
+        // this spawn's `current_pid` is set (or it returns early), so two
+        // reopens of one session — two picker clicks, picker + MCP — can't
+        // both pass. Keyed by session (reagent P1 on #3421): a fixed stripe
+        // of locks chosen by hashing the session id — every reopen of one
+        // session takes the same lock, unrelated agents' resume respawns
+        // almost never share one, and memory stays bounded (a per-session map
+        // would grow forever — reagent P2). Only resume spawns take one;
+        // `spawn_process` is synchronous, and no caller holds an `inner` lock
+        // across it.
+        let resume_claim = requested_sid.as_deref().map(|sid| {
+            const STRIPES: usize = 64;
+            static RESUME_SPAWN_LOCKS: [Mutex<()>; STRIPES] = [const { Mutex::new(()) }; STRIPES];
+            let stripe = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                sid.hash(&mut h);
+                (h.finish() as usize) % STRIPES
+            };
+            RESUME_SPAWN_LOCKS[stripe].lock().unwrap_or_else(|e| e.into_inner())
+        });
+        if let Some(sid) = requested_sid.as_deref() {
+            if let Some((other, closing)) = self.session_held_elsewhere(sid) {
+                return Err(if closing {
+                    format!(
+                        "This conversation's previous process (block {other}) is still shutting down. Try again in a few seconds."
+                    )
+                } else {
+                    format!(
+                        "This conversation is already open in another pane (block {other}). Close it there, or switch to it, instead of opening a second copy."
+                    )
+                });
+            }
+        }
         {
             let inner = self.inner.lock().unwrap();
             if let Some(ref sid) = inner.session_id {
@@ -3059,6 +3107,9 @@ impl PersistentSubprocessController {
             inner.stdin_tx = Some(msg_tx);
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
+        // Now visible to `session_held_elsewhere` — a concurrent resume of
+        // the same session may run its check.
+        drop(resume_claim);
         self.publish_status();
 
         // Auto-register with the muxbus reactive handler so inter-agent
@@ -4464,6 +4515,35 @@ impl PersistentSubprocessController {
             KillRequest::Graceful(std::time::Instant::now() + super::SHUTDOWN_GRACE)
         };
         self.request_stop(request)
+    }
+
+    /// Another process already running on session `sid`: `(block id, closing)`.
+    /// Checks live persistent controllers in the registry, then blocks
+    /// mid-close (out of the registry, process not yet exited).
+    fn session_held_elsewhere(&self, sid: &str) -> Option<(String, bool)> {
+        for (block_id, ctrl) in super::get_all_controllers() {
+            if block_id == self.block_id {
+                continue;
+            }
+            if let Some(other) = ctrl.as_any().downcast_ref::<PersistentSubprocessController>() {
+                let g = other.inner.lock().unwrap();
+                if g.current_pid.is_some() && g.session_id.as_deref() == Some(sid) {
+                    return Some((block_id, false));
+                }
+            }
+        }
+        let store = self.mstore.as_ref()?;
+        super::closing_blocks_still_running()
+            .into_iter()
+            .filter(|block_id| *block_id != self.block_id)
+            .find(|block_id| {
+                store
+                    .get::<crate::backend::obj::Block>(block_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|b| crate::backend::obj::meta_get_string(&b.meta, core::META_SESSION_ID, "") == sid)
+            })
+            .map(|block_id| (block_id, true))
     }
 
     fn request_stop(&self, request: KillRequest) -> Result<(), String> {
@@ -7928,5 +8008,152 @@ rl.on("close", () => {
         assert!(elapsed >= std::time::Duration::from_millis(1400), "killed early: {elapsed:?}");
         assert!(elapsed < std::time::Duration::from_secs(4), "killed late: {elapsed:?}");
         let _ = std::fs::remove_file(stub);
+    }
+}
+
+/// One session, one process: a spawn that would `--resume` a session another
+/// live process is still on is refused (pane-close spec §4.7).
+#[cfg(test)]
+mod reopen_guard_tests {
+    use super::*;
+    use crate::backend::obj::Block;
+
+    fn resume_config(sid: &str) -> PersistentSpawnConfig {
+        PersistentSpawnConfig {
+            // Never actually spawned when the guard refuses; "git" (a real
+            // executable on every CI platform) keeps the allowed case honest.
+            cli_command: "git".to_string(),
+            cli_args: vec!["--version".to_string()],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: sid.to_string(),
+            message_id: None,
+        }
+    }
+
+    fn controller(block_id: &str, mstore: Option<Arc<Store>>) -> Arc<PersistentSubprocessController> {
+        Arc::new(PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.to_string(),
+            None,
+            None,
+            mstore,
+            None,
+        ))
+    }
+
+    const MSG: &str = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
+
+    #[tokio::test]
+    async fn a_session_live_in_another_pane_is_not_resumed_twice() {
+        let sid = format!("sid-{}", uuid::Uuid::new_v4());
+        let live_block = format!("live-{}", uuid::Uuid::new_v4());
+        let live = controller(&live_block, None);
+        {
+            let mut g = live.inner.lock().unwrap();
+            g.session_id = Some(sid.clone());
+            g.current_pid = Some(4242);
+        }
+        crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+        let reopen = controller(&format!("reopen-{}", uuid::Uuid::new_v4()), None);
+        let err = reopen.send_message(MSG.to_string(), resume_config(&sid)).unwrap_err();
+        crate::backend::blockcontroller::delete_controller(&live_block);
+
+        assert!(err.contains("already open in another pane"), "got: {err}");
+        assert!(reopen.inner.lock().unwrap().current_pid.is_none(), "no second process");
+    }
+
+    #[tokio::test]
+    async fn a_session_whose_process_is_still_closing_is_not_resumed_yet() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let sid = format!("sid-{}", uuid::Uuid::new_v4());
+        let closing_block = format!("closing-{}", uuid::Uuid::new_v4());
+        let mut block = Block {
+            oid: closing_block.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert(core::META_SESSION_ID.to_string(), serde_json::json!(sid));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        crate::backend::blockcontroller::mark_closing(&closing_block);
+
+        let reopen = controller(&format!("reopen-{}", uuid::Uuid::new_v4()), Some(store.clone()));
+        let err = reopen.send_message(MSG.to_string(), resume_config(&sid)).unwrap_err();
+        assert!(err.contains("still shutting down"), "got: {err}");
+
+        // Once that process has exited, the same reopen is allowed.
+        crate::backend::blockcontroller::mark_closing_stopped(&closing_block);
+        let allowed = controller(&format!("reopen-{}", uuid::Uuid::new_v4()), Some(store));
+        let result = allowed.send_message(MSG.to_string(), resume_config(&sid));
+        crate::backend::blockcontroller::unmark_closing(&closing_block);
+        assert!(result.is_ok(), "got: {result:?}");
+    }
+
+    /// reagent P1 on #3421: check-then-spawn must be atomic across
+    /// controllers. Several reopens of one session at once — exactly one may
+    /// win. Uses a node process that stays alive (EOF-only exit), so the
+    /// winner's `current_pid` stays set while the others check.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_reopens_of_one_session_start_exactly_one_process() {
+        let has_node = std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path).any(|dir| dir.join("node").is_file() || dir.join("node.exe").is_file())
+        });
+        if !has_node {
+            eprintln!("reopen_guard_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let stub = std::env::temp_dir().join(format!("agentmux-reopen-stub-{}.js", uuid::Uuid::new_v4()));
+        std::fs::write(&stub, "process.stdin.on('data', () => {}); process.stdin.on('end', () => process.exit(0));").unwrap();
+
+        let sid = format!("sid-{}", uuid::Uuid::new_v4());
+        let controllers: Vec<Arc<PersistentSubprocessController>> =
+            (0..4).map(|i| controller(&format!("race-{i}-{}", uuid::Uuid::new_v4()), None)).collect();
+        for c in &controllers {
+            crate::backend::blockcontroller::register_controller(&c.block_id, c.clone());
+        }
+        let config = PersistentSpawnConfig {
+            cli_command: "node".to_string(),
+            cli_args: vec![stub.to_string_lossy().to_string()],
+            ..resume_config(&sid)
+        };
+
+        let barrier = Arc::new(std::sync::Barrier::new(controllers.len()));
+        let handles: Vec<_> = controllers
+            .iter()
+            .map(|c| {
+                let (c, config, barrier) = (c.clone(), config.clone(), barrier.clone());
+                tokio::task::spawn_blocking(move || {
+                    barrier.wait();
+                    c.send_message(MSG.to_string(), config)
+                })
+            })
+            .collect();
+        let mut results = Vec::new();
+        for h in handles {
+            results.push(h.await.unwrap());
+        }
+
+        for c in &controllers {
+            let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(3)).await;
+            crate::backend::blockcontroller::delete_controller(&c.block_id);
+        }
+        let _ = std::fs::remove_file(stub);
+
+        let ok = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(ok, 1, "exactly one reopen may win; got {results:?}");
+        assert!(
+            results.iter().filter_map(|r| r.as_ref().err()).all(|e| e.contains("already open in another pane")),
+            "the others are refused by the guard: {results:?}"
+        );
     }
 }
