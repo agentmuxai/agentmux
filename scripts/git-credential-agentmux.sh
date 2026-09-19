@@ -81,9 +81,15 @@ if command -v python3 >/dev/null 2>&1; then
     # Tier 1: this agent's own App. Tier 2: the shared App. Same order as
     # gh-agent.sh, for the same reason -- an agent without its own App must
     # still get a short-lived token rather than falling back to a PAT.
-    token="$(python3 "$SCRIPT_DIR/github-app-token.py" "$agent" "$owner" 2>/dev/null)" \
-      || token="$(python3 "$SCRIPT_DIR/github-app-token.py" genericagentx "$owner" 2>/dev/null)" \
-      || token=""
+    token="$(python3 "$SCRIPT_DIR/github-app-token.py" "$agent" "$owner" 2>/dev/null)" || token=""
+    # Only fall back when tier 1 used a DIFFERENT identity. If
+    # AGENTMUX_AGENT_ID is unset, $agent already defaulted to genericagentx
+    # above, so retrying it repeats an identical call that can only fail the
+    # same way -- doubling latency and API calls on every push made outside
+    # an agent context.
+    if [[ -z "$token" && "$agent" != "genericagentx" ]]; then
+        token="$(python3 "$SCRIPT_DIR/github-app-token.py" genericagentx "$owner" 2>/dev/null)" || token=""
+    fi
 fi
 
 if [[ -z "$token" ]]; then
