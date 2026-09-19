@@ -66,6 +66,20 @@ jobs:
       CEF_RUNTIME_DIR_DARWIN: ${{ github.workspace }}/cef-runtime-darwin
 
     steps:
+      # Replaces CEF_RUNTIME_TOKEN, a long-lived PAT, with an installation
+      # token that expires in an hour. Scoped to agentmuxai/cef only -- the
+      # private key can mint broader tokens, but this job only reads one
+      # repo's releases, so that is all it gets.
+      # Proven equivalent in ci-app-token-smoke.yml before this swap.
+      - name: Mint a short-lived token for agentmuxai/cef
+        id: cef_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: agentmuxai
+          repositories: cef
+
       - name: Resolve inputs
         id: in
         shell: bash
@@ -117,7 +131,7 @@ jobs:
       - name: Resolve patched CEF framework tag
         id: cef
         env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
         run: |
           TAG="${{ steps.in.outputs.cef_tag }}"
           if [ -z "$TAG" ]; then
@@ -152,7 +166,7 @@ jobs:
       - name: Download patched CEF framework
         if: steps.cef-cache.outputs.cache-hit != 'true'
         env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
         run: |
           mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_DARWIN"
           gh release download "${{ steps.cef.outputs.tag }}" \
