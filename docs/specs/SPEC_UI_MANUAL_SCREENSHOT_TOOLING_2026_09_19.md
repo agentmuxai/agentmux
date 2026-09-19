@@ -1,7 +1,8 @@
 # SPEC: Reusable, cropped screenshot tooling for the user manual
 
 **Date:** 2026-09-19
-**Status:** implemented — first run complete (§6a), tool itself working.
+**Status:** implemented — PR #3432. First run complete (§6a), tool itself
+working.
 **Related:** `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` (the
 CDP automation layer this reuses — `Page.captureScreenshot`/`Input.dispatchMouseEvent`/
 `Runtime.evaluate` already built into `agentmux-cef/src/browser_api/`, exposed
