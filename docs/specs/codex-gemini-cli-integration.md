@@ -33,7 +33,7 @@ Codex and Gemini are defined in the provider registry but their install/auth/lau
 - `ResolveCliCommand` in the backend has 3-step resolution (versioned → system PATH → install)
 - `CheckCliAuthCommand` supports all 3 providers
 - Forge seed includes Codex (AgentY) and Gemini (AgentZ) agents
-- Agent config writing (CLAUDE.md, .mcp.json, skills) works for all providers
+- Per-agent config writing (the generated CLAUDE.md, .mcp.json, skills) works for all providers
 
 ### What's Broken
 
