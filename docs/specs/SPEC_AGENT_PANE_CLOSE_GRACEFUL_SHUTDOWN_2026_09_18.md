@@ -729,9 +729,11 @@ reattach, the launch modal and MCP, not just `agent.open`.
   seconds."
 - The error returns through `send_message` to the input RPC, so the sender
   sees it.
-- The check and the claim are one step. A process-wide lock is held from the
-  check until this spawn's `current_pid` is set, so two reopens of one
-  session at once can't both pass (reagent P1 on #3421). A test runs four
+- The check and the claim are one step. A lock keyed by session id is held
+  from the check until this spawn's `current_pid` is set, so two reopens of
+  one session at once can't both pass (reagent P1 on #3421). The lock is per
+  session, so unrelated agents' respawns never wait on each other (a second
+  P1 on #3421 caught a first, global version). A test runs four
   concurrent reopens against a real process: exactly one wins. Without the
   lock, all four do.
 
