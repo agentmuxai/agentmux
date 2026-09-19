@@ -1,7 +1,7 @@
 # SPEC: Closing a pane shuts down every agent in it — gracefully, in order
 
 **Date:** 2026-09-18
-**Status:** active — Phase 0 measured (§5.1), Phase 1 implemented (§5.2);
+**Status:** active — Phase 0 measured (§5.1), Phase 1 implemented in #3402 (§5.2);
 Phases 2–3 not started.
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
