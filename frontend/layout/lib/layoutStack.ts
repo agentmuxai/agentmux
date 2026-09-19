@@ -42,12 +42,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { findNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { closeNode } from "./layoutMagnify";
+import { effectiveStack, removeMemberFromStack } from "./stackMembers";
 
-/** The node's stack, or `[blockId]` when it has none yet (back-compat: a
- *  non-stacked leaf behaves as a one-member stack for these functions). */
-export function effectiveStack(data: TabLayoutData): string[] {
-    return data.blockStack?.length ? data.blockStack : [data.blockId];
-}
+export { effectiveStack };
 
 function setActive(data: TabLayoutData, blockId: string, stack: string[]): void {
     data.blockStack = stack;
@@ -178,22 +175,13 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         return;
     }
 
-    const nextStack = stack.filter((id) => id !== blockId);
-    node.data.blockStack = nextStack;
-    if (node.data.activeBlockId === blockId) {
-        // Prefer the neighbor that was to the right; falls back to the new
-        // last member when the closed tab was the rightmost — matches the
-        // editor tab strip's own CloseTab right-neighbor convention.
-        const nextActive = nextStack[Math.min(idx, nextStack.length - 1)];
-        node.data.activeBlockId = nextActive;
-        node.data.blockId = nextActive;
-        // No dispose here anymore — the leaf's NodeModel survives
-        // active-member churn regardless of whether the closed member was
-        // active or background; pane-leaf-chrome.tsx's own inner <Key>
-        // (keyed on activeBlockId) is what remounts the actual block
-        // content now, scoped to just that, not the whole leaf. See this
-        // file's header comment.
-    }
+    // Right-hand neighbour becomes visible if `blockId` was (stackMembers.ts).
+    // No dispose here anymore — the leaf's NodeModel survives active-member
+    // churn regardless of whether the closed member was active or
+    // background; pane-leaf-chrome.tsx's own inner <Key> (keyed on
+    // activeBlockId) is what remounts the actual block content now, scoped
+    // to just that, not the whole leaf. See this file's header comment.
+    removeMemberFromStack(node.data, blockId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();

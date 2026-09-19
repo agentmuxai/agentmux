@@ -183,6 +183,36 @@ pub fn find_leaf_containing_block<'a>(tree: &'a LayoutNode, block_id: &str) -> O
         .find_map(|child| find_leaf_containing_block(child, block_id))
 }
 
+/// Remove `block_id` from the stack of the leaf holding it, WITHOUT removing
+/// the leaf, when that leaf has other members. If it was the visible tab, the
+/// right-hand neighbour becomes visible (the new last member when it was
+/// rightmost) — the same rule as the frontend's `removeMemberFromStack`
+/// (`frontend/layout/lib/stackMembers.ts`). Returns false and changes nothing
+/// when `block_id` is in no leaf or is its leaf's only member (removing it
+/// means removing the leaf — the caller's job).
+/// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.4.
+pub fn remove_stack_member(tree: &mut LayoutNode, block_id: &str) -> bool {
+    if let Some(data) = tree.data.as_mut() {
+        let members = leaf_members(data);
+        if let Some(idx) = members.iter().position(|m| m == block_id) {
+            if members.len() <= 1 {
+                return false;
+            }
+            let next: Vec<String> = members.into_iter().filter(|m| m != block_id).collect();
+            if data.block_id == block_id || data.active_block_id == block_id {
+                let visible = next[idx.min(next.len() - 1)].clone();
+                data.block_id = visible.clone();
+                data.active_block_id = visible;
+            }
+            data.block_stack = next;
+            return true;
+        }
+    }
+    tree.children
+        .iter_mut()
+        .any(|child| remove_stack_member(child, block_id))
+}
+
 /// Removes every leaf whose `data.block_id` is not in `live_block_ids`,
 /// using the same collapse semantics as an explicit user delete
 /// (`delete_node`'s single-child-parent promotion). Returns the number of
