@@ -60,6 +60,9 @@ pub(super) struct ShellControllerInner {
     pub(super) input_rx: Option<mpsc::UnboundedReceiver<BlockInputUnion>>,
     /// OS PID of the running child process, kept for signal delivery in stop().
     pub(super) child_pid: Option<u32>,
+    /// Program name of that child (`pwsh`, `bash`, …), for the Shell drawer's
+    /// info line. Empty until the first spawn.
+    pub(super) shell_name: String,
     /// Unix timestamp (ms) when the process was spawned; None until first spawn.
     pub(super) spawn_ts_ms: Option<i64>,
     /// Monotonic instant of the most recent PTY read; None until first output.
@@ -145,6 +148,7 @@ impl ShellController {
                 input_tx: None,
                 input_rx: None,
                 child_pid: None,
+                shell_name: String::new(),
                 spawn_ts_ms: None,
                 last_pty_output: None,
                 is_agent_pane: false,
@@ -195,6 +199,8 @@ impl ShellController {
             shellprocconnname: inner.conn_name.clone(),
             shellprocexitcode: inner.proc_exit_code,
             spawn_ts_ms: inner.spawn_ts_ms,
+            shellprocpid: inner.child_pid,
+            shellprocname: inner.shell_name.clone(),
             is_agent_pane: inner.is_agent_pane,
             // The shell/PTY controller has no NDJSON-derived health monitor
             // (no structured turn-end marker to key off, unlike

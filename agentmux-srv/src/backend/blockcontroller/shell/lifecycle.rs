@@ -762,6 +762,21 @@ impl Controller for ShellController {
             cmd.cwd(&cwd);
         }
 
+        // Program name for the UI, captured before `cmd` is consumed by the
+        // spawn. The process tracker can't supply it: it deliberately omits
+        // each block's root process (#3430), and for this sub-block the root
+        // IS the shell.
+        let prog_name = cmd
+            .get_argv()
+            .first()
+            .map(|p| {
+                std::path::Path::new(p)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| p.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
+
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, cmd = %cmd_str, "spawn failed");
             let mut inner = self.inner.lock().unwrap();
@@ -786,9 +801,18 @@ impl Controller for ShellController {
                 inner.child_pid = Some(pid);
             }
             inner.spawn_ts_ms = Some(spawn_ts_ms);
+            inner.shell_name = prog_name.clone();
             inner.is_agent_pane = is_agent;
             inner.agent_id = agent_id_for_jekt.clone();
         }
+
+        // Re-publish now that the spawn metadata exists. The `running` status
+        // above goes out BEFORE the PTY child is created, so it carries no
+        // pid, program name or spawn time, and nothing else publishes until
+        // the process exits — a subscriber would show a running shell as an
+        // anonymous one for its whole life (Codex P1 on #3436). `persist: 1`
+        // means this snapshot is also what a later subscriber gets replayed.
+        self.publish_status();
 
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
         // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
@@ -1335,6 +1359,10 @@ impl Controller for ShellController {
                             shellprocstatus: inner.proc_status.clone(),
                             shellprocconnname: inner.conn_name.clone(),
                             shellprocexitcode: inner.proc_exit_code,
+                            // Kept on the exit status too, so the drawer's
+                            // info line can still say which PID exited.
+                            shellprocpid: inner.child_pid,
+                            shellprocname: inner.shell_name.clone(),
                             spawn_ts_ms: inner.spawn_ts_ms,
                             is_agent_pane: inner.is_agent_pane,
                             turn_active: false,

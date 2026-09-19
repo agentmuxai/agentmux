@@ -829,6 +829,30 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
         expect(precedes(trigger, auth)).toBe(true);
     });
 
+    it("still offers the session trigger when there is history but no context reading yet", () => {
+        // ReAgent P1 on #3436: Archive/Export live behind this trigger. A
+        // pane that has history but has not reported context usage — the
+        // interrupted / resume-failed states — must not lose access to them.
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                blockId="block-1"
+                blockAtom={() => ({ meta: { "session:line_count": 4200 } }) as never}
+                contextTokens={null}
+            />
+        ));
+        const trigger = container.querySelector(".agent-session-stats-trigger")!;
+        expect(trigger).not.toBeNull();
+        expect(trigger).toHaveTextContent("session");
+    });
+
+    it("renders no session trigger for a pane with neither a reading nor history", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} blockId="block-1" blockAtom={() => ({ meta: {} }) as never} contextTokens={null} />
+        ));
+        expect(container.querySelector(".agent-session-stats-trigger")).toBeNull();
+    });
+
     it("keeps Shell the outermost element of the right edge, outside an interactive ctx slot", () => {
         render(() => (
             <AgentComposerStrip

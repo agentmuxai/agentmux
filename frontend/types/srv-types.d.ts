@@ -71,6 +71,12 @@ declare global {
         shellprocstatus?: string;
         shellprocconnname?: string;
         shellprocexitcode: number;
+        // PID of the controller's own child. Set by the shell controller —
+        // the agent pane's Shell drawer identifies its shell by PID.
+        shellprocpid?: number;
+        // Program name of that child ("pwsh", "bash", …). Not derivable from
+        // the process tracker, which omits each block's root process.
+        shellprocname?: string;
         spawn_ts_ms?: number;
         is_agent_pane?: boolean;
         // True if a turn is in flight (message sent, no terminating "result"

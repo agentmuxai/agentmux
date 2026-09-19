@@ -673,6 +673,22 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return `agent-composer-strip-ctx--${b}`;
     };
 
+    // Archive/Export live behind the ctx reading's popover, but the reading
+    // itself only exists once a turn has reported context usage. A pane with
+    // history and no reading yet — exactly the state the interrupted /
+    // resume-failed banners describe — would otherwise have no way to reach
+    // session management at all, which `AgentControlBar` always offered
+    // (ReAgent P1 on #3436). In that case the slot still renders, labelled
+    // "session" instead of a token count.
+    const hasSessionToManage = (): boolean => {
+        if (props.providerId !== "claude") return false;
+        const meta = props.blockAtom?.()?.meta;
+        if (!meta) return false;
+        const lines = (meta["session:line_count"] as number | undefined) ?? 0;
+        const archivedAt = (meta["session:archived_at"] as number | undefined) ?? 0;
+        return lines > 0 || archivedAt > 0;
+    };
+
     const ctxText = (): string | null => {
         const t = props.contextTokens;
         const w = props.contextWindow;
@@ -789,7 +805,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             });
         }
 
-        if (ctxText() != null) {
+        if (ctxText() != null || hasSessionToManage()) {
             out.push({
                 key: "ctx",
                 // ctx text + countdown (conditional) + Compact button
@@ -858,7 +874,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                         ? contextTitle(props.contextTokens, props.contextWindow)
                                         : undefined
                                 }
-                                label={ctxText() ?? ""}
+                                label={ctxText() ?? "session"}
                             />
                             <Show when={ctxCountdownText()}>
                                 <span
