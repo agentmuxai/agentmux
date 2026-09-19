@@ -1,5 +1,28 @@
 # AgentMux Version History
 
+## 0.56.7 — 2026-09-18
+
+- fix(term): flush the CPU/mem badge to the pane's real top-right corner; add a toggle
+- update the migration wrap-up report with the docs-lifecycle state, and correct its "Phase 2 is all that's left" claim
+- fold two singleton docs directories and normalise 17 mis-formatted Status lines
+- A10: consolidate AgentMux-root resolution onto one resolver and reconcile the two env var names
+- fix(panes): one shared pane-tab model — every tab is a pill with a stable, fixed-size icon
+- correct two spec claims that were false: the history-search spec said nothing had shipped when it had, and the MCP-bindings spec described the auth-key's pane exposure backwards
+- remove two off-topic research reports that were committed to the repo root by mistake
+- add retro and analysis to the docs Status vocabulary, and stamp the ~270 docs that needed them
+- correct the A1-A15 architecture board: two items were shipped but still marked open
+- make ORef generate the TypeScript type it actually sends over the wire
+- pin the wire-equivalence of the duplicated BlockDef/FileDef pairs so they cannot silently diverge
+- institutionalise §3's reverse check: flag specs that claim to be unbuilt while source code cites them
+- docs: correct container-agent-runtime.md's stale status, consolidate sandbox tracking into #2939
+- docs(specs): correct 24 Status lines the code contradicts, and rank the rest
+- docs(specs): correct Status lines the code contradicts (batch 2)
+- docs(specs): correct Status lines the code contradicts (batch 3)
+- ci(docs): gate a new spec that its own PR implements against saying it is unbuilt
+- fix(agent): stop a runtime change from disabling the control protocol on persistent Claude agents
+- feat(agent): backend plumbing for per-tool-call permission decisions (SPEC_DECISION_PROMPT Phase 2, gated off)
+- test(muxsh): export main() for testability and cover its dispatch/error paths
+
 ## 0.56.6 — 2026-09-18
 
 - generate the shell, agent-input and write-agent-config wire types and migrate seven commands
