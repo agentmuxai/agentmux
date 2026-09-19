@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-18
 **Status:** active — Phase 0 measured (§5.1), Phase 1 implemented in #3402 (§5.2);
-Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3 in
-progress (§10).
+Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3
+implemented in #3419, #3421, #3422 (§10).
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
 (the continuity guarantee this spec protects),
@@ -137,7 +137,7 @@ exists.
 
 ### 3.5 The close confirmation is bypassed and too narrow
 
-`useAgentCloseConfirm` (`frontend/app/view/agent/hooks/useAgentCloseConfirm.ts`)
+`useAgentCloseConfirm` (in `frontend/app/view/agent/hooks/`, removed in Phase 3 — §10.3)
 replaces `onClose` on the agent's own `nodeModel`. That object is a spread copy
 made by `PaneLeafChrome` (`frontend/app/tab/pane-leaf-chrome.tsx:181`, or `:238`
 for kept-alive tabs, which agent panes use since
@@ -741,3 +741,31 @@ Scope: persistent (Claude) controllers only. Per-turn subprocess providers
 have no long-lived process to collide with between turns. The picker's
 "offer to switch to it" UX (§4.7) is not built. The refusal message says what
 to do instead.
+
+### 10.3 One confirmation per pane, and close failures surfaced (§4.5, §4.6)
+
+**Confirmation.**
+- **Where the hook is:** the layout asks
+  `LayoutModel.beforeNodeDelete(data) → Promise<boolean>` before it closes
+  anything. It is called from `closeNode`, for the whole pane, and from
+  `closeBlockInStack`, for one tab. It is supplied by `tabcontent.tsx`
+  through `TileLayoutContents`, the same way `onNodeDelete` is.
+- **What it checks:** `tabcontent` probes every member of the closing leaf:
+  `turn_active` from `GetControllerStatus`, and tracked processes from
+  `AgentProcessListCommand` (`frontend/app/tab/pane-close-guard.ts`,
+  `busyMembers`).
+- **What the user sees:**
+  - If any member is busy, one `ConfirmModal` lists each agent, for example
+    "Posa — mid-turn, 2 processes running". Cancel keeps the pane.
+  - An idle pane closes with no prompt.
+  - A probe that fails counts as "not busy", so a broken status lookup can
+    never make a pane impossible to close.
+- **What was removed:** `useAgentCloseConfirm` is deleted. It patched `onClose`
+  on the agent view's copy of the NodeModel, which the pane header's × never
+  reads (§3.5, confirmed in `pane-leaf-chrome.tsx`: the chrome gets the leaf's
+  own `nodeModel`). Its "kill the tree first" step is no longer needed: the
+  graceful close drops the tracker after the process exits.
+
+**Close failures surfaced.** When `ClosePane` fails, `onNodeDelete` shows a
+flash error ("Couldn't fully close the pane") instead of only logging through
+`fireAndForget`. If the close can't finish, the orphan reaper does.

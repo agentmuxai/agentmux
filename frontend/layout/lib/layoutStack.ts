@@ -175,13 +175,28 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         return;
     }
 
+    // Same confirmation as closing the whole pane, scoped to this one tab.
+    let leafData = node.data;
+    if (model.beforeNodeDelete) {
+        if (!(await model.beforeNodeDelete({ blockId } as TabLayoutData))) return;
+        // The tree may have changed while the prompt was open. Re-find by node
+        // id, not object identity (`balanceNode` can swap the object when an
+        // unrelated pane closes — reagent P1 on #3422), and act on the
+        // current data. Nothing to do unless the tab is still one of several.
+        const current = findNode(model.treeState.rootNode, nodeId);
+        if (!current?.data) return;
+        const members = effectiveStack(current.data);
+        if (!members.includes(blockId) || members.length <= 1) return;
+        leafData = current.data;
+    }
+
     // Right-hand neighbour becomes visible if `blockId` was (stackMembers.ts).
     // No dispose here anymore — the leaf's NodeModel survives active-member
     // churn regardless of whether the closed member was active or
     // background; pane-leaf-chrome.tsx's own inner <Key> (keyed on
     // activeBlockId) is what remounts the actual block content now, scoped
     // to just that, not the whole leaf. See this file's header comment.
-    removeMemberFromStack(node.data, blockId);
+    removeMemberFromStack(leafData, blockId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
