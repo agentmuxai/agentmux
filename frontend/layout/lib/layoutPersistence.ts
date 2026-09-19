@@ -6,7 +6,7 @@ import { fireAndForget } from "@/util/util";
 import { isTileDragInFlight } from "./dragInFlight";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
-import { removeMemberFromStack } from "./stackMembers";
+import { addMemberToStack, removeMemberFromStack } from "./stackMembers";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -294,6 +294,23 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 focused: action.focused,
             };
             model.treeReducer(insertAction, false);
+            break;
+        }
+        case LayoutTreeActionType.StackPush: {
+            // The backend already placed the block (`CreateBlockInStack`);
+            // mirror it so the tab appears. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+            let leaf = model?.getNodeByBlockId(action.targetblockid);
+            if (!leaf && model.treeState.rootNode) {
+                leaf = findNodeByBlockId(model.treeState.rootNode, action.targetblockid);
+            }
+            if (leaf?.data) {
+                addMemberToStack(leaf.data, action.blockid, true);
+            } else {
+                console.error(
+                    "Cannot apply layout action StackPush, no pane holds blockId",
+                    action.targetblockid
+                );
+            }
             break;
         }
         case LayoutTreeActionType.ClearTree: {

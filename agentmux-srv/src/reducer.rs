@@ -127,6 +127,25 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             block_id,
             correlation_id,
         } => layout::handle_layout_delete_node_by_block(state, tab_id, block_id, correlation_id),
+        // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.2 — pane tabs.
+        Command::LayoutStackPush {
+            tab_id,
+            target_block_id,
+            block_id,
+            activate,
+            correlation_id,
+        } => layout::handle_layout_stack_push(state, tab_id, target_block_id, block_id, activate, correlation_id),
+        Command::LayoutStackActivate {
+            tab_id,
+            block_id,
+            correlation_id,
+        } => layout::handle_layout_stack_activate(state, tab_id, block_id, correlation_id),
+        Command::CreateBlockInStack {
+            tab_id,
+            target_block_id,
+            meta,
+            activate,
+        } => layout::handle_create_block_in_stack(state, tab_id, target_block_id, meta, activate),
         // SPEC_864 Phase 4 — queue-append pass-through (the reducer does
         // not model pendingbackendactions in TabRecord; the persist
         // subscriber appends to db_layout from the event).

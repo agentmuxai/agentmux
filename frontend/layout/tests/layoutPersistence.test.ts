@@ -417,6 +417,51 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
         expect(data!.blockId).toBe("existing");
     });
 
+    // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3: the backend created
+    // and placed the block (CreateBlockInStack); the frontend mirrors it.
+    it("StackPush adds the block as the visible tab of the pane holding the target", async () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+
+        setPendingActions(model, [{
+            actiontype: LayoutTreeActionType.StackPush,
+            actionid: "stackpush-1",
+            blockid: "new-block",
+            targetblockid: "existing",
+            position: "",
+            nodesize: undefined,
+            focused: true,
+            magnified: false,
+            ephemeral: false,
+        }]);
+        await processPendingBackendActions(model);
+
+        const data = model.treeState.rootNode!.data!;
+        expect(data.blockStack).toEqual(["existing", "new-block"]);
+        expect(data.blockId).toBe("new-block");
+        expect(data.activeBlockId).toBe("new-block");
+    });
+
+    it("StackPush for a block already added locally is idempotent", async () => {
+        const model = createLayoutModel();
+        stackRoot(model, ["existing", "new-block"], "new-block");
+
+        setPendingActions(model, [{
+            actiontype: LayoutTreeActionType.StackPush,
+            actionid: "stackpush-2",
+            blockid: "new-block",
+            targetblockid: "existing",
+            position: "",
+            nodesize: undefined,
+            focused: true,
+            magnified: false,
+            ephemeral: false,
+        }]);
+        await processPendingBackendActions(model);
+
+        expect(model.treeState.rootNode!.data!.blockStack).toEqual(["existing", "new-block"]);
+    });
+
     it("actions with duplicate actionid are processed only once (idempotent)", async () => {
         const model = createLayoutModel();
         insertBlock(model, "existing");

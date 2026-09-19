@@ -63,12 +63,12 @@ function setActive(data: TabLayoutData, blockId: string, stack: string[]): void 
  * stack as a new Pane Tab. Generalizes the exact create-then-push sequence
  * agent's own "+" handler already used inline
  * (`frontend/app/view/agent/agent-view.tsx`'s `handleNewAgentTab`) — `pane.open`
- * with `skip_placement: true` creates the block without placing it anywhere,
- * so no backend change is needed to support this for an arbitrary widget type.
+ * with `stack_onto_block_id` creates the block AND places it in this pane's
+ * stack in one backend step (`CreateBlockInStack`), for any widget type.
  *
  * Re-resolves `nodeId` fresh after the RPC rather than trusting a pre-await
  * reference — the pane can close while the request is in flight. If it has,
- * the skip_placement block has nowhere to attach to; delete it instead of
+ * the new block's pane is gone too; delete it instead of
  * leaving an orphaned, unreachable block behind (same race agent's handler
  * already guards).
  */
@@ -97,9 +97,17 @@ export async function addWidgetAsPaneTab(
 ): Promise<void> {
     const meta = extraMeta ? { ...(blockDef.meta as Record<string, unknown>), ...extraMeta } : blockDef.meta;
     const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"];
+    // Created AND placed in one backend step (`stack_onto_block_id` →
+    // `CreateBlockInStack`), so the block is never in the tab without a pane —
+    // `skip_placement` + a later push could be interrupted in between
+    // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.1, §3.3). The local
+    // push below just shows the tab without waiting for the queued
+    // `stackpush`; both add the same member, idempotently.
+    const target = findNode(model.treeState.rootNode, nodeId)?.data?.blockId;
+    if (!target) return;
     const paneOpenResult = (await TabRpcClient.rpcCall(
         "pane.open",
-        { view, skip_placement: true, meta },
+        { view, stack_onto_block_id: target, meta },
         {}
     )) as { block_id: string };
     const node = findNode(model.treeState.rootNode, nodeId);

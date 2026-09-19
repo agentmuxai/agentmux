@@ -109,7 +109,9 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
                 "pane.open",
                 {
                     view: "agent",
-                    skip_placement: true,
+                    // Created and placed in one backend step — never in no pane
+                    // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3).
+                    stack_onto_block_id: currentBlockId,
                     meta: {
                         view: "agent",
                         agentId,
