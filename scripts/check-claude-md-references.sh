@@ -64,6 +64,12 @@ while IFS= read -r hit; do
 
     [[ "$file" == "$SELF" || "$file" == "$SPEC" ]] && continue
     [[ "$file" =~ $EXCLUDE_PATH ]] && continue
+    # The generated specs index repeats each spec's title. An entry whose
+    # link target is itself an excluded (dated) document is that document's
+    # text, not a living reference — judge it by its target, as above.
+    if [[ "$file" == "docs/specs/INDEX.md" && "$text" =~ \]\(([^\)]+\.md)\) ]]; then
+        [[ "docs/specs/${BASH_REMATCH[1]}" =~ $EXCLUDE_PATH ]] && continue
+    fi
     shopt -s nocasematch
     if [[ "$text" =~ $PRODUCT ]]; then shopt -u nocasematch; continue; fi
     shopt -u nocasematch
