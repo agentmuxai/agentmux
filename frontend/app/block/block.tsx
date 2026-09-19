@@ -294,6 +294,44 @@ function Block(props: BlockProps): JSX.Element {
     createEffect(() => {
         const view = viewType();
         if (!view) return;
+        // A drag-preview thumbnail (`tabcontent.tsx`'s `renderPreview`,
+        // `<Block preview>` with the RAW leaf nodeModel) renders through
+        // this SAME component but must never share a ViewModel instance —
+        // or the leaf's `activeViewModel` signal — with the real,
+        // non-preview mount of the same blockId. Two confirmed collisions
+        // when it did:
+        // 1. `getBlockComponentModel`/`registerBlockComponentModel` are
+        //    keyed by blockId ALONE, with no preview/real distinction, and
+        //    adoption below is last-writer-wins. If the preview mount's
+        //    effect happened to run first, the real mount adopted ITS
+        //    ViewModel — one whose cached `nodeModel` (the raw leaf model)
+        //    has no `paneChromeHoisted` at all, silently and permanently
+        //    breaking `noHeader()` for the real pane (reproduced live: two
+        //    agent panes stuck with a double header, `noHeader()` frozen
+        //    `false` because the adopted vm's `nodeModel` wasn't the
+        //    correctly-hoisted wrapper). See custom.d.ts's own doc comment
+        //    on `paneChromeHoisted` for the fix that made THIS symptom
+        //    possible to diagnose (a live accessor, not a snapshot) — the
+        //    accessor was never the bug; sharing the vm across mounts was.
+        // 2. Worse: `setActiveViewModel` below has NO owner-check on its
+        //    SET path (only its CLEAR path does — see
+        //    layoutNodeModels.ts) — for every non-keep-alive hoisted type,
+        //    the preview mount's raw leaf nodeModel and the real content
+        //    mount's `scopedNodeModel` wrapper share the exact SAME
+        //    underlying signal, so whichever mount's effect runs LAST
+        //    simply overwrites the other's ViewModel in that signal — not
+        //    just a broken header, chrome could render the PREVIEW's own
+        //    ViewModel instance for the real, visible pane.
+        // Fixed by never letting a preview mount touch either shared
+        // surface: it gets its own private ViewModel, created fresh here,
+        // disposed on its own unmount, and never registered or published
+        // anywhere another mount could adopt or overwrite.
+        if (props.preview) {
+            const vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+            createdViewModels.push(vm);
+            setViewModel(vm);
+            return;
+        }
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
@@ -315,13 +353,18 @@ function Block(props: BlockProps): JSX.Element {
     });
 
     onCleanup(() => {
-        // Owner is `registeredBcm` here too (not `registeredBcm ?? bcm`) —
-        // an adopting mount never created its own registration object, so
-        // this correctly no-ops for it instead of clearing the creating
-        // mount's still-live activeViewModel out from under it.
-        props.nodeModel.setActiveViewModel?.(null, registeredBcm);
-        if (registeredBcm) {
-            unregisterBlockComponentModel(props.nodeModel.blockId, registeredBcm);
+        // Preview mounts never touched either shared surface above — see
+        // that branch's own comment — so there's nothing to unregister or
+        // clear here for them, just their own private ViewModel(s) below.
+        if (!props.preview) {
+            // Owner is `registeredBcm` here too (not `registeredBcm ?? bcm`) —
+            // an adopting mount never created its own registration object, so
+            // this correctly no-ops for it instead of clearing the creating
+            // mount's still-live activeViewModel out from under it.
+            props.nodeModel.setActiveViewModel?.(null, registeredBcm);
+            if (registeredBcm) {
+                unregisterBlockComponentModel(props.nodeModel.blockId, registeredBcm);
+            }
         }
         // Dispose only ViewModels this mount CREATED and that are not the
         // registry's live one (a newer mount may have adopted nothing from
