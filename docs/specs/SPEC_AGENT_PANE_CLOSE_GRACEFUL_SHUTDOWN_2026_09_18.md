@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-18
 **Status:** active — Phase 0 measured (§5.1), Phase 1 implemented in #3402 (§5.2);
-Phases 2–3 not started.
+Phase 2 designed (§9), not started; Phase 3 not started.
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
 (the continuity guarantee this spec protects),
@@ -210,8 +210,9 @@ After all members: prune the layout leaf once.
   `agentmux-srv/src/backend/blockcontroller/mod.rs` that does steps 1–5 and
   **returns when the process has actually exited**. `delete_controller` stays
   as the immediate, forced variant for paths that need it.
-- `PersistentSubprocessController::stop` honors `graceful` by sending `false`
-  to the kill task (the existing graceful branch). The kill task gains a way to
+- ~~`PersistentSubprocessController::stop` honors `graceful`~~ — superseded
+  by §9.3: every existing `stop(true, …)` caller relies on an immediate stop,
+  so graceful stopping gets its own entry point, `Controller::shutdown`. The kill task gains a way to
   signal completion (a oneshot or notify) so `shutdown_controller` can await it
   instead of assuming.
 - **Turn in progress at close:** closing a pane is the user choosing to stop,
@@ -334,8 +335,11 @@ steps 1, 4–7), pane × wired to it, `ClosePane` MCP routed through it (#3202).
   refuse (last-tab guard), and stopping every agent in a tab that then stays
   open would be worse than today. It moves with Phase 2.
 
-**Phase 2 — graceful.** `shutdown_controller`, `stop` honoring `graceful`,
-completion signal, concurrent members (§4.3, §4.4).
+**Phase 2 — graceful, and the same chain for every close.** An agent is
+interrupted, allowed to exit, and only then has its process tree killed and
+its records deleted. All four ways of closing an agent (a pane tab's ×, a
+pane's ×, closing a window tab, closing a window) run that one chain, with
+the agents stopped concurrently under one deadline. Detailed design: §9.
 
 **Phase 3 — the edges.** Pane-level confirmation (§4.6), reopen guard (§4.7),
 reaper (§4.9), user-visible failure (§4.5).
@@ -377,13 +381,32 @@ authoritative run.
 - **App and OS shutdown** — `SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md`.
   The per-agent shutdown here is a natural building block for it, but wiring
   app exit to it is that spec's work.
+- **Making pane tabs reducer commands.** The reducer stores each leaf's
+  `block_stack` but has no command that changes it: every add, switch and
+  remove is a frontend edit followed by a whole-tree `LayoutSetTree` push
+  (`frontend/layout/lib/layoutStack.ts`, header comment). So "a block exists"
+  and "a block is in a pane" are two separate writes that can come apart —
+  another way to produce the orphan this spec's reaper backstops. Stack
+  commands in the reducer (push / set-active / remove, and create-and-place as
+  one step) would make that invariant enforceable in one place. A follow-up
+  spec, not a phase of this one.
+- **Using the interrupt for the Stop button.** Phase 2 makes the controller
+  able to interrupt a turn without killing the process. Stop / Esc
+  (`persistent.rs` `send_input`, SIGINT) could then stop a turn and keep the
+  process warm instead of hard-killing it. Worth doing; a separate change,
+  because it alters what Stop means to the user.
 
 ## 7. Open questions
 
 1. ~~How does the pinned Claude CLI behave on stdin EOF mid-turn in
    stream-json mode?~~ Answered in §5.1: it finishes the turn. Interrupt first.
-   Other providers (Codex, Gemini, ...) are not measured; Phase 2 keeps the
-   force-kill deadline as their backstop.
+   Other providers (Codex via app-server, the ACP providers) are not measured.
+   §9.3 requires that measurement before their graceful path lands; the
+   deadline is their backstop meanwhile.
+5. A turn blocked on a permission prompt (the CLI's `can_use_tool` request
+   over `--permission-prompt-tool stdio`) has an open request AgentMux owes an
+   answer to. Does the interrupt cancel it, or must the shutdown deny it
+   first? Measure alongside §9.3's other-provider runs.
 2. Why is the local instance row's `session_id` empty for every agent in the
    incident instance, when `sync_instance_session_id` looks the row up by block
    id and the row's `last_block_id` matches? Reopen reads the shared registry,
@@ -401,3 +424,238 @@ authoritative run.
 Separately from the fix: the orphaned Manoz process from §2 can be stopped by
 pid, and its block removed, by hand. The Phase 3 reaper would do the same
 automatically.
+
+## 9. Phase 2 in detail
+
+### 9.1 What Phase 1 left
+
+After Phase 1, every close path stops every agent it should, but:
+
+- The stop is still `delete_controller`: a hard kill, followed on the next line
+  by dropping the process tracker, which kills the whole tree
+  (`blockcontroller/mod.rs`). Nothing waits for the process to exit.
+- A turn in progress is cut off mid-write. Phase 0 (§5.1) showed the CLI keeps
+  the session resumable even so, but the turn's last output is lost and any
+  tool it was running dies mid-step.
+- Closing a window tab (`delete_tab` saga → `wcore::delete_tab_inner`,
+  `agentmux-srv/src/backend/wcore/tab.rs:100`) and closing a window
+  (`delete_workspace` saga, which relies on the same `delete_tab_inner`,
+  `agentmux-srv/src/sagas/delete_workspace.rs:136-145`) never go through
+  `shutdown_before_delete`. The reducer drops the tab and its blocks first,
+  then the persist step hard-kills and deletes rows. No respawn guard, no
+  messaging unregister, no final state.
+- Agents are stopped one after another. With a hard kill that costs nothing;
+  with a grace period it would cost 5s per agent.
+
+### 9.2 One shutdown, used by every close
+
+```
+shutdown_agents(block_ids, deadline) -> Vec<StopOutcome>
+```
+
+in `agentmux-srv/src/sagas/close_pane.rs` (renamed `agent_shutdown.rs` if it
+outgrows panes). For each block, **concurrently**:
+
+1. Mark closing (refuses `resync_controller`) and unregister from messaging —
+   unchanged from Phase 1.
+2. Remove the controller from `CONTROLLER_REGISTRY` so no new input reaches it.
+3. `ctrl.shutdown(deadline).await` (§9.3) — returns when the process has
+   exited, whether on its own or by force at the deadline.
+4. Only then drop the process tracker, killing anything the agent left behind.
+5. Save final state (Phase 1's `save_final_state`).
+
+It resolves when every block has finished step 5. Records are deleted by the
+caller after that, exactly as Phase 1 does. `delete_controller` stays as the
+immediate variant for the paths that must not wait (spawn rollback in
+`server/mod.rs`, crash cleanup).
+
+Callers:
+
+| Close | Saga | Blocks passed |
+|---|---|---|
+| A pane tab's × | `delete_block` | that block |
+| A pane's × | `close_pane` | every member |
+| A window tab | `delete_tab` | every block in `tab.block_ids` |
+| A window | `delete_workspace` | every block in every tab of the workspace |
+
+One deadline per close, not per agent: `deadline = now + GRACE` with
+`GRACE = 5s` (the existing constant in the kill task). Ten agents in a window
+take about 5s, not 50s.
+
+### 9.3 `Controller::shutdown`
+
+Add to the `Controller` trait (`blockcontroller/mod.rs:206`):
+
+```rust
+/// Stop gracefully: end any turn in progress, ask the process to exit, and
+/// force-kill at `deadline`. Resolves once the process has actually exited
+/// (or there was none). Does NOT drop the process tracker — the caller does
+/// that after this resolves.
+fn shutdown(&self, deadline: Instant) -> BoxFuture<'static, StopOutcome>;
+```
+
+`StopOutcome` is one of `NotRunning`, `Exited { code }` or `Killed`. It is
+logged, and the `Killed` count feeds §9.8.
+
+The default implementation calls `stop(true, STATUS_DONE)` and resolves
+immediately. That is today's behavior, kept for shell, cmd, subprocess and
+tsunami controllers. Each has its own story (a PTY's shell exits on SIGHUP;
+a per-turn subprocess has no idle process), and none is an agent session
+whose state matters here.
+
+Implemented for:
+
+**`PersistentSubprocessController`** (Claude stream-json), using §5.1:
+
+1. Nothing spawned yet (lazy spawn) → `NotRunning`.
+2. Clear `pending_send_messages` so no queued message starts a new turn.
+3. **If a turn is active** (`health_monitor.is_active_turn()`,
+   `persistent.rs:993`):
+   - set `stop_requested` on the controller before sending anything (§9.4);
+   - write the control-protocol interrupt
+     (`{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}`)
+     to stdin;
+   - wait for the turn's `result` frame, but no later than `deadline − 1s`.
+     The stdout reader already recognises result frames (`persistent.rs`,
+     `is_result_frame`); it signals a `Notify` the shutdown waits on.
+   
+   Measured: about 2s.
+4. Send the graceful stop through `kill_tx`, carrying the deadline instead of
+   today's `bool`: `enum KillRequest { Force, Graceful { deadline } }`. The
+   graceful branch (`persistent.rs` kill task) already drops `stdin_tx` for
+   EOF and then waits; it waits until `deadline` instead of a fixed 5s, then
+   kills. Measured: 0.4–0.5s to exit after EOF.
+5. The kill task's cleanup ends by publishing the exit on a
+   `watch::Sender<Option<StopOutcome>>` held in the controller. `shutdown`
+   awaits that — the completion signal §3.2 found missing.
+
+**`stop(graceful, …)` is left as it is, an immediate stop.** §4.3 proposed
+making it honor its flag, but every caller passes `true` and relies on the stop
+being immediate. That includes:
+- the hung-process watchdog (`watchdog.rs:64`, `:82`);
+- controller replacement (`blockcontroller/mod.rs:222`, `:307`);
+- `delete_controller` (`mod.rs:375`);
+- the app-server controller's own paths.
+
+Flipping the flag's meaning would quietly slow every one of them. `shutdown`
+is the only graceful entry point. A later cleanup can rename or remove the
+unused flag.
+
+**ACP controllers** (`acp.rs:658`): if a turn is active, send ACP
+`session/cancel`, then the `shutdown` request and `exit` notification it
+already sends, then wait for exit until the deadline, then kill. **App-server
+controllers** (`app_server_controller.rs:484`): if a turn is active, send the
+app-server's turn interrupt, close stdin, wait until the deadline, then kill.
+
+Neither provider family's exit behavior has been measured (§7 Q1). Before
+either lands, a §5.1-style measurement must be run for it. Until then, the
+deadline guarantees they are never worse than today: at worst they are
+killed 5s later than now.
+
+### 9.4 A requested stop is not a failure
+
+Phase 0: an interrupted turn ends in `result` with `is_error: true`,
+`subtype: error_during_execution`, and the process then exits with code 1.
+Today the stdout reader classifies any `is_error` result as a failure,
+persists `agent:last_failure` and publishes `EVENT_AGENT_FAILURE`
+(`persistent.rs`, the `is_error_result && !hold_back_for_resume_retry` arm).
+It also feeds the stale-`--resume` retry machine. Neither must happen for a
+stop we asked for:
+
+- The shutdown sets `stop_requested` (with the spawn generation) **before**
+  writing the interrupt. The result arm skips failure classification and the
+  resume-retry capture for that generation while the flag is set.
+- The exit is already handled correctly: a stop requested through `kill_tx`
+  exits through the kill arm, which records `StopRequested` and never
+  classifies the exit code. That holds as long as the shutdown takes the
+  `kill_tx` path after the interrupt, which step 4 does.
+
+Without this, every mid-turn close would record a failure on its way out, and
+it would be sent to the notification sound service and to any other open
+view of that block.
+
+### 9.5 Closing a window tab and a window
+
+`delete_tab` becomes:
+
+1. Pre-check as today, plus the reducer's own last-tab guard
+   (`workspace.tab_ids.len() <= 1` and `!force`, `reducer/tab.rs:114`),
+   checked **before** anything is stopped. Refusing after stopping every agent
+   would leave a tab full of stopped agents — the reason Phase 1 left this
+   path alone.
+2. To keep that check true until the dispatch, hold a per-workspace close lock
+   (an async mutex keyed by workspace id) from the check through the
+   `DeleteTab` dispatch. Two concurrent closes of the last two tabs then
+   serialise, and the second is refused before it stops anything.
+3. `shutdown_agents(tab.block_ids, deadline)`, then `DeleteTab`.
+4. `delete_tab_inner`'s `delete_controller` loop stays as the backstop; it
+   finds nothing left to stop.
+
+`delete_workspace` (window close) runs `shutdown_agents` over every block of
+every tab once, up front, with one deadline, and then its per-tab `DeleteTab
+{ force: true }` dispatches as today. It has no last-tab guard to respect
+(`force: true`).
+
+**The last window is special.** Closing it is the user quitting. On that
+close, `window_close.rs` saves the restore-on-relaunch snapshot and then
+deletes the workspace. That snapshot must be taken **before** the agents are
+stopped, as now, so it records the open tabs. Whether the launcher waits for
+srv to finish a 5s shutdown on quit is
+`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md`'s question, not this
+spec's. If it doesn't wait, those agents are hard-killed exactly as today, and
+their sessions still resume (§5.1).
+
+### 9.6 What the user sees
+
+- **Pane ×:** the pane disappears at once, as now (§4.5). The backend finishes
+  within the deadline.
+- **Window tab ×:** the tab strip hides the tab optimistically on confirm, as
+  now (`frontend/app/tab/tabbar.tsx`, `handleClose`); `CloseTab` now takes up
+  to about 5s to resolve instead of milliseconds. The hide already survives an
+  in-flight RPC; no UI change is needed. Its `holdRevealGate` has its own 800ms
+  cap and does not depend on the RPC.
+- **Window close:** the window closes at once. The saga completes in the
+  background.
+- **A closed-pane agent reopened within the grace window.**
+  `agent.open`'s live-elsewhere guard (`agent_open.rs:524`) treats a block as
+  live when `get_controller(block).is_some()`. Step 2 of §9.2 removes the
+  controller before the process has exited. Unchanged, the guard would
+  therefore call a still-exiting agent "not live" and seed its session id,
+  and two processes would `--resume` one session for up to 5s.
+  
+  Instead, `shutdown_agents` registers each closing block's completion (a
+  `watch::Receiver<Option<StopOutcome>>` keyed by block id, next to
+  `mark_closing`). The guard waits on it, bounded by the deadline, before
+  deciding. By the time it decides, the old process is gone and the reopen
+  resumes the session. The picker's reattach path (§4.7) uses the same wait.
+
+### 9.7 Tests
+
+Each must fail on the code after Phase 1:
+
+- **Idle persistent agent:** `shutdown` closes stdin and the process exits
+  with `Exited`; it is never force-killed; the tracker is dropped only after
+  exit. Use a stub CLI script that exits on EOF.
+- **Mid-turn persistent agent:** the stub echoes `result
+  error_during_execution` on interrupt. The interrupt is written before EOF,
+  the result is awaited, the process exits within the deadline, no
+  `agent:last_failure` is written, and no `EVENT_AGENT_FAILURE` is published.
+- **Stub that ignores both:** killed at the deadline; the outcome is `Killed`.
+- **Concurrency:** a window tab with three agents whose stub takes 3s to exit
+  each finishes in about 3s, not 9s. Assert under 5s.
+- **Last-tab guard:** closing the last window tab refuses **without** stopping
+  any agent in it. Two concurrent closes of the last two tabs stop exactly
+  one tab's agents.
+- **Window close** stops every agent in every tab of the workspace.
+- **`stop(true, …)` stays immediate:** the watchdog's stop of a hung
+  persistent agent still kills at once and does not wait for a grace period.
+- **Reopen during the grace window** resumes the session instead of
+  starting fresh.
+
+### 9.8 Watching it in production
+
+Log one line per closed agent: block, controller type, how it ended
+(`NotRunning` / `Exited` / `Killed`), and elapsed ms. If `Killed` is common
+for a provider, that provider's shutdown needs work, or the grace period is
+too short (§7 Q4). `muxlog srv grep agent_shutdown` is enough; no metrics
+system is needed.
