@@ -11,6 +11,7 @@ import {
     LayoutTreeInsertNodeAction,
     LayoutTreeMagnifyNodeToggleAction,
 } from "./types";
+import { effectiveStack } from "./stackMembers";
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
 import { clearLeafRevealGate } from "@/app/store/tab-reveal";
@@ -60,8 +61,14 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
 
     // One confirmation for the whole pane, when something in it is still
     // running (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6).
-    if (model.beforeNodeDelete && !(await model.beforeNodeDelete(nodeToDelete.data))) {
-        return;
+    if (model.beforeNodeDelete) {
+        const membersAsked = effectiveStack(nodeToDelete.data).join("\n");
+        if (!(await model.beforeNodeDelete(nodeToDelete.data))) return;
+        // The tree may have changed while the prompt was open (a backend
+        // push, the orphan reaper, another close). Close only what the user
+        // confirmed: the same pane, with the same members.
+        const current = findNode(model.treeState.rootNode, nodeId);
+        if (current !== nodeToDelete || effectiveStack(current.data).join("\n") !== membersAsked) return;
     }
 
     if (nodeId === model.magnifiedNodeId) {
