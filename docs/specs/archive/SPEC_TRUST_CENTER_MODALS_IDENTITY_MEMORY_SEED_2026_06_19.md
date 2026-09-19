@@ -3,8 +3,8 @@
 > **Redacted 2026-09-18.** This archived spec originally included the AWS
 > account ID and the per-agent Secrets Manager key names. This repository is
 > public, so those were replaced with placeholders; the real values live in
-> the private `shared-infrastructure` repo
-> (`docs/standards/CREDENTIAL_INVENTORY.md`). Note that git history still
+> the private `shared-infrastructure` repository, in its credential
+> inventory standard. Note that git history still
 > contains the original values - they are identifiers, not credentials, and
 > nothing disclosed can authenticate.
 
