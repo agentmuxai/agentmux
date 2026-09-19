@@ -228,19 +228,18 @@ mod tests {
         track_spawned("test-block-track-spawned-no-global", 999_999);
     }
 
+    // This test used to be `#[ignore]`d as "environment-dependent", blaming
+    // the agent-shell harness's own job object. That was wrong: the Windows
+    // tracker opened the process with 0x0200 (PROCESS_SET_INFORMATION) where
+    // AssignProcessToJobObject needs PROCESS_SET_QUOTA (0x0100), so EVERY
+    // assignment failed with Access Denied — in the shipped app too (no
+    // production log ever shows "assigned process to job"). Nested jobs are
+    // fine; the access mask wasn't. Keep this test running so it can't
+    // silently break again. Windows-only: elsewhere `new_tracker` is still
+    // the membership-less stub, so there is nothing to observe (Codex P1 on
+    // #3425).
     #[test]
-    #[ignore = "environment-dependent: fails with AssignProcessToJobObject \
-        Access Denied when run under this dev machine's agent-shell harness \
-        (both Git Bash and PowerShell reproduce identically), because that \
-        harness already assigns spawned children to its own session/pane job \
-        object for reaping (see docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md, \
-        'owning session/pane's job object') and Windows denies re-assigning a \
-        process into a second, unrelated job in that configuration. Not \
-        reproduced as a defect in the shipped app itself — SubprocessController \
-        and PersistentSubprocessController already exercise this exact API \
-        successfully in production, outside this harness's process tree. Run \
-        with `--ignored` (or from a plain, non-harness-wrapped shell / real \
-        `task dev` instance) to verify the mechanism directly."]
+    #[cfg(windows)]
     fn ensure_tracker_and_assign_process_track_a_real_short_lived_child() {
         // Uses a fresh, non-global `AgentProcessRegistry` (not `track_spawned`'s
         // `global()` path) so this doesn't touch the process-wide `GLOBAL`
@@ -251,13 +250,15 @@ mod tests {
         // job handle, which fires `KILL_ON_JOB_CLOSE` on Windows — assigning
         // the test runner's own PID would kill the test process the moment
         // the registry (and its tracker) drops at the end of this test.
+        // Alive for a few seconds, so it can't exit (and make the assignment
+        // race a dead process) before `assign_process` runs; killed below.
         let mut child = if cfg!(windows) {
             std::process::Command::new("cmd")
-                .args(["/C", "exit 0"])
+                .args(["/C", "ping -n 10 127.0.0.1 > nul"])
                 .spawn()
         } else {
             std::process::Command::new("sh")
-                .args(["-c", "exit 0"])
+                .args(["-c", "sleep 10"])
                 .spawn()
         }
         .expect("failed to spawn a disposable test child");
@@ -277,6 +278,7 @@ mod tests {
 
         // Reap before `registry` drops, so KILL_ON_JOB_CLOSE has nothing left
         // to terminate.
-        child.wait().expect("disposable child should exit cleanly");
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }

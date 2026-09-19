@@ -39,7 +39,8 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+    OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA,
+    PROCESS_TERMINATE,
 };
 
 use super::{TrackedProcess, TrackerHandle, TrackingConfidence};
@@ -116,8 +117,14 @@ impl JobObjectTracker {
     /// window caveat.
     fn assign_process_impl(&self, pid: u32) -> Result<(), String> {
         unsafe {
+            // `AssignProcessToJobObject` needs PROCESS_SET_QUOTA (0x0100) and
+            // PROCESS_TERMINATE. This used to pass a hand-written `0x0200`
+            // labelled "PROCESS_SET_QUOTA" — that is PROCESS_SET_INFORMATION,
+            // so every assignment failed with ERROR_ACCESS_DENIED and no agent
+            // process was ever tracked (every log back to 0.55.42 shows only
+            // "assign_process failed", never "assigned process to job").
             let h_process = OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | 0x0200, /* PROCESS_SET_QUOTA */
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SET_QUOTA,
                 0,
                 pid,
             );
