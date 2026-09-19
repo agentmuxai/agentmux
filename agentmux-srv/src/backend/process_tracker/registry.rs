@@ -19,7 +19,7 @@ use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 
-use super::{new_tracker, TrackedProcess, TrackerHandle, TrackingConfidence};
+use super::{agent_started, new_tracker, TrackedProcess, TrackerHandle, TrackingConfidence};
 use crate::backend::mps;
 
 /// Host-wide registry, set once at startup. Exposed as a global so
@@ -45,8 +45,7 @@ pub fn global() -> Option<Arc<AgentProcessRegistry>> {
 /// its own (see `broker::process::ProcessStatus`'s own doc comment).
 pub fn track_spawned(block_id: &str, pid: u32) {
     let Some(registry) = global() else { return };
-    let tracker = registry.ensure_tracker(block_id);
-    if let Err(e) = tracker.assign_process(pid) {
+    if let Err(e) = registry.assign(block_id, pid) {
         tracing::warn!(
             block_id = %block_id,
             pid = pid,
@@ -67,6 +66,10 @@ struct RegistryEntry {
     /// against the current set so we only emit events for
     /// additions/removals — not on every poll tick.
     last_pids: HashSet<u32>,
+    /// Every PID handed to `assign` — the agent CLI itself, one per
+    /// (re)spawn. `agent_started` excludes them and their non-shell
+    /// children (MCP servers) from what we report.
+    roots: HashSet<u32>,
 }
 
 impl AgentProcessRegistry {
@@ -91,6 +94,7 @@ impl AgentProcessRegistry {
             RegistryEntry {
                 tracker: tracker.clone(),
                 last_pids: HashSet::new(),
+                roots: HashSet::new(),
             },
         );
         tracing::info!(
@@ -99,6 +103,17 @@ impl AgentProcessRegistry {
             "[process-tracker] registered tracker"
         );
         tracker
+    }
+
+    /// Assign a freshly-spawned agent/shell PID to `block_id`'s tracker
+    /// (creating it if needed) and remember it as a root.
+    pub fn assign(&self, block_id: &str, pid: u32) -> Result<(), String> {
+        let tracker = self.ensure_tracker(block_id);
+        tracker.assign_process(pid)?;
+        if let Some(entry) = self.inner.lock().get_mut(block_id) {
+            entry.roots.insert(pid);
+        }
+        Ok(())
     }
 
     /// Drop a block's tracker — call when the pane closes. The tracker's
@@ -111,13 +126,16 @@ impl AgentProcessRegistry {
         }
     }
 
-    /// Current members of a block's tracker, for the RPC endpoint.
+    /// Processes the agent started through its tools (see
+    /// [`agent_started`]) — for the RPC endpoint, Swarm and the pane-close
+    /// confirmation. Excludes the CLI itself, conhost and MCP servers;
+    /// `kill_tree` still takes all of them.
     pub fn list_block(&self, block_id: &str) -> Vec<TrackedProcess> {
-        self.inner
-            .lock()
-            .get(block_id)
-            .map(|e| e.tracker.list_members())
-            .unwrap_or_default()
+        let (tracker, roots) = match self.inner.lock().get(block_id) {
+            Some(e) => (e.tracker.clone(), e.roots.clone()),
+            None => return Vec::new(),
+        };
+        agent_started(tracker.list_members(), &roots)
     }
 
     /// Confidence of a block's tracker — drives the "tracking is
@@ -164,7 +182,7 @@ impl AgentProcessRegistry {
     pub fn poll_and_emit(&self) {
         let mut map = self.inner.lock();
         for (block_id, entry) in map.iter_mut() {
-            let current_members = entry.tracker.list_members();
+            let current_members = agent_started(entry.tracker.list_members(), &entry.roots);
             let current_pids: HashSet<u32> = current_members.iter().map(|p| p.pid).collect();
 
             for added_pid in current_pids.difference(&entry.last_pids) {
@@ -254,7 +272,7 @@ mod tests {
         // race a dead process) before `assign_process` runs; killed below.
         let mut child = if cfg!(windows) {
             std::process::Command::new("cmd")
-                .args(["/C", "ping -n 10 127.0.0.1 > nul"])
+                .args(["/C", "ping -n 2 127.0.0.1 > nul & ping -n 10 127.0.0.1 > nul"])
                 .spawn()
         } else {
             std::process::Command::new("sh")
@@ -265,15 +283,35 @@ mod tests {
         let pid = child.id();
 
         let registry = AgentProcessRegistry::new(None);
-        let tracker = registry.ensure_tracker("test-block-real-spawn");
-        tracker
-            .assign_process(pid)
-            .expect("assign_process should succeed for a live child we just spawned");
+        registry
+            .assign("test-block-real-spawn", pid)
+            .expect("assign should succeed for a live child we just spawned");
 
-        let members = registry.list_block("test-block-real-spawn");
+        let raw = registry.ensure_tracker("test-block-real-spawn").list_members();
         assert!(
-            members.iter().any(|p| p.pid == pid),
-            "expected pid {pid} to appear in list_block after assign_process"
+            raw.iter().any(|p| p.pid == pid),
+            "expected pid {pid} to be a job member after assign"
+        );
+
+        // The root itself is plumbing, not agent-started; the `ping` its shell
+        // launches is. The second ping starts ~1s in, well after assignment,
+        // so it can't slip through the spawn/assign race.
+        let is_ping = |p: &TrackedProcess| p.command.to_ascii_lowercase().ends_with("ping.exe");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let started = loop {
+            let listed = registry.list_block("test-block-real-spawn");
+            if listed.iter().any(is_ping) || std::time::Instant::now() > deadline {
+                break listed;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        assert!(
+            !started.iter().any(|p| p.pid == pid),
+            "the assigned root must not be listed as agent-started"
+        );
+        assert!(
+            started.iter().any(|p| is_ping(p) && p.parent_pid == Some(pid)),
+            "expected the shell's ping child in list_block, got {started:?}"
         );
 
         // Reap before `registry` drops, so KILL_ON_JOB_CLOSE has nothing left

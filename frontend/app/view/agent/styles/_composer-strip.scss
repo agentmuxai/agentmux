@@ -34,7 +34,7 @@
 //   what actually fixed the real clipping bug this file has a documented
 //   history with (PR #2393/#2408). Growing taller is always preferable to
 //   silently clipping Shell.
-// - The shed-content queries further down (hiding badge/auth/HOST at
+// - The shed-content queries further down (hiding auth/HOST at
 //   extreme narrow widths) — orthogonal to row-pairing, untouched by
 //   Rev 7 (spec §4).
 
@@ -366,36 +366,18 @@
 // inside the dropup panel or another component's own flex internals.
 .agent-composer-strip-row-left
     .agent-composer-strip-slot-measure
-    > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-process-badge, .agent-composer-strip-log-btn) {
+    > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-log-btn) {
     order: -1;
 }
 
 .agent-composer-strip-row-right
     .agent-composer-strip-slot-measure
-    > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-process-badge, .agent-composer-strip-log-btn) {
+    > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-log-btn) {
     order: 1;
 }
 
-.agent-composer-strip-process-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 1px var(--space-1);
-    font-size: 11px;
-    font-family: var(--font-mono);
-    color: var(--main-text-color);
-    background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
-    border-radius: 0;
-    cursor: default;
-
-    &:hover {
-        background: color-mix(in srgb, var(--accent-color) 20%, transparent);
-    }
-}
-
-// Manual "Compact now" trigger — same subtle chrome treatment as the
-// process badge (neutral, not a loud CTA; Shell stays the strip's one
+// Manual "Compact now" trigger — subtle chrome treatment (neutral, not a
+// loud CTA; Shell stays the strip's one
 // real call-to-action). Sits immediately adjacent to the context text,
 // on its OUTER side (edge priority — left of the text when the ctx slot
 // is on a row's left half, right of it otherwise; see the ctx slot's
@@ -540,12 +522,6 @@
 
 @container agent-pane (max-width: 220px) {
     .agent-composer-strip-auth {
-        display: none;
-    }
-}
-
-@container agent-pane (max-width: 180px) {
-    .agent-composer-strip-process-badge {
         display: none;
     }
 }

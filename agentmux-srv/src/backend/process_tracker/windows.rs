@@ -24,10 +24,12 @@
 //! concern — but worth a future move to `CREATE_SUSPENDED` + assign +
 //! `ResumeThread` if we see escapes.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStringExt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::JobObjects::{
@@ -196,13 +198,18 @@ impl TrackerHandle for JobObjectTracker {
     }
 
     fn list_members(&self) -> Vec<TrackedProcess> {
-        self.query_pids()
-            .into_iter()
+        let pids = self.query_pids();
+        if pids.is_empty() {
+            return Vec::new();
+        }
+        let parents = query_parent_pids(&pids);
+        pids.into_iter()
             .map(|pid| TrackedProcess {
                 pid,
                 command: query_command_line(pid),
                 rss_bytes: query_rss(pid),
                 started_at_ms: 0, // deferred; uses NtQueryInformationProcess — skip for v1
+                parent_pid: parents.get(&pid).copied(),
             })
             .collect()
     }
@@ -293,6 +300,55 @@ fn query_command_line(pid: u32) -> String {
             .to_string_lossy()
             .into_owned()
     }
+}
+
+/// pid → parent pid for every process on the system. `poll_and_emit` lists
+/// every tracked block back to back each tick, so the snapshot is shared
+/// for a short window instead of re-enumerating the whole system once per
+/// block (ReAgent P2 on #3430). The cache is reused only while it is fresh
+/// AND already knows every PID being listed — a process spawned after the
+/// snapshot forces a new one rather than getting an unknown parent.
+fn query_parent_pids(pids: &[u32]) -> Arc<HashMap<u32, u32>> {
+    static CACHE: Mutex<Option<(Instant, Arc<HashMap<u32, u32>>)>> = Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap();
+    if let Some((at, map)) = cache.as_ref() {
+        if at.elapsed() < PARENT_SNAPSHOT_TTL && pids.iter().all(|p| map.contains_key(p)) {
+            return map.clone();
+        }
+    }
+    let map = Arc::new(snapshot_parent_pids());
+    *cache = Some((Instant::now(), map.clone()));
+    map
+}
+
+const PARENT_SNAPSHOT_TTL: Duration = Duration::from_millis(500);
+
+/// One Toolhelp snapshot. Empty on failure (callers then treat lineage as
+/// unknown).
+fn snapshot_parent_pids() -> HashMap<u32, u32> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    let mut out = HashMap::new();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return out;
+        }
+        let mut entry: PROCESSENTRY32W = zeroed();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                out.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    out
 }
 
 fn query_rss(pid: u32) -> u64 {
