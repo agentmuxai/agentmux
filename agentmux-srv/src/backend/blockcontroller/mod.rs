@@ -435,6 +435,18 @@ pub fn is_closing(block_id: &str) -> bool {
     CLOSING_BLOCKS.read().unwrap().contains_key(block_id)
 }
 
+/// Blocks mid-close whose process has not exited yet. Their controllers have
+/// already left `CONTROLLER_REGISTRY`, so a registry scan can't see them.
+pub fn closing_blocks_still_running() -> Vec<String> {
+    CLOSING_BLOCKS
+        .read()
+        .unwrap()
+        .iter()
+        .filter(|(_, stopped)| !*stopped.borrow())
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
 /// Wait until a closing block's process has exited, or `timeout`. Returns
 /// immediately for a block that isn't closing.
 pub async fn wait_closing_stopped(block_id: &str, timeout: std::time::Duration) {
