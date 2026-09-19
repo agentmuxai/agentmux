@@ -86,7 +86,7 @@ pub async fn run(state: &AppState, workspace_id: String) -> Result<Value, String
     // before any dispatch. We need the tab list to drive step 2's
     // per-tab DeleteTab dispatches, and we record block ids in the
     // saga log so `--diag sagas` can show what was destroyed.
-    let (tab_ids, block_count) = {
+    let (tab_ids, block_count, block_ids) = {
         let s = state.srv_state.lock().await;
         let Some(workspace) = s.workspaces.get(&workspace_id) else {
             return Err(format!(
@@ -99,7 +99,12 @@ pub async fn run(state: &AppState, workspace_id: String) -> Result<Value, String
             .iter()
             .map(|tid| s.tabs.get(tid).map(|t| t.block_ids.len()).unwrap_or(0))
             .sum();
-        (tab_ids, block_count)
+        let block_ids: Vec<String> = tab_ids
+            .iter()
+            .filter_map(|tid| s.tabs.get(tid))
+            .flat_map(|t| t.block_ids.iter().cloned())
+            .collect();
+        (tab_ids, block_count, block_ids)
     };
 
     let saga_id = alloc_saga_id(state);
@@ -117,12 +122,19 @@ pub async fn run(state: &AppState, workspace_id: String) -> Result<Value, String
     {
         return Err(e);
     }
+    // Stop every agent in every tab of the workspace up front — gracefully,
+    // concurrently, under one deadline — before any record goes (pane-close
+    // spec §9.5). The per-tab cascade below then finds nothing left to stop.
+    super::close_pane::shutdown_agents(state, &block_ids).await;
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga(
         "delete_workspace",
         run_inner(ctx, workspace_id.clone(), tab_ids.clone(), block_count),
     )
     .await;
+    for block_id in &block_ids {
+        super::close_pane::finish_close(state, block_id).await;
+    }
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
 }

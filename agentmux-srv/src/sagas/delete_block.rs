@@ -118,7 +118,7 @@ pub async fn run(
     // §4.2). Deleting first left the controller's own exit cleanup writing
     // to a block that no longer existed. After `emit_saga_started`, so a
     // saga-start collision still has no side effect (round 1 below).
-    super::close_pane::shutdown_before_delete(state, &block_id);
+    super::close_pane::shutdown_agents(state, std::slice::from_ref(&block_id)).await;
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id.clone())).await;
     // Controller-kill ordering. Three rounds of bot review:
