@@ -729,6 +729,11 @@ reattach, the launch modal and MCP, not just `agent.open`.
   seconds."
 - The error returns through `send_message` to the input RPC, so the sender
   sees it.
+- The check and the claim are one step. A process-wide lock is held from the
+  check until this spawn's `current_pid` is set, so two reopens of one
+  session at once can't both pass (reagent P1 on #3421). A test runs four
+  concurrent reopens against a real process: exactly one wins. Without the
+  lock, all four do.
 
 Scope: persistent (Claude) controllers only. Per-turn subprocess providers
 have no long-lived process to collide with between turns. The picker's
