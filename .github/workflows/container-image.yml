@@ -48,7 +48,12 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.A5AF_PACKAGES_TOKEN }}
+          # Was A5AF_PACKAGES_TOKEN, which is the shared a5af admin PAT (21
+          # scopes, no expiry, includes delete_repo). Pushing this repo's own
+          # image to its own org's registry needs none of that: the job
+          # already declares `permissions: packages: write` above, so the
+          # built-in GITHUB_TOKEN is sufficient and expires with the job.
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract image metadata
         id: meta
