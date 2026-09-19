@@ -68,6 +68,73 @@ if REMOTE_URL="$(git remote get-url origin 2>/dev/null)"; then
     fi
 fi
 
+# The remote is only a fallback. An installation token is scoped to ONE
+# account, so deriving the target purely from the current directory breaks
+# every cross-org call: `gh api repos/a5af/dev-tools/...` run from inside the
+# agentmuxai checkout mints an agentmuxai token and gets a bare 404, which
+# reads as "that repo doesn't exist" rather than "wrong account". A PAT had no
+# such constraint, so this would be a straight regression if left unhandled -
+# and it's the thing blocking removal of the PAT tier entirely.
+#
+# So when the caller names an owner explicitly, that wins over the directory.
+#
+# Both matchers below are deliberately narrow. Scanning all of argv for
+# anything shaped like an owner is the tempting version and it is wrong: a
+# branch name, title or field value can take any shape a real reference can.
+# `--head security/some-fix` looks like OWNER/REPO; `--head orgs/migrate-team`
+# looks like an orgs path; `--head repos/some-feature/sub` looks like a repos
+# path. Each would mint a token for an account that does not exist and turn a
+# working command into an auth failure - the same class of bug this whole
+# block exists to remove. So position is what qualifies a match, not shape.
+
+# (a) -R/--repo takes an OWNER/REPO value, in any subcommand.
+for ((i = 1; i <= $#; i++)); do
+    arg="${!i}"
+    case "$arg" in
+        -R|--repo)
+            next_i=$((i + 1))
+            [[ $next_i -le $# ]] || continue
+            arg="${!next_i}"
+            ;;
+        --repo=*) arg="${arg#--repo=}" ;;
+        # Attached shorthand (`-Rowner/repo`). gh is cobra/pflag-based and
+        # accepts it, so it must be handled or the explicit owner is ignored.
+        -R?*)     arg="${arg#-R}" ;;
+        *) continue ;;
+    esac
+    if [[ "$arg" =~ ^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$ ]]; then
+        TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO="${BASH_REMATCH[2]}"
+        EXPLICIT_TARGET=1
+    fi
+    break
+done
+
+# (b) `gh api <endpoint>` - ONLY the endpoint, which is the first positional
+# argument after the `api` subcommand. Flags that take a separate value must
+# be stepped over so their value is never mistaken for the endpoint.
+if [[ -z "${EXPLICIT_TARGET:-}" && "${1:-}" == "api" ]]; then
+    skip_next=0
+    for ((i = 2; i <= $#; i++)); do
+        arg="${!i}"
+        if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
+        case "$arg" in
+            -X|--method|-F|--field|-f|--raw-field|-H|--header|--input|--jq|-q|--template|-t|--cache|--hostname)
+                skip_next=1; continue ;;
+            -*) continue ;;
+        esac
+        # First positional wins; the leading slash is optional because `gh api`
+        # documents and accepts both `repos/O/R/...` and `/repos/O/R/...`.
+        if [[ "$arg" =~ ^/?repos/([^/]+)/([^/]+) ]]; then
+            TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO="${BASH_REMATCH[2]}"
+        elif [[ "$arg" =~ ^/?orgs/([^/]+) ]]; then
+            # Org-scoped: leave TARGET_REPO empty so the reachability probe is
+            # skipped - there is no repo to probe.
+            TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO=""
+        fi
+        break
+    done
+fi
+
 TOKEN=""
 USED_KEY=""
 AUTH_MODE=""
