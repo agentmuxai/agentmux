@@ -119,11 +119,12 @@ describe("quickForkAgent", () => {
             expect.anything(),
             { source_id: "source-def", branch_label: "" },
         );
-        // pane.open with skip_placement — same primitive Agent History / the
+        // pane.open with stack_onto_block_id (create-and-place in one step) —
+        // same primitive Agent History / the
         // "+" new-tab button use — NOT a WorkspaceService.CreateTab call.
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            { view: "agent", skip_placement: true, tab_id: "tab-1", meta: { view: "agent" } },
+            { view: "agent", stack_onto_block_id: "source-block", meta: { view: "agent" } },
             {},
         );
         expect(pushBlockOntoStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
@@ -189,13 +190,13 @@ describe("quickForkAgent", () => {
 
     // Codex's review of PR #2746: the several RPCs this function awaits
     // (fork, identity lookup, pane.open, launch) leave a window for the
-    // user to switch window tabs mid-flight. pane.open's skip_placement
-    // path and launchAgentDefinition's ControllerResyncCommand would
-    // otherwise each independently resolve "the active tab" at their own
-    // execution time (possibly AFTER the switch), silently registering the
-    // new block under the wrong tab. The active tab id must be captured
-    // ONCE, synchronously, before any await, and threaded through both.
-    it("captures the active tab id synchronously and passes the SAME value to both pane.open and launchAgentDefinition, even if the active tab changes mid-flight", async () => {
+    // user to switch window tabs mid-flight. launchAgentDefinition's
+    // ControllerResyncCommand would otherwise resolve "the active tab" at its
+    // own execution time (possibly AFTER the switch), registering the new
+    // block under the wrong tab — so the active tab id is captured ONCE,
+    // synchronously, before any await. pane.open no longer needs it: with
+    // stack_onto_block_id the server takes the tab from the pane's own block.
+    it("places the new block by the pane's own block and launches it under the tab captured before any await", async () => {
         activeTabId.mockReturnValue("tab-original");
         let resolveForkCommand: (v: unknown) => void;
         forkAgentDefinitionCommand.mockReturnValue(
@@ -212,7 +213,7 @@ describe("quickForkAgent", () => {
 
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            expect.objectContaining({ tab_id: "tab-original" }),
+            expect.objectContaining({ stack_onto_block_id: "source-block" }),
             {},
         );
         const [, , , targetTabId] = launchAgentDefinition.mock.calls[0];
@@ -295,7 +296,7 @@ describe("quickForkAgent", () => {
         expect(deleteBlock).toHaveBeenCalledWith("new-block-1");
     });
 
-    it("deletes the orphaned skip_placement block and returns false if the pane closed while the RPCs were in flight", async () => {
+    it("deletes the new block and returns false if the pane closed while the RPCs were in flight", async () => {
         getNodeByBlockId
             .mockReturnValueOnce({ id: "node-1", data: { blockStack: ["source-block"] } }) // initial check
             .mockReturnValueOnce(undefined); // re-check after pane.open

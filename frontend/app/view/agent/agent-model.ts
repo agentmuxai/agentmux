@@ -364,10 +364,10 @@ export class AgentViewModel implements ViewModel {
     /**
      * @param targetBlockId When set, launches INTO that block instead of
      *   `this.blockId` — used by `quick-fork.ts`'s `quickForkAgent`, which
-     *   spawns the fork into a freshly-created, not-yet-placed block (see
-     *   `pane.open`'s `skip_placement`) pushed onto THIS SAME pane's own
-     *   block-stack, rather than reconfiguring the current pane's own
-     *   block. Every other caller omits this and gets today's behavior
+     *   spawns the fork into a freshly-created block that `pane.open
+     *   { stack_onto_block_id }` placed in THIS SAME pane's own block-stack
+     *   (created and placed in one backend step), rather than reconfiguring
+     *   the current pane's own block. Every other caller omits this and gets today's behavior
      *   unchanged.
      * @param targetTabId The tab id to pass to `ControllerResyncCommand`
      *   instead of `atoms.staticTabId()` (fixed at window bootstrap, not
