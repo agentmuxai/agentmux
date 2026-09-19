@@ -886,8 +886,9 @@ impl ContainerManager {
     /// Whether an existing container's `HostConfig.extra_hosts` already has
     /// the `host.docker.internal:host-gateway` entry `create_and_start` sets
     /// (reagent P1, PR #3393). Docker cannot add an extra_hosts entry to an
-    /// already-existing container — only `mounts_match`'s recreate path can
-    /// actually fix a container that predates this.
+    /// already-existing container — only `container_drift`'s recreate path
+    /// (via `ensure_running_locked`) can actually fix a container that
+    /// predates this.
     fn extra_hosts_match(details: &ContainerInspectResponse) -> bool {
         let Some(extra_hosts) = details.host_config.as_ref().and_then(|hc| hc.extra_hosts.as_ref()) else {
             return false;
