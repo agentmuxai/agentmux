@@ -123,7 +123,7 @@ Verify:
 
 ### Acceptance for Phase 2
 
-A short retro doc (`docs/retro/browser-pane-observed-behavior-2026-05-08.md`) describing each scenario's actual log sequence. This is the **baseline** — any future refactor must produce the same sequence (modulo stable refactor markers).
+A short retro doc under `docs/retro/` describing each scenario's actual log sequence (never written — the filename previously given here pointed at nothing). This is the **baseline** — any future refactor must produce the same sequence (modulo stable refactor markers).
 
 ### Phase 2 PR
 
