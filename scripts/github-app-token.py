@@ -31,8 +31,18 @@ import requests
 
 
 class NoAppIdentity(Exception):
-    """Raised when an agent has no github_app_id/installation_id/workflow-key
-    provisioned - the caller should fall back to the PAT path, not crash."""
+    """Raised when an agent genuinely has no App identity provisioned - the
+    caller should quietly fall back to another tier, not crash."""
+
+
+class SecretsLookupError(Exception):
+    """Raised when the secrets lookup itself failed (expired AWS credentials,
+    no network, permission denied) as opposed to the value simply not being
+    there. These two must not be conflated: 'this agent has no App' is a
+    normal state worth falling through quietly, while 'I could not tell
+    whether it has one' is a real fault that should be surfaced - otherwise
+    an AWS outage silently downgrades the whole fleet to PATs and looks like
+    business as usual."""
 
 
 def get_secret_field(path):
@@ -52,8 +62,25 @@ def get_secret_field(path):
         [secrets_bin, "get", "services/infra", "--path", path, "--raw", "--no-warning"],
         capture_output=True, text=True,
     )
-    if proc.returncode != 0 or not proc.stdout.strip():
+    combined = (proc.stdout or "") + (proc.stderr or "")
+
+    # The CLI says so explicitly when the path simply isn't there. That is the
+    # ONLY case that means "this agent has no App identity" - everything else
+    # non-zero means the lookup itself broke, which must not be reported as
+    # "not provisioned" or an AWS outage silently downgrades the whole fleet
+    # to PATs while looking like business as usual.
+    if "Path not found" in combined:
         raise NoAppIdentity(f"no value at services/infra:{path}")
+
+    if proc.returncode != 0:
+        raise SecretsLookupError(
+            f"secrets lookup failed for services/infra:{path} "
+            f"(exit {proc.returncode}): {combined.strip()[:300]}"
+        )
+
+    if not proc.stdout.strip():
+        raise NoAppIdentity(f"no value at services/infra:{path}")
+
     return proc.stdout.rstrip("\n")
 
 
@@ -114,10 +141,13 @@ if __name__ == "__main__":
         token = mint_installation_token(sys.argv[1], sys.argv[2])
     except NoAppIdentity as e:
         # Distinct exit code so gh-agent.sh can tell "no App identity, fall
-        # back to PAT" apart from "App identity exists but minting failed"
-        # (network error, revoked installation, bad key, etc - exit 1 below).
+        # through quietly" apart from "something actually broke" (exit 1).
+        # gh-agent.sh branches on this code, not on this message's text.
         print(f"[github-app-token] {e} - no App identity for this agent", file=sys.stderr)
         sys.exit(2)
+    except SecretsLookupError as e:
+        print(f"[github-app-token] {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"[github-app-token] failed to mint token: {e}", file=sys.stderr)
         sys.exit(1)

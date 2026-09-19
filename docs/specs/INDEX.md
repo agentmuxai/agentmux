@@ -768,6 +768,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_REDOCK_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) | Spec: Floating pane re-dock (with multi-window + drop-target highlighting) |
 | [`SPEC_FORGE_AGENT_IDENTITY_2026_04_13`](SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md) | Spec: Forge Agent Identity — GitHub + AWS + Git |
 | [`SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20`](SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md) | Spec: Forge + Identity + Agent Instances Refinement |
+| [`SPEC_GITHUB_APP_IDENTITY_MIGRATION_2026_09_18`](SPEC_GITHUB_APP_IDENTITY_MIGRATION_2026_09_18.md) | SPEC: Migrate agent GitHub authentication from long-lived PATs to GitHub App installation tokens |
 | [`SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13`](SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md) | SPEC — Graceful Crash Handling |
 | [`SPEC_GRACEFUL_OOM_EXIT_2026_06_29`](SPEC_GRACEFUL_OOM_EXIT_2026_06_29.md) | Graceful OOM Exit — Own the Death, Explain the Reason |
 | [`SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20`](SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md) | SPEC: Host-side CLI login capture is broken for Claude Code v2.1.183 |

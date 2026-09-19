@@ -54,9 +54,11 @@ FALLBACK_KEY="gh-token-genericagentx"
 # Defaults to a5af (the historical single-org case) if there's no git
 # remote to inspect (e.g. `gh auth status` run outside a repo).
 TARGET_ORG="a5af"
+TARGET_REPO=""
 if REMOTE_URL="$(git remote get-url origin 2>/dev/null)"; then
-    if [[ "$REMOTE_URL" =~ [:/]([^/:]+)/[^/]+\.git$ || "$REMOTE_URL" =~ [:/]([^/:]+)/[^/]+$ ]]; then
+    if [[ "$REMOTE_URL" =~ [:/]([^/:]+)/([^/]+?)(\.git)?$ ]]; then
         TARGET_ORG="${BASH_REMATCH[1]}"
+        TARGET_REPO="${BASH_REMATCH[2]%.git}"
     fi
 fi
 
@@ -64,37 +66,59 @@ TOKEN=""
 USED_KEY=""
 AUTH_MODE=""
 
-# --- Tier 1: this agent's own GitHub App installation token ----------------
-if command -v python3 >/dev/null 2>&1; then
-    APP_ERR_FILE="$(mktemp)"
-    if APP_TOKEN="$(python3 "$SCRIPT_DIR/github-app-token.py" "$AGENT_LOWER" "$TARGET_ORG" 2>"$APP_ERR_FILE")"; then
-        TOKEN="$APP_TOKEN"
-        USED_KEY="${AGENT_LOWER}-workflow-key"
-        AUTH_MODE="app"
-    elif [[ "$(cat "$APP_ERR_FILE" 2>/dev/null)" != *"no App identity"* ]]; then
-        # Exit code wasn't the clean "no identity provisioned" case (2) -
-        # something about minting actually failed. Surface it (stderr only,
-        # never fatal) since a silently-failing App path that always falls
-        # back to the next tier would hide the exact class of bug this
-        # migration exists to prevent from recurring unnoticed.
-        echo "gh-agent: own App token mint failed, trying shared App:" >&2
-        cat "$APP_ERR_FILE" >&2
+# Minting a token successfully is NOT the same as that token being able to
+# reach the repo we're about to operate on: an App installed on one account
+# mints perfectly valid tokens that return 403 "Resource not accessible by
+# integration" against a repo in a different org. That failure mode cost a
+# long debugging session precisely because it looks like a permissions bug
+# on the App rather than a missing installation.
+#
+# So each tier is probed before it's accepted. The probe is a single
+# read-only GET against the target repo - critically, done BEFORE running
+# the caller's command, so falling through to the next tier can never
+# re-run a mutation that already partially succeeded. If we can't determine
+# the repo (outside a checkout) or curl is unavailable, the probe is
+# skipped rather than treated as a failure.
+token_reaches_target() {
+    local token="$1"
+    [[ -z "$TARGET_REPO" ]] && return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    local code
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10         -H "Authorization: Bearer $token"         -H "Accept: application/vnd.github+json"         "https://api.github.com/repos/${TARGET_ORG}/${TARGET_REPO}" 2>/dev/null)" || return 0
+    [[ "$code" == "200" ]]
+}
+
+# github-app-token.py exit codes are the contract here, not its stderr text:
+#   2 = this agent has no App identity provisioned (expected, quiet)
+#   1 = an identity exists but minting genuinely failed (surface it)
+try_app_tier() {
+    local identity="$1" keyname="$2" label="$3"
+    command -v python3 >/dev/null 2>&1 || return 1
+    local err_file token rc
+    err_file="$(mktemp)"
+    token="$(python3 "$SCRIPT_DIR/github-app-token.py" "$identity" "$TARGET_ORG" 2>"$err_file")"
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+        if token_reaches_target "$token"; then
+            TOKEN="$token"; USED_KEY="$keyname"; AUTH_MODE="app"
+            rm -f "$err_file"; return 0
+        fi
+        echo "gh-agent: $label token minted but cannot reach ${TARGET_ORG}/${TARGET_REPO}" >&2
+        echo "          (App likely not installed on '${TARGET_ORG}') - trying next tier" >&2
+    elif [[ $rc -ne 2 ]]; then
+        echo "gh-agent: $label token mint failed - trying next tier:" >&2
+        cat "$err_file" >&2
     fi
-    rm -f "$APP_ERR_FILE"
-fi
+    rm -f "$err_file"
+    return 1
+}
+
+# --- Tier 1: this agent's own GitHub App installation token ----------------
+try_app_tier "$AGENT_LOWER" "${AGENT_LOWER}-workflow-key" "own App" || true
 
 # --- Tier 2: shared genericagentx-workflow App installation token ----------
-if [[ -z "$TOKEN" ]] && command -v python3 >/dev/null 2>&1; then
-    SHARED_ERR_FILE="$(mktemp)"
-    if SHARED_TOKEN="$(python3 "$SCRIPT_DIR/github-app-token.py" genericagentx "$TARGET_ORG" 2>"$SHARED_ERR_FILE")"; then
-        TOKEN="$SHARED_TOKEN"
-        USED_KEY="genericagentx-workflow-key"
-        AUTH_MODE="app"
-    elif [[ "$(cat "$SHARED_ERR_FILE" 2>/dev/null)" != *"no App identity"* ]]; then
-        echo "gh-agent: shared App token mint failed, falling back to PAT:" >&2
-        cat "$SHARED_ERR_FILE" >&2
-    fi
-    rm -f "$SHARED_ERR_FILE"
+if [[ -z "$TOKEN" ]]; then
+    try_app_tier genericagentx "genericagentx-workflow-key" "shared App" || true
 fi
 
 # --- Tier 3: long-lived PAT fallback ----------------------------------------
