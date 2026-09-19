@@ -494,7 +494,7 @@ AgentMux's `agent_config.rs` currently generates:
 - `.claude/commands/*.md` — slash commands
 
 **Question:** Does Kimi read a system prompt file like `CLAUDE.md`?  
-**Answer:** Unknown. Kimi has `--agent-file` for custom agent specs and `--skills-dir` for skills. It does not appear to auto-read `CLAUDE.md`. For Phase 1, skip `KIMI.md` generation. Forge `soul`/`agentmd` content can be passed via the `-p` prompt or via `--agent-file` in Phase 2.
+**Answer:** Unknown. Kimi has `--agent-file` for custom agent specs and `--skills-dir` for skills. It does not appear to auto-read a generated `CLAUDE.md`. For Phase 1, skip `KIMI.md` generation. Forge `soul`/`agentmd` content can be passed via the `-p` prompt or via `--agent-file` in Phase 2.
 
 **MCP:** Kimi supports MCP via `--mcp-config-file`. AgentMux should generate `.mcp.json` and pass it via `--mcp-config-file` in the launch args if Forge content includes MCP config.
 
