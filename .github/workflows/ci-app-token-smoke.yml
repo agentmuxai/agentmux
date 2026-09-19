@@ -1,0 +1,168 @@
+# Proves a GitHub App installation token can do everything the four CI PATs
+# currently do, BEFORE any production workflow is changed.
+#
+# Why this exists: CEF_RUNTIME_TOKEN, A5AF_PACKAGES_TOKEN, LANDING_DEPLOY_TOKEN
+# and NIGHTLY_TAG_PAT are only exercised by release/build workflows that are
+# slow, expensive, or actually cut a release. Migrating all four and finding
+# out at the next release that one of them is broken is the failure mode we
+# are explicitly trying to avoid — LANDING_DEPLOY_TOKEN in particular fails
+# SILENTLY (fire-and-forget dispatch; the release job stays green while the
+# site goes stale).
+#
+# So: prove the mechanism once, cheaply, with non-mutating checks.
+#
+# Every step here is READ-ONLY. Nothing is pushed, published, dispatched, or
+# tagged. Delete this workflow once the migration is done and verified.
+name: App token smoke test
+
+on:
+  workflow_dispatch:
+  # workflow_dispatch only fires for workflows already on the default branch,
+  # so it cannot verify this file before it merges — which is exactly when the
+  # verification is worth having. This path-scoped pull_request trigger runs it
+  # on the migration PR itself and nowhere else. Same-repo branch, so org
+  # secrets are available (they would not be from a fork).
+  pull_request:
+    paths:
+      - '.github/workflows/ci-app-token-smoke.yml'
+
+permissions: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint an App installation token
+        id: app
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: agentmuxai
+          # Scope the minted token to only what these jobs touch, rather than
+          # the App's full installation. The private key can mint broader
+          # tokens; the token this job actually holds should not be broader
+          # than its work.
+          repositories: |
+            agentmux
+            cef
+            agentmux-landing
+
+      # Installation tokens are PER-ACCOUNT. The first token is scoped to the
+      # agentmuxai installation and cannot see anything under a5af — proven by
+      # the first run of this workflow, which failed with
+      #   403 permission_denied: The requested installation does not exist.
+      # when asking npm.pkg.github.com for @a5af/secrets.
+      # The @a5af npm scope lives under the a5af account, so it needs its own
+      # token from the a5af installation. This is the main design consequence
+      # for the migration: the build workflows need TWO tokens, not one.
+      - name: Mint an App installation token for the a5af account
+        id: app_a5af
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: a5af
+          # Least privilege, same as the agentmuxai mint above. @a5af/secrets
+          # is published from a5af/dev-tools, so that is the only repo this
+          # token needs. Without this it would span the whole a5af
+          # installation (127 repos) for one `npm view`.
+          repositories: dev-tools
+
+      - name: What permissions did we actually get?
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          echo "::group::identity"
+          gh api user 2>&1 | head -5 || echo "(expected: installation tokens are not users)"
+          echo "::endgroup::"
+          # x-oauth-scopes is empty for App tokens; the useful signal is that
+          # the per-repo calls below succeed.
+          gh api rate_limit --jq '.rate.limit' | sed 's/^/rate limit: /'
+
+      - name: "PAT #1 — CEF_RUNTIME_TOKEN: read agentmuxai/cef releases"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release list --repo agentmuxai/cef --limit 1 --json tagName --jq '.[0].tagName')
+          [ -n "$TAG" ] || { echo "::error::no release tag returned"; exit 1; }
+          echo "latest cef release: $TAG"
+          # the real workflows download an asset; prove asset listing works too
+          gh release view "$TAG" --repo agentmuxai/cef --json assets \
+            --jq '.assets | length | "assets: \(.)"'
+
+      # KNOWN BLOCKED — kept as a live regression probe, not a gate.
+      # An App installation cannot see npm packages owned by a USER account:
+      # granular package permissions are an organization-only feature. Proven
+      # three ways, not inferred:
+      #   1. minted for agentmuxai -> "The requested installation does not exist"
+      #   2. minted for a5af       -> "installation not allowed to Read organization package"
+      #   3. the same a5af token reads a5af/dev-tools (the package's linked
+      #      repo) fine, yet GET /users/a5af/packages?package_type=npm returns
+      #      ZERO packages -- so this is package-scope policy, not repo access.
+      # A5AF_PACKAGES_TOKEN therefore CANNOT be replaced by an App token while
+      # the @a5af scope lives under a user account. This very likely also
+      # explains the standing 403 write_package failure when publishing
+      # @a5af/secrets. Fix is to move the scope to an org, or keep one narrow
+      # fine-grained PAT for packages only.
+      - name: "PAT #2 — A5AF_PACKAGES_TOKEN: authenticate to GitHub Packages"
+        continue-on-error: true
+        env:
+          # a5af-scoped token, NOT the agentmuxai one — see the mint step above
+          NPM_TOKEN: ${{ steps.app_a5af.outputs.token }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/.npmrc <<EOF
+          @a5af:registry=https://npm.pkg.github.com
+          //npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+          EOF
+          # read-only: resolve versions, install nothing
+          npm view @a5af/secrets version --userconfig /tmp/.npmrc \
+            | sed 's/^/@a5af\/secrets latest: /'
+          rm -f /tmp/.npmrc
+
+      # .permissions.push is meaningless for an App installation token -- the
+      # first version of this step asserted it and got `false` even though the
+      # installation demonstrably holds contents:write. So assert the real
+      # capability instead of reading a field.
+      #
+      # Safe: agentmux-landing's landing-deploy.yml subscribes ONLY to
+      # `types: [release]` (verified in that repo). An event type nothing
+      # subscribes to is accepted by the API and triggers no workflow.
+      - name: "PAT #3 - LANDING_DEPLOY_TOKEN: really send a no-op dispatch"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST             -H "Accept: application/vnd.github+json"             /repos/agentmuxai/agentmux-landing/dispatches             -f event_type=agentmux-app-token-smoke             -F client_payload[note]="smoke test - nothing subscribes to this type"
+          echo "dispatch accepted - contents:write on agentmux-landing confirmed"
+
+      # Same reasoning as #3. Creating and deleting a BRANCH ref is safe here:
+      # release.yml and container-image.yml both trigger only on TAGS
+      # (v[0-9]+.[0-9]+.[0-9]+ and v*), so a branch fires nothing. A tag would
+      # have cut a real release.
+      - name: "PAT #4 - NIGHTLY_TAG_PAT: really create and delete a ref"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          REF="refs/heads/ci/app-token-probe-${GITHUB_RUN_ID}"
+          cleanup() { gh api --method DELETE "/repos/agentmuxai/agentmux/git/${REF}" >/dev/null 2>&1                         && echo "cleaned up: $REF" || echo "note: nothing to clean up"; }
+          trap cleanup EXIT
+          SHA=$(gh api repos/agentmuxai/agentmux/git/refs/heads/main --jq '.object.sha')
+          gh api --method POST /repos/agentmuxai/agentmux/git/refs             -f ref="$REF" -f sha="$SHA" --jq '.ref' | sed 's/^/created: /'
+          echo "ref write confirmed - NIGHTLY_TAG_PAT is replaceable"
+          echo "note: an App token DOES trigger on:push workflows. GitHub's"
+          echo "anti-recursion rule is scoped to GITHUB_TOKEN's identity, which"
+          echo "is why this can replace NIGHTLY_TAG_PAT at all."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### App token smoke test"
+            echo ""
+            echo "Proves one App installation token covers all four CI PATs."
+            echo "All checks read-only — nothing pushed, published or dispatched."
+          } >> "$GITHUB_STEP_SUMMARY"

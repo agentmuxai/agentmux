@@ -157,11 +157,11 @@ tasks:
             - bash scripts/package-macos.sh {{.CLI_ARGS}}
 
     package:release:macos:
-        desc: 'Like `task package:macos` but bakes the "stable" channel so the artifact opens the user''s real data dir. Guarded: refuses unless the tree is clean and HEAD is a merged `chore: release v*` commit (AGENTMUX_STABLE_OVERRIDE=1 to bypass). See docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md.'
+        desc: 'Like `task package:macos` but (a) strips source maps (~28 MB) and (b) bakes the "stable" channel so the artifact opens the user''s real data dir. Guarded: refuses unless the tree is clean and HEAD is a merged `chore: release v*` commit (AGENTMUX_STABLE_OVERRIDE=1 to bypass). See docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md and SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md.'
         platforms: [darwin]
         cmds:
             - bash scripts/guard-stable-build.sh
-            - bash -c 'RELEASE_CHANNEL=stable bash scripts/package-macos.sh {{.CLI_ARGS}}'
+            - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh {{.CLI_ARGS}}'
 
     package:linux:
         desc: 'Build + package a LOCAL portable AppImage to ~/Desktop with an ephemeral, traceable label and a per-build data-dir channel (local-<branch>-<hash>-<build-id>) so the build runs as its own AgentMux instance alongside a release install. Does NOT bump the version. Pass `-- <dir>` for an alternate output dir. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'

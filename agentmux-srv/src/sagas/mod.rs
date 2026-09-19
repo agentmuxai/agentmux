@@ -54,6 +54,7 @@ pub mod delete_block;
 pub mod delete_tab;
 pub mod delete_workspace;
 pub mod log;
+pub mod orphan_reaper;
 pub mod promote_block_to_tab;
 pub mod recovery;
 pub mod redock_floating_pane;

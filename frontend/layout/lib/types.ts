@@ -277,6 +277,8 @@ export interface TileLayoutContents {
     renderContent: ContentRenderer;
     renderPreview?: PreviewRenderer;
     onNodeDelete?: (data: TabLayoutData) => Promise<void>;
+    /** See `LayoutModel.beforeNodeDelete`. */
+    beforeNodeDelete?: (data: TabLayoutData) => Promise<boolean>;
     getCursorPoint?: () => Point;
 }
 
