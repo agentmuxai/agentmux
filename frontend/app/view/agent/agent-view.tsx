@@ -67,6 +67,7 @@ import { ActivityDock } from "./components/ActivityDock";
 import { AmbientNarrationRow } from "./components/AmbientNarrationRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentSessionNotices } from "./components/AgentSessionNotices";
+import { AgentShellInfoPanel } from "./components/AgentShellInfoPanel";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -2563,6 +2564,15 @@ const AgentPresentationView = ({
                     since this region hugs the pane bottom). */}
                 <Show when={paneModel.state.detailsOpen}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
+                        {/* One line: what this shell is, and what the agent
+                            has left running. Takes the slot AgentControlBar
+                            used to occupy with session UI — see
+                            SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §4. */}
+                        <AgentShellInfoPanel
+                            blockId={model.blockId}
+                            shellSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                            cwd={block()?.meta?.["cmd:cwd"] as string | undefined}
+                        />
                         {/* Drag-to-height drawer wrapping the terminal — the actual
                             scrollable/resizable content. */}
                         <ResizableDetailsDrawer
