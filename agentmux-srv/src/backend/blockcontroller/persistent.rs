@@ -2825,12 +2825,21 @@ impl PersistentSubprocessController {
         // session only sets further down this function. Held from here until
         // this spawn's `current_pid` is set (or it returns early), so two
         // reopens of one session — two picker clicks, picker + MCP — can't
-        // both pass. Only resume spawns take it; `spawn_process` is
+        // both pass. One lock PER SESSION (reagent P1 on #3421): unrelated
+        // agents' resume respawns (model/effort changes) never wait on each
+        // other. Only resume spawns take one; `spawn_process` is
         // synchronous, and no caller holds an `inner` lock across it.
-        let resume_claim = requested_sid.as_ref().map(|_| {
-            static RESUME_SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-            RESUME_SPAWN.lock().unwrap_or_else(|e| e.into_inner())
+        let session_lock: Option<Arc<Mutex<()>>> = requested_sid.as_ref().map(|sid| {
+            static RESUME_SPAWN_LOCKS: std::sync::LazyLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+                std::sync::LazyLock::new(Default::default);
+            RESUME_SPAWN_LOCKS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(sid.clone())
+                .or_default()
+                .clone()
         });
+        let resume_claim = session_lock.as_ref().map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
         if let Some(sid) = requested_sid.as_deref() {
             if let Some((other, closing)) = self.session_held_elsewhere(sid) {
                 return Err(if closing {
