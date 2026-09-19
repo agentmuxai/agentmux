@@ -104,7 +104,7 @@ task package            # Portable ZIP for the host platform
 task package:linux      # Linux AppImage (writes to ~/Desktop)
 ```
 
-`task package` builds a local portable with a unique build label — no version bump, no git changes. See [CLAUDE.md](./CLAUDE.md) for the full build labeling and data-isolation details.
+`task package` builds a local portable with a unique build label — no version bump, no git changes. See [SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) for the full build labeling and data-isolation details.
 
 ### Logs
 
@@ -286,7 +286,7 @@ Layer B is where both incidents happened. Nothing checks it.
   milestone alone (`7778`, `7977`), never from a feature branch, even if the
   feature branch looks newer.
 - **Never reuse a feature branch after its PR is merged** — start a new one off
-  `<milestone>`. See the rule under [Git Workflow](./CLAUDE.md#git-workflow);
+  `<milestone>`. See the branch-reuse rule in [CEF_FORK_MAINTENANCE.md](./docs/cef-build/CEF_FORK_MAINTENANCE.md) §1.1;
   violating it is exactly what caused the 2026-07 gap.
 - **Merge the whole carry-set before cutting a release.** A milestone's work is
   split across several branches; merging one and not the others silently drops
