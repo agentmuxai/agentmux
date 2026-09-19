@@ -30,7 +30,9 @@ name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 # decide a version bump — it only finds the most recent `chore: release`
 # commit on main and tags it if (and only if) that tag doesn't exist yet.
 #
-# REQUIRES repo secret NIGHTLY_TAG_PAT: a PAT (contents:write is enough)
+# REQUIRES org secrets CI_APP_ID / CI_APP_PRIVATE_KEY. A contents:write
+# token for this repo is minted per run by the first step; there is no
+# longer a long-lived NIGHTLY_TAG_PAT repo secret.
 # belonging to a service/bot identity — NOT a stand-in for the default
 # GITHUB_TOKEN. GitHub does not allow a push/tag event made by the default
 # GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
@@ -60,6 +62,22 @@ jobs:
   detect-and-tag:
     runs-on: ubuntu-latest
     steps:
+      # Replaces TAG_TOKEN. An App installation token works in the
+      # x-access-token position of a git remote exactly as a PAT does, and
+      # -- the reason a PAT was needed at all -- a tag pushed with it DOES
+      # trigger release.yml and container-image.yml. GitHub's anti-recursion
+      # rule is scoped to GITHUB_TOKEN's identity, not to "any token".
+      # Proven in ci-app-token-smoke.yml: a real ref was created and deleted
+      # with this token before this swap.
+      - name: Mint a short-lived token that can push tags
+        id: tag_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: agentmuxai
+          repositories: agentmux
+
       - name: Checkout main (full history)
         uses: actions/checkout@v4
         with:
@@ -67,7 +85,7 @@ jobs:
           fetch-depth: 0
           # actions/checkout otherwise leaves a git-config extraheader
           # (Authorization: token <GITHUB_TOKEN>) for github.com that
-          # silently overrides the URL-embedded NIGHTLY_TAG_PAT credential
+          # silently overrides the URL-embedded TAG_TOKEN credential
           # used by the push step below — a well-known checkout gotcha for
           # any job that needs to push with a different identity than the
           # default token. Without this, the push would authenticate as
@@ -77,7 +95,7 @@ jobs:
 
       - name: Find latest pending release commit and tag it if needed
         env:
-          NIGHTLY_TAG_PAT: ${{ secrets.NIGHTLY_TAG_PAT }}
+          TAG_TOKEN: ${{ steps.tag_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -107,12 +125,13 @@ jobs:
           # persist-credentials: false (above) means `origin` has no auth
           # configured, so this read must authenticate itself explicitly
           # rather than relying on an anonymous request. Falls back to a
-          # plain `origin` read only when NIGHTLY_TAG_PAT isn't set yet
+          # plain `origin` read only if the mint step somehow yielded an
+          # empty token (it fails the job instead, so this is defensive)
           # (bootstrap period) — works today since this repo is public, but
           # an authenticated read is correct regardless of that and doesn't
           # depend on the repo staying public.
-          if [ -n "${NIGHTLY_TAG_PAT:-}" ]; then
-            remote="https://x-access-token:${NIGHTLY_TAG_PAT}@github.com/${REPO}.git"
+          if [ -n "${TAG_TOKEN:-}" ]; then
+            remote="https://x-access-token:${TAG_TOKEN}@github.com/${REPO}.git"
           else
             remote="origin"
           fi
@@ -122,8 +141,8 @@ jobs:
             exit 0
           fi
 
-          if [ -z "${NIGHTLY_TAG_PAT:-}" ]; then
-            echo "::error::Found untagged pending release ${version} (${sha:0:9}), but NIGHTLY_TAG_PAT is not set — cannot push a tag that will trigger release.yml/container-image.yml (the default GITHUB_TOKEN can't do this, see this file's header comment)." | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -z "${TAG_TOKEN:-}" ]; then
+            echo "::error::Found untagged pending release ${version} (${sha:0:9}), but no tag-push token was minted — cannot push a tag that will trigger release.yml/container-image.yml (the default GITHUB_TOKEN cannot: its pushes do not trigger workflows)." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
@@ -131,7 +150,7 @@ jobs:
           git config user.name "agentmux-nightly-release"
           git config user.email "nightly-release@agentmux.ai"
           git tag -a "$version" "$sha" -m "Release ${version} (nightly automation)"
-          # $remote is guaranteed PAT-authenticated here — the NIGHTLY_TAG_PAT
+          # $remote is guaranteed PAT-authenticated here — the TAG_TOKEN
           # empty-check above already exited if it weren't set.
           git push "$remote" "$version"
 
