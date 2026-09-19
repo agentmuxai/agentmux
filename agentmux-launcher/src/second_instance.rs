@@ -120,6 +120,59 @@ fn forward_host_cmd_impl(
     Ok(())
 }
 
+/// User-facing message for an actual second-instance collision (not a
+/// bind-failure, not a stale socket — a real running launcher answered our
+/// connect probe). Shared by both call sites in
+/// `bind_socket_with_recovery` (fast-path and post-recovery-lock retry),
+/// which previously duplicated this message and both got it wrong the same
+/// way — see docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md.
+///
+/// For a `dev-` channel, this used to say "Use `task dev:local` to launch a
+/// second isolated session" — plausible-sounding, and wrong for the common
+/// case. `task dev:local`'s version bump only changes the launcher's own
+/// IPC socket key (`hash.rs`'s `data_dir_hash16`, keyed on
+/// `CARGO_PKG_VERSION`/`AGENTMUX_BUILD_LABEL` at compile time) — it does
+/// NOT change the CEF profile/data directory, which for dev mode is keyed
+/// on `(branch, clone_id)` — NOT version — via
+/// `agentmux-common/src/data_paths.rs`'s `resolve_channel_and_dir`
+/// (`honor_env_channel=false` for dev launches). `clone_id`
+/// (`runtime_mode.rs`'s `derive_clone_id`) is a hash of the CLONE'S OWN
+/// CANONICAL WORKSPACE-ROOT PATH — git-worktree-aware by design, so a
+/// second worktree of the SAME branch already gets a distinct `clone_id`
+/// and therefore a distinct data dir, with no branch switch needed;
+/// `resolve_channel_and_dir` folds both into the one `channel` string this
+/// function receives (`format!("dev-{branch}-{clone_id}")` — confirmed by
+/// reading that call site directly). Two dev instances collide on CEF's
+/// own `SingletonLock` only when BOTH branch and clone/workspace path are
+/// identical — reproduced live: a real rebuild under a bumped version, run
+/// from the unchanged clone path on the unchanged branch, got a new
+/// launcher socket and STILL hit `CEF early exit (process singleton or
+/// similar)` on the unchanged data dir. The fix is a different branch OR a
+/// different clone/worktree path (either one changes `channel`) — named
+/// directly here instead of pointing at a command that cannot solve this
+/// specific problem. (ReAgent P1 on this PR: an earlier revision of this
+/// message claimed branch was the ONLY lever, which is what this revision
+/// corrects — verified against `resolve_channel_and_dir`'s actual source,
+/// not just re-asserted.)
+fn print_dev_instance_collision(channel: &str, data_dir: &std::path::Path, socket_path: &str) {
+    eprintln!(
+        "AgentMux dev instance already running for channel \"{channel}\"\n\
+         (dev-<branch>-<clone_id>, where clone_id identifies THIS checkout's\n\
+         own workspace-root path). Data-dir isolation is keyed on branch AND\n\
+         clone/workspace path together, not build version — a `task dev:local`\n\
+         version bump will NOT let a second instance run alongside this one\n\
+         from this same checkout on this same branch (it only changes this\n\
+         launcher's own IPC socket key, not the CEF profile directory below).\n\
+         To run a second dev instance concurrently, either check out a\n\
+         DIFFERENT branch, or run `task dev` from a DIFFERENT clone/worktree\n\
+         path (even on this same branch — clone/worktree path alone is\n\
+         enough to change the channel above).\n\
+         Data dir: {}\n\
+         Socket:   {socket_path}",
+        data_dir.display()
+    );
+}
+
 /// Best-effort `open_new_window` forward for the unix second-instance path.
 /// Unlike the Windows path (which pops a dialog on a fatal forward), unix just
 /// logs and lets the caller exit 0: the existing instance is alive (its socket
@@ -243,12 +296,7 @@ pub(crate) fn bind_socket_with_recovery(
             // already-running launcher's host (Windows-parity — main.rs:1292),
             // then exit cleanly. SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
             if channel.starts_with("dev-") {
-                eprintln!(
-                    "AgentMux dev instance already running (channel: {}).\n\
-                     Use `task dev:local` to launch a second isolated session.\n\
-                     Socket: {}",
-                    channel, socket_path
-                );
+                print_dev_instance_collision(channel, data_dir, socket_path);
             } else {
                 eprintln!(
                     "AgentMux is already running for this data directory.\n\nSocket: {}",
@@ -285,12 +333,7 @@ pub(crate) fn bind_socket_with_recovery(
                 Ok(l) => l,
                 Err(retry_e) if retry_e.kind() == std::io::ErrorKind::AddrInUse => {
                     if channel.starts_with("dev-") {
-                        eprintln!(
-                            "AgentMux dev instance already running (channel: {}).\n\
-                             Use `task dev:local` to launch a second isolated session.\n\
-                             Socket: {}",
-                            channel, socket_path
-                        );
+                        print_dev_instance_collision(channel, data_dir, socket_path);
                     } else {
                         eprintln!(
                             "AgentMux is already running for this data directory.\n\nSocket: {}",
