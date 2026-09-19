@@ -62,20 +62,27 @@ def get_secret_field(path):
         [secrets_bin, "get", "services/infra", "--path", path, "--raw", "--no-warning"],
         capture_output=True, text=True,
     )
-    combined = (proc.stdout or "") + (proc.stderr or "")
+    # stdout carries the SECRET VALUE itself (that is what --raw means), so it
+    # is matched against but NEVER echoed. stderr is the only stream safe to
+    # surface. This distinction is load-bearing: when this function is called
+    # for `<agent>-workflow-key`, stdout is a private RSA key, and an error
+    # message built from stdout would leak it into logs and terminals via
+    # gh-agent.sh, which prints this script's stderr verbatim.
+    out = proc.stdout or ""
+    err = proc.stderr or ""
 
     # The CLI says so explicitly when the path simply isn't there. That is the
     # ONLY case that means "this agent has no App identity" - everything else
     # non-zero means the lookup itself broke, which must not be reported as
     # "not provisioned" or an AWS outage silently downgrades the whole fleet
     # to PATs while looking like business as usual.
-    if "Path not found" in combined:
+    if "Path not found" in out or "Path not found" in err:
         raise NoAppIdentity(f"no value at services/infra:{path}")
 
     if proc.returncode != 0:
         raise SecretsLookupError(
             f"secrets lookup failed for services/infra:{path} "
-            f"(exit {proc.returncode}): {combined.strip()[:300]}"
+            f"(exit {proc.returncode}): {err.strip()[:300]}"
         )
 
     if not proc.stdout.strip():
