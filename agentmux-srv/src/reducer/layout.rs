@@ -417,11 +417,31 @@ pub(super) fn handle_layout_delete_node_by_block(
     block_id: String,
     correlation_id: String,
 ) -> Vec<Event> {
+    // One tab of a stacked pane: remove just that member and keep the pane
+    // and its other tabs. Deleting the whole leaf (the old behaviour, via
+    // `find_node_id_by_block` on the visible block) took every sibling tab
+    // with it. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.4.
+    if let Some(root) = state.tabs.get_mut(&tab_id).and_then(|tab| tab.rootnode.as_mut()) {
+        if crate::backend::layout::remove_stack_member(root, &block_id) {
+            let new_tree = state.tabs.get(&tab_id).and_then(|tab| tab.rootnode.clone());
+            let v = state.bump_version();
+            return vec![Event::LayoutTreeReplaced {
+                tab_id,
+                new_tree,
+                correlation_id,
+                // Tree only: focus, magnify, leaf order and the pending
+                // action queue are left exactly as they are.
+                slices: None,
+                version: v,
+            }];
+        }
+    }
     let node_id = match state
         .tabs
         .get(&tab_id)
         .and_then(|tab| tab.rootnode.as_ref())
-        .and_then(|root| crate::backend::layout::find_node_id_by_block(root, &block_id))
+        .and_then(|root| crate::backend::layout::find_leaf_containing_block(root, &block_id))
+        .map(|leaf| leaf.id.clone())
     {
         Some(id) => id,
         // Unknown tab, empty tree, or block not in the tree — no-op.
@@ -2501,6 +2521,83 @@ mod tests {
             }
             other => panic!("expected LayoutNodeDeleted, got {:?}", other),
         }
+    }
+
+    fn stacked_leaf(id: &str, stack: &[&str], visible: &str) -> agentmux_common::LayoutNode {
+        let mut leaf = leaf_node(id, visible);
+        let data = leaf.data.as_mut().unwrap();
+        data.block_stack = stack.iter().map(|s| s.to_string()).collect();
+        data.active_block_id = visible.to_string();
+        leaf
+    }
+
+    fn only_leaf_data(state: &State, tab_id: &str) -> agentmux_common::LayoutNodeData {
+        state.tabs[tab_id].rootnode.as_ref().unwrap().data.clone().unwrap()
+    }
+
+    fn delete_by_block(state: &mut State, tab_id: &str, block_id: &str) -> Vec<Event> {
+        update(
+            state,
+            Command::LayoutDeleteNodeByBlock {
+                tab_id: tab_id.to_string(),
+                block_id: block_id.to_string(),
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        )
+    }
+
+    // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2 / §3.4: deleting one
+    // tab of a stacked pane removes that tab only — never the pane and its
+    // sibling tabs (which left their blocks, agents included, with no pane).
+
+    #[test]
+    fn layout_delete_node_by_block_removes_only_a_background_stack_member() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(stacked_leaf("pane", &["agent", "term"], "agent"));
+
+        let events = delete_by_block(&mut state, &tab_id, "term");
+
+        assert!(matches!(events[0], Event::LayoutTreeReplaced { slices: None, .. }), "got {:?}", events);
+        let data = only_leaf_data(&state, &tab_id);
+        assert_eq!(data.block_stack, vec!["agent".to_string()]);
+        assert_eq!(data.block_id, "agent", "the visible tab is untouched");
+    }
+
+    #[test]
+    fn layout_delete_node_by_block_on_the_visible_member_activates_the_right_neighbour() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(stacked_leaf("pane", &["a", "b", "c"], "b"));
+
+        delete_by_block(&mut state, &tab_id, "b");
+
+        let data = only_leaf_data(&state, &tab_id);
+        assert_eq!(data.block_stack, vec!["a".to_string(), "c".to_string()]);
+        assert_eq!(data.block_id, "c");
+        assert_eq!(data.active_block_id, "c");
+    }
+
+    #[test]
+    fn layout_delete_node_by_block_on_the_rightmost_visible_member_activates_the_new_last() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(stacked_leaf("pane", &["a", "b"], "b"));
+
+        delete_by_block(&mut state, &tab_id, "b");
+
+        let data = only_leaf_data(&state, &tab_id);
+        assert_eq!(data.block_stack, vec!["a".to_string()]);
+        assert_eq!(data.block_id, "a");
+    }
+
+    #[test]
+    fn layout_delete_node_by_block_on_the_last_stack_member_removes_the_pane() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(stacked_leaf("pane", &["a"], "a"));
+
+        let events = delete_by_block(&mut state, &tab_id, "a");
+
+        assert!(matches!(events[0], Event::LayoutNodeDeleted { .. }), "got {:?}", events);
+        assert!(state.tabs[&tab_id].rootnode.is_none());
     }
 
     #[test]
