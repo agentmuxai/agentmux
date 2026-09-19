@@ -348,6 +348,17 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
                         };
 
+                        // Same AGENTMUX_LOCAL_URL rewrite the `agentinput` path
+                        // does — see its comment (input.rs). Without this a
+                        // container agent opened via the App API path gets no
+                        // sidecar URL at all, same as the RPC path before this fix.
+                        if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
+                            env_vars.insert(
+                                "AGENTMUX_LOCAL_URL".to_string(),
+                                crate::backend::container::rewrite_local_url_for_container(&local_url),
+                            );
+                        }
+
                         // Ensure container is alive (pull image if needed — P1b).
                         cm.ensure_running(&container_name, &container_image, &volumes, &[], &mount_spec).await
                             .map_err(|e| format!("container ensure_running failed: {e}"))?;
