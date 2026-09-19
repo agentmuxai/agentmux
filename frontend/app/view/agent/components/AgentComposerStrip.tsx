@@ -152,6 +152,8 @@ import { compactionThreshold } from "@/app/store/agent-pane-state/context-window
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
+import { AgentSessionStats } from "./AgentSessionStats";
+import type { SessionStats } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
 
@@ -604,6 +606,10 @@ interface AgentComposerStripProps {
      *  strip doesn't flash a wrong color for an instant on every mount. */
     authStatus?: "authenticated" | "unauthenticated" | "unknown";
 
+    /** Cumulative cost/tokens/duration for this pane, shown in the
+     *  session-stats popover the context reading opens. */
+    sessionTotals?: SessionStats | null;
+
     // ── Inline model / effort controls ────────────────────────────
     /** Block id — needed for applyRuntimeChange. */
     blockId?: string;
@@ -805,11 +811,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // the `auth` slot's own comment above; this is the
                 // matching other half of the same fallback-side fix.
                 side: "right",
-                // Interactive exactly when the Compact button actually
-                // renders (same gate as its <Show> below) — a pure
-                // ctx-text slot has nothing clickable and should sit
-                // inward like any other passive content.
-                interactive: props.providerId === "claude" && props.onCompact != null,
+                // Always interactive: the context reading itself is a button
+                // that opens the session-stats popover (AgentSessionStats),
+                // so this slot has something clickable even when the Compact
+                // button doesn't render. It was gated on Compact back when
+                // the reading was inert text.
+                interactive: true,
                 // Compact sits on the OUTER end of whichever side this
                 // slot renders on (edge priority): first on the left,
                 // last on the right. The text + countdown stay adjacent
@@ -838,16 +845,21 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     return (
                         <>
                             {rowSide === "left" && compactBtn()}
-                            <span
-                                class={`agent-composer-strip-ctx ${ctxClass()}`}
+                            <AgentSessionStats
+                                blockId={props.blockId ?? ""}
+                                blockAtom={props.blockAtom ?? (() => undefined)}
+                                providerId={props.providerId ?? ""}
+                                contextTokens={props.contextTokens}
+                                contextWindow={props.contextWindow}
+                                sessionTotals={props.sessionTotals}
+                                ctxClass={ctxClass()}
                                 title={
                                     props.contextTokens != null
                                         ? contextTitle(props.contextTokens, props.contextWindow)
                                         : undefined
                                 }
-                            >
-                                {ctxText()}
-                            </span>
+                                label={ctxText() ?? ""}
+                            />
                             <Show when={ctxCountdownText()}>
                                 <span
                                     class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}

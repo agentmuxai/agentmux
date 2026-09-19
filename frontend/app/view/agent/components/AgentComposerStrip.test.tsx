@@ -813,22 +813,20 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
         expect(precedes(compact, ctxText)).toBe(true);
     });
 
-    it("orders a passive slot INSIDE an interactive one on the right side (ctx inward of Shell)", () => {
-        // ctx is passive here: no onCompact, so no Compact button renders
-        // and the slot's own `interactive` flag is false. authStatus is set
-        // so auth's pinned-left placement (Rev 9,
+    it("orders a passive slot INSIDE an interactive one on the left side (auth inward of the runtime trigger)", () => {
+        // auth is the strip's one remaining passive slot: the ctx slot went
+        // interactive when its reading became the session-stats trigger
+        // (SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.1), so this
+        // property is now exercised on the left, where auth is pinned (Rev 9,
         // SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md)
-        // fills the left side and the "left must never be completely
-        // empty" fallback never fires — without it, that fallback would
-        // promote some right-side slot to the left instead, changing which
-        // slots actually share this row with Shell.
+        // alongside the interactive runtime trigger.
         const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="authenticated" agentMode="host" contextTokens={40_000} contextWindow={200_000} />
+            <AgentComposerStrip {...baseProps} blockId="block-1" blockAtom={() => undefined} authStatus="authenticated" />
         ));
-        const ctxText = container.querySelector(".agent-composer-strip-ctx")!;
-        const shell = screen.getByRole("button", { name: /Shell/i });
-        expect(ctxText.closest(".agent-composer-strip-row-right")).not.toBeNull();
-        expect(precedes(ctxText, shell)).toBe(true);
+        const auth = container.querySelector(".agent-composer-strip-auth")!;
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(auth.closest(".agent-composer-strip-row-left")).not.toBeNull();
+        expect(precedes(trigger, auth)).toBe(true);
     });
 
     it("keeps Shell the outermost element of the right edge, outside an interactive ctx slot", () => {
