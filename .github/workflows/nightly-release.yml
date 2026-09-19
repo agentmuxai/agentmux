@@ -35,10 +35,10 @@ name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 # commit on main and tags it if (and only if) that tag doesn't exist yet.
 #
 # REQUIRES org secrets CI_APP_ID / CI_APP_PRIVATE_KEY. A contents:write
-# token for this repo is minted per run by the first step; there is no
-# longer a long-lived NIGHTLY_TAG_PAT repo secret.
-# belonging to a service/bot identity — NOT a stand-in for the default
-# GITHUB_TOKEN. GitHub does not allow a push/tag event made by the default
+# token for this repo is minted per run by the first step (there is no
+# longer a long-lived NIGHTLY_TAG_PAT repo secret). That token belongs to a
+# GitHub App identity — NOT a stand-in for the default GITHUB_TOKEN.
+# GitHub does not allow a push/tag event made by the default
 # GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
 # anti-recursion guard) — if this workflow pushed the tag using
 # GITHUB_TOKEN, release.yml and container-image.yml would silently never
@@ -66,7 +66,7 @@ jobs:
   detect-and-tag:
     runs-on: ubuntu-latest
     steps:
-      # Replaces TAG_TOKEN. An App installation token works in the
+      # Replaces NIGHTLY_TAG_PAT. An App installation token works in the
       # x-access-token position of a git remote exactly as a PAT does, and
       # -- the reason a PAT was needed at all -- a tag pushed with it DOES
       # trigger release.yml and container-image.yml. GitHub's anti-recursion
