@@ -91,6 +91,16 @@ export class AgentViewModel implements ViewModel {
         setInterim: (text: string) => this.voiceTargetRef.current?.setInterim(text),
     });
 
+    /** See ViewModel.updateNodeModel's own doc comment (custom.d.ts) —
+     *  block.tsx calls this on every mount attempt, including when this
+     *  instance is ADOPTED rather than freshly constructed, so
+     *  `noHeader`'s `this.nodeModel.paneChromeHoisted` read never stays
+     *  pinned to a stale wrapper from this instance's original
+     *  construction. */
+    updateNodeModel(nodeModel: BlockNodeModel): void {
+        this.nodeModel = nodeModel;
+    }
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
