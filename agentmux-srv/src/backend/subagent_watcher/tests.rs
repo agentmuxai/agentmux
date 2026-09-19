@@ -2642,3 +2642,34 @@ fn parse_event_timestamp_does_not_return_now_for_a_historical_string() {
         "a historical timestamp must read as historical (got {got}, now {now})"
     );
 }
+
+/// After a pane close the parent's controller leaves the registry for good,
+/// so reconciling must stop at once instead of retrying ~15s of "controller
+/// not yet registered" (seen after every mid-turn close in a live test).
+#[test]
+fn parent_block_closed_is_true_for_a_deleted_or_closing_block_only() {
+    let watcher = fixture_watcher();
+
+    // Never existed / deleted → closed.
+    assert!(watcher.parent_block_closed(&format!("gone-{}", now_millis())));
+
+    // Exists and not closing → keep the bounded retry (a reopen whose
+    // controller simply hasn't registered yet).
+    let mut block = crate::backend::obj::Block {
+        oid: format!("live-{}", now_millis()),
+        parentoref: String::new(),
+        version: 1,
+        runtimeopts: None,
+        stickers: None,
+        meta: crate::backend::obj::MetaMapType::new(),
+        subblockids: None,
+    };
+    watcher.mstore.insert(&mut block).unwrap();
+    assert!(!watcher.parent_block_closed(&block.oid));
+
+    // Exists but mid-close → closed.
+    crate::backend::blockcontroller::mark_closing(&block.oid);
+    let closing = watcher.parent_block_closed(&block.oid);
+    crate::backend::blockcontroller::unmark_closing(&block.oid);
+    assert!(closing);
+}
