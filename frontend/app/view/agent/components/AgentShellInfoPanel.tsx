@@ -36,6 +36,12 @@ interface AgentShellInfoPanelProps {
     cwd?: string;
 }
 
+/**
+ * How often the line re-reads uptime and memory. Uptime is minute-grained, so
+ * this only needs to be well under a minute; memory tolerates the same lag.
+ */
+const REFRESH_MS = 15_000;
+
 /** `312 MB`, `1.2 GB`, `—` for 0/unknown. */
 function formatBytes(n: number): string {
     if (!n) return "—";
@@ -113,8 +119,19 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
         onCleanup(() => unsub());
     });
 
+    // One tick drives both the uptime text and the memory figures. The
+    // backend's poller emits add/exit deltas only — never an RSS update for a
+    // pid it already reported — so without re-fetching the snapshot, memory
+    // would stay frozen at whatever a process used the moment it started, and
+    // a dev server that grows to a gigabyte would still read as its first few
+    // megabytes (ReAgent P1 on #3436). This panel only exists while the
+    // drawer is open, so the cost is one RPC per open drawer per tick.
     createEffect(() => {
-        const t = setInterval(() => setNow(Date.now()), 30_000);
+        const t = setInterval(() => {
+            setNow(Date.now());
+            agentProcs.refresh();
+            shellProcs.refresh();
+        }, REFRESH_MS);
         onCleanup(() => clearInterval(t));
     });
 
