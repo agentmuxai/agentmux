@@ -153,8 +153,12 @@ async fn run_inner(
 
     // A member whose delete failed still exists; removing the leaf now would
     // leave it in the tab with no pane — the orphan this saga exists to
-    // prevent. Keep the pane; closing it again finishes the job.
-    let leaf_to_delete = leaf_to_delete.filter(|_| failures.is_empty());
+    // prevent. Return before touching the layout (as `delete_block` does);
+    // the pane stays, and closing it again finishes the job.
+    if !failures.is_empty() {
+        return Err(format!("ClosePane: {}", failures.join("; ")));
+    }
+
     let leaf_removed = leaf_to_delete.is_some();
     if let Some((node_id, visible_block_id)) = leaf_to_delete {
         // Best-effort, as in `delete_block`: the blocks are already gone.
@@ -192,9 +196,6 @@ async fn run_inner(
         }
     }
 
-    if !failures.is_empty() {
-        return Err(format!("ClosePane: {}", failures.join("; ")));
-    }
     Ok(json!({
         "tab_id": tab_id,
         "block_ids": block_ids,
