@@ -394,6 +394,23 @@ describe("layoutStack", () => {
             expect(onNodeDelete).not.toHaveBeenCalled();
         });
 
+        it("a pane whose tabs changed while the prompt was open is not closed", async () => {
+            // reagent P1 on #3422: close only what the user confirmed.
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = vi.fn().mockImplementation(async () => {
+                pushBlockOntoStack(model, nodeId, "b2"); // a tab arrives meanwhile
+                return true;
+            });
+
+            await closeNode(model, nodeId);
+
+            expect(model.treeState.rootNode).toBeDefined();
+            expect(onNodeDelete).not.toHaveBeenCalled();
+        });
+
         it("confirming the pane-close proceeds with the close", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
