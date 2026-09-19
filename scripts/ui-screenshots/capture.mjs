@@ -62,30 +62,54 @@ class CdpSession {
         this.ws = new WebSocket(wsUrl);
         this.nextId = 1;
         this.pending = new Map();
+        this.closed = false;
         this.ws.onmessage = (ev) => {
             const msg = JSON.parse(ev.data);
             if (msg.id != null && this.pending.has(msg.id)) {
-                const { resolve, reject } = this.pending.get(msg.id);
+                const { resolve, reject, timer } = this.pending.get(msg.id);
+                clearTimeout(timer);
                 this.pending.delete(msg.id);
                 if (msg.error) reject(new Error(msg.error.message));
                 else resolve(msg.result);
             }
         };
+        // Lasting handlers (unlike connect()'s one-shot error listener below):
+        // if the socket drops or errors mid-run — e.g. a prep click navigates
+        // or reloads the target window — every still-pending send() must be
+        // rejected immediately instead of hanging forever with no response.
+        this.ws.onclose = () => this._failAll("CDP connection closed unexpectedly");
+        this.ws.onerror = (e) => this._failAll(`CDP connection error: ${e.message ?? e}`);
+    }
+
+    _failAll(reason) {
+        if (this.closed) return;
+        this.closed = true;
+        const err = new Error(reason);
+        for (const { reject, timer } of this.pending.values()) {
+            clearTimeout(timer);
+            reject(err);
+        }
+        this.pending.clear();
     }
 
     static async connect(wsUrl) {
         const session = new CdpSession(wsUrl);
         await new Promise((resolve, reject) => {
             session.ws.onopen = () => resolve();
-            session.ws.onerror = (e) => reject(new Error(`CDP connect failed: ${e.message ?? e}`));
+            session.ws.addEventListener("error", (e) => reject(new Error(`CDP connect failed: ${e.message ?? e}`)), { once: true });
         });
         return session;
     }
 
-    send(method, params = {}) {
+    send(method, params = {}, timeoutMs = 10000) {
+        if (this.closed) return Promise.reject(new Error(`CDP session closed, cannot send ${method}`));
         const id = this.nextId++;
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                reject(new Error(`CDP command "${method}" timed out after ${timeoutMs}ms (id=${id})`));
+            }, timeoutMs);
+            this.pending.set(id, { resolve, reject, timer });
             this.ws.send(JSON.stringify({ id, method, params }));
         });
     }
@@ -137,8 +161,19 @@ class CdpSession {
     }
 
     close() {
+        // Mark closed first so the onclose handler's _failAll() no-ops —
+        // this is an intentional shutdown, not a dropped-connection failure.
+        this.closed = true;
         this.ws.close();
     }
+}
+
+/** Reads width/height straight out of a PNG's IHDR chunk (bytes 16-23,
+ *  big-endian uint32 each) — the actual captured pixel dimensions,
+ *  independent of any CSS-pixel/device-scale-factor math, and available
+ *  whether or not the shot used a `clip` (a `selector`). */
+function pngDimensions(buffer) {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
 /** Resolves a CSS selector's bounding box (with optional padding) into a CDP `clip` region. */
@@ -194,7 +229,9 @@ async function main() {
                 ...(clip ? { clip } : {}),
             });
             const filename = `${n}-${shot.id}.png`;
-            writeFileSync(join(args.out, filename), Buffer.from(data, "base64"));
+            const pngBuffer = Buffer.from(data, "base64");
+            writeFileSync(join(args.out, filename), pngBuffer);
+            const { width, height } = pngDimensions(pngBuffer);
 
             manifest.push({
                 id: shot.id,
@@ -202,8 +239,8 @@ async function main() {
                 description: shot.description,
                 file: filename,
                 capturedAt: new Date().toISOString(),
-                width: clip ? Math.round(clip.width) : null,
-                height: clip ? Math.round(clip.height) : null,
+                width,
+                height,
             });
             console.log("ok");
         } catch (err) {
