@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-18
 **Status:** active — Phase 0 measured (§5.1), Phase 1 implemented in #3402 (§5.2);
-Phase 2 designed (§9), not started; Phase 3 not started.
+Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3
+implemented in #3419, #3421, #3422 (§10).
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
 (the continuity guarantee this spec protects),
@@ -136,7 +137,7 @@ exists.
 
 ### 3.5 The close confirmation is bypassed and too narrow
 
-`useAgentCloseConfirm` (`frontend/app/view/agent/hooks/useAgentCloseConfirm.ts`)
+`useAgentCloseConfirm` (in `frontend/app/view/agent/hooks/`, removed in Phase 3 — §10.3)
 replaces `onClose` on the agent's own `nodeModel`. That object is a spread copy
 made by `PaneLeafChrome` (`frontend/app/tab/pane-leaf-chrome.tsx:181`, or `:238`
 for kept-alive tabs, which agent panes use since
@@ -659,3 +660,112 @@ Log one line per closed agent: block, controller type, how it ended
 for a provider, that provider's shutdown needs work, or the grace period is
 too short (§7 Q4). `muxlog srv grep agent_shutdown` is enough; no metrics
 system is needed.
+
+### 9.9 As implemented
+
+- `Controller::shutdown`, `StopOutcome` and `SHUTDOWN_GRACE` are in
+  `agentmux-srv/src/backend/blockcontroller/mod.rs`. The default is today's
+  immediate stop.
+- The persistent (Claude stream-json) controller implements it as §9.3
+  describes (`persistent.rs`, `fn shutdown`):
+  - the kill channel carries `KillRequest::{Force, Graceful(deadline)}`;
+  - the kill arm records `stop_exit` the moment the process ends;
+  - `shutdown_generation` makes the stdout reader treat the interrupted turn's
+    `is_error` result as an ordinary end of turn (§9.4).
+- `shutdown_agents` (`agentmux-srv/src/sagas/close_pane.rs`) is used by
+  `delete_block`, `close_pane`, `delete_tab` (under `workspace_close_lock`)
+  and `delete_workspace`. It logs one `agent_shutdown` line per block.
+- **ACP and app-server controllers keep the default immediate stop.** §9.3
+  requires a measurement of each provider's exit behavior before either gets a
+  graceful path; neither has been run yet.
+- The reopen guard (`agent_open.rs`) waits on `wait_closing_stopped` for this
+  agent's closing blocks before deciding whether it is live elsewhere. The
+  picker's reattach (§4.7) is Phase 3 and does not wait yet.
+- Tests:
+  - `persistent::shutdown_tests` runs a node stub that behaves as §5.1
+    measured: a mid-turn close is interrupted and exits with no failure event,
+    an idle close exits on EOF, and a stub that ignores both is killed at the
+    deadline. The tests skip, with a note, if `node` isn't on PATH.
+  - `close_pane::tests` covers concurrency, the last-tab guard refusing
+    without stopping anything, window-tab close, and the closing-wait signal.
+
+## 10. Phase 3 as implemented
+
+### 10.1 Orphan reaper (§4.9)
+
+`agentmux-srv/src/sagas/orphan_reaper.rs`, installed from `main`.
+
+- **When it runs:** first sweep 2 minutes after startup, then every 60s.
+- **What it reaps:** an agent block that has stayed in its tab's `block_ids`
+  but in no leaf, counting background stack members as placed, for 90s
+  across sweeps. It is closed through the ordinary graceful `close_pane`.
+  A block that becomes placed in between is forgotten.
+- **Never reaped:**
+  - non-agent blocks (a first, narrow scope);
+  - sub-blocks (listed in a parent's `subblockids`);
+  - blocks already closing;
+  - blocks in a tab with no layout tree;
+  - blocks named by a queued placement action (`pendingbackendactions`).
+- **The queued-placement exemption was found while building this.**
+  `agent.open` and docked `pane.open` place a block by queueing an action for
+  the frontend. The backend tree gains the block only when a frontend applies
+  that action and pushes back. With no window showing the tab, it would
+  otherwise be reaped 90s after opening.
+
+
+### 10.2 Reopen guard (§4.7)
+
+The guard sits at the one point every reopen path goes through: the
+persistent controller's spawn, right before `--resume <sid>` is appended
+(`persistent.rs`, `session_held_elsewhere`). That covers the picker's
+reattach, the launch modal and MCP, not just `agent.open`.
+
+- **Another live persistent controller holds the session:** the spawn is
+  refused with "This conversation is already open in another pane … Close it
+  there, or switch to it".
+- **A block mid-close holds the session:** mid-close means it has left the
+  registry but its process has not exited (`closing_blocks_still_running`).
+  The spawn is refused with "… still shutting down. Try again in a few
+  seconds."
+- The error returns through `send_message` to the input RPC, so the sender
+  sees it.
+- The check and the claim are one step. A lock chosen by the session id (one of 64,
+  by hash, so memory stays bounded) is held from the check until this spawn's `current_pid` is set, so two reopens of
+  one session at once can't both pass (reagent P1 on #3421). The lock is per
+  session, so unrelated agents' respawns never wait on each other (a second
+  P1 on #3421 caught a first, global version). A test runs four
+  concurrent reopens against a real process: exactly one wins. Without the
+  lock, all four do.
+
+Scope: persistent (Claude) controllers only. Per-turn subprocess providers
+have no long-lived process to collide with between turns. The picker's
+"offer to switch to it" UX (§4.7) is not built. The refusal message says what
+to do instead.
+
+### 10.3 One confirmation per pane, and close failures surfaced (§4.5, §4.6)
+
+**Confirmation.**
+- **Where the hook is:** the layout asks
+  `LayoutModel.beforeNodeDelete(data) → Promise<boolean>` before it closes
+  anything. It is called from `closeNode`, for the whole pane, and from
+  `closeBlockInStack`, for one tab. It is supplied by `tabcontent.tsx`
+  through `TileLayoutContents`, the same way `onNodeDelete` is.
+- **What it checks:** `tabcontent` probes every member of the closing leaf:
+  `turn_active` from `GetControllerStatus`, and tracked processes from
+  `AgentProcessListCommand` (`frontend/app/tab/pane-close-guard.ts`,
+  `busyMembers`).
+- **What the user sees:**
+  - If any member is busy, one `ConfirmModal` lists each agent, for example
+    "Posa — mid-turn, 2 processes running". Cancel keeps the pane.
+  - An idle pane closes with no prompt.
+  - A probe that fails counts as "not busy", so a broken status lookup can
+    never make a pane impossible to close.
+- **What was removed:** `useAgentCloseConfirm` is deleted. It patched `onClose`
+  on the agent view's copy of the NodeModel, which the pane header's × never
+  reads (§3.5, confirmed in `pane-leaf-chrome.tsx`: the chrome gets the leaf's
+  own `nodeModel`). Its "kill the tree first" step is no longer needed: the
+  graceful close drops the tracker after the process exits.
+
+**Close failures surfaced.** When `ClosePane` fails, `onNodeDelete` shows a
+flash error ("Couldn't fully close the pane") instead of only logging through
+`fireAndForget`. If the close can't finish, the orphan reaper does.

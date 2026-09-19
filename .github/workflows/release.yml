@@ -373,9 +373,24 @@ jobs:
             gh release upload "v${VERSION}" dist-flat/* --clobber
           fi
 
+      # Replaces LANDING_DEPLOY_TOKEN, which fingerprinted as an `a5af`
+      # account PAT. The dispatch below is fire-and-forget -- this job stays
+      # green whether or not it lands -- so a dead credential here fails
+      # SILENTLY and the site just goes stale. A per-run token removes the
+      # "expired months ago and nobody noticed" failure mode entirely.
+      # Proven in ci-app-token-smoke.yml by sending a real (no-op) dispatch.
+      - name: Mint a short-lived token for the landing repo
+        id: landing_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: agentmuxai
+          repositories: agentmux-landing
+
       - name: Trigger landing page deploy
         env:
-          GH_TOKEN: ${{ secrets.LANDING_DEPLOY_TOKEN }}
+          GH_TOKEN: ${{ steps.landing_token.outputs.token }}
         run: |
           gh api \
             --method POST \

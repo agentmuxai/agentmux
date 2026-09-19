@@ -534,6 +534,7 @@ partial list.
 | [`SPEC_EARLY_ALPHA_WARNING_2026_06_05`](SPEC_EARLY_ALPHA_WARNING_2026_06_05.md) | SPEC: Early Alpha Warning — README & Microsoft Store Partner Center |
 | [`SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21`](SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21.md) | SPEC — Editor Markdown Live Preview Panel |
 | [`SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15`](SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md) | SPEC — Fast startup: the Upgrade button owns migrations and updates, the boot path owns nothing deferrable |
+| [`SPEC_FIRST_CLASS_GITHUB_APP_AND_AWS_IDENTITY_2026_09_19`](SPEC_FIRST_CLASS_GITHUB_APP_AND_AWS_IDENTITY_2026_09_19.md) | SPEC: GitHub App and AWS as first-class AgentMux identities |
 | [`SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01`](SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md) | Spec: Personal Memory is empty for any agent with a blank `working_directory` |
 | [`SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22`](SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) | Floating-pane DnD lifecycle — architecture rethink |
 | [`SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`](SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30.md) | SPEC — Rename Pool-Promoted Floating Panes to `floating-<uuid>` (Option A) |

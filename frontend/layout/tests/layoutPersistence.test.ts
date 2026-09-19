@@ -349,6 +349,74 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
         expect(closeNodeSpy).not.toHaveBeenCalled();
     });
 
+    // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2 / §3.4: a backend
+    // delete names ONE block. For a stacked pane it removes that tab only —
+    // deleting the whole leaf took every sibling tab (agents included) with it.
+    function stackRoot(model: LayoutModel, stack: string[], visible: string) {
+        insertBlock(model, stack[0]);
+        const data = model.treeState.rootNode!.data!;
+        data.blockStack = [...stack];
+        data.activeBlockId = visible;
+        data.blockId = visible;
+        model.updateTree(false);
+    }
+
+    function deleteAction(blockid: string, actionid: string) {
+        return {
+            actiontype: LayoutTreeActionType.DeleteNode,
+            actionid,
+            blockid,
+            targetblockid: "",
+            position: "",
+            nodesize: undefined,
+            focused: false,
+            magnified: false,
+            ephemeral: false,
+        };
+    }
+
+    it("DeleteNode for a background tab of a stacked pane removes only that tab", async () => {
+        const model = createLayoutModel();
+        stackRoot(model, ["existing", "moved-block"], "existing");
+
+        setPendingActions(model, [deleteAction("moved-block", "del-bg")]);
+        await processPendingBackendActions(model);
+
+        const data = model.treeState.rootNode?.data;
+        expect(data, "the pane must survive").toBeTruthy();
+        expect(data!.blockStack).toEqual(["existing"]);
+        expect(data!.blockId).toBe("existing");
+    });
+
+    it("DeleteNode for the visible tab of a stacked pane activates its right-hand neighbour", async () => {
+        const model = createLayoutModel();
+        stackRoot(model, ["existing", "moved-block", "new-block"], "moved-block");
+
+        setPendingActions(model, [deleteAction("moved-block", "del-visible")]);
+        await processPendingBackendActions(model);
+
+        const data = model.treeState.rootNode!.data!;
+        expect(data.blockStack).toEqual(["existing", "new-block"]);
+        expect(data.activeBlockId).toBe("new-block");
+        expect(data.blockId).toBe("new-block");
+    });
+
+    it("two DeleteNode actions for sibling tabs in one batch leave the pane with its remaining tab", async () => {
+        // reagent P1 on #3414: `leafs` is refreshed only once per batch, so a
+        // later action in the same batch can miss it and take the tree-walk
+        // fallback — which must also remove just the member, not the pane.
+        const model = createLayoutModel();
+        stackRoot(model, ["existing", "moved-block", "new-block"], "existing");
+
+        setPendingActions(model, [deleteAction("moved-block", "del-a"), deleteAction("new-block", "del-b")]);
+        await processPendingBackendActions(model);
+
+        const data = model.treeState.rootNode?.data;
+        expect(data, "the pane must survive").toBeTruthy();
+        expect(data!.blockStack).toEqual(["existing"]);
+        expect(data!.blockId).toBe("existing");
+    });
+
     it("actions with duplicate actionid are processed only once (idempotent)", async () => {
         const model = createLayoutModel();
         insertBlock(model, "existing");

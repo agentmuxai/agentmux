@@ -15,7 +15,9 @@ name: build-linux
 #
 # Required repo secrets (Settings → Secrets → Actions):
 #   A5AF_PACKAGES_TOKEN      npm GitHub Packages token (@a5af scope)
-#   CEF_RUNTIME_TOKEN        PAT (contents:read) for agentmuxai/cef
+#   CI_APP_ID / CI_APP_PRIVATE_KEY   GitHub App creds (org secrets); a
+#                                   short-lived token for agentmuxai/cef is
+#                                   minted per run, replacing CEF_RUNTIME_TOKEN
 #   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 
 on:
@@ -69,6 +71,20 @@ jobs:
       CEF_RUNTIME_DIR: ${{ github.workspace }}/cef-runtime
 
     steps:
+      # Replaces CEF_RUNTIME_TOKEN, a long-lived PAT, with an installation
+      # token that expires in an hour. Scoped to agentmuxai/cef only -- the
+      # private key can mint broader tokens, but this job only reads one
+      # repo's releases, so that is all it gets.
+      # Proven equivalent in ci-app-token-smoke.yml before this swap.
+      - name: Mint a short-lived token for agentmuxai/cef
+        id: cef_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: agentmuxai
+          repositories: cef
+
       - name: Resolve inputs
         id: in
         shell: bash
@@ -152,7 +168,7 @@ jobs:
       - name: Resolve patched libcef.so tag
         id: cef
         env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
         run: |
           TAG="${{ steps.in.outputs.cef_tag }}"
           if [ -z "$TAG" ]; then
@@ -187,7 +203,7 @@ jobs:
       - name: Download patched libcef.so
         if: steps.cef-cache.outputs.cache-hit != 'true'
         env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+          GH_TOKEN: ${{ steps.cef_token.outputs.token }}
         run: |
           mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR"
           gh release download "${{ steps.cef.outputs.tag }}" \
