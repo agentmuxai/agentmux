@@ -19,7 +19,7 @@ import { busyMembers, describeBusyMember, type BusyMember, type PaneCloseProbe }
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 /**
@@ -56,15 +56,24 @@ function TabContent(props: { tabId: string }): JSX.Element {
         return settings["window:tilegapsize"];
     });
 
-    const [pendingClose, setPendingClose] = createSignal<{
-        busy: BusyMember[];
-        resolve: (close: boolean) => void;
-    } | null>(null);
+    // Queue, not a single slot: two busy panes closed in quick succession
+    // each get their own answer, in order. A single slot let the second
+    // prompt overwrite the first, whose close then waited forever
+    // (reagent P1 on #3422).
+    const [pendingCloses, setPendingCloses] = createSignal<
+        { busy: BusyMember[]; resolve: (close: boolean) => void }[]
+    >([]);
+    const pendingClose = () => pendingCloses()[0] ?? null;
     const answerPendingClose = (close: boolean) => {
-        const pending = pendingClose();
-        setPendingClose(null);
-        pending?.resolve(close);
+        const [head, ...rest] = pendingCloses();
+        setPendingCloses(rest);
+        head?.resolve(close);
     };
+    // A tab that goes away with prompts still open cancels them, rather than
+    // leaving their closes waiting forever.
+    onCleanup(() => {
+        for (const pending of pendingCloses()) pending.resolve(false);
+    });
 
     const tileLayoutContents = createMemo<TileLayoutContents>(() => {
         const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
@@ -114,7 +123,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
             const blockIds = effectiveStack(data).filter(Boolean);
             const busy = await busyMembers(blockIds, paneCloseProbe);
             if (busy.length === 0) return true;
-            return new Promise<boolean>((resolve) => setPendingClose({ busy, resolve }));
+            return new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
         }
 
         return {
