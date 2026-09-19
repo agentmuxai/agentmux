@@ -189,6 +189,38 @@ pub struct BlockControllerRuntimeStatus {
 
 // ---- Controller trait ----
 
+/// How a [`Controller::shutdown`] ended. Logged per closed agent
+/// (spec §9.8) — a provider that is often `Killed` needs a better shutdown or
+/// a longer grace period.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopOutcome {
+    /// No process was running (lazy controller never spawned, or already gone).
+    NotRunning,
+    /// Stopped the immediate way (default impl) — no wait, no verdict.
+    Stopped,
+    /// The process exited on its own before the deadline.
+    Exited,
+    /// The process was still alive at the deadline and was killed.
+    Killed,
+}
+
+impl StopOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotRunning => "not_running",
+            Self::Stopped => "stopped",
+            Self::Exited => "exited",
+            Self::Killed => "killed",
+        }
+    }
+}
+
+pub type ShutdownFuture = std::pin::Pin<Box<dyn std::future::Future<Output = StopOutcome> + Send>>;
+
+/// Grace period for closing agents: one deadline per close, shared by every
+/// agent it stops (spec §9.2). Matches the kill task's long-standing 5s.
+pub const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Trait for block controllers. Each block type has its own implementation.
 /// Port of Go's `blockcontroller.Controller` interface.
 pub trait Controller: Send + Sync {
@@ -220,6 +252,23 @@ pub trait Controller: Send + Sync {
     /// overrides this today.
     fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
         self.stop(true, new_status)
+    }
+
+    /// Stop gracefully because the block is being CLOSED: end any turn in
+    /// progress, ask the process to exit, force-kill at `deadline`. The
+    /// returned future resolves once the process has actually exited (or
+    /// there was none). Does NOT drop the block's process tracker — the
+    /// caller does that after this resolves, so nothing the agent started
+    /// outlives it. See
+    /// docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §9.3.
+    ///
+    /// Default: today's immediate stop. Right for controllers with no agent
+    /// session worth ending cleanly (shells, cmd, per-turn subprocess) and for
+    /// providers whose exit behaviour hasn't been measured yet (ACP,
+    /// app-server — §9.3 requires that before they get a graceful path).
+    fn shutdown(&self, _deadline: std::time::Instant) -> ShutdownFuture {
+        let _ = self.stop(true, STATUS_DONE);
+        Box::pin(async { StopOutcome::Stopped })
     }
 
     /// Get the current runtime status.
@@ -349,31 +398,74 @@ fn remove_controller_entry_only(block_id: &str) {
 /// still present and spawn a fresh process for it — an orphan the close
 /// never sees. See docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md
 /// §4.2 step 1.
-static CLOSING_BLOCKS: std::sync::LazyLock<RwLock<std::collections::HashSet<String>>> =
-    std::sync::LazyLock::new(|| RwLock::new(std::collections::HashSet::new()));
+///
+/// Each entry also carries a completion signal (`true` once the block's
+/// process has exited), so a reopen racing the close can wait for the old
+/// process instead of starting a second `--resume` on the same session
+/// (spec §9.6).
+static CLOSING_BLOCKS: std::sync::LazyLock<RwLock<HashMap<String, tokio::sync::watch::Sender<bool>>>> =
+    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Refuse to (re)spawn a controller for `block_id` until [`unmark_closing`].
 pub fn mark_closing(block_id: &str) {
-    CLOSING_BLOCKS.write().unwrap().insert(block_id.to_string());
+    CLOSING_BLOCKS
+        .write()
+        .unwrap()
+        .entry(block_id.to_string())
+        .or_insert_with(|| tokio::sync::watch::channel(false).0);
+}
+
+/// Signal that a closing block's process has exited. The block stays marked
+/// closing (no respawn) until [`unmark_closing`].
+pub fn mark_closing_stopped(block_id: &str) {
+    if let Some(tx) = CLOSING_BLOCKS.read().unwrap().get(block_id) {
+        tx.send_replace(true);
+    }
 }
 
 /// Lift [`mark_closing`]. Called once the block's record is gone (or the
-/// close failed and the block stays).
+/// close failed and the block stays). Wakes anyone still waiting.
 pub fn unmark_closing(block_id: &str) {
-    CLOSING_BLOCKS.write().unwrap().remove(block_id);
+    if let Some(tx) = CLOSING_BLOCKS.write().unwrap().remove(block_id) {
+        tx.send_replace(true);
+    }
 }
 
 pub fn is_closing(block_id: &str) -> bool {
-    CLOSING_BLOCKS.read().unwrap().contains(block_id)
+    CLOSING_BLOCKS.read().unwrap().contains_key(block_id)
+}
+
+/// Wait until a closing block's process has exited, or `timeout`. Returns
+/// immediately for a block that isn't closing.
+pub async fn wait_closing_stopped(block_id: &str, timeout: std::time::Duration) {
+    let rx = CLOSING_BLOCKS.read().unwrap().get(block_id).map(|tx| tx.subscribe());
+    if let Some(mut rx) = rx {
+        let _ = tokio::time::timeout(timeout, rx.wait_for(|stopped| *stopped)).await;
+    }
 }
 
 /// Unregister (delete) a controller by block ID, stopping it first.
 /// Removes from the registry before calling stop() so no new callers can reach it.
 pub fn delete_controller(block_id: &str) {
-    let ctrl = CONTROLLER_REGISTRY.write().unwrap().remove(block_id);
+    let ctrl = take_controller(block_id);
     if let Some(ctrl) = ctrl {
         let _ = ctrl.stop(true, STATUS_DONE);
     }
+    release_block_processes(block_id);
+}
+
+/// Remove a controller from `CONTROLLER_REGISTRY` and hand it back, without
+/// stopping it — for the graceful close, which awaits
+/// [`Controller::shutdown`] and only then calls [`release_block_processes`].
+/// Once removed, no new input reaches it.
+pub fn take_controller(block_id: &str) -> Option<Arc<dyn Controller>> {
+    CONTROLLER_REGISTRY.write().unwrap().remove(block_id)
+}
+
+/// Drop the block's process tracker (killing anything left in its tree) and
+/// its Process Broker entry. The second half of [`delete_controller`]; a
+/// graceful close calls it only after the process has exited.
+pub fn release_block_processes(block_id: &str) {
     // Drop the process tracker for this block. On Windows the job
     // object's `KILL_ON_JOB_CLOSE` flag nukes the whole descendant
     // tree; on Linux/macOS the tracker's `Drop` does the same.

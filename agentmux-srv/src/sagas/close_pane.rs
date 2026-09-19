@@ -9,12 +9,13 @@
 // every other tab's agent running with no pane (§2 of the spec), and the
 // `ClosePane` MCP tool had the same gap (#3202). This saga takes the whole set.
 //
-// **Steps, per block (§4.2):**
-// 1. `shutdown_before_delete` — refuse respawn and messaging delivery, stop
-//    the controller and drop its process tracker, then save final state
-//    (`session:active_pid` cleared, instance row `stopped` + `ended_at`)
-//    while the block record still exists.
-// 2. `DeleteBlock { tab_id, block_id }` through the reducer.
+// **Steps (§4.2, §9.2):**
+// 1. `shutdown_agents` over every block at once, one deadline: refuse
+//    respawn and messaging delivery, interrupt any turn, let the process
+//    exit (force-kill at the deadline), THEN drop its process tracker, then
+//    save final state (`session:active_pid` cleared, instance row `stopped`
+//    + `ended_at`) while the block record still exists.
+// 2. `DeleteBlock { tab_id, block_id }` through the reducer, per block.
 //
 // **Then, once for the pane:** if every member of the leaf is gone, delete
 // the leaf (`LayoutDeleteNode`) and queue one frontend `delete` for it.
@@ -22,9 +23,6 @@
 // stack (`closeBlockInStack`) must never take its siblings with it; the
 // frontend has already pushed the shortened stack, and the reducer's
 // `prune_dangling_stack_members` covers any stale copy.
-//
-// Phase 1 of the spec: the stop is still the immediate hard kill
-// (`delete_controller`). Phase 2 makes it graceful and waits for exit.
 //
 // **Compensation:** none, same as `delete_block` — a stopped process and a
 // deleted record cannot be recreated from saga state. A block whose
@@ -132,8 +130,8 @@ async fn run_inner(
     leaf_to_delete: Option<(String, String)>,
 ) -> Result<Value, String> {
     let mut failures = Vec::new();
+    shutdown_agents(ctx.state, &block_ids).await;
     for block_id in &block_ids {
-        shutdown_before_delete(ctx.state, block_id);
         if let Err(reason) = ctx
             .dispatch(Command::DeleteBlock {
                 tab_id: tab_id.clone(),
@@ -203,19 +201,65 @@ async fn run_inner(
     }))
 }
 
-/// §4.2 steps 1 and 4–6 for one block, run while its record still exists.
-/// Shared with `delete_block` so a tab's own × and the pane's × stop an
-/// agent identically.
-pub(crate) fn shutdown_before_delete(state: &AppState, block_id: &str) {
+/// Serialises tab closes within one workspace, from `delete_tab`'s last-tab
+/// pre-check through its `DeleteTab` dispatch (spec §9.5). One lock per
+/// workspace id; entries are tiny and bounded by the number of workspaces.
+pub(crate) async fn workspace_close_lock(workspace_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    static LOCKS: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::LazyLock::new(Default::default);
+    let lock = LOCKS
+        .lock()
+        .unwrap()
+        .entry(workspace_id.to_string())
+        .or_default()
+        .clone();
+    lock.lock_owned().await
+}
+
+/// Stop every block in `block_ids` — concurrently, under ONE deadline — while
+/// their records still exist (spec §9.2). Every close path runs this before
+/// deleting records: a pane tab's × (`delete_block`), a pane's ×
+/// (`close_pane`), a window tab (`delete_tab`) and a window
+/// (`delete_workspace`). Ten agents take one grace period, not ten.
+pub(crate) async fn shutdown_agents(state: &AppState, block_ids: &[String]) {
+    let deadline = std::time::Instant::now() + blockcontroller::SHUTDOWN_GRACE;
+    futures_util::future::join_all(
+        block_ids.iter().map(|id| shutdown_one(state, id, deadline)),
+    )
+    .await;
+}
+
+async fn shutdown_one(state: &AppState, block_id: &str, deadline: std::time::Instant) {
+    let started = std::time::Instant::now();
     // 1. Stop routing input: no respawn (resync_controller refuses), no
-    //    jekt/muxbus delivery. The controller leaves CONTROLLER_REGISTRY in
-    //    the next step, so AgentInput finds nothing to write to.
+    //    jekt/muxbus delivery, and — once out of CONTROLLER_REGISTRY — no
+    //    AgentInput either.
     blockcontroller::mark_closing(block_id);
     state.reactive_handler.unregister_block(block_id);
-    // 4–5. Stop the process, then drop its tracker (kills its descendants).
-    blockcontroller::delete_controller(block_id);
+    let ctrl = blockcontroller::take_controller(block_id);
+    // 2–4. End the turn, ask the process to exit, force-kill at the deadline;
+    //      resolves once it has actually exited.
+    let (controller_type, outcome) = match ctrl {
+        Some(ctrl) => {
+            let outcome = ctrl.shutdown(deadline).await;
+            (ctrl.controller_type().to_string(), outcome)
+        }
+        None => (String::new(), blockcontroller::StopOutcome::NotRunning),
+    };
+    // 5. Only now drop the process tracker — anything the agent itself
+    //    started dies with it, but the agent got to exit first.
+    blockcontroller::release_block_processes(block_id);
+    blockcontroller::mark_closing_stopped(block_id);
     // 6. Save final state.
     save_final_state(state, block_id);
+    tracing::info!(
+        block_id = %block_id,
+        controller_type = %controller_type,
+        outcome = outcome.as_str(),
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "agent_shutdown"
+    );
 }
 
 /// Clear `session:active_pid` (so the next boot doesn't read this as an
@@ -508,7 +552,7 @@ mod tests {
             .unwrap();
 
         // Run only the pre-delete half and observe the block while it exists.
-        shutdown_before_delete(&state, &a);
+        shutdown_agents(&state, std::slice::from_ref(&a)).await;
         let block = state.mstore.get::<Block>(&a).unwrap().expect("block still exists");
         assert!(
             block
@@ -560,6 +604,150 @@ mod tests {
         assert_eq!(out["block_ids"], json!([a]));
         let err = run(&state, vec!["ghost".into()]).await.unwrap_err();
         assert!(err.contains("block not found"), "got: {err}");
+    }
+
+    /// A controller whose graceful shutdown takes `delay`.
+    struct SlowStop {
+        block_id: String,
+        delay: std::time::Duration,
+    }
+
+    impl blockcontroller::Controller for SlowStop {
+        fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<Value>, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn shutdown(&self, _deadline: std::time::Instant) -> blockcontroller::ShutdownFuture {
+            let delay = self.delay;
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                blockcontroller::StopOutcome::Exited
+            })
+        }
+        fn get_runtime_status(&self) -> blockcontroller::BlockControllerRuntimeStatus {
+            blockcontroller::BlockControllerRuntimeStatus {
+                blockid: self.block_id.clone(),
+                ..Default::default()
+            }
+        }
+        fn send_input(&self, _: blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn controller_type(&self) -> &str {
+            "slow-stop-test"
+        }
+        fn block_id(&self) -> &str {
+            &self.block_id
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn register_slow(block_id: &str, delay_ms: u64) {
+        blockcontroller::register_controller(
+            block_id,
+            std::sync::Arc::new(SlowStop {
+                block_id: block_id.to_string(),
+                delay: std::time::Duration::from_millis(delay_ms),
+            }),
+        );
+    }
+
+    /// Spec §9.2: agents in one close stop concurrently under one deadline.
+    /// Three that each take 1s finish in about 1s, not 3s.
+    #[tokio::test]
+    async fn agents_in_one_close_stop_concurrently() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let id = seed_block(&state, &tab_id).await;
+            register_slow(&id, 1000);
+            ids.push(id);
+        }
+        let started = std::time::Instant::now();
+        shutdown_agents(&state, &ids).await;
+        let elapsed = started.elapsed();
+        assert!(elapsed < std::time::Duration::from_millis(2500), "sequential? took {elapsed:?}");
+        for id in &ids {
+            assert!(blockcontroller::get_controller(id).is_none(), "controller removed");
+            finish_close(&state, id).await;
+        }
+    }
+
+    /// Spec §9.5: closing the last window tab is refused BEFORE any agent in
+    /// it is stopped — otherwise a refused close leaves a tab of stopped
+    /// agents.
+    #[tokio::test]
+    async fn last_tab_close_is_refused_without_stopping_its_agents() {
+        let state = test_state();
+        let (ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        register_slow(&a, 0);
+
+        let err = crate::sagas::delete_tab::run(&state, ws, tab_id).await.unwrap_err();
+        assert!(err.contains("last tab"), "got: {err}");
+        assert!(blockcontroller::get_controller(&a).is_some(), "agent must not be stopped");
+        assert!(!blockcontroller::is_closing(&a));
+        blockcontroller::delete_controller(&a);
+    }
+
+    /// Closing a window tab stops its agents (through the shared shutdown)
+    /// and deletes the tab.
+    #[tokio::test]
+    async fn window_tab_close_stops_its_agents() {
+        let state = test_state();
+        let (ws, tab1) = seed_tab(&state).await;
+        let tab2 = dispatch_apply(
+            &state,
+            Command::CreateTab {
+                workspace_id: ws.clone(),
+                name: "t2".into(),
+            },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        let a = seed_block(&state, &tab2).await;
+        let b = seed_block(&state, &tab2).await;
+        register_slow(&a, 300);
+        register_slow(&b, 300);
+
+        crate::sagas::delete_tab::run(&state, ws, tab2.clone()).await.unwrap();
+
+        assert!(blockcontroller::get_controller(&a).is_none());
+        assert!(blockcontroller::get_controller(&b).is_none());
+        assert!(!blockcontroller::is_closing(&a) && !blockcontroller::is_closing(&b));
+        let s = state.srv_state.lock().await;
+        assert!(!s.tabs.contains_key(&tab2));
+        assert!(s.tabs.contains_key(&tab1));
+    }
+
+    /// A reopen racing a close waits for the old process instead of calling
+    /// it gone the moment its controller leaves the registry (spec §9.6).
+    #[tokio::test]
+    async fn waiting_on_a_closing_block_returns_once_it_has_stopped() {
+        let id = format!("closing-wait-{}", uuid::Uuid::new_v4());
+        blockcontroller::mark_closing(&id);
+        let waiter_id = id.clone();
+        let waiter = tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            blockcontroller::wait_closing_stopped(&waiter_id, std::time::Duration::from_secs(5)).await;
+            started.elapsed()
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        blockcontroller::mark_closing_stopped(&id);
+        let waited = waiter.await.unwrap();
+        assert!(waited >= std::time::Duration::from_millis(250), "returned early: {waited:?}");
+        assert!(waited < std::time::Duration::from_secs(2), "missed the signal: {waited:?}");
+        blockcontroller::unmark_closing(&id);
     }
 
     #[test]

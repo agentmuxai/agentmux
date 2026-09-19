@@ -66,6 +66,13 @@ pub async fn run(
     workspace_id: String,
     tab_id: String,
 ) -> Result<Value, String> {
+    // Held from the last-tab pre-check through the DeleteTab dispatch.
+    // Agents are now stopped BEFORE the dispatch (pane-close spec §9.5), so
+    // the pre-check must stay true until then: two concurrent closes of the
+    // last two tabs would otherwise both pass it, both stop their agents, and
+    // the loser would leave a tab full of stopped agents.
+    let _close_guard = super::close_pane::workspace_close_lock(&workspace_id).await;
+
     // Pre-conditions: tab exists in workspace; not the last tab.
     //
     // **Last-tab pre-check is best-effort.** A reducer-level guard
@@ -134,6 +141,11 @@ pub async fn run(
     {
         return Err(e);
     }
+    // Stop every agent in the tab — gracefully, concurrently, one deadline —
+    // before its records go (pane-close spec §9.5). The persist step's
+    // `delete_tab_inner` still calls `delete_controller` per block; it finds
+    // nothing left to stop.
+    super::close_pane::shutdown_agents(state, &block_ids_to_cleanup).await;
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_tab", run_inner(ctx, workspace_id, tab_id.clone())).await;
     // If the tab is gone from reducer state, the reducer dispatched
@@ -148,6 +160,9 @@ pub async fn run(
                 crate::backend::blockcontroller::delete_controller(block_id);
             }
         }
+    }
+    for block_id in &block_ids_to_cleanup {
+        super::close_pane::finish_close(state, block_id).await;
     }
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
