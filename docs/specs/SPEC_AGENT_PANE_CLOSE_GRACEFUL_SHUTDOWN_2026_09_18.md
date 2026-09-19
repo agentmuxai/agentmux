@@ -1,8 +1,8 @@
 # SPEC: Closing a pane shuts down every agent in it — gracefully, in order
 
 **Date:** 2026-09-18
-**Status:** proposed — design only, nothing implemented yet. Lands with its
-implementing PR, not as a docs-only change.
+**Status:** active — Phase 0 measured (§5.1), Phase 1 implemented (§5.2);
+Phases 2–3 not started.
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
 (the continuity guarantee this spec protects),
@@ -71,7 +71,10 @@ Evidence, all from the running instance's own data:
 Swarm was reporting the truth: the controller was still registered. The bug is
 that nothing ever removed it.
 
-## 3. How it works today (verified in code)
+## 3. How it worked before Phase 1 (verified in code)
+
+This section records the code as the audit found it. §5.2 lists what Phase 1
+changed.
 
 ### 3.1 Close paths
 
@@ -212,10 +215,15 @@ After all members: prune the layout leaf once.
   signal completion (a oneshot or notify) so `shutdown_controller` can await it
   instead of assuming.
 - **Turn in progress at close:** closing a pane is the user choosing to stop,
-  so the default is to interrupt the turn cleanly (the control protocol's
-  interrupt, see `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`), then
-  send EOF. Whether EOF alone ends a stream-json session cleanly mid-turn is
-  not yet verified — Phase 0 (§5).
+  so interrupt the turn (the control protocol's interrupt, see
+  `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`), wait for the
+  turn's `result` event, then send EOF. Phase 0 (§5.1) showed EOF alone does
+  **not** end a running turn: the CLI finishes the turn first, so with a 5s
+  grace every mid-turn close would end in a force-kill.
+- **Idle at close:** EOF alone; the CLI exits cleanly in under half a second.
+- **Exit code after an interrupt is 1** (the turn's result is
+  `error_during_execution`). The controller's exit handling must treat that as
+  the requested stop, not a crash — no failure banner, no crash-restart.
 
 ### 4.4 Several agents in one pane
 
@@ -275,14 +283,56 @@ The first reaper run also cleans up orphans left by the bug today.
 
 ## 5. Phases and tests
 
-**Phase 0 — measure before building (no user-visible change).** In a `task dev`
-instance, for a stream-json persistent session: send EOF while idle and while a
-turn is running; send the control-protocol interrupt then EOF. Record exit time,
-exit code, and whether the session resumes intact afterwards. This decides §4.3.
+**Phase 0 — measure before building (no user-visible change).** For a
+stream-json persistent session: send EOF while idle and while a turn is
+running; send the control-protocol interrupt then EOF. Record exit time, exit
+code, and whether the session resumes intact afterwards. This decides §4.3.
+
+### 5.1 Phase 0 results (2026-09-18)
+
+Measured against the pinned CLI (`@anthropic-ai/claude-code` `bin/claude.exe`
+from the 0.56.6 instance), launched with the production flags
+(`--input-format stream-json --output-format stream-json --verbose
+--include-partial-messages --permission-prompt-tool stdio
+--dangerously-skip-permissions`, `--model haiku`), after an `initialize`
+control request. The mid-turn cases asked the model to run `sleep 20` via Bash
+and acted 2s after the `tool_use` event. Times are from the action.
+
+| Case | What happened | Exit | Resume afterwards |
+|---|---|---|---|
+| EOF while idle | exits | 0, after 0.4s | — |
+| EOF mid-turn | **keeps running**: finishes the tool call and the turn (`result: success`), then exits | 0, after **22.8s** | intact — the model recalls the command |
+| Interrupt, EOF 1.5s later | interrupt acked in 13ms; `result: error_during_execution` just after the EOF | 1, after 1.9s | intact |
+| Interrupt, EOF 6s later | `result: error_during_execution` 2.3s after the interrupt, with stdin still open; exit after EOF | 1, 0.5s after EOF | — |
+
+So the interrupt on its own ends the turn in about 2s, EOF then exits in about
+0.5s, and neither loses the session. §4.3 is written from this.
 
 **Phase 1 — every agent in a closed pane stops, in the right order.**
 `ClosePane` saga (§4.1), per-agent order with the existing hard kill (§4.2
 steps 1, 4–7), pane × wired to it, `ClosePane` MCP routed through it (#3202).
+
+### 5.2 Phase 1 as implemented
+
+- `agentmux-srv/src/sagas/close_pane.rs`: `close_pane::run(block_ids)`. Per
+  block, `shutdown_before_delete` (mark closing, unregister from messaging,
+  `delete_controller`, clear `session:active_pid`, instance row `stopped` +
+  `ended_at`), then `DeleteBlock`. The leaf is deleted, and one frontend
+  `delete` queued, only when no member of it survives — so one id from a
+  tab's own × closes that tab and keeps the pane.
+- `delete_block` runs the same `shutdown_before_delete` before its reducer
+  dispatch, so a tab's × and the pane's × stop an agent identically.
+- A closing block is refused by `resync_controller`
+  (`blockcontroller::mark_closing`), so nothing can respawn it between the
+  stop and the record delete.
+- Frontend: `onNodeDelete` (`frontend/app/tab/tabcontent.tsx`) sends
+  `ObjectService.ClosePane(effectiveStack(data))`.
+- `ClosePane` MCP (`agentmux-srv/src/server/app_api/pane.rs`) expands the
+  target to its leaf's members (`backend::layout::find_leaf_containing_block`).
+- **Not yet reordered: `delete_tab`.** It still deletes records before
+  stopping controllers. Stopping first there needs care: its reducer step can
+  refuse (last-tab guard), and stopping every agent in a tab that then stays
+  open would be worse than today. It moves with Phase 2.
 
 **Phase 2 — graceful.** `shutdown_controller`, `stop` honoring `graceful`,
 completion signal, concurrent members (§4.3, §4.4).
@@ -330,8 +380,10 @@ authoritative run.
 
 ## 7. Open questions
 
-1. How does the pinned Claude CLI behave on stdin EOF mid-turn in stream-json
-   mode (Phase 0)? Interrupt-then-EOF is the default until measured.
+1. ~~How does the pinned Claude CLI behave on stdin EOF mid-turn in
+   stream-json mode?~~ Answered in §5.1: it finishes the turn. Interrupt first.
+   Other providers (Codex, Gemini, ...) are not measured; Phase 2 keeps the
+   force-kill deadline as their backstop.
 2. Why is the local instance row's `session_id` empty for every agent in the
    incident instance, when `sync_instance_session_id` looks the row up by block
    id and the row's `last_block_id` matches? Reopen reads the shared registry,

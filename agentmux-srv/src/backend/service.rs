@@ -201,6 +201,11 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["uiContext".into(), "blockId".into()],
             return_desc: None,
         }),
+        ("object", "ClosePane") => Some(MethodMeta {
+            desc: Some("close a pane: stop and delete every block in its stack".into()),
+            arg_names: vec!["uiContext".into(), "blockIds".into()],
+            return_desc: None,
+        }),
         ("object", "UpdateObjectMeta") => Some(MethodMeta {
             desc: Some("update object meta".into()),
             arg_names: vec!["uiContext".into(), "oref".into(), "meta".into()],

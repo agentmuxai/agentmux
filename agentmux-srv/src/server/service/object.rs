@@ -176,6 +176,20 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             }
             WebReturnType::success_empty()
         }
+        // A pane's × — every block in the pane's stack, stopped before its
+        // records are deleted (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md).
+        // Closing one tab of a stack sends that one id; the saga keeps the
+        // pane when other members survive.
+        "ClosePane" => {
+            let block_ids: Vec<String> = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            if let Err(reason) = crate::sagas::close_pane::run(state, block_ids).await {
+                return WebReturnType::error(reason);
+            }
+            WebReturnType::success_empty()
+        }
         "UpdateObject" => {
             let mux_obj_value: serde_json::Value = match service::get_arg(args, 0) {
                 Ok(v) => v,

@@ -8,6 +8,7 @@ import { ModalLayer } from "@/element/ModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
 import logoUrl from "@/app/asset/logo-brain.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
+import { effectiveStack } from "@/layout/lib/layoutStack";
 import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/store/global";
 import * as services from "@/store/services";
@@ -52,11 +53,17 @@ function TabContent(props: { tabId: string }): JSX.Element {
             return <Block nodeModel={nodeModel} preview={true} />;
         };
 
+        // Every block in the closed leaf, not just the visible one — closing a
+        // pane that holds several tabs used to leave every background tab's
+        // agent running with no pane. `closeBlockInStack` passes `{ blockId }`
+        // alone, which the backend treats as one tab of a surviving pane.
+        // SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.1.
         async function onNodeDelete(data: TabLayoutData) {
-            getApi().sendLog(`[BUG-TRACE] onNodeDelete ENTER for blockId: ${data.blockId}`);
+            const blockIds = effectiveStack(data).filter(Boolean);
+            getApi().sendLog(`[BUG-TRACE] onNodeDelete ENTER for blockIds: ${blockIds.join(",")}`);
             try {
-                const result = await services.ObjectService.DeleteBlock(data.blockId);
-                getApi().sendLog(`[BUG-TRACE] onNodeDelete DeleteBlock returned: ${JSON.stringify(result)}`);
+                const result = await services.ObjectService.ClosePane(blockIds);
+                getApi().sendLog(`[BUG-TRACE] onNodeDelete ClosePane returned: ${JSON.stringify(result)}`);
                 return result;
             } catch (err) {
                 getApi().sendLog(`[BUG-TRACE] onNodeDelete ERROR: ${err}`);

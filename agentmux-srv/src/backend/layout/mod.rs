@@ -158,6 +158,31 @@ pub fn find_node_id_by_block(tree: &LayoutNode, block_id: &str) -> Option<String
     None
 }
 
+/// A leaf's members: its `block_stack`, or `[block_id]` for a leaf with no
+/// stack (mirrors the frontend's `effectiveStack`, `layoutStack.ts`).
+pub fn leaf_members(data: &agentmux_common::LayoutNodeData) -> Vec<String> {
+    if data.block_stack.is_empty() {
+        vec![data.block_id.clone()]
+    } else {
+        data.block_stack.clone()
+    }
+}
+
+/// Find the (first) leaf that has `block_id` as its visible block OR as any
+/// member of its `block_stack`. Unlike [`find_node_id_by_block`], which only
+/// matches the visible block, this finds the pane a background tab lives in.
+/// Returns the leaf node itself.
+pub fn find_leaf_containing_block<'a>(tree: &'a LayoutNode, block_id: &str) -> Option<&'a LayoutNode> {
+    if let Some(d) = tree.data.as_ref() {
+        if d.block_id == block_id || d.block_stack.iter().any(|b| b == block_id) {
+            return Some(tree);
+        }
+    }
+    tree.children
+        .iter()
+        .find_map(|child| find_leaf_containing_block(child, block_id))
+}
+
 /// Removes every leaf whose `data.block_id` is not in `live_block_ids`,
 /// using the same collapse semantics as an explicit user delete
 /// (`delete_node`'s single-child-parent promotion). Returns the number of

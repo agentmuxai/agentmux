@@ -343,6 +343,30 @@ fn remove_controller_entry_only(block_id: &str) {
     CONTROLLER_REGISTRY.write().unwrap().remove(block_id);
 }
 
+/// Blocks whose pane is being closed. Between stopping a block's
+/// controller and deleting its record, a `resync_controller` (frontend
+/// ControllerResync, `agent.open`, ...) would otherwise find the block
+/// still present and spawn a fresh process for it — an orphan the close
+/// never sees. See docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md
+/// §4.2 step 1.
+static CLOSING_BLOCKS: std::sync::LazyLock<RwLock<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| RwLock::new(std::collections::HashSet::new()));
+
+/// Refuse to (re)spawn a controller for `block_id` until [`unmark_closing`].
+pub fn mark_closing(block_id: &str) {
+    CLOSING_BLOCKS.write().unwrap().insert(block_id.to_string());
+}
+
+/// Lift [`mark_closing`]. Called once the block's record is gone (or the
+/// close failed and the block stays).
+pub fn unmark_closing(block_id: &str) {
+    CLOSING_BLOCKS.write().unwrap().remove(block_id);
+}
+
+pub fn is_closing(block_id: &str) -> bool {
+    CLOSING_BLOCKS.read().unwrap().contains(block_id)
+}
+
 /// Unregister (delete) a controller by block ID, stopping it first.
 /// Removes from the registry before calling stop() so no new callers can reach it.
 pub fn delete_controller(block_id: &str) {
@@ -583,6 +607,10 @@ pub fn resync_controller(
     if controller_type.is_empty() {
         // No controller type = web/static block, nothing to manage
         return Ok(());
+    }
+
+    if is_closing(block_id) {
+        return Err(format!("resync_controller: block {block_id} is closing"));
     }
 
     // Container agents (agentMode == "container") require a subprocess controller for
