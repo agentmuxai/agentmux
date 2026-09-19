@@ -303,23 +303,6 @@ function Block(props: BlockProps): JSX.Element {
             registerBlockComponentModel(props.nodeModel.blockId, registeredBcm);
         }
         setViewModel(vm);
-        // Unconditional, same as the setActiveViewModel call below — an
-        // ADOPTED vm (registry already had one for this blockId+viewType)
-        // still needs its cached nodeModel refreshed to THIS mount's
-        // wrapper, or a field like AgentViewModel/TermViewModel's
-        // `noHeader` (which reads `this.nodeModel.paneChromeHoisted`) stays
-        // pinned to whatever wrapper was live at the vm's ORIGINAL
-        // construction — stale the moment a later mount for the same
-        // blockId passes a differently-shaped wrapper (e.g.
-        // pane-leaf-chrome.tsx's keep-alive branch, once hoisted() latches
-        // true after the first, pre-data-load render). See custom.d.ts's
-        // own doc comment on `updateNodeModel`. `as any` mirrors
-        // `makeViewModel`'s own cast just above — `NodeModel` vs.
-        // `BlockNodeModel`'s `innerRect` shape is structurally
-        // incompatible (CSS `Properties` vs. a plain `{width,height}`),
-        // same non-issue in both places since neither ViewModel actually
-        // reads `innerRect` off this field.
-        vm.updateNodeModel?.(props.nodeModel as any);
         // See NodeModel.activeViewModel/setActiveViewModel's own doc
         // comments (layout/lib/types.ts) — hoisted pane chrome's only live
         // pointer to a callable ViewModel, since the global registry

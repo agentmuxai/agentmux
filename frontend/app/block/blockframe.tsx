@@ -866,7 +866,21 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         const holder: { current: HTMLDivElement | null } = { current: null };
         return () => holder;
     })();
-    const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
+    // Deliberately a plain function reference, NOT eagerly invoked here —
+    // this used to be `util.useAtomValueSafe(props.viewModel?.noHeader)`,
+    // computed once as a plain boolean at this component's own (one-time)
+    // setup. That silently froze the header decision forever, since
+    // `BlockFrame_Default_Component` itself is constructed once and never
+    // remounts (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) and
+    // `props.viewModel`'s underlying signal doesn't change identity on a
+    // block.tsx ViewModel-registry ADOPTION either (same object, so the
+    // signal setter is a same-reference no-op) — so a value read here once
+    // could never update even after `paneChromeHoisted` genuinely flipped.
+    // Calling `noHeader()` inline at each JSX use site below instead keeps
+    // this a normal Solid reactive read, correctly re-deriving whenever
+    // `paneChromeHoisted` (now a live accessor, not a snapshot — see
+    // `BlockNodeModel.paneChromeHoisted`'s own doc comment) changes.
+    const noHeader = () => props.viewModel?.noHeader?.() ?? false;
     // Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
     // types keep the badge unconditionally, matching prior behavior — this
     // setting exists specifically for the terminal pane's CPU%/mem overlay.
@@ -1070,7 +1084,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 />
             </Show>
             <div class="block-frame-default-inner" style={innerStyle}>
-                {noHeader || <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>}
+                {noHeader() || <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>}
                 <Show when={!props.preview && blockData()}>
                     <TitleBar
                         blockId={nodeModel.blockId}
@@ -1080,7 +1094,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 </Show>
                 {props.preview ? previewElem : props.children}
                 <Show when={showStatsBadge()}>
-                    <BlockStatsBadge blockId={nodeModel.blockId} noHeader={noHeader} />
+                    <BlockStatsBadge blockId={nodeModel.blockId} noHeader={noHeader()} />
                 </Show>
             </div>
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>

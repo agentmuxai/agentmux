@@ -597,16 +597,6 @@ declare global {
         giveFocus?: () => boolean;
         keyDownHandler?: (e: MuxKeyboardEvent) => boolean;
         dispose?: () => void;
-        /** Called by block.tsx on every mount attempt for this blockId —
-         *  including when an existing ViewModel is ADOPTED from the
-         *  registry rather than freshly constructed via `makeViewModel`.
-         *  A ViewModel that caches its own constructor-time `nodeModel`
-         *  (agent/term, for `noHeader`'s `paneChromeHoisted` check) must
-         *  implement this to keep that cache from going stale across an
-         *  adoption where the caller's nodeModel WRAPPER identity changed
-         *  (e.g. pane-leaf-chrome.tsx switching a pane into its keep-alive
-         *  branch after first mount) — see block.tsx's own call site. */
-        updateNodeModel?: (nodeModel: BlockNodeModel) => void;
         /** Views that support voice input expose a handle accessor. Called
          *  by BlockFrame_Header (to render the mic button) and by the
          *  Ctrl+Shift+V global hotkey to retarget the voice session. */

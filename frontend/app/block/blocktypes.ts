@@ -19,8 +19,24 @@ export interface BlockNodeModel {
      *  raw leaf nodeModel a drag-preview thumbnail gets
      *  (`tabcontent.tsx`'s `renderPreview`), which has no chrome around it
      *  and therefore still needs `BlockFrame`'s own inline header. See
-     *  that wrapper's construction in `pane-leaf-chrome.tsx`. */
-    paneChromeHoisted?: boolean;
+     *  that wrapper's construction in `pane-leaf-chrome.tsx`.
+     *
+     *  An ACCESSOR, not a plain boolean, deliberately — it's the SAME
+     *  `hoisted` memo reference `pane-leaf-chrome.tsx` computes for the
+     *  whole leaf, forwarded as-is rather than snapshotted. A plain
+     *  boolean baked in at wrapper-construction time goes stale the
+     *  moment a LATER wrapper (a different `paneChromeHoisted` snapshot)
+     *  gets built for the same blockId before block.tsx's ViewModel
+     *  registry has a chance to construct a fresh ViewModel for it —
+     *  `getBlockComponentModel` ADOPTS the existing one instead whenever
+     *  `viewType` still matches, so a `noHeader` reading a frozen
+     *  snapshot off `this.nodeModel` can end up permanently wrong (the
+     *  double-header bug this comment's PR fixed). Forwarding the LIVE
+     *  memo instead means every wrapper for this leaf — however many get
+     *  built, whichever one a ViewModel happens to be holding — always
+     *  reports the SAME, currently-correct value, so ViewModel adoption
+     *  timing can no longer matter. */
+    paneChromeHoisted?: () => boolean;
 }
 
 export type FullBlockProps = {

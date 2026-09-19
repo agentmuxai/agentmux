@@ -90,15 +90,6 @@ class TermViewModel implements ViewModel {
     searchAtoms?: SearchAtoms;
     voiceHandle: () => PaneVoiceHandle;
 
-    /** See ViewModel.updateNodeModel's own doc comment (custom.d.ts) —
-     *  block.tsx calls this on every mount attempt, including when this
-     *  instance is ADOPTED rather than freshly constructed, so
-     *  `noHeader`'s `this.nodeModel.paneChromeHoisted` read never stays
-     *  pinned to a stale wrapper from this instance's original
-     *  construction. */
-    updateNodeModel(nodeModel: BlockNodeModel): void {
-        this.nodeModel = nodeModel;
-    }
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "term";
@@ -360,7 +351,7 @@ class TermViewModel implements ViewModel {
      *  `<Block preview>`, no chrome around it) keeps its own header — the
      *  same bug Codex/ReAgent caught on the agent pane in #3151. */
     get noHeader(): () => boolean {
-        return () => this.nodeModel.paneChromeHoisted === true;
+        return () => this.nodeModel.paneChromeHoisted?.() === true;
     }
 
     /** Terminal now renders through the ONE shared chrome like every other
