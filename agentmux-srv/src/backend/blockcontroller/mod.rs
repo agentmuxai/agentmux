@@ -170,6 +170,18 @@ pub struct BlockControllerRuntimeStatus {
     /// Unix timestamp (ms) when the process was spawned; None until first spawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_ts_ms: Option<i64>,
+    /// PID of the controller's own child process. Set by the shell
+    /// controller, which is the one the UI needs it for: the agent pane's
+    /// Shell drawer identifies its shell by PID (see
+    /// docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §4.1).
+    /// None before the first spawn, and for controllers that don't set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shellprocpid: Option<u32>,
+    /// Program name of that child (`pwsh`, `bash`, …). The process tracker
+    /// can't supply it — it omits each block's root process by design, and
+    /// for a shell sub-block the root IS the shell.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shellprocname: String,
     /// True if this pane is running an agent CLI (e.g. claude, codex, gemini, kimi, openclaw, pi).
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_agent_pane: bool,

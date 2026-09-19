@@ -138,3 +138,72 @@
     margin-top: var(--space-1);
     border-top: 1px solid var(--border-color);
 }
+
+// === Shell drawer info line ===
+// One row at the top of the Shell drawer (AgentShellInfoPanel): what the
+// shell is on the left, what the agent has running on the right. Sized to
+// match the composer strip above it, and deliberately shallow — the terminal
+// below is what the drawer is for.
+.agent-view .agent-shell-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 2px var(--space-2);
+    border-top: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+
+    > * {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1-5);
+        min-width: 0;
+    }
+}
+
+.agent-view .agent-shell-info-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    // Grey until the shell reports "running"; red once it exits non-zero.
+    background: var(--secondary-text-color);
+    opacity: 0.5;
+
+    &--running {
+        background: var(--success-color, #22c55e);
+        opacity: 1;
+    }
+
+    &--failed {
+        background: var(--error-color);
+        opacity: 1;
+    }
+}
+
+.agent-view .agent-shell-info-name {
+    color: var(--main-text-color);
+}
+
+.agent-view .agent-shell-info-exit {
+    color: var(--error-color);
+}
+
+.agent-view .agent-shell-info-cwd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+}
+
+.agent-view .agent-shell-info-count {
+    color: var(--main-text-color);
+}
+
+.agent-view .agent-shell-info-muted {
+    opacity: 0.6;
+}
