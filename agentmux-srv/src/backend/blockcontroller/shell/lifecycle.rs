@@ -592,14 +592,9 @@ impl Controller for ShellController {
                 .join("logs");
             c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
 
-            // Propagate local backend URL so the muxbus client (agentbus-client package) prefers local PTY delivery.
-            // Set by main.rs after binding; absent in test/mock contexts (graceful no-op).
-            if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                c.env("AGENTMUX_LOCAL_URL", &local_url);
-            }
-
-            // The AGENTMUX sentinel is set by pane_env::sanitize_pty_command
-            // after the if/else, so every branch gets it — not just this one.
+            // AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY: injected below, applied
+            // to ALL THREE branches (not just this one) — see that comment
+            // for why.
 
             // Wire AgentMux-managed tool dirs into the agent's PATH.
             //
@@ -728,6 +723,32 @@ impl Controller for ShellController {
 
             c
         };
+
+        // Propagate this instance's local API endpoint + auth key to ALL
+        // THREE branches above, not just the interactive shell — same "don't
+        // half-fix it" lesson as the sanitize_pty_command call below (ReAgent
+        // P0 on PR #3326). `muxsh`/`muxspect`/`muxopen`/`muxlog` — meant for
+        // a human to run from inside a plain Terminal-widget pane, the same
+        // role Wave Terminal's `wsh` played — need both to authenticate
+        // against this instance's REST API; without them they fail with
+        // "AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY not set" even when run from
+        // a pane AgentMux itself opened, which is exactly the case they're
+        // documented to support (SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md).
+        //
+        // AGENTMUX_LOCAL_URL is set by main.rs after binding and never
+        // scrubbed from this process's own env, so it can be read straight
+        // back (absent in test/mock contexts — graceful no-op). AUTH_KEY
+        // cannot be read the same way: config.rs deliberately removes it
+        // from this process's own environment right after startup (PR #801),
+        // so it has to be threaded in explicitly via `self.auth_key` instead
+        // — the same value agent panes already receive via their own
+        // `PersistentSpawnConfig`/`SubprocessSpawnConfig` env_vars.
+        if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
+            cmd.env("AGENTMUX_LOCAL_URL", &local_url);
+        }
+        if !self.auth_key.is_empty() {
+            cmd.env("AGENTMUX_AUTH_KEY", &self.auth_key);
+        }
 
         // Applied to ALL THREE branches above, not just the interactive shell.
         // The direct-spawn branch launches agent CLIs and the shell-wrapped `cmd`
@@ -2063,6 +2084,7 @@ mod agent_lease_release_tests {
             None,
             None,
             None,
+            String::new(),
         ))
     }
 
@@ -2142,6 +2164,7 @@ mod controller_agent_id_tests {
             None,
             None,
             None,
+            String::new(),
         )
     }
 
