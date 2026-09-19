@@ -76,28 +76,67 @@ fi
 agent="$(printf '%s' "${AGENTMUX_AGENT_ID:-}" | tr '[:upper:]' '[:lower:]')"
 [[ -n "$agent" ]] || agent="genericagentx"
 
+# github-app-token.py has an exit-code contract, and it matters here:
+#   0 = token on stdout
+#   2 = this agent has no App identity  -> expected, stay quiet
+#   1 = the lookup genuinely FAILED (expired AWS credentials, Secrets Manager
+#       unreachable, malformed key) -> must be surfaced
+#
+# Flattening 1 and 2 into "no token" would be actively dangerous. Falling
+# through silently hands the request to the NEXT credential helper, which on
+# this machine is `gh auth git-credential` reading the 21-scope admin PAT --
+# the exact credential this helper exists to stop using. A transient AWS
+# outage would then quietly re-escalate every push to admin, with no signal.
+# So a real failure always prints why, even in non-strict mode.
 token=""
-if command -v python3 >/dev/null 2>&1; then
-    # Tier 1: this agent's own App. Tier 2: the shared App. Same order as
-    # gh-agent.sh, for the same reason -- an agent without its own App must
-    # still get a short-lived token rather than falling back to a PAT.
-    token="$(python3 "$SCRIPT_DIR/github-app-token.py" "$agent" "$owner" 2>/dev/null)" || token=""
-    # Only fall back when tier 1 used a DIFFERENT identity. If
-    # AGENTMUX_AGENT_ID is unset, $agent already defaulted to genericagentx
-    # above, so retrying it repeats an identical call that can only fail the
-    # same way -- doubling latency and API calls on every push made outside
-    # an agent context.
-    if [[ -z "$token" && "$agent" != "genericagentx" ]]; then
-        token="$(python3 "$SCRIPT_DIR/github-app-token.py" genericagentx "$owner" 2>/dev/null)" || token=""
+MINT_HARD_FAIL=0
+MINT_TOKEN=""
+
+# NOTE: called as `mint ...`, never as `$(mint ...)`. Command substitution runs
+# the function in a SUBSHELL, so MINT_HARD_FAIL set inside would be discarded --
+# which silently defeated the whole point of this block on the first attempt.
+mint() {                      # $1=identity $2=owner ; sets MINT_TOKEN, returns rc
+    local err rc
+    err="$(mktemp)"
+    MINT_TOKEN="$(python3 "$SCRIPT_DIR/github-app-token.py" "$1" "$2" 2>"$err")"
+    rc=$?
+    if [[ $rc -ne 0 && $rc -ne 2 ]]; then
+        echo "git-credential-agentmux: minting failed for '$1' on '$2' (exit $rc) -- NOT falling back silently:" >&2
+        sed 's/^/    /' "$err" >&2
+        MINT_HARD_FAIL=1
     fi
+    [[ $rc -ne 0 ]] && MINT_TOKEN=""
+    rm -f "$err"
+    return $rc
+}
+
+if command -v python3 >/dev/null 2>&1; then
+    # Tier 1: this agent's own App. Tier 2: the shared App -- only when tier 1
+    # used a DIFFERENT identity, and only if tier 1 did not hard-fail. If
+    # AGENTMUX_AGENT_ID is unset, $agent already defaulted to genericagentx, so
+    # retrying it repeats an identical call that can only fail the same way.
+    mint "$agent" "$owner" || true
+    token="$MINT_TOKEN"
+    if [[ -z "$token" && $MINT_HARD_FAIL -eq 0 && "$agent" != "genericagentx" ]]; then
+        mint genericagentx "$owner" || true
+        token="$MINT_TOKEN"
+    fi
+else
+    echo "git-credential-agentmux: python3 not found; cannot mint an App token" >&2
+    MINT_HARD_FAIL=1
 fi
 
 if [[ -z "$token" ]]; then
+    # Strict mode, or a genuine (non-exit-2) failure that we already explained
+    # above: refuse rather than let git silently escalate to another helper.
     if [[ "${AGENTMUX_GIT_CRED_STRICT:-0}" == "1" ]]; then
-        echo "git-credential-agentmux: could not mint an App token for '$owner' as '$agent'" >&2
+        echo "git-credential-agentmux: no App token for '$owner' as '$agent' (strict mode)" >&2
         exit 1
     fi
-    exit 0   # stay silent; git falls through to the next helper
+    if [[ $MINT_HARD_FAIL -eq 1 ]]; then
+        echo "git-credential-agentmux: falling through to the next helper -- if that is the shared admin credential, this push is NOT running as '$agent'" >&2
+    fi
+    exit 0   # exit 2 case only: no App provisioned, nothing to say
 fi
 
 printf 'protocol=%s\n' "${protocol:-https}"
