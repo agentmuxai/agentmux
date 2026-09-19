@@ -3,8 +3,9 @@
 # deleted repo-level CLAUDE.md.
 #
 # Why this is a script and not a grep in a spec:
-# SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md §7 originally listed its
-# verification steps as commands a human was expected to remember to run.
+# The port spec (SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md, landing
+# separately) originally listed its verification steps as commands a human
+# was expected to remember to run.
 # That is the same gap the spec itself documents — a hand-run check matched
 # markdown link syntax `](./CLAUDE.md)` only, reported "zero dangling", and
 # missed plain-prose `see CLAUDE.md` references that review then caught.
@@ -48,7 +49,11 @@ SPEC='docs/specs/SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md'
 EXCLUDE_PATH='(^(VERSION_HISTORY|CHANGELOG)\.md$)|(^docs/([a-z]+/)?(analysis|retro|reports|archive|research|incident|investigations|status)/)|([-_][0-9]{4}[-_][0-9]{2}[-_][0-9]{2}\.md$)'
 
 # Lines about the CLAUDE.md files AgentMux writes for agents, not about ours.
-PRODUCT="generated claude\.md|agent'?s? own claude\.md|per-agent claude|writes? [a-z ]{0,15}claude\.md|templates/host|\.claude/|claude_md_ownership|isolate_host_claude_md|agent-seed|provider|bundle|startup instruction|global claude\.md|host claude\.md|workspace copy|filenamegroup|kimi|system prompt|agent_config\.rs|config file builder|generated per-agent|project config"
+# Every alternative must be CLAUDE.md-specific. Bare generic words (an earlier
+# revision had 'bundle', 'provider', 'project config') silently skipped genuine
+# references that merely happened to contain them -- exactly the bug this gate
+# exists to catch. Review caught settings-cleanup.md slipping through on 'bundle'.
+PRODUCT="generated .{0,2}claude\.md|generated per-agent|agent'?s? own claude\.md|per-agent claude|writes? [a-z ]{0,15}.{0,2}claude\.md|templates/host|\.claude/|claude_md_ownership|isolate_host_claude_md|agent-seed|agent_config\.rs|config file builder|startup instruction|global claude\.md|host claude\.md|workspace copy|filenamegroup|generates? [a-z ]{0,15}.{0,2}claude\.md|claude\.md[^.]{0,40}system prompt|system prompt[^.]{0,40}claude\.md|read a system prompt file"
 
 fail=0
 while IFS= read -r hit; do
@@ -74,9 +79,15 @@ if [[ $fail -ne 0 ]]; then
 check-claude-md-references: FAILED — a living document points at the deleted
 repo-level CLAUDE.md.
 
-Repoint it at whichever document now owns that content (see
-docs/specs/SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md sections 2 and 3 for
-the mapping), or state the rule inline if it is a single line.
+Repoint it at whichever document now owns that content:
+
+  architecture, widgets, isolation invariants  ->  README.md
+  build, prerequisites, task commands          ->  BUILD.md
+  git workflow, versioning, contribution rules ->  CONTRIBUTING.md
+  log access                                   ->  docs/MUXLOG.md
+  message security / sender identity           ->  README.md, docs/specs/SPEC_JEKT_*
+
+...or just state the rule inline if it is a single line.
 
 Do NOT silence this by adding the file to EXCLUDE_PATH. That list is for
 documents allowed to be stale by design (dated records), not for ones that
