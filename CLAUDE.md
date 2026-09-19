@@ -944,6 +944,67 @@ to doubt regardless of what the marker claims.
 
 ---
 
+## AWS access for agents — default is narrow on purpose, debugging has a path
+
+Agents on migrated hosts authenticate to AWS with a short-lived,
+certificate-derived credential (IAM Roles Anywhere), not a static access
+key, and the role they land in is deliberately scoped to **Secrets Manager
+reads only** — nothing else. That narrowness is intentional, built from a
+90-day audit of what agents actually do. **If you hit `AccessDenied`, do
+not ask a human to widen the default role.** Widening it widens every
+agent on every host, permanently; that is the exact problem this setup
+exists to prevent.
+
+**Instead, escalate — one command, no approval step, no waiting:**
+
+```bash
+# Read-only access (S3, CloudFormation, SSM, CloudWatch Logs, IAM
+# introspection, EC2 describe, etc.). 1 hour, expires on its own.
+eval "$(secrets escalate debug --reason 'what you are investigating')"
+
+# Full access - only once you have confirmed something actually needs
+# changing, not as a first move. Also 1 hour, also self-expiring.
+eval "$(secrets escalate admin --reason 'what you are fixing and why')"
+```
+
+`--reason` is required and is recorded server-side on the session itself,
+so the escalation is auditable after the fact — same discipline as
+`secrets update --reason`. Write a reason a stranger could understand
+later, not "debugging".
+
+Prefer `debug` first; reach for `admin` only when read-only has already
+shown you what needs fixing. Sessions expire on their own — there is
+nothing to clean up or revoke afterwards.
+
+**Infrastructure detail (account identifiers, role ARNs, trust anchors,
+bastion/CA specifics, host inventory) is deliberately NOT documented in
+this repo — see "What must not be committed here" below.** The escalation
+commands above need none of it: the identifiers live inside the `secrets`
+CLI, which is distributed privately.
+
+---
+
+## What must not be committed to this repo
+
+**This repository is public.** Infrastructure and credential detail must
+never land here, even in docs, specs, retros, or commit messages. That
+specifically means: AWS account IDs, any `arn:aws:...` containing a real
+account number, EC2/instance identifiers, access key IDs (`AKIA...`),
+trust-anchor/profile/role identifiers, private-CA locations, secret
+key-names paired with the values or hosts they unlock, and internal
+network addresses.
+
+Those belong in the **private** `shared-infrastructure` repository — its
+specs directory, and its credential inventory standard. Public docs
+here may reference a private spec **by name**, so a reader knows it exists
+and where to look, but must not restate its contents.
+
+Referring to a host by bare name (`narko`, `area54`) in a log excerpt or
+retro is fine — a machine name alone unlocks nothing. Pairing that name
+with credentials, addresses, or the account it authenticates into is not.
+
+---
+
 ## Naming Conventions
 
 ### Cloud messaging layer — canonical name: **muxbus**
