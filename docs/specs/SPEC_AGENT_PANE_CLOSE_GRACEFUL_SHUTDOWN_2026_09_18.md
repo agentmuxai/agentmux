@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-18
 **Status:** active — Phase 0 measured (§5.1), Phase 1 implemented in #3402 (§5.2);
-Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3 not
-started.
+Phase 2 implemented for the Claude persistent controller (§9.9); Phase 3 in
+progress (§10).
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md`
 (the continuity guarantee this spec protects),
@@ -691,8 +691,27 @@ system is needed.
 
 ## 10. Phase 3 as implemented
 
-(§10.1 and §10.2, the orphan reaper and the reopen guard, land in their own
-PRs.)
+### 10.1 Orphan reaper (§4.9)
+
+`agentmux-srv/src/sagas/orphan_reaper.rs`, installed from `main`.
+
+- **When it runs:** first sweep 2 minutes after startup, then every 60s.
+- **What it reaps:** an agent block that has stayed in its tab's `block_ids`
+  but in no leaf, counting background stack members as placed, for 90s
+  across sweeps. It is closed through the ordinary graceful `close_pane`.
+  A block that becomes placed in between is forgotten.
+- **Never reaped:**
+  - non-agent blocks (a first, narrow scope);
+  - sub-blocks (listed in a parent's `subblockids`);
+  - blocks already closing;
+  - blocks in a tab with no layout tree;
+  - blocks named by a queued placement action (`pendingbackendactions`).
+- **The queued-placement exemption was found while building this.**
+  `agent.open` and docked `pane.open` place a block by queueing an action for
+  the frontend. The backend tree gains the block only when a frontend applies
+  that action and pushes back. With no window showing the tab, it would
+  otherwise be reaped 90s after opening.
+
 
 ### 10.3 One confirmation per pane, and close failures surfaced (§4.5, §4.6)
 
