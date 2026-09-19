@@ -112,6 +112,13 @@ pub async fn run(
     {
         return Err(e);
     }
+    // Stop the block's process and save its final state BEFORE its records
+    // are deleted — the same per-agent order the pane's × uses
+    // (`close_pane`, SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md
+    // §4.2). Deleting first left the controller's own exit cleanup writing
+    // to a block that no longer existed. After `emit_saga_started`, so a
+    // saga-start collision still has no side effect (round 1 below).
+    super::close_pane::shutdown_before_delete(state, &block_id);
     let ctx = SagaCtx::new(state, saga_id);
     let result = run_saga("delete_block", run_inner(ctx, tab_id, block_id.clone())).await;
     // Controller-kill ordering. Three rounds of bot review:
@@ -142,6 +149,7 @@ pub async fn run(
             state.broker.purge_scope(&format!("block:{}", block_id));
         }
     }
+    super::close_pane::finish_close(state, &block_id).await;
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
 }

@@ -63,6 +63,13 @@ class ObjectServiceType {
         return MOS.callBackendService("object", "DeleteBlock", Array.from(arguments))
     }
 
+    // close a pane: stop and delete every block in its stack, each process
+    // stopped before its records go. One id = one tab of a stack; the pane
+    // itself is removed only when no member survives.
+    ClosePane(blockIds: string[]): Promise<void> {
+        return MOS.callBackendService("object", "ClosePane", Array.from(arguments))
+    }
+
     // get wave object by oref
     GetObject(oref: string): Promise<MuxObj> {
         return MOS.callBackendService("object", "GetObject", Array.from(arguments))

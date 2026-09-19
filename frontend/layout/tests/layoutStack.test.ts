@@ -12,7 +12,14 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import { activeKeyFor, getNodeByBlockId } from "@/layout/lib/layoutNodeModels";
-import { addWidgetAsPaneTab, closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
+import { closeNode } from "@/layout/lib/layoutMagnify";
+import {
+    addWidgetAsPaneTab,
+    closeBlockInStack,
+    effectiveStack,
+    pushBlockOntoStack,
+    setActiveBlockInStack,
+} from "@/layout/lib/layoutStack";
 import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
@@ -335,6 +342,36 @@ describe("layoutStack", () => {
             expect(data.blockStack).toEqual(["b2", "b3"]);
             expect(data.activeBlockId).toBe("b3"); // untouched — b1 wasn't active
             expect(onNodeDelete).toHaveBeenCalledWith(expect.objectContaining({ blockId: "b1" }));
+        });
+
+        // SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §2/§4.1: the
+        // pane's × must hand the backend EVERY member, not just the visible
+        // one — tabcontent.tsx closes `effectiveStack(data)` of what it gets.
+        it("closing the whole pane hands onNodeDelete every stack member", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            pushBlockOntoStack(model, nodeId, "b3"); // active b3
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+
+            await closeNode(model, nodeId);
+
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+            expect(effectiveStack(onNodeDelete.mock.calls[0][0]).sort()).toEqual(["b1", "b2", "b3"]);
+        });
+
+        it("closing one tab of a stack hands onNodeDelete only that tab", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+
+            await closeBlockInStack(model, nodeId, "b2");
+
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+            expect(effectiveStack(onNodeDelete.mock.calls[0][0])).toEqual(["b2"]);
         });
 
         // codex P1 on #3091: closing a BACKGROUND member leaves activeBlockId
