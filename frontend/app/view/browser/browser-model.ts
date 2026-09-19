@@ -90,7 +90,7 @@ export class BrowserViewModel implements ViewModel {
     // required whenever a view type is added to pane-leaf-chrome.tsx's
     // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors
     // AgentViewModel's/TermViewModel's identical field exactly.
-    noHeader = () => this.nodeModel.paneChromeHoisted === true;
+    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
     blockId: string;
     nodeModel: BlockNodeModel;
 

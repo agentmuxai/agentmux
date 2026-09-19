@@ -171,16 +171,23 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // a drag-preview thumbnail — `tabcontent.tsx`'s `renderPreview`, a
     // plain `<Block preview>` with the raw leaf nodeModel and no chrome
     // around it — must keep its inline header or the thumbnail loses its
-    // title entirely. A plain field, not a signal, deliberately: it's known
-    // at wrapper-construction time, so there's no window where both headers
-    // could render at once.
+    // title entirely.
+    //
+    // The `hoisted` MEMO ITSELF, not `hoisted()`'s current value — see
+    // `BlockNodeModel.paneChromeHoisted`'s own doc comment (blocktypes.ts)
+    // for why a frozen snapshot isn't safe here: block.tsx's ViewModel
+    // registry can ADOPT an existing ViewModel (skipping construction)
+    // for a later wrapper whose snapshot would've read differently.
+    // Forwarding the live memo means every wrapper built for this leaf
+    // — regardless of which one a ViewModel instance ends up holding —
+    // reports the SAME, always-current value.
     //
     // Used only when !keepAlive() — the single-active-member path below,
     // unchanged from before KEEP_ALIVE_TYPES existed.
     const scopedNodeModel = createMemo<NodeModel>(() => ({
         ...nodeModel,
         blockId: activeBlockId(),
-        paneChromeHoisted: hoisted(),
+        paneChromeHoisted: hoisted,
     }));
 
     // --- Keep-alive machinery (only ever touched when keepAlive() is true) ---
@@ -237,7 +244,15 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
             scoped = {
                 ...nodeModel,
                 blockId: id,
-                paneChromeHoisted: true,
+                // The live `hoisted` memo, same as `scopedNodeModel` above
+                // — not a bare `true` literal. This branch is only ever
+                // reachable once `hoisted()` is already true, but keeping
+                // it as the SAME shared accessor (rather than a
+                // once-true-forever snapshot) is what lets `noHeader`
+                // stay correct across a ViewModel adoption regardless of
+                // which wrapper it's currently holding. See
+                // `BlockNodeModel.paneChromeHoisted`'s own doc comment.
+                paneChromeHoisted: hoisted,
                 activeViewModel: slot.get,
                 setActiveViewModel: slot.set,
             } as NodeModel;
