@@ -15,10 +15,11 @@
  * no such thing as a non-generic pane.
  *
  * Note this does not remove the old capability: picking "Agent" from the
- * menu runs the same `pane.open { view: "agent", skip_placement: true }` +
- * push that `handleNewAgentTab` did (and "Terminal" likewise for
- * `handleTermTabAdd`) — it just costs one menu step, and every other widget
- * type is now reachable the same way.
+ * menu creates an agent tab in this pane, as `handleNewAgentTab` did (and
+ * "Terminal" likewise for `handleTermTabAdd`) — now via
+ * `pane.open { stack_onto_block_id }`, which creates and places the block in
+ * one backend step (`addWidgetAsPaneTab`). It just costs one menu step, and
+ * every other widget type is reachable the same way.
  */
 
 import { ContextMenuModel } from "@/app/store/contextmenu";

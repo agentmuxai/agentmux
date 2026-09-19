@@ -17,7 +17,8 @@
  * missed that pre-existing spec entirely and instead opened the fork in a
  * brand-new top-level WINDOW tab — corrected here per repo-owner feedback
  * back to the originally-specced destination: a pane-stack tab, using the
- * exact same `pane.open({skip_placement: true})` + `pushBlockOntoStack`
+ * same `pane.open({stack_onto_block_id})` (create-and-place in one backend
+ * step) + local `pushBlockOntoStack`
  * primitive `open-history-tab.ts`'s "Agent History" entry and the pane tab
  * strip's own "+" (`handleNewAgentTab`, `agent-view.tsx`) already use.
  *
@@ -117,16 +118,13 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     // being right-clickable at all guarantees its own tab is the active
     // one at this exact instant. The several RPCs this function awaits
     // (fork, identity lookup, pane.open, launch) can take a while; if the
-    // user switches window tabs mid-flight, `pane.open`'s `skip_placement`
-    // path still resolves its OWN `tab_id` server-side ("explicit tab_id
-    // wins, else split_reference_block_id's owner, else whichever tab is
-    // globally active" — `open_pane`, agentmux-srv/src/server/app_api/mod.rs)
-    // and `launchAgentDefinition`'s `ControllerResyncCommand` uses
-    // `atoms.staticTabId()` (fixed at window bootstrap, not necessarily
-    // this tab) when no override is given — either one would otherwise
-    // silently register the new block under the WRONG tab (Codex's review
-    // of this PR, two P1s). Passing this captured value through to both
-    // closes that race.
+    // user switches window tabs mid-flight, `launchAgentDefinition`'s
+    // `ControllerResyncCommand` uses `atoms.staticTabId()` (fixed at window
+    // bootstrap, not necessarily this tab) when no override is given, and
+    // would silently register the new block under the WRONG tab (Codex's
+    // review of this PR). Passing this captured value through closes that
+    // race. (`pane.open` itself no longer needs it: `stack_onto_block_id`
+    // resolves the tab from THIS pane's own block server-side.)
     const ownerTabId = atoms.activeTabId();
 
     // Hide this pane while the fork settles — the whole RPC chain below
@@ -198,12 +196,13 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             // regardless of provider — nothing silently changed).
             const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
 
-            // Allocate the new block WITHOUT placing it — same primitive
-            // open-history-tab.ts / handleNewAgentTab (agent-view.tsx) use to
-            // add a sibling into THIS pane's own stack.
+            // Create the new block as a tab of THIS pane — created and placed
+            // in one backend step, never in no pane — the same primitive
+            // open-history-tab.ts and the "+" pane-tab picker use
+            // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3).
             paneOpenResult = (await TabRpcClient.rpcCall(
                 "pane.open",
-                { view: "agent", skip_placement: true, tab_id: ownerTabId, meta: { view: "agent" } },
+                { view: "agent", stack_onto_block_id: model.blockId, meta: { view: "agent" } },
                 {},
             )) as { block_id: string };
 

@@ -778,7 +778,7 @@ describe("addWidgetAsPaneTab", () => {
         deleteBlock.mockResolvedValue(undefined);
     });
 
-    it("creates the block via pane.open{skip_placement:true} and pushes it onto the target node's stack", async () => {
+    it("creates the block as a tab of the target pane via pane.open{stack_onto_block_id} and shows it", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");
         rpcCall.mockResolvedValue({ block_id: "b2" });
@@ -787,7 +787,7 @@ describe("addWidgetAsPaneTab", () => {
 
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            { view: "browser", skip_placement: true, meta: { view: "browser" } },
+            { view: "browser", stack_onto_block_id: "b1", meta: { view: "browser" } },
             {}
         );
         const data = model.treeState.rootNode!.data!;
@@ -817,7 +817,7 @@ describe("addWidgetAsPaneTab", () => {
             "pane.open",
             {
                 view: "term",
-                skip_placement: true,
+                stack_onto_block_id: "b1",
                 meta: { view: "term", controller: "shell", "cmd:cwd": "/tmp/here" },
             },
             {}
@@ -837,21 +837,31 @@ describe("addWidgetAsPaneTab", () => {
 
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            { view: "browser", skip_placement: true, meta: { view: "browser" } },
+            { view: "browser", stack_onto_block_id: "b1", meta: { view: "browser" } },
             {}
         );
     });
 
-    it("deletes the orphaned block and does not throw if the target node vanished while the RPC was in flight", async () => {
+    it("deletes the new block and does not throw if the target node vanished while the RPC was in flight", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");
-        rpcCall.mockResolvedValue({ block_id: "b2" });
-
-        // Simulate the pane closing mid-flight by clearing the tree before
-        // addWidgetAsPaneTab re-resolves the node.
-        model.treeState.rootNode = undefined;
+        // The pane closes while pane.open is in flight.
+        rpcCall.mockImplementation(async () => {
+            model.treeState.rootNode = undefined;
+            return { block_id: "b2" };
+        });
 
         await expect(addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef)).resolves.toBeUndefined();
         expect(deleteBlock).toHaveBeenCalledWith("b2");
+    });
+
+    it("creates nothing when the target pane is already gone", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        model.treeState.rootNode = undefined;
+
+        await expect(addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef)).resolves.toBeUndefined();
+        expect(rpcCall).not.toHaveBeenCalled();
+        expect(deleteBlock).not.toHaveBeenCalled();
     });
 });

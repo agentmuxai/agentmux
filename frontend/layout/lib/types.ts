@@ -62,6 +62,9 @@ export enum LayoutTreeActionType {
     ReplaceNode = "replace",
     SplitHorizontal = "splithorizontal",
     SplitVertical = "splitvertical",
+    // Backend-originated: `blockid` was added (in the reducer) as the visible
+    // tab of the pane holding `targetblockid` (`CreateBlockInStack`).
+    StackPush = "stackpush",
 }
 
 export interface LayoutTreeAction {

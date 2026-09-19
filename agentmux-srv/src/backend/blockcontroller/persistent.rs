@@ -7919,19 +7919,24 @@ rl.on("close", () => {
     /// Wait until the stub is actually running: it has printed its init line
     /// and the controller captured the session id from it. A bare pid isn't
     /// enough — node can take seconds to start on a loaded CI runner, and the
-    /// timing assertions must not include that.
+    /// timing assertions must not include that. The budget is generous: a
+    /// Windows runner scanning a freshly written .js file took over 15s once
+    /// (the #3409 CI run). The panic says what state it was stuck in.
     async fn wait_for_pid(c: &PersistentSubprocessController) {
-        for _ in 0..300 {
-            let ready = {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            let (pid, sid) = {
                 let g = c.inner.lock().unwrap();
-                g.current_pid.is_some() && g.session_id.as_deref() == Some("stub-session")
+                (g.current_pid, g.session_id.clone())
             };
-            if ready {
+            if pid.is_some() && sid.as_deref() == Some("stub-session") {
                 return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("stub process never became ready: current_pid={pid:?} session_id={sid:?}");
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        panic!("stub process never became ready");
     }
 
     fn failures(broker: &mps::Broker, block_id: &str) -> usize {
