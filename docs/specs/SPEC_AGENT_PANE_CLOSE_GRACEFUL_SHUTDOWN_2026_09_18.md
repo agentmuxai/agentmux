@@ -711,3 +711,33 @@ system is needed.
   the frontend. The backend tree gains the block only when a frontend applies
   that action and pushes back. With no window showing the tab, it would
   otherwise be reaped 90s after opening.
+
+
+### 10.2 Reopen guard (§4.7)
+
+The guard sits at the one point every reopen path goes through: the
+persistent controller's spawn, right before `--resume <sid>` is appended
+(`persistent.rs`, `session_held_elsewhere`). That covers the picker's
+reattach, the launch modal and MCP, not just `agent.open`.
+
+- **Another live persistent controller holds the session:** the spawn is
+  refused with "This conversation is already open in another pane … Close it
+  there, or switch to it".
+- **A block mid-close holds the session:** mid-close means it has left the
+  registry but its process has not exited (`closing_blocks_still_running`).
+  The spawn is refused with "… still shutting down. Try again in a few
+  seconds."
+- The error returns through `send_message` to the input RPC, so the sender
+  sees it.
+- The check and the claim are one step. A lock chosen by the session id (one of 64,
+  by hash, so memory stays bounded) is held from the check until this spawn's `current_pid` is set, so two reopens of
+  one session at once can't both pass (reagent P1 on #3421). The lock is per
+  session, so unrelated agents' respawns never wait on each other (a second
+  P1 on #3421 caught a first, global version). A test runs four
+  concurrent reopens against a real process: exactly one wins. Without the
+  lock, all four do.
+
+Scope: persistent (Claude) controllers only. Per-turn subprocess providers
+have no long-lived process to collide with between turns. The picker's
+"offer to switch to it" UX (§4.7) is not built. The refusal message says what
+to do instead.
