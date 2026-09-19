@@ -25,7 +25,6 @@ import { getRecentDispatches } from "@/app/store/command-source";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     atoms,
-    createBlock,
     getApi,
     getBlockMetaKeyAtom,
     openOrFocusPaneByView,
@@ -104,7 +103,6 @@ import { didTurnJustEnd, useControllerStatusEvents } from "./hooks/useController
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
-import { useProcessCount } from "./hooks/useProcessCount";
 import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { useScrollToNode } from "./hooks/useScrollToNode";
@@ -1400,11 +1398,6 @@ const AgentPresentationView = ({
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
     });
 
-    // Count of OS processes currently tracked for this block — drives
-    // the `⚙ N` badge on the status line. Silently returns 0 on
-    // platforms without a real tracker. See `hooks/useProcessCount.ts`.
-    const processCount = useProcessCount(model.blockId);
-
     // Subscribe to subprocess output and parse into DocumentNodes.
     // Mutations dispatch through agent-document-store; the reducer there
     // owns dedup against in-flight history loads and the truncate-suppress
@@ -2481,10 +2474,6 @@ const AgentPresentationView = ({
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
                 loading={paneBusy()}
-                processCount={processCount()}
-                onProcessBadgeClick={() => {
-                    createBlock({ meta: { view: "swarm" } });
-                }}
                 logOpen={paneModel.state.detailsOpen}
                 onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
                 contextTokens={(paneModel.state.lastContextTokens ?? null)}

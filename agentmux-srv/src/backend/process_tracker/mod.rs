@@ -25,6 +25,7 @@
 //!
 //! See `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md` for the design.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub mod registry;
@@ -50,6 +51,71 @@ pub struct TrackedProcess {
     pub rss_bytes: u64,
     /// Unix ms of process creation, 0 if unavailable.
     pub started_at_ms: u64,
+    /// Parent PID, if the platform exposes it. Drives
+    /// [`agent_started`]'s ancestry walk.
+    pub parent_pid: Option<u32>,
+}
+
+/// Lowercased executable name without directory or `.exe` suffix —
+/// `C:\Program Files\Git\bin\bash.exe` → `bash`.
+fn image_name(command: &str) -> String {
+    let base = command.rsplit(['\\', '/']).next().unwrap_or(command);
+    let base = base.to_ascii_lowercase();
+    base.strip_suffix(".exe").map(str::to_string).unwrap_or(base)
+}
+
+/// Interpreters an agent runs its tool commands through (Claude Code's Bash
+/// tool spawns `bash.exe -c ...` directly under `claude.exe`; Codex/Gemini
+/// use `powershell`/`cmd`).
+fn is_shell(p: &TrackedProcess) -> bool {
+    matches!(
+        image_name(&p.command).as_str(),
+        "bash" | "sh" | "dash" | "zsh" | "fish" | "cmd" | "powershell" | "pwsh" | "nu"
+    )
+}
+
+/// Filter a tracker's raw membership down to the processes the agent
+/// started through its tools — what the Swarm list, the pane-close
+/// confirmation and the process events should count.
+///
+/// The raw job also holds the agent's own plumbing: the CLI itself
+/// (`roots` — every PID handed to `assign_process`), its `conhost.exe`, and
+/// MCP servers such as `agentmux-mcp.exe` (direct non-shell children of the
+/// root, plus their own conhosts/children). Counting those made every idle
+/// agent report ~3 processes and every pane close ask for confirmation.
+///
+/// Rule: drop roots and `conhost`; keep a process iff walking its parents
+/// inside the job passes through a shell before reaching a root. A root
+/// that is itself a shell (terminal blocks) counts as that shell. A chain
+/// that leaves the job before reaching a root (the parent exited — e.g. a
+/// dev server whose launching shell is gone) is kept: those orphans are
+/// exactly what the user needs to see.
+pub fn agent_started(members: Vec<TrackedProcess>, roots: &HashSet<u32>) -> Vec<TrackedProcess> {
+    let by_pid: HashMap<u32, &TrackedProcess> = members.iter().map(|p| (p.pid, p)).collect();
+    let keep: HashSet<u32> = members
+        .iter()
+        .filter(|p| !roots.contains(&p.pid) && image_name(&p.command) != "conhost")
+        .filter(|p| {
+            let mut cur = *p;
+            // Bounded walk: a PID-reuse cycle can't spin forever.
+            for _ in 0..=members.len() {
+                if is_shell(cur) {
+                    return true;
+                }
+                let Some(parent) = cur.parent_pid else { return true };
+                if roots.contains(&parent) {
+                    return by_pid.get(&parent).is_some_and(|r| is_shell(r));
+                }
+                match by_pid.get(&parent) {
+                    Some(next) => cur = next,
+                    None => return true,
+                }
+            }
+            false
+        })
+        .map(|p| p.pid)
+        .collect();
+    members.into_iter().filter(|p| keep.contains(&p.pid)).collect()
 }
 
 /// Opaque per-agent handle returned by the tracker when we wrap a spawn.
@@ -179,5 +245,91 @@ pub mod stub {
         fn confidence(&self) -> TrackingConfidence {
             TrackingConfidence::None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proc(pid: u32, parent: Option<u32>, command: &str) -> TrackedProcess {
+        TrackedProcess {
+            pid,
+            command: command.to_string(),
+            rss_bytes: 0,
+            started_at_ms: 0,
+            parent_pid: parent,
+        }
+    }
+
+    fn pids(v: &[TrackedProcess]) -> Vec<u32> {
+        let mut p: Vec<u32> = v.iter().map(|p| p.pid).collect();
+        p.sort();
+        p
+    }
+
+    /// The live tree of an idle Claude agent (observed after #3425): nothing
+    /// in it was started by the agent.
+    fn idle_claude() -> Vec<TrackedProcess> {
+        vec![
+            proc(10, Some(1), r"C:\Users\u\.local\bin\claude.exe"),
+            proc(11, Some(10), r"C:\Windows\System32\conhost.exe"),
+            proc(12, Some(10), r"C:\Program Files\AgentMux\agentmux-mcp.exe"),
+            proc(13, Some(12), r"C:\Windows\System32\conhost.exe"),
+        ]
+    }
+
+    #[test]
+    fn idle_agent_has_no_agent_started_processes() {
+        assert!(agent_started(idle_claude(), &HashSet::from([10])).is_empty());
+    }
+
+    #[test]
+    fn bash_tool_command_and_its_descendants_count() {
+        let mut members = idle_claude();
+        members.push(proc(20, Some(10), r"C:\Program Files\Git\bin\bash.exe"));
+        members.push(proc(21, Some(20), r"C:\Program Files\nodejs\node.exe"));
+        members.push(proc(22, Some(21), r"C:\Program Files\nodejs\node.exe"));
+        assert_eq!(pids(&agent_started(members, &HashSet::from([10]))), vec![20, 21, 22]);
+    }
+
+    #[test]
+    fn mcp_server_and_its_children_do_not_count() {
+        let mut members = idle_claude();
+        members.push(proc(30, Some(10), r"C:\Program Files\nodejs\node.exe"));
+        members.push(proc(31, Some(30), r"C:\Program Files\nodejs\node.exe"));
+        assert!(agent_started(members, &HashSet::from([10])).is_empty());
+    }
+
+    #[test]
+    fn orphan_whose_launching_shell_exited_still_counts() {
+        // `npm run dev &` — the bash that launched it is gone, the server lives on.
+        let mut members = idle_claude();
+        members.push(proc(40, Some(39), r"C:\Program Files\nodejs\node.exe"));
+        assert_eq!(pids(&agent_started(members, &HashSet::from([10]))), vec![40]);
+    }
+
+    #[test]
+    fn terminal_block_rooted_at_a_shell_counts_its_direct_children() {
+        let members = vec![
+            proc(50, Some(1), r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            proc(51, Some(50), r"C:\Windows\System32\conhost.exe"),
+            proc(52, Some(50), r"C:\Program Files\nodejs\node.exe"),
+        ];
+        assert_eq!(pids(&agent_started(members, &HashSet::from([50]))), vec![52]);
+    }
+
+    #[test]
+    fn respawned_agent_excludes_every_root() {
+        // Old and new CLI PIDs were both assigned; neither is agent-started.
+        let mut members = idle_claude();
+        members.push(proc(60, Some(1), r"C:\Users\u\.local\bin\claude.exe"));
+        assert!(agent_started(members, &HashSet::from([10, 60])).is_empty());
+    }
+
+    #[test]
+    fn parent_pid_cycle_terminates() {
+        let members = vec![proc(70, Some(71), r"C:\x\a.exe"), proc(71, Some(70), r"C:\x\b.exe")];
+        assert!(agent_started(members, &HashSet::new()).is_empty());
     }
 }

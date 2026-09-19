@@ -590,10 +590,6 @@ function compactionCountdownText(tokens: number, window: number): string | null 
 interface AgentComposerStripProps {
     /** True while a turn is in flight. */
     loading?: boolean;
-    /** Count of OS processes tracked for this agent block. */
-    processCount?: number;
-    /** Fires when the user clicks the ⚙N process badge. */
-    onProcessBadgeClick?: () => void;
     /** Reducer-projected: activity log panel open/closed. */
     logOpen: boolean;
     /** Dispatches `DetailsToggle` to the pane reducer. */
@@ -749,26 +745,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         blockAtom={props.blockAtom ?? (() => undefined)}
                         providerId={props.providerId ?? ""}
                     />
-                ),
-            });
-        }
-
-        if ((props.processCount ?? 0) > 0) {
-            out.push({
-                key: "badge",
-                side: "right",
-                interactive: true,
-                render: () => (
-                    <button
-                        type="button"
-                        class="agent-composer-strip-process-badge"
-                        data-strip-button
-                        title={`${props.processCount} tracked ${props.processCount === 1 ? "process" : "processes"} — click to open swarm`}
-                        onClick={() => props.onProcessBadgeClick?.()}
-                    >
-                        <span aria-hidden="true">⚙</span>
-                        <span>{props.processCount}</span>
-                    </button>
                 ),
             });
         }
@@ -1043,9 +1019,9 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     //
     // Also depends on `stripWidth()` — regression found post-merge: a
     // slot's OWN rendered width isn't purely a function of its content;
-    // this file's own SCSS shed-content queries (`.agent-composer-strip-
-    // auth`, `.agent-composer-strip-process-badge` collapsing to
-    // `display:none` below a container-width threshold) make it a
+    // this file's own SCSS shed-content query (`.agent-composer-strip-
+    // auth` collapsing to
+    // `display:none` below a container-width threshold) makes it a
     // function of the CONTAINER width too. Without this dependency, a
     // pure resize crossing a shed threshold never re-ran this effect —
     // `slots()` (prop-driven) hadn't changed — so `slotWidths` kept
@@ -1162,7 +1138,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // reagent P1 on PR #2808: `<For>` (below) reconciles by referential
     // identity of each item in its `each` array — passing `slots()`
     // entries directly gives every one a brand-new `{key, side, render}`
-    // object on EVERY recompute (any processCount/authStatus/ctxText
+    // object on EVERY recompute (any authStatus/ctxText
     // change, which ticks every second during an active turn). With no
     // stable identity to compare against, `<For>` would treat that as
     // "every slot removed and re-added," remounting `AgentRuntimeDropup`
@@ -1266,8 +1242,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         const gapPx = rowsRef ? (parseFloat(getComputedStyle(rowsRef).getPropertyValue("--space-2")) || 8) * zoomRatio() : 8;
 
         // Codex P1, PR #2812: a slot hidden via this file's own SCSS
-        // shed-content queries (e.g. `.agent-composer-strip-auth`,
-        // `.agent-composer-strip-process-badge` collapsing to
+        // shed-content queries (e.g. `.agent-composer-strip-auth`
+        // collapsing to
         // `display:none` below a container-width threshold) measures a
         // real 0px — correct, not a measurement bug. Feeding it into
         // `computeComposerRows` anyway let it consume a pairing partner
