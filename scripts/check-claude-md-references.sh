@@ -44,6 +44,11 @@ cd "$(dirname "$0")/.."
 
 SELF='scripts/check-claude-md-references.sh'
 SPEC='docs/specs/SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md'
+# Generated from spec TITLES by scripts/gen-docs-index.sh. A spec whose title
+# legitimately names CLAUDE.md (the port spec does) puts that string in the
+# index as a side effect. Editing the index by hand would be undone on the
+# next regeneration, so it is skipped rather than "fixed".
+INDEX='docs/specs/INDEX.md'
 
 # Dated / historical documents whose references are correct as written.
 EXCLUDE_PATH='(^(VERSION_HISTORY|CHANGELOG)\.md$)|(^docs/([a-z]+/)?(analysis|retro|reports|archive|research|incident|investigations|status)/)|([-_][0-9]{4}[-_][0-9]{2}[-_][0-9]{2}\.md$)'
@@ -62,7 +67,7 @@ while IFS= read -r hit; do
     lineno=${rest%%:*}
     text=${rest#*:}
 
-    [[ "$file" == "$SELF" || "$file" == "$SPEC" ]] && continue
+    [[ "$file" == "$SELF" || "$file" == "$SPEC" || "$file" == "$INDEX" ]] && continue
     [[ "$file" =~ $EXCLUDE_PATH ]] && continue
     shopt -s nocasematch
     if [[ "$text" =~ $PRODUCT ]]; then shopt -u nocasematch; continue; fi
