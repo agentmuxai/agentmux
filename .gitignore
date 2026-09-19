@@ -68,3 +68,7 @@ nul
 # macOS packaging build artifact (signed .app — never commit)
 build/AgentMux.app/
 build/AgentMux.AppDir/
+
+# Python bytecode from local tooling scripts
+__pycache__/
+*.pyc

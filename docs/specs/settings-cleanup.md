@@ -94,7 +94,7 @@ Plus one out-of-template key referenced by code that is **not** in the SettingsT
 
 #### C1. Whole namespace: `ai:*` (waveterm leftover)
 
-The user asked: *"is `ai:` meaning the agent pane, or is that old waveterm?"* — **It is old waveterm.** Zero reads anywhere in the codebase. AgentMux's agent pane uses agent definitions stored in `db_forge_agents` / `db_memory_bundles` (see CLAUDE.md), with config flowing through the agent-launch dialog and ACP, not through `SettingsType`.
+The user asked: *"is `ai:` meaning the agent pane, or is that old waveterm?"* — **It is old waveterm.** Zero reads anywhere in the codebase. AgentMux's agent pane uses agent definitions stored in `db_forge_agents` / `db_memory_bundles` (see the Agents section of `README.md`), with config flowing through the agent-launch dialog and ACP, not through `SettingsType`.
 
 Remove these 13 keys from template, schema, and `SettingsType`:
 

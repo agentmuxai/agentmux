@@ -293,8 +293,31 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // overridden to the per-id lookup above so a switch re-points the read
     // at the newly-active tab's own slot instead of following whichever
     // Block mounted last.
+    //
+    // `viewModelSlotFor(activeBlockId())` is called here, EAGERLY, not just
+    // inside `keepAliveNodeModelFor` — closes a real race (found live, via
+    // a diagnostic pass reproducing a permanently-blank pane): a slot is a
+    // lazily-created `createSignal`, so `chromeVm` below (which subscribes
+    // via `viewModelSlots.get(id)?.get()`) only actually establishes a
+    // Solid subscription if the slot ALREADY EXISTS at the moment it reads
+    // it — `undefined?.get()` short-circuits and reads NOTHING, so if
+    // `chromeVm` happens to evaluate before the `<For>` below has mounted
+    // this id's `<Block>` (which is what actually calls
+    // `keepAliveNodeModelFor` and creates the slot), `chromeVm` latches
+    // `null` FOREVER: nothing it read was reactive, so nothing can ever
+    // wake it to try again, even once the real Block mounts moments later
+    // and populates the slot. Reproduced live: `hoisted`/`keepAlive` both
+    // true, `stackBlockIds` correctly containing the blockId, yet the pane
+    // rendered permanently blank — not a data/layout-corruption issue (the
+    // block's own data was fully intact), a pure ordering race in this
+    // file. Calling `viewModelSlotFor` here guarantees the slot (and its
+    // signal) exists BEFORE `chromeVm` ever gets a chance to read it —
+    // `chromeNodeModel()` is called synchronously from inside `chromeVm`'s
+    // own computation, so this always runs first on the same tick,
+    // regardless of whether the `<For>` has mounted this id's Block yet.
     const chromeNodeModel = createMemo<NodeModel>(() => {
         if (!keepAlive()) return nodeModel;
+        viewModelSlotFor(activeBlockId());
         return {
             ...nodeModel,
             activeViewModel: () => viewModelSlots.get(activeBlockId())?.get() ?? null,

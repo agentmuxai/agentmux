@@ -65,7 +65,7 @@ without first closing the host they're embedded in. We can't assume a
 clean environment.
 
 We cannot ask agents to kill or restart the host they're running inside
-(see `CLAUDE.md` "Host Process Safety").
+(never kill AgentMux by image name — always by PID, since multiple instances share binary names).
 
 ## Resolution
 
@@ -161,5 +161,5 @@ Expected: log line shows
 
 - #695 — `RuntimeMode` + `DataPaths` primitives
 - #696 — switch launcher/host/srv onto the new primitives
-- `docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original
+- `docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md` — the original
   unification spec; this is a follow-up.

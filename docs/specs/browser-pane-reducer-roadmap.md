@@ -31,7 +31,7 @@ Goal: every state write, every IPC event, every reactive read of the URL/title/f
 
 ### Logs to add
 
-All routed through `console.log` (which goes through `fe_log_structured` → host log per `CLAUDE.md`'s "Console Logs Go to the Backend" note). Tag every line with `[browser-pane:diag]` + the blockId prefix so they're greppable.
+All routed through `console.log` (which goes through `fe_log_structured` → host log per the console-logging convention (frontend `console.log` is bridged to the host log via `fe_log_structured`; see `docs/MUXLOG.md`) — formerly "Console Logs Go to the Backend" note). Tag every line with `[browser-pane:diag]` + the blockId prefix so they're greppable.
 
 #### In `BrowserViewModel`
 
@@ -123,7 +123,7 @@ Verify:
 
 ### Acceptance for Phase 2
 
-A short retro doc (`docs/retro/browser-pane-observed-behavior-2026-05-08.md`) describing each scenario's actual log sequence. This is the **baseline** — any future refactor must produce the same sequence (modulo stable refactor markers).
+A short retro doc under `docs/retro/` describing each scenario's actual log sequence (never written — the filename previously given here pointed at nothing). This is the **baseline** — any future refactor must produce the same sequence (modulo stable refactor markers).
 
 ### Phase 2 PR
 

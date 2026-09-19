@@ -1249,6 +1249,7 @@ async fn try_attach_to_existing_shell(
         Some(Arc::clone(&state.filestore)),
         registry,
         state.boot_id.clone(),
+        &state.auth_key,
     ) {
         if e == blockcontroller::RESYNC_ERR_ALREADY_EXITED {
             // Treating an exited shell like a stale pointer (return
@@ -1627,6 +1628,7 @@ async fn handle_pty_shell_create(
         Some(Arc::clone(&state.filestore)),
         registry,
         state.boot_id.clone(),
+        &state.auth_key,
     ) {
         // Roll back — the block was already inserted and linked into the
         // parent's subblockids above (Codex P2 on PR #3177): without this,
