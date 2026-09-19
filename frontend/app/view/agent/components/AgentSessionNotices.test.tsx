@@ -12,9 +12,9 @@
  * that makes the disclosure unconditional.
  */
 
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { AgentSessionNotices } from "./AgentSessionNotices";
 
@@ -29,6 +29,10 @@ vi.mock("../session-actions", async (importOriginal) => {
 const block = (meta: Record<string, unknown>) => () => ({ meta }) as never;
 
 describe("AgentSessionNotices", () => {
+    // Banners are queried through `screen`; stale renders from earlier tests
+    // would otherwise still match.
+    afterEach(cleanup);
+
     beforeEach(() => {
         clearSessionFlag.mockClear();
         archiveSession.mockClear();

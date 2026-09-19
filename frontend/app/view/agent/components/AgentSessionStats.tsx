@@ -152,6 +152,13 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
             document.removeEventListener("mousedown", handleClickOutside);
             document.removeEventListener("keydown", handleKeyDown, true);
             document.removeEventListener("focusin", handleFocusChange);
+            // Tied to the OPEN lifetime, not the component's: the portaled
+            // panel is gone once closed, so leaving autoUpdate armed would
+            // keep scroll/resize observers repositioning a detached element
+            // for the rest of the pane's life (Codex P2 on #3435).
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = undefined;
+            floatingEl = undefined;
         });
     });
     onCleanup(() => cleanupAutoUpdate?.());

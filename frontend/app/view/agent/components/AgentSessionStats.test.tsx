@@ -11,9 +11,9 @@
  * report no cost at all.
  */
 
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { AgentSessionStats } from "./AgentSessionStats";
 
@@ -42,6 +42,11 @@ const openPanel = async () => {
 };
 
 describe("AgentSessionStats", () => {
+    // This suite queries `screen` (document-wide) and the panel renders through
+    // a Portal into body — without an explicit unmount, the previous test's
+    // trigger and panel are still in the DOM and every query matches twice.
+    afterEach(cleanup);
+
     beforeEach(() => {
         archiveSession.mockClear();
         exportSession.mockClear();

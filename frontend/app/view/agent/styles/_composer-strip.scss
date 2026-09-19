@@ -413,6 +413,11 @@
     font-size: 10px;
     white-space: nowrap;
     opacity: 0.8;
+    // Base color, stated explicitly because this element is a <button> now
+    // (the session-stats trigger): a button would otherwise fall back to the
+    // UA's `buttontext` whenever no band modifier applies. Declared before
+    // the band modifiers so they still win at equal specificity.
+    color: var(--secondary-text-color);
 
     // Color bands — text color only, no background.
     &--low     { color: var(--secondary-text-color); }
