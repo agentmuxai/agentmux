@@ -1,7 +1,7 @@
 # SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane"
 
 **Date:** 2026-09-18
-**Status:** proposed
+**Status:** active — Phase 0 implemented in #3414 (§4); Phases 1–3 not started.
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for
@@ -211,7 +211,9 @@ expected outputs in a Rust test and a vitest).
 
 ## 4. Phases
 
-**Phase 0 — the `delete` action fix (§3.4).** Frontend handler change, the
+**Phase 0 — the `delete` action fix (§3.4).** Implemented in #3414:
+`frontend/layout/lib/stackMembers.ts`, `backend::layout::remove_stack_member`,
+and `LayoutDeleteNodeByBlock` member removal. Frontend handler change, the
 `LayoutDeleteNodeByBlock` semantics change, and tests: a terminal tab exiting
 in a stack with an agent tab leaves the agent tab's pane and block intact. Small;
 closes the live orphan path in §2.2.
