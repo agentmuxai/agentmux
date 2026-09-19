@@ -56,9 +56,15 @@ FALLBACK_KEY="gh-token-genericagentx"
 TARGET_ORG="a5af"
 TARGET_REPO=""
 if REMOTE_URL="$(git remote get-url origin 2>/dev/null)"; then
-    if [[ "$REMOTE_URL" =~ [:/]([^/:]+)/([^/]+?)(\.git)?$ ]]; then
+    # Two patterns rather than one with an optional `.git`: bash uses POSIX
+    # ERE, which has no non-greedy quantifier, so `([^/]+?)(\.git)?$` does
+    # not match at all. It failing SILENTLY is the dangerous part - TARGET_ORG
+    # just kept its default and we minted a token for the wrong account,
+    # which then 403s on write while still passing a public-repo read probe.
+    if [[ "$REMOTE_URL" =~ [:/]([^/:]+)/([^/]+)\.git$ ]] \
+       || [[ "$REMOTE_URL" =~ [:/]([^/:]+)/([^/]+)$ ]]; then
         TARGET_ORG="${BASH_REMATCH[1]}"
-        TARGET_REPO="${BASH_REMATCH[2]%.git}"
+        TARGET_REPO="${BASH_REMATCH[2]}"
     fi
 fi
 
@@ -69,22 +75,48 @@ AUTH_MODE=""
 # Minting a token successfully is NOT the same as that token being able to
 # reach the repo we're about to operate on: an App installed on one account
 # mints perfectly valid tokens that return 403 "Resource not accessible by
-# integration" against a repo in a different org. That failure mode cost a
-# long debugging session precisely because it looks like a permissions bug
-# on the App rather than a missing installation.
+# integration" against a repo in a different org. That failure cost a long
+# debugging session precisely because it looks like a permissions bug on the
+# App rather than a missing installation.
 #
-# So each tier is probed before it's accepted. The probe is a single
-# read-only GET against the target repo - critically, done BEFORE running
-# the caller's command, so falling through to the next tier can never
-# re-run a mutation that already partially succeeded. If we can't determine
-# the repo (outside a checkout) or curl is unavailable, the probe is
-# skipped rather than treated as a failure.
+# So each tier is probed before it's accepted. Read what this probe does and
+# does not tell you, because the distinction is not academic:
+#
+#   IT DOES detect "this token has no access to this repo at all" - the
+#   wrong-org-installation case above, which is the one that actually bit.
+#
+#   IT DOES NOT verify the token can perform the specific operation the
+#   caller is about to run. Demonstrated on this very repo: agenty's App
+#   passes this probe with 200, and still gets 403 creating a PR comment,
+#   despite its token carrying issues:write. Reachability and capability are
+#   different questions, and only the caller knows which capability it needs.
+#
+# A capability probe is not possible here - we cannot know the operation, and
+# any write-shaped probe would have side effects. So the probe stays scoped
+# to reachability, and the gap is covered at the other end instead: if gh
+# itself fails while we're on an App token, we annotate the failure with the
+# likely cause rather than leaving an opaque 403 (see the tail of this file).
+#
+# The probe runs BEFORE the caller's command, so falling through to the next
+# tier can never re-run a mutation that already partially succeeded. If the
+# repo can't be determined (outside a checkout) or curl is unavailable, the
+# probe is skipped rather than treated as a failure.
 token_reaches_target() {
     local token="$1"
     [[ -z "$TARGET_REPO" ]] && return 0
     command -v curl >/dev/null 2>&1 || return 0
     local code
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10         -H "Authorization: Bearer $token"         -H "Accept: application/vnd.github+json"         "https://api.github.com/repos/${TARGET_ORG}/${TARGET_REPO}" 2>/dev/null)" || return 0
+    # The token goes in via --config on stdin, never as an argv element:
+    # this machine runs many agents under one OS user, and argv is readable
+    # from the process table by anything else running here.
+    code="$(printf 'header = "Authorization: Bearer %s"
+header = "Accept: application/vnd.github+json"
+silent
+output = "/dev/null"
+write-out = "%%{http_code}"
+max-time = 10
+url = "https://api.github.com/repos/%s/%s"
+'         "$token" "$TARGET_ORG" "$TARGET_REPO" | curl --config - 2>/dev/null)" || return 0
     [[ "$code" == "200" ]]
 }
 
@@ -169,4 +201,29 @@ if [[ "$USED_KEY" == "$FALLBACK_KEY" || "$USED_KEY" == "genericagentx-workflow-k
     done
 fi
 
-GH_TOKEN="$TOKEN" exec gh "$@"
+# Deliberately not `exec`: we want the exit code back so a failure can be
+# annotated. This is NOT a retry - the command runs exactly once, and we only
+# add a diagnostic line afterwards. Retrying under a different identity could
+# double-execute a mutation that already partially succeeded.
+# `|| GH_RC=$?` rather than a bare call: this script runs under `set -e`, so a
+# failing gh would abort here and skip the diagnostic below - which is exactly
+# the case the diagnostic exists for. A command in a `||` list is exempt from
+# errexit.
+GH_RC=0
+GH_TOKEN="$TOKEN" gh "$@" || GH_RC=$?
+
+if [[ $GH_RC -ne 0 && "$AUTH_MODE" == "app" ]]; then
+    {
+        echo "gh-agent: that failed while authenticated as a GitHub App"
+        echo "          ($USED_KEY). If the error mentioned \"Resource not"
+        echo "          accessible by integration\", the App reached the repo"
+        echo "          but lacks permission for THAT operation - the tier"
+        echo "          probe only checks reachability, not per-operation"
+        echo "          capability. Check the App's granted permissions for"
+        echo "          '${TARGET_ORG}', and note an installation must"
+        echo "          separately accept a permission the App definition"
+        echo "          added later."
+    } >&2
+fi
+
+exit $GH_RC
