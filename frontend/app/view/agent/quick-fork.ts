@@ -196,13 +196,12 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             // regardless of provider — nothing silently changed).
             const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
 
-            // Allocate the new block WITHOUT placing it — same primitive
-            // open-history-tab.ts / handleNewAgentTab (agent-view.tsx) use to
-            // add a sibling into THIS pane's own stack.
+            // Create the new block as a tab of THIS pane — created and placed
+            // in one backend step, never in no pane — the same primitive
+            // open-history-tab.ts and the "+" pane-tab picker use
+            // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3).
             paneOpenResult = (await TabRpcClient.rpcCall(
                 "pane.open",
-                // Created and placed in one backend step — never in no pane
-                // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3).
                 { view: "agent", stack_onto_block_id: model.blockId, meta: { view: "agent" } },
                 {},
             )) as { block_id: string };
