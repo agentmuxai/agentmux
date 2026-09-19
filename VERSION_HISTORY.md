@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.56.8 — 2026-09-19
+
+- perf(agent-pane): keep agent tabs mounted across a pane-tab-strip switch instead of remounting (cold history restore + virtualizer rebuild) every time
+- fix(pane-tabs): a new tab's default agent pane silently ignored every '+'/close/switch action (wrong tab's LayoutModel latched at construction)
+- fix(container-agents): inject AGENTMUX_LOCAL_URL so container agents can reach the sidecar
+- fix(panes): fresh agent tab reads 'Agent' again, not 'New Agent'
+- feat(statusbar): make the macOS Keychain-access notice a proper callout
+- fix(agent-pane): thin the progress-bar ring from 3px to 1px
+- fix(pane-chrome): agent/term pane double header when its ViewModel is adopted stale
+- feat(auth): resolve gh identity via GitHub App tokens before falling back to a PAT
+- fix(auth): scope gh-agent tokens to the repo named in the command, not just the current directory
+- fix(panes): closing a pane stops every agent tab in it, each before its records are deleted
+- fix(agents): closing a pane, window tab or window stops agents gracefully — an active turn is interrupted, the process exits, then its tree is cleaned up
+- fix(shell): inject AGENTMUX_AUTH_KEY into plain Terminal-widget panes so muxsh works
+- fix(pane-chrome): keep-alive pane can render permanently blank — a subscription race in chromeVm
+- fix(panes): closing one tab of a stacked pane (e.g. a terminal whose shell exited) no longer drops the whole pane and orphans its other tabs
+- fix(package): macOS local builds keep source maps by default, matching Windows/Linux
+- fix(agents): an agent left in a tab but in no pane is found and shut down automatically (orphan reaper)
+- fix(block): drag-preview thumbnail and its real pane can share one ViewModel, double-header/wrong-chrome
+- fix(agents): reopening a conversation that is still open (or still closing) elsewhere is refused instead of starting a second process on it
+- fix(panes): closing a pane with a busy agent asks once for the whole pane (listing each agent), and a failed close is shown instead of swallowed
+- feat(ci): git credential helper mints short-lived GitHub App tokens for `git push`, replacing the machine-wide admin PAT and per-agent PATs embedded in remote URLs
+- fix(panes): a new pane tab is created and placed in one backend step, so it can never end up running in no pane
+- fix(agents): Windows process tracking works — processes an agent starts now actually die with its pane
+- fix(agents): no retry-log loop after closing a pane mid-turn
+- fix(container): ship agentmux-mcp/agentmux-bashwrap in the sandbox image (#2939)
+- fix(launcher): correct misleading 'task dev:local' guidance on a same-branch dev instance collision
+
 ## 0.56.7 — 2026-09-18
 
 - fix(term): flush the CPU/mem badge to the pane's real top-right corner; add a toggle
