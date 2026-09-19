@@ -4278,6 +4278,7 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
         Some(state.filestore.clone()),
         registry,
         state.boot_id.clone(),
+        &state.auth_key,
     )
     .expect("resync/start shell");
 
@@ -4385,6 +4386,7 @@ async fn force_restart_does_not_close_the_pane_via_the_old_controllers_exit() {
             Some(state.filestore.clone()),
             state.mstore.shared_agent_registry(),
             state.boot_id.clone(),
+            &state.auth_key,
         )
     };
 
@@ -4405,4 +4407,111 @@ async fn force_restart_does_not_close_the_pane_via_the_old_controllers_exit() {
     );
 
     blockcontroller::delete_controller("test-restart-shell");
+}
+
+/// A plain Terminal-widget pane's shell must receive AGENTMUX_AUTH_KEY (not
+/// just AGENTMUX_LOCAL_URL) so a human can run `muxsh`/`muxspect`/`muxopen`/
+/// `muxlog` from it — the same role Wave Terminal's `wsh` played, and
+/// exactly what those tools' own help text and
+/// docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md promise ("run from a
+/// pane AgentMux opened, agent or shell"). Before this fix, `ShellController`
+/// never injected AGENTMUX_AUTH_KEY at all — only agent panes got it, via
+/// PersistentSpawnConfig/SubprocessSpawnConfig's own env_vars — so muxsh
+/// failed from every plain Terminal pane with "AGENTMUX_LOCAL_URL /
+/// AGENTMUX_AUTH_KEY not set" even though it was being run exactly as
+/// documented.
+///
+/// Same real-PTY caveats and process-global `OnceLock` caveat as the sibling
+/// tests above; run individually
+/// (`cargo test -p agentmux-srv --bin agentmux-srv
+/// plain_terminal_pane_shell_receives_the_instance_auth_key -- --ignored
+/// --nocapture`).
+#[tokio::test]
+#[ignore]
+async fn plain_terminal_pane_shell_receives_the_instance_auth_key() {
+    let state = test_state();
+
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("term"));
+    meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    #[cfg(windows)]
+    {
+        meta.insert(blockcontroller::META_KEY_CMD.to_string(), serde_json::json!("cmd.exe"));
+        meta.insert("cmd:interactive".to_string(), serde_json::json!(true));
+    }
+    let mut block = crate::backend::obj::Block {
+        oid: "test-authkey-shell".to_string(),
+        parentoref: "tab:test-authkey-tab".to_string(),
+        meta,
+        ..Default::default()
+    };
+    state.mstore.insert(&mut block).expect("insert block");
+
+    let registry = state.mstore.shared_agent_registry();
+    blockcontroller::resync_controller(
+        &block,
+        "test-authkey-tab",
+        None,
+        false,
+        true,
+        Some(state.broker.clone()),
+        Some(state.event_bus.clone()),
+        Some(state.mstore.clone()),
+        Some(state.filestore.clone()),
+        registry,
+        state.boot_id.clone(),
+        &state.auth_key,
+    )
+    .expect("resync/start shell");
+
+    // Give the PTY a moment to spawn its shell before typing into it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Same cursor-position-query answer as the sibling tests (cmd.exe only).
+    #[cfg(windows)]
+    {
+        blockcontroller::send_input(
+            "test-authkey-shell",
+            blockcontroller::BlockInputUnion::data(b"\x1b[1;1R".to_vec()),
+            None,
+        )
+        .expect("answer cursor-position query");
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    // Dump every AGENTMUX_* var so it lands in the pane's own scrollback,
+    // the same place a human's `muxsh` invocation would read it from.
+    // Deliberately `env`/`set` (not `printenv NAME` or `echo %NAME%`) — the
+    // point is proving AGENTMUX_AUTH_KEY is actually present in the child's
+    // real environment, not just testing one specific shell builtin's
+    // handling of an unset variable.
+    #[cfg(windows)]
+    let print_cmd: &[u8] = b"set | findstr AGENTMUX\r\n";
+    #[cfg(not(windows))]
+    let print_cmd: &[u8] = b"env | grep AGENTMUX\r\n";
+    blockcontroller::send_input(
+        "test-authkey-shell",
+        blockcontroller::BlockInputUnion::data(print_cmd.to_vec()),
+        None,
+    )
+    .expect("send env dump");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let scrollback = state
+        .filestore
+        .read_file("test-authkey-shell", "term")
+        .expect("read term scrollback")
+        .unwrap_or_default();
+    let scrollback = String::from_utf8_lossy(&scrollback);
+    assert!(
+        scrollback.contains(&state.auth_key),
+        "the shell's own env should have included AGENTMUX_AUTH_KEY=\"{}\" \
+         into its scrollback, got: {scrollback:?}",
+        state.auth_key
+    );
+
+    blockcontroller::delete_controller("test-authkey-shell");
 }
