@@ -66,7 +66,7 @@ import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
 import { AmbientNarrationRow } from "./components/AmbientNarrationRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
-import { AgentControlBar } from "./components/AgentControlBar";
+import { AgentSessionNotices } from "./components/AgentSessionNotices";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -2469,10 +2469,22 @@ const AgentPresentationView = ({
                 </Show>
             </div>
 
+            {/* Session banners (interrupted / resume-failed / large /
+                archived). Above the strip, NOT inside the Shell drawer where
+                they used to live: a conversation-level disclosure can't be
+                gated behind a terminal toggle — see
+                SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3. */}
+            <AgentSessionNotices
+                blockId={model.blockId}
+                blockAtom={block}
+                providerId={provider()?.id ?? ""}
+            />
+
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
+                sessionTotals={paneModel.state.sessionTotals}
                 loading={paneBusy()}
                 logOpen={paneModel.state.detailsOpen}
                 onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
@@ -2551,12 +2563,6 @@ const AgentPresentationView = ({
                     since this region hugs the pane bottom). */}
                 <Show when={paneModel.state.detailsOpen}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        <AgentControlBar
-                            blockId={model.blockId}
-                            blockAtom={block}
-                            providerId={provider()?.id ?? ""}
-                            onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
-                        />
                         {/* Drag-to-height drawer wrapping the terminal — the actual
                             scrollable/resizable content. */}
                         <ResizableDetailsDrawer

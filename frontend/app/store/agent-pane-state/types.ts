@@ -304,14 +304,18 @@ export interface AgentPaneState {
     turnPhase: TurnPhase;
 
     /**
-     * Whether the composer details panel (the expandable section that
-     * holds the activity log, session stats, permission/model/effort
-     * dropdowns, and Archive/Export/Restore buttons) is open. Default
-     * `false`. Persists across renders within a pane lifetime; resets
-     * to `false` on pane unmount (because a new pane gets a fresh
-     * state via `initialState()`). Not persisted to backend — this is
-     * a per-session ephemeral preference, same contract today's
-     * AgentControlBar uses.
+     * Whether the composer details panel — the Shell drawer, holding the
+     * interactive terminal — is open. Default `false`. Persists across
+     * renders within a pane lifetime; resets to `false` on pane unmount
+     * (because a new pane gets a fresh state via `initialState()`). Not
+     * persisted to backend — a per-session ephemeral preference.
+     *
+     * It used to host the session banners and the Archive/Export/Restore
+     * actions as well; those moved to `AgentSessionNotices` (above the
+     * composer) and the `AgentSessionStats` popover respectively, and the
+     * runtime dropdowns moved to the strip before that — leaving the drawer
+     * to the shell alone. See
+     * SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.
      *
      * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4. Previously
      * auto-collapsed on `TurnStart`; removed once the panel started
