@@ -1,7 +1,7 @@
 # SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane"
 
 **Date:** 2026-09-18
-**Status:** active — Phase 0 implemented in #3414 (§4); Phases 1–3 not started.
+**Status:** active — Phase 0 implemented in #3414; Phase 1 partly implemented in #3424 (§4); Phases 2–3 not started.
 **Author:** AgentA@Area54
 **Related:** `docs/specs/SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md`
 (§6 names this as its follow-up; its orphan reaper, §4.9, is the backstop for
@@ -222,6 +222,21 @@ closes the live orphan path in §2.2.
 `pane.open { stack_onto_block_id }`, the three frontend callers moved onto it,
 pending-action verbs and handler (§3.3), unified neighbour rule (§3.6), I1/I2 in
 `validate_layout_invariants` (report-only).
+
+*Phase 1 as implemented in #3424:*
+- **Reducer:** `LayoutStackPush`, `LayoutStackActivate` and `CreateBlockInStack`.
+- **Placement:** `pane.open { stack_onto_block_id }`, the queued `stackpush`
+  action, and its frontend handler (`addMemberToStack`).
+- **Callers moved onto it:** the "+" picker, the Agent History tab, and quick
+  fork.
+- **One neighbour rule:** `next_visible_member`. The dangling-visible repair
+  used to pick the first live member.
+- **I2:** checked as `STACK_*` in `validate_layout_invariants`.
+
+*Not yet:*
+- tab switches and closes sent as commands with `actionid` de-duplication
+  (§3.3);
+- I1, which needs the tab's `block_ids` as well as the tree.
 
 **Phase 2 — stale-push protection (§3.5).**
 
