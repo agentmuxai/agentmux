@@ -1,6 +1,9 @@
 # Report: Blockers building and running the UI-manual screenshot tooling
 
 **Date:** 2026-09-19
+**Status:** retro — a live-as-it-happened record. Attempts 1/3's root
+cause is fixed by `docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md`;
+the rest (Attempts 2, 4-8) are recorded findings, not yet acted on.
 **Context:** Building `scripts/ui-screenshots/` (see
 `docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md`) needed a clean,
 isolated AgentMux instance — no real conversations/accounts — to capture
