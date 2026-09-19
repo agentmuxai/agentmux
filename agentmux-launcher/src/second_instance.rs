@@ -120,6 +120,44 @@ fn forward_host_cmd_impl(
     Ok(())
 }
 
+/// User-facing message for an actual second-instance collision (not a
+/// bind-failure, not a stale socket — a real running launcher answered our
+/// connect probe). Shared by both call sites in
+/// `bind_socket_with_recovery` (fast-path and post-recovery-lock retry),
+/// which previously duplicated this message and both got it wrong the same
+/// way — see docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md.
+///
+/// For a `dev-` channel, this used to say "Use `task dev:local` to launch a
+/// second isolated session" — plausible-sounding, and wrong for the common
+/// case. `task dev:local`'s version bump only changes the launcher's own
+/// IPC socket key (`hash.rs`'s `data_dir_hash16`, keyed on
+/// `CARGO_PKG_VERSION`/`AGENTMUX_BUILD_LABEL` at compile time) — it does
+/// NOT change the CEF profile/data directory, which for dev mode is keyed
+/// on git branch alone (`agentmux-common/src/data_paths.rs`'s
+/// `resolve_channel_and_dir`, called with `honor_env_channel=false` for
+/// dev launches; `runtime_mode.rs`'s `detect_branch` reruns `git
+/// rev-parse` itself). Two same-branch dev instances collide on CEF's own
+/// `SingletonLock` inside that directory regardless of version — reproduced
+/// live: a real rebuild under a bumped version got a new launcher socket
+/// and STILL hit `CEF early exit (process singleton or similar)` on the
+/// unchanged, branch-keyed data dir. The only actual fix is a different
+/// branch (or a worktree checked out to one) — named directly here instead
+/// of pointing at a command that cannot solve this specific problem.
+fn print_dev_instance_collision(channel: &str, data_dir: &std::path::Path, socket_path: &str) {
+    eprintln!(
+        "AgentMux dev instance already running for branch \"{channel}\".\n\
+         Data-dir isolation is keyed on git branch, not build version — a\n\
+         `task dev:local` version bump will NOT let a second instance run\n\
+         alongside this one (it only changes this launcher's own IPC socket\n\
+         key, not the CEF profile directory below). To run a second dev\n\
+         instance concurrently, check out — or add a worktree for — a\n\
+         DIFFERENT branch and run `task dev` there instead.\n\
+         Data dir: {}\n\
+         Socket:   {socket_path}",
+        data_dir.display()
+    );
+}
+
 /// Best-effort `open_new_window` forward for the unix second-instance path.
 /// Unlike the Windows path (which pops a dialog on a fatal forward), unix just
 /// logs and lets the caller exit 0: the existing instance is alive (its socket
@@ -243,12 +281,7 @@ pub(crate) fn bind_socket_with_recovery(
             // already-running launcher's host (Windows-parity — main.rs:1292),
             // then exit cleanly. SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
             if channel.starts_with("dev-") {
-                eprintln!(
-                    "AgentMux dev instance already running (channel: {}).\n\
-                     Use `task dev:local` to launch a second isolated session.\n\
-                     Socket: {}",
-                    channel, socket_path
-                );
+                print_dev_instance_collision(channel, data_dir, socket_path);
             } else {
                 eprintln!(
                     "AgentMux is already running for this data directory.\n\nSocket: {}",
@@ -285,12 +318,7 @@ pub(crate) fn bind_socket_with_recovery(
                 Ok(l) => l,
                 Err(retry_e) if retry_e.kind() == std::io::ErrorKind::AddrInUse => {
                     if channel.starts_with("dev-") {
-                        eprintln!(
-                            "AgentMux dev instance already running (channel: {}).\n\
-                             Use `task dev:local` to launch a second isolated session.\n\
-                             Socket: {}",
-                            channel, socket_path
-                        );
+                        print_dev_instance_collision(channel, data_dir, socket_path);
                     } else {
                         eprintln!(
                             "AgentMux is already running for this data directory.\n\nSocket: {}",

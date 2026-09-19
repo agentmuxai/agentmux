@@ -1082,8 +1082,18 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         }
         match exit_code {
             0 | 24 | 36 | 38 => {
+                // `data_dir` (logged once already, above, as "CEF cache
+                // dir") is the CEF profile directory whose own
+                // SingletonLock is the most common real cause of this path
+                // (exit_code 24 specifically = NORMAL_EXIT_PROCESS_NOTIFIED,
+                // i.e. singleton relaunch) — printing it here turns "why did
+                // this silently exit" into something directly inspectable
+                // (e.g. `fuser`/`lsof` on this path) instead of requiring a
+                // source read to rediscover it. See
+                // docs/specs/SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md.
                 tracing::info!(
                     exit_code,
+                    data_dir = %data_dir.display(),
                     "CEF early exit (process singleton or similar) — exiting cleanly"
                 );
                 std::process::exit(0);
