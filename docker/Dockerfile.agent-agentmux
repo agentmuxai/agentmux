@@ -9,13 +9,69 @@
 #   - DISABLE_AUTOUPDATER=1: version pinned at image build time, not runtime
 #   - ~/.claude is a named Docker volume (not host bind mount) — credential isolation
 #   - /workspace is bind-mounted by the AgentMux runtime at container start
+#
+# Build context is the REPO ROOT (see .github/workflows/container-image.yml's
+# `context: .`), not this docker/ directory — the mcp-builder stage below
+# needs the whole Cargo workspace to resolve `-p agentmux-mcp
+# -p agentmux-bashwrap`. See .dockerignore at the repo root for what's
+# excluded from that context (local build artifacts, mainly).
 
+# ── Stage 1: build agentmux-mcp + agentmux-bashwrap for this platform ──────
+# #2939 workstream 1: container agents currently have no working `agentmux`
+# MCP toolset (no SendMessage, no jekt messaging, nothing) because these two
+# binaries never shipped in the image, even though `.mcp.json` is always
+# configured to launch `agentmux-mcp` with no explicit path (hardcoded in
+# agentmux-srv/src/backend/agent_config.rs's build_mcp_config — it must
+# resolve via PATH), and agentmux-bashwrap is the PreToolUse hook helper /
+# streaming bash wrapper agents resolve the same way. See the comment above
+# `AGENTMUX_LOCAL_URL` injection in
+# agentmux-srv/src/server/agent_handlers/input.rs.
+#
+# Multi-stage: compile in a full `rust` image, then copy only the two
+# release binaries into the final slim runtime image below so the Rust
+# toolchain itself doesn't end up in the shipped image. `container-image.yml`
+# builds linux/amd64 AND linux/arm64 via buildx + QEMU — this stage needs no
+# explicit cross-compilation setup, since buildx runs a whole separate build
+# (under emulation) per target platform.
+FROM rust:1-bookworm AS mcp-builder
+
+# pkg-config + libdbus-1-dev + libxcb1-dev: agentmux-mcp's `xcap` (screen
+# capture, used by the CaptureWindow tool) dependency needs dbus-1.pc AND
+# -lxcb to link on Linux — the same packages ci-pr.yml installs for the same
+# reason (see that workflow's "Install build deps (Linux — launcher Wayland
+# toolkit + agentmux-mcp's xcap)" step comment).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libdbus-1-dev \
+    libxcb1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Cargo needs every workspace member's manifest present to resolve the
+# workspace dependency graph, even though `-p` below only compiles two of
+# them — copy the whole tree. .dockerignore strips target/, dist/,
+# node_modules/, .git/, docs/, etc. so this stays reasonably small.
+COPY . .
+
+# Same package set Taskfile.yml's build:host:{linux,darwin} tasks build
+# (minus agentmux-cef/agentmux-launcher, which the container image has no
+# use for — this is a headless CLI-driven sandbox agent, not a GUI host).
+RUN cargo build --release -p agentmux-mcp -p agentmux-bashwrap
+
+# ── Stage 2: the actual agent runtime image ─────────────────────────────────
 FROM node:24-slim
 
 # System dependencies
 # procps provides `pkill`, used by the host to interrupt an in-flight turn:
 # `docker exec` has no kill API, so AgentMux pkills the turn's CLI process
 # inside the container on stop/Esc (see spawn_container_turn).
+# libdbus-1-3/libxcb1 (runtime .so, not the -dev/-dev headers the builder
+# stage installs): agentmux-mcp links libdbus-1.so.3 and libxcb.so.1
+# dynamically (its `xcap` dependency) — confirmed via `ldd` against a build
+# of this image before these were added; agentmux-mcp exited 127 with
+# "error while loading shared libraries: libdbus-1.so.3: cannot open shared
+# object file" without them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     git \
@@ -24,6 +80,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     procps \
     ca-certificates \
+    libdbus-1-3 \
+    libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # node:24-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
@@ -49,6 +107,16 @@ ENV LANG=C.UTF-8
 # Docker initialises a fresh named volume as root:root; without this the agent
 # user cannot write its config/session state on first mount.
 RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+
+# agentmux-mcp / agentmux-bashwrap — copied from the mcp-builder stage above.
+# /usr/local/bin is on PATH for every user by default (Docker's baked-in
+# default PATH, independent of the later USER switch below), matching the
+# bare "agentmux-mcp" command .mcp.json is hardcoded to launch (no explicit
+# path — see agentmux-srv/src/backend/agent_config.rs's build_mcp_config).
+# --chmod=755 belt-and-suspenders on top of the executable bit cargo already
+# sets, since these are invoked by the (non-root) `agent` user.
+COPY --from=mcp-builder --chmod=755 /build/target/release/agentmux-mcp /usr/local/bin/agentmux-mcp
+COPY --from=mcp-builder --chmod=755 /build/target/release/agentmux-bashwrap /usr/local/bin/agentmux-bashwrap
 
 # /workspace is the default mount point for the agent's working directory.
 # AgentMux bind-mounts the host workspace path here at container start.
