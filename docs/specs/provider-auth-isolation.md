@@ -74,7 +74,7 @@ AgentC (claude provider)  ─┘
 AgentD (gemini provider)  ── GEMINI_CLI_HOME = v0.32.62/auth/gemini/
 ```
 
-Per-agent isolation (project config, CLAUDE.md, .mcp.json, working dir) is handled via `cmd:cwd`, not auth dirs.
+Per-agent isolation (the generated per-agent project config: CLAUDE.md, .mcp.json, working dir) is handled via `cmd:cwd`, not auth dirs.
 
 ---
 

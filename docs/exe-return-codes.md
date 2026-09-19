@@ -2,7 +2,7 @@
 
 ## agentmux.exe / agentmux-launcher (Windows entry point)
 
-On Windows, the executable users actually launch is `agentmux.exe` — `scripts/package-portable.sh` builds it by copying `agentmux-launcher.exe`, and `packaging/windows/agentmux.iss` installs it under that name. The launcher owns `agentmux-srv`'s lifecycle directly and spawns `agentmux-cef` itself (see the Architecture section of `CLAUDE.md`).
+On Windows, the executable users actually launch is `agentmux.exe` — `scripts/package-portable.sh` builds it by copying `agentmux-launcher.exe`, and `packaging/windows/agentmux.iss` installs it under that name. The launcher owns `agentmux-srv`'s lifecycle directly and spawns `agentmux-cef` itself (see the Architecture section of [`README.md`](../README.md#architecture)).
 
 This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can also **pass through the CEF host's or `agentmux-srv`'s own raw OS exit code** once a restart/recovery budget is exhausted (`break code`, e.g. after repeated abnormal host exits or repeated system-OOM restarts) or a relaunch attempt itself fails to spawn. Codes below are the launcher's own, not inherited ones.
 
@@ -20,7 +20,7 @@ This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can
 |-----------|-------------|
 | **0** | Clean exit — application closed normally (e.g., user quit via tray icon or window close) |
 
-`agentmux-cef` is not spawned directly by the user on Windows — `agentmux-launcher` launches it, per the table above. On macOS/Linux, `agentmux-cef` is invoked via the launcher too (see `CLAUDE.md`'s Architecture section) rather than run standalone.
+`agentmux-cef` is not spawned directly by the user on Windows — `agentmux-launcher` launches it, per the table above. On macOS/Linux, `agentmux-cef` is invoked via the launcher too (see [`README.md`](../README.md#architecture)'s Architecture section) rather than run standalone.
 
 ## agentmux-srv (Backend Server)
 

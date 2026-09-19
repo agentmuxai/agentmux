@@ -234,7 +234,7 @@ AGENTBUS_TOKEN={auth_key}
 - Existing `agentbus-client` MCP tools keep working — just change the URL
 - Cloud AgentBus stays operational during migration
 - Agents that can't reach localhost fall back to cloud automatically
-- No breaking changes to agent workflows or CLAUDE.md instructions
+- No breaking changes to agent workflows or to the per-agent instruction files AgentMux generates
 
 ## Open Questions
 
