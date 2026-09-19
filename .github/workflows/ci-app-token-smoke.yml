@@ -87,7 +87,22 @@ jobs:
           gh release view "$TAG" --repo agentmuxai/cef --json assets \
             --jq '.assets | length | "assets: \(.)"'
 
+      # KNOWN BLOCKED — kept as a live regression probe, not a gate.
+      # An App installation cannot see npm packages owned by a USER account:
+      # granular package permissions are an organization-only feature. Proven
+      # three ways, not inferred:
+      #   1. minted for agentmuxai -> "The requested installation does not exist"
+      #   2. minted for a5af       -> "installation not allowed to Read organization package"
+      #   3. the same a5af token reads a5af/dev-tools (the package's linked
+      #      repo) fine, yet GET /users/a5af/packages?package_type=npm returns
+      #      ZERO packages -- so this is package-scope policy, not repo access.
+      # A5AF_PACKAGES_TOKEN therefore CANNOT be replaced by an App token while
+      # the @a5af scope lives under a user account. This very likely also
+      # explains the standing 403 write_package failure when publishing
+      # @a5af/secrets. Fix is to move the scope to an org, or keep one narrow
+      # fine-grained PAT for packages only.
       - name: "PAT #2 — A5AF_PACKAGES_TOKEN: authenticate to GitHub Packages"
+        continue-on-error: true
         env:
           # a5af-scoped token, NOT the agentmuxai one — see the mint step above
           NPM_TOKEN: ${{ steps.app_a5af.outputs.token }}
