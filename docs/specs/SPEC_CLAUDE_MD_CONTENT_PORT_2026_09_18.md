@@ -247,22 +247,35 @@ Each step is independently reviewable and leaves the repo consistent.
 
 ---
 
-## 7. Verification — falsifiable checks, not "looks right"
+## 7. Verification — enforced in CI, not left to memory
 
-Each must be able to **fail**. Run at Step 5.
+**Check 1 is now a script wired into CI** (`scripts/check-claude-md-references.sh`,
+added in #3403, run by `ci-pr.yml`). An earlier revision listed these as grep
+commands for a human to run — which review correctly flagged as the *same* gap
+that caused the missed-citation failure described below. A check nobody runs is
+not a check.
 
-1. **No dangling citations.** Must return zero:
-   ```bash
-   git ls-files '*.md' \
-     | grep -vE '^(VERSION_HISTORY|CHANGELOG)\.md$' \
-     | grep -vE 'docs/(analysis|retro|reports|archive|research|incident|investigations)/' \
-     | xargs grep -n 'CLAUDE\.md' \
-     | grep -viE "generated claude\.md|agent'?s? own claude\.md|per-agent|templates/host|provider"
-   ```
-   *This is the check that failed last time.* The earlier pass only matched
+That script immediately found dangling references this spec's own hand-run
+analysis had missed, in `docs/status/` and `docs/specs/archive/` — trees the
+ad-hoc patterns never covered. Twelve files were repointed as a result.
+
+Checks 2–6 stay manual: they are one-time, port-specific judgements that do not
+generalise into a gate. Run them at Step 5.
+
+1. **No dangling citations — AUTOMATED.**
+   `bash scripts/check-claude-md-references.sh` (also a required CI step).
+   Exits non-zero naming file and line.
+
+   *This is the check that failed last time.* The earlier pass matched only
    markdown link syntax `](./CLAUDE.md)` and reported "zero dangling" while
    plain-prose references (`see CLAUDE.md`) survived — ReAgent caught two in
-   PR #3403. **Grep for the filename, never for link syntax.**
+   PR #3403. The script greps the filename, never link syntax, and documents
+   its exclusions in its own header.
+
+   Confirmed **falsifiable**, not merely green: planting
+   `See CLAUDE.md for details.` in a living doc exits 1 and names it;
+   removing it exits 0.
+
 2. **No content lost.** Every `##`/`###`/`####` heading in
    `git show 597164878:CLAUDE.md` maps to a row in §2/§2.1 with a disposition.
 3. **Jekt policy unchanged.** Diff the ported section against
