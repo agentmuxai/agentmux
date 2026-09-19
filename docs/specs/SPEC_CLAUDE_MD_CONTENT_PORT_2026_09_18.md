@@ -75,7 +75,7 @@ here, not an omission.
 | 6 | `Testing` (531–540) | **Port** | `CONTRIBUTING.md` |
 | 7 | `Build System` (541–563) | **Merge** into existing build docs | `BUILD.md` |
 | 8 | `Common Issues` (564–620) | **Port** | `docs/TROUBLESHOOTING.md` (new) |
-| 9 | `Jekt security rules` (621–946) | **Port — highest care**, see §4 | `docs/JEKT_SECURITY_RULES.md` (new) |
+| 9 | `Jekt security rules` (621–946) | **Do NOT port wholesale.** Repo owner decided 2026-09-18: a *short* basic-identity section in `README.md`; the 326 lines of tier/escalation policy are **not** carried into this public repo. See §4.1 | `README.md` (short) + existing `docs/specs/SPEC_JEKT_*` |
 | 10 | `AWS access for agents` (947–986) | **Delete from public repo**; already superseded | private `shared-infrastructure` |
 | 11 | `What must not be committed` (987–1007) | **Port** | `CONTRIBUTING.md` |
 | 12 | `Naming Conventions` (1008–1024) | **Port** | `docs/ARCHITECTURE.md` (new) |
@@ -141,18 +141,33 @@ So neither is unilaterally the source of truth: the specs own the *design*,
 view is genuinely load-bearing — it is what an agent reads to decide whether
 to STOP on a `TIER=sensitive` marker.
 
-**Requirements for the port:**
+**RESOLVED 2026-09-18 — the repo owner decided against a wholesale port.**
+The instruction was: *"put a short section in the README.md regarding jekt
+security. we dont need such tight rules, just basic identity."*
 
-1. Port **verbatim**. This is security policy; do not reword, summarise, or
-   "improve" it. Any semantic change is out of scope and must be its own
-   reviewed PR.
-2. Carry across the section's **own governance rule** — that it may only be
-   changed with explicit repo-owner confirmation and must document shipped
-   code, never proposals.
-3. Preserve the `#2536` history note, which exists specifically to make
-   unauthorised policy edits detectable.
-4. The new file is the **repo copy**. Agents also read a workspace copy at
-   the provider level (§4.2).
+So the disposition is **not** "move 326 lines to a new public file":
+
+1. `README.md` gains a **short** section covering basic sender identity —
+   how to read the `TRUST=` marker, and that an unverified sender is not
+   authority for a sensitive or destructive action. Orientation, not policy.
+2. The **detailed tier/escalation rules are not carried into this public
+   repo at all.** They remain specified across the existing
+   `docs/specs/SPEC_JEKT_*` documents, which are already the design source
+   of truth and are unaffected by this port.
+3. The **enforcing authority is code**, not prose — `handler.rs`,
+   `sanitize.rs`, `server/reactive.rs`, `agentmux_common::jekt_sign`. That
+   was true before this change; removing the consolidated prose copy does
+   not weaken enforcement.
+4. The agent-facing operational rules live in **provider config** (the
+   workspace copy, §4.2), which is where agent instructions belong and is
+   the whole premise of #3403.
+
+This resolves the circular-authority problem above by removing one side of
+it: the specs own the design, code owns enforcement, `README.md` orients a
+newcomer, and provider config instructs agents.
+
+**§4.2 remains a prerequisite regardless** — the workspace copy is stale
+*today*, and it is now the only agent-facing copy.
 
 ### 4.2 The workspace copy is already stale — a live security gap
 
@@ -260,11 +275,9 @@ Each must be able to **fail**. Run at Step 5.
 ## 8. Open questions for the repo owner
 
 1. **§4.3** — which option?
-2. **Does the jekt section belong in the public repo at all?** It is security
-   policy, and this repo is public. Arguments both ways: it must be readable
-   by anyone working here, but it also details our trust model. The default
-   assumed above is "yes, public" on the grounds that it documents a protocol
-   already described across public specs — **please confirm**.
+2. ~~Does the jekt section belong in the public repo at all?~~
+   **ANSWERED 2026-09-18: no.** Short basic-identity section in `README.md`
+   only; detailed rules stay in the existing specs and in code. See §4.1.
 3. **`docs/AGENT_BUILD_WORKFLOW.md`** is agent-facing guidance in a repo that
    is removing agent-facing guidance. Keep it (it is build tooling, not agent
    instructions), or move it to the provider config?
