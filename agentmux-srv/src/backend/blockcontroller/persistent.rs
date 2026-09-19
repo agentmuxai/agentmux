@@ -2820,6 +2820,17 @@ impl PersistentSubprocessController {
         } else {
             self.inner.lock().unwrap().session_id.clone()
         };
+        // Check and claim must be one step: the check reads other
+        // controllers' `current_pid`, which a concurrent resume of the same
+        // session only sets further down this function. Held from here until
+        // this spawn's `current_pid` is set (or it returns early), so two
+        // reopens of one session — two picker clicks, picker + MCP — can't
+        // both pass. Only resume spawns take it; `spawn_process` is
+        // synchronous, and no caller holds an `inner` lock across it.
+        let resume_claim = requested_sid.as_ref().map(|_| {
+            static RESUME_SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            RESUME_SPAWN.lock().unwrap_or_else(|e| e.into_inner())
+        });
         if let Some(sid) = requested_sid.as_deref() {
             if let Some((other, closing)) = self.session_held_elsewhere(sid) {
                 return Err(if closing {
@@ -3084,6 +3095,9 @@ impl PersistentSubprocessController {
             inner.stdin_tx = Some(msg_tx);
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
+        // Now visible to `session_held_elsewhere` — a concurrent resume of
+        // the same session may run its check.
+        drop(resume_claim);
         self.publish_status();
 
         // Auto-register with the muxbus reactive handler so inter-agent
@@ -8071,5 +8085,63 @@ mod reopen_guard_tests {
         let result = allowed.send_message(MSG.to_string(), resume_config(&sid));
         crate::backend::blockcontroller::unmark_closing(&closing_block);
         assert!(result.is_ok(), "got: {result:?}");
+    }
+
+    /// reagent P1 on #3421: check-then-spawn must be atomic across
+    /// controllers. Several reopens of one session at once — exactly one may
+    /// win. Uses a node process that stays alive (EOF-only exit), so the
+    /// winner's `current_pid` stays set while the others check.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_reopens_of_one_session_start_exactly_one_process() {
+        let has_node = std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path).any(|dir| dir.join("node").is_file() || dir.join("node.exe").is_file())
+        });
+        if !has_node {
+            eprintln!("reopen_guard_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let stub = std::env::temp_dir().join(format!("agentmux-reopen-stub-{}.js", uuid::Uuid::new_v4()));
+        std::fs::write(&stub, "process.stdin.on('data', () => {}); process.stdin.on('end', () => process.exit(0));").unwrap();
+
+        let sid = format!("sid-{}", uuid::Uuid::new_v4());
+        let controllers: Vec<Arc<PersistentSubprocessController>> =
+            (0..4).map(|i| controller(&format!("race-{i}-{}", uuid::Uuid::new_v4()), None)).collect();
+        for c in &controllers {
+            crate::backend::blockcontroller::register_controller(&c.block_id, c.clone());
+        }
+        let config = PersistentSpawnConfig {
+            cli_command: "node".to_string(),
+            cli_args: vec![stub.to_string_lossy().to_string()],
+            ..resume_config(&sid)
+        };
+
+        let barrier = Arc::new(std::sync::Barrier::new(controllers.len()));
+        let handles: Vec<_> = controllers
+            .iter()
+            .map(|c| {
+                let (c, config, barrier) = (c.clone(), config.clone(), barrier.clone());
+                tokio::task::spawn_blocking(move || {
+                    barrier.wait();
+                    c.send_message(MSG.to_string(), config)
+                })
+            })
+            .collect();
+        let mut results = Vec::new();
+        for h in handles {
+            results.push(h.await.unwrap());
+        }
+
+        for c in &controllers {
+            let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(3)).await;
+            crate::backend::blockcontroller::delete_controller(&c.block_id);
+        }
+        let _ = std::fs::remove_file(stub);
+
+        let ok = results.iter().filter(|r| r.is_ok()).count();
+        assert_eq!(ok, 1, "exactly one reopen may win; got {results:?}");
+        assert!(
+            results.iter().filter_map(|r| r.as_ref().err()).all(|e| e.contains("already open in another pane")),
+            "the others are refused by the guard: {results:?}"
+        );
     }
 }
