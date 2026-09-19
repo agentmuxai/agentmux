@@ -116,8 +116,9 @@ lifecycle so the host and backend can stay focused on the app:
 - Owns the **`agentmux-srv` lifecycle** (spawns and supervises the backend).
 
 On Windows, `task dev` exercises the launcher exactly as a packaged build does
-(production-parallel layout). See the isolation invariants (I1–I6) in
-[`CLAUDE.md`](./CLAUDE.md) for the contract that keeps parallel instances safe.
+(production-parallel layout). See the isolation invariants (I1–I7) in
+[`SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`](./docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md)
+for the contract that keeps parallel instances safe.
 
 ### Communication Flow
 

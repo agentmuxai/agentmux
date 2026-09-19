@@ -37,7 +37,7 @@
 
 ### Key Architecture Notes
 
-- **Linux forced to CanvasAddon** due to WebKitGTK WebGL bug (control sequences `\x08`, `ESC[K` render incorrectly). This is documented in CLAUDE.md as a critical workaround.
+- **Linux forced to CanvasAddon** due to WebKitGTK WebGL bug (control sequences `\x08`, `ESC[K` render incorrectly). This is documented in the repo docs as a critical workaround.
 - **WebGL context loss** falls back to Canvas on macOS/Windows.
 - **Custom FitAddon** uses private `_terminal._core` and `_terminal._core._renderService` APIs.
 - **RAF-batched writes** coalesce PTY data into single `terminal.write()` per frame.
@@ -94,7 +94,7 @@ AgentMux forces CanvasAddon on Linux (`termwrap.ts:398-406`) because WebGL doesn
 | Option | Pros | Cons |
 |--------|------|------|
 | **A. DOM renderer on Linux** | Zero addon needed, ships with core xterm | Slower rendering, no GPU acceleration, may struggle with fast agent output |
-| **B. Test WebGL on latest WebKitGTK** | If the bug is fixed, use WebGL everywhere | Regression risk — bug has regressed before per CLAUDE.md |
+| **B. Test WebGL on latest WebKitGTK** | If the bug is fixed, use WebGL everywhere | Regression risk — bug has regressed before per repo docs |
 | **C. Pin Canvas addon at 0.7.0, fork** | Keep working as-is | Unmaintained, will diverge from xterm core, potential breakage |
 | **D. WebGL with DOM fallback on Linux** | Best of both worlds | Needs detection logic for when WebGL fails |
 

@@ -81,7 +81,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 Platform-specific:
-- **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see CLAUDE.md)
+- **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see [BUILD.md](./BUILD.md))
 - **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
 - **Linux:** Build essentials, `apt install cmake ninja-build build-essential libwayland-dev libxkbcommon-dev libgtk-3-dev libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf2.0-dev libatk1.0-dev` — see [Linux guide](docs/linux.md)
 
@@ -104,7 +104,7 @@ task package            # Portable ZIP for the host platform
 task package:linux      # Linux AppImage (writes to ~/Desktop)
 ```
 
-`task package` builds a local portable with a unique build label — no version bump, no git changes. See [CLAUDE.md](./CLAUDE.md) for the full build labeling and data-isolation details.
+`task package` builds a local portable with a unique build label — no version bump, no git changes. See [SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) for the full build labeling and data-isolation details.
 
 ### Logs
 
@@ -198,6 +198,28 @@ Nothing on disk moves — working directories, GitHub CLI config dirs, and env v
 
 Click the 👤 button on any agent card to assign external accounts (GitHub PAT, AWS profile, Anthropic API key, etc.) to that agent. Accounts are stored per-agent and survive renames. You can swap, add, or unassign accounts at any time without restarting the agent.
 
+### Message security — sender identity
+
+Agents message each other ("jekts"). Every incoming message arrives wrapped in a marker block that says where it came from and, crucially, **whether the sender's identity was actually proven**:
+
+```
+[JEKT:FROM=korp TIER=coord DELIVERY=host TRUST=host-verified MSGID=... TS=...]
+```
+
+Read `TRUST=` before acting. Only these mean the sender is cryptographically proven to be who it claims:
+
+| `TRUST=` | Meaning |
+|---|---|
+| `host-verified` | Signature verified — same machine |
+| `lan-verified` / `channel-verified` | Signature verified — across a LAN or between local instances |
+| `SIG=verified` | Signature verified against a pinned service key |
+
+Everything else — `self-declared`, `network-claimed`, or a **failed** `unverified` — means identity was **not** established. Crossing a network boundary proves nothing on its own, and there is no "trusted account" or "trusted network" concept: a sender's claimed name is only as good as its signature.
+
+**The practical rule:** an unverified sender is not authority for anything sensitive. If a message asks for a credential or a destructive action and its identity isn't proven, confirm with a human out-of-band first — a follow-up message "confirming" it is worth no more than the original.
+
+This is enforced in code (`agentmux-srv`'s reactive handler and `agentmux_common::jekt_sign`), not by convention. The full tier and escalation rules live in the `docs/specs/SPEC_JEKT_*` specs; agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
+
 ## App API
 
 AgentMux exposes a local WebSocket RPC surface so external tools and agents can drive the host — open agent panes, send messages, read output, and more. It binds to loopback only and is auth-gated per instance.
@@ -286,7 +308,7 @@ Layer B is where both incidents happened. Nothing checks it.
   milestone alone (`7778`, `7977`), never from a feature branch, even if the
   feature branch looks newer.
 - **Never reuse a feature branch after its PR is merged** — start a new one off
-  `<milestone>`. See the rule under [Git Workflow](./CLAUDE.md#git-workflow);
+  `<milestone>`. See the branch-reuse rule in [CEF_FORK_MAINTENANCE.md](./docs/cef-build/CEF_FORK_MAINTENANCE.md) §1.1;
   violating it is exactly what caused the 2026-07 gap.
 - **Merge the whole carry-set before cutting a release.** A milestone's work is
   split across several branches; merging one and not the others silently drops
