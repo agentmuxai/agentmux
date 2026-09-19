@@ -688,3 +688,29 @@ system is needed.
     deadline. The tests skip, with a note, if `node` isn't on PATH.
   - `close_pane::tests` covers concurrency, the last-tab guard refusing
     without stopping anything, window-tab close, and the closing-wait signal.
+
+## 10. Phase 3 as implemented
+
+(§10.1, the orphan reaper, lands in its own PR.)
+
+### 10.2 Reopen guard (§4.7)
+
+The guard sits at the one point every reopen path goes through: the
+persistent controller's spawn, right before `--resume <sid>` is appended
+(`persistent.rs`, `session_held_elsewhere`). That covers the picker's
+reattach, the launch modal and MCP, not just `agent.open`.
+
+- **Another live persistent controller holds the session:** the spawn is
+  refused with "This conversation is already open in another pane … Close it
+  there, or switch to it".
+- **A block mid-close holds the session:** mid-close means it has left the
+  registry but its process has not exited (`closing_blocks_still_running`).
+  The spawn is refused with "… still shutting down. Try again in a few
+  seconds."
+- The error returns through `send_message` to the input RPC, so the sender
+  sees it.
+
+Scope: persistent (Claude) controllers only. Per-turn subprocess providers
+have no long-lived process to collide with between turns. The picker's
+"offer to switch to it" UX (§4.7) is not built. The refusal message says what
+to do instead.
