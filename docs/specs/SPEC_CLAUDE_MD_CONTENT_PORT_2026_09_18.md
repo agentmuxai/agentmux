@@ -191,9 +191,12 @@ explicitly corrected once PR #2764 shipped.
 > (§5, step 0), not a follow-up.**
 
 The `Which GitHub account am I acting as?` content (7 citations) is already
-superseded by the private `shared-infrastructure`
-`docs/standards/AGENT_GITHUB_AUTH.md` (merged, PR #480). Public docs may
-reference it **by name only**.
+superseded by the agent GitHub auth standard in the **private**
+`shared-infrastructure` repository (merged there as PR #480). It is named
+here without a path deliberately: it is not a file in this repo, and a
+path-shaped reference to another repository is exactly the dangling pointer
+`check-spec-citations.sh` exists to prevent. Public docs may reference it
+**by name only**.
 
 ### 4.3 Resolve the unlanded WAN-signing dependency
 
