@@ -194,7 +194,7 @@ export class AgentViewModel implements ViewModel {
         // it — and `BlockFrame_Default_Component` honors `noHeader` in
         // preview mode too, so a blanket `true` silently stripped the title
         // off every agent pane's drag thumbnail.
-        this.noHeader = () => this.nodeModel.paneChromeHoisted === true;
+        this.noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
             const oref = MOS.makeORef("block", this.blockId);

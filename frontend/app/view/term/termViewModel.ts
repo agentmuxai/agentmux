@@ -90,6 +90,7 @@ class TermViewModel implements ViewModel {
     searchAtoms?: SearchAtoms;
     voiceHandle: () => PaneVoiceHandle;
 
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "term";
         this.blockId = blockId;
@@ -350,7 +351,7 @@ class TermViewModel implements ViewModel {
      *  `<Block preview>`, no chrome around it) keeps its own header — the
      *  same bug Codex/ReAgent caught on the agent pane in #3151. */
     get noHeader(): () => boolean {
-        return () => this.nodeModel.paneChromeHoisted === true;
+        return () => this.nodeModel.paneChromeHoisted?.() === true;
     }
 
     /** Terminal now renders through the ONE shared chrome like every other

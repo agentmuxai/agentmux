@@ -254,7 +254,7 @@ class SysinfoViewModel implements ViewModel {
     // the 2nd param as what it actually is.
     nodeModel: BlockNodeModel;
     renderPaneChrome = renderPaneChromeShell;
-    noHeader = () => this.nodeModel.paneChromeHoisted === true;
+    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.nodeModel = nodeModel;

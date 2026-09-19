@@ -28,7 +28,7 @@ class HelpViewModel implements ViewModel {
     // `makeViewModel`); previously unused here, now needed for `noHeader`.
     nodeModel: BlockNodeModel;
     renderPaneChrome = renderPaneChromeShell;
-    noHeader = () => this.nodeModel.paneChromeHoisted === true;
+    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "help";
