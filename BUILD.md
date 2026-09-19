@@ -18,6 +18,18 @@ These instructions cover setting up dependencies and building AgentMux from sour
 | **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
+**Ninja must be on `PATH`.** `cef-dll-sys` builds CEF's C wrapper via CMake,
+which needs a build program it can find. Visual Studio ships Ninja but does not
+put it on `PATH`; copy it somewhere that is:
+
+```bash
+cp "/c/Program Files/Microsoft Visual Studio/"*"/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" /c/tools/bin/
+```
+
+Verify with `ninja --version`. If `cargo build` fails with *"CMake was unable to
+find a build program corresponding to Ninja"*, this is why. On macOS use
+`brew install cmake ninja`; on Linux `apt install cmake ninja-build`.
+
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
 
 ### Platform-Specific Setup

@@ -116,6 +116,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
         assert_eq!(ctrl.controller_type(), "shell");
         assert_eq!(ctrl.block_id(), "block-1");
@@ -136,6 +137,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         // Use mock factory so we don't open a real PTY in tests
@@ -166,6 +168,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         let mut meta = make_shell_meta();
@@ -192,6 +195,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
@@ -223,6 +227,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         // Set a custom factory that returns a mock with exit code 42
@@ -249,6 +254,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
@@ -275,6 +281,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         let result = ctrl.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
@@ -292,6 +299,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         );
 
         ctrl.set_conn_factory(Box::new(|_conn_name, _meta| {
@@ -326,6 +334,7 @@ use std::sync::Arc;
             None,
             None,
             Some(fs.clone()),
+            String::new(),
         );
         assert!(ctrl.filestore.is_some());
         assert!(Arc::ptr_eq(ctrl.filestore.as_ref().unwrap(), &fs));
@@ -341,6 +350,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         ));
 
         assert_eq!(ctrl.controller_type(), "shell");
@@ -582,6 +592,7 @@ use std::sync::Arc;
             None,
             Some(store),
             None,
+            String::new(),
         );
 
         Controller::stop(&ctrl, true, STATUS_DONE).unwrap();
@@ -613,6 +624,7 @@ use std::sync::Arc;
             None,
             None,
             None,
+            String::new(),
         ));
 
         super::super::register_controller("test-register-block", ctrl.clone());
@@ -648,7 +660,7 @@ use std::sync::Arc;
             ..Default::default()
         };
 
-        let result = super::super::resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"));
+        let result = super::super::resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
         assert!(result.is_ok());
 
         let ctrl = super::super::get_controller("resync-test-block");
