@@ -93,6 +93,13 @@ for ((i = 1; i <= $#; i++)); do
             arg="${arg#--repo=}"
             from_repo_flag=1
             ;;
+        -R?*)
+            # Attached shorthand (`-Rowner/repo`, no space). gh is
+            # cobra/pflag-based and accepts it, so it has to be handled or the
+            # explicit owner is silently ignored in favour of the directory.
+            arg="${arg#-R}"
+            from_repo_flag=1
+            ;;
     esac
 
     # A bare OWNER/REPO is ONLY accepted as the value of -R/--repo. Matching it
@@ -102,9 +109,13 @@ for ((i = 1; i <= $#; i++)); do
     # does not exist. `gh api` paths are unambiguous and safe to match anywhere.
     if [[ $from_repo_flag -eq 1 && "$arg" =~ ^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$ ]]; then
         TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO="${BASH_REMATCH[2]}"; break
-    elif [[ "$arg" =~ ^repos/([^/]+)/([^/]+) ]]; then
+    # The leading slash is optional because `gh api` documents and accepts both
+    # `repos/O/R/...` and `/repos/O/R/...`. Requiring the bare form meant the
+    # documented spelling silently fell through to the cwd-derived org, which
+    # is precisely the wrong-account 404 this matching exists to prevent.
+    elif [[ "$arg" =~ ^/?repos/([^/]+)/([^/]+) ]]; then
         TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO="${BASH_REMATCH[2]}"; break
-    elif [[ "$arg" =~ ^orgs/([^/]+) ]]; then
+    elif [[ "$arg" =~ ^/?orgs/([^/]+) ]]; then
         # Org-scoped call with no repo: mint for that org, and leave TARGET_REPO
         # empty so the reachability probe is skipped - there is no repo to probe.
         TARGET_ORG="${BASH_REMATCH[1]}"; TARGET_REPO=""; break
