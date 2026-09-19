@@ -34,12 +34,14 @@ const [agentList, setAgentList] = createSignal<TrackedProcessInfo[]>([]);
 const [shellList, setShellList] = createSignal<TrackedProcessInfo[]>([]);
 const [confidence, setConfidence] = createSignal<TrackingConfidence>("high");
 
+const refreshCalls = vi.hoisted(() => vi.fn());
+
 vi.mock("../hooks/useTrackedProcesses", () => ({
     useTrackedProcesses: (blockId: () => string | undefined) => ({
         // The agent pane's own block vs the drawer shell's sub-block.
         list: () => (blockId() === "sub-1" ? shellList() : agentList()),
         confidence,
-        refresh: () => {},
+        refresh: () => refreshCalls(blockId()),
     }),
 }));
 
@@ -119,5 +121,23 @@ describe("AgentShellInfoPanel", () => {
         renderPanel();
         setAgentList([proc(100, "/usr/bin/node")]);
         expect(screen.getByText(/≈/)).toBeInTheDocument();
+    });
+
+    it("re-reads both blocks on a tick, because events never carry memory", () => {
+        // The backend emits add/exit deltas only — a pid it has already
+        // reported never gets an RSS update — so a dev server that grows to a
+        // gigabyte would keep reading as its start-up size without this
+        // (ReAgent P1 on #3436).
+        vi.useFakeTimers();
+        try {
+            refreshCalls.mockClear();
+            renderPanel();
+            expect(refreshCalls).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(15_000);
+            expect(refreshCalls).toHaveBeenCalledWith("block-1");
+            expect(refreshCalls).toHaveBeenCalledWith("sub-1");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
