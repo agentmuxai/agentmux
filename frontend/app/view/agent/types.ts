@@ -518,10 +518,14 @@ export interface HistoryLinkNode {
  * `agentmux-srv/src/backend/resume_preflight.rs`).
  *
  * A render-time synthetic like `HistoryLinkNode`: injected by
- * `injectResumePreflight`, never persisted, never in the reducer store. It has
- * to be a document node rather than a banner because the pane's other banner
- * host (`AgentControlBar`) renders only while the details panel is open, and
- * this notice is worthless if it can be missed.
+ * `injectResumePreflight`, never persisted, never in the reducer store. It is
+ * a document node rather than a banner because it belongs in the transcript
+ * it is making a claim about — and because when this was written the pane's
+ * only banner host (`AgentControlBar`) rendered solely while the Shell drawer
+ * was open, which would have let the notice be missed entirely. That host is
+ * gone: `AgentSessionNotices` now renders above the composer unconditionally
+ * (SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3), so visibility alone
+ * no longer rules a banner out.
  *
  * Distinct from `SessionOutcomeNode`, which reports what a resume attempt
  * *did*. This reports what the next one *will* do, and disappears once the
