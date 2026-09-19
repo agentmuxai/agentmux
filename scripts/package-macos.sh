@@ -235,8 +235,15 @@ cp -R dist/frontend "$APP/Contents/Resources/frontend"
 ln -s "../Resources/frontend" "$APP/Contents/MacOS/frontend"
 
 # Strip .js.map source maps for release DMGs (~28 MB saved). Matches the
-# STRIP_MAPS logic in scripts/package.sh (#1226). Set STRIP_MAPS=0 to keep.
-if [ "${STRIP_MAPS:-1}" = "1" ]; then
+# STRIP_MAPS logic in scripts/package.sh (#1226) and, since #3355, Linux's
+# scripts/stage-linux-runtime.sh: default KEEP, release opts in explicitly
+# via `task package:release:macos` (Taskfile.yml). This used to default to
+# 1 here — the opposite of every other platform, and of
+# docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md's "`task package` (local
+# portable) — maps included" — so a local `task package:macos` build always
+# shipped without maps, silencing frontend/log/source-map-resolver.ts (a
+# packaged crash reports as `index-<hash>.js (190)` plus a 404 for the map).
+if [ "${STRIP_MAPS:-0}" = "1" ]; then
     find "$APP/Contents/Resources/frontend" -name "*.map" -delete
     echo "  stripped .map files from frontend"
 fi
