@@ -220,6 +220,18 @@ impl SubagentWatcher {
                 );
                 return;
             }
+            // The pane was closed: its controller left the registry on
+            // purpose and will never register again. Retrying (~15s of
+            // "not yet registered" lines after every mid-turn close) would
+            // only chase a block that's gone.
+            None if self.parent_block_closed(parent_block_id) => {
+                tracing::debug!(
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    "reconcile_stale_subagents: parent block closed — nothing to reconcile"
+                );
+                return;
+            }
             None if retries_remaining > 0 => {
                 tracing::info!(
                     parent_block_id = %parent_block_id,
@@ -496,6 +508,16 @@ impl SubagentWatcher {
     /// for spawning a task that outlives this sync call; silently no-ops
     /// for a bare `new()` watcher (most unit tests), same "untracked ->
     /// safe no-op" convention as that method.
+    /// The parent block is mid-close, or no longer exists — either way no
+    /// controller for it will ever register again. A failed store read is
+    /// "unknown", not "closed", so it keeps the bounded retry.
+    /// SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md (graceful close
+    /// removes the controller before the block record).
+    pub(super) fn parent_block_closed(&self, parent_block_id: &str) -> bool {
+        crate::backend::blockcontroller::is_closing(parent_block_id)
+            || matches!(self.mstore.get::<crate::backend::obj::Block>(parent_block_id), Ok(None))
+    }
+
     fn retry_reconcile_once(&self, parent_block_id: &str, session_id: &str, retries_remaining: u32) {
         let Some(watcher) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
             return;
