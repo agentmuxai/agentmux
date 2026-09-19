@@ -806,6 +806,14 @@ impl Controller for ShellController {
             inner.agent_id = agent_id_for_jekt.clone();
         }
 
+        // Re-publish now that the spawn metadata exists. The `running` status
+        // above goes out BEFORE the PTY child is created, so it carries no
+        // pid, program name or spawn time, and nothing else publishes until
+        // the process exits — a subscriber would show a running shell as an
+        // anonymous one for its whole life (Codex P1 on #3436). `persist: 1`
+        // means this snapshot is also what a later subscriber gets replayed.
+        self.publish_status();
+
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
         // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
         // messages directly to this PTY without a separate /agentmux/reactive/register call.

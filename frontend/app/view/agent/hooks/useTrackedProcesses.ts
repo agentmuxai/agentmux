@@ -42,10 +42,17 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
     const [list, setList] = createSignal<TrackedProcessInfo[]>([]);
     const [confidence, setConfidence] = createSignal<TrackingConfidence>("none");
 
-    const fetchSnapshot = (id: string) => {
+    // Bumped whenever the watched block changes. Every in-flight snapshot
+    // carries the generation it was issued under and is dropped if that
+    // moved on: a response for the previous shell must never land on the new
+    // one's list (Codex P2 on #3436).
+    let generation = 0;
+
+    const fetchSnapshot = (id: string, issuedAt: number) => {
         if (!TabRpcClient) return;
         void RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: id })
             .then((res) => {
+                if (issuedAt !== generation) return;
                 setList(res.processes ?? []);
                 setConfidence(res.confidence);
             })
@@ -60,6 +67,7 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
     // the list so a stale block's processes never show under a new one.
     createEffect(() => {
         const id = blockId();
+        const myGeneration = ++generation;
         if (!id) {
             setList([]);
             setConfidence("none");
@@ -113,10 +121,13 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
         } else {
             void RpcApi.AgentProcessListCommand(TabRpcClient, { block_id: id })
                 .then((res) => {
+                    if (myGeneration !== generation) return;
                     setConfidence(res.confidence);
                     seed(res.processes ?? []);
                 })
-                .catch(() => seed([]));
+                .catch(() => {
+                    if (myGeneration === generation) seed([]);
+                });
         }
 
         onCleanup(() => {
@@ -130,7 +141,7 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
         confidence,
         refresh: () => {
             const id = blockId();
-            if (id) fetchSnapshot(id);
+            if (id) fetchSnapshot(id, generation);
         },
     };
 }
