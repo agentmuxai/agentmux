@@ -401,6 +401,22 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
         expect(data.blockId).toBe("new-block");
     });
 
+    it("two DeleteNode actions for sibling tabs in one batch leave the pane with its remaining tab", async () => {
+        // reagent P1 on #3414: `leafs` is refreshed only once per batch, so a
+        // later action in the same batch can miss it and take the tree-walk
+        // fallback — which must also remove just the member, not the pane.
+        const model = createLayoutModel();
+        stackRoot(model, ["existing", "moved-block", "new-block"], "existing");
+
+        setPendingActions(model, [deleteAction("moved-block", "del-a"), deleteAction("new-block", "del-b")]);
+        await processPendingBackendActions(model);
+
+        const data = model.treeState.rootNode?.data;
+        expect(data, "the pane must survive").toBeTruthy();
+        expect(data!.blockStack).toEqual(["existing"]);
+        expect(data!.blockId).toBe("existing");
+    });
+
     it("actions with duplicate actionid are processed only once (idempotent)", async () => {
         const model = createLayoutModel();
         insertBlock(model, "existing");

@@ -232,20 +232,11 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
         case LayoutTreeActionType.DeleteNode: {
             let leaf = model?.getNodeByBlockId(action.blockid);
 
-            // If not found in leafs array, search the tree directly (handles orphaned blocks)
+            // If not found in leafs array, search the tree directly (handles
+            // orphaned blocks, and a leafs array that is stale mid-batch — it
+            // is only refreshed once, after every action in the batch).
             if (!leaf && model.treeState.rootNode) {
                 leaf = findNodeByBlockId(model.treeState.rootNode, action.blockid);
-                if (leaf) {
-                    // Delete directly from tree instead of closeNode (which may expect block to exist)
-                    model.treeReducer(
-                        {
-                            type: LayoutTreeActionType.DeleteNode,
-                            nodeId: leaf.id,
-                        } as LayoutTreeDeleteNodeAction,
-                        false
-                    );
-                    break;
-                }
             }
 
             // The action names ONE block. `getNodeByBlockId` also matches a
