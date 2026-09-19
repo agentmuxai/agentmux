@@ -1,0 +1,133 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Session surfaces: the notice banners above the composer strip
+// (AgentSessionNotices) and the stats popover the strip's context reading
+// opens (AgentSessionStats).
+//
+// Deliberately NOT nested under `.agent-view`, unlike the banner styles in
+// _control-bar.scss: the popover renders through a `Portal` into document
+// body, outside the pane's subtree, so anything scoped to `.agent-view`
+// would not reach it. The shared `.agent-session-btn` chrome lives here for
+// the same reason — the banners inside the pane and the popover's own
+// Archive/Export/Restore buttons must look identical.
+
+// === Shared session-action button chrome ===
+// (Archive / Export / Restore / Dismiss.) Moved out of _control-bar.scss's
+// `.agent-view` nesting when the Shell drawer's Session row was replaced by
+// the stats popover — see
+// docs/specs/SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §3.
+.agent-session-btn {
+    appearance: none;
+    background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    color: var(--main-text-color);
+    font: inherit;
+    font-size: 10px;
+    padding: 2px var(--space-1-5);
+    cursor: default;
+    outline: none;
+    white-space: nowrap;
+    transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        border-color: var(--accent-color);
+        color: var(--main-text-color);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+}
+
+// Archive is mildly destructive (compresses history) — warm accent border.
+.agent-session-btn-archive:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--warning-color) 16%, transparent);
+    border-color: var(--warning-color);
+}
+
+// === Notices ===
+// Stack of banners directly above the composer strip. Each banner keeps its
+// own chrome (defined in _control-bar.scss); this only owns the stacking.
+.agent-session-notices {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+// === Stats trigger ===
+// The context reading itself. A button, but it must keep reading as the
+// strip's inert-looking text until hovered — the strip's one loud
+// call-to-action is Shell, and a second bordered control on the same row
+// would compete with it.
+.agent-session-stats-trigger {
+    appearance: none;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: default;
+    outline: none;
+
+    &:hover {
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+}
+
+// === Stats popover ===
+.menu.agent-session-stats-panel {
+    min-width: 200px;
+    padding: var(--space-1) 0;
+    font-size: 10px;
+}
+
+.agent-session-stats-section {
+    padding: 2px var(--space-2);
+    color: var(--secondary-text-color);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.agent-session-stats-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    padding: 1px var(--space-2);
+    white-space: nowrap;
+}
+
+.agent-session-stats-key {
+    color: var(--secondary-text-color);
+    min-width: 48px;
+}
+
+.agent-session-stats-val {
+    color: var(--main-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-session-stats-actions {
+    display: flex;
+    gap: var(--space-1-5);
+    padding: var(--space-1-5) var(--space-2) var(--space-1);
+    margin-top: var(--space-1);
+    border-top: 1px solid var(--border-color);
+}
