@@ -45,7 +45,7 @@ import { closeNode } from "./layoutMagnify";
 
 /** The node's stack, or `[blockId]` when it has none yet (back-compat: a
  *  non-stacked leaf behaves as a one-member stack for these functions). */
-function effectiveStack(data: TabLayoutData): string[] {
+export function effectiveStack(data: TabLayoutData): string[] {
     return data.blockStack?.length ? data.blockStack : [data.blockId];
 }
 
