@@ -61,14 +61,20 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
 
     // One confirmation for the whole pane, when something in it is still
     // running (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6).
+    let closingData = nodeToDelete.data;
     if (model.beforeNodeDelete) {
         const membersAsked = effectiveStack(nodeToDelete.data).join("\n");
         if (!(await model.beforeNodeDelete(nodeToDelete.data))) return;
         // The tree may have changed while the prompt was open (a backend
         // push, the orphan reaper, another close). Close only what the user
-        // confirmed: the same pane, with the same members.
+        // confirmed: the same pane, with the same members. Compared by node
+        // id and members, NOT object identity — `balanceNode` collapses a
+        // single-child container by copying the leaf's id/data onto its
+        // parent, so an unrelated close elsewhere swaps the object while the
+        // pane itself is unchanged (reagent P1 on #3422).
         const current = findNode(model.treeState.rootNode, nodeId);
-        if (current !== nodeToDelete || effectiveStack(current.data).join("\n") !== membersAsked) return;
+        if (!current?.data || effectiveStack(current.data).join("\n") !== membersAsked) return;
+        closingData = current.data;
     }
 
     if (nodeId === model.magnifiedNodeId) {
@@ -85,7 +91,7 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
     // long-running session (reagent's review of PR #2761).
     clearLeafRevealGate(nodeId);
 
-    await model.onNodeDelete?.(nodeToDelete.data);
+    await model.onNodeDelete?.(closingData);
 }
 
 /**

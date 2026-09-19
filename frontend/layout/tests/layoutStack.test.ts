@@ -411,6 +411,34 @@ describe("layoutStack", () => {
             expect(onNodeDelete).not.toHaveBeenCalled();
         });
 
+        it("a confirmed close still happens when an unrelated pane closed during the prompt", async () => {
+            // reagent P1 on #3422: `balanceNode` collapses the now-single-child
+            // container onto the surviving leaf, swapping its object — the
+            // pane itself is unchanged, so the confirmed close must proceed.
+            const model = createLayoutModel();
+            insertRootBlock(model, "b1");
+            const other = newLayoutNode(undefined, undefined, undefined, { blockId: "b2" });
+            model.treeReducer({
+                type: LayoutTreeActionType.InsertNode,
+                node: other,
+                magnified: false,
+                focused: false,
+            } as LayoutTreeInsertNodeAction);
+            const target = getNodeByBlockId(model, "b1")!;
+            const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+            model.onNodeDelete = onNodeDelete;
+            model.beforeNodeDelete = vi.fn().mockImplementation(async () => {
+                model.treeReducer({ type: LayoutTreeActionType.DeleteNode, nodeId: getNodeByBlockId(model, "b2")!.id } as any);
+                return true;
+            });
+
+            await closeNode(model, target.id);
+
+            expect(onNodeDelete).toHaveBeenCalledTimes(1);
+            expect(onNodeDelete.mock.calls[0][0].blockId).toBe("b1");
+            expect(model.treeState.rootNode).toBeUndefined();
+        });
+
         it("confirming the pane-close proceeds with the close", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
