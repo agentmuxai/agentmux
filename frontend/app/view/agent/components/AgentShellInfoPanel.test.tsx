@@ -67,7 +67,10 @@ describe("AgentShellInfoPanel", () => {
 
     it("reports the shell's name, pid and cwd once the controller says so", () => {
         renderPanel();
-        publishStatus({ shellprocstatus: "running", shellprocpid: 18432, shellprocname: "pwsh", spawn_ts_ms: Date.now() - 12 * 60_000 });
+        // Mid-bucket on purpose: the panel samples `now` when it renders,
+        // fractionally before this line runs, so an exact 12-minute offset
+        // floors to 11m.
+        publishStatus({ shellprocstatus: "running", shellprocpid: 18432, shellprocname: "pwsh", spawn_ts_ms: Date.now() - 12.5 * 60_000 });
         expect(screen.getByText("pwsh")).toBeInTheDocument();
         expect(screen.getByText("pid 18432")).toBeInTheDocument();
         expect(screen.getByText("12m")).toBeInTheDocument();
