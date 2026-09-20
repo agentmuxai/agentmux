@@ -2154,14 +2154,36 @@ const AgentPresentationView = ({
         <div
             ref={rootRef}
             class="agent-view agent-view--presentation"
-            style={{ zoom: zoomFactor(), "--agent-pane-zoom": String(zoomFactor()) }}
+            // NOTE: `zoom` lives on `.agent-view-zoomed` below, NOT here. The Shell
+            // drawer must render in an UNSCALED coordinate space: xterm measures cells
+            // via getBoundingClientRect (visual px) but customFit reclaims width from
+            // clientWidth (layout px), and CSS `zoom` makes those two disagree — which
+            // produced fractional cell sizes (clipped top row, since the grid is
+            // bottom-anchored) and a link layer drawn into a 445x210 buffer but
+            // displayed at 307x145 (misplaced hover underlines). xterm.js does not
+            // support being rendered inside a CSS-scaled subtree (xtermjs/xterm.js
+            // #2584, #3242). `--agent-pane-zoom` is still published here for other
+            // consumers. See SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md.
+            style={{ "--agent-pane-zoom": String(zoomFactor()) }}
             onContextMenu={handleContextMenu}
             tabIndex={-1}
         >
+            {/* Everything that SHOULD scale with pane zoom lives in here. The Shell
+                drawer is deliberately a sibling of this element, below. */}
             {/* Loading overlay — covers the pane from mount until the initial
                 history load resolves, so a content-heavy pane never sits
                 blank while it replays. See
-                docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md. */}
+                docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md.
+
+                Deliberately a DIRECT child of `.agent-view`, OUTSIDE
+                `.agent-view-zoomed`. It is `position: absolute; inset: 0`
+                (_loading-overlay.scss), so it covers its nearest POSITIONED
+                ancestor — and the zoomed wrapper is `position: relative`. Nested
+                inside it, the overlay stopped covering the Shell drawer (a sibling
+                of the wrapper), leaving an open drawer visible and uncovered for
+                the whole load. Keeping it out here also keeps it unscaled, so the
+                cover can't be 69%-sized by the pane zoom.
+                See REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md §F. */}
             <Show when={showLoadingOverlay()}>
                 <div
                     class="agent-pane-loading-overlay"
@@ -2170,6 +2192,7 @@ const AgentPresentationView = ({
                     <BrainSpinner fading={historyLoaded()} />
                 </div>
             </Show>
+            <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Gradient progress bar — marching-ants shimmer traced around
                 the full pane perimeter while working, hidden at rest.
                 Color matches the pane's own selection-ring color (not a
@@ -2586,13 +2609,22 @@ const AgentPresentationView = ({
                         composerIsEmptyFn = fn;
                     }}
                 />
-                {/* Details panel — just the shell + control bar now. Activity-log
-                    lines write directly into the terminal (handleShellTermReady)
-                    instead of a separate panel here. Docked BELOW the composer
-                    (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md): the shell
-                    stacks under the text input (which shifts up to make room,
-                    since this region hugs the pane bottom). */}
-                <Show when={paneModel.state.detailsOpen}>
+            </div>
+            </div>
+            {/* Details panel — just the shell + control bar now. Activity-log
+                lines write directly into the terminal (handleShellTermReady)
+                instead of a separate panel here. Docked BELOW the composer
+                (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md): the shell
+                stacks under the text input (which shifts up to make room,
+                since this region hugs the pane bottom).
+
+                Deliberately OUTSIDE `.agent-view-zoomed` — see the note on the root
+                element. The terminal has to render at a 1:1 device-pixel ratio, so it
+                must not be inside the per-pane `zoom`. It stays a flex child of
+                `.agent-view` so the composer still shifts up to make room for it.
+                Same move `agent-view.scss:350` records for the progress bar, and the
+                same cure as SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md. */}
+            <Show when={paneModel.state.detailsOpen}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
                         {/* One line: what this shell is, and what the agent
                             has left running. Takes the slot AgentControlBar
@@ -2616,12 +2648,10 @@ const AgentPresentationView = ({
                                 parentBlockId={model.blockId}
                                 cwd={block()?.meta?.["cmd:cwd"] ?? ""}
                                 existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                                // Passed so the shell can cancel it out of its own
-                                // font-size math -- total decoupling: the pane's
-                                // zoom (this) and the shell's own zoom (term:zoom
-                                // on the sub-block) are independent controls, and
-                                // neither should visually leak into the other.
-                                agentPaneZoom={zoomFactor}
+                                // No `agentPaneZoom` prop any more. The shell used to
+                                // divide the pane's zoom out of its own font-size math
+                                // to fake independence; now it genuinely IS independent,
+                                // because it renders outside `.agent-view-zoomed`.
                                 onSubBlockCreated={(subBlockId) => {
                                     void RpcApi.SetMetaCommand(TabRpcClient, {
                                         oref: MOS.makeORef("block", model.blockId),
@@ -2634,8 +2664,7 @@ const AgentPresentationView = ({
                             />
                         </ResizableDetailsDrawer>
                     </div>
-                </Show>
-            </div>
+            </Show>
         </div>
     );
 };

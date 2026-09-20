@@ -24,7 +24,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { sendWSCommand } from "@/app/store/ws";
 import { TermWrap } from "@/app/view/term/termwrap";
 import { stringToBase64 } from "@/util/util";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
@@ -35,17 +35,6 @@ interface AgentShellSubblockProps {
     cwd: string;
     existingSubBlockId: string | undefined;
     onSubBlockCreated: (subBlockId: string) => void;
-    /**
-     * The agent pane's OWN zoom factor (agent-view.tsx's `zoomFactor()`,
-     * applied as CSS `zoom` on the `.agent-view` root — an ancestor of this
-     * component). CSS `zoom` cascades to descendants, so without correction
-     * the terminal's rendered glyph size would silently ride along with
-     * whatever the outer pane is zoomed to, on top of this component's own
-     * independent `term:zoom`. Dividing it out of the raw pixel fontSize we
-     * feed xterm cancels that cascade — the two zooms become fully
-     * independent controls (see `termFontSize` below).
-     */
-    agentPaneZoom: Accessor<number>;
     /**
      * Fired once the terminal has finished `init()`, handing the parent a
      * closure that writes pre-formatted (already ANSI-colored, no trailing
@@ -296,9 +285,14 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         onCleanup(() => unsub());
     });
 
+    // No pane-zoom compensation: this component renders OUTSIDE `.agent-view-zoomed`,
+    // so it is not scaled by the per-pane `zoom` and has nothing to cancel. The old
+    // `/ paneZoom` divisor cancelled the NUMBER but not the GEOMETRY — the element was
+    // still CSS-scaled, so an integer font size here became a fractional cell size on
+    // screen, clipping the top row and displacing the link layer.
+    // See SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md.
     const termFontSize = createMemo(() => {
-        const paneZoom = props.agentPaneZoom() || 1;
-        return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));
+        return Math.max(4, Math.min(64, Math.round(BASE_FONT_SIZE * termZoom())));
     });
 
     // The drawer used to hardcode `scrollback: 2000`, ignoring `term:scrollback`

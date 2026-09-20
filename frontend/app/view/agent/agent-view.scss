@@ -474,6 +474,22 @@
     }
 }
 
+// The per-pane `zoom` lives on `.agent-view-zoomed` (below), NOT here, so the
+// Shell drawer — a direct flex child of this element — renders at a 1:1
+// device-pixel ratio. See SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md.
+//
+// The `agent-pane` container is declared on BOTH this element and
+// `.agent-view-zoomed`, deliberately. Container queries resolve to the NEAREST
+// matching ancestor, so:
+//   * inside the presentation view, `.agent-view-zoomed` is nearer and wins —
+//     `@container agent-pane` keeps measuring the ZOOMED width it always did;
+//   * `AgentPicker.tsx:957,971` and `AgentHistoryTabView.tsx:56` render a BARE
+//     `.agent-view` with `zoom` applied directly and no wrapper, and this
+//     declaration is the only thing keeping `@container agent-pane` matching
+//     there at all.
+// Declaring it only on the wrapper silently stopped every `@container
+// agent-pane` rule (_responsive.scss, _shell-node.scss, _composer-strip.scss)
+// from matching in the History tab and the Picker — caught by review on #3456.
 .agent-view {
     container-type: inline-size;
     container-name: agent-pane;
@@ -516,6 +532,28 @@
     z-index: 0;
     user-select: none;
     cursor: default;
+}
+
+// Carries the per-pane `zoom` for everything that SHOULD scale with it, and owns
+// the `agent-pane` container so every `@container agent-pane` breakpoint keeps
+// firing against the same VISUAL width it always did. (If the container stayed on
+// the now-unscaled `.agent-view`, its inline-size would jump by 1/zoom — e.g.
+// 310px → 449px at 0.69 — and every responsive breakpoint would shift.)
+//
+// The Shell drawer is deliberately a sibling of this element, not a descendant:
+// xterm cannot render correctly inside a CSS-scaled subtree. See
+// SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md.
+.agent-view-zoomed {
+    container-type: inline-size;
+    container-name: agent-pane;
+    display: flex;
+    flex-direction: column;
+    // Takes the space the drawer doesn't, so the composer still shifts up to make
+    // room for it. min-height:0 so the transcript can scroll rather than forcing
+    // the flex parent open.
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
 }
 
 // ── Agent History view (spec §4 — read-only full-stream reader) ──────────
