@@ -11,7 +11,7 @@ import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
-import { createPaneReadiness, type PaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
+import { createPaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -132,7 +132,7 @@ function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
     );
 }
 
-function BlockFull({ nodeModel, viewModel, readiness }: FullBlockProps): JSX.Element {
+function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Element {
     counterInc("render-BlockFull");
     let focusElemRef: { current: HTMLInputElement | null } = { current: null };
     let blockRef: { current: HTMLDivElement | null } = { current: null };
@@ -269,7 +269,7 @@ function BlockFull({ nodeModel, viewModel, readiness }: FullBlockProps): JSX.Ele
                         spinner underneath it is the "two brains at once" case
                         the consolidation exists to remove, so suppress it for
                         that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
-                    <Suspense fallback={<Show when={!readiness?.isLoading()}><BrainSpinner /></Show>}>
+                    <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
                         {viewElem()}
                     </Suspense>
                 </ErrorBoundary>
@@ -538,7 +538,7 @@ function Block(props: BlockProps): JSX.Element {
                 >
                     {props.preview
                         ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-                        : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} readiness={readiness} />
+                        : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} covered={() => coverPhase() !== "live"} />
                     }
                 </BlockErrorBoundary>
             </Show>

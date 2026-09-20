@@ -164,6 +164,23 @@ The drawer's own spinner (#5) is a genuinely different thing — it hides a *re-
 already-live pane, not initial assembly — and stays, but should adopt the same component
 for visual consistency.
 
+**Whatever suppresses a kept affordance must ask "is a cover up?", not "is the controller
+assembling?"** The `<Suspense>` fallback was first suppressed on
+`PaneReadiness.isLoading()`, which is permanently false once the pane is live and knows
+nothing about the separate re-cover cycle a cyclic signal drives (§5.2). A mid-life
+suspension during a backfill re-cover therefore rendered a spinner *underneath* the
+cover — reintroducing the two-brains case on exactly the path the re-cover fix had just
+added. The predicate is now derived from the rendered cover's own phase.
+(reagent P1 on #3466.)
+
+**Open question this raised.** That `<Suspense>` boundary may not catch view-level
+`createResource` reads at all: `block.tsx` builds `viewElem` with an *eager* `createMemo`,
+so the view component is constructed during `BlockFull` setup rather than while the
+boundary is rendering. An attempt to drive a real suspension through it in
+`block.test.tsx` produced a normally-rendered view and no fallback. If that holds, #1 is
+dead code rather than a kept mid-life affordance, and should be deleted outright rather
+than suppressed — but that is a separate investigation and is NOT assumed here.
+
 ### 5.4 Chrome subscribes
 
 `BlockFrame` reads `readiness.isLoading()` and suppresses transient affordances centrally

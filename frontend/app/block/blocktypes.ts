@@ -1,7 +1,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PaneReadiness } from "@/app/store/pane-readiness";
 import { NodeModel } from "@/layout/index";
 import type { Accessor, JSX } from "solid-js";
 
@@ -45,13 +44,23 @@ export type FullBlockProps = {
     nodeModel: NodeModel;
     viewModel: ViewModel;
     /**
-     * This pane's readiness authority, owned by `<Block>`
-     * (SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md). Optional because
-     * `BlockPreview` (a static drag thumbnail) has no assembly phase worth
-     * covering. Read it to avoid rendering a SECOND loading affordance while
-     * the pane is still assembling — the cover is already up.
+     * Whether a loading cover is on screen over this pane RIGHT NOW, for any
+     * reason (SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md). Read it to avoid
+     * rendering a SECOND loading affordance underneath one — the acceptance
+     * criterion is a count: never more than one at a time.
+     *
+     * Deliberately "is a cover up", not "is the controller assembling". An
+     * earlier version passed `PaneReadiness` and asked `isLoading()`, which
+     * only knows the controller's own phase and is permanently false once the
+     * pane goes live — blind to the separate re-cover cycle a cyclic signal
+     * drives (see block.tsx). A mid-life suspension during one of those
+     * re-covers then rendered a spinner underneath the cover: the exact
+     * two-brains case this consolidation removes. (reagent P1 on #3466.)
+     *
+     * Optional because `BlockPreview` (a static drag thumbnail) is never
+     * covered.
      */
-    readiness?: PaneReadiness;
+    covered?: () => boolean;
 };
 
 export interface BlockProps {
