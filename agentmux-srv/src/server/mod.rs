@@ -260,6 +260,15 @@ pub struct AppState {
     /// without an app restart. See `ContainerRuntimeHandle` and
     /// docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     pub container_manager: std::sync::Arc<crate::backend::container::ContainerRuntimeHandle>,
+    /// Native dev-proxy routing table (`"<project>-<agent_id>"` →
+    /// container-internal `ip:port`) — backs the `RegisterDevServer` MCP
+    /// tool and the standalone dev-proxy HTTP server spawned in `main.rs`.
+    /// Cheap to clone (one `Arc` inside); `container_manager` also holds a
+    /// clone (wired via `ContainerRuntimeHandle::set_dev_proxy_registry`
+    /// in `bootstrap::build_app_state`) so `stop`/`remove` can clear a
+    /// dead container's routes. See
+    /// docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+    pub dev_proxy: crate::backend::dev_proxy::DevProxyRegistry,
     /// Phase 3 — per-shell stop handles so `ShellStop` (MCP tool) and the UI
     /// stop button can tree-kill a running persistent shell node. See
     /// `docs/specs/SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md`.
@@ -607,6 +616,12 @@ pub fn build_router(state: AppState) -> Router {
         // target, but the caller is never anonymous in the audit log the
         // way `FleetBulkStop`'s calls are today.
         .route("/api/v1/agent/pane/close", post(app_api::pane::handle_close_pane))
+        // Native dev-proxy registration (SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
+        // — `RegisterDevServer`. Same `verified_block_id` identity model as
+        // the ui/* and pane/close routes above; the backend address it
+        // actually stores is resolved server-side from the CALLER's own
+        // container, never taken from the request body.
+        .route("/api/v1/agent/dev_server/register", post(app_api::dev_server::handle_register_dev_server))
         // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) —
         // bulk-stop is the one fleet action exposed to agentmux-mcp (see
         // `FleetBulkStop`): stopping a controller involves no jekt signing,

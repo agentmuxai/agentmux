@@ -98,6 +98,7 @@ pub(crate) fn test_state() -> AppState {
         auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
         container_manager: Arc::new(crate::backend::container::ContainerRuntimeHandle::disabled()),
+        dev_proxy: crate::backend::dev_proxy::DevProxyRegistry::new(),
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         cron_scheduler: crate::backend::cron::CronScheduler::new(
             None,
@@ -715,6 +716,116 @@ async fn ui_click_requires_host_registration_first() {
 
     let req = Request::builder()
         .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+// ── RegisterDevServer (SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) ──────
+
+#[tokio::test]
+async fn register_dev_server_rejects_an_unsigned_request() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/api/v1/agent/dev_server/register")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"agent_id":"nobody","ts_secs":9999999999,"sig":"forged","project":"pulse","port":3000}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn register_dev_server_rejects_an_empty_project_before_touching_docker() {
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["project"] = serde_json::json!("   ");
+    body["port"] = serde_json::json!(3000);
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/agent/dev_server/register")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn register_dev_server_rejects_a_non_hostname_safe_project_before_touching_docker() {
+    // reagent P2, PR #3439: a `project` that isn't a valid DNS label
+    // (contains '.', whitespace, etc.) must 400 clearly instead of
+    // registering successfully and handing back a URL that can never
+    // actually route.
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["project"] = serde_json::json!("pulse.app");
+    body["port"] = serde_json::json!(3000);
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/agent/dev_server/register")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn register_dev_server_rejects_a_zero_port() {
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["project"] = serde_json::json!("pulse");
+    body["port"] = serde_json::json!(0);
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/agent/dev_server/register")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// `test_state()` wires a `disabled()` `ContainerRuntimeHandle` (no real
+/// Docker) — confirms a well-formed, correctly signed request still fails
+/// cleanly (503, not a panic or a 200 with a bogus address) when Docker
+/// itself isn't available. The real-Docker path (network attach, IP
+/// resolution, and registration reaching the routing table) is covered by
+/// `backend::container::tests::itest_dev_proxy_network_attach_and_ip_resolution`
+/// (Docker-gated, `#[ignore]`) and `backend::dev_proxy::tests`' in-process
+/// HTTP-through-proxy test.
+#[tokio::test]
+async fn register_dev_server_requires_docker_available() {
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["project"] = serde_json::json!("pulse");
+    body["port"] = serde_json::json!(3000);
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/agent/dev_server/register")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
