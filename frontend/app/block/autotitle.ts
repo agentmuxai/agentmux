@@ -14,88 +14,6 @@ import { isBlank } from "@/util/util";
 const AGENT_ENV_VAR = "AGENTMUX_AGENT_ID" as const;
 
 /**
- * Environment variable name for agent color (background)
- */
-const AGENT_COLOR_ENV_VAR = "AGENTMUX_AGENT_COLOR" as const;
-
-/**
- * Environment variable name for agent text color
- */
-const AGENT_TEXT_COLOR_ENV_VAR = "AGENTMUX_AGENT_TEXT_COLOR" as const;
-
-/**
- * Default colors for known agents (used when no color env var is set)
- */
-const DEFAULT_AGENT_COLORS: Record<string, string> = {
-    AgentA: "#1e3a5f",  // Dark blue
-    AgentX: "#ef4444",  // Red (matches claw assignment)
-    AgentY: "#eab308",  // Yellow/Gold
-    AgentG: "#f59e0b",  // Amber
-    Agent1: "#3b82f6",  // Blue
-    Agent2: "#06b6d4",  // Cyan
-    Agent3: "#ec4899",  // Pink
-    Agent4: "#ef4444",  // Red
-    Agent5: "#84cc16",  // Lime
-};
-
-/**
- * Default text colors for known agents (used when no text color env var is set)
- * These are optimized for readability against the default background colors
- */
-const DEFAULT_AGENT_TEXT_COLORS: Record<string, string> = {
-    AgentA: "#ffffff",  // White on dark blue
-    AgentX: "#ffffff",  // White on red
-    AgentY: "#000000",  // Black on yellow/gold
-    AgentG: "#000000",  // Black on amber
-    Agent1: "#ffffff",  // White on blue
-    Agent2: "#000000",  // Black on cyan
-    Agent3: "#ffffff",  // White on pink
-    Agent4: "#ffffff",  // White on red
-    Agent5: "#000000",  // Black on lime
-};
-
-/**
- * Detect agent color from environment variable or use default
- */
-export function detectAgentColor(envVars: Record<string, string> | undefined, agentId: string | null): string | null {
-    // Check env var
-    if (envVars) {
-        const value = envVars[AGENT_COLOR_ENV_VAR];
-        if (!isBlank(value)) {
-            return value!.trim();
-        }
-    }
-
-    // Fall back to default color for known agents
-    if (agentId && DEFAULT_AGENT_COLORS[agentId]) {
-        return DEFAULT_AGENT_COLORS[agentId];
-    }
-
-    return null;
-}
-
-/**
- * Detect agent text color from environment variable or use default
- * Returns the text color to use in the pane header for optimal readability
- */
-export function detectAgentTextColor(envVars: Record<string, string> | undefined, agentId: string | null): string | null {
-    // Check env var first
-    if (envVars) {
-        const value = envVars[AGENT_TEXT_COLOR_ENV_VAR];
-        if (!isBlank(value)) {
-            return value!.trim();
-        }
-    }
-
-    // Fall back to default text color for known agents
-    if (agentId && DEFAULT_AGENT_TEXT_COLORS[agentId]) {
-        return DEFAULT_AGENT_TEXT_COLORS[agentId];
-    }
-
-    return null;
-}
-
-/**
  * Detect agent identity from environment variable in block metadata
  *
  * "Terminal" is rejected: it is the default title for plain terminal panes,
@@ -206,6 +124,24 @@ export function isUsableFocusRingColor(color: string | null | undefined): boolea
         return false;
     }
     return relativeLuminance(rgba) >= MIN_FOCUS_RING_LUMINANCE;
+}
+
+/**
+ * Pick readable header text color (`#000000`/`#ffffff`) for a given
+ * background, via WCAG relative luminance. Replaces the old per-agent
+ * `DEFAULT_AGENT_TEXT_COLORS` hardcoded table (decommissioned — see
+ * `docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`): computed
+ * generically from whatever background color is actually in use (the
+ * agent's persisted `frame:activebordercolor`, or an explicit "Pane Color"
+ * hue) instead of needing a hardcoded entry per known agent name.
+ * Unparseable/blank input returns null — caller keeps the theme default.
+ */
+export function pickReadableTextColor(bgColor: string | null | undefined): string | null {
+    const rgba = parseCssColor(bgColor);
+    if (!rgba) {
+        return null;
+    }
+    return relativeLuminance(rgba) > 0.5 ? "#000000" : "#ffffff";
 }
 
 /**

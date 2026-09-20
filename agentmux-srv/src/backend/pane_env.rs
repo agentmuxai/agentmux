@@ -63,9 +63,14 @@ pub const PANE_ENV_KEEP: &[&str] = &[
     "AGENTMUX_LOG_DIR",
     // Agent identity: the OSC-16162 prompt hook, `gh-agent.sh` credential
     // selection, and bashwrap's per-instance cwd-state file key.
+    //
+    // AGENTMUX_AGENT_COLOR/AGENTMUX_AGENT_TEXT_COLOR decommissioned
+    // 2026-09-20 (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) — the
+    // only consumer was the frontend's env-var-driven pane header/border
+    // color detection, itself replaced by reusing the agent's persisted
+    // `ui:color` (SPEC_AGENT_COLOR_2026_08_08.md). Nothing reads these two
+    // keys downstream of the OSC-16162 `cmd:env` payload anymore.
     "AGENTMUX_AGENT_ID",
-    "AGENTMUX_AGENT_COLOR",
-    "AGENTMUX_AGENT_TEXT_COLOR",
     "AGENTMUX_AGENT_SLUG",
     "AGENTMUX_AGENT_DISPLAY",
     "AGENTMUX_INSTANCE_SLUG",

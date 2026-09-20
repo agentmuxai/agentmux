@@ -31,17 +31,13 @@ function _agentmux_si_agent_env
     _agentmux_si_blocked; and return
     set -l current_agent ""
     if set -q AGENTMUX_AGENT_ID; and test -n "$AGENTMUX_AGENT_ID"
-        set current_agent "AGENTMUX_AGENT_ID:$AGENTMUX_AGENT_ID:COLOR:$AGENTMUX_AGENT_COLOR"
+        set current_agent "AGENTMUX_AGENT_ID:$AGENTMUX_AGENT_ID"
     end
     if test "$current_agent" != "$_AGENTMUX_SI_LAST_AGENT"
         set -g _AGENTMUX_SI_LAST_AGENT "$current_agent"
         if set -q AGENTMUX_AGENT_ID; and test -n "$AGENTMUX_AGENT_ID"
             set -l escaped (_agentmux_si_json_escape "$AGENTMUX_AGENT_ID")
             set -l payload "{\"AGENTMUX_AGENT_ID\":\"$escaped\""
-            if set -q AGENTMUX_AGENT_COLOR; and test -n "$AGENTMUX_AGENT_COLOR"
-                set -l color_escaped (_agentmux_si_json_escape "$AGENTMUX_AGENT_COLOR")
-                set payload "$payload,\"AGENTMUX_AGENT_COLOR\":\"$color_escaped\""
-            end
             set payload "$payload}"
             printf '\033]16162;E;%s\007' "$payload"
         else
