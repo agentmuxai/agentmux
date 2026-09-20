@@ -50,6 +50,42 @@ fn build_legacy_argv(
     Ok(argv)
 }
 
+/// Build the argv for a `/btw` side-question one-shot turn
+/// (`server/agent_handlers/side_question.rs`) from `base_one_shot_args` —
+/// the same one-shot `cli_args` a normal turn on this block would use.
+///
+/// Deliberately does NOT touch resume/session-id handling: the caller
+/// always passes `SubprocessSpawnConfig::session_id: None` for this turn
+/// (a `/btw` never resumes a session — context comes from a text prefix in
+/// the prompt instead, per the module's design), so `build_turn_argv`'s own
+/// `session_id.is_none()` branch already returns `base` unchanged with no
+/// `--resume` appended — nothing here needs to duplicate that guarantee.
+///
+/// Appends two flags, confirmed against
+/// `code.claude.com/docs/en/cli-reference` (checked 2026-09-19):
+///   - `--disallowedTools "*"` — the docs' own words are "a bare tool name
+///     removes the matching tools... `\"*\"` removes every tool", making
+///     this turn fully tool-less. The doc's other caveat — "a rule naming
+///     `EndConversation` can't remove it while any other tool remains" — is
+///     about a rule that NAMES `EndConversation` specifically; a wildcard
+///     that merely happens to cover it too is a different case and isn't
+///     described as failing.
+///   - `--max-turns 1` — print mode's own hard cap on agentic turns, a
+///     backstop against looping that holds even if the no-tools flag were
+///     somehow bypassed.
+///
+/// `--output-format stream-json` is NOT added here — every subprocess-mode
+/// provider's base one-shot `launch_args` already carries it (see
+/// `providers.rs`), so `base_one_shot_args` already has it.
+pub(crate) fn build_side_question_argv(base_one_shot_args: &[String]) -> Vec<String> {
+    let mut argv = base_one_shot_args.to_vec();
+    argv.push("--disallowedTools".to_string());
+    argv.push("*".to_string());
+    argv.push("--max-turns".to_string());
+    argv.push("1".to_string());
+    argv
+}
+
 fn build_codex_argv(base: &[String], session_id: Option<&str>) -> Result<Vec<String>, String> {
     let exec_index = base
         .iter()
@@ -78,7 +114,7 @@ fn build_codex_argv(base: &[String], session_id: Option<&str>) -> Result<Vec<Str
 
 #[cfg(test)]
 mod tests {
-    use super::build_turn_argv;
+    use super::{build_side_question_argv, build_turn_argv};
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
@@ -164,5 +200,61 @@ mod tests {
         assert!(build_turn_argv(&base, "codex-exec", "", Some("thread-id"))
             .unwrap_err()
             .contains("stdin prompt marker"));
+    }
+
+    // ── build_side_question_argv (/btw) ─────────────────────────────────
+
+    #[test]
+    fn side_question_argv_disables_every_tool_and_caps_turns() {
+        let base = strings(&["-p", "--output-format", "stream-json", "--verbose"]);
+        let got = build_side_question_argv(&base);
+        assert_eq!(
+            got,
+            strings(&[
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--disallowedTools",
+                "*",
+                "--max-turns",
+                "1",
+            ]),
+        );
+    }
+
+    #[test]
+    fn side_question_argv_never_contains_resume() {
+        // No session id is ever plumbed into this path (see the function's
+        // own doc comment) — assert the negative directly so a future edit
+        // that accidentally threads one through gets caught here, not just
+        // by omission.
+        let base = strings(&["-p", "--output-format", "stream-json"]);
+        let got = build_side_question_argv(&base);
+        assert!(!got.iter().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn side_question_argv_preserves_base_args_verbatim_and_in_order() {
+        let base = strings(&["-p", "--model", "opus", "--my-custom-flag", "42"]);
+        let got = build_side_question_argv(&base);
+        assert_eq!(&got[..base.len()], base.as_slice());
+    }
+
+    #[test]
+    fn side_question_argv_composes_with_build_turn_argv_resume_free() {
+        // The real call path: build_side_question_argv's output becomes
+        // SubprocessSpawnConfig::cli_args, which spawn_turn then feeds
+        // through build_turn_argv with session_id: None (a `/btw` turn
+        // never resumes). Confirm that composition still ends up
+        // --resume-free and still carries both added flags, exactly as it
+        // would in the real spawn.
+        let base = strings(&["-p", "--output-format", "stream-json"]);
+        let augmented = build_side_question_argv(&base);
+        let final_argv = build_turn_argv(&augmented, "flag", "--resume", None).unwrap();
+        assert_eq!(final_argv, augmented);
+        assert!(!final_argv.iter().any(|a| a == "--resume"));
+        assert!(final_argv.iter().any(|a| a == "--disallowedTools"));
+        assert!(final_argv.iter().any(|a| a == "--max-turns"));
     }
 }

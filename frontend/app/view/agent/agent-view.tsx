@@ -61,6 +61,8 @@ import {
     nextToolPromotionAt,
 } from "./activity/tool-adapter";
 import { paneBusyForInput } from "./working-indicator";
+import { quickForkAgent } from "./quick-fork";
+import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
@@ -82,6 +84,7 @@ import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBan
 import { PaneRow } from "./components/PaneRow";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
+import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { useForkSet } from "./fork/useForkSet";
@@ -1621,6 +1624,15 @@ const AgentPresentationView = ({
         // reagent P1 on PR #2338 (twenty-first re-review).
         isBackendTurnConfirmedIdle: () => wasTurnActive === false,
         backToPicker: () => model.backToPicker(),
+        // /fork — same fork-to-sibling-tab action as the pane's right-click
+        // "Quick Fork" context-menu item (agent-model.ts's
+        // getBodyContextMenuItems, which passes `this` — this same `model`
+        // instance already satisfies QuickForkModel).
+        quickFork: () => quickForkAgent(model),
+        // /btw — fires the side-question backend request (AskSideQuestionCommand);
+        // useAgentCommands itself owns opening/updating the overlay signal
+        // around this call.
+        askSideQuestion: (question: string) => askSideQuestion(model.blockId, question, paneModel.document()),
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
@@ -2196,6 +2208,24 @@ const AgentPresentationView = ({
                 </Portal>
             </Show>
             <DragOverlay message={dropAttach.dropMessage()} visible={dropAttach.isDragOver()} />
+            {/* /btw side-question overlay — ephemeral, floats over the whole
+                pane (position: absolute against .agent-view, styles/_btw.scss),
+                NOT part of the persisted layout tree and NOT gated on the
+                pane's own turn state: it must stay usable, and non-blocking,
+                whether or not a real agent turn is streaming. State is owned
+                by useAgentCommands (mirrors helpVisible/pickerSpec below). */}
+            <Show when={commands.btwOverlay()}>
+                {(state) => (
+                    <BtwOverlay
+                        blockId={model.blockId}
+                        askId={state().askId}
+                        question={state().question}
+                        requestId={state().requestId}
+                        error={state().error}
+                        onClose={commands.closeBtw}
+                    />
+                )}
+            </Show>
             {/* Pane title + back button now live in the block frame header,
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
                 See SPEC_AGENT_PANE_FOLLOWUPS item #8. */}

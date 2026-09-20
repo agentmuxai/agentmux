@@ -1,0 +1,141 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// /btw overlay — a genuinely floating panel over the agent pane (NOT a
+// composer-region row like .slash-help/.slash-picker), per the spec's
+// "ephemeral, dismissable floating overlay panel... NOT part of the
+// persisted layout tree" requirement. Wrapped in .agent-view so the
+// cascade chain matches every other split partial (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24)
+// and so `position: absolute` resolves against .agent-view's own
+// `position: relative; z-index: 0` stacking context (agent-view.scss) —
+// the same context `.agent-pane-loading-overlay` (_loading-overlay.scss)
+// already anchors to.
+.agent-view {
+    .btw-overlay {
+        position: absolute;
+        right: var(--space-3);
+        bottom: var(--space-3);
+        width: min(420px, calc(100% - var(--space-3) * 2));
+        max-height: min(420px, calc(100% - var(--space-3) * 2));
+        display: flex;
+        flex-direction: column;
+        background: var(--main-bg-color);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        font-size: 12px;
+        overflow: hidden;
+        // Below the tab strip's contained z-index (var(--z-pane-overlay, 4))
+        // but above ordinary pane content — this floats over the
+        // transcript/composer, never over pane chrome. See the comment on
+        // .agent-view's own z-index: 0 in agent-view.scss for why this is
+        // safe to pick independently of every other descendant's value.
+        z-index: 3;
+    }
+
+    .btw-overlay__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-1) 10px;
+        border-bottom: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--accent-color) 8%, var(--main-bg-color));
+    }
+
+    .btw-overlay__title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--accent-color);
+        font-family: var(--font-mono);
+    }
+
+    .btw-overlay__close {
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 0;
+        cursor: default;
+        color: var(--secondary-text-color);
+        font-size: 16px;
+        line-height: 1;
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+            background 0.1s,
+            color 0.1s,
+            border-color 0.1s;
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+            border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+            color: var(--error-color);
+        }
+    }
+
+    .btw-overlay__question {
+        padding: var(--space-2) 10px;
+        border-bottom: 1px solid var(--border-color);
+        font-weight: 500;
+        color: var(--main-text-color);
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .btw-overlay__body {
+        flex: 1;
+        min-height: 32px;
+        overflow-y: auto;
+        padding: var(--space-2) 10px;
+    }
+
+    .btw-overlay__loading,
+    .btw-overlay__error {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+
+    .btw-overlay__error {
+        color: var(--error-color);
+    }
+
+    .btw-overlay__answer {
+        color: var(--main-text-color);
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.5;
+    }
+
+    .btw-overlay__cursor {
+        display: inline-block;
+        width: 6px;
+        height: 12px;
+        margin-left: 2px;
+        vertical-align: text-bottom;
+        background: var(--accent-color);
+        animation: btw-overlay-cursor-blink 1s step-end infinite;
+    }
+
+    .btw-overlay__hint {
+        display: flex;
+        gap: var(--space-3);
+        padding: 3px 10px;
+        border-top: 1px solid var(--border-color);
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
+    }
+}
+
+@keyframes btw-overlay-cursor-blink {
+    0%,
+    50% {
+        opacity: 1;
+    }
+    50.01%,
+    100% {
+        opacity: 0;
+    }
+}

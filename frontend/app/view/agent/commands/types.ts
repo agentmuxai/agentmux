@@ -254,6 +254,31 @@ export interface SlashCommandContext {
      * a `helpVisible` signal that AgentPresentationView reads.
      */
     openHelp: () => void;
+    /**
+     * Fork this pane's live agent into a new sibling pane-stack tab —
+     * `quick-fork.ts`'s `quickForkAgent`, the same action the pane's
+     * right-click "Quick Fork" context-menu item already triggers.
+     * Resolves to whether the fork actually launched; `quickForkAgent`
+     * never throws (failures are logged and surfaced via a toast).
+     */
+    quickFork: () => Promise<boolean>;
+    /**
+     * `/btw <question>` — ask a tool-less, context-aware side question
+     * without touching this pane's own live turn or transcript. Calling
+     * this both fires the backend request AND opens the floating
+     * `BtwOverlay` (owned by `useAgentCommands`, mirroring `openPicker`/
+     * `openHelp`'s "the hook owns the signal, the view reads it" shape) —
+     * there is no separate "show the overlay" call, matching how
+     * `quickFork` already bundles its own UI feedback (toast on failure)
+     * rather than exposing a second context field for it.
+     *
+     * Resolves with the backend-assigned `requestId`, which is also the
+     * scope suffix (`block:<blockId>:btw:<requestId>`) the overlay
+     * subscribes to for streamed `WpsEvent.BtwAnswerChunk` events — see
+     * `BtwOverlay.tsx`. Rejects (and the overlay surfaces an inline error,
+     * still dismissable) if the request never made it to the backend.
+     */
+    askSideQuestion: (question: string) => Promise<{ requestId: string }>;
 }
 
 /**
