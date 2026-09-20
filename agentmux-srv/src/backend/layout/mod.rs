@@ -301,7 +301,15 @@ pub fn move_stack_member(
     activate: bool,
 ) -> bool {
     if block_id == target_block_id {
-        return true; // already exactly there
+        // Not a real move — nothing to reorder against — but still confirm
+        // the block actually exists (a bogus self-target must not report
+        // success), and still honor `activate` exactly like every other
+        // branch below does (ReAgent P1 on PR #3441: this used to
+        // short-circuit before either check).
+        if find_leaf_containing_block(tree, block_id).is_none() {
+            return false;
+        }
+        return if activate { activate_stack_member(tree, block_id) } else { true };
     }
     let Some(source_leaf) = find_leaf_containing_block(tree, block_id) else {
         return false;

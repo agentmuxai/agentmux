@@ -1574,6 +1574,30 @@ fn move_stack_member_is_a_noop_when_block_and_target_are_the_same() {
     assert_eq!(root, before);
 }
 
+// ReAgent P1 on PR #3441: the self-target short-circuit above used to fire
+// BEFORE any existence check, reporting success (and leaving `activate`
+// silently ignored) even for a block that doesn't exist anywhere.
+
+#[test]
+fn move_stack_member_self_target_refuses_when_the_block_does_not_exist() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b"], 1.0);
+    let before = root.clone();
+    assert!(!move_stack_member(&mut root, "missing", "missing", StackMovePosition::After, false));
+    assert_eq!(root, before);
+}
+
+#[test]
+fn move_stack_member_self_target_still_activates_when_requested() {
+    // A background member dropped onto itself with `activate: true` must
+    // still become visible — every other branch of this function honors
+    // `activate`; the self-target short-circuit must not be an exception.
+    let mut root = leaf_with_stack("pane", "a", &["a", "b", "c"], 1.0);
+    assert!(move_stack_member(&mut root, "b", "b", StackMovePosition::After, true));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["a", "b", "c"]), "position unchanged — it's a self-target");
+    assert_eq!((data.block_id.as_str(), data.active_block_id.as_str()), ("b", "b"));
+}
+
 #[test]
 fn move_stack_member_reorders_within_the_same_leaf_before_target() {
     let mut root = leaf_with_stack("pane", "a", &["a", "b", "c"], 1.0);
