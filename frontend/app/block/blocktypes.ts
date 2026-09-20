@@ -1,6 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PaneReadiness } from "@/app/store/pane-readiness";
 import { NodeModel } from "@/layout/index";
 import type { Accessor, JSX } from "solid-js";
 
@@ -43,6 +44,14 @@ export type FullBlockProps = {
     preview: boolean;
     nodeModel: NodeModel;
     viewModel: ViewModel;
+    /**
+     * This pane's readiness authority, owned by `<Block>`
+     * (SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md). Optional because
+     * `BlockPreview` (a static drag thumbnail) has no assembly phase worth
+     * covering. Read it to avoid rendering a SECOND loading affordance while
+     * the pane is still assembling — the cover is already up.
+     */
+    readiness?: PaneReadiness;
 };
 
 export interface BlockProps {
