@@ -28,15 +28,32 @@
  * whole pane, see `styles/_btw.scss`) rather than a composer-region row —
  * point 3/4 of the spec this was built against: "a transient UI element,
  * not a new Block/pane/tab" that must not block the pane's own turn.
+ *
+ * A second `/btw` asked while the overlay from a prior ask is still mounted
+ * does NOT unmount/remount this component: `<Show when={commands.btwOverlay()}>`
+ * in agent-view.tsx never sees a falsy value between two truthy asks, so
+ * SolidJS reuses the same instance — `props.requestId` genuinely does cycle
+ * old-id -> null -> new-id across two overlapping asks (reagentx P1 on PR
+ * #3440 caught an earlier version of this file's own doc comment claiming
+ * otherwise). This component's local `answer`/`streamError`/`done` signals
+ * are therefore reset explicitly, keyed on `props.askId` — see that effect
+ * below — rather than relying on remount to clear them.
  */
 
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { type JSX, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 
 export interface BtwOverlayProps {
     /** Block this overlay belongs to — scopes the MPS subscription. */
     blockId: string;
+    /**
+     * Unique per ask (`BtwOverlayState.askId`) — this component's local
+     * streaming state is reset whenever this changes, since the component
+     * instance itself may be reused across two overlapping asks. See this
+     * file's own module doc comment.
+     */
+    askId: number;
     /** The question exactly as typed, shown immediately. */
     question: string;
     /** `null` until the backend request is accepted; see `BtwOverlayState`. */
@@ -63,10 +80,27 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
     const [streamError, setStreamError] = createSignal<string | null>(null);
     const [done, setDone] = createSignal(false);
 
+    // Reset local streaming state whenever a NEW ask starts, keyed on
+    // `askId` rather than `requestId`/`question` — this component's
+    // instance is reused across two overlapping asks (see the module doc
+    // comment), so without this a second `/btw` would inherit the first
+    // one's leftover `answer` text and have new deltas appended onto it.
+    // Fires on initial mount too (harmless — the signals already start
+    // empty), and runs before the subscription effect below sees the
+    // corresponding `requestId` reset to `null`, so there's no window where
+    // a stale answer is visible under a fresh question.
+    createEffect(on(() => props.askId, () => {
+        setAnswer("");
+        setStreamError(null);
+        setDone(false);
+    }));
+
     // Subscribe once `requestId` is known — nothing to scope the
-    // subscription to before then. `requestId` never changes back to null
-    // or to a different value once set (see BtwOverlayState's doc comment),
-    // so this effect only ever subscribes once per overlay instance.
+    // subscription to before then. `requestId` DOES cycle old-id -> null ->
+    // new-id across two overlapping asks (see the module doc comment) — this
+    // effect re-runs each time, tearing down the previous subscription via
+    // its own `onCleanup` before (re)subscribing, or just returning early
+    // while `requestId` is transiently `null` between asks.
     createEffect(() => {
         const requestId = props.requestId;
         if (!requestId) return;
