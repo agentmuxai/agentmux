@@ -17,7 +17,7 @@
         "Chrome >= 128"
     ],
     "scripts": {
-        "prepare": "node scripts/setup-git-hooks.cjs",
+        "prepare": "node -e \"try{require('child_process').execSync('git rev-parse --git-dir',{stdio:'ignore'})}catch(e){process.exit(0)}require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})\"",
         "dev": "task dev",
         "build": "task build:frontend",
         "build:backend": "task build:backend",
