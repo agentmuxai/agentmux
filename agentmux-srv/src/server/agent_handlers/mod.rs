@@ -403,6 +403,7 @@ mod recent_sessions_tests {
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
             container_manager: Arc::new(crate::backend::container::ContainerRuntimeHandle::disabled()),
+            dev_proxy: crate::backend::dev_proxy::DevProxyRegistry::new(),
             shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
             cron_scheduler: crate::backend::cron::CronScheduler::new(
                 None,
@@ -753,6 +754,7 @@ mod recent_sessions_tests {
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
             container_manager: Arc::new(crate::backend::container::ContainerRuntimeHandle::disabled()),
+            dev_proxy: crate::backend::dev_proxy::DevProxyRegistry::new(),
             shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
             cron_scheduler: crate::backend::cron::CronScheduler::new(
                 None,

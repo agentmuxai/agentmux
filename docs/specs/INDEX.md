@@ -318,6 +318,7 @@ partial list.
 | [`SPEC_MUXSPECT_PHASE_C_WAN_TIER_ENFORCEMENT_2026_08_22`](SPEC_MUXSPECT_PHASE_C_WAN_TIER_ENFORCEMENT_2026_08_22.md) | SPEC: `muxspect` Phase C — WAN tier enforcement |
 | [`SPEC_MUXSPECT_SRV_VERSION_HEADER_2026_08_22`](SPEC_MUXSPECT_SRV_VERSION_HEADER_2026_08_22.md) | SPEC: `x-agentmux-srv-version` response header |
 | [`SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21`](SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md) | Spec: `muxspect verify-sender` — fast JEKT-sender liveness lookup |
+| [`SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19`](SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) | SPEC: a native reverse proxy in agentmux-srv for friendly dev-server hostnames — not Traefik, not a sidecar |
 | [`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md) | SPEC: Durable, location-consistent, transparent native memory |
 | [`SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10`](SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md) | SPEC: Restore the ghost-text suggestion when the composer is cleared back to empty |
 | [`SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) | Pane block-stack mount flicker — root causes + reveal-gate generalization |
