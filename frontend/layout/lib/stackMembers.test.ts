@@ -65,6 +65,29 @@ describe("moveMemberInStack", () => {
         expect(moveMemberInStack(data, "a", "missing", "after", false)).toBe(false);
         expect(data).toEqual(before);
     });
+
+    // ReAgent P2 on PR #3444: filtering blockId out of `members` when
+    // blockId === targetBlockId also removes targetBlockId (same id), so
+    // `next.indexOf(targetBlockId)` returns -1 and every position variant
+    // below silently reorders the stack instead of leaving it unchanged.
+    // Mirrors the backend's identical guard in move_stack_member
+    // (agentmux-srv/src/backend/layout/mod.rs), added after the same
+    // mistake there (ReAgent P1 on PR #3441) — never mirrored here until now.
+    it("is a no-op — stack order unchanged — when blockId and targetBlockId are the same, for every position", () => {
+        for (const position of ["before", "after", "end"] as const) {
+            const data = stacked("a", ["a", "b", "c"], "a");
+            expect(moveMemberInStack(data, "b", "b", position, false)).toBe(true);
+            expect(data.blockStack).toEqual(["a", "b", "c"]);
+        }
+    });
+
+    it("self-target still activates when requested, without reordering", () => {
+        const data = stacked("a", ["a", "b", "c"], "a");
+        expect(moveMemberInStack(data, "b", "b", "before", true)).toBe(true);
+        expect(data.blockStack).toEqual(["a", "b", "c"]);
+        expect(data.blockId).toBe("b");
+        expect(data.activeBlockId).toBe("b");
+    });
 });
 
 // Regression guard: confirms these two existing helpers are still exported

@@ -77,6 +77,22 @@ export function moveMemberInStack(
     const members = effectiveStack(data);
     if (!members.includes(blockId) || !members.includes(targetBlockId)) return false;
 
+    if (blockId === targetBlockId) {
+        // Not a real move — nothing to reorder against — but still honor
+        // `activate` like every other branch below does. Mirrors the
+        // backend's identical guard (`move_stack_member`,
+        // agentmux-srv/src/backend/layout/mod.rs) — ReAgent P2 on PR #3444:
+        // without this, filtering `blockId` out of `members` below also
+        // removes `targetBlockId` (same id), so `next.indexOf(targetBlockId)`
+        // returns -1 and every position variant silently reorders the stack
+        // instead of leaving it unchanged.
+        if (activate) {
+            data.activeBlockId = blockId;
+            data.blockId = blockId;
+        }
+        return true;
+    }
+
     const next = members.filter((id) => id !== blockId);
     const targetIdx = next.indexOf(targetBlockId);
     const insertAt = position === "before" ? targetIdx : position === "after" ? targetIdx + 1 : next.length;
