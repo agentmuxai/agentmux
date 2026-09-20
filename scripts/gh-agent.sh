@@ -187,15 +187,41 @@ url = "https://api.github.com/repos/%s/%s"
     [[ "$code" == "200" ]]
 }
 
+# Path the interpreter is actually given, which is not always $SCRIPT_DIR.
+#
+# Under MSYS/Git-Bash, python3 is usually a native Windows binary, and MSYS
+# normally rewrites POSIX arguments to Windows paths on the way in. But
+# MSYS_NO_PATHCONV=1 in the CALLER's environment disables that rewriting --
+# it is commonly set for the AWS CLI, which needs its own arguments left
+# alone -- and python3.exe then resolves /c/Users/... against the current
+# drive as C:\c\Users\..., which exists nowhere.
+#
+# cygpath -w makes the path unconditionally openable, independent of whatever
+# the caller set. Absent cygpath (real Linux/macOS) the POSIX path is already
+# correct and is used as-is.
+APP_TOKEN_PY="$SCRIPT_DIR/github-app-token.py"
+if command -v cygpath >/dev/null 2>&1; then
+    APP_TOKEN_PY="$(cygpath -w "$APP_TOKEN_PY")"
+fi
+
 # github-app-token.py exit codes are the contract here, not its stderr text:
-#   2 = this agent has no App identity provisioned (expected, quiet)
+#   3 = this agent has no App identity provisioned (expected, quiet)
 #   1 = an identity exists but minting genuinely failed (surface it)
+#   2 = the interpreter never ran the script (bad path, unreadable file).
+#       NOT a quiet case: 2 used to be the "no App identity" signal, which
+#       meant a python3 that could not open the script was indistinguishable
+#       from an agent that legitimately has no App -- and the result was a
+#       silent downgrade to the Tier 3 PAT. Surface it loudly instead.
 try_app_tier() {
     local identity="$1" keyname="$2" label="$3"
     command -v python3 >/dev/null 2>&1 || return 1
+    if [[ ! -f "$SCRIPT_DIR/github-app-token.py" ]]; then
+        echo "gh-agent: github-app-token.py missing from $SCRIPT_DIR - App tiers unavailable" >&2
+        return 1
+    fi
     local err_file token rc
     err_file="$(mktemp)"
-    token="$(python3 "$SCRIPT_DIR/github-app-token.py" "$identity" "$TARGET_ORG" 2>"$err_file")"
+    token="$(python3 "$APP_TOKEN_PY" "$identity" "$TARGET_ORG" 2>"$err_file")"
     rc=$?
     if [[ $rc -eq 0 ]]; then
         if token_reaches_target "$token"; then
@@ -204,7 +230,11 @@ try_app_tier() {
         fi
         echo "gh-agent: $label token minted but cannot reach ${TARGET_ORG}/${TARGET_REPO}" >&2
         echo "          (App likely not installed on '${TARGET_ORG}') - trying next tier" >&2
-    elif [[ $rc -ne 2 ]]; then
+    elif [[ $rc -eq 2 ]]; then
+        echo "gh-agent: $label - python3 could not run github-app-token.py (exit 2)." >&2
+        echo "          This is NOT 'no App identity'; the App tier was skipped entirely." >&2
+        cat "$err_file" >&2
+    elif [[ $rc -ne 3 ]]; then
         echo "gh-agent: $label token mint failed - trying next tier:" >&2
         cat "$err_file" >&2
     fi

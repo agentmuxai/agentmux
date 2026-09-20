@@ -76,11 +76,26 @@ fi
 agent="$(printf '%s' "${AGENTMUX_AGENT_ID:-}" | tr '[:upper:]' '[:lower:]')"
 [[ -n "$agent" ]] || agent="genericagentx"
 
+# Path the interpreter is actually given -- see the matching note in
+# gh-agent.sh. MSYS_NO_PATHCONV=1 in the caller's environment stops MSYS
+# rewriting POSIX paths for native Windows binaries, and python3.exe then
+# resolves /c/Users/... to C:\c\Users\... and exits 2. cygpath -w removes the
+# dependency on the caller's environment entirely.
+APP_TOKEN_PY="$SCRIPT_DIR/github-app-token.py"
+if command -v cygpath >/dev/null 2>&1; then
+    APP_TOKEN_PY="$(cygpath -w "$APP_TOKEN_PY")"
+fi
+
 # github-app-token.py has an exit-code contract, and it matters here:
 #   0 = token on stdout
-#   2 = this agent has no App identity  -> expected, stay quiet
+#   3 = this agent has no App identity  -> expected, stay quiet
 #   1 = the lookup genuinely FAILED (expired AWS credentials, Secrets Manager
 #       unreachable, malformed key) -> must be surfaced
+#   2 = the interpreter never ran the script at all -> must be surfaced.
+#       This used to be the "no App identity" code, and that overload was
+#       exactly the hole the paragraph below warns about: python3 failing to
+#       open the script looked identical to "this agent has no App", so the
+#       request fell through in silence to the admin PAT. 2 is now loud.
 #
 # Flattening 1 and 2 into "no token" would be actively dangerous. Falling
 # through silently hands the request to the NEXT credential helper, which on
@@ -98,9 +113,9 @@ MINT_TOKEN=""
 mint() {                      # $1=identity $2=owner ; sets MINT_TOKEN, returns rc
     local err rc
     err="$(mktemp)"
-    MINT_TOKEN="$(python3 "$SCRIPT_DIR/github-app-token.py" "$1" "$2" 2>"$err")"
+    MINT_TOKEN="$(python3 "$APP_TOKEN_PY" "$1" "$2" 2>"$err")"
     rc=$?
-    if [[ $rc -ne 0 && $rc -ne 2 ]]; then
+    if [[ $rc -ne 0 && $rc -ne 3 ]]; then
         echo "git-credential-agentmux: minting failed for '$1' on '$2' (exit $rc) -- NOT falling back silently:" >&2
         sed 's/^/    /' "$err" >&2
         MINT_HARD_FAIL=1

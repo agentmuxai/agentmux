@@ -147,11 +147,24 @@ if __name__ == "__main__":
     try:
         token = mint_installation_token(sys.argv[1], sys.argv[2])
     except NoAppIdentity as e:
-        # Distinct exit code so gh-agent.sh can tell "no App identity, fall
+        # Distinct exit code so callers can tell "no App identity, fall
         # through quietly" apart from "something actually broke" (exit 1).
-        # gh-agent.sh branches on this code, not on this message's text.
+        # Callers branch on this code, not on this message's text.
+        #
+        # 3, NOT 2. CPython itself exits 2 when it cannot open the script file
+        # ("can't open file '...': [Errno 2] No such file or directory"), so 2
+        # cannot distinguish "this agent has no App" from "the interpreter
+        # never ran this script at all". That collision was not theoretical:
+        # under MSYS/Git-Bash with MSYS_NO_PATHCONV=1 set, a POSIX script path
+        # reaches python3.exe verbatim and resolves to C:\c\Users\... -> exit
+        # 2 -> every caller silently concluded "no App identity" and fell
+        # through to a long-lived PAT. Silent PAT downgrade is the one
+        # outcome this whole migration exists to prevent.
+        #
+        # 3 is safe because CPython reserves only 1 and 2 for its own startup
+        # failures, so a 3 can only have come from this line.
         print(f"[github-app-token] {e} - no App identity for this agent", file=sys.stderr)
-        sys.exit(2)
+        sys.exit(3)
     except SecretsLookupError as e:
         print(f"[github-app-token] {e}", file=sys.stderr)
         sys.exit(1)
