@@ -310,7 +310,20 @@
     // SPEC_AGENT_PANE_PROGRESS_BAR_FULL_PERIMETER_2026_09_18.md — still no
     // reserved layout space, only the offset from the ring itself was ever
     // new (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md).
-    inset: 2px;
+    //
+    // Inset is 1px here, not 2px — paired with .agent-pane-progress-bar's
+    // own 2px (not 1px) padding below (this file); see that rule's comment
+    // for the full reasoning (a device-pixel rounding disagreement between
+    // this unzoomed element and its independently-positioned sibling
+    // .pane-stack::after). Originally applied to the top edge only (this
+    // pane's header is the one element nearby with `zoom` applied) but
+    // confirmed live to be the wrong scope: fixing the top edge alone just
+    // moved the same seam to the bottom, since the underlying cause — two
+    // separately-rounded absolutely-positioned boxes computed off this
+    // pane's own (often fractional, panes are resizable) height/width — can
+    // land on any edge, not only the one next to a zoomed element. Applied
+    // uniformly on all four sides for that reason.
+    inset: 1px;
     // Matches the ring's own radius so the masked frame below (which has
     // no border-radius awareness of its own beyond what its box carries)
     // doesn't poke square corners past the pane's actual rounded corners.
@@ -387,7 +400,34 @@
     opacity: 0;
     transition: opacity 200ms ease;
     border-radius: var(--block-border-radius);
-    padding: 1px;
+    // Every band is 2px, not 1px — paired with agent-pane-progress-bar-slot's
+    // own 1px (not 2px) inset above, and deliberate, not a typo. Both this
+    // element and the focus ring (.pane-stack::after, PaneChrome.scss) are
+    // independently absolutely-positioned against `.pane-stack`'s own box,
+    // each rounded to the device pixel grid separately by the browser. Two
+    // independently-rounded boxes computed off the same (often fractional —
+    // panes are resizable, and the header additionally applies `zoom:
+    // var(--zoomfactor)`, chrome zoom, zoom.ts) height/width can disagree by
+    // one device pixel on any edge, not predictably the same edge every
+    // time (confirmed live: a first version of this fix scoped to the top
+    // edge only — the edge nearest the zoomed header — closed the gap
+    // there but the same seam reappeared on the bottom edge instead; see
+    // docs/retro/RETRO_AGENT_PANE_PROGRESS_RING_TOP_EDGE_GAP_2026_09_19.md).
+    // The slot's 1px inset (instead of 2px) pulls this whole element's box
+    // 1px closer to the true pane edge on every side, so each band's 2px
+    // padding draws a ring spanning that extra pixel PLUS the same pixel
+    // this ring always drew — not a thicker ring pushed further into the
+    // content side. The extra pixel lands inside the focus ring's own 2px
+    // footprint, which paints above this element (z-index,
+    // agent-pane-progress-bar-slot above) and fully covers it when
+    // rounding lands cleanly, so every edge reads as the same 1px line it
+    // always did in the common case. It only matters on the zoom/DPI/size
+    // combinations where rounding doesn't land cleanly on a given edge,
+    // where it consumes that edge's stray device pixel instead of
+    // revealing a background-colored seam. Standard technique for this
+    // class of bug: deliberately overlap a seam on every side rather than
+    // trust two independently-rounded boxes to agree on any one of them.
+    padding: 2px;
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
