@@ -26,8 +26,17 @@ import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
+import { DEFAULT_TERM_SCROLLBACK } from "@/app/view/term/termscrollback";
 
-const { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, resyncRejections } = vi.hoisted(() => {
+const {
+    blockDataSignals,
+    seedData,
+    mpsHandlers,
+    mpsPersisted,
+    resyncDeferreds,
+    resyncRejections,
+    termSettingsBag,
+} = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
     const mpsHandlers = new Map<string, Array<(event: any) => void>>();
@@ -41,7 +50,18 @@ const { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, 
     // Ids for which ControllerResyncCommand rejects immediately, forcing
     // attachShell down the create-new-block fallback path.
     const resyncRejections = new Set<string>();
-    return { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, resyncRejections };
+    const termSettingsBag: Record<string, unknown> = {};
+    return {
+        blockDataSignals,
+        seedData,
+        mpsHandlers,
+        mpsPersisted,
+        resyncDeferreds,
+        resyncRejections,
+        // Mutable `term:*` settings the global mock serves. Hoisted alongside
+        // the other mock state so the vi.mock factory can close over it.
+        termSettingsBag,
+    };
 });
 
 // Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
@@ -143,6 +163,10 @@ vi.mock("@/app/store/global", async () => {
         MOS,
         atoms: { prefersReducedMotionAtom: () => false },
         staticTabId: () => "tab-1",
+        // The drawer resolves `term:scrollback` through this (see
+        // termscrollback.ts). Backed by a mutable bag so a test can set the
+        // value before mounting and assert what TermWrap was constructed with.
+        getSettingsPrefixAtom: (prefix: string) => () => (prefix === "term" ? termSettingsBag : {}),
     };
 });
 
@@ -153,6 +177,7 @@ vi.mock("@/app/store/global", async () => {
 const termWrapInstances: Array<{
     id: string;
     fontSize: number;
+    scrollback: number | undefined;
     loaded: boolean;
     disposed: boolean;
     terminal: any;
@@ -163,6 +188,7 @@ vi.mock("@/app/view/term/termwrap", () => {
     class FakeTermWrap {
         id: string;
         fontSize: number;
+        scrollback: number | undefined;
         terminal = { options: { fontSize: 0 } };
         loaded = false;
         disposed = false;
@@ -170,11 +196,12 @@ vi.mock("@/app/view/term/termwrap", () => {
         constructor(
             id: string,
             _container: HTMLElement,
-            options: { fontSize: number },
+            options: { fontSize: number; scrollback?: number },
             muxOptions: { sendDataHandler: (data: string) => void }
         ) {
             this.id = id;
             this.fontSize = options.fontSize;
+            this.scrollback = options.scrollback;
             this.terminal.options.fontSize = options.fontSize;
             this.sendDataHandler = muxOptions.sendDataHandler;
             termWrapInstances.push(this as any);
@@ -237,6 +264,7 @@ beforeEach(() => {
     resyncDeferreds.clear();
     resyncRejections.clear();
     termWrapInstances.length = 0;
+    for (const key of Object.keys(termSettingsBag)) delete termSettingsBag[key];
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
     (globalThis as any).ResizeObserver =
@@ -251,6 +279,78 @@ beforeEach(() => {
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+});
+
+describe("AgentShellSubblock — scrollback depth", () => {
+    /**
+     * Regression: the drawer hardcoded `scrollback: 2000` and never read
+     * `term:scrollback`, so raising the setting deepened terminal panes while
+     * this shell stayed capped. Because xterm counts scrollback in display
+     * rows and the drawer is narrow (lines soft-wrap across 2-3 rows), that cap
+     * cost far less history than it looks — a long agent session silently lost
+     * the top of its own output, and the topmost reachable line was cut
+     * mid-line because trimming is per-row.
+     */
+    it("uses the configured term:scrollback instead of the old hardcoded 2000", async () => {
+        termSettingsBag["term:scrollback"] = 40000;
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={undefined}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].scrollback).toBe(40000);
+    });
+
+    it("falls back to the default depth when term:scrollback is unset", async () => {
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={undefined}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].scrollback).toBe(DEFAULT_TERM_SCROLLBACK);
+    });
+
+    /**
+     * The drawer must pass its sub-block's own meta to the shared resolver, the
+     * way term.tsx passes `blockData()?.meta`. Without it a per-block
+     * `term:scrollback` override is silently ignored here while working on a
+     * terminal pane — the resolver would be shared in name only. Caught by
+     * review on #3455.
+     */
+    it("lets the sub-block's own term:scrollback meta override the global setting", async () => {
+        const existingId = "override-sub-block";
+        termSettingsBag["term:scrollback"] = 8000;
+        queueSeedMeta(`block:${existingId}`, { "term:scrollback": 31000 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await new Promise((r) => setTimeout(r, 10));
+        resolveSeedFetch(`block:${existingId}`);
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].scrollback).toBe(31000);
+    });
 });
 
 describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10)", () => {

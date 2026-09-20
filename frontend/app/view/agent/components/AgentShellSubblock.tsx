@@ -15,7 +15,8 @@
  */
 
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { atoms, staticTabId, MOS } from "@/app/store/global";
+import { atoms, getSettingsPrefixAtom, staticTabId, MOS } from "@/app/store/global";
+import { resolveTermScrollback } from "@/app/view/term/termscrollback";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -299,6 +300,19 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         const paneZoom = props.agentPaneZoom() || 1;
         return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));
     });
+
+    // The drawer used to hardcode `scrollback: 2000`, ignoring `term:scrollback`
+    // entirely — so raising the setting deepened terminal panes but not this
+    // shell, and a long session silently lost the top of its own history.
+    // Resolved through the same helper term.tsx uses so the two can't drift.
+    // Passes the sub-block's OWN meta as the second argument, exactly as
+    // term.tsx does with `blockData()?.meta` — otherwise a per-block
+    // `term:scrollback` override is silently ignored here while working on a
+    // terminal pane, which would defeat the point of sharing one resolver. The
+    // drawer already honours a per-block override for `term:zoom` off this same
+    // atom (see `termZoom` above), so the two keys now behave consistently.
+    const termSettingsAtom = getSettingsPrefixAtom("term");
+    const termScrollback = createMemo(() => resolveTermScrollback(termSettingsAtom(), subBlockAtom()?.()?.meta));
 
     // Apply zoom-driven font-size changes to the live terminal in place —
     // mirrors term.tsx:234-241. Only for LIVE updates (Ctrl+Wheel while the
@@ -607,7 +621,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                     fontSize: termFontSize(),
                     fontFamily: "Hack",
                     allowTransparency: false,
-                    scrollback: 2000,
+                    scrollback: termScrollback(),
                     allowProposedApi: true,
                 },
                 {
