@@ -171,6 +171,18 @@ crate::commands::orphan_reconcile::reconcile_and_drain(&self.state);
 (`client/mod.rs:169`) and already used elsewhere in this same file
 (e.g. `crash_recovery.rs:226`), so no new plumbing is needed.
 
+**Placement matters (reagent P1, PR #3458):** a first pass placed this
+call at the very end of the function. But the function has three earlier
+`return`s — the memory-paused-OOM path, the crash-budget-exceeded
+"give up" path, and the frontend-assets-missing path — all of which
+would have silently skipped the new call, leaving exactly this fix's own
+gap open for those cases (notably the crash-budget path, arguably the
+one most likely to correlate with a genuinely torn-down host window).
+Corrected: the call is placed immediately after the rate-limited crash
+log, before any of those branches, since it depends on none of what they
+compute — only on the fact that this handler was called at all, which
+(per the over-triggering argument above) is already sufficient.
+
 **Why this doesn't risk over-triggering on a benign exit:** CEF's own
 contract for this callback (`cef_termination_status_t`) rules that out —
 the doc says it's *"called... when the render process terminates
