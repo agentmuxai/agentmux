@@ -152,6 +152,20 @@ export interface PaneTabStripProps<T> {
      *  `canDrop` — cross-pane drops are Phase 4's job (§3.3), not silently
      *  half-supported here. ReAgent P1 on PR #3444. */
     paneKey?: string;
+
+    /** Opt in to cross-pane drop-to-append (Phase 4 of
+     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4): fires with the
+     *  dragged pill's `blockId` when a pill dragged from a DIFFERENT pane
+     *  (a different `sourceNodeId`) is dropped anywhere on this strip's row
+     *  — not on a specific pill (that's `onReorder`'s job, same-pane only).
+     *  Registers a SEPARATE `dropTargetForElements` on the strip's own
+     *  container, not a second one on any pill — pragmatic-dnd's registry
+     *  is one-registration-per-DOM-element (confirmed via its source, not
+     *  assumed), so this deliberately targets a different element than the
+     *  per-pill ones `onReorder` uses, rather than risk clobbering them.
+     *  Requires `paneKey`; omitted entirely (the default) → no
+     *  registration, zero behavior change. */
+    onReceiveForeignTab?: (blockId: string) => void;
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -175,6 +189,32 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         ro.observe(el);
         measure();
         onCleanup(() => ro.disconnect());
+    });
+
+    // Cross-pane drop-to-append (Phase 4, §3.4). A dwell-free hover flash —
+    // unlike the outer Window Tab bar's spring-loaded switch (which needs a
+    // dwell because committing reveals a HIDDEN tab), a target Pane's
+    // content here is already visible the whole time, so there's nothing
+    // to reveal before committing; see the spec's own reasoning for
+    // skipping that dwell timer.
+    const [foreignHover, setForeignHover] = createSignal(false);
+    onMount(() => {
+        const el = stripRef;
+        if (!el || !props.onReceiveForeignTab || !props.paneKey) return;
+        const paneKey = props.paneKey;
+        const cleanup = dropTargetForElements({
+            element: el,
+            canDrop: ({ source }) =>
+                source.data.type === paneTabItemType && source.data.sourceNodeId !== paneKey,
+            onDragEnter: () => setForeignHover(true),
+            onDragLeave: () => setForeignHover(false),
+            onDrop: ({ source }) => {
+                setForeignHover(false);
+                const blockId = source.data.blockId as string | undefined;
+                if (blockId) props.onReceiveForeignTab!(blockId);
+            },
+        });
+        onCleanup(cleanup);
     });
 
     // FLIP-style width transition, opt-in via `animateWidth` (see that
@@ -288,6 +328,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     return (
         <div
             class="pane-tab-strip"
+            classList={{ "pane-tab-strip--foreign-hover": foreignHover() }}
             ref={(el) => { stripRef = el; }}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from

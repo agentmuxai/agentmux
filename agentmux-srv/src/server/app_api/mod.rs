@@ -404,30 +404,14 @@ pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> R
     };
     let tab_id = resolve_tab_id_for_block(mstore, &cmd.block_id)
         .map_err(|e| format!("pane.moveTab: {e}"))?;
-    // Phase 3 scope: same-pane reorder only. The reducer command itself
-    // already supports a cross-pane move (built in Phase 1) but the
-    // frontend's pending-action handler (layoutPersistence.ts) does not yet
-    // apply a cross-leaf "stackmove" to OTHER windows/tabs watching this
-    // layout — an unhandled action there is silently dropped, and that
-    // client's next whole-tree persist could then clobber this move.
-    // Rejected here until Phase 4 (§3.3) closes that gap end-to-end.
-    // Codex P2 on PR #3444.
-    {
-        let s = state.srv_state.lock().await;
-        let same_pane = s
-            .tabs
-            .get(&tab_id)
-            .and_then(|t| t.rootnode.as_ref())
-            .and_then(|root| crate::backend::layout::find_leaf_containing_block(root, &cmd.block_id))
-            .is_some_and(|leaf| {
-                crate::backend::layout::leaf_members(leaf.data.as_ref().expect("leaf has data"))
-                    .iter()
-                    .any(|m| m == &cmd.target_block_id)
-            });
-        if !same_pane {
-            return Err("pane.moveTab: cross-pane move not yet supported (Phase 4)".to_string());
-        }
-    }
+    // Cross-pane moves (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.4) were rejected here through Phase 3 (Codex P2 on PR #3444) —
+    // the frontend's pending-action handler didn't yet mirror a cross-leaf
+    // "stackmove" to other windows/tabs watching this layout. That gap is
+    // now closed (layoutPersistence.ts's StackMove case, via
+    // moveMemberAcrossStacks), so both same-pane and cross-pane targets are
+    // accepted here — Command::LayoutStackMove already validates everything
+    // else (existence, non-empty source, etc.) via move_stack_member.
     let events = crate::server::service::dispatch_to_reducer(
         state,
         agentmux_common::ipc::Command::LayoutStackMove {
@@ -3020,13 +3004,14 @@ mod pane_open_reducer_tests {
         );
     }
 
-    // Codex P2 on PR #3444: the reducer command itself supports a cross-pane
-    // move (built in Phase 1), but the frontend's pending-action handler
-    // doesn't yet apply one to OTHER windows/tabs watching this layout,
-    // which could let their next whole-tree persist clobber it. Reject at
-    // the RPC layer until Phase 4 (cross-pane drop) closes that gap.
+    // Phase 4 (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4): a cross-pane
+    // target is now accepted — Codex P2 on PR #3444 had this rejected
+    // through Phase 3, until the frontend's pending-action handler could
+    // correctly mirror a cross-leaf "stackmove" to other windows/tabs
+    // (layoutPersistence.ts, via moveMemberAcrossStacks). That gap is
+    // closed; this test replaces the old rejection test.
     #[tokio::test]
-    async fn move_tab_rejects_a_cross_pane_target() {
+    async fn move_tab_moves_a_tab_across_panes_and_queues_a_cross_pane_stackmove() {
         let state = test_state();
         let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
             .await
@@ -3056,9 +3041,9 @@ mod pane_open_reducer_tests {
                 .unwrap();
             ids.push(id);
         }
-        // Pane A is a real 2-member stack (so a rejection here can't be
-        // confused with the separate "can't strip a pane to zero members"
-        // guard — that one already has its own dedicated test above).
+        // Pane A is a real 2-member stack (so the source leaf survives the
+        // move — a solo-member source is covered by the dedicated
+        // zero-members-guard test above, unaffected by this change).
         let (a1, a2, b) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
         dispatch_apply(
             &state,
@@ -3090,22 +3075,33 @@ mod pane_open_reducer_tests {
             },
         )
         .await;
-        let before = state.srv_state.lock().await.tabs[&tab_id].rootnode.clone();
 
-        let res = move_tab(
+        move_tab(
             &state,
             CommandPaneMoveTabData {
-                block_id: a2,
-                target_block_id: b,
-                position: "after".into(),
-                activate: false,
+                block_id: a2.clone(),
+                target_block_id: b.clone(),
+                position: "end".into(),
+                activate: true,
             },
         )
-        .await;
-        assert!(res.is_err(), "cross-pane move must be rejected until Phase 4");
+        .await
+        .expect("cross-pane move_tab");
 
-        let after = state.srv_state.lock().await.tabs[&tab_id].rootnode.clone();
-        assert_eq!(before, after, "a rejected move must not mutate the tree");
+        let tree = state.srv_state.lock().await.tabs[&tab_id].rootnode.clone().unwrap();
+        let pane_a = tree.children[0].data.as_ref().unwrap();
+        assert_eq!(pane_a.block_stack, vec![a1], "removed from the source pane");
+        let pane_b = tree.children[1].data.as_ref().unwrap();
+        assert_eq!(pane_b.block_stack, vec![b.clone(), a2.clone()]);
+        assert_eq!((pane_b.block_id.as_str(), pane_b.active_block_id.as_str()), (a2.as_str(), a2.as_str()));
+
+        let tab = state.mstore.must_get::<crate::backend::obj::Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+        let actions = layout.pendingbackendactions.unwrap_or_default();
+        assert!(
+            actions.iter().any(|a| a.actiontype == "stackmove" && a.blockid == a2 && a.targetblockid == b && a.focused),
+            "frontend told via a queued cross-pane stackmove: {actions:?}"
+        );
     }
 
     #[tokio::test]

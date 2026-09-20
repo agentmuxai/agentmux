@@ -11,7 +11,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { addMemberToStack, effectiveStack, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
+import {
+    addMemberToStack,
+    effectiveStack,
+    moveMemberAcrossStacks,
+    moveMemberInStack,
+    removeMemberFromStack,
+} from "./stackMembers";
 
 function stacked(blockId: string, blockStack: string[], activeBlockId: string): TabLayoutData {
     return { blockId, blockStack, activeBlockId };
@@ -87,6 +93,70 @@ describe("moveMemberInStack", () => {
         expect(data.blockStack).toEqual(["a", "b", "c"]);
         expect(data.blockId).toBe("b");
         expect(data.activeBlockId).toBe("b");
+    });
+});
+
+// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4 (cross-pane header-drop):
+// moves blockId OUT of sourceData's stack and INTO targetData's stack.
+// Mirrors the backend's cross-leaf branch of move_stack_member
+// (remove_stack_member + push_stack_member_at composition) — but unlike
+// that Rust function, this one only ever needs a plain append (the caller
+// always targets "the destination pane's currently-active member", per
+// §3.4's design; there is no drop-relative-to-a-specific-pill position for
+// a whole-header drop), so there's no position/splice logic to get wrong
+// here the way moveMemberInStack's self-target case did.
+describe("moveMemberAcrossStacks", () => {
+    it("moves the block from source to target, appended and activated", () => {
+        const source = stacked("a", ["a", "b"], "a");
+        const target = stacked("x", ["x", "y"], "x");
+        expect(moveMemberAcrossStacks(source, target, "b", true)).toBe(true);
+        expect(source.blockStack).toEqual(["a"]);
+        expect(target.blockStack).toEqual(["x", "y", "b"]);
+        expect(target.blockId).toBe("b");
+        expect(target.activeBlockId).toBe("b");
+    });
+
+    it("does not activate the moved block in the target unless requested", () => {
+        const source = stacked("a", ["a", "b"], "a");
+        const target = stacked("x", ["x", "y"], "x");
+        expect(moveMemberAcrossStacks(source, target, "b", false)).toBe(true);
+        expect(target.blockStack).toEqual(["x", "y", "b"]);
+        expect(target.blockId).toBe("x");
+        expect(target.activeBlockId).toBe("x");
+    });
+
+    it("moving the currently-visible source member activates its right-hand neighbour there", () => {
+        const source = stacked("b", ["a", "b", "c"], "b");
+        const target = stacked("x", ["x"], "x");
+        expect(moveMemberAcrossStacks(source, target, "b", false)).toBe(true);
+        expect(source.blockStack).toEqual(["a", "c"]);
+        expect(source.blockId).toBe("c");
+        expect(source.activeBlockId).toBe("c");
+    });
+
+    it("promotes a single-block target into a real stack", () => {
+        const source = stacked("a", ["a", "b"], "a");
+        const target = stacked("x", [], "x");
+        expect(moveMemberAcrossStacks(source, target, "b", true)).toBe(true);
+        expect(target.blockStack).toEqual(["x", "b"]);
+    });
+
+    it("refuses — changes nothing — when blockId is the source's only member", () => {
+        const source = stacked("a", [], "a");
+        const target = stacked("x", ["x", "y"], "x");
+        const sourceBefore = { ...source };
+        const targetBefore = { ...target };
+        expect(moveMemberAcrossStacks(source, target, "a", true)).toBe(false);
+        expect(source).toEqual(sourceBefore);
+        expect(target).toEqual(targetBefore);
+    });
+
+    it("refuses when blockId is not a member of the source at all", () => {
+        const source = stacked("a", ["a", "b"], "a");
+        const target = stacked("x", ["x"], "x");
+        const targetBefore = { ...target };
+        expect(moveMemberAcrossStacks(source, target, "not-there", true)).toBe(false);
+        expect(target).toEqual(targetBefore);
     });
 });
 
