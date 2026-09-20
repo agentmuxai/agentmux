@@ -298,15 +298,6 @@ export class TermWrap {
         this.mainFileSubject = getFileSubject(this.blockId, TermFileName);
         this.mainFileSubject.subscribe(this.handleNewFileSubjectData.bind(this));
 
-        // Load any existing terminal data (cache + main file)
-        try {
-            await this.loadInitialTerminalData();
-        } finally {
-            // Flush any data that arrived during loading, then open the gate
-            this.flushHeldData();
-            this.loaded = true;
-        }
-
         // Force-load the configured term font BEFORE the first fit, with a bounded
         // timeout. proposeDimensions() measures rendered cell width from the DOM; if
         // the configured term font (e.g. Hack) hasn't loaded yet, FitAddon uses fallback
@@ -352,9 +343,45 @@ export class TermWrap {
             ]);
         } catch (_) { /* font API unavailable or face unknown — fall through */ }
 
-        // NOW fit and tell backend to start/resync the shell controller.
-        // At this point we are fully subscribed and ready to receive data.
+        // Fit to the real container geometry BEFORE replaying history.
+        //
+        // This used to run AFTER loadInitialTerminalData(), which meant every
+        // mount replayed the whole session into xterm's default 80x24 grid and
+        // then resized to the actual geometry. Measured on a live drawer
+        // (docs/reports/REPORT_SHELL_DRAWER_ZOOM_HISTORY_ALIGNMENT_2026_09_19.md
+        // §A5): `delta-replay curSize=80x24` followed by a resize that reflowed
+        // all 1208 replayed rows, ~95ms of synchronous main-thread work. That
+        // cost is linear in scrollback depth, so it scales with the
+        // `term:scrollback` setting (up to 50000 rows) and is paid on every
+        // remount — reopening the drawer, reconnecting, a pane re-layout.
+        //
+        // Fitting first also makes the replay itself correct rather than merely
+        // recoverable: history is laid out once at the width it will actually be
+        // displayed at, instead of being wrapped at 80 cols and re-wrapped. The
+        // snapshot path in loadInitialTerminalData() reconciles against
+        // `this.terminal.rows/cols`, so it now compares the cache's recorded
+        // termsize against the real geometry instead of against the 80x24
+        // default — which is what that comparison was always meant to do.
+        //
+        // Ordering constraints preserved: the font load above must still precede
+        // this (proposeDimensions() measures a rendered cell, so a late font swap
+        // yields wrong cols), and sendTermSize()/hasResized/resyncController("init")
+        // still follow it in the same relative order.
         this.customFit();
+
+        // Load any existing terminal data (cache + main file). Data arriving from
+        // the already-active subscription while this is in flight is buffered by
+        // handleNewFileSubjectData and released by flushHeldData below.
+        try {
+            await this.loadInitialTerminalData();
+        } finally {
+            // Flush any data that arrived during loading, then open the gate
+            this.flushHeldData();
+            this.loaded = true;
+        }
+
+        // NOW tell the backend to start/resync the shell controller.
+        // At this point we are fully subscribed, sized, and ready to receive data.
         this.sendTermSize();
         // hasResized must flip before the fire-and-forget resync below: it gates the
         // TermResyncHandler effect, and the terminal is already sized at this point
@@ -891,6 +918,10 @@ export class TermWrap {
             `terminal loaded cachefile:${cacheData?.byteLength ?? 0} main:${mainData?.byteLength ?? 0} bytes, ${Date.now() - startTs}ms`
         );
         if (mainFile != null) {
+            // These raw delta bytes carry no recorded width, so they are replayed at
+            // the terminal's current geometry. init() now fits the terminal BEFORE
+            // calling this, so "current" is the real container size rather than
+            // xterm's 80x24 default — see the ordering comment in init().
             await this.doTerminalWrite(mainData, null);
         }
     }
