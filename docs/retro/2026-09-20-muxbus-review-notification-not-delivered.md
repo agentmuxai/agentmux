@@ -2,9 +2,51 @@
 
 **Date:** 2026-09-20
 **Author:** Oozp (agent), investigating at the operator's request
-**Status:** root cause NOT conclusively confirmed — this is an honest writeup
-of what was checked, what was ruled out, and what remains unverifiable from
-this agent's own vantage point. Treat §4 as the actionable part.
+**Status:** root cause NOT conclusively confirmed, but see **§0 — live update**:
+delivery demonstrably works again as of ~08:29 PDT, which reshapes the
+ranking in §3. Treat §0 and §4 as the actionable parts.
+
+## 0. Live update — delivery recovered within the hour, still unexplained
+
+While opening the two documentation PRs (#3450 for this retro, #3451 for the
+cross-instance sync spec) and *while waiting on `feat/global-memory-history-
+mcp-tools`'s re-review*, MuxBus jekts **did** arrive successfully, in close
+to real time, for three separate events within about 2 minutes of each
+other, ~19 minutes after the original #3448 failure:
+
+- `[ReAgent] PR #3450 reviewed — LGTM — approved` (MSGID
+  `inj-1789918557833-b08b1248`, TS `1789918552`)
+- `[ReAgent] PR #3451 reviewed — LGTM — approved` (MSGID
+  `inj-1789918590452-59ad01bf`, TS `1789918585`)
+- `[ReAgent] PR #3448 reviewed — changes requested` (MSGID
+  `inj-1789918592828-b75c6211`, TS `1789918587`) — a *second* review on the
+  same PR this retro is about, and this one **was** delivered.
+
+This is meaningful new evidence, not just "it works now so who cares":
+
+- It directly weakens **hypothesis #2** (deployed `agentmux-cloud` code
+  doesn't match what I read) and **#3** (webhook not configured/firing) —
+  both would need to have been broken and then fixed within the same
+  ~20-minute window with no deploy or config change I'm aware of. Possible,
+  but now the less likely explanation.
+- It's consistent with, and somewhat strengthens, **hypothesis #1**
+  (transient connection unhealthiness) — MuxBus's own reconnect/refresh
+  loop (`cloud_subscriber.rs`) recovering on its own, unprompted, fits a
+  transient-then-recovered shape exactly.
+- **It does not, by itself, explain *why* the original delivery failed** —
+  only that whatever the problem was, it wasn't a durable/structural one.
+  The specific trigger (why the connection was unhealthy for that ~40+
+  minute window in the first place) is still unconfirmed. I did not take
+  any action myself that would explain a recovery (no restart, no
+  re-login, no config change) — if anything changed, it changed on its
+  own or via something outside this session's visibility.
+
+Revised ranking given this: the "transient, self-recovered connection
+issue" explanation is now the leading hypothesis by a wider margin, and the
+"structurally broken/misconfigured" hypotheses are correspondingly less
+likely — but *still not confirmed*, since I still have no direct visibility
+into `muxbus.status` or `agentmux-cloud`'s logs to see what actually
+changed.
 
 ## 1. What happened
 
