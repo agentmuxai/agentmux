@@ -774,6 +774,16 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     REGISTRY.get(canonical).copied()
 }
 
+/// Every registered provider, for callers that must act on all of them
+/// rather than look one up by id — e.g. a migration backfilling
+/// conversation history for every provider that has a linkable native
+/// history directory ([`ProviderConfig::history_native_subdir`]), so a
+/// future provider gains that behavior automatically instead of needing
+/// a follow-up patch to an id list maintained elsewhere.
+pub fn all_providers() -> impl Iterator<Item = &'static ProviderConfig> {
+    REGISTRY.values().copied()
+}
+
 /// True when `dir` resolves to `provider`'s literal ambient home directory
 /// (e.g. `~/.claude` for Claude Code) rather than an AgentMux-isolated dir.
 /// Used to block identity bindings/spawns from ever pointing a spawned
@@ -1042,6 +1052,46 @@ mod tests {
     #[test]
     fn unknown_returns_none() {
         assert!(get_provider("unknown-provider").is_none());
+    }
+
+    #[test]
+    fn all_providers_covers_every_registered_id_exactly_once() {
+        let ids: Vec<&str> = all_providers().map(|p| p.id).collect();
+        for expected in [
+            "claude",
+            "codex",
+            "gemini",
+            "qwen",
+            "kimi",
+            "openclaw",
+            "pi",
+            "copilot",
+            "muxcode",
+            "antigravity",
+        ] {
+            assert_eq!(
+                ids.iter().filter(|id| **id == expected).count(),
+                1,
+                "expected exactly one entry for {expected}, got {ids:?}"
+            );
+        }
+        assert_eq!(ids.len(), 10, "must not silently gain/lose a provider: {ids:?}");
+    }
+
+    #[test]
+    fn all_providers_includes_every_provider_with_a_linkable_history_dir() {
+        let with_history: Vec<&str> = all_providers()
+            .filter(|p| p.history_native_subdir.is_some())
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            with_history.len(),
+            3,
+            "expected exactly claude/codex/gemini to have a linkable history dir: {with_history:?}"
+        );
+        for expected in ["claude", "codex", "gemini"] {
+            assert!(with_history.contains(&expected), "missing {expected}: {with_history:?}");
+        }
     }
 
     #[test]
