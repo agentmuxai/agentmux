@@ -8,7 +8,7 @@ and an opt-in (default-off) reveal bound;
 `<PaneLoadingCover>` (§5.3) now the single owner of `.agent-pane-loading-overlay`,
 adopted by both `agent-view.tsx` and `AgentPicker.tsx` — indicator #4 in §2 is gone and
 #3 no longer renders its own markup; the header-mic guard inverted to positive (§5.4).
-Phase 3 follows in PR #3464: indicators #1 and #2 now route through the same
+Phase 3 follows in PR #3466: indicators #1 and #2 now route through the same
 controller and cover, the cover's styles moved out of the `.agent-view` cascade into
 `element/PaneLoadingCover.scss`, and coverage became an explicit input (§5.3).
 Not started: phase 4's `isLoading()` subscription and phase 5 (browser pane, §2 #6-#7) —
@@ -136,7 +136,7 @@ pre-consolidation code deliberately re-showed its spinner for it. `PaneReadiness
 one-way — gate release is one-shot, and re-registering after reveal is a documented
 no-op precisely so a late dependency cannot yank the cover back over content the user
 is reading. Feeding a re-entrant signal into it type-checks, reads correctly, and
-silently drops every re-cover after the first. (reagent P1 on #3464.)
+silently drops every re-cover after the first. (reagent P1 on #3464, which became #3466.)
 
 The rule this generalises to: **one-time assembly is the controller's job; anything
 cyclic keeps its own small cycle and merely renders the same cover.** The same split
