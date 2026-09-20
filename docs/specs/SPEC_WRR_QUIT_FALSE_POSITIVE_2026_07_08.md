@@ -242,7 +242,7 @@ Also fixed en route: `wrap_task!` in `win_event.rs` needs explicit `use cef::rc:
 - `docs/specs/SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` (L1, the item this slices from)
 - `docs/specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md` (§3.3, §7 — WRR gap previously scoped,
   not started)
-- `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` §2 (confirms WRR is still the
+- `docs/archive/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` §2 (confirms WRR is still the
   dominant, unwired quit path)
 - `docs/specs/SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md` (the sibling frontend-count bug,
   same recycle-close root event, different symptom)

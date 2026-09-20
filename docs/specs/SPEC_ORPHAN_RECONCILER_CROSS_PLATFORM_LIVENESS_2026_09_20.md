@@ -10,11 +10,10 @@ within), `docs/specs/SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` (a
 Windows-only sibling bug in the parallel `win_event.rs` quit-trigger path
 — not touched by this fix). GitHub issue #1569.
 
-Note: issue #1569 cites `docs/specs/ANALYSIS_WRR_CROSS_PLATFORM_2026_06_18.md`
-— that file does not exist anywhere in the repo (checked `docs/specs/`,
-`docs/analysis/`, `docs/retro/`, `docs/reports/`, `docs/archive/`). This
-spec cites `docs/retro/wrr-design-2026-04-28.md` instead, which is the
-real source for the "WRR is Windows-only" claim.
+Note: issue #1569 cites an `ANALYSIS_WRR_CROSS_PLATFORM_2026_06_18` doc
+under `docs/specs/` — no file by that name exists anywhere in the repo
+(checked every `docs/` subtree). This spec cites `docs/retro/wrr-design-2026-04-28.md`
+instead, which is the real source for the "WRR is Windows-only" claim.
 
 ---
 
