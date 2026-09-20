@@ -305,8 +305,14 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // entirely — so raising the setting deepened terminal panes but not this
     // shell, and a long session silently lost the top of its own history.
     // Resolved through the same helper term.tsx uses so the two can't drift.
+    // Passes the sub-block's OWN meta as the second argument, exactly as
+    // term.tsx does with `blockData()?.meta` — otherwise a per-block
+    // `term:scrollback` override is silently ignored here while working on a
+    // terminal pane, which would defeat the point of sharing one resolver. The
+    // drawer already honours a per-block override for `term:zoom` off this same
+    // atom (see `termZoom` above), so the two keys now behave consistently.
     const termSettingsAtom = getSettingsPrefixAtom("term");
-    const termScrollback = createMemo(() => resolveTermScrollback(termSettingsAtom()));
+    const termScrollback = createMemo(() => resolveTermScrollback(termSettingsAtom(), subBlockAtom()?.()?.meta));
 
     // Apply zoom-driven font-size changes to the live terminal in place —
     // mirrors term.tsx:234-241. Only for LIVE updates (Ctrl+Wheel while the

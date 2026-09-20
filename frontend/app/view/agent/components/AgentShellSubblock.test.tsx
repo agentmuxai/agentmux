@@ -322,6 +322,35 @@ describe("AgentShellSubblock — scrollback depth", () => {
         await waitFor(() => expect(termWrapInstances.length).toBe(1));
         expect(termWrapInstances[0].scrollback).toBe(DEFAULT_TERM_SCROLLBACK);
     });
+
+    /**
+     * The drawer must pass its sub-block's own meta to the shared resolver, the
+     * way term.tsx passes `blockData()?.meta`. Without it a per-block
+     * `term:scrollback` override is silently ignored here while working on a
+     * terminal pane — the resolver would be shared in name only. Caught by
+     * review on #3455.
+     */
+    it("lets the sub-block's own term:scrollback meta override the global setting", async () => {
+        const existingId = "override-sub-block";
+        termSettingsBag["term:scrollback"] = 8000;
+        queueSeedMeta(`block:${existingId}`, { "term:scrollback": 31000 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await new Promise((r) => setTimeout(r, 10));
+        resolveSeedFetch(`block:${existingId}`);
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].scrollback).toBe(31000);
+    });
 });
 
 describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10)", () => {
