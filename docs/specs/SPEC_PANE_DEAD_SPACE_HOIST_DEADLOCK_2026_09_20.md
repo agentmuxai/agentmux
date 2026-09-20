@@ -1,9 +1,41 @@
 # SPEC: Permanently blank agent panes after recovery — the hoist deadlock, and the wrong-tab registration that triggers it
 
 **Date:** 2026-09-20
-**Status:** proposed — RCA complete and evidence-backed; fixes not yet implemented
+**Status:** proposed — §3.1's non-keep-alive claim CORRECTED 2026-09-20 (see
+erratum immediately below); §2, §3.2, §5, §6, §7, and §10 are independently
+evidenced (logs/code) and unaffected. §3.1 (keep-alive variant), §3.3, and
+§8.1 need rework before implementation — do not implement Layer A against
+the original §3.1 text.
 **Author:** Lark
 **Repo state:** `main` @ `1e976aac8` (v0.56.9); incident observed live on a running v0.56.7 instance (srv pid 27512, host `narko`)
+
+> **Erratum (2026-09-20, same day, before merge):** §3.1 originally claimed
+> `hoisted()`/`chromeVm()` deadlock in the **non-keep-alive** path too — i.e.
+> for an ordinary, non-stacked single-block pane, which is what `Naki #2`,
+> `Loap #2`, and the five Tab-2 agents in this incident all are. **That
+> specific claim is wrong, confirmed empirically, not just reread:** a
+> targeted test (`pane-leaf-chrome.test.tsx`, "RCA verification (non-keep-alive
+> hoist path)") mounts a pane whose view type is already `"agent"` on the very
+> first synchronous render — exactly the claimed trigger condition — using the
+> file's own realistic signal-backed `NodeModel` double, and **it passes**:
+> chrome resolves in 2ms (CI run
+> `35539258553`, job `106153809703`, PR #3459). The reason, on rereading:
+> `content` (`:327`) is a plain, eagerly-constructed `const` containing
+> `<Block>` — SolidJS runs a component's effects at construction time
+> regardless of which `<Show>` branch later consumes the resulting value, so
+> `<Block>`'s `createEffect` (which publishes the ViewModel) fires whether or
+> not `hoisted()` is already true. There is no deadlock here. §3.1's text
+> below is kept as originally written, for the investigative trail, but is
+> superseded by this note — do not treat it as current. The keep-alive
+> variant (`viewModelSlots`) is a distinct code path this test does not
+> exercise; whether a live variant of that one still applies is open, tracked
+> in §3.3-erratum below. The live symptom itself (5+ panes permanently blank,
+> backend data intact) is not in question — only this proposed mechanism for
+> it. See `docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §8 for
+> the last time this codebase prematurely closed a theory about this exact
+> symptom class without a disproving test — this erratum exists so this spec
+> doesn't repeat that in the other direction (closing on an *unproven*
+> theory instead of a disproven one).
 **Related:**
 `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
 (same symptom class — dead layout space — different mechanism; its systemic write-path
