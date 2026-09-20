@@ -10,6 +10,7 @@ import { ISearchOptions } from "@xterm/addon-search";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { resolveTermScrollback } from "./termscrollback";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
@@ -168,10 +169,9 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         const termBPMAtom = getOverrideConfigAtom(blockId, "term:allowbracketedpaste");
         const [termTheme] = computeTheme(fullConfig, termThemeName, termTransparency);
         const ts = termSettings();
-        let termScrollback = 2000;
-        if (ts?.["term:scrollback"]) termScrollback = Math.floor(ts["term:scrollback"]);
-        if (blockData()?.meta?.["term:scrollback"]) termScrollback = Math.floor(blockData().meta["term:scrollback"]);
-        termScrollback = Math.max(0, Math.min(termScrollback, 50000));
+        // Shared with the agent Shell drawer so both surfaces read the same
+        // setting — see termscrollback.ts for why that matters.
+        const termScrollback = resolveTermScrollback(ts, blockData()?.meta);
         // Default ON: modern shells (bash 4+, zsh, fish) all support BPM and it
         // prevents the shell from executing partial lines mid-paste. Disable per-pane
         // via term:allowbracketedpaste=false for legacy shells that don't support it.
