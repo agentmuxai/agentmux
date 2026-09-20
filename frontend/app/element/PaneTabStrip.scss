@@ -133,6 +133,16 @@
     &::-webkit-scrollbar {
         display: none; // Chrome/Safari/CEF
     }
+
+    // Cross-pane drop-to-append hover (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.4, Phase 4) — a pill dragged from a DIFFERENT pane is hovering this
+    // strip's row, about to be appended as a new tab here on drop. Same
+    // "minimal, exact polish deferred" posture as the same-pane reorder
+    // feedback above (`--dragging`/`--drop-before`/`--drop-after` on
+    // `.pane-tab`).
+    &--foreign-hover {
+        box-shadow: inset 0 0 0 1px var(--accent-color);
+    }
 }
 
 // The zoomed layer — carries the flex layout the outer box used to own

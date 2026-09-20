@@ -97,6 +97,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             // strip usage where reserving drag space after the "+" matters.
             reserveDragHandle
             onReorder={props.onReorder}
+            onReceiveForeignTab={props.onReceiveForeignTab}
             // Derived from `nodeModel` (this strip's own Pane) rather than
             // requiring a redundant caller-supplied prop — `PaneTabStrip`'s
             // `canDrop` uses it to reject a pill dragged from a DIFFERENT

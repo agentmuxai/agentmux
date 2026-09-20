@@ -6,8 +6,24 @@
 only) implemented in PR #3441. Phase 2 (§3.6, reserved whole-pane drag space)
 implemented in PR #3442. Phase 3 (§3.1/§3.2, same-pane drag-reorder: the
 `pane.moveTab` RPC, `moveBlockInStack`, and the actual per-pill drag UI)
-implemented — PR pending at time of writing. Phases 4-6 (cross-pane drops,
-tear-off-to-floating-pane) not started.
+implemented in PR #3444. Phase 4 (§3.4, cross-pane drop onto ANOTHER pane's
+header — the tab joins that pane's stack) implemented — PR pending at time of
+writing.
+
+**Deliberate re-ordering of the remaining work, decided with the repo owner
+2026-09-20:** §3.3 (cross-pane drop onto a pane's CONTENT area, with a
+ghost/split preview) was originally Phase 4's first half, but it is the only
+remaining piece that cannot be built additively — `OverlayNode`'s
+`dropTargetForElements` (`tilelayout-shared.tsx`) is keyed entirely to
+`tileItemType`, and pragmatic-dnd's drop-target registry is
+one-registration-per-DOM-element (verified in its source: `registry.set(element,
+args)`, with a dev-mode warning on a second registration), so a parallel,
+isolated handler on the same element is impossible — the existing callbacks
+would have to be edited in place. That file is the one implicated in the four
+rounds of dead-tab/dead-pane incidents `SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md`
+catalogs, so the header-drop half (§3.4 — a brand-new drop target on an element
+with zero existing registrations) was built first instead. §3.3 and §3.5
+(tear-off-to-floating-pane) remain not started.
 **Scope:** Dragging an individual **Pane Tab** pill (the pills rendered by
 `PaneHeaderTabStrip`/`PaneTabStrip`, one per `block_stack` member — see
 terminology below) to: reorder it within its own Pane, move it into a
