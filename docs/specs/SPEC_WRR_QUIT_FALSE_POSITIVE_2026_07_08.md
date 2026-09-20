@@ -1,6 +1,10 @@
 # SPEC — WRR quit gate fires on a live window (false exit on non-last window close)
 
-- **Status:** Draft → implementing
+- **Status:** implemented — PR #2043 (merged 2026-07-09, the day after
+  this spec). Corrected 2026-09-20: this line had said "Draft →
+  implementing" for over two months after the fix actually shipped —
+  found stale while researching #1569, an unrelated fix to a sibling
+  file (`orphan_reconcile.rs`) in the same quit/reconciliation area.
 - **Date:** 2026-07-08
 - **Author:** AgentA
 - **Scope:** A minimal, independently-shippable slice of L1 from

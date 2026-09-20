@@ -410,6 +410,23 @@ impl AgentMuxHandler {
                 frame.load_url(Some(&uri));
             }
         }
+
+        // On Windows, a crash that also takes the HWND down is caught by
+        // WRR's native WM_DESTROY hook, which re-emits HostShouldQuit and
+        // wakes the orphan reconciler (see orphan_reconcile.rs's own module
+        // doc). There's no equivalent native hook on macOS/Linux, so a
+        // renderer crash there previously left the reconciler un-triggered
+        // until the NEXT normal last-window-close — this call closes that
+        // gap directly from the one cross-platform signal CEF already gives
+        // us for an unexpected termination. Not needed on Windows, where
+        // the WRR path already covers this (#1569,
+        // SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md).
+        // Safe to call with no specific browser resolved (this function
+        // already tolerates `browser == None` above) — reconcile_and_drain
+        // re-derives its plan from the whole reducer snapshot, not from
+        // whichever browser crashed.
+        #[cfg(not(target_os = "windows"))]
+        crate::commands::orphan_reconcile::reconcile_and_drain(&self.state);
     }
 
     /// CEF asks the embedder for HTTP Basic / Digest credentials on a
