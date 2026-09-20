@@ -31,9 +31,11 @@
 //!
 //! ## What this does
 //!
-//! Walks every existing channel/dev-branch root under `<home>/channels/*`
-//! and `<home>/dev/*` (the two bases `DataPaths::instance_dir` ever
-//! resolves to — see `agentmux_common::data_paths` tests), and for every
+//! Walks every `identities/` directory found up to 2 levels under
+//! `<home>/channels/*` and `<home>/dev/*` — covering `channels/<slug>/`,
+//! `dev/<branch>/`, and the clone-scoped `dev/<branch>/<clone_id>/` shape
+//! (see [`identities_roots`], and `ClaudeHistoryAdapter`'s identical
+//! bounded traversal, which this mirrors on purpose). For every
 //! `identities/<bundle_id>/<provider.auth_dir_name>/<history_subdir>` path
 //! that exists on disk, calls the live `ensure_history_link` to merge it
 //! into `<home>/shared/identities/<bundle_id>/<provider.auth_dir_name>/<history_subdir>`
@@ -89,8 +91,7 @@ impl Migration for M0034IdentityHistoryBackfill {
         let mut linked = 0usize;
         let mut failed = 0usize;
 
-        for instance_dir in candidate_instance_dirs(&ctx.home) {
-            let identities_root = instance_dir.join("identities");
+        for identities_root in identities_roots(&ctx.home) {
             let Ok(bundle_entries) = std::fs::read_dir(&identities_root) else {
                 continue;
             };
@@ -103,7 +104,7 @@ impl Migration for M0034IdentityHistoryBackfill {
                 if !is_safe_path_segment(&bundle_id) {
                     tracing::warn!(
                         bundle_id,
-                        instance_dir = %instance_dir.display(),
+                        identities_root = %identities_root.display(),
                         "identity_history_backfill: skipping unsafe bundle id"
                     );
                     continue;
@@ -153,25 +154,55 @@ impl Migration for M0034IdentityHistoryBackfill {
     }
 }
 
-/// The two bases `DataPaths::instance_dir` ever resolves to: every
-/// existing entry under `<home>/channels/` and `<home>/dev/` — one level
-/// deep, matching `channels/<channel>` and `dev/<branch>` respectively
-/// (see `agentmux_common::data_paths`'s own resolve() tests). Missing
-/// roots (a fresh install with no `dev/` dir yet, for instance) are
-/// ordinary, not an error.
-fn candidate_instance_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// Every `identities/` directory up to 2 levels under `<home>/channels/`
+/// and `<home>/dev/`. Deliberately mirrors
+/// `ClaudeHistoryAdapter::scan_isolated_identities_under`'s bounded
+/// traversal (`agentmux-srv/src/backend/history/claude_adapter.rs`) rather
+/// than assuming a fixed one-level shape: `DataPaths::resolve` places a
+/// dev instance at `dev/<branch>/` when there is no clone id, but at
+/// `dev/<branch>/<clone_id>/` whenever one is derived — which
+/// `agentmux_common::runtime_mode::derive_clone_id` does for essentially
+/// every real dev checkout (anywhere a `.git`/`Cargo.toml`/`Taskfile.yml`
+/// is found up the tree), not an edge case. An earlier revision of this
+/// function only checked one level under `dev/`, which silently found
+/// nothing for that layout and would have marked the migration applied
+/// without ever backfilling clone-scoped dev instances — caught in review
+/// (ReAgent + Codex, independently, on the same commit) before merge.
+/// Depth 2 covers every known layout: `channels/<slug>/identities/`,
+/// `dev/<branch>/identities/`, and `dev/<branch>/<clone_id>/identities/`.
+/// Kept as its own copy rather than calling the adapter's function
+/// directly: that one is Claude-specific (hardcodes `claude/projects`)
+/// and private to its module; this migration needs the `identities/`
+/// directory itself, for every provider.
+fn identities_roots(home: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     for base in ["channels", "dev"] {
-        let Ok(entries) = std::fs::read_dir(home.join(base)) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                out.push(entry.path());
-            }
-        }
+        collect_identities_roots(&home.join(base), &mut out, 2);
     }
     out
+}
+
+fn collect_identities_roots(
+    root: &std::path::Path,
+    out: &mut Vec<std::path::PathBuf>,
+    max_depth: u8,
+) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let identities = path.join("identities");
+        if identities.is_dir() {
+            out.push(identities);
+        }
+        if max_depth > 1 {
+            collect_identities_roots(&path, out, max_depth - 1);
+        }
+    }
 }
 
 /// Mirrors `agentmux_common::data_paths`'s private `sanitize_path_segment`
@@ -304,6 +335,47 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&global_file).unwrap(),
             "dev branch history"
+        );
+    }
+
+    /// The gap caught in review (ReAgent + Codex, independently, same
+    /// commit): a dev build with a clone id nests one level deeper —
+    /// `dev/<branch>/<clone_id>/identities/...`, per
+    /// `DataPaths::resolve`'s `RuntimeMode::Dev` branch — which
+    /// `sweeps_dev_branch_roots_too` above does not exercise. This is the
+    /// common case, not an edge case: `derive_clone_id` succeeds (and so
+    /// this layout applies) for essentially every real `task dev`
+    /// checkout. Must be found and linked exactly like the shallow form.
+    #[test]
+    fn sweeps_clone_scoped_dev_roots_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+
+        let stranded = home
+            .join("dev")
+            .join("some-branch")
+            .join("a1b2c3d4")
+            .join("identities")
+            .join("bundle-1")
+            .join("gemini")
+            .join("history");
+        std::fs::create_dir_all(&stranded).unwrap();
+        std::fs::write(stranded.join("h.json"), "clone-scoped dev history").unwrap();
+
+        M0034IdentityHistoryBackfill
+            .up(&ctx_at(home.clone()))
+            .unwrap();
+
+        let global_file = home
+            .join("shared")
+            .join("identities")
+            .join("bundle-1")
+            .join("gemini")
+            .join("history")
+            .join("h.json");
+        assert_eq!(
+            std::fs::read_to_string(&global_file).unwrap(),
+            "clone-scoped dev history"
         );
     }
 
