@@ -2218,6 +2218,7 @@ const AgentPresentationView = ({
                 {(state) => (
                     <BtwOverlay
                         blockId={model.blockId}
+                        askId={state().askId}
                         question={state().question}
                         requestId={state().requestId}
                         error={state().error}
