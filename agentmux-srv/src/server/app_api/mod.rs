@@ -434,6 +434,7 @@ pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> R
         &cmd.block_id,
         &cmd.target_block_id,
         &cmd.position,
+        cmd.activate,
     )
     .await
     {
@@ -2989,7 +2990,8 @@ mod pane_open_reducer_tests {
             actions.iter().any(|a| a.actiontype == "stackmove"
                 && a.blockid == c
                 && a.targetblockid == blocks[1]
-                && a.position == "before"),
+                && a.position == "before"
+                && !a.focused), // activate: false rides on `focused` — see queue_target_stack_move's doc comment
             "frontend told via a queued stackmove: {actions:?}"
         );
     }

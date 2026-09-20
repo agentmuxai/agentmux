@@ -137,7 +137,11 @@ pub(crate) async fn queue_target_stack_push(
 /// in `frontend/layout/lib/types.ts`. `position` is the same
 /// `"before"`/`"after"`/`"end"` string `pane.moveTab`'s caller supplied —
 /// reused verbatim, not re-derived, so the frontend applies the identical
-/// operation rather than inferring it from resulting tree state.
+/// operation rather than inferring it from resulting tree state. `activate`
+/// rides on `LayoutActionData.focused` — the same field `queue_target_stack_push`
+/// above already overloads for this purpose (that call hardcodes `true`,
+/// since `CreateBlockInStack` always activates; this one carries the
+/// caller's actual `activate` value since a reorder may or may not).
 /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
 pub(crate) async fn queue_target_stack_move(
     state: &super::super::AppState,
@@ -145,6 +149,7 @@ pub(crate) async fn queue_target_stack_move(
     block_id: &str,
     target_block_id: &str,
     position: &str,
+    activate: bool,
 ) -> Result<(), String> {
     let action = LayoutActionData {
         actiontype: "stackmove".to_string(),
@@ -153,7 +158,7 @@ pub(crate) async fn queue_target_stack_move(
         nodesize: None,
         nodesizefraction: None,
         indexarr: None,
-        focused: false,
+        focused: activate,
         magnified: false,
         ephemeral: false,
         targetblockid: target_block_id.to_string(),

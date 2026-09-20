@@ -42,7 +42,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { findNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { closeNode } from "./layoutMagnify";
-import { effectiveStack, removeMemberFromStack } from "./stackMembers";
+import { effectiveStack, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 
 export { effectiveStack };
 
@@ -210,4 +210,51 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
     model.persistToBackend();
 
     await model.onNodeDelete?.({ blockId } as TabLayoutData);
+}
+
+/**
+ * Reorder `blockId` within the SAME pane's (`nodeId`'s) stack, to `position`
+ * relative to `targetBlockId`. Applies the local optimistic edit immediately
+ * (so the tab strip reacts instantly to a drag) — same "local mutation is
+ * this client's own source of truth" pattern every mutator in this file
+ * uses. Also fires the matching `pane.moveTab` RPC, fire-and-forget (not
+ * awaited — a failure is logged only, same posture as every other mutator
+ * here, none of which reconciles against RPC failure): it exists so OTHER
+ * windows/tabs watching this same layout see the move too, via the queued
+ * `stackmove` action `pane.moveTab` sends (this client's own local edit
+ * already reflects it, so it doesn't need to wait on or re-apply its own
+ * queued action).
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+ */
+export function moveBlockInStack(
+    model: LayoutModel,
+    nodeId: string,
+    blockId: string,
+    targetBlockId: string,
+    position: "before" | "after" | "end",
+    activate = false
+): void {
+    const node = findNode(model.treeState.rootNode, nodeId);
+    if (!node?.data) {
+        console.error("moveBlockInStack: node not found or has no data", nodeId);
+        return;
+    }
+    if (!moveMemberInStack(node.data, blockId, targetBlockId, position, activate)) {
+        console.error(
+            "moveBlockInStack: blockId or targetBlockId is not a member of this node's stack",
+            nodeId,
+            blockId,
+            targetBlockId
+        );
+        return;
+    }
+    model.updateTree(false);
+    model.setter(model.localTreeStateAtom, { ...model.treeState });
+    model.persistToBackend();
+
+    TabRpcClient.rpcCall(
+        "pane.moveTab",
+        { block_id: blockId, target_block_id: targetBlockId, position, activate },
+        {}
+    ).catch((e) => console.error("moveBlockInStack: pane.moveTab RPC failed", e));
 }

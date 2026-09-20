@@ -17,6 +17,7 @@ import {
     addWidgetAsPaneTab,
     closeBlockInStack,
     effectiveStack,
+    moveBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
 } from "@/layout/lib/layoutStack";
@@ -277,6 +278,73 @@ describe("layoutStack", () => {
 
             setActiveBlockInStack(model, nodeId, "b1"); // real switch
             expect(model.nodeModels.has(nodeId)).toBe(true);
+        });
+    });
+
+    describe("moveBlockInStack", () => {
+        beforeEach(() => rpcCall.mockReset());
+
+        it("reorders locally and fires pane.moveTab with the same operation", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            pushBlockOntoStack(model, nodeId, "b3"); // stack: [b1,b2,b3]
+            rpcCall.mockResolvedValue(undefined);
+
+            moveBlockInStack(model, nodeId, "b3", "b1", "before");
+
+            const data = model.treeState.rootNode!.data!;
+            expect(data.blockStack).toEqual(["b3", "b1", "b2"]);
+            expect(rpcCall).toHaveBeenCalledWith(
+                "pane.moveTab",
+                { block_id: "b3", target_block_id: "b1", position: "before", activate: false },
+                {}
+            );
+        });
+
+        it("does not change the visible tab unless activate is passed", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2"); // active = b2
+            pushBlockOntoStack(model, nodeId, "b3"); // active = b3
+            rpcCall.mockResolvedValue(undefined);
+
+            moveBlockInStack(model, nodeId, "b3", "b1", "after");
+
+            const data = model.treeState.rootNode!.data!;
+            expect(data.blockStack).toEqual(["b1", "b3", "b2"]);
+            expect(data.activeBlockId).toBe("b3"); // was already active, reorder alone doesn't change it
+        });
+
+        it("activates the moved block when requested", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2"); // active = b2
+            rpcCall.mockResolvedValue(undefined);
+
+            moveBlockInStack(model, nodeId, "b1", "b2", "after", true);
+
+            const data = model.treeState.rootNode!.data!;
+            expect(data.blockStack).toEqual(["b2", "b1"]);
+            expect(data.blockId).toBe("b1");
+            expect(data.activeBlockId).toBe("b1");
+            expect(rpcCall).toHaveBeenCalledWith(
+                "pane.moveTab",
+                { block_id: "b1", target_block_id: "b2", position: "after", activate: true },
+                {}
+            );
+        });
+
+        it("is a no-op and does not call the RPC when blockId is not a stack member", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            const before = { ...model.treeState.rootNode!.data! };
+
+            moveBlockInStack(model, nodeId, "not-a-member", "b1", "after");
+
+            expect(model.treeState.rootNode!.data).toEqual(before);
+            expect(rpcCall).not.toHaveBeenCalled();
         });
     });
 

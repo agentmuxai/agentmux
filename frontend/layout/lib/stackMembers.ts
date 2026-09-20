@@ -54,3 +54,38 @@ export function addMemberToStack(data: TabLayoutData, blockId: string, activate:
         data.blockId = blockId;
     }
 }
+
+/**
+ * Splice `blockId` to `position` relative to `targetBlockId` within the SAME
+ * leaf's stack. Both must already be members. Mirrors the backend's
+ * `reorder_within_leaf` (`agentmux-srv/src/backend/layout/mod.rs`) exactly,
+ * including the one subtlety that makes this a distinct function rather than
+ * a `removeMemberFromStack` + `addMemberToStack` composition: only touches
+ * `blockId`/`activeBlockId` when `activate` is explicitly set — reordering
+ * the currently-visible member must not switch away from it, which
+ * `removeMemberFromStack`'s neighbour-reassignment would otherwise do.
+ * Returns `false` and changes nothing when either id isn't a member.
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+ */
+export function moveMemberInStack(
+    data: TabLayoutData,
+    blockId: string,
+    targetBlockId: string,
+    position: "before" | "after" | "end",
+    activate: boolean
+): boolean {
+    const members = effectiveStack(data);
+    if (!members.includes(blockId) || !members.includes(targetBlockId)) return false;
+
+    const next = members.filter((id) => id !== blockId);
+    const targetIdx = next.indexOf(targetBlockId);
+    const insertAt = position === "before" ? targetIdx : position === "after" ? targetIdx + 1 : next.length;
+    next.splice(insertAt, 0, blockId);
+
+    data.blockStack = next;
+    if (activate) {
+        data.activeBlockId = blockId;
+        data.blockId = blockId;
+    }
+    return true;
+}
