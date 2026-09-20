@@ -14,88 +14,6 @@ import { isBlank } from "@/util/util";
 const AGENT_ENV_VAR = "AGENTMUX_AGENT_ID" as const;
 
 /**
- * Environment variable name for agent color (background)
- */
-const AGENT_COLOR_ENV_VAR = "AGENTMUX_AGENT_COLOR" as const;
-
-/**
- * Environment variable name for agent text color
- */
-const AGENT_TEXT_COLOR_ENV_VAR = "AGENTMUX_AGENT_TEXT_COLOR" as const;
-
-/**
- * Default colors for known agents (used when no color env var is set)
- */
-const DEFAULT_AGENT_COLORS: Record<string, string> = {
-    AgentA: "#1e3a5f",  // Dark blue
-    AgentX: "#ef4444",  // Red (matches claw assignment)
-    AgentY: "#eab308",  // Yellow/Gold
-    AgentG: "#f59e0b",  // Amber
-    Agent1: "#3b82f6",  // Blue
-    Agent2: "#06b6d4",  // Cyan
-    Agent3: "#ec4899",  // Pink
-    Agent4: "#ef4444",  // Red
-    Agent5: "#84cc16",  // Lime
-};
-
-/**
- * Default text colors for known agents (used when no text color env var is set)
- * These are optimized for readability against the default background colors
- */
-const DEFAULT_AGENT_TEXT_COLORS: Record<string, string> = {
-    AgentA: "#ffffff",  // White on dark blue
-    AgentX: "#ffffff",  // White on red
-    AgentY: "#000000",  // Black on yellow/gold
-    AgentG: "#000000",  // Black on amber
-    Agent1: "#ffffff",  // White on blue
-    Agent2: "#000000",  // Black on cyan
-    Agent3: "#ffffff",  // White on pink
-    Agent4: "#ffffff",  // White on red
-    Agent5: "#000000",  // Black on lime
-};
-
-/**
- * Detect agent color from environment variable or use default
- */
-export function detectAgentColor(envVars: Record<string, string> | undefined, agentId: string | null): string | null {
-    // Check env var
-    if (envVars) {
-        const value = envVars[AGENT_COLOR_ENV_VAR];
-        if (!isBlank(value)) {
-            return value!.trim();
-        }
-    }
-
-    // Fall back to default color for known agents
-    if (agentId && DEFAULT_AGENT_COLORS[agentId]) {
-        return DEFAULT_AGENT_COLORS[agentId];
-    }
-
-    return null;
-}
-
-/**
- * Detect agent text color from environment variable or use default
- * Returns the text color to use in the pane header for optimal readability
- */
-export function detectAgentTextColor(envVars: Record<string, string> | undefined, agentId: string | null): string | null {
-    // Check env var first
-    if (envVars) {
-        const value = envVars[AGENT_TEXT_COLOR_ENV_VAR];
-        if (!isBlank(value)) {
-            return value!.trim();
-        }
-    }
-
-    // Fall back to default text color for known agents
-    if (agentId && DEFAULT_AGENT_TEXT_COLORS[agentId]) {
-        return DEFAULT_AGENT_TEXT_COLORS[agentId];
-    }
-
-    return null;
-}
-
-/**
  * Detect agent identity from environment variable in block metadata
  *
  * "Terminal" is rejected: it is the default title for plain terminal panes,
@@ -177,7 +95,58 @@ function parseCssColor(color: string | null | undefined): ParsedRgba | null {
         return { r, g, b, a };
     }
 
+    // hsl()/hsla() — needed since this PR's own callers (hueToHeaderBg,
+    // NON_AGENT_DEFAULT_HEADER_BG) pass hsl() strings into
+    // pickReadableTextColor, which relies on this parser. Without this
+    // branch those calls silently returned null and computed no text color
+    // at all (reagent P1, PR #3452).
+    const hslMatch = c.match(
+        /^hsla?\(\s*([\d.]+)(?:deg)?\s*[, ]\s*([\d.]+)%\s*[, ]\s*([\d.]+)%\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/
+    );
+    if (hslMatch) {
+        const h = Number(hslMatch[1]);
+        const s = Number(hslMatch[2]) / 100;
+        const l = Number(hslMatch[3]) / 100;
+        let a = 1;
+        if (hslMatch[4] != null) {
+            a = hslMatch[4].endsWith("%") ? Number(hslMatch[4].slice(0, -1)) / 100 : Number(hslMatch[4]);
+        }
+        if ([h, s, l, a].some((n) => Number.isNaN(n))) {
+            return null;
+        }
+        return { ...hslToRgb(h, s, l), a };
+    }
+
     return null;
+}
+
+/** HSL (h in degrees, s/l in 0-1) to RGB (0-255 each). Standard conversion. */
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+    const hue = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = l - c / 2;
+    let rp = 0;
+    let gp = 0;
+    let bp = 0;
+    if (hue < 60) {
+        [rp, gp, bp] = [c, x, 0];
+    } else if (hue < 120) {
+        [rp, gp, bp] = [x, c, 0];
+    } else if (hue < 180) {
+        [rp, gp, bp] = [0, c, x];
+    } else if (hue < 240) {
+        [rp, gp, bp] = [0, x, c];
+    } else if (hue < 300) {
+        [rp, gp, bp] = [x, 0, c];
+    } else {
+        [rp, gp, bp] = [c, 0, x];
+    }
+    return {
+        r: Math.round((rp + m) * 255),
+        g: Math.round((gp + m) * 255),
+        b: Math.round((bp + m) * 255),
+    };
 }
 
 /** WCAG 2.x relative luminance (0 = black, 1 = white). */
@@ -206,6 +175,37 @@ export function isUsableFocusRingColor(color: string | null | undefined): boolea
         return false;
     }
     return relativeLuminance(rgba) >= MIN_FOCUS_RING_LUMINANCE;
+}
+
+/**
+ * Pick readable header text color (`#000000`/`#ffffff`) for a given
+ * background. Replaces the old per-agent `DEFAULT_AGENT_TEXT_COLORS`
+ * hardcoded table (decommissioned — see
+ * `docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`): computed
+ * generically from whatever background color is actually in use (the
+ * agent's persisted `frame:activebordercolor`, or an explicit "Pane Color"
+ * hue) instead of needing a hardcoded entry per known agent name.
+ * Unparseable/blank input returns null — caller keeps the theme default.
+ *
+ * Picks whichever of black/white gives the HIGHER WCAG contrast ratio,
+ * computed directly — not a `luminance > 0.5` cutoff. That cutoff is wrong:
+ * the real black/white crossover is where the two candidates' contrast
+ * ratios are equal, which works out to background luminance ≈0.179, not
+ * 0.5. A fixed 0.5 threshold picks white for the whole 0.179–0.5 range even
+ * though black reads better there — e.g. `#f59e0b` (amber, one of this
+ * app's own AGENT_COLOR_PALETTE entries), L≈0.44: white-on-amber is
+ * ~2.15:1 (fails WCAG AA), black-on-amber is ~9.78:1. codex P1, PR #3452.
+ */
+export function pickReadableTextColor(bgColor: string | null | undefined): string | null {
+    const rgba = parseCssColor(bgColor);
+    if (!rgba) {
+        return null;
+    }
+    const bgLum = relativeLuminance(rgba);
+    // WCAG contrast ratio: (lighter + 0.05) / (darker + 0.05).
+    const contrastWithWhite = 1.05 / (bgLum + 0.05);
+    const contrastWithBlack = (bgLum + 0.05) / 0.05;
+    return contrastWithBlack >= contrastWithWhite ? "#000000" : "#ffffff";
 }
 
 /**
