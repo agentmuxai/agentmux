@@ -2,9 +2,10 @@
 
 **Date:** 2026-09-19
 **Severity:** Low — cosmetic, reported on the agent pane's busy-indicator ring.
-**Status:** fixed, on the third attempt. `frontend/app/view/agent/agent-view.scss`
-was changed (`.agent-pane-progress-bar-slot`); see "Fix v2" below for what
-actually shipped. Earlier revisions of this document described this as
+**Status:** implemented — PR #3443, on the third attempt.
+`frontend/app/view/agent/agent-view.scss` was changed
+(`.agent-pane-progress-bar-slot`); see "Fix v2" below for what actually
+shipped. Earlier revisions of this document described this as
 investigation-only with no fix applied (true for the first pass,
 all-negative geometry/DPR results), then as fixed with a top-edge-only
 overlap (true for that specific edge, on that specific live test, but too
