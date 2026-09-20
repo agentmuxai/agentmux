@@ -1219,7 +1219,7 @@ const AgentPresentationView = ({
         if (authPhaseSettled()) releaseAuthGate();
     });
     // `revealing` → `live`: hold the overlay mounted for the fade's own duration
-    // (matching _loading-overlay.scss's transition) before unmounting, so it fades
+    // (matching PaneLoadingCover.scss's transition) before unmounting, so it fades
     // as one visual unit with the spinner instead of vanishing mid-transition.
     createEffect(() => {
         if (readiness.phase() === "revealing") {
@@ -2205,7 +2205,7 @@ const AgentPresentationView = ({
 
                 Deliberately a DIRECT child of `.agent-view`, OUTSIDE
                 `.agent-view-zoomed`. It is `position: absolute; inset: 0`
-                (_loading-overlay.scss), so it covers its nearest POSITIONED
+                (PaneLoadingCover.scss), so it covers its nearest POSITIONED
                 ancestor — and the zoomed wrapper is `position: relative`. Nested
                 inside it, the overlay stopped covering the Shell drawer (a sibling
                 of the wrapper), leaving an open drawer visible and uncovered for

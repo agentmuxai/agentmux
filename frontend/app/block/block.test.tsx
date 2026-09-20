@@ -89,8 +89,23 @@ vi.mock("./blockframe", () => ({
     ),
 }));
 
+// The real hook's `settled` is RE-ENTRANT — it calls setSettled(false) on every
+// "started" event, including one long after the first cycle settled. A mock
+// that returns a constant `true` cannot exercise that, which is exactly how a
+// one-way gate silently swallowing the re-cover got through review (P1 on
+// #3464). `backfillSettled` is a real signal so a test can flip it.
+//
+// NOTE the default here is `true`, while the REAL hook initialises `settled` to
+// `false` (useSubagentBackfillGate.ts:113) and only flips it when the async
+// backfill completes. That divergence is deliberate — most tests in this file
+// are about ViewModel/cover concerns and want a pane with nothing outstanding —
+// but it is also load-bearing: defaulting to the convenient value is what hid
+// the phase-tracking race below (P2 on #3466). Any test that cares about the
+// backfill window must set it false BEFORE rendering, as `covers a fast pane
+// whose backfill is still outstanding` does.
+const [backfillSettled, setBackfillSettled] = createSignal(true);
 vi.mock("@/app/view/agent/hooks/useSubagentBackfillGate", () => ({
-    useSubagentBackfillGate: () => () => true,
+    useSubagentBackfillGate: () => () => backfillSettled(),
 }));
 
 vi.mock("@/layout/index", () => ({
@@ -124,6 +139,7 @@ afterEach(() => {
     blockMetaSignals.clear();
     registry.clear();
     constructedViewModels.length = 0;
+    setBackfillSettled(true);
 });
 
 describe("Block — preview/real ViewModel isolation", () => {
@@ -165,5 +181,141 @@ describe("Block — preview/real ViewModel isolation", () => {
         const registered = registry.get("b1") as { viewModel: TestAgentViewModel } | undefined;
         expect(registered?.viewModel.nodeModel).toBe(realNodeModel);
         expect(registered?.viewModel.noHeader()).toBe(true);
+    });
+});
+
+/**
+ * Phase 3 of SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md.
+ *
+ * The headline acceptance criterion is a COUNT: at no point during a pane mount
+ * is more than one loading indicator in the DOM. `spin:2` was measured before
+ * this, with block.tsx, agent-view.tsx and AgentPicker.tsx each running their
+ * own visible/fading/unmount state machine for the same pane.
+ */
+describe("Block — one loading cover, stated coverage", () => {
+    const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
+
+    it("covers the pane exactly once while its view is still unresolved", async () => {
+        // No view type → getBlockViewClass returns null → viewModel() is null →
+        // ready() is false. This is the pane-still-assembling state.
+        setBlockView("b-assembling", undefined);
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-assembling" })} preview={false} />);
+
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(false);
+    });
+
+    it("sits in flow while there is no mounted content to overlay", async () => {
+        setBlockView("b-inflow", undefined);
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-inflow" })} preview={false} />);
+
+        // `.block` is rendered by BlockFrame, which does not exist until
+        // ready() — so there is no positioned ancestor for `inset: 0` to
+        // resolve against, and an absolute cover would collapse or escape the
+        // pane depending on the render route.
+        expect(covers()[0].classList.contains("is-in-flow")).toBe(true);
+    });
+
+    /**
+     * The warm-cache path, and the one a naive port gets wrong: if the gates
+     * complete during setup, the cover never painted, so fading it out would
+     * flash an opaque panel over content that was never hidden. The code this
+     * replaced special-cased exactly this ("reflect it directly, no fade").
+     */
+    it("never paints a cover for a block that is already ready on first flush", async () => {
+        setBlockView("b-warm", "agent"); // resolves synchronously → ready() true
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-warm" })} preview={false} />);
+
+        expect(covers().length).toBe(0);
+    });
+});
+
+/**
+ * The re-entrancy the one-way controller cannot express (reagent P1 on #3464).
+ *
+ * `useSubagentBackfillGate`'s `settled` flips back to false on EVERY "started"
+ * event, including one arriving long after the first cycle settled — that
+ * re-arm is the hook's round-7 fix, not an edge case. The pre-consolidation
+ * code re-showed its spinner for it ("Not ready anymore ... show the spinner
+ * again immediately"). Routing it through `PaneReadiness.gate()` type-checks
+ * and reads correctly, and silently drops every re-cover after the first,
+ * because gate release is one-shot and re-registering after reveal is a
+ * documented no-op. So it drives its own cycle instead, rendered by the same
+ * cover.
+ */
+describe("Block — a later backfill cycle re-covers the pane", () => {
+    const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
+
+    it("re-covers live content when backfill re-arms, and clears when it settles", async () => {
+        setBlockView("b-rearm", "agent"); // ready() true → assembly cover never paints
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-rearm" })} preview={false} />);
+        expect(covers().length).toBe(0);
+
+        // A fresh "started" arrives well after the pane went live.
+        setBackfillSettled(false);
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(false); // opaque, no fade in
+        // Content stayed mounted underneath — this covers, it does not unmount.
+        expect(document.querySelector('[data-testid="blockframe-real-b-rearm"]')).not.toBeNull();
+
+        // ...and settles again, starting the fade rather than a hard cut.
+        setBackfillSettled(true);
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(true);
+    });
+
+    it("overlays rather than displacing content on a re-cover", async () => {
+        setBlockView("b-rearm2", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-rearm2" })} preview={false} />);
+
+        setBackfillSettled(false);
+        // ready() is true, so there IS mounted content to sit on top of.
+        expect(covers()[0].classList.contains("is-in-flow")).toBe(false);
+    });
+});
+
+/**
+ * The realistic ordering for a fast-resolving pane with a slow backfill, and
+ * the one the convenient mock default hid (reagent P1/P2 on #3466).
+ *
+ * The real hook initialises `settled` to FALSE and leaves it there until the
+ * async backfill completes. So `ready()` — and with it the whole controller —
+ * can reach `live` while the backfill signal has never changed value once. An
+ * effect that reads the phase through `untrack` never re-runs to notice, the
+ * cover never appears, and the pane reveals mid-backfill: exactly the Activity
+ * Dock flicker rounds 2-8 of that hook exist to prevent.
+ */
+describe("Block — backfill outstanding from the very start", () => {
+    const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
+
+    it("covers a fast pane whose backfill is still outstanding", async () => {
+        setBackfillSettled(false); // never changes value during this test
+        setBlockView("b-slowfill", "agent"); // ready() true immediately
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-slowfill" })} preview={false} />);
+
+        // The pane is live, but the backfill has not settled — it must still be
+        // covered, over already-mounted content.
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(false);
+        expect(covers()[0].classList.contains("is-in-flow")).toBe(false);
+        expect(document.querySelector('[data-testid="blockframe-real-b-slowfill"]')).not.toBeNull();
+    });
+
+    it("starts fading only once that first backfill finally settles", async () => {
+        setBackfillSettled(false);
+        setBlockView("b-slowfill2", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-slowfill2" })} preview={false} />);
+        expect(covers()[0].classList.contains("is-fading")).toBe(false);
+
+        setBackfillSettled(true);
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(true);
     });
 });
