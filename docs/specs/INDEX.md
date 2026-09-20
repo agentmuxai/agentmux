@@ -589,6 +589,7 @@ partial list.
 | [`SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24`](SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md) | SPEC — Pane Minimize Refinements |
 | [`SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16`](SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16.md) | Typing should go into a pane the moment it opens (editor + terminal) |
 | [`SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md) | Auto-discovery pane-overlay clipping (declarative `data-pane-overlay`) |
+| [`SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19`](SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) | SPEC + PLAN: Pane Tab Drag-and-Drop — reorder, cross-pane move, tear-off-to-floating-pane, and reserved whole-pane-drag space |
 | [`SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20`](SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md) | Pane Tear-Off — Mother Window Resize |
 | [`SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) | SPEC: Patched macOS CEF Framework — Release Pipeline + CI Wiring |
 | [`SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03`](SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md) | SPEC — Peek overlay: track mouse Y while pinned to the right |
