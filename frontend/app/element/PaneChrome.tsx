@@ -22,7 +22,7 @@ import { createMemo, createSignal, type JSX } from "solid-js";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { closeBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
@@ -158,6 +158,15 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (!e) return;
         openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model?.newTabMeta);
     };
+    // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.2). No `model?.onReorder` escape hatch like activate/close have —
+    // unlike activation (agent forks can live in a DIFFERENT pane) or close
+    // (a view type may need its own confirmation/cleanup), reordering never
+    // changes membership or requires side effects beyond the stack itself,
+    // so there's nothing for a view type to meaningfully override.
+    const handleReorder = (blockId: string, targetId: string, position: "before" | "after") => {
+        moveBlockInStack(layoutModel, nodeModel.nodeId, blockId, targetId, position);
+    };
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
 
@@ -170,6 +179,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
             onActivate={handleActivate}
             onClose={handleClose}
+            onReorder={handleReorder}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>
                 renamingId() === id ? (

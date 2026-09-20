@@ -652,6 +652,20 @@ pub struct PaneOpenResult {
     pub created: bool,
 }
 
+/// Request for pane.moveTab — reorder `block_id` within its own pane, or
+/// move it into a different pane. `position` is `"before"` / `"after"` /
+/// `"end"`, relative to `target_block_id` (matches
+/// `agentmux_common::StackMovePosition`'s serde encoding).
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandPaneMoveTabData {
+    pub block_id: String,
+    pub target_block_id: String,
+    pub position: String,
+    pub activate: bool,
+}
+
 /// Request for blockfile:line_count — count total lines in a blockfile.
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]

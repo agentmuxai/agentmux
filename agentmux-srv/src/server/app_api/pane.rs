@@ -2,6 +2,7 @@ use super::*;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_pane_open(engine, state);
+    register_pane_move_tab(engine, state);
 }
 
 fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -15,6 +16,23 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("pane.open: {e}"))?;
                 let result = open_pane(&state, cmd).await?;
                 Ok(Some(serde_json::to_value(&result).unwrap()))
+            })
+        }),
+    );
+}
+
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+fn register_pane_move_tab(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_handler(
+        COMMAND_PANE_MOVE_TAB,
+        Box::new(move |data, _ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                let cmd: CommandPaneMoveTabData = serde_json::from_value(data)
+                    .map_err(|e| format!("pane.moveTab: {e}"))?;
+                super::move_tab(&state, cmd).await?;
+                Ok(None)
             })
         }),
     );

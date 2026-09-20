@@ -65,6 +65,10 @@ export enum LayoutTreeActionType {
     // Backend-originated: `blockid` was added (in the reducer) as the visible
     // tab of the pane holding `targetblockid` (`CreateBlockInStack`).
     StackPush = "stackpush",
+    // Backend-originated: `blockid` was moved (in the reducer) to `position`
+    // relative to `targetblockid` — a same-pane reorder or a cross-pane move
+    // (`LayoutStackMove`). SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
+    StackMove = "stackmove",
 }
 
 export interface LayoutTreeAction {

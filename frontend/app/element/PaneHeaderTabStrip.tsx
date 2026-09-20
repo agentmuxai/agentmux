@@ -96,6 +96,12 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             // handle, blockframe.tsx's `data-role="block-header"`), the one
             // strip usage where reserving drag space after the "+" matters.
             reserveDragHandle
+            onReorder={props.onReorder}
+            // Derived from `nodeModel` (this strip's own Pane) rather than
+            // requiring a redundant caller-supplied prop — `PaneTabStrip`'s
+            // `canDrop` uses it to reject a pill dragged from a DIFFERENT
+            // pane (see that prop's own doc comment). ReAgent P1 on PR #3444.
+            paneKey={props.nodeModel.nodeId}
         />
     );
 
