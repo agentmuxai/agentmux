@@ -1,9 +1,9 @@
 # SPEC: a native reverse proxy in agentmux-srv for friendly dev-server hostnames — not Traefik, not a sidecar
 
 **Date:** 2026-09-19
-**Status:** implemented — see "Implementation notes (2026-09-19)" at the end
-of this document for what shipped, verification depth, and where the actual
-implementation diverged (or didn't) from what's proposed below.
+**Status:** implemented in #3439 — see "Implementation notes (2026-09-19)" at
+the end of this document for what shipped, verification depth, and where the
+actual implementation diverged (or didn't) from what's proposed below.
 **Author:** Camper
 **Repo state:** main @ `bdd3270aa` (v0.56.8+)
 **Related:** `docs/reports/REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md`
