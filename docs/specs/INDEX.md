@@ -600,6 +600,7 @@ partial list.
 | [`SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) | SPEC: Patched macOS CEF Framework — Release Pipeline + CI Wiring |
 | [`SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03`](SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md) | SPEC — Peek overlay: track mouse Y while pinned to the right |
 | [`SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION`](SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) | Performance instrumentation + optimization strategy |
+| [`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20`](SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md) | SPEC — Eagerly resume a persistent agent controller that already has a session, instead of waiting for the next message |
 | [`SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03`](SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md) | Spec: true per-node token accounting |
 | [`SPEC_PHASE_E_SAGAS_2026-04-30`](SPEC_PHASE_E_SAGAS_2026-04-30.md) | Phase E Sagas — Full Specification |
 | [`SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06`](SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md) | Pillar 1 Step 2 — Persist the Two Host-Only Topology Facts to srv |
