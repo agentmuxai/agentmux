@@ -95,7 +95,58 @@ function parseCssColor(color: string | null | undefined): ParsedRgba | null {
         return { r, g, b, a };
     }
 
+    // hsl()/hsla() — needed since this PR's own callers (hueToHeaderBg,
+    // NON_AGENT_DEFAULT_HEADER_BG) pass hsl() strings into
+    // pickReadableTextColor, which relies on this parser. Without this
+    // branch those calls silently returned null and computed no text color
+    // at all (reagent P1, PR #3452).
+    const hslMatch = c.match(
+        /^hsla?\(\s*([\d.]+)(?:deg)?\s*[, ]\s*([\d.]+)%\s*[, ]\s*([\d.]+)%\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/
+    );
+    if (hslMatch) {
+        const h = Number(hslMatch[1]);
+        const s = Number(hslMatch[2]) / 100;
+        const l = Number(hslMatch[3]) / 100;
+        let a = 1;
+        if (hslMatch[4] != null) {
+            a = hslMatch[4].endsWith("%") ? Number(hslMatch[4].slice(0, -1)) / 100 : Number(hslMatch[4]);
+        }
+        if ([h, s, l, a].some((n) => Number.isNaN(n))) {
+            return null;
+        }
+        return { ...hslToRgb(h, s, l), a };
+    }
+
     return null;
+}
+
+/** HSL (h in degrees, s/l in 0-1) to RGB (0-255 each). Standard conversion. */
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+    const hue = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = l - c / 2;
+    let rp = 0;
+    let gp = 0;
+    let bp = 0;
+    if (hue < 60) {
+        [rp, gp, bp] = [c, x, 0];
+    } else if (hue < 120) {
+        [rp, gp, bp] = [x, c, 0];
+    } else if (hue < 180) {
+        [rp, gp, bp] = [0, c, x];
+    } else if (hue < 240) {
+        [rp, gp, bp] = [0, x, c];
+    } else if (hue < 300) {
+        [rp, gp, bp] = [x, 0, c];
+    } else {
+        [rp, gp, bp] = [c, 0, x];
+    }
+    return {
+        r: Math.round((rp + m) * 255),
+        g: Math.round((gp + m) * 255),
+        b: Math.round((bp + m) * 255),
+    };
 }
 
 /** WCAG 2.x relative luminance (0 = black, 1 = white). */
@@ -128,20 +179,33 @@ export function isUsableFocusRingColor(color: string | null | undefined): boolea
 
 /**
  * Pick readable header text color (`#000000`/`#ffffff`) for a given
- * background, via WCAG relative luminance. Replaces the old per-agent
- * `DEFAULT_AGENT_TEXT_COLORS` hardcoded table (decommissioned — see
+ * background. Replaces the old per-agent `DEFAULT_AGENT_TEXT_COLORS`
+ * hardcoded table (decommissioned — see
  * `docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md`): computed
  * generically from whatever background color is actually in use (the
  * agent's persisted `frame:activebordercolor`, or an explicit "Pane Color"
  * hue) instead of needing a hardcoded entry per known agent name.
  * Unparseable/blank input returns null — caller keeps the theme default.
+ *
+ * Picks whichever of black/white gives the HIGHER WCAG contrast ratio,
+ * computed directly — not a `luminance > 0.5` cutoff. That cutoff is wrong:
+ * the real black/white crossover is where the two candidates' contrast
+ * ratios are equal, which works out to background luminance ≈0.179, not
+ * 0.5. A fixed 0.5 threshold picks white for the whole 0.179–0.5 range even
+ * though black reads better there — e.g. `#f59e0b` (amber, one of this
+ * app's own AGENT_COLOR_PALETTE entries), L≈0.44: white-on-amber is
+ * ~2.15:1 (fails WCAG AA), black-on-amber is ~9.78:1. codex P1, PR #3452.
  */
 export function pickReadableTextColor(bgColor: string | null | undefined): string | null {
     const rgba = parseCssColor(bgColor);
     if (!rgba) {
         return null;
     }
-    return relativeLuminance(rgba) > 0.5 ? "#000000" : "#ffffff";
+    const bgLum = relativeLuminance(rgba);
+    // WCAG contrast ratio: (lighter + 0.05) / (darker + 0.05).
+    const contrastWithWhite = 1.05 / (bgLum + 0.05);
+    const contrastWithBlack = (bgLum + 0.05) / 0.05;
+    return contrastWithBlack >= contrastWithWhite ? "#000000" : "#ffffff";
 }
 
 /**
