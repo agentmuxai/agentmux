@@ -236,7 +236,6 @@ function getMuxObjectAtom<T extends MuxObj>(oref: string): SignalAtom<T> {
     // terminal pane's block is held by layout code through `useMuxObjectValue`,
     // which is why the same gesture kept working there. Reopening the drawer
     // "fixed" it only because that rebuilt the atom against the fresh entry.
-    // See docs/reports/REPORT_SHELL_DRAWER_ZOOM_HISTORY_ALIGNMENT_2026_09_19.md §B.
     //
     // Late-binding keeps the read reactive (getData() still tracks the current
     // signal) and lets an evicted entry transparently re-fetch, at the cost of
