@@ -442,7 +442,27 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                     element: handle,
                     canDrag: ({ input }) => {
                         if (isEphemeral() || isMagnified()) return false;
-                        return !platform.rejectDragAt?.(props.layoutModel, input);
+                        if (platform.rejectDragAt?.(props.layoutModel, input)) return false;
+                        // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1: a
+                        // Pane Tab pill (and its own close button — a
+                        // descendant, caught by the same `.closest`) gets its
+                        // OWN draggable() (PaneTabStripItem) — a mousedown
+                        // starting on one must not ALSO start the whole-pane
+                        // drag registered on the header that contains it.
+                        // Defense-in-depth, not solely relied-upon: nested
+                        // `draggable=true` elements resolve to the innermost
+                        // one under the native HTML5 drag spec, but this
+                        // repo's embedded-CEF drag stack has repeatedly
+                        // diverged from browser-drag assumptions in practice
+                        // (see docs/retro/retro-native-pointer-drag-tearoff-shelved-2026-07-29.md)
+                        // — checked explicitly here rather than trusted
+                        // implicitly. `.pane-tab-strip-drag-handle` (the
+                        // reserved whole-pane-drag space once the strip
+                        // overflows, PaneTabStrip.tsx) is deliberately NOT
+                        // in this selector — it stays part of this region.
+                        const atPoint = document.elementFromPoint(input.clientX, input.clientY);
+                        if (atPoint?.closest(".pane-tab, .pane-tab-strip-add")) return false;
+                        return true;
                     },
                     getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                     onGenerateDragPreview: ({ nativeSetDragImage }) => {

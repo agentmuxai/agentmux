@@ -211,6 +211,23 @@
             opacity: 1;
         }
     }
+
+    // Same-pane drag-reorder (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.2, Phase 3) — deliberately minimal (a dimmed source, a solid
+    // insertion-line on the hovered side), matching this codebase's pattern
+    // of leaving exact visual polish (timing, color) to a follow-up design
+    // pass rather than baking it into the functional change.
+    &--dragging {
+        opacity: 0.4;
+    }
+
+    &--drop-before {
+        box-shadow: inset 2px 0 0 0 var(--accent-color);
+    }
+
+    &--drop-after {
+        box-shadow: inset -2px 0 0 0 var(--accent-color);
+    }
 }
 
 // One fixed box for every icon kind (font icon, brand logo, favicon), so a

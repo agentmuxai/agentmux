@@ -130,6 +130,43 @@ pub(crate) async fn queue_target_stack_push(
     super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
 }
 
+/// Tell the frontend that `block_id` was moved — already, in the reducer —
+/// to `position` relative to `target_block_id` (`Command::LayoutStackMove`):
+/// a same-pane reorder when both are already in one leaf's stack, otherwise
+/// a cross-pane move. Matches `LayoutTreeActionType.StackMove = "stackmove"`
+/// in `frontend/layout/lib/types.ts`. `position` is the same
+/// `"before"`/`"after"`/`"end"` string `pane.moveTab`'s caller supplied —
+/// reused verbatim, not re-derived, so the frontend applies the identical
+/// operation rather than inferring it from resulting tree state. `activate`
+/// rides on `LayoutActionData.focused` — the same field `queue_target_stack_push`
+/// above already overloads for this purpose (that call hardcodes `true`,
+/// since `CreateBlockInStack` always activates; this one carries the
+/// caller's actual `activate` value since a reorder may or may not).
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+pub(crate) async fn queue_target_stack_move(
+    state: &super::super::AppState,
+    tab_id: &str,
+    block_id: &str,
+    target_block_id: &str,
+    position: &str,
+    activate: bool,
+) -> Result<(), String> {
+    let action = LayoutActionData {
+        actiontype: "stackmove".to_string(),
+        actionid: uuid::Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize: None,
+        nodesizefraction: None,
+        indexarr: None,
+        focused: activate,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: target_block_id.to_string(),
+        position: position.to_string(),
+    };
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
+}
+
 /// Phase 4b/4c — enqueue a directional split action on the TARGET tab's
 /// `LayoutState.pendingbackendactions` so the redocked block lands in
 /// the exact slot the ghost overlay previewed.

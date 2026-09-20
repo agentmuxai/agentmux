@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PaneTabStrip } from "./PaneTabStrip";
+import { dropPositionForPointerX, PaneTabStrip } from "./PaneTabStrip";
 
 afterEach(() => cleanup());
 
@@ -302,6 +302,30 @@ describe("PaneTabStrip", () => {
         const user = userEvent.setup();
         await user.dblClick(screen.getByText("beta"));
         expect(onDbl).toHaveBeenCalledWith(TABS[1]);
+    });
+});
+
+// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2 (Phase 3, same-pane
+// reorder): which side of a hovered pill's rect a dragged pill should land
+// on. Pure and separately tested since the actual drag gesture (pragmatic-
+// dnd, real pointer events) has no unit-test coverage anywhere in this
+// codebase — see droppable-tab.tsx/TileLayout.core.tsx, both untested at
+// that layer for the same reason (jsdom has no real HTML5 drag/pointer
+// pipeline). This function is the one piece of that interaction's logic
+// that's pure enough to verify directly.
+describe("dropPositionForPointerX", () => {
+    const rect = { left: 100, width: 40 } as DOMRect;
+
+    it("returns before when the pointer is left of the pill's midpoint", () => {
+        expect(dropPositionForPointerX(rect, 110)).toBe("before");
+    });
+
+    it("returns after when the pointer is right of the pill's midpoint", () => {
+        expect(dropPositionForPointerX(rect, 130)).toBe("after");
+    });
+
+    it("returns after exactly at the midpoint", () => {
+        expect(dropPositionForPointerX(rect, 120)).toBe("after");
     });
 });
 

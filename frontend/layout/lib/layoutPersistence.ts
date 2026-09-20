@@ -6,7 +6,7 @@ import { fireAndForget } from "@/util/util";
 import { isTileDragInFlight } from "./dragInFlight";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
-import { addMemberToStack, removeMemberFromStack } from "./stackMembers";
+import { addMemberToStack, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -308,6 +308,42 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             } else {
                 console.error(
                     "Cannot apply layout action StackPush, no pane holds blockId",
+                    action.targetblockid
+                );
+            }
+            break;
+        }
+        case LayoutTreeActionType.StackMove: {
+            // Mirrors StackPush's leaf resolution above; `activate` rides on
+            // `action.focused` (see `queue_target_stack_move`'s doc comment,
+            // agentmux-srv/src/server/service/layout_helpers.rs).
+            let leaf = model?.getNodeByBlockId(action.blockid);
+            if (!leaf && model.treeState.rootNode) {
+                leaf = findNodeByBlockId(model.treeState.rootNode, action.blockid);
+            }
+            let targetLeaf = model?.getNodeByBlockId(action.targetblockid);
+            if (!targetLeaf && model.treeState.rootNode) {
+                targetLeaf = findNodeByBlockId(model.treeState.rootNode, action.targetblockid);
+            }
+            if (!leaf?.data || !targetLeaf?.data) {
+                console.error(
+                    "Cannot apply layout action StackMove, source or target blockId not found",
+                    action.blockid,
+                    action.targetblockid
+                );
+                break;
+            }
+            const position = (action.position as "before" | "after" | "end" | undefined) ?? "end";
+            if (leaf.id === targetLeaf.id) {
+                moveMemberInStack(leaf.data, action.blockid, action.targetblockid, position, action.focused);
+            } else {
+                // Cross-pane move: not yet reachable from any UI (Phase 3 of
+                // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md only sends
+                // same-pane reorders) — position-aware cross-leaf placement
+                // is Phase 4's job. Logged, not silently dropped.
+                console.error(
+                    "StackMove across panes is not yet supported by the frontend handler (Phase 4)",
+                    action.blockid,
                     action.targetblockid
                 );
             }
