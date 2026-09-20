@@ -387,6 +387,62 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     })
 }
 
+/// Core `pane.moveTab` logic — reorder `cmd.block_id` within its own pane, or
+/// move it into a different pane (`Command::LayoutStackMove`). Queues a
+/// `stackmove` layout action so any OTHER window/tab viewing the same
+/// `db_layout` sees the change (mirrors `stack_onto_block_id`'s `stackpush`
+/// queue above); the calling frontend applies its own optimistic local edit
+/// directly and does not wait on the queue for itself.
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> Result<(), String> {
+    let mstore = &state.mstore;
+    let position = match cmd.position.as_str() {
+        "before" => agentmux_common::StackMovePosition::Before,
+        "after" => agentmux_common::StackMovePosition::After,
+        "end" => agentmux_common::StackMovePosition::End,
+        other => return Err(format!("pane.moveTab: invalid position '{other}' (expected before/after/end)")),
+    };
+    let tab_id = resolve_tab_id_for_block(mstore, &cmd.block_id)
+        .map_err(|e| format!("pane.moveTab: {e}"))?;
+    let events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutStackMove {
+            tab_id: tab_id.clone(),
+            block_id: cmd.block_id.clone(),
+            target_block_id: cmd.target_block_id.clone(),
+            position,
+            activate: cmd.activate,
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    if let Some(msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.moveTab: {msg}"));
+    }
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.moveTab: mstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &events);
+    if let Err(e) = crate::server::service::layout_helpers::queue_target_stack_move(
+        state,
+        &tab_id,
+        &cmd.block_id,
+        &cmd.target_block_id,
+        &cmd.position,
+    )
+    .await
+    {
+        tracing::warn!(block_id = %cmd.block_id, "pane.moveTab: stackmove queue failed: {e}");
+    }
+    tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
+    Ok(())
+}
+
 /// Atomically allocate an agent working directory.
 ///
 /// Tries to atomically create `desired` via `std::fs::create_dir`. If
@@ -2848,6 +2904,173 @@ mod pane_open_reducer_tests {
         // The persisted tree agrees with the reducer (single writer).
         let persisted = layout.rootnode.expect("tree persisted");
         assert_eq!(persisted.data.unwrap().block_stack, vec![anchor, res.block_id]);
+    }
+
+    // ── pane.moveTab (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3) ──
+
+    async fn seed_stacked_pane(state: &AppState, stack: &[&str]) -> (String, Vec<String>) {
+        let ws_id = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_id = dispatch_apply(state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut block_ids = Vec::new();
+        for _ in stack {
+            let id = dispatch_apply(state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null })
+                .await
+                .iter()
+                .find_map(|e| match e {
+                    Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            block_ids.push(id);
+        }
+        dispatch_apply(
+            state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "pane".into(),
+                    data: Some(agentmux_common::LayoutNodeData {
+                        block_id: block_ids[0].clone(),
+                        block_stack: block_ids.clone(),
+                        active_block_id: block_ids[0].clone(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+        (tab_id, block_ids)
+    }
+
+    #[tokio::test]
+    async fn move_tab_reorders_within_the_same_pane_and_queues_a_stackmove() {
+        let state = test_state();
+        let (tab_id, blocks) = seed_stacked_pane(&state, &["a", "b", "c"]).await;
+        let (a, b, c) = (blocks[0].clone(), blocks[1].clone(), blocks[2].clone());
+
+        move_tab(
+            &state,
+            CommandPaneMoveTabData {
+                block_id: c.clone(),
+                target_block_id: b.clone(),
+                position: "before".into(),
+                activate: false,
+            },
+        )
+        .await
+        .expect("move_tab reorder");
+
+        let s = state.srv_state.lock().await;
+        let data = s.tabs[&tab_id].rootnode.as_ref().unwrap().data.clone().unwrap();
+        assert_eq!(data.block_stack, vec![a, c.clone(), b]);
+        drop(s);
+
+        let tab = state.mstore.must_get::<crate::backend::obj::Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+        let actions = layout.pendingbackendactions.unwrap_or_default();
+        assert!(
+            actions.iter().any(|a| a.actiontype == "stackmove"
+                && a.blockid == c
+                && a.targetblockid == blocks[1]
+                && a.position == "before"),
+            "frontend told via a queued stackmove: {actions:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn move_tab_rejects_stripping_a_pane_to_zero_members() {
+        // Both panes live in the SAME tab (LayoutStackMove operates within
+        // one tab's tree) — a solo-block leaf and a two-member stacked leaf
+        // as siblings under one root.
+        let state = test_state();
+        let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let id = dispatch_apply(&state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null })
+                .await
+                .iter()
+                .find_map(|e| match e {
+                    Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        let (solo, x, y) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
+        dispatch_apply(
+            &state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "root".into(),
+                    children: vec![
+                        agentmux_common::LayoutNode {
+                            id: "solo-pane".into(),
+                            data: Some(agentmux_common::LayoutNodeData { block_id: solo.clone(), ..Default::default() }),
+                            ..Default::default()
+                        },
+                        agentmux_common::LayoutNode {
+                            id: "dst-pane".into(),
+                            data: Some(agentmux_common::LayoutNodeData {
+                                block_id: x.clone(),
+                                block_stack: vec![x.clone(), y.clone()],
+                                active_block_id: x.clone(),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        let res = move_tab(
+            &state,
+            CommandPaneMoveTabData {
+                block_id: solo,
+                target_block_id: x,
+                position: "after".into(),
+                activate: false,
+            },
+        )
+        .await;
+        assert!(res.is_err(), "moving a pane's only tab is a close, not a move");
     }
 
     #[tokio::test]

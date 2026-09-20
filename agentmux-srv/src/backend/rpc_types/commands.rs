@@ -383,6 +383,10 @@ pub const COMMAND_FLEET_GROUP_DELETE: &str = "fleet.group.delete";
 
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
+/// Reorder a Pane Tab within its own pane, or move it into a different
+/// pane — `Command::LayoutStackMove`.
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+pub const COMMAND_PANE_MOVE_TAB: &str = "pane.moveTab";
 
 // App API Tier 1 — blockfile pagination commands
 pub const COMMAND_BLOCKFILE_LINE_COUNT: &str = "blockfile:line_count";
