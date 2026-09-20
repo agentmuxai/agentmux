@@ -144,6 +144,16 @@ already applies to the block `<Suspense>` fallback (§2 #1), the Shell drawer's 
 spinner (#5) and the browser pane's post-first-paint badge (§6.2). Before adding a gate,
 check whether its signal can go back to false.
 
+**A cyclic signal's effect must track the phase too.** The first attempt at that own
+cycle read `readiness.phase()` through `untrack`, so it re-ran only when the cyclic
+signal itself changed value. `useSubagentBackfillGate` initialises `settled` to **false**
+and leaves it there until an async RPC completes, while the `content` gate releases on
+`ready()` — which for a persisted-session agent pane resolves well before the backfill
+round trip. So the ordinary case is: the signal is false and never changes, the pane
+reaches `live`, the effect never re-runs to notice, and the cover never appears at all.
+Strictly worse than the code it replaced, and invisible to any test whose mock defaults
+the signal to the convenient value. Track both reads. (reagent P1 on #3466.)
+
 ### 5.3 One cover, with an explicit coverage contract
 
 A single `<PaneLoadingCover>`, rendered at **one** place (the block level, wrapping the

@@ -448,9 +448,22 @@ function Block(props: BlockProps): JSX.Element {
     onCleanup(() => clearTimeout(reCoverFade));
     createEffect(() => {
         const settled = subagentBackfillSettled();
+        // BOTH reads are tracked, deliberately. An earlier version read the
+        // phase through `untrack`, so this only re-ran when the backfill signal
+        // itself changed value — and the real hook initialises `settled` to
+        // FALSE and leaves it there until the async backfill completes. The
+        // ordinary case for a fast-resolving pane with a slow backfill is
+        // therefore: settled is false and never changes, the pane reaches
+        // `live`, and this effect never re-runs to notice, so the cover never
+        // appears at all and the pane reveals mid-backfill — the exact Activity
+        // Dock flicker rounds 2-8 of the hook exist to prevent. Nothing
+        // corrected it later either: when `settled` finally flipped true the
+        // effect early-returned, already believing itself live.
+        // (reagent P1 on #3466.)
+        //
         // While the pane is still assembling the initial cover is already up;
         // the controller owns the screen until it reaches `live`.
-        if (untrack(readiness.phase) !== "live") return;
+        if (readiness.phase() !== "live") return;
         clearTimeout(reCoverFade);
         if (!settled) {
             setReCoverPhase("assembling"); // re-covered, opaque, no fade in
