@@ -597,6 +597,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/globalmemory/list", get(handle_agent_globalmemory_list))
         .route("/api/v1/agent/globalmemory/read", get(handle_agent_globalmemory_read))
         .route("/api/v1/agent/globalmemory/remove", post(handle_agent_globalmemory_remove))
+        // Global Memory audit trail (read side) — SPEC_AGENT_FACING_GLOBAL_
+        // MEMORY_API_2026_09_15.md Phase 3 follow-up: `bundle_version_list`/
+        // `bundle_version_get` (`bundle_versions.rs`) already existed and were
+        // tested, but nothing exposed them via MCP/REST until now. Same trust
+        // model and same system-tier exclusion as the four routes above.
+        .route("/api/v1/agent/globalmemory/history", get(handle_agent_globalmemory_history))
+        .route("/api/v1/agent/globalmemory/diff", get(handle_agent_globalmemory_diff))
+        .route("/api/v1/agent/globalmemory/revert", post(handle_agent_globalmemory_revert))
         .route("/api/v1/agent/preset/list", get(handle_agent_preset_list))
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
@@ -2337,6 +2345,62 @@ async fn handle_agent_globalmemory_remove(
     Json(req): Json<AgentGlobalMemoryRemoveRequest>,
 ) -> impl IntoResponse {
     app_api_response(app_api::global_memory_remove_impl(&state, &req.id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryHistoryQuery {
+    id: String,
+}
+
+/// `GET /api/v1/agent/globalmemory/history?id=<id>` — list every recorded
+/// version of one Global Memory entry, newest first. Refuses a system-tier,
+/// blank, or non-global id the same way `read`/`remove` already do — see
+/// `global_memory_history_impl`'s own doc comment. Backs the
+/// `GlobalMemoryHistory` MCP tool.
+async fn handle_agent_globalmemory_history(
+    State(state): State<AppState>,
+    Query(q): Query<AgentGlobalMemoryHistoryQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::global_memory_history_impl(&state, &q.id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryDiffQuery {
+    id: String,
+    from_version_id: String,
+    to_version_id: String,
+}
+
+/// `GET /api/v1/agent/globalmemory/diff?id=<id>&from_version_id=&to_version_id=`
+/// — a line-based diff between two recorded versions, both of which must
+/// belong to `id` (same ownership check as `/api/v1/agent/memory/diff`'s
+/// `agent_id` scoping — see `global_memory_diff_impl`'s own doc comment for
+/// why). Backs the `GlobalMemoryDiff` MCP tool.
+async fn handle_agent_globalmemory_diff(
+    State(state): State<AppState>,
+    Query(q): Query<AgentGlobalMemoryDiffQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::global_memory_diff_impl(&state, &q.id, &q.from_version_id, &q.to_version_id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryRevertRequest {
+    agent_id: String,
+    id: String,
+    version_id: String,
+}
+
+/// `POST /api/v1/agent/globalmemory/revert` — restore a Global Memory
+/// entry's live content to a prior recorded version, recorded as a NEW
+/// version (`source: "revert"`) — never rewrites or deletes history, same
+/// as `/api/v1/agent/memory/revert`. Never reaches a system-tier row — see
+/// `global_memory_revert_impl`'s own doc comment. Backs the
+/// `GlobalMemoryRevert` MCP tool.
+async fn handle_agent_globalmemory_revert(
+    State(state): State<AppState>,
+    Json(req): Json<AgentGlobalMemoryRevertRequest>,
+) -> impl IntoResponse {
+    app_api_response(app_api::global_memory_revert_impl(&state, &req.agent_id, &req.id, &req.version_id))
 }
 
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary

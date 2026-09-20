@@ -241,6 +241,9 @@ async fn main() {
                 let global_memory_read: Value = serde_json::from_str(GLOBAL_MEMORY_READ_TOOL).expect("static json");
                 let global_memory_write: Value = serde_json::from_str(GLOBAL_MEMORY_WRITE_TOOL).expect("static json");
                 let global_memory_remove: Value = serde_json::from_str(GLOBAL_MEMORY_REMOVE_TOOL).expect("static json");
+                let global_memory_history: Value = serde_json::from_str(GLOBAL_MEMORY_HISTORY_TOOL).expect("static json");
+                let global_memory_diff: Value = serde_json::from_str(GLOBAL_MEMORY_DIFF_TOOL).expect("static json");
+                let global_memory_revert: Value = serde_json::from_str(GLOBAL_MEMORY_REVERT_TOOL).expect("static json");
                 let preset_list: Value = serde_json::from_str(PRESET_LIST_TOOL).expect("static json");
                 let preset_get: Value = serde_json::from_str(PRESET_GET_TOOL).expect("static json");
                 let identity_accounts: Value =
@@ -250,7 +253,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -3221,6 +3224,107 @@ async fn call_tool(
             }
             Ok(format!("Removed Global Memory entry {id}"))
         }
+        "GlobalMemoryHistory" => {
+            let id = arguments
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/api/v1/agent/globalmemory/history", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("id", id)])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("globalmemory/history failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "GlobalMemoryDiff" => {
+            let id = arguments
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let from_version_id = arguments
+                .get("from_version_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: from_version_id"))?;
+            let to_version_id = arguments
+                .get("to_version_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: to_version_id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/api/v1/agent/globalmemory/diff", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("id", id), ("from_version_id", from_version_id), ("to_version_id", to_version_id)])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("globalmemory/diff failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(result
+                .get("diff")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+                }))
+        }
+        "GlobalMemoryRevert" => {
+            let id = arguments
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let version_id = arguments
+                .get("version_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: version_id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/globalmemory/revert", local_url.trim_end_matches('/'));
+            let body = json!({
+                "agent_id": agent_id,
+                "id": id,
+                "version_id": version_id,
+            });
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("globalmemory/revert failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Reverted Global Memory entry {id} to version {version_id}"))
+        }
         "PresetList" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let url = format!("{}/api/v1/agent/preset/list", local_url.trim_end_matches('/'));
@@ -3871,6 +3975,9 @@ mod tests {
             GLOBAL_MEMORY_READ_TOOL,
             GLOBAL_MEMORY_WRITE_TOOL,
             GLOBAL_MEMORY_REMOVE_TOOL,
+            GLOBAL_MEMORY_HISTORY_TOOL,
+            GLOBAL_MEMORY_DIFF_TOOL,
+            GLOBAL_MEMORY_REVERT_TOOL,
             PRESET_LIST_TOOL,
             PRESET_GET_TOOL,
             IDENTITY_ACCOUNTS_TOOL,
@@ -3918,7 +4025,14 @@ mod tests {
         // SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) — same reasoning,
         // not fixing the pre-existing drift between this running total and
         // the prose breakdown.
-        assert_eq!(defs.len(), 49, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer");
+        // GLOBAL_MEMORY_{HISTORY,DIFF,REVERT}_TOOL added (3:
+        // SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md's own Phase-3
+        // follow-up — the read side of the Global Memory audit trail,
+        // `bundle_version_list`/`bundle_version_get`, existed and was tested
+        // but had no MCP tool wrapper until now) — same reasoning, not fixing
+        // the pre-existing drift between this running total and the prose
+        // breakdown.
+        assert_eq!(defs.len(), 52, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

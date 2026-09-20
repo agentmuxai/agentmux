@@ -1452,6 +1452,172 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     Ok(json!({ "ok": true }))
 }
 
+/// A version's metadata as JSON — `id`/`content_hash`/`parent_version_id`/
+/// `source`/`source_detail`/`written_by`/`created_at`, no `name`/
+/// `instructions`. Takes the five common-field accessors as plain values
+/// rather than borrowing a concrete struct so both `BundleVersionSummary`
+/// (the `history` list shape) and `BundleVersion` (the full-content shape
+/// `revert`'s freshly-inserted row comes back as) can share this one
+/// formatter without either type needing to convert into the other.
+fn bundle_version_meta_json(
+    id: &str,
+    content_hash: &str,
+    parent_version_id: &Option<String>,
+    source: &str,
+    source_detail: &str,
+    written_by: &str,
+    created_at: i64,
+) -> serde_json::Value {
+    json!({
+        "id": id,
+        "content_hash": content_hash,
+        "parent_version_id": parent_version_id,
+        "source": source,
+        "source_detail": source_detail,
+        "written_by": written_by,
+        "created_at": created_at,
+    })
+}
+
+/// Loads `id`'s bundle and refuses it unless it is (a) not the blank
+/// singleton, (b) not a system-tier entry, and (c) currently a Global Memory
+/// entry (`is_global`) — the exact guard `global_memory_write_impl`/
+/// `global_memory_remove_impl` already apply, reused here rather than
+/// re-derived so `history`/`diff`/`revert` can never diverge from it. Bundle
+/// ids for EVERY bundle in the system (not just global ones) are enumerable
+/// via `PresetList` (reagent P0/P1, PR #3237) — without this, an agent could
+/// point any of these three new routes at another agent's private preset, or
+/// at AgentMux's own system-tier entries, and read/restore content that was
+/// never meant to be reachable through this API.
+fn load_ordinary_global_bundle(state: &AppState, id: &str, verb: &str) -> Result<Bundle, String> {
+    let bundle = state.id_store.bundle_get(id)
+        .map_err(|e| format!("globalmemory.{verb}: {e}"))?
+        .ok_or_else(|| format!("globalmemory.{verb}: not found id={id}"))?;
+    if bundle.is_system {
+        return Err(format!(
+            "globalmemory.{verb}: cannot {verb} a system Global Memory entry through this API"
+        ));
+    }
+    if bundle.is_blank || bundle.id == "blank" {
+        return Err(format!("globalmemory.{verb}: cannot {verb} the blank Bundle singleton"));
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory.{verb}: id={id} is not a Global Memory entry"));
+    }
+    Ok(bundle)
+}
+
+/// Version history for one Global Memory entry, newest first — metadata
+/// only, no `name`/`instructions` (mirrors `memory_history_impl`'s summary
+/// shape and `global_memory_list_impl`'s "no content" posture). Refuses a
+/// system-tier, blank, or non-global id via `load_ordinary_global_bundle` —
+/// structurally the same exclusion `list`/`read`/`remove` already apply, so
+/// there is no path here that can ever surface a system-tier row's history.
+/// Backs the `GlobalMemoryHistory` MCP tool.
+pub(crate) fn global_memory_history_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
+    load_ordinary_global_bundle(state, id, "history")?;
+    let versions: Vec<_> = state.id_store.bundle_version_list(id)
+        .map_err(|e| format!("globalmemory.history: store: {e}"))?
+        .iter()
+        .map(|v| bundle_version_meta_json(
+            &v.id, &v.content_hash, &v.parent_version_id, &v.source, &v.source_detail, &v.written_by, v.created_at,
+        ))
+        .collect();
+    Ok(json!({ "versions": versions }))
+}
+
+/// A line-based diff between two recorded versions of one Global Memory
+/// entry (mirrors `memory_diff_impl`). Both versions must belong to `id` —
+/// reagent P1 in `memory_diff_impl` fixed the identical "diff across two
+/// unrelated owners" gap for native memory; the same check applies here
+/// since a `version_id` alone does not otherwise prove which bundle (and
+/// therefore whether a system-tier one) it came from. A name change is
+/// surfaced as its own two-line entry ahead of the instructions diff, since
+/// `content_hash` is computed over `name` + `instructions` together
+/// (`bundle_versions.rs`'s own `content_hash` doc comment) — a rename with
+/// unchanged body would otherwise produce a "no differences" instructions
+/// diff that silently hid the one thing that actually changed. Backs the
+/// `GlobalMemoryDiff` MCP tool.
+pub(crate) fn global_memory_diff_impl(
+    state: &AppState,
+    id: &str,
+    from_version_id: &str,
+    to_version_id: &str,
+) -> Result<serde_json::Value, String> {
+    load_ordinary_global_bundle(state, id, "diff")?;
+    let from = state.id_store.bundle_version_get(from_version_id)
+        .map_err(|e| format!("globalmemory.diff: store: {e}"))?
+        .ok_or_else(|| format!("globalmemory.diff: version {from_version_id} not found"))?;
+    let to = state.id_store.bundle_version_get(to_version_id)
+        .map_err(|e| format!("globalmemory.diff: store: {e}"))?
+        .ok_or_else(|| format!("globalmemory.diff: version {to_version_id} not found"))?;
+    if from.bundle_id != id || to.bundle_id != id {
+        return Err(format!("globalmemory.diff: one or both versions do not belong to {id}"));
+    }
+    let mut diff = String::new();
+    if from.name != to.name {
+        diff.push_str(&format!("- name: {}\n+ name: {}\n", from.name, to.name));
+    }
+    diff.push_str(&crate::server::native_memory_handlers::line_diff(&from.instructions, &to.instructions));
+    Ok(json!({ "diff": diff }))
+}
+
+/// Restores a Global Memory entry's live `name`/`instructions` to a prior
+/// recorded version — same "revert never rewrites history, it records a new
+/// version" semantics as `memory_revert_impl` (`source: "revert"`, chained
+/// onto whatever the current latest version is). Reuses
+/// `Store::bundle_upsert_with_version` — the SAME primitive
+/// `global_memory_write_impl` already uses — so the live row and its new
+/// version are written atomically, in one transaction, exactly as that
+/// method's own doc comment requires (codex P2, PR #3237). `agent_id` is the
+/// TRUSTED caller identity (an agent's real `AGENTMUX_AGENT_ID`, resolved by
+/// `agentmux-mcp` from its own env, never caller-suppliable) recorded as
+/// `written_by` — never inferred from anything in the request body. Backs
+/// the `GlobalMemoryRevert` MCP tool.
+pub(crate) fn global_memory_revert_impl(
+    state: &AppState,
+    agent_id: &str,
+    id: &str,
+    version_id: &str,
+) -> Result<serde_json::Value, String> {
+    let mut bundle = load_ordinary_global_bundle(state, id, "revert")?;
+    let target = state.id_store.bundle_version_get(version_id)
+        .map_err(|e| format!("globalmemory.revert: store: {e}"))?
+        .ok_or_else(|| format!("globalmemory.revert: version {version_id} not found"))?;
+    if target.bundle_id != id {
+        return Err(format!("globalmemory.revert: version {version_id} does not belong to {id}"));
+    }
+
+    bundle.name = target.name.clone();
+    bundle.instructions = target.instructions.clone();
+    bundle.updated_at = agentmux_common::time::now_ms();
+
+    let detail = json!({ "reverted_to": version_id }).to_string();
+    let new_version = state.id_store
+        .bundle_upsert_with_version(&bundle, agent_id, "revert", &detail)
+        .map_err(|e| format!("globalmemory.revert: {e}"))?
+        // `bundle.is_global` is guaranteed true by `load_ordinary_global_bundle`
+        // above, and `bundle_upsert_with_version` only ever returns `None` when
+        // `is_global` is false — so this branch is unreachable in practice, but
+        // failing loudly beats silently reporting success with no new version.
+        .ok_or_else(|| "globalmemory.revert: no version was recorded (unexpected: entry is not global)".to_string())?;
+
+    state.broker.publish(crate::backend::mps::MuxEvent {
+        event: "memories:changed".to_string(),
+        scopes: vec![], sender: String::new(), persist: 0, data: None,
+    });
+    tracing::info!(agent_id, bundle_id = %id, version_id, "globalmemory.revert");
+    Ok(json!({ "version": bundle_version_meta_json(
+        &new_version.id,
+        &new_version.content_hash,
+        &new_version.parent_version_id,
+        &new_version.source,
+        &new_version.source_detail,
+        &new_version.written_by,
+        new_version.created_at,
+    ) }))
+}
+
 #[cfg(test)]
 mod global_memory_impl_tests {
     use super::*;
@@ -1670,6 +1836,199 @@ mod global_memory_impl_tests {
 
         let unchanged = state.id_store.bundle_get("someone-elses-preset").unwrap().unwrap();
         assert_eq!(unchanged.updated_at, 0, "must not have been touched at all");
+    }
+}
+
+#[cfg(test)]
+mod global_memory_version_impl_tests {
+    use super::*;
+
+    fn system_bundle(id: &str) -> Bundle {
+        Bundle {
+            id: id.to_string(),
+            name: format!("System ({id})"),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: "system content".to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            is_system: true,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn history_lists_versions_newest_first() {
+        let state = crate::server::tests::test_state();
+        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "content-1", None).unwrap();
+        let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        global_memory_write_impl(&state, "agent-2", Some(&id), "V1", "content-2", None).unwrap();
+
+        let history = global_memory_history_impl(&state, &id).unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].get("written_by").and_then(|v| v.as_str()), Some("agent-2"), "newest first");
+        assert_eq!(versions[1].get("written_by").and_then(|v| v.as_str()), Some("agent-1"));
+        // Summary shape only — no name/instructions.
+        assert!(versions[0].get("name").is_none());
+        assert!(versions[0].get("instructions").is_none());
+    }
+
+    /// Hard invariant, SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md,
+    /// re-affirmed by SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md: none
+    /// of history/diff/revert may ever surface a system-tier bundle's
+    /// content, the same way write/read/remove already refuse one.
+    #[tokio::test]
+    async fn history_refuses_a_system_entry() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert_system(&system_bundle("sys-history")).unwrap();
+        state.id_store.bundle_version_insert("sys-history", "System (sys-history)", "system content", "human", "{}", "armory-ui").unwrap();
+
+        let err = global_memory_history_impl(&state, "sys-history").unwrap_err();
+        assert!(err.contains("system"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn history_refuses_a_non_global_bundle() {
+        let state = crate::server::tests::test_state();
+        let mut private = system_bundle("private-preset");
+        private.is_system = false;
+        private.is_global = false;
+        state.id_store.bundle_upsert(&private).unwrap();
+
+        let err = global_memory_history_impl(&state, "private-preset").unwrap_err();
+        assert!(err.contains("not a Global Memory entry"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_shows_line_changes_between_two_versions() {
+        let state = crate::server::tests::test_state();
+        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "line one\nline two", None).unwrap();
+        let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        global_memory_write_impl(&state, "agent-1", Some(&id), "V1", "line one\nline three", None).unwrap();
+
+        let history = global_memory_history_impl(&state, &id).unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        let newest = versions[0].get("id").and_then(|v| v.as_str()).unwrap();
+        let oldest = versions[1].get("id").and_then(|v| v.as_str()).unwrap();
+
+        let diff = global_memory_diff_impl(&state, &id, oldest, newest).unwrap();
+        let diff_str = diff.get("diff").and_then(|v| v.as_str()).unwrap();
+        assert!(diff_str.contains("- line two"), "diff was: {diff_str}");
+        assert!(diff_str.contains("+ line three"), "diff was: {diff_str}");
+    }
+
+    /// A rename with byte-identical body still changes `content_hash`
+    /// (`bundle_versions.rs`'s own `content_hash` doc comment) — the diff
+    /// must surface that, not silently report "no differences".
+    #[tokio::test]
+    async fn diff_surfaces_a_name_only_change() {
+        let state = crate::server::tests::test_state();
+        let created = global_memory_write_impl(&state, "agent-1", None, "Old Name", "same body", None).unwrap();
+        let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        global_memory_write_impl(&state, "agent-1", Some(&id), "New Name", "same body", None).unwrap();
+
+        let history = global_memory_history_impl(&state, &id).unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        let newest = versions[0].get("id").and_then(|v| v.as_str()).unwrap();
+        let oldest = versions[1].get("id").and_then(|v| v.as_str()).unwrap();
+
+        let diff = global_memory_diff_impl(&state, &id, oldest, newest).unwrap();
+        let diff_str = diff.get("diff").and_then(|v| v.as_str()).unwrap();
+        assert!(diff_str.contains("- name: Old Name"), "diff was: {diff_str}");
+        assert!(diff_str.contains("+ name: New Name"), "diff was: {diff_str}");
+    }
+
+    /// reagent-P1-equivalent regression for Global Memory: a version id alone
+    /// does not prove which bundle it belongs to, so diff must refuse to
+    /// compare versions from two different bundles (mirrors
+    /// `memory_diff_impl`'s identical ownership check for native memory).
+    #[tokio::test]
+    async fn diff_refuses_versions_from_different_bundles() {
+        let state = crate::server::tests::test_state();
+        let a = global_memory_write_impl(&state, "agent-1", None, "A", "content-a", None).unwrap();
+        let a_id = a.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        let b = global_memory_write_impl(&state, "agent-1", None, "B", "content-b", None).unwrap();
+        let b_id = b.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        let a_version = global_memory_history_impl(&state, &a_id).unwrap();
+        let a_version_id = a_version["versions"][0]["id"].as_str().unwrap().to_string();
+        let b_version = global_memory_history_impl(&state, &b_id).unwrap();
+        let b_version_id = b_version["versions"][0]["id"].as_str().unwrap().to_string();
+
+        let err = global_memory_diff_impl(&state, &a_id, &a_version_id, &b_version_id).unwrap_err();
+        assert!(err.contains("do not belong to"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_refuses_a_system_entry() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert_system(&system_bundle("sys-diff")).unwrap();
+        let v = state.id_store.bundle_version_insert("sys-diff", "System (sys-diff)", "system content", "human", "{}", "armory-ui").unwrap();
+
+        let err = global_memory_diff_impl(&state, "sys-diff", &v.id, &v.id).unwrap_err();
+        assert!(err.contains("system"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn revert_restores_content_and_records_a_new_version() {
+        let state = crate::server::tests::test_state();
+        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "original", None).unwrap();
+        let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        global_memory_write_impl(&state, "agent-1", Some(&id), "V1", "overwritten", None).unwrap();
+
+        let history_before = global_memory_history_impl(&state, &id).unwrap();
+        let good_version_id = history_before["versions"][1]["id"].as_str().unwrap().to_string();
+
+        let result = global_memory_revert_impl(&state, "agent-revert", &id, &good_version_id).unwrap();
+        assert_eq!(result["version"]["source"].as_str(), Some("revert"));
+        assert_eq!(result["version"]["written_by"].as_str(), Some("agent-revert"));
+
+        let live = state.id_store.bundle_get(&id).unwrap().unwrap();
+        assert_eq!(live.instructions, "original", "live content must match the reverted-to version");
+
+        // Revert is a NEW event, not a silent rewrite — three versions now
+        // exist (write, write, revert), all still present.
+        let history_after = global_memory_history_impl(&state, &id).unwrap();
+        let versions_after = history_after.get("versions").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(versions_after.len(), 3);
+        assert_eq!(versions_after[0].get("source").and_then(|v| v.as_str()), Some("revert"), "newest version is the revert event");
+    }
+
+    #[tokio::test]
+    async fn revert_refuses_to_touch_a_system_entry() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert_system(&system_bundle("sys-revert")).unwrap();
+        let v = state.id_store.bundle_version_insert("sys-revert", "System (sys-revert)", "system content", "human", "{}", "armory-ui").unwrap();
+
+        let err = global_memory_revert_impl(&state, "agent-1", "sys-revert", &v.id).unwrap_err();
+        assert!(err.contains("system"), "unexpected error: {err}");
+
+        let unchanged = state.id_store.bundle_get("sys-revert").unwrap().unwrap();
+        assert_eq!(unchanged.instructions, "system content", "system entry must be untouched");
+    }
+
+    #[tokio::test]
+    async fn revert_refuses_a_version_from_a_different_bundle() {
+        let state = crate::server::tests::test_state();
+        let a = global_memory_write_impl(&state, "agent-1", None, "A", "content-a", None).unwrap();
+        let a_id = a.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        let b = global_memory_write_impl(&state, "agent-1", None, "B", "content-b", None).unwrap();
+        let b_id = b.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        let b_version_id = global_memory_history_impl(&state, &b_id).unwrap()["versions"][0]["id"].as_str().unwrap().to_string();
+
+        let err = global_memory_revert_impl(&state, "agent-1", &a_id, &b_version_id).unwrap_err();
+        assert!(err.contains("does not belong to"), "unexpected error: {err}");
+
+        let unchanged = state.id_store.bundle_get(&a_id).unwrap().unwrap();
+        assert_eq!(unchanged.instructions, "content-a", "must not have been touched");
     }
 }
 
