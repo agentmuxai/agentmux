@@ -11,7 +11,7 @@ import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
-import { createPaneReadiness, type PaneReadiness } from "@/app/store/pane-readiness";
+import { createPaneReadiness, type PaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -26,7 +26,7 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
@@ -243,7 +243,6 @@ function BlockFull({ nodeModel, viewModel, readiness }: FullBlockProps): JSX.Ele
             preview={false}
             blockModel={blockModel}
             viewModel={viewModel}
-            isLoading={() => readiness?.isLoading() ?? false}
         >
             <div class="block-focuselem">
                 <input
@@ -418,18 +417,56 @@ function Block(props: BlockProps): JSX.Element {
     // their own spinner with their own timers, up to two of them measured on
     // screen at once. They are now the same controller and the same cover.
     //
-    // Both of these are REVEAL gates, never mount gates. `ready()` below still
-    // decides mounting entirely on its own and depends on nothing here — see
-    // the deadlock note above, which is exactly what happens if that is blurred.
+    // This is a REVEAL gate, never a mount gate. `ready()` still decides
+    // mounting entirely on its own and depends on nothing here — see the
+    // deadlock note above, which is exactly what happens if that is blurred.
     const readiness = createPaneReadiness({ label: `block:${props.nodeModel.blockId.substring(0, 8)}` });
     const releaseMountGate = readiness.gate("content");
-    const releaseBackfillGate = readiness.gate("subagents");
     createEffect(() => {
         if (ready()) releaseMountGate();
     });
+
+    // `subagentBackfillSettled()` is deliberately NOT a gate, and that is the
+    // whole point of this block of code.
+    //
+    // PaneReadiness is one-way by design: `assembling → revealing → live`, and
+    // a gate registered after reveal is a no-op precisely so a late dependency
+    // cannot yank the cover back over content the user is already reading.
+    // But this signal is RE-ENTRANT — `useSubagentBackfillGate` calls
+    // `setSettled(false)` on EVERY "started" event, including one arriving long
+    // after the first cycle settled. Feeding it to a one-way gate compiles and
+    // looks right, and silently drops every re-cover after the first: exactly
+    // the behaviour the hook's own round-7 fix exists to provide. (reagent P1
+    // on #3464.)
+    //
+    // So it drives its own small cycle, which the cover renders with the same
+    // component. Same split as the `<Suspense>` fallback below and the browser
+    // pane's post-first-paint badge (§6.1): one-time assembly is the
+    // controller's job, mid-life re-covers are not.
+    const [reCoverPhase, setReCoverPhase] = createSignal<PaneReadinessPhase>("live");
+    let reCoverFade: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(reCoverFade));
     createEffect(() => {
-        if (subagentBackfillSettled()) releaseBackfillGate();
+        const settled = subagentBackfillSettled();
+        // While the pane is still assembling the initial cover is already up;
+        // the controller owns the screen until it reaches `live`.
+        if (untrack(readiness.phase) !== "live") return;
+        clearTimeout(reCoverFade);
+        if (!settled) {
+            setReCoverPhase("assembling"); // re-covered, opaque, no fade in
+            return;
+        }
+        if (untrack(reCoverPhase) === "live") return; // nothing to fade out
+        setReCoverPhase("revealing");
+        reCoverFade = setTimeout(() => setReCoverPhase("live"), READY_GATE_FADE_MS);
     });
+
+    // One cover, two sources: the controller until it goes live, this block's
+    // own re-cover cycle afterwards.
+    const coverPhase = (): PaneReadinessPhase => {
+        const phase = readiness.phase();
+        return phase === "live" ? reCoverPhase() : phase;
+    };
 
     // Cross-fade the cover out on top of the real content instead of an instant
     // hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4
@@ -499,7 +536,7 @@ function Block(props: BlockProps): JSX.Element {
                 `overlay` flips to true the instant ready() does (the same
                 render as the real content appearing), so the cover never sits
                 in normal flow alongside that content, even for one frame. */}
-            <PaneLoadingCover phase={readiness.phase} overlay={ready} />
+            <PaneLoadingCover phase={coverPhase} overlay={ready} />
         </>
     );
 }

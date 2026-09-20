@@ -89,8 +89,14 @@ vi.mock("./blockframe", () => ({
     ),
 }));
 
+// The real hook's `settled` is RE-ENTRANT — it calls setSettled(false) on every
+// "started" event, including one long after the first cycle settled. A mock
+// that returns a constant `true` cannot exercise that, which is exactly how a
+// one-way gate silently swallowing the re-cover got through review (P1 on
+// #3464). `backfillSettled` is a real signal so a test can flip it.
+const [backfillSettled, setBackfillSettled] = createSignal(true);
 vi.mock("@/app/view/agent/hooks/useSubagentBackfillGate", () => ({
-    useSubagentBackfillGate: () => () => true,
+    useSubagentBackfillGate: () => () => backfillSettled(),
 }));
 
 vi.mock("@/layout/index", () => ({
@@ -124,6 +130,7 @@ afterEach(() => {
     blockMetaSignals.clear();
     registry.clear();
     constructedViewModels.length = 0;
+    setBackfillSettled(true);
 });
 
 describe("Block — preview/real ViewModel isolation", () => {
@@ -214,5 +221,51 @@ describe("Block — one loading cover, stated coverage", () => {
         render(() => <Block nodeModel={makeNodeModel({ blockId: "b-warm" })} preview={false} />);
 
         expect(covers().length).toBe(0);
+    });
+});
+
+/**
+ * The re-entrancy the one-way controller cannot express (reagent P1 on #3464).
+ *
+ * `useSubagentBackfillGate`'s `settled` flips back to false on EVERY "started"
+ * event, including one arriving long after the first cycle settled — that
+ * re-arm is the hook's round-7 fix, not an edge case. The pre-consolidation
+ * code re-showed its spinner for it ("Not ready anymore ... show the spinner
+ * again immediately"). Routing it through `PaneReadiness.gate()` type-checks
+ * and reads correctly, and silently drops every re-cover after the first,
+ * because gate release is one-shot and re-registering after reveal is a
+ * documented no-op. So it drives its own cycle instead, rendered by the same
+ * cover.
+ */
+describe("Block — a later backfill cycle re-covers the pane", () => {
+    const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
+
+    it("re-covers live content when backfill re-arms, and clears when it settles", async () => {
+        setBlockView("b-rearm", "agent"); // ready() true → assembly cover never paints
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-rearm" })} preview={false} />);
+        expect(covers().length).toBe(0);
+
+        // A fresh "started" arrives well after the pane went live.
+        setBackfillSettled(false);
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(false); // opaque, no fade in
+        // Content stayed mounted underneath — this covers, it does not unmount.
+        expect(document.querySelector('[data-testid="blockframe-real-b-rearm"]')).not.toBeNull();
+
+        // ...and settles again, starting the fade rather than a hard cut.
+        setBackfillSettled(true);
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(true);
+    });
+
+    it("overlays rather than displacing content on a re-cover", async () => {
+        setBlockView("b-rearm2", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-rearm2" })} preview={false} />);
+
+        setBackfillSettled(false);
+        // ready() is true, so there IS mounted content to sit on top of.
+        expect(covers()[0].classList.contains("is-in-flow")).toBe(false);
     });
 });

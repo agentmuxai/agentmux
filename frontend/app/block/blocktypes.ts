@@ -83,17 +83,18 @@ export interface BlockFrameProps {
     children?: JSX.Element;
     connBtnRef?: { current: HTMLDivElement | null };
 
-    /**
-     * True while this pane is still assembling
-     * (SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4). The loading cover
-     * deliberately does NOT extend over the header — the tab strip has to stay
-     * interactive during load (SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md
-     * §1.4) — so header affordances that appear only once a view has finished
-     * resolving must suppress themselves instead, or they pop in underneath a
-     * pane that still looks like it is loading. One subscription here beats a
-     * per-affordance guess at "is my data ready yet".
-     */
-    isLoading?: () => boolean;
+    // NOTE: there is deliberately no `isLoading` here yet.
+    // SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4 asks BlockFrame to
+    // subscribe to pane readiness and suppress transient header affordances.
+    // Wiring it through these props does not work, and does so SILENTLY: every
+    // view type in `pane-leaf-chrome.tsx`'s HOISTS_OWN_CHROME (agent, term,
+    // browser, editor, sysinfo, cpuplot, swarm, armory, media, drone, help,
+    // warden — i.e. essentially every real pane) sets `noHeader()`, so
+    // BlockFrame's own inline header never renders; the header those panes
+    // actually show is built by `PaneHeaderTabStrip`, which lives OUTSIDE
+    // `<Block>` and constructs its own explicit prop object. A prop threaded
+    // from Block can never reach it. See spec §6.1 — phase 4 needs the same
+    // pane-scoped readiness handle as phase 5. (reagent P1 on #3464.)
 
     /** Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
      *  §4.1) — when provided, `BlockFrame_Header` renders this INSTEAD of its
