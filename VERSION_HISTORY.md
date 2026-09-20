@@ -11,6 +11,7 @@
 - feat(layout): LayoutStackMove reducer command for a future pane-tab drag reorder/move (backend only, not yet wired to any frontend caller)
 - feat(panes): reserve whole-pane drag space in a Pane's tab strip once it overflows
 - fix(agent-pane): close a device-pixel rounding seam in the progress ring
+- feat(browser-api): deep, no-mouse browser-pane control via the Agent App API — 8 new MCP tools (BrowserNavigate/Back/Forward/Reload/Eval/DispatchKey/FocusElement/FocusInfo) so an agent can drive its own browser pane
 - feat(panes): drag a Pane Tab pill to reorder it within its own pane (new pane.moveTab RPC + LayoutStackMove reducer command)
 
 ## 0.56.8 — 2026-09-19
