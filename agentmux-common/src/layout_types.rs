@@ -158,6 +158,20 @@ pub enum SplitPosition {
     After,
 }
 
+/// Position for `LayoutStackMove`: where `block_id` lands relative to
+/// `target_block_id` in the destination leaf's stack (or its own leaf's
+/// stack, for a same-leaf reorder). `End` ignores `target_block_id`'s own
+/// position and appends after every existing member — `target_block_id` is
+/// still used to locate which leaf.
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StackMovePosition {
+    Before,
+    After,
+    End,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

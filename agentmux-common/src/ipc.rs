@@ -599,6 +599,24 @@ pub enum Command {
         meta: serde_json::Value,
         activate: bool,
     },
+    /// Move `block_id` to `position` relative to `target_block_id` — a
+    /// same-leaf reorder when both are already members of the same pane's
+    /// stack, otherwise a cross-pane move (removed from its current leaf,
+    /// placed into `target_block_id`'s leaf, promoting a single-block leaf
+    /// into a stack if needed). Refuses (silent no-op-with-error) if
+    /// `block_id` is its source leaf's only member — removing the last
+    /// member is "close the pane," a different command. A same-leaf reorder
+    /// never changes which member is visible unless `activate` is set,
+    /// even when the reordered member was already the visible one.
+    /// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
+    LayoutStackMove {
+        tab_id: String,
+        block_id: String,
+        target_block_id: String,
+        position: crate::StackMovePosition,
+        activate: bool,
+        correlation_id: String,
+    },
     /// Reparent a node to a new parent at the given child index.
     LayoutMoveNode {
         tab_id: String,
