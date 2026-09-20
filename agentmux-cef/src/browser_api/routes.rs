@@ -146,7 +146,7 @@ pub async fn focus_info(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -164,17 +164,24 @@ pub async fn focus_info(
         return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
     }
 
-    // focus_info intentionally reports whatever has focus in the whole
-    // page, not scoped to this block — it's a read of global page state
-    // (mirrors document.activeElement's own semantics), not an action on
-    // this block specifically. Not currently reachable via any
-    // agent-facing MCP tool (see SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md
-    // Phase 1 scope), so this is unchanged from its original behavior.
+    // Scoped to this block's own [data-blockid] subtree on a shared page —
+    // see resolver::ResolvedTarget::scope_to_block — same as query/click.
+    // NOT scoped for a dedicated browser-pane target, which already IS
+    // this block's own isolated page. (reagent P0, PR #3445: this used to
+    // report document.activeElement for the WHOLE resolved page
+    // unconditionally, reasoned as safe only because focus_info wasn't yet
+    // reachable by any agent — this PR's own BrowserFocusInfo tool is what
+    // makes that reasoning stale.)
+    let block_id_js = if scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
     let eval_result = match cdp
         .call(
             "Runtime.evaluate",
             json!({
-                "expression": "__amq_focus_info()",
+                "expression": format!("__amq_focus_info({block_id_js})"),
                 "returnByValue": true,
             }),
         )
@@ -599,25 +606,29 @@ pub async fn dispatch_key(
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
 
-    // Optionally focus a selector first.
+    // Helper is needed on every path below (selector-focus AND the
+    // no-selector ownership check), so inject it unconditionally
+    // up front rather than duplicating the injection in both branches.
+    let helper = include_str!("scripts/query.js");
+    if let Err(e) = cdp
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": helper, "returnByValue": false }),
+        )
+        .await
+    {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
+    }
+    let block_id_js = if scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
+
     if let Some(sel) = &req.selector {
-        let helper = include_str!("scripts/query.js");
-        if let Err(e) = cdp
-            .call(
-                "Runtime.evaluate",
-                json!({ "expression": helper, "returnByValue": false }),
-            )
-            .await
-        {
-            let _ = cdp.close().await;
-            return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
-        }
+        // Focus a specific, ownership-checked selector first.
         let sel_js = serde_json::to_string(sel).unwrap_or_else(|_| "\"\"".into());
-        let block_id_js = if scope_to_block {
-            serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
-        } else {
-            "null".to_string()
-        };
         let script = format!("__amq_focus({sel_js}, {block_id_js})");
         let reply = cdp
             .call(
@@ -637,6 +648,40 @@ pub async fn dispatch_key(
             return ok_body(ApiResponse::err(format!(
                 "dispatch_key: selector {sel:?} matched no element"
             )));
+        }
+    } else if scope_to_block {
+        // No selector: keys/text land on whatever currently has focus on
+        // the resolved page. For a dedicated browser pane that page
+        // already IS this block's own content, so that's fine as-is. But
+        // for a SHARED page (this branch), "whatever has focus" could be
+        // a different pane entirely — verify ownership before dispatching
+        // blind. (reagent P0, PR #3445: this branch didn't exist before;
+        // an omitted selector against a shared target dispatched
+        // unconditionally to the page's current focus, letting an agent
+        // inject keystrokes into another pane's focused element.)
+        let owned_expr = format!("__amq_focus_owned_by({block_id_js})");
+        let reply = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": owned_expr, "returnByValue": true }),
+            )
+            .await;
+        let owned = reply
+            .as_ref()
+            .ok()
+            .and_then(|v| v.get("result"))
+            .and_then(|r| r.get("value"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !owned {
+            let _ = cdp.close().await;
+            return ok_body(ApiResponse::err(
+                "dispatch_key: no `selector` was given, and the element currently \
+                 focused on this shared page isn't in your own pane (or nothing is \
+                 focused there) — pass `selector` to focus an element in your own \
+                 pane first."
+                    .to_string(),
+            ));
         }
     }
 

@@ -359,7 +359,7 @@ pub(crate) const BROWSER_EVAL_TOOL: &str = r#"{
 
 pub(crate) const BROWSER_DISPATCH_KEY_TOOL: &str = r#"{
   "name": "BrowserDispatchKey",
-  "description": "Type into whatever currently has focus in your OWN AgentMux pane (browser pane or otherwise — this one works for any pane, same scoping as UIClick). Pass exactly one of `text` (inserted atomically, handles IME correctly — use this for typing strings) or `key` (a named key: Enter, Tab, Escape, Backspace, ArrowUp/Down/Left/Right, Space). Optionally pass `selector` to focus an element first.",
+  "description": "Type into whatever currently has focus in your OWN AgentMux pane (browser pane or otherwise — this one works for any pane, same scoping as UIClick). Pass exactly one of `text` (inserted atomically, handles IME correctly — use this for typing strings) or `key` (a named key: Enter, Tab, Escape, Backspace, ArrowUp/Down/Left/Right, Space). Optionally pass `selector` to focus an element first — if you omit it, the currently-focused element must already be inside your own pane, or the call fails rather than typing into whatever else happens to have focus.",
   "inputSchema": {
     "type": "object",
     "properties": {
