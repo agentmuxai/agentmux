@@ -36,6 +36,15 @@ pub const CONTAINER_CLAUDE_DIR: &str = "/home/agent/.claude";
 /// Where the agent's working directory is bind-mounted inside the image.
 pub const CONTAINER_WORKSPACE_DIR: &str = "/workspace";
 
+/// Shared user-defined Docker bridge network every agent container is
+/// attached to, ADDITIVE to whatever `network_mode`/`extra_hosts` already
+/// set up (container→host reachability, unaffected — see the doc comment
+/// on `network_mode` below). Unlike the default bridge network, a
+/// user-defined one gives per-container DNS resolution and lets the
+/// native dev-proxy (`backend::dev_proxy`) route to a container by its
+/// internal IP. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md §3.1.
+pub const AGENTMUX_DOCKER_NETWORK: &str = "agentmux-agents";
+
 /// Host directories a container agent needs mounted to be able to work.
 ///
 /// Both were missing entirely before 2026-09-02, which is why container agents
@@ -248,6 +257,16 @@ struct ContainerManagerInner {
     /// Per-container `(uid, gid)` of the user execs run as, resolved once and
     /// cached — see [`ContainerManager::exec_identity`].
     exec_identities: Mutex<HashMap<String, (u64, u64)>>,
+    /// Dev-proxy routing table, wired in post-construction by
+    /// [`ContainerManager::attach_dev_proxy_registry`] (called by
+    /// `ContainerRuntimeHandle`, which re-attaches after every reconnect
+    /// since each reconnect creates a fresh `ContainerManagerInner`).
+    /// `stop`/`remove` clear this agent's registrations when set — see
+    /// `cleanup_dev_proxy_routes`. Unset (`None` via `OnceLock`) in tests
+    /// and any path that never wires it up; cleanup is then simply
+    /// skipped, never an error. See
+    /// docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+    dev_proxy: std::sync::OnceLock<crate::backend::dev_proxy::DevProxyRegistry>,
 }
 
 /// Exec session handle for a single turn.
@@ -349,8 +368,37 @@ impl ContainerManager {
                 docker,
                 ensure_locks: Mutex::new(HashMap::new()),
                 exec_identities: Mutex::new(HashMap::new()),
+                dev_proxy: std::sync::OnceLock::new(),
             }),
         })
+    }
+
+    /// Wires a dev-proxy routing table into this manager so `stop`/`remove`
+    /// can clear an agent's registrations when its container goes away.
+    /// Set once per `ContainerManager` instance (a second call is a
+    /// harmless no-op — `OnceLock::set` fails silently, which is fine
+    /// here: the registry itself doesn't change after boot).
+    /// See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+    pub fn attach_dev_proxy_registry(&self, registry: crate::backend::dev_proxy::DevProxyRegistry) {
+        let _ = self.inner.dev_proxy.set(registry);
+    }
+
+    /// This container's IP address on [`AGENTMUX_DOCKER_NETWORK`] — what
+    /// the dev-proxy registry stores as the routable backend address.
+    /// `None` if the container isn't running, isn't on the network yet, or
+    /// Docker is unreachable. Always a fresh `inspect_container`, never
+    /// cached — the caller (`app_api::dev_server::handle_register_dev_server`)
+    /// needs the CURRENT address, not one from whenever the container was
+    /// first created.
+    pub async fn agent_network_ip(&self, container_name: &str) -> Option<String> {
+        let details = self.inner.docker.inspect_container(container_name, None).await.ok()?;
+        details
+            .network_settings?
+            .networks?
+            .get(AGENTMUX_DOCKER_NETWORK)?
+            .ip_address
+            .clone()
+            .filter(|s| !s.is_empty())
     }
 
     /// Ping the Docker daemon. Returns `Ok(())` if available.
@@ -468,6 +516,13 @@ impl ContainerManager {
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
+
+        // Additive, best-effort: attach to the shared dev-proxy network
+        // regardless of which branch above ran, so an already-running
+        // container from before this feature shipped still gets picked up
+        // on its next turn. See `ensure_agent_network`'s own doc comment.
+        self.ensure_agent_network(container_name).await;
+
         Ok(())
     }
 
@@ -773,6 +828,7 @@ impl ContainerManager {
             .stop_container(container_name, Some(StopContainerOptions { t: timeout_secs }))
             .await?;
         tracing::info!(container = container_name, "stopped container");
+        self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())
     }
 
@@ -786,7 +842,24 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
+        self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())
+    }
+
+    /// Clears this container's dev-proxy routes (see
+    /// docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) if a
+    /// registry was ever wired in via `attach_dev_proxy_registry` — a
+    /// no-op everywhere else (tests, non-agent Docker use). Never fails
+    /// `stop`/`remove`: the container operation itself already succeeded
+    /// by the time this runs, and a routing-table cleanup miss is
+    /// recoverable (the entry just goes stale until re-registered) in a
+    /// way an interrupted `stop`/`remove` wouldn't be.
+    async fn cleanup_dev_proxy_routes(&self, container_name: &str) {
+        if let Some(registry) = self.inner.dev_proxy.get() {
+            if let Some(agent_id) = agent_id_from_container_name(container_name) {
+                registry.unregister_agent(agent_id).await;
+            }
+        }
     }
 
     // ---- private helpers ----
@@ -1070,6 +1143,67 @@ impl ContainerManager {
 
         Ok(())
     }
+
+    /// Best-effort: create the shared [`AGENTMUX_DOCKER_NETWORK`] (if it
+    /// doesn't already exist) and attach `container_name` to it, additive
+    /// to whatever `network_mode`/`extra_hosts` `create_and_start` already
+    /// set up (container→host reachability via `host.docker.internal`,
+    /// entirely unaffected). Never fails `ensure_running` — this is purely
+    /// in service of dev-proxy routing
+    /// (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md §3.1), not
+    /// required for a container agent's core turn-execution path. Called
+    /// on every `ensure_running`, not just at creation, so an
+    /// already-running container from before this feature shipped is
+    /// picked up too, and so a network deleted out-of-band (`docker
+    /// network rm`) is recreated automatically.
+    async fn ensure_agent_network(&self, container_name: &str) {
+        use bollard::models::EndpointSettings;
+        use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
+
+        let create_opts = CreateNetworkOptions {
+            name: AGENTMUX_DOCKER_NETWORK,
+            driver: "bridge",
+            ..Default::default()
+        };
+        if let Err(e) = self.inner.docker.create_network(create_opts).await {
+            let already_exists = matches!(
+                &e,
+                bollard::errors::Error::DockerResponseServerError { message, .. }
+                    if message.to_lowercase().contains("already exists")
+            );
+            if !already_exists {
+                tracing::warn!(
+                    network = AGENTMUX_DOCKER_NETWORK,
+                    error = %e,
+                    "dev-proxy: failed to create shared Docker network — dev-server routing unavailable this run"
+                );
+                return;
+            }
+        }
+
+        let connect_opts = ConnectNetworkOptions {
+            container: container_name,
+            endpoint_config: EndpointSettings {
+                aliases: Some(vec![container_name.to_string()]),
+                ..Default::default()
+            },
+        };
+        if let Err(e) = self.inner.docker.connect_network(AGENTMUX_DOCKER_NETWORK, connect_opts).await {
+            let already_attached = matches!(
+                &e,
+                bollard::errors::Error::DockerResponseServerError { message, .. }
+                    if message.to_lowercase().contains("already exists")
+            );
+            if !already_attached {
+                tracing::warn!(
+                    container = container_name,
+                    network = AGENTMUX_DOCKER_NETWORK,
+                    error = %e,
+                    "dev-proxy: failed to attach container to shared Docker network"
+                );
+            }
+        }
+    }
 }
 
 /// State of the container-runtime slot held by [`ContainerRuntimeHandle`].
@@ -1097,6 +1231,15 @@ enum RuntimeSlot {
 /// See docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
 pub struct ContainerRuntimeHandle {
     slot: tokio::sync::RwLock<RuntimeSlot>,
+    /// Dev-proxy registry to attach to every `ContainerManager` this handle
+    /// ever produces — including across reconnects, each of which creates
+    /// a fresh manager instance with its own unset `attach_dev_proxy_registry`
+    /// state. `None` until `set_dev_proxy_registry` is called (bootstrap
+    /// wires this in once both this handle and the registry exist); tests
+    /// using `disabled()` never set it, and `get()` never even constructs
+    /// a manager in that case. See
+    /// docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+    dev_proxy: std::sync::RwLock<Option<crate::backend::dev_proxy::DevProxyRegistry>>,
 }
 
 impl ContainerRuntimeHandle {
@@ -1109,14 +1252,39 @@ impl ContainerRuntimeHandle {
             Ok(mgr) => RuntimeSlot::Connected(mgr),
             Err(_) => RuntimeSlot::Empty,
         };
-        Self { slot: tokio::sync::RwLock::new(slot) }
+        Self {
+            slot: tokio::sync::RwLock::new(slot),
+            dev_proxy: std::sync::RwLock::new(None),
+        }
     }
 
     /// Test-only constructor: permanently reports unavailable and never
     /// attempts a real connect, keeping host-only unit tests hermetic and
     /// deterministic regardless of whether the test box has Docker.
     pub fn disabled() -> Self {
-        Self { slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled) }
+        Self {
+            slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled),
+            dev_proxy: std::sync::RwLock::new(None),
+        }
+    }
+
+    /// Wire a dev-proxy registry into this handle so every
+    /// `ContainerManager` it produces — now and after any future Docker
+    /// reconnect — has `stop`/`remove` clear that agent's routes. Call
+    /// once at bootstrap, after both this handle and the registry exist
+    /// (see `bootstrap::build_app_state`).
+    pub fn set_dev_proxy_registry(&self, registry: crate::backend::dev_proxy::DevProxyRegistry) {
+        if let Ok(mut slot) = self.dev_proxy.write() {
+            *slot = Some(registry.clone());
+        }
+        // Attach immediately to whatever manager already exists (the
+        // common case — `connect_at_startup` usually connects
+        // synchronously before this is called), not just future ones.
+        if let Ok(slot) = self.slot.try_read() {
+            if let RuntimeSlot::Connected(mgr) = &*slot {
+                mgr.attach_dev_proxy_registry(registry);
+            }
+        }
     }
 
     /// Returns a connected manager, retrying `ContainerManager::connect()`
@@ -1143,6 +1311,15 @@ impl ContainerRuntimeHandle {
         }
         match ContainerManager::connect() {
             Ok(mgr) => {
+                // A reconnect makes a brand-new `ContainerManagerInner`
+                // (fresh `OnceLock`s) — re-attach the registry here so
+                // `stop`/`remove` cleanup survives a Docker daemon
+                // restart, not just the initial connect.
+                if let Ok(guard) = self.dev_proxy.read() {
+                    if let Some(registry) = guard.as_ref() {
+                        mgr.attach_dev_proxy_registry(registry.clone());
+                    }
+                }
                 *slot = RuntimeSlot::Connected(mgr.clone());
                 Some(mgr)
             }
@@ -1166,6 +1343,13 @@ impl ContainerRuntimeHandle {
 /// Format: `agentmux-<slug>`. Deterministic so restarts reuse the same container.
 pub fn container_name_for_slug(slug: &str) -> String {
     format!("agentmux-{slug}")
+}
+
+/// Reverses [`container_name_for_slug`] — `"agentmux-foo"` → `Some("foo")`.
+/// Used by `cleanup_dev_proxy_routes` to key off the container name alone
+/// (`stop`/`remove` only get a container_name, not the agent's own id).
+fn agent_id_from_container_name(container_name: &str) -> Option<&str> {
+    container_name.strip_prefix("agentmux-").filter(|s| !s.is_empty())
 }
 
 /// Parse a Docker volume spec into `(source, target, read_only)`.
@@ -1214,6 +1398,14 @@ mod tests {
     fn test_container_name_for_slug() {
         assert_eq!(container_name_for_slug("my-agent"), "agentmux-my-agent");
         assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
+    }
+
+    #[test]
+    fn agent_id_from_container_name_reverses_container_name_for_slug() {
+        assert_eq!(agent_id_from_container_name("agentmux-my-agent"), Some("my-agent"));
+        assert_eq!(agent_id_from_container_name("agentmux-agent1"), Some("agent1"));
+        assert_eq!(agent_id_from_container_name("agentmux-"), None, "empty slug is not a real agent id");
+        assert_eq!(agent_id_from_container_name("not-agentmux-prefixed"), None);
     }
 
     // ── AGENTMUX_LOCAL_URL rewrite for container reachability ───────────────
@@ -1570,5 +1762,62 @@ mod tests {
 
         // cleanup
         cm.remove(name, true).await.expect("remove");
+    }
+
+    /// Docker-gated integration test for the dev-proxy network attachment
+    /// added by docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+    /// Requires a reachable Docker daemon; `#[ignore]` by default. Run with:
+    ///   cargo test -p agentmux-srv -- --ignored --nocapture itest_dev_proxy
+    ///
+    /// Confirms, against a REAL daemon (not a mock): `ensure_running`
+    /// creates the shared `AGENTMUX_DOCKER_NETWORK` and attaches the
+    /// container to it, `agent_network_ip` resolves a real IP on that
+    /// network, and `remove` clears the container's dev-proxy
+    /// registrations via the attached registry — the same path
+    /// `bootstrap::build_app_state` wires up for real srv instances.
+    #[tokio::test]
+    #[ignore]
+    async fn itest_dev_proxy_network_attach_and_ip_resolution() {
+        let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
+        cm.check_available().await.expect("docker daemon must be reachable");
+
+        let name = "agentmux-itest-devproxy";
+        let image = "nginx:alpine";
+        let _ = cm.remove(name, true).await; // clean slate; ignore if absent
+
+        let registry = crate::backend::dev_proxy::DevProxyRegistry::new();
+        cm.attach_dev_proxy_registry(registry.clone());
+
+        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default())
+            .await
+            .expect("ensure_running (create)");
+
+        let ip = cm
+            .agent_network_ip(name)
+            .await
+            .expect("container must have an IP on AGENTMUX_DOCKER_NETWORK after ensure_running");
+        assert!(
+            ip.parse::<std::net::Ipv4Addr>().is_ok(),
+            "agent_network_ip must return a real IPv4 address, got {ip:?}"
+        );
+
+        // Simulate a real registration (what `handle_register_dev_server`
+        // does) so we can prove `remove` actually clears it below.
+        let addr: std::net::SocketAddr = format!("{ip}:3000").parse().expect("valid addr");
+        registry.register("itest-proj", "itest-devproxy", addr).await;
+        assert_eq!(
+            registry.lookup("itest-proj-itest-devproxy").await,
+            Some(addr),
+            "registration must be visible via lookup before cleanup"
+        );
+
+        // cleanup — also exercises `cleanup_dev_proxy_routes`.
+        cm.remove(name, true).await.expect("remove");
+
+        assert_eq!(
+            registry.lookup("itest-proj-itest-devproxy").await,
+            None,
+            "remove() must clear this agent's dev-proxy registrations, not leave a stale route"
+        );
     }
 }

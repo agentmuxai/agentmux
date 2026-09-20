@@ -313,6 +313,19 @@ pub(crate) const CLOSE_PANE_TOOL: &str = r#"{
   }
 }"#;
 
+pub(crate) const REGISTER_DEV_SERVER_TOOL: &str = r#"{
+  "name": "RegisterDevServer",
+  "description": "Container-type agents only. Registers a dev server YOU just started inside YOUR OWN container (e.g. `npm run dev`) with AgentMux's native reverse proxy, so a human or another agent can browse to it at a friendly `http://<project>-<your-agent-id>.localhost:8090` URL instead of needing the container's internal port. Call this once your dev server is actually listening. Identity is verified server-side (same mechanism as ClosePane/UIClick) — you can only register a server as running inside YOUR OWN container, never anyone else's. Registrations are cleared automatically when your container stops; call this again after a restart.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "project": { "type": "string", "description": "Short project name, becomes part of the routing hostname (e.g. \"pulse\" -> pulse-<agent-id>.localhost)" },
+      "port": { "type": "number", "description": "Port the dev server is listening on INSIDE this container (container-internal — not a host-published port)" }
+    },
+    "required": ["project", "port"]
+  }
+}"#;
+
 // Deliberately NOT part of the ui_handlers.rs signed-identity/pane-ownership
 // scheme UIScreenshot/UIClick/UIQuery use. Authorization here is by
 // `CaptureTier` (what is being captured), not by pane ownership.

@@ -37,6 +37,7 @@ use agentmux_common::api_types::{
     ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest, UiClickRequest,
     UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse, WindowFocusRequest,
     WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest,
+    RegisterDevServerRequest, RegisterDevServerResponse,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -185,6 +186,8 @@ async fn main() {
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
                 let close_pane: Value =
                     serde_json::from_str(CLOSE_PANE_TOOL).expect("static json");
+                let register_dev_server: Value =
+                    serde_json::from_str(REGISTER_DEV_SERVER_TOOL).expect("static json");
                 let capture_window: Value =
                     serde_json::from_str(CAPTURE_WINDOW_TOOL).expect("static json");
                 let discover_windows: Value =
@@ -229,7 +232,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, register_dev_server, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -2221,6 +2224,43 @@ async fn call_tool(
                 None => Ok("Closed your own pane".to_string()),
             }
         }
+        "RegisterDevServer" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let project = arguments
+                .get("project")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: project"))?
+                .to_string();
+            let port = arguments
+                .get("port")
+                .and_then(|v| v.as_u64())
+                .filter(|p| *p > 0 && *p <= u16::MAX as u64)
+                .ok_or_else(|| anyhow::anyhow!("missing or invalid required parameter: port (must be 1-65535)"))?
+                as u16;
+            let url = format!(
+                "{}/api/v1/agent/dev_server/register",
+                local_url.trim_end_matches('/')
+            );
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&RegisterDevServerRequest { auth, project, port })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("RegisterDevServer failed: HTTP {status} — {text}");
+            }
+            let body: RegisterDevServerResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(format!("Registered. Browse to: {}", body.url))
+        }
         "Loop" => {
             let prompt = arguments
                 .get("prompt")
@@ -3674,6 +3714,7 @@ mod tests {
             DISCOVER_WINDOWS_TOOL,
             LIST_CONVERSATIONS_TOOL,
             CLOSE_PANE_TOOL,
+            REGISTER_DEV_SERVER_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
         // response before this change too — SHELL_INPUT/STATUS, the three
@@ -3704,7 +3745,11 @@ mod tests {
         // SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md Phase 2) — same
         // reasoning, not fixing the pre-existing drift between this running
         // total and the prose breakdown.
-        assert_eq!(defs.len(), 48, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory");
+        // REGISTER_DEV_SERVER_TOOL added (1:
+        // SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) — same reasoning,
+        // not fixing the pre-existing drift between this running total and
+        // the prose breakdown.
+        assert_eq!(defs.len(), 49, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

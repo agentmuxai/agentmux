@@ -565,6 +565,37 @@ pub struct ClosePaneRequest {
     pub reason: Option<String>,
 }
 
+/// `POST /api/v1/agent/dev_server/register` — backs the `RegisterDevServer`
+/// MCP tool. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+///
+/// `auth` is reused unchanged from `UiAutomationAuth`, same as
+/// `ClosePaneRequest` above — the calling agent proves it IS `auth.agent_id`
+/// via its own `AGENTMUX_JEKT_KEY` signature; there is no client-supplied
+/// agent id to spoof. The backend address the routing table actually
+/// stores is resolved server-side from THAT agent's own container (never a
+/// client-supplied address) — this request only ever supplies the PORT the
+/// caller's own dev server is listening on inside its own container.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDevServerRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Project name — becomes part of the routing hostname,
+    /// `<project>-<agent_id>.localhost`. Lowercased server-side before use;
+    /// should be a short, hostname-safe slug.
+    pub project: String,
+    /// Port the dev server is listening on INSIDE the caller's own
+    /// container (container-internal — never a host-published port).
+    pub port: u16,
+}
+
+/// Response for `POST /api/v1/agent/dev_server/register`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDevServerResponse {
+    /// The full routable URL, e.g. `"http://pulse-korp.localhost:8090"` —
+    /// what to actually browse to.
+    pub url: String,
+}
+
 #[cfg(test)]
 mod app_api_manifest_contract_tests {
     //! Rust half of the DRY contract check for the `shell.*` routes,
