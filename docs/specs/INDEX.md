@@ -535,6 +535,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
+| [`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20`](SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md) | Spec: Cross-Instance Global Memory Sync |
 | [`SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02`](SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02.md) | Spec: default tab names — "Tab N", not "tabN" |
 | [`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25`](SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) | SPEC: Default fresh-start widgets — Agent, Swarm, Armory, Sysinfo |
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
@@ -587,6 +588,7 @@ partial list.
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
 | [`SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18`](SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md) | SPEC: panes should not hold the instance's API credential |
+| [`SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20`](SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md) | SPEC: Permanently blank agent panes after recovery — the hoist deadlock, and the wrong-tab registration that triggers it |
 | [`SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21`](SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21.md) | SPEC — Pane Minimize Button + Failed Tool Call Immediate Collapse |
 | [`SPEC_PANE_MINIMIZE_CARET_BUG_2026_06_24`](SPEC_PANE_MINIMIZE_CARET_BUG_2026_06_24.md) | SPEC — Pane Minimize Caret Not Flipping |
 | [`SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27`](SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md) | SPEC — Pane Minimize: Column Dissolve on Full-Column Collapse |
