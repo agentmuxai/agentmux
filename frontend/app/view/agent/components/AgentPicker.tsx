@@ -30,7 +30,8 @@
  * and docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md (current).
  */
 
-import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
+import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -213,16 +214,26 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         return myAgentsLoaded();
     });
 
-    // Hold-then-fade, same mechanics as agent-view.tsx's pane-level loading
-    // overlay (docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md):
-    // `pickerReady()` flips once, `showPickerOverlay` stays true for one
-    // more CSS fade duration so the overlay's own removal is never a pop.
-    const [showPickerOverlay, setShowPickerOverlay] = createSignal(true);
+    // Hold-then-fade, now expressed through the shared readiness controller
+    // (SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md phase 2). Mechanics are
+    // unchanged — one gate, released when `pickerReady()` flips, then one CSS fade
+    // duration before unmount so the overlay's removal is never a pop.
+    //
+    // What changes is ownership: this component used to render
+    // `.agent-pane-loading-overlay` itself, with its own ready signal and its own
+    // unmount timer, while agent-view.tsx rendered the SAME class with its own —
+    // two covers for one pane, whichever unmounted last winning. Both now go
+    // through <PaneLoadingCover>, so the class has a single owner.
+    const pickerReadiness = createPaneReadiness({ label: "agent-picker" });
+    const releasePickerGate = pickerReadiness.gate("picker-content");
     let pickerOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => clearTimeout(pickerOverlayFadeTimeout));
     createEffect(() => {
-        if (pickerReady() && showPickerOverlay()) {
-            pickerOverlayFadeTimeout = setTimeout(() => setShowPickerOverlay(false), 220);
+        if (pickerReady()) releasePickerGate();
+    });
+    createEffect(() => {
+        if (pickerReadiness.phase() === "revealing") {
+            pickerOverlayFadeTimeout = setTimeout(() => pickerReadiness.revealComplete(), 220);
         }
     });
 
@@ -935,19 +946,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // combined overlay replaced each branch's previous independent partial
     // reflow. Not a separate component (no reactive scope of its own
     // needed) — just a render-time helper so the markup isn't duplicated.
-    const pickerOverlay = () => (
-        <Show when={showPickerOverlay()}>
-            <div
-                class="agent-pane-loading-overlay"
-                classList={{
-                    "is-fading": pickerReady(),
-                    "is-reduced-motion": atoms.prefersReducedMotionAtom(),
-                }}
-            >
-                <BrainSpinner fading={pickerReady()} />
-            </div>
-        </Show>
-    );
+    const pickerOverlay = () => <PaneLoadingCover phase={pickerReadiness.phase} />;
 
     return (
         <>

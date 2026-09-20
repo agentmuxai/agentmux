@@ -472,6 +472,7 @@ partial list.
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
+| [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
 | [`SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19`](SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) | SPEC + PLAN: Pane Tab Drag-and-Drop — reorder, cross-pane move, tear-off-to-floating-pane, and reserved whole-pane-drag space |
