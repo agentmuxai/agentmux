@@ -2,13 +2,17 @@
 
 **Date:** 2026-09-19
 **Severity:** Low — cosmetic, reported on the agent pane's busy-indicator ring.
-**Status:** fixed, on the second attempt. `frontend/app/view/agent/agent-view.scss`
-was changed (`.agent-pane-progress-bar-slot` and `.agent-pane-progress-bar`);
-see "Confirmed root cause and fix" below. Earlier revisions of this document
-described this as investigation-only with no fix applied (true for the first
-pass, all-negative geometry/DPR results) and then as fixed with a top-edge-only
-change (true for that specific edge, on that specific live test, but the fix
-was scoped too narrowly — see "First fix attempt was too narrow" below).
+**Status:** fixed, on the third attempt. `frontend/app/view/agent/agent-view.scss`
+was changed (`.agent-pane-progress-bar-slot`); see "Fix v2" below for what
+actually shipped. Earlier revisions of this document described this as
+investigation-only with no fix applied (true for the first pass,
+all-negative geometry/DPR results), then as fixed with a top-edge-only
+overlap (true for that specific edge, on that specific live test, but too
+narrowly scoped — see "First fix attempt was too narrow"), then as fixed by
+widening the overlap to all four edges (v1: closed the gap on every edge
+tested, but ReAgent's PR review caught a real regression in that approach —
+see "Fix v1 was caught by review" below — superseded by v2, which removes
+the regression and needs no overlap-and-hope at all).
 
 ## What was reported
 
@@ -188,11 +192,10 @@ on *any* edge — not predictably the same one. Chrome zoom on the header
 arithmetic, but the fix needs to protect every edge, not just the one
 adjacent to the zoomed element.
 
-## Fix applied
+## Fix v1 (superseded) — uniform overlap on all four sides
 
 `frontend/app/view/agent/agent-view.scss`, two paired changes, applied
-**uniformly on all four sides** (both required together — see comments left
-in the code for the full reasoning):
+uniformly on all four sides:
 
 1. `.agent-pane-progress-bar-slot`: inset changed from `2px` to `1px`
    (all sides) — pulls the ring 1px closer to the true pane edge, everywhere.
@@ -201,61 +204,92 @@ in the code for the full reasoning):
    so the ring's visible position doesn't move (nothing shifts toward the
    content side).
 
-Together these add one extra pixel of ring coverage on every edge, landing
-*inside* the 2px focus ring's own footprint — invisible in the common case,
-since the focus ring paints above this element (z-index) and fully covers
-it — but present as a safety margin against a one-device-pixel rounding
-disagreement, wherever it happens to land. Standard technique for this class
-of bug: deliberately overlap a seam by construction, on every edge, rather
-than rely on two independently-rounded boxes to agree on any one of them.
+Verified with the same Playwright + pngjs repro methodology: pixel-identical
+to the unfixed CSS in the clean-rounding case, and closed a simulated
+1-device-pixel-short border on both the top and bottom edges. Pushed as
+PR #3443.
 
-## Validation
+### Fix v1 was caught by review
 
-Extended the same Playwright + pngjs repro methodology used for the
-investigation, for both the top-only attempt and the final uniform fix:
+ReAgent's review on PR #3443 ([P1], `agent-view.scss:326`) identified a real
+regression this repro methodology missed: v1's "invisible in the common
+case" claim depends on the focus ring being opaque enough to fully cover the
+extra pixel. It isn't, in two very common states:
 
-- **No regression**: with the uniform fix applied, sampling all four edges
-  at DPR 1 produces pixel-identical output to the original (unfixed) CSS —
-  border, then a 1px-visible ring, then background — on every edge.
-  (`node pixels_uniform.mjs` in the repro directory.)
-- **Fix is effective on the edge that actually failed live (bottom)**: built
-  `ring-repro-uniform-shortbottom.html`, simulating the bottom border
-  rendering 1 device pixel short (`border-width: 2px 2px 1px 2px`).
-  Unfixed CSS under that condition reproduces a background-colored gap
-  between border and ring (same shape as the original top-edge repro,
-  `ring-repro-shortborder.html`, which reproduced the original top symptom).
-  The uniform fix closes it: `border(blue) → ring(red) → ring(red) →
-  background`, no gap pixel.
-- Confirmed via the same method that the top edge (the case the first,
-  narrower fix already handled) is unaffected by generalizing to all four
-  sides.
+- **Default/unfocused**: `--border-color: rgba(255, 255, 255, 0.16)`
+  (`theme.scss`) — a 16%-opacity white. The extra pixel shows through,
+  alpha-blended, not hidden.
+- **Focused-alone** (a single pane, not part of a split — arguably the most
+  common way to watch one agent work): `.pane-stack-focused-alone::after {
+  border-color: transparent; }` (`PaneChrome.scss`). Nothing covers the
+  extra pixel at all.
 
-This proves the mechanism (a rounding-short edge, on either the top or
-bottom, and by the same reasoning potentially left/right at some other
-container size) produces precisely the reported symptom, and that the
-uniform fix removes it on every edge tested without altering the
-correctly-rounding case. Recommend the user re-check at the zoom/display-scale/
-pane-size combinations that previously showed the gap now that the app is
-running with this change.
+Both were missed because every repro variant up to this point used
+`.pane-stack.focused` for visibility while sampling pixels — the one state
+where the border genuinely is opaque. Confirmed the reviewer's claim
+directly against the cited lines before responding (`grep` on both files —
+exact values matched).
+
+## Fix v2 (shipped) — match the border's own box-model mechanism
+
+Root issue underlying both the original bug and v1's flawed patch: `inset:
+2px` (an absolute-position offset) and `.pane-stack::after`'s `border: 2px
+solid` (a border-width subtraction) are two *different* CSS box-model
+computations that both nominally mean "2px" but are not guaranteed to round
+to the same device pixel. v1 tried to paper over an occasional disagreement
+between them with an overlap margin; v2 removes the disagreement itself by
+having `.agent-pane-progress-bar-slot` ask the layout engine to solve the
+exact same problem `.pane-stack::after` does:
+
+```scss
+.agent-pane-progress-bar-slot {
+    inset: 0;
+    border: 2px solid transparent;
+    // ...
+}
+```
+
+Instead of `inset: 2px`. The child `.agent-pane-progress-bar` (`inset: 0`
+relative to this element) resolves against the *padding box* per spec —
+i.e. automatically inside the transparent border, same as it sat inside the
+old `inset: 2px` — so `.agent-pane-progress-bar`'s own rule needed no change
+and its `padding: 1px` (ring thickness) reverted to what it was before v1.
+Net effect: no extra pixel exists anywhere to hide, so the translucent- and
+transparent-border regression v1 introduced cannot occur, by construction —
+not by relying on opacity.
+
+## Validation (v2)
+
+- **All three real border states** (opaque/focused, translucent/default,
+  transparent/focused-alone): ring stays exactly 1px thick in every case,
+  confirmed by sampling `ring-repro.html` (focused), `ring-default.html`
+  (default `.pane-stack`, translucent border), and
+  `ring-focused-alone.html` (`.pane-stack.focused-alone`, transparent
+  border) — no thickening, no color bleed-through in any of them.
+- **DPR 1/1.25/1.5/1.75**, all four edges: pixel-identical to the original
+  pre-v1 CSS (border, then 1px ring, then background) at every combination
+  tested.
+- Not independently re-tested against the exact live short-rounding
+  scenario from before (v1's `ring-repro-uniform-shortbottom.html` doesn't
+  carry over cleanly, since v2's fix works by eliminating the mismatched
+  computation rather than by margin — there's no longer a meaningful way to
+  "simulate a disagreement" between two rules that now literally ask for
+  the same thing). Recommend re-verifying live at whatever zoom/display-scale
+  combination previously showed the gap, same as v1's own follow-up ask.
 
 ## Repro artifacts
 
 `C:\Users\asafe\.agentmux\agents\agent1-06309\repro\`:
-- `ring-repro.html` — the isolated static repro, flat-color variant (swap
-  `--progress-bar-color` back to a `repeating-conic-gradient` to test the
-  animated case)
-- `ring-repro-uniform.html` — the final, uniform (all-four-sides) fix
-- `ring-repro-shortborder.html` / `ring-repro-shortborder-unfixed.html` —
-  the (superseded) top-only fix vs. original, against a simulated top-edge
-  short border
-- `ring-repro-uniform-shortbottom.html` — the final uniform fix against a
-  simulated bottom-edge short border (the case that actually failed live)
-- `pixels.mjs` / `pixels_dpr.mjs` / `pixels_chromezoom.mjs` /
-  `pixels_short.mjs` / `pixels_short2.mjs` / `pixels_uniform.mjs` /
-  `pixels_shortbottom.mjs` — Playwright + pngjs scripts sampling exact pixel
-  colors across all four edges, at various DPRs, with `--zoomfactor` set on
-  the header only, and against simulated short-border cases on both the top
-  and bottom edges
+- `ring-repro.html` — isolated static repro, flat-color variant, focused
+  state (opaque border); currently reflects the v2 fix
+- `ring-default.html` / `ring-focused-alone.html` — v2 fix under the real
+  translucent (default) and transparent (focused-alone) border states, the
+  cases v1 got wrong
+- `ring-repro-uniform.html`, `ring-repro-uniform-shortbottom.html`,
+  `ring-repro-shortborder.html` / `-unfixed.html` — v1 (superseded)
+  artifacts, kept for the record of what was tried and why it wasn't enough
+- `pixels*.mjs` — Playwright + pngjs scripts backing all of the above
+  (`pixels_borderstates.mjs` and `pixels_v2_dpr.mjs` are v2's)
 
 These are scratch/investigation files in the agent workspace, not part of
 the repo, and were not committed.
