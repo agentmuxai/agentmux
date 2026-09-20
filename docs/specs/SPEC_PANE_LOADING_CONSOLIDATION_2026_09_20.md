@@ -2,8 +2,9 @@
 
 **Date:** 2026-09-20
 **Type:** Architecture proposal
-**Status:** active — phases 1 and 2 and the §5.4 chrome guard ship with this spec.
-Landed: `PaneReadiness` (§5.1/§5.2) with named gates and a bounded reveal timeout;
+**Status:** active — phases 1 and 2 and the §5.4 chrome guard shipped in PR #3462.
+Landed: `PaneReadiness` (§5.1/§5.2) with named gates, a warn-only stuck-gate report
+and an opt-in (default-off) reveal bound;
 `<PaneLoadingCover>` (§5.3) now the single owner of `.agent-pane-loading-overlay`,
 adopted by both `agent-view.tsx` and `AgentPicker.tsx` — indicator #4 in §2 is gone and
 #3 no longer renders its own markup; the header-mic guard inverted to positive (§5.4).
