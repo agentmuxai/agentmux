@@ -496,3 +496,31 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
         expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
     });
 });
+
+describe("PaneLeafChrome — RCA verification (non-keep-alive hoist path)", () => {
+    // DIAGNOSTIC, not a claimed-fixed regression test yet. Checks whether
+    // `chromeVm()` can permanently latch null via the non-keep-alive path
+    // when the view type is ALREADY resolved before the first render (the
+    // condition observed live after an app recovery/restart cycle, when
+    // MOS block meta is already warm). `content` (line ~327) is a plain,
+    // eagerly-constructed const containing `<Block>`, unconditionally —
+    // NOT gated behind `hoisted()`/`chromeVm()` — so if SolidJS mounts it
+    // (and runs its `createEffect`) regardless of which `<Show>` branch
+    // ends up using the resulting value, this should resolve fine and this
+    // test should PASS, refuting the non-keep-alive half of the hoist-
+    // deadlock theory in SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md.
+    // If it TIMES OUT instead, that confirms the deadlock is real here too.
+    it("resolves chrome-root even when the view type is already \"agent\" on the very first synchronous render", async () => {
+        setBlockView("b1", "agent"); // already resolved BEFORE render — the claimed trigger condition
+        const [activeBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId }); // REAL signal-backed activeViewModel, not a static fake
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("chrome-root")).toBeInTheDocument();
+        }, { timeout: 1000 });
+        expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
+    });
+});
