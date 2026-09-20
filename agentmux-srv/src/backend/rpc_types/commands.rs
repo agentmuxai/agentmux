@@ -119,6 +119,13 @@ pub const COMMAND_AGENT_ANSWER: &str = "agentanswer";
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
 pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
+/// Backend half of the `/btw` slash command — a fast, one-shot, tool-less
+/// side question answered against a fresh throwaway block, without
+/// touching the asking pane's own persisted transcript or blocking/queuing
+/// behind that pane's live turn. See
+/// `server/agent_handlers/side_question.rs` for the full design and
+/// `mps::EVENT_BTW_ANSWER_CHUNK` for how the answer streams back.
+pub const COMMAND_ASK_SIDE_QUESTION: &str = "asksidequestion";
 pub const COMMAND_SHELL_EXEC: &str = "shellexec";
 /// Stop a running persistent shell node (Phase 3) — UI stop button.
 pub const COMMAND_SHELL_STOP: &str = "shellstop";

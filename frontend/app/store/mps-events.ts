@@ -73,4 +73,20 @@ export const WpsEvent = {
     // `{ block_id, kind, text }` — because there is no list query to re-read,
     // so an invalidation ping would have nothing to invalidate.
     AmbientNarration: "ambient-narration",
+    // Streamed answer chunks for a `/btw <question>` side question — scoped
+    // `block:<blockId>:btw:<requestId>` (NOT plain `block:<blockId>`, unlike
+    // most other block-scoped events here: a pane can have more than one
+    // `/btw` in flight, and each overlay must only see its own answer).
+    // Mirrors `mps::EVENT_BTW_ANSWER_CHUNK`
+    // (agentmux-srv/src/server/agent_handlers/side_question.rs's
+    // `publish_chunk`). Payload:
+    // `{ blockId: string, requestId: string, event: AgentEvent, done: boolean }`
+    // — `event` is the SAME tagged `AgentEvent` union every normal turn
+    // streams (`type: "assistant_text"` with `delta`, `"done"` with the
+    // final `response`, `"error"` with `message`, etc. — see
+    // `frontend/types/srv-types.d.ts`'s `AgentEvent`). The outer `done: true`
+    // (not `event.type === "done"`) is the authoritative completion signal
+    // `components/BtwOverlay.tsx` waits on — it also fires on a terminal
+    // `error` event, which `event.type` alone would not indicate as "done".
+    BtwAnswerChunk: "btw_answer_chunk",
 } as const;

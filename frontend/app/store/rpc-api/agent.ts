@@ -40,6 +40,8 @@ export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit
 export type { AgentConfigFile } from "@/types/rpc/AgentConfigFile";
 export type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 export type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
+export type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
+export type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 export type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 export type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 export type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
@@ -53,6 +55,8 @@ export type { ShellStopResult } from "@/types/rpc/ShellStopResult";
 import type { AgentConfigFile } from "@/types/rpc/AgentConfigFile";
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
+import type { CommandAskSideQuestionData } from "@/types/rpc/CommandAskSideQuestionData";
+import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
 import type { CommandShellExecData } from "@/types/rpc/CommandShellExecData";
 import type { CommandShellStatusData } from "@/types/rpc/CommandShellStatusData";
 import type { CommandShellStopData } from "@/types/rpc/CommandShellStopData";
@@ -602,6 +606,19 @@ export const AgentApi = {
 
     AgentInputCommand(client: RpcClient, data: CommandAgentInputData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("agentinput", data, opts);
+    },
+
+    // `/btw <question>` — a one-shot, tool-less side question (see
+    // agentmux-srv/src/server/agent_handlers/side_question.rs). Returns
+    // immediately with a `request_id`; the actual answer streams as
+    // `WpsEvent.BtwAnswerChunk` events scoped
+    // `block:<block_id>:btw:<request_id>` — see mps-events.ts.
+    AskSideQuestionCommand(
+        client: RpcClient,
+        data: CommandAskSideQuestionData,
+        opts?: RpcOpts,
+    ): Promise<AskSideQuestionResult> {
+        return client.rpcCall("asksidequestion", data, opts);
     },
 
     // Run a shell command in the agent's working directory. Invoked by the
