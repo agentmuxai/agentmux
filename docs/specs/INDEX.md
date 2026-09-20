@@ -225,6 +225,7 @@ partial list.
 | [`SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07`](SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md) | SPEC: Explicit close button on the Runtime (Mode/Model/Effort) dropup |
 | [`SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02`](SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md) | SPEC: Agent Pane Session Cost/Token Totals |
 | [`SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08`](SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md) | SPEC: Open the agent-pane Shell drawer below the composer, not above it |
+| [`SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20`](SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md) | SPEC — Shell drawer terminal renders in a fractionally-scaled coordinate space |
 | [`SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14`](SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md) | Agent shell drawer: PSReadLine thaw resize causes a visible ~9px width blip ~300-350ms after open |
 | [`SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10`](SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) | Agent shell drawer: font-size seed race causes zoom jerk on open |
 | [`SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16`](SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md) | SPEC: Agent Startup Sequence |
@@ -535,6 +536,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
+| [`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20`](SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md) | Spec: Cross-Instance Global Memory Sync |
 | [`SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02`](SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02.md) | Spec: default tab names — "Tab N", not "tabN" |
 | [`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25`](SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) | SPEC: Default fresh-start widgets — Agent, Swarm, Armory, Sysinfo |
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
