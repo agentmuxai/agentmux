@@ -17,7 +17,7 @@
         "Chrome >= 128"
     ],
     "scripts": {
-        "prepare": "node -e \"try{require('child_process').execSync('git rev-parse --git-dir',{stdio:'ignore'})}catch(e){process.exit(0)}require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})\"",
+        "prepare": "node -e \"try{const t=require('child_process').execSync('git rev-parse --show-toplevel',{stdio:['ignore','pipe','ignore']}).toString().trim();if(!require('fs').existsSync(require('path').join(t,'.githooks')))process.exit(0)}catch(e){process.exit(0)}require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})\"",
         "dev": "task dev",
         "build": "task build:frontend",
         "build:backend": "task build:backend",
