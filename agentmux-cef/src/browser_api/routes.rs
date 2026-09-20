@@ -225,10 +225,14 @@ pub async fn eval(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "eval", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let eval_result = match cdp
         .call(
@@ -709,10 +713,14 @@ pub async fn navigate(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "navigate", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let reply = cdp.call("Page.navigate", json!({ "url": req.url })).await;
     let _ = cdp.close().await;
@@ -747,10 +755,14 @@ pub async fn back(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "back", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     // `Page.navigateToHistoryEntry` needs an entryId; simpler to call
     // Page.goBack which CDP exposes directly.
@@ -779,10 +791,14 @@ pub async fn forward(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "forward", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let reply = cdp.call("Page.goForward", json!({})).await;
     let _ = cdp.close().await;
@@ -811,10 +827,14 @@ pub async fn reload(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "reload", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let reply = cdp
         .call("Page.reload", json!({ "ignoreCache": req.ignore_cache }))
@@ -868,6 +888,38 @@ async fn open_cdp_for_block(
     Err(last_err)
 }
 
+/// Rejects `eval`/`navigate`/`back`/`forward`/`reload` against a Path-2
+/// (shared-window) target. Those CDP calls (`Runtime.evaluate`,
+/// `Page.navigate`/`goBack`/`goForward`/`reload`) act on the resolved
+/// page AS A WHOLE — there is no way to scope `Page.navigate` to "just
+/// this block's subtree" the way `query`/`click_element` scope a DOM
+/// lookup. For a Path 1 target (a dedicated `view: "browser"` pane) that
+/// whole page already IS this block's own isolated content, so acting on
+/// it is safe. For a Path 2 target (any other pane — agent/terminal/
+/// editor/etc., a DOM node inside a page SHARED with the main/pool/
+/// floating window's own chrome and every other pane in it) it is not:
+/// `eval` would run arbitrary JS with access to the entire shared page,
+/// and `navigate`/`back`/`forward`/`reload` would navigate or rewrite
+/// history for that whole shared window out from under every other pane
+/// in it, for a `block_id` that isn't even a browser pane. See
+/// `resolver::ResolvedTarget::scope_to_block` and
+/// `docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md` §2-3.1.
+///
+/// Deliberately sync/pure (no `CdpSession` param) so it's unit-testable
+/// without a live CDP connection — callers close their own session on the
+/// `Err` path, same as every other error branch in this file.
+fn reject_if_shared_target(scope_to_block: bool, op: &str, block_id: &str) -> Result<(), String> {
+    if scope_to_block {
+        return Err(format!(
+            "{op}: block {block_id:?} is not a dedicated browser pane. {op} acts on the \
+             whole resolved page, which for this block is a page SHARED with other panes \
+             and the app's own chrome, not an isolated page — only a `view: \"browser\"` \
+             pane block is a safe target for this operation."
+        ));
+    }
+    Ok(())
+}
+
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {
     headers
         .get("authorization")
@@ -879,4 +931,34 @@ fn authorized(headers: &HeaderMap, expected: &str) -> bool {
 
 fn ok_body<T>(body: ApiResponse<T>) -> (StatusCode, Json<ApiResponse<T>>) {
     (StatusCode::OK, Json(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reject_if_shared_target;
+
+    #[test]
+    fn allows_a_dedicated_browser_pane_target() {
+        assert!(reject_if_shared_target(false, "eval", "block-1").is_ok());
+    }
+
+    #[test]
+    fn rejects_a_shared_window_target_with_a_clear_message() {
+        let err = reject_if_shared_target(true, "navigate", "block-1")
+            .expect_err("a shared-window target must be rejected");
+        assert!(err.contains("navigate"), "message should name the rejected operation: {err}");
+        assert!(err.contains("block-1"), "message should name the offending block: {err}");
+        assert!(
+            err.contains("not a dedicated browser pane"),
+            "message should explain why: {err}"
+        );
+    }
+
+    #[test]
+    fn every_op_name_this_module_calls_it_with_appears_in_the_message() {
+        for op in ["eval", "navigate", "back", "forward", "reload"] {
+            let err = reject_if_shared_target(true, op, "b").unwrap_err();
+            assert!(err.starts_with(op), "expected message to start with {op:?}: {err}");
+        }
+    }
 }

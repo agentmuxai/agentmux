@@ -301,6 +301,93 @@ pub(crate) const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+// Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
+// — no-mouse, selector/JS-level control of a browser pane, layered on the
+// same identity/own-pane scoping UIClick/UIQuery/UIScreenshot use.
+// Navigate/Back/Forward/Reload/Eval additionally only work when the
+// caller's OWN pane is itself a dedicated browser pane (view: "browser")
+// — rejected with a clear error otherwise, never silently falling back to
+// acting on the shared window.
+
+pub(crate) const BROWSER_NAVIGATE_TOOL: &str = r#"{
+  "name": "BrowserNavigate",
+  "description": "Navigate your OWN browser pane to a new URL. Only works if your own pane IS a browser pane (view: \"browser\") — fails clearly otherwise, does not affect any other pane.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": { "type": "string", "description": "URL to navigate to" }
+    },
+    "required": ["url"]
+  }
+}"#;
+
+pub(crate) const BROWSER_BACK_TOOL: &str = r#"{
+  "name": "BrowserBack",
+  "description": "Walk your OWN browser pane's history back one step. Only works if your own pane is a browser pane. Ack-only even if there was no prior history (CDP no-ops); confirm the result with BrowserEval(\"location.href\") if needed.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const BROWSER_FORWARD_TOOL: &str = r#"{
+  "name": "BrowserForward",
+  "description": "Walk your OWN browser pane's history forward one step. Only works if your own pane is a browser pane. Ack-only even if there was no next history entry.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+pub(crate) const BROWSER_RELOAD_TOOL: &str = r#"{
+  "name": "BrowserReload",
+  "description": "Reload your OWN browser pane's current page. Only works if your own pane is a browser pane.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "ignore_cache": { "type": "boolean", "description": "Bypass the HTTP cache (like Ctrl+F5). Default false." }
+    }
+  }
+}"#;
+
+pub(crate) const BROWSER_EVAL_TOOL: &str = r#"{
+  "name": "BrowserEval",
+  "description": "Run arbitrary JavaScript in your OWN browser pane's page and return the serialized result — the general-purpose way to read page text/state (e.g. `document.body.innerText`), fill a form field, or wait for app-specific state, without a dedicated tool for every action. Only works if your own pane is a browser pane: the script runs in that page's own JS world, never the shared AgentMux window. Returns {result, type, exception} — exception is set (and result null) if the script threw.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "script": { "type": "string", "description": "JavaScript expression to evaluate" },
+      "await_promise": { "type": "boolean", "description": "If the script returns a Promise, wait for it to resolve before returning. Default false." }
+    },
+    "required": ["script"]
+  }
+}"#;
+
+pub(crate) const BROWSER_DISPATCH_KEY_TOOL: &str = r#"{
+  "name": "BrowserDispatchKey",
+  "description": "Type into whatever currently has focus in your OWN AgentMux pane (browser pane or otherwise — this one works for any pane, same scoping as UIClick). Pass exactly one of `text` (inserted atomically, handles IME correctly — use this for typing strings) or `key` (a named key: Enter, Tab, Escape, Backspace, ArrowUp/Down/Left/Right, Space). Optionally pass `selector` to focus an element first.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": { "type": "string", "description": "Optional CSS selector to focus before dispatching" },
+      "text": { "type": "string", "description": "Text to insert — mutually exclusive with key" },
+      "key": { "type": "string", "description": "Named key to dispatch — mutually exclusive with text. One of: Enter, Tab, Escape, Backspace, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Space" }
+    }
+  }
+}"#;
+
+pub(crate) const BROWSER_FOCUS_ELEMENT_TOOL: &str = r#"{
+  "name": "BrowserFocusElement",
+  "description": "Call .focus() on the first element matching a CSS selector in your OWN pane (browser pane or otherwise, same scoping as UIClick). Does not synthesize a mouse event — use UIClick for full click semantics.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": { "type": "string", "description": "CSS selector for the element to focus, scoped to your own pane" }
+    },
+    "required": ["selector"]
+  }
+}"#;
+
+pub(crate) const BROWSER_FOCUS_INFO_TOOL: &str = r#"{
+  "name": "BrowserFocusInfo",
+  "description": "Report the element currently focused (document.activeElement) in your OWN pane, as the same {tag, text, attrs, rect, selector} shape UIQuery returns — null if nothing is focused. Works for any pane, same scoping as UIClick/UIQuery.",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
 pub(crate) const CLOSE_PANE_TOOL: &str = r#"{
   "name": "ClosePane",
   "description": "Close a pane. With no arguments, closes YOUR OWN pane (identity verified server-side, same mechanism as UIClick — there is no way to spoof this as a different pane). Pass block_id to close ANY pane instead — including one that is unresponsive/unclickable (e.g. a pane stuck in a broken render state) — with no ownership check on the target: this is a fleet-level action, logged to the audit trail with your own verified identity as the source, same posture as FleetBulkStop. Get a target block_id from Layout. Closing a pane only removes it from the layout; the underlying agent's conversation history is not deleted.",
