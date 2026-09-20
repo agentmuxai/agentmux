@@ -1671,6 +1671,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Agent input/stop + subprocess spawn handlers
     super::agent_handlers::register_agent_input_handlers(engine, &state);
 
+    // `/btw` slash command — one-shot, tool-less side question.
+    super::agent_handlers::register_side_question_handlers(engine, &state);
+
     // Shell exec/stop handlers
     super::shell_handlers::register_shell_handlers(engine, &state);
 

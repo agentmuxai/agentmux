@@ -99,6 +99,25 @@ pub const EVENT_CRON_CHANGED: &str = "cron_changed";
 /// resolved, or a different pane's block) no-ops.
 /// See `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md` §3.2.
 pub const EVENT_DOCK_CLEAR: &str = "dock:clear";
+/// Fired by the `/btw` slash command's one-shot side-question turn
+/// (`server/agent_handlers/side_question.rs`, `AskSideQuestionCommand`) —
+/// one event per `AgentEvent` translated from the throwaway turn's
+/// stream-json output (same `ClaudeTranslator` the drone Agent block runner
+/// uses, `agents/translator/claude.rs`), plus a final event with
+/// `"done": true` when the turn completes (successfully, with an error, or
+/// via a timeout/no-response fallback).
+///
+/// Scoped `block:<source_block_id>:btw:<request_id>` — the block id of the
+/// PANE THAT ASKED, not the throwaway block the turn actually ran on (that
+/// one is never surfaced, is deleted when the turn ends, and nothing is
+/// ever subscribed to its scope). `request_id` is the UUID
+/// `AskSideQuestionCommand` mints and returns, so two concurrent `/btw`
+/// asks from the same pane get independently-scoped streams. Payload:
+/// `{ "blockId": "<source_block_id>", "requestId": "<request_id>",
+/// "event": <AgentEvent JSON>, "done": bool }`. `persist: 0` — a `/btw`
+/// overlay is transient UI, not conversation history, so a pane that
+/// wasn't subscribed while it ran has nothing worth replaying.
+pub const EVENT_BTW_ANSWER_CHUNK: &str = "btw_answer_chunk";
 
 // File operation constants
 #[allow(dead_code)]

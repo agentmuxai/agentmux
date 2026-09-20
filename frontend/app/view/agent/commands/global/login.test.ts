@@ -59,6 +59,8 @@ function makeCtx(): SlashCommandContext {
         resetCancelled: vi.fn(),
         openPicker: vi.fn(),
         openHelp: vi.fn(),
+        quickFork: vi.fn(),
+        askSideQuestion: vi.fn(),
     };
 }
 
