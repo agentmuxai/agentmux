@@ -1,7 +1,7 @@
 # SPEC: Deep, no-mouse control of a browser pane via the Agent App API
 
 **Date:** 2026-09-20
-**Status:** proposed
+**Status:** implemented — PR #3445.
 **Related:** `docs/specs/SPEC_AGENT_BROWSER_CONTROL_2026_04_17.md` (original
 2026-04-17 proposal — Draft, its tool names never built, superseded in
 spirit by this doc's design against the architecture that actually shipped),
