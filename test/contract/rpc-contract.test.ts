@@ -264,6 +264,7 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "memory.list",
     "memory.read",
     "memory.write",
+    "pane.moveTab",
     "pane.open",
     "slow",
     // engine.rs #[cfg(test)] registrations for the typed-registry eviction
