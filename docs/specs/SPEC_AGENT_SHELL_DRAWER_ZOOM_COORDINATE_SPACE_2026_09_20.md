@@ -1,10 +1,14 @@
 # SPEC — Shell drawer terminal renders in a fractionally-scaled coordinate space
 
 **Date:** 2026-09-20
-**Type:** Bug diagnosis + fix proposal (diagnosis verified live via CDP; fix not yet implemented)
-**Status:** proposed — diagnosis confirmed by direct measurement against a running dev
-instance; no code change has shipped. Decision on the user-visible trade-off (§7) taken:
-decouple.
+**Type:** Bug diagnosis + fix (both verified live via CDP)
+**Status:** implemented — shipped in #3456, which carries this spec. §8's plan was
+followed with two corrections found during implementation, both recorded there: the
+`agent-pane` container must be declared on BOTH `.agent-view` and the new wrapper (§8.5),
+and the loading overlay must move out of the wrapper or it stops covering the drawer
+(§8.6). Geometry is verified by measurement; the two user-visible rendering outcomes in
+§9 (whole top line, correctly placed hover underline) were NOT confirmed by a human at
+merge time — see the note there.
 **Scope (confirmed affected):** `frontend/app/view/agent/agent-view.tsx` (the
 `zoom:` style at :2145 and the drawer mount at :2585-2594),
 `frontend/app/view/agent/components/AgentShellSubblock.tsx` (`termFontSize`
