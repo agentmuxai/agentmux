@@ -17,7 +17,7 @@
         "Chrome >= 128"
     ],
     "scripts": {
-        "prepare": "git config core.hooksPath .githooks",
+        "prepare": "node scripts/setup-git-hooks.cjs",
         "dev": "task dev",
         "build": "task build:frontend",
         "build:backend": "task build:backend",
