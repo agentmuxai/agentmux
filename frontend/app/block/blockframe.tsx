@@ -236,10 +236,21 @@ function EndIcons(props: {
      *  hoisted pane-chrome caller can instead pass `nodeModel.activeBlockId`
      *  to track a switch without remounting this component. */
     blockId: Accessor<string>;
+    /** True while the pane is still assembling — see BlockFrameProps.isLoading. */
+    isLoading?: () => boolean;
 }): JSX.Element {
     // createMemo so blockAtom reads inside endIconButtons() are tracked and
     // the button array re-evaluates when the agent loads/unloads.
-    const endIconButtons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
+    //
+    // Held back until the pane is live (spec §5.4). These are view-supplied and
+    // appear only once the ViewModel has resolved, so during assembly they pop
+    // into a header that sits beside a pane still showing its loading cover,
+    // shifting the icons already there. The close/magnify/minimize controls
+    // below deliberately do NOT wait: the pane must stay closable while it
+    // loads, which is the whole reason the cover stops short of the header.
+    const endIconButtons = createMemo(() =>
+        props.isLoading?.() ? undefined : util.useAtomValueSafe(props.viewModel?.endIconButtons)
+    );
     const magnified = () => props.nodeModel.isMagnified();
     const minimized = () => props.nodeModel.isMinimized();
     const ephemeral = () => props.nodeModel.isEphemeral();
@@ -593,6 +604,7 @@ function BlockFrame_Header(
                     onContextMenu={onContextMenu}
                     blockView={blockData()?.meta?.view}
                     blockId={props.blockId}
+                    isLoading={props.isLoading}
                 />
             </div>
         </div>

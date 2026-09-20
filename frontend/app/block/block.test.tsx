@@ -167,3 +167,52 @@ describe("Block — preview/real ViewModel isolation", () => {
         expect(registered?.viewModel.noHeader()).toBe(true);
     });
 });
+
+/**
+ * Phase 3 of SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md.
+ *
+ * The headline acceptance criterion is a COUNT: at no point during a pane mount
+ * is more than one loading indicator in the DOM. `spin:2` was measured before
+ * this, with block.tsx, agent-view.tsx and AgentPicker.tsx each running their
+ * own visible/fading/unmount state machine for the same pane.
+ */
+describe("Block — one loading cover, stated coverage", () => {
+    const covers = () => document.querySelectorAll(".agent-pane-loading-overlay");
+
+    it("covers the pane exactly once while its view is still unresolved", async () => {
+        // No view type → getBlockViewClass returns null → viewModel() is null →
+        // ready() is false. This is the pane-still-assembling state.
+        setBlockView("b-assembling", undefined);
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-assembling" })} preview={false} />);
+
+        expect(covers().length).toBe(1);
+        expect(covers()[0].classList.contains("is-fading")).toBe(false);
+    });
+
+    it("sits in flow while there is no mounted content to overlay", async () => {
+        setBlockView("b-inflow", undefined);
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-inflow" })} preview={false} />);
+
+        // `.block` is rendered by BlockFrame, which does not exist until
+        // ready() — so there is no positioned ancestor for `inset: 0` to
+        // resolve against, and an absolute cover would collapse or escape the
+        // pane depending on the render route.
+        expect(covers()[0].classList.contains("is-in-flow")).toBe(true);
+    });
+
+    /**
+     * The warm-cache path, and the one a naive port gets wrong: if the gates
+     * complete during setup, the cover never painted, so fading it out would
+     * flash an opaque panel over content that was never hidden. The code this
+     * replaced special-cased exactly this ("reflect it directly, no fade").
+     */
+    it("never paints a cover for a block that is already ready on first flush", async () => {
+        setBlockView("b-warm", "agent"); // resolves synchronously → ready() true
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "b-warm" })} preview={false} />);
+
+        expect(covers().length).toBe(0);
+    });
+});
