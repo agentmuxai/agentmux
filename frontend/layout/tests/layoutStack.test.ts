@@ -291,7 +291,7 @@ describe("layoutStack", () => {
             pushBlockOntoStack(model, nodeId, "b3"); // stack: [b1,b2,b3]
             rpcCall.mockResolvedValue(undefined);
 
-            moveBlockInStack(model, nodeId, "b3", "b1", "before");
+            moveBlockInStack(model, "b3", "b1", "before");
 
             const data = model.treeState.rootNode!.data!;
             expect(data.blockStack).toEqual(["b3", "b1", "b2"]);
@@ -309,7 +309,7 @@ describe("layoutStack", () => {
             pushBlockOntoStack(model, nodeId, "b3"); // active = b3
             rpcCall.mockResolvedValue(undefined);
 
-            moveBlockInStack(model, nodeId, "b3", "b1", "after");
+            moveBlockInStack(model, "b3", "b1", "after");
 
             const data = model.treeState.rootNode!.data!;
             expect(data.blockStack).toEqual(["b1", "b3", "b2"]);
@@ -322,7 +322,7 @@ describe("layoutStack", () => {
             pushBlockOntoStack(model, nodeId, "b2"); // active = b2
             rpcCall.mockResolvedValue(undefined);
 
-            moveBlockInStack(model, nodeId, "b1", "b2", "after", true);
+            moveBlockInStack(model, "b1", "b2", "after", true);
 
             const data = model.treeState.rootNode!.data!;
             expect(data.blockStack).toEqual(["b2", "b1"]);
@@ -341,10 +341,78 @@ describe("layoutStack", () => {
             pushBlockOntoStack(model, nodeId, "b2");
             const before = { ...model.treeState.rootNode!.data! };
 
-            moveBlockInStack(model, nodeId, "not-a-member", "b1", "after");
+            moveBlockInStack(model, "not-a-member", "b1", "after");
 
             expect(model.treeState.rootNode!.data).toEqual(before);
             expect(rpcCall).not.toHaveBeenCalled();
+        });
+
+        // Phase 4 (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4) — the
+        // cross-pane path, exercised with exactly the arguments the real drop
+        // handler passes (two block ids, nothing else). ReAgent P0 on PR
+        // #3447: the first version took the source pane's node id as a
+        // parameter, and `handleReceiveForeignTab` — which runs on the
+        // DESTINATION pane — passed its own id, so every cross-pane drop
+        // silently took the same-pane branch and bailed. Resolving both
+        // panes from their block ids removes the parameter that could be
+        // wrong at all, so this test can't drift from the caller again.
+        function insertSecondPane(model: LayoutModel, blockId: string) {
+            model.treeReducer({
+                type: LayoutTreeActionType.InsertNode,
+                node: newLayoutNode(undefined, undefined, undefined, { blockId }),
+                magnified: false,
+                focused: false,
+            } as LayoutTreeInsertNodeAction);
+        }
+
+        it("moves a tab into ANOTHER pane's stack, active there, and fires the RPC", () => {
+            const model = createLayoutModel();
+            const paneA = insertRootBlock(model, "a1");
+            pushBlockOntoStack(model, paneA, "a2"); // pane A: [a1,a2]
+            insertSecondPane(model, "b1"); // pane B: [b1]
+            model.updateTree();
+            rpcCall.mockResolvedValue(undefined);
+
+            moveBlockInStack(model, "a2", "b1", "end", true);
+
+            const a = getNodeByBlockId(model, "a1")!;
+            const b = getNodeByBlockId(model, "b1")!;
+            expect(effectiveStack(a.data!)).toEqual(["a1"]); // a2 left pane A
+            expect(effectiveStack(b.data!)).toEqual(["b1", "a2"]); // and joined pane B
+            expect(b.data!.activeBlockId).toBe("a2");
+            expect(b.data!.blockId).toBe("a2");
+            expect(rpcCall).toHaveBeenCalledWith(
+                "pane.moveTab",
+                { block_id: "a2", target_block_id: "b1", position: "end", activate: true },
+                {}
+            );
+        });
+
+        it("refuses to move a pane's ONLY tab into another pane — that's a close, not a move", () => {
+            const model = createLayoutModel();
+            insertRootBlock(model, "a1"); // pane A: [a1] only
+            insertSecondPane(model, "b1");
+            model.updateTree();
+
+            moveBlockInStack(model, "a1", "b1", "end", true);
+
+            expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1"]);
+            expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1"]);
+            expect(rpcCall).not.toHaveBeenCalled();
+        });
+
+        it("resolves a DORMANT (background) pill's own pane, not just a visible one", () => {
+            const model = createLayoutModel();
+            const paneA = insertRootBlock(model, "a1");
+            pushBlockOntoStack(model, paneA, "a2"); // active = a2, so a1 is dormant
+            insertSecondPane(model, "b1");
+            model.updateTree();
+            rpcCall.mockResolvedValue(undefined);
+
+            moveBlockInStack(model, "a1", "b1", "end", true); // drag the DORMANT one
+
+            expect(effectiveStack(getNodeByBlockId(model, "a2")!.data!)).toEqual(["a2"]);
+            expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1", "a1"]);
         });
     });
 

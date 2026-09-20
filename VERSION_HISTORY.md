@@ -1,5 +1,19 @@
 # AgentMux Version History
 
+## 0.56.9 — 2026-09-20
+
+- fix(agents): Swarm's process list and the pane-close confirmation count only processes the agent started — not the agent CLI itself, conhost, or MCP servers; the composer's "⚙ N" badge is removed
+- feat(scripts): reusable, cropped CDP screenshot tooling for the UI manual
+- feat(agents): the composer's context reading is now a button — it opens a session popover with cost, turns, token totals and the Archive/Export actions that used to hide in the Shell drawer; session warnings moved above the composer where they are always visible
+- feat(agents): the Shell drawer opens with a line telling you what the shell is (name, pid, uptime, folder) and what the agent has left running on your machine
+- feat(container): native dev-proxy for container-agent dev servers
+- fix(scripts): stop silently downgrading from GitHub App to PAT on Windows
+- feat(layout): LayoutStackMove reducer command for a future pane-tab drag reorder/move (backend only, not yet wired to any frontend caller)
+- feat(panes): reserve whole-pane drag space in a Pane's tab strip once it overflows
+- fix(agent-pane): close a device-pixel rounding seam in the progress ring
+- feat(browser-api): deep, no-mouse browser-pane control via the Agent App API — 8 new MCP tools (BrowserNavigate/Back/Forward/Reload/Eval/DispatchKey/FocusElement/FocusInfo) so an agent can drive its own browser pane
+- feat(panes): drag a Pane Tab pill to reorder it within its own pane (new pane.moveTab RPC + LayoutStackMove reducer command)
+
 ## 0.56.8 — 2026-09-19
 
 - perf(agent-pane): keep agent tabs mounted across a pane-tab-strip switch instead of remounting (cold history restore + virtualizer rebuild) every time

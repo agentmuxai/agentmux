@@ -165,7 +165,20 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // changes membership or requires side effects beyond the stack itself,
     // so there's nothing for a view type to meaningfully override.
     const handleReorder = (blockId: string, targetId: string, position: "before" | "after") => {
-        moveBlockInStack(layoutModel, nodeModel.nodeId, blockId, targetId, position);
+        moveBlockInStack(layoutModel, blockId, targetId, position);
+    };
+    // Cross-pane drop-to-append (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.4): a pill dragged from a DIFFERENT pane was dropped on this
+    // Pane's header — append it, active, at the end of THIS pane's stack.
+    // `target` is any current member of THIS pane (its active tab), which is
+    // all `moveBlockInStack` needs to resolve the destination; the dragged
+    // block's own pane is resolved from `blockId`, NOT assumed to be this
+    // one (ReAgent P0 on PR #3447 — passing this pane's node id here is
+    // exactly what made the first version a silent no-op).
+    const handleReceiveForeignTab = (blockId: string) => {
+        const target = activeBlockId();
+        if (!target) return;
+        moveBlockInStack(layoutModel, blockId, target, "end", true);
     };
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
@@ -180,6 +193,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             onActivate={handleActivate}
             onClose={handleClose}
             onReorder={handleReorder}
+            onReceiveForeignTab={handleReceiveForeignTab}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>
                 renamingId() === id ? (

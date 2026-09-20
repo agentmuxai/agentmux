@@ -39,10 +39,10 @@
 
 import { ObjectService } from "@/app/store/services";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { findNode } from "./layoutNode";
+import { findNode, findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { closeNode } from "./layoutMagnify";
-import { effectiveStack, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
+import { effectiveStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 
 export { effectiveStack };
 
@@ -213,36 +213,55 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
 }
 
 /**
- * Reorder `blockId` within the SAME pane's (`nodeId`'s) stack, to `position`
- * relative to `targetBlockId`. Applies the local optimistic edit immediately
- * (so the tab strip reacts instantly to a drag) — same "local mutation is
- * this client's own source of truth" pattern every mutator in this file
- * uses. Also fires the matching `pane.moveTab` RPC, fire-and-forget (not
- * awaited — a failure is logged only, same posture as every other mutator
- * here, none of which reconciles against RPC failure): it exists so OTHER
- * windows/tabs watching this same layout see the move too, via the queued
- * `stackmove` action `pane.moveTab` sends (this client's own local edit
- * already reflects it, so it doesn't need to wait on or re-apply its own
- * queued action).
- * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+ * Reorder `blockId` within its own pane's stack (when `targetBlockId` is a
+ * member of that same pane), OR move it into `targetBlockId`'s pane (when
+ * that's a different one) — Phase 3 and Phase 4 of
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1/§3.4, sharing one entry
+ * point since the caller (a drop handler) doesn't need to know in advance
+ * which case applies: it passes the two block ids and this function
+ * resolves both panes itself, exactly as the backend's `move_stack_member`
+ * does. Applies the local optimistic
+ * edit immediately (so the tab strip reacts instantly to a drag) — same
+ * "local mutation is this client's own source of truth" pattern every
+ * mutator in this file uses. Also fires the matching `pane.moveTab` RPC,
+ * fire-and-forget (not awaited — a failure is logged only, same posture as
+ * every other mutator here, none of which reconciles against RPC failure):
+ * it exists so OTHER windows/tabs watching this same layout see the move
+ * too, via the queued `stackmove` action `pane.moveTab` sends (this
+ * client's own local edit already reflects it, so it doesn't need to wait
+ * on or re-apply its own queued action).
  */
 export function moveBlockInStack(
     model: LayoutModel,
-    nodeId: string,
     blockId: string,
     targetBlockId: string,
     position: "before" | "after" | "end",
     activate = false
 ): void {
-    const node = findNode(model.treeState.rootNode, nodeId);
-    if (!node?.data) {
-        console.error("moveBlockInStack: node not found or has no data", nodeId);
+    const root = model.treeState.rootNode;
+    // BOTH sides are resolved from their block ids, exactly as the backend's
+    // `move_stack_member` does — deliberately NOT from a caller-supplied
+    // node id. An earlier version took the source pane's `nodeId`, which
+    // made the caller responsible for knowing which pane the DRAGGED block
+    // lives in; the cross-pane drop handler naturally knows its own
+    // (destination) pane instead and passed that, so every drop silently
+    // took the same-pane branch and bailed — the whole cross-pane feature
+    // was a no-op in the UI while its unit tests passed in isolation
+    // (ReAgent P0 on PR #3447). Both lookups are stack-aware, so a dragged
+    // pill that is a DORMANT member of its pane resolves correctly too.
+    const sourceNode = root && findNodeByBlockId(root, blockId);
+    const targetNode = root && findNodeByBlockId(root, targetBlockId);
+    if (!sourceNode?.data || !targetNode?.data) {
+        console.error("moveBlockInStack: source or target block is in no pane", blockId, targetBlockId);
         return;
     }
-    if (!moveMemberInStack(node.data, blockId, targetBlockId, position, activate)) {
+    const applied =
+        sourceNode.id === targetNode.id
+            ? moveMemberInStack(sourceNode.data, blockId, targetBlockId, position, activate)
+            : moveMemberAcrossStacks(sourceNode.data, targetNode.data, blockId, activate);
+    if (!applied) {
         console.error(
-            "moveBlockInStack: blockId or targetBlockId is not a member of this node's stack",
-            nodeId,
+            "moveBlockInStack: could not apply — blockId is not a member of its resolved pane, or is that pane's only member",
             blockId,
             targetBlockId
         );
