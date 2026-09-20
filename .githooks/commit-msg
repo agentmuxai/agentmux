@@ -1,11 +1,23 @@
 #!/bin/sh
 # commit-msg hook: strip ALL Co-Authored-By trailers, regardless of who they
-# name. Policy (2026-09-20): only the actual person/identity who opened the
-# PR should be attributed -- no co-author trailers at all, AI or human.
+# name (case-insensitive on the "Co-Authored-By:" label itself). Policy
+# (2026-09-20): only the actual person/identity who opened the PR should be
+# attributed -- no co-author trailers at all, AI or human.
+#
+# Portable POSIX sh + awk only (Codex P1 on the first version of this hook):
+# that version used GNU sed's bare `-i` and the `I` case-insensitive address
+# flag, neither of which BSD/macOS sed supports -- it errored out on every
+# native macOS git commit instead of stripping trailers, on a platform this
+# fleet actually builds for (build-macos.yml). tolower() is POSIX awk and
+# behaves identically under GNU and BSD/macOS awk, unlike gawk's IGNORECASE
+# extension, which this deliberately avoids.
 MSG_FILE="$1"
+TMP_FILE="${MSG_FILE}.tmp.$$"
 
-sed -i -E '/^Co-Authored-By:/Id' "$MSG_FILE"
-
-# Trim trailing blank lines left behind (the trailer is usually preceded by a
-# blank separator line, which would otherwise be left dangling at the end).
-sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$MSG_FILE"
+awk '
+  { if (tolower(substr($0, 1, 15)) == "co-authored-by:") next; lines[++n] = $0 }
+  END {
+    while (n > 0 && lines[n] ~ /^[ \t]*$/) n--
+    for (i = 1; i <= n; i++) print lines[i]
+  }
+' "$MSG_FILE" > "$TMP_FILE" && mv "$TMP_FILE" "$MSG_FILE"
