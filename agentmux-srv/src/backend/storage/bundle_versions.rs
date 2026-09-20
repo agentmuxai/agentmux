@@ -186,10 +186,11 @@ impl Store {
     /// (`bundles.rs`) performs its own inline `SELECT written_by,
     /// content_hash, source_detail ... LIMIT 1` query instead, so its
     /// ownership check and the write it gates happen in one transaction
-    /// (see that method's own doc comment for why). The read side of a
-    /// future GlobalMemoryHistory tool remains otherwise unbuilt
-    /// (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this method is
-    /// exercised directly by this file's own tests in the meantime.
+    /// (see that method's own doc comment for why). Backs the
+    /// `GlobalMemoryHistory` MCP tool (`global_memory_history_impl`,
+    /// `server/app_api/mod.rs`) as of
+    /// SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md's Phase-3
+    /// follow-up — also still exercised directly by this file's own tests.
     pub fn bundle_version_list(&self, bundle_id: &str) -> Result<Vec<BundleVersionSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
