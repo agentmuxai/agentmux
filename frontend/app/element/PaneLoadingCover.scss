@@ -1,0 +1,80 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Styles for `<PaneLoadingCover>`, co-located with the single component that
+// renders this class (phase 3 of
+// docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md).
+//
+// Previously these lived in `agent-view/styles/_loading-overlay.scss`, nested
+// inside a `.agent-view { ... }` block and reachable only via
+// `agent-view.scss`'s `@use`. That was the spec's §3.2 problem in miniature:
+// the cover's appearance depended on which ancestor happened to be in the
+// cascade, so moving the markup up to the block level — where it now also
+// covers non-agent panes — would have rendered a completely UNSTYLED div
+// (no background, no positioning, no fade) rather than failing loudly.
+// Unscoped and owned by the component, it works wherever the component does.
+//
+// Original history preserved below, because the reasoning is still load-bearing.
+.agent-pane-loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--main-bg-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    // Low, explicit value — not load-bearing on its own. Every host that
+    // renders this cover establishes its own stacking context (`.agent-view`
+    // has `z-index: 0`; `.block` is `position: relative`), so this is compared
+    // only against its own siblings and can never compete with
+    // `.pane-tab-strip` (z-index var(--z-pane-overlay, 4)) — the "+"/tab
+    // controls stay usable while this covers the pane during initial load
+    // (SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md §1.4). Kept low anyway:
+    // nothing meaningful renders underneath before the pane has assembled, so
+    // it only needs to beat ordinary unpositioned content, not a "modal" tier.
+    // (Doesn't cover the progress bar either way — that's portaled into
+    // AgentViewWrapper's own slot, outside this box entirely, since
+    // SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md.)
+    z-index: 1;
+
+    // The cover STATES its own coverage instead of inheriting it from whatever
+    // ancestor happens to be positioned — spec §5.3, and the direct fix for the
+    // §3.2 failure where introducing `.agent-view-zoomed` (position: relative)
+    // silently moved this element's containing block and left the Shell drawer
+    // uncovered, with nothing to detect it.
+    //
+    // A block-level cover has a case the agent-level one never had: before its
+    // pane content mounts there IS no positioned ancestor to resolve against
+    // (`.block` is rendered by BlockFrame, which only exists once `ready()`),
+    // and `<Block>`'s own parent differs by route — the keep-alive path wraps it
+    // in an absolutely-positioned slot, the plain path does not. So callers with
+    // nothing yet to overlay ask for in-flow instead of betting on the cascade.
+    // Ported from `.block-ready-gate-host`, which drew exactly this distinction.
+    &.is-in-flow {
+        position: relative;
+        inset: auto;
+        width: 100%;
+        height: 100%;
+    }
+
+    // codex P1 on #2543: only the child `<BrainSpinner>` had its own fade
+    // (`.brain-spinner.is-fading`, 200ms) — this div's own opaque `background`
+    // had none, so it stayed a fully solid cover for the entire fade window
+    // regardless of the spinner icon underneath having already faded to
+    // invisible, then vanished INSTANTLY (a `<Show>` unmount, no transition)
+    // when the timer fired — an extra, separate pop distinct from the
+    // spinner's own fade. Mirrors the spinner's exact easing/duration so both
+    // fade as one visual unit; the cover stays mounted for the fade's own
+    // duration before unmounting (so removal itself is invisible, not a pop).
+    &.is-fading {
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+    }
+
+    // Same reduced-motion override as .brain-spinner.is-reduced-motion
+    // (BrainSpinner.scss) — instant show/hide, no animated fade.
+    &.is-reduced-motion.is-fading {
+        transition: none;
+    }
+}

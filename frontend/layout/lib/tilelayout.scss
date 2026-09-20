@@ -96,9 +96,18 @@
 
         .tile-leaf {
             overflow: hidden;
-            // Containing block for Block's own ready()-gate spinner overlay
-            // (block.tsx's block-ready-gate-host, SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
-            // §2.3/§4 Option B) — without this, an absolutely-positioned
+            // Containing block for Block's own loading cover — `<PaneLoadingCover>`
+            // / `.agent-pane-loading-overlay` (element/PaneLoadingCover.scss),
+            // which replaced `block-ready-gate-host` in
+            // SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md phase 3; the
+            // cross-fade it performs is still
+            // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4 Option B.
+            // Note the cover only relies on this once the pane's content has
+            // mounted — before that it renders `.is-in-flow` instead of
+            // absolute, because on the keep-alive route its containing block is
+            // a different element entirely and betting on the cascade is what
+            // §3.2 of that spec is about.
+            // Without this, an absolutely-positioned
             // child would skip past this (padded, in a split layout — see
             // the `:not(:only-child)` rule below) static box straight to
             // `.tile-node`'s own positioned box, ignoring this element's

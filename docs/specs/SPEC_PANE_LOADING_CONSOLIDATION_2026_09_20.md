@@ -8,9 +8,12 @@ and an opt-in (default-off) reveal bound;
 `<PaneLoadingCover>` (§5.3) now the single owner of `.agent-pane-loading-overlay`,
 adopted by both `agent-view.tsx` and `AgentPicker.tsx` — indicator #4 in §2 is gone and
 #3 no longer renders its own markup; the header-mic guard inverted to positive (§5.4).
-Not started: phase 3 (folding the block-level `ready()` spinner and `<Suspense>`
-fallback, §2 #1-#2, into the same cover), phase 4's chrome `isLoading()` subscription,
-phase 5 (browser pane, §2 #6-#7).
+Phase 3 follows in PR #3466: indicators #1 and #2 now route through the same
+controller and cover, the cover's styles moved out of the `.agent-view` cascade into
+`element/PaneLoadingCover.scss`, and coverage became an explicit input (§5.3).
+Not started: phase 4's `isLoading()` subscription and phase 5 (browser pane, §2 #6-#7) —
+both blocked on the same missing plumbing, and phase 5 also needs a different
+design than originally specified — see §6.1.
 **Motivating evidence:** `docs/reports/REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md`
 (measured timeline, `spin:2` observation, §F regression).
 **Related:** `REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`,
@@ -120,11 +123,36 @@ The five-stage chain (§3.1) becomes explicit registrations:
 |---|---|
 | `historyPainted()` | `const done = readiness.gate("history")` → called by the transcript when it has painted |
 | `authPhaseSettled()` | `readiness.gate("auth")` |
-| `subagentBackfillSettled()` | `readiness.gate("subagents")` — a *reveal* gate, never a mount gate (§4) |
+| `subagentBackfillSettled()` | **NOT a gate** — see below. It is re-entrant, and a one-way gate silently swallows every re-cover after the first |
 | Long-Task quiet + 2×rAF | retained, but owned once by the controller as the transition into `revealing`, not re-implemented per view |
 
 A pane with no gates goes `assembling → revealing` immediately, so non-agent panes are
 unaffected.
+
+**Only one-way signals may be gates.** `subagentBackfillSettled()` looks like an obvious
+gate and is not one: `useSubagentBackfillGate` calls `setSettled(false)` on *every*
+"started" event, including one arriving long after the first cycle settled, and the
+pre-consolidation code deliberately re-showed its spinner for it. `PaneReadiness` is
+one-way — gate release is one-shot, and re-registering after reveal is a documented
+no-op precisely so a late dependency cannot yank the cover back over content the user
+is reading. Feeding a re-entrant signal into it type-checks, reads correctly, and
+silently drops every re-cover after the first. (reagent P1 on #3464, which became #3466.)
+
+The rule this generalises to: **one-time assembly is the controller's job; anything
+cyclic keeps its own small cycle and merely renders the same cover.** The same split
+already applies to the block `<Suspense>` fallback (§2 #1), the Shell drawer's re-seed
+spinner (#5) and the browser pane's post-first-paint badge (§6.2). Before adding a gate,
+check whether its signal can go back to false.
+
+**A cyclic signal's effect must track the phase too.** The first attempt at that own
+cycle read `readiness.phase()` through `untrack`, so it re-ran only when the cyclic
+signal itself changed value. `useSubagentBackfillGate` initialises `settled` to **false**
+and leaves it there until an async RPC completes, while the `content` gate releases on
+`ready()` — which for a persisted-session agent pane resolves well before the backfill
+round trip. So the ordinary case is: the signal is false and never changes, the pane
+reaches `live`, the effect never re-runs to notice, and the cover never appears at all.
+Strictly worse than the code it replaced, and invisible to any test whose mock defaults
+the signal to the convenient value. Track both reads. (reagent P1 on #3466.)
 
 ### 5.3 One cover, with an explicit coverage contract
 
@@ -135,6 +163,23 @@ target rather than inheriting it from the cascade, so §3.2 cannot recur.
 The drawer's own spinner (#5) is a genuinely different thing — it hides a *re-seed* of an
 already-live pane, not initial assembly — and stays, but should adopt the same component
 for visual consistency.
+
+**Whatever suppresses a kept affordance must ask "is a cover up?", not "is the controller
+assembling?"** The `<Suspense>` fallback was first suppressed on
+`PaneReadiness.isLoading()`, which is permanently false once the pane is live and knows
+nothing about the separate re-cover cycle a cyclic signal drives (§5.2). A mid-life
+suspension during a backfill re-cover therefore rendered a spinner *underneath* the
+cover — reintroducing the two-brains case on exactly the path the re-cover fix had just
+added. The predicate is now derived from the rendered cover's own phase.
+(reagent P1 on #3466.)
+
+**Open question this raised.** That `<Suspense>` boundary may not catch view-level
+`createResource` reads at all: `block.tsx` builds `viewElem` with an *eager* `createMemo`,
+so the view component is constructed during `BlockFull` setup rather than while the
+boundary is rendering. An attempt to drive a real suspension through it in
+`block.test.tsx` produced a normally-rendered view and no fallback. If that holds, #1 is
+dead code rather than a kept mid-life affordance, and should be deleted outright rather
+than suppressed — but that is a separate investigation and is NOT assumed here.
 
 ### 5.4 Chrome subscribes
 
@@ -152,8 +197,76 @@ renders nothing (the safe default).
    `.agent-pane-loading-overlay` render in `AgentPicker.tsx`.
 3. **Collapse #1 and #2** into the same cover, keeping `ready()` as mount gating only
    (§4).
-4. **Chrome subscribes** (§5.4) and the mic guard is inverted.
-5. **Browser pane** (#6-7) adopts the controller.
+4. **Chrome subscribes** (§5.4) and the mic guard is inverted. **The mic guard
+   shipped; the `isLoading()` subscription is blocked — see §6.1.**
+5. **Browser pane** (#6-7) adopts the controller. **Revised — see §6.1.**
+
+### 6.1 Phases 4 and 5 both need a pane-scoped readiness handle
+
+Two separate attempts ran into the same missing piece, which is worth naming
+once rather than rediscovering a third time.
+
+**Phase 4.** §5.4 says "`BlockFrame` reads `readiness.isLoading()`". Threading
+it as a prop from `<Block>` does not work, and fails *silently*: every view type
+in `pane-leaf-chrome.tsx`'s `HOISTS_OWN_CHROME` — agent, term, browser, editor,
+sysinfo, cpuplot, swarm, armory, media, drone, help, warden, i.e. essentially
+every real pane — sets `noHeader()`, so `BlockFrame`'s own inline header never
+renders. The header those panes actually show is built by `PaneHeaderTabStrip`,
+which lives **outside** `<Block>` and constructs its own explicit prop object.
+A prop threaded down from Block can never reach it, so the suppression is inert
+exactly where it was aimed. (Caught in review on #3464; the inert wiring was
+removed rather than shipped as a fix.) The mic guard, which is a pure function
+of `blockView` inside `EndIcons`, is unaffected and did ship.
+
+**Phase 5.** See the browser-pane analysis below: the correct form is a
+`gate("first-paint")` registered by `browser-view`, which also sits outside the
+block's prop tree.
+
+Both need the same thing: **the pane's readiness must be reachable from outside
+`<Block>`**, by the hoisted chrome above it and by view code inside it. The
+obvious shortcut — the blockId-keyed `BlockComponentModel` registry — is not
+safe as-is, because that entry is adopted across mounts (`block.tsx`'s
+create-vs-adopt ownership dance, and the P0 it already caused), so a consumer
+could pick up another mount's controller. Candidates: hang readiness off the
+existing `setActiveViewModel(vm, bcm)` channel that hoisted chrome already uses
+as its live pointer into the block, or have `pane-leaf-chrome` own the
+controller and pass it *down* into `<Block>`. Either is a deliberate design
+change, not a prop rename.
+
+### 6.2 Phase 5 does not fit the controller as written
+
+Phase 5 was specified on the assumption that #6/#7 are assembly indicators like
+the rest. They are not, and implementing it as a fold would break the controller.
+
+`browser-view.tsx`'s spinner is driven by `model.loadingAtom()`, which is
+**cyclic**: it flips true→false→true again on every reload, back/forward and
+redirect chain, for the whole life of the pane. `PaneReadiness` is deliberately
+**one-way** — `assembling → revealing → live`, with a gate registered after
+reveal treated as a no-op precisely so that a late dependency cannot yank the
+cover back over content the user is already reading. Making it re-entrant to
+accommodate a page load would delete that guarantee for every other pane.
+
+The same distinction already appears twice elsewhere and is resolved the same
+way both times: the block `<Suspense>` fallback (§2 #1) and the Shell drawer's
+re-seed spinner (§2 #5) are *mid-life* affordances, kept, and merely suppressed
+while the one-time cover is up. #7 (the post-first-paint badge) is that same
+category and stays — it also carries deliberate anti-flicker design of its own
+(`SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`) and a
+`data-pane-overlay` attribute the native pane flip logic depends on.
+
+Only #6 — the *first* load, when there is genuinely nothing behind it — is
+initial assembly. The correct form of phase 5 is therefore **not** a fold but a
+gate: `browser-view` registers `readiness.gate("first-paint")` and releases it
+on the first `loadingAtom()` true→false transition, after which #6 is deleted
+outright and the block-level cover hides that window instead.
+
+That needs a readiness handle reachable from view code, which does not exist
+yet: views receive `viewModel`, not the controller. The obvious shortcut — the
+blockId-keyed `BlockComponentModel` registry — is not safe to use for it as-is,
+because that entry is adopted across mounts (`block.tsx`'s create-vs-adopt
+ownership dance, and the P0 it already caused), so a view could pick up another
+mount's controller. Phase 5 should introduce that plumbing deliberately rather
+than borrow the registry for it.
 
 ## 7. Acceptance criteria
 

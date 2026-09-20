@@ -8,7 +8,7 @@
 // cascade chain matches every other split partial (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24)
 // and so `position: absolute` resolves against .agent-view's own
 // `position: relative; z-index: 0` stacking context (agent-view.scss) —
-// the same context `.agent-pane-loading-overlay` (_loading-overlay.scss)
+// the same context `.agent-pane-loading-overlay` (PaneLoadingCover.scss)
 // already anchors to.
 .agent-view {
     .btw-overlay {

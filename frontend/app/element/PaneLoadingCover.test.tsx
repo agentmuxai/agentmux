@@ -67,4 +67,47 @@ describe("PaneLoadingCover", () => {
         render(() => <PaneLoadingCover phase={phase} />);
         expect(overlays().length).toBe(1);
     });
+
+    /**
+     * Phase 3. The cover must STATE its coverage rather than inherit it from
+     * whichever ancestor happens to be positioned — that inheritance is what
+     * broke in §3.2, where adding `.agent-view-zoomed` (position: relative)
+     * silently moved the containing block and left the Shell drawer uncovered.
+     *
+     * A block-level cover has a window the agent-level one never had: before
+     * its pane content mounts there is no `.block` to resolve `inset: 0`
+     * against at all, and `<Block>`'s parent differs by render route (the
+     * keep-alive path wraps it in an absolutely-positioned slot, the plain
+     * path does not). So "is there content under me?" is an input, not a guess.
+     */
+    describe("coverage mode", () => {
+        it("overlays by default, for callers whose content is already mounted", () => {
+            render(() => <PaneLoadingCover phase={() => "assembling" as PaneReadinessPhase} />);
+            expect(overlays()[0].classList.contains("is-in-flow")).toBe(false);
+        });
+
+        it("sits in flow when told there is nothing yet to overlay", () => {
+            render(() => (
+                <PaneLoadingCover phase={() => "assembling" as PaneReadinessPhase} overlay={() => false} />
+            ));
+            expect(overlays()[0].classList.contains("is-in-flow")).toBe(true);
+        });
+
+        it("switches to overlay the moment content mounts, on the same element", () => {
+            const [contentMounted, setContentMounted] = createSignal(false);
+            render(() => (
+                <PaneLoadingCover phase={() => "assembling" as PaneReadinessPhase} overlay={contentMounted} />
+            ));
+            const before = overlays()[0];
+            expect(before.classList.contains("is-in-flow")).toBe(true);
+
+            setContentMounted(true);
+
+            // Same node, reclassed — NOT an unmount/remount, which would drop
+            // the cover for a frame and expose the content it is hiding.
+            expect(overlays().length).toBe(1);
+            expect(overlays()[0]).toBe(before);
+            expect(overlays()[0].classList.contains("is-in-flow")).toBe(false);
+        });
+    });
 });

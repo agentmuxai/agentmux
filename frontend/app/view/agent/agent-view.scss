@@ -32,7 +32,6 @@
 @use "styles/responsive";
 @use "styles/decision-panel";
 @use "styles/shell-node";
-@use "styles/loading-overlay";
 @use "styles/picker-fade";
 @use "styles/btw";
 
@@ -507,7 +506,7 @@
     // Establishes a real stacking context (position + z-index together,
     // per spec — same pattern as .agent-document-scroll-region below).
     // Contains EVERY absolutely/sticky-positioned descendant's z-index —
-    // .agent-pane-loading-overlay (_loading-overlay.scss), .agent-search-
+    // .agent-pane-loading-overlay (PaneLoadingCover.scss), .agent-search-
     // bar (_search.scss, z:10), .slash-autocomplete (_slash.scss, z:50),
     // .agent-filter-toggle (_header-controls.scss, z:10), and anything
     // else added inside .agent-view later — so none of them can ever

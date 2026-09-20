@@ -14,7 +14,7 @@
  * "fading" and "gone" cannot disagree:
  *
  *   assembling → mounted, opaque
- *   revealing  → mounted, fading (CSS transition in _loading-overlay.scss)
+ *   revealing  → mounted, fading (CSS transition in PaneLoadingCover.scss)
  *   live       → unmounted
  *
  * The caller owns the `revealing` → `live` transition (it knows the fade duration
@@ -25,19 +25,34 @@ import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms } from "@/app/store/global";
 import type { PaneReadinessPhase } from "@/app/store/pane-readiness";
 import { Show, type JSX } from "solid-js";
+import "./PaneLoadingCover.scss";
 
 export interface PaneLoadingCoverProps {
     /** Current readiness phase for the pane being covered. */
     phase: () => PaneReadinessPhase;
+    /**
+     * Whether there is mounted content to sit on top of. Default `true`.
+     *
+     * Callers whose pane content is already mounted underneath (agent-view,
+     * AgentPicker) leave this alone and get the absolute overlay. A caller that
+     * covers a pane whose content has NOT mounted yet — block-level, before
+     * `ready()` — passes `false` for that window, because there is no
+     * positioned ancestor to resolve `inset: 0` against and the cover would
+     * otherwise collapse or escape its pane depending on the render route.
+     * Stating it beats inheriting it from the cascade (spec §3.2/§5.3).
+     */
+    overlay?: () => boolean;
 }
 
 export function PaneLoadingCover(props: PaneLoadingCoverProps): JSX.Element {
     const fading = () => props.phase() === "revealing";
+    const overlay = () => props.overlay?.() ?? true;
     return (
         <Show when={props.phase() !== "live"}>
             <div
                 class="agent-pane-loading-overlay"
                 classList={{
+                    "is-in-flow": !overlay(),
                     "is-fading": fading(),
                     "is-reduced-motion": atoms.prefersReducedMotionAtom(),
                 }}

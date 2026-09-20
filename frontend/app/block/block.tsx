@@ -10,11 +10,12 @@ import {
 import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
+import { createPaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
 import {
-    atoms,
     counterInc,
     getBlockComponentModel,
     registerBlockComponentModel,
@@ -25,7 +26,7 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
@@ -131,7 +132,7 @@ function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
     );
 }
 
-function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
+function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Element {
     counterInc("render-BlockFull");
     let focusElemRef: { current: HTMLInputElement | null } = { current: null };
     let blockRef: { current: HTMLDivElement | null } = { current: null };
@@ -259,7 +260,18 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
                 style={blockContentStyle()}
             >
                 <ErrorBoundary>
-                    <Suspense fallback={<BrainSpinner />}>{viewElem()}</Suspense>
+                    {/* A view that suspends AFTER the pane is live (a
+                        `createResource` refetch, say) still needs something on
+                        screen — this is the one loading affordance that is NOT
+                        about initial assembly, so it is not folded into the
+                        cover. But while the pane IS still assembling the cover
+                        is already up over this exact box, and rendering a
+                        spinner underneath it is the "two brains at once" case
+                        the consolidation exists to remove, so suppress it for
+                        that window. See SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
+                    <Suspense fallback={<Show when={!covered?.()}><BrainSpinner /></Show>}>
+                        {viewElem()}
+                    </Suspense>
                 </ErrorBoundary>
             </div>
         </BlockFrame>
@@ -397,68 +409,116 @@ function Block(props: BlockProps): JSX.Element {
     // until everything is ready") literally: a brain covering already-live
     // content, not a gate blocking that content from existing at all.
     const subagentBackfillSettled = useSubagentBackfillGate(props.nodeModel.blockId, viewType, hasPersistedSession);
-    const spinnerReady = createMemo(() => ready() && subagentBackfillSettled());
 
-    // Cross-fade the ready()-gate BrainSpinner out on top of the real
-    // content instead of an instant hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
-    // §2.3/§4 Option B) — this is generic over every block type (agent,
-    // terminal, browser, ...), unlike agent-view.tsx's picker-fade which is
-    // agent-specific.
+    // ONE readiness authority for this pane (phase 3 of
+    // SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md). This block used to own a
+    // hand-rolled visible/fading/unmount state machine of its own, a second one
+    // lived in agent-view.tsx, and a third in AgentPicker.tsx — all rendering
+    // their own spinner with their own timers, up to two of them measured on
+    // screen at once. They are now the same controller and the same cover.
     //
-    // An earlier version seeded `spinnerVisible` from `!ready()` read once
-    // at construction (synchronous), then relied on `on(ready, ...,
-    // {defer: true})`'s first (swallowed) run to treat "already ready" as
-    // "nothing to do." Those are two DIFFERENT reads of `ready()` taken at
-    // two different times — construction vs. the effect's first flush a
-    // render pass later — so a block whose data resolves in that gap (the
-    // common case for an already-warm cache) got seeded `true` and then
-    // never corrected: `defer` skips the one call that would have set it
-    // to `false`, and since `ready()` never changes again, nothing else
-    // ever runs it either. The spinner stayed mounted at full opacity
-    // indefinitely (see docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md).
-    // Fixed by making the first observation of `ready()` and the seed the
-    // same read, inside the same effect — no gap for them to disagree in.
-    const [spinnerVisible, setSpinnerVisible] = createSignal(true);
-    const [spinnerFading, setSpinnerFading] = createSignal(false);
-    let spinnerFadeRaf: number | undefined;
-    let spinnerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
-    let spinnerGateInitialized = false;
-    onCleanup(() => {
-        if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
-        clearTimeout(spinnerFadeTimeout);
-    });
+    // This is a REVEAL gate, never a mount gate. `ready()` still decides
+    // mounting entirely on its own and depends on nothing here — see the
+    // deadlock note above, which is exactly what happens if that is blurred.
+    const readiness = createPaneReadiness({ label: `block:${props.nodeModel.blockId.substring(0, 8)}` });
+    const releaseMountGate = readiness.gate("content");
     createEffect(() => {
-        const isReady = spinnerReady();
-        if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
-        clearTimeout(spinnerFadeTimeout);
-        if (!spinnerGateInitialized) {
-            // First observation of `ready()` for this mount: reflect it
-            // directly, no fade — there's nothing painted yet to fade
-            // from either way.
-            spinnerGateInitialized = true;
-            setSpinnerVisible(!isReady);
-            setSpinnerFading(false);
+        if (ready()) releaseMountGate();
+    });
+
+    // `subagentBackfillSettled()` is deliberately NOT a gate, and that is the
+    // whole point of this block of code.
+    //
+    // PaneReadiness is one-way by design: `assembling → revealing → live`, and
+    // a gate registered after reveal is a no-op precisely so a late dependency
+    // cannot yank the cover back over content the user is already reading.
+    // But this signal is RE-ENTRANT — `useSubagentBackfillGate` calls
+    // `setSettled(false)` on EVERY "started" event, including one arriving long
+    // after the first cycle settled. Feeding it to a one-way gate compiles and
+    // looks right, and silently drops every re-cover after the first: exactly
+    // the behaviour the hook's own round-7 fix exists to provide. (reagent P1
+    // on #3464.)
+    //
+    // So it drives its own small cycle, which the cover renders with the same
+    // component. Same split as the `<Suspense>` fallback below and the browser
+    // pane's post-first-paint badge (§6.1): one-time assembly is the
+    // controller's job, mid-life re-covers are not.
+    const [reCoverPhase, setReCoverPhase] = createSignal<PaneReadinessPhase>("live");
+    let reCoverFade: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(reCoverFade));
+    createEffect(() => {
+        const settled = subagentBackfillSettled();
+        // BOTH reads are tracked, deliberately. An earlier version read the
+        // phase through `untrack`, so this only re-ran when the backfill signal
+        // itself changed value — and the real hook initialises `settled` to
+        // FALSE and leaves it there until the async backfill completes. The
+        // ordinary case for a fast-resolving pane with a slow backfill is
+        // therefore: settled is false and never changes, the pane reaches
+        // `live`, and this effect never re-runs to notice, so the cover never
+        // appears at all and the pane reveals mid-backfill — the exact Activity
+        // Dock flicker rounds 2-8 of the hook exist to prevent. Nothing
+        // corrected it later either: when `settled` finally flipped true the
+        // effect early-returned, already believing itself live.
+        // (reagent P1 on #3466.)
+        //
+        // While the pane is still assembling the initial cover is already up;
+        // the controller owns the screen until it reaches `live`.
+        if (readiness.phase() !== "live") return;
+        clearTimeout(reCoverFade);
+        if (!settled) {
+            setReCoverPhase("assembling"); // re-covered, opaque, no fade in
             return;
         }
-        if (isReady) {
-            if (!spinnerVisible()) return; // already past the transition
-            // One rAF so the spinner paints at full opacity at least once
-            // before the fade starts — flipping straight to the
-            // "is-fading" class in this same tick would apply opacity:0
-            // on the very first paint, with nothing to visibly transition
-            // from.
-            spinnerFadeRaf = requestAnimationFrame(() => setSpinnerFading(true));
-            spinnerFadeTimeout = setTimeout(() => {
-                setSpinnerVisible(false);
-                setSpinnerFading(false);
-            }, READY_GATE_FADE_MS);
-        } else {
-            // Not ready anymore (e.g. the view type changed out from
-            // under this block) — show the spinner again immediately, no
-            // fade needed going this direction.
-            setSpinnerFading(false);
-            setSpinnerVisible(true);
+        if (untrack(reCoverPhase) === "live") return; // nothing to fade out
+        setReCoverPhase("revealing");
+        reCoverFade = setTimeout(() => setReCoverPhase("live"), READY_GATE_FADE_MS);
+    });
+
+    // One cover, two sources: the controller until it goes live, this block's
+    // own re-cover cycle afterwards.
+    const coverPhase = (): PaneReadinessPhase => {
+        const phase = readiness.phase();
+        return phase === "live" ? reCoverPhase() : phase;
+    };
+
+    // Cross-fade the cover out on top of the real content instead of an instant
+    // hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3/§4
+    // Option B) — generic over every block type (agent, terminal, browser, ...),
+    // unlike agent-view.tsx's picker-fade which is agent-specific.
+    //
+    // The first observation is special-cased, and the reason is a retro. An
+    // earlier version seeded its spinner signal from `!ready()` read once at
+    // construction, then relied on a deferred effect to correct it — two
+    // DIFFERENT reads of `ready()` at two different times, so a block whose
+    // data resolved in the gap (the common case for a warm cache) got seeded
+    // "visible" and was never corrected, leaving the spinner up forever
+    // (docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md).
+    // Here the phase starts at `assembling` unconditionally and only a gate
+    // completion moves it, so there is no second read to disagree with — but a
+    // block that is ALREADY ready on its first flush must still skip the fade
+    // rather than flash an opaque cover over content that was never hidden.
+    // Deliberately ONE effect reading the phase once. Splitting "was this the
+    // first flush?" across two effects re-creates the retro's shape: two reads
+    // at two times that can disagree.
+    let firstFlush = true;
+    let fadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(fadeTimeout));
+    createEffect(() => {
+        const phase = readiness.phase();
+        const wasFirstFlush = firstFlush;
+        firstFlush = false;
+        if (phase !== "revealing") return;
+        clearTimeout(fadeTimeout);
+        if (wasFirstFlush) {
+            // Already revealed by the time this block first flushed: the gates
+            // completed synchronously during setup (warm cache), so the cover
+            // never painted and there is nothing to fade FROM. Go straight to
+            // live, matching the pre-consolidation "reflect it directly, no
+            // fade" first-observation behaviour.
+            readiness.revealComplete();
+            return;
         }
+        fadeTimeout = setTimeout(() => readiness.revealComplete(), READY_GATE_FADE_MS);
     });
 
     // Per-block ErrorBoundary: a renderer fault in this pane only blanks
@@ -478,26 +538,18 @@ function Block(props: BlockProps): JSX.Element {
                 >
                     {props.preview
                         ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-                        : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                        : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} covered={() => coverPhase() !== "live"} />
                     }
                 </BlockErrorBoundary>
             </Show>
-            {/* Applied the instant ready() flips true (same render as the
-                real content appearing) so this never sits in normal flow
-                alongside it, even for one frame — see is-overlay's
-                counterpart in agent-view.tsx's picker-fade. */}
-            <Show when={spinnerVisible()}>
-                <div
-                    class="block-ready-gate-host"
-                    classList={{
-                        "is-overlay": ready(),
-                        "is-fading": spinnerFading(),
-                        "is-reduced-motion": atoms.prefersReducedMotionAtom(),
-                    }}
-                >
-                    <BrainSpinner fading={spinnerFading()} />
-                </div>
-            </Show>
+            {/* The same cover component agent-view.tsx and AgentPicker.tsx
+                render, driven by the same controller — this block used to
+                render a third, independent spinner here.
+
+                `overlay` flips to true the instant ready() does (the same
+                render as the real content appearing), so the cover never sits
+                in normal flow alongside that content, even for one frame. */}
+            <PaneLoadingCover phase={coverPhase} overlay={ready} />
         </>
     );
 }
