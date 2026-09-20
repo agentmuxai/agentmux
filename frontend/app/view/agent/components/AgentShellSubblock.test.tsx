@@ -300,7 +300,6 @@ describe("AgentShellSubblock — scrollback depth", () => {
                 cwd="/tmp"
                 existingSubBlockId={undefined}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -315,7 +314,6 @@ describe("AgentShellSubblock — scrollback depth", () => {
                 cwd="/tmp"
                 existingSubBlockId={undefined}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -341,7 +339,6 @@ describe("AgentShellSubblock — scrollback depth", () => {
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -357,7 +354,9 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
     it("constructs the terminal with the persisted zoom already applied, not the BASE_FONT_SIZE default", async () => {
         const existingId = "existing-sub-block";
         const oref = `block:${existingId}`;
-        // Persisted zoom of 2.0 → BASE_FONT_SIZE(13) * 2.0 / paneZoom(1) = 26.
+        // Persisted zoom of 2.0 → BASE_FONT_SIZE(13) * 2.0 = 26. No pane-zoom
+        // divisor any more: the drawer renders outside `.agent-view-zoomed`, so
+        // its font size depends only on its own `term:zoom`.
         queueSeedMeta(oref, { "term:zoom": 2.0 });
 
         render(() => (
@@ -366,7 +365,6 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -392,7 +390,6 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
                 cwd="/tmp"
                 existingSubBlockId={undefined}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -413,7 +410,6 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -439,7 +435,6 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -458,7 +453,6 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
                 cwd="/tmp"
                 existingSubBlockId="dead-id"
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -506,7 +500,6 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -546,7 +539,6 @@ describe("AgentShellSubblock — agent lock (SPEC_AGENT_INTERACTIVE_PTY_SHELL_AP
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(oref);
@@ -571,7 +563,6 @@ describe("AgentShellSubblock — agent lock (SPEC_AGENT_INTERACTIVE_PTY_SHELL_AP
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(oref);
@@ -594,7 +585,6 @@ describe("AgentShellSubblock — agent lock (SPEC_AGENT_INTERACTIVE_PTY_SHELL_AP
                 cwd="/tmp"
                 existingSubBlockId={existingId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(oref);
@@ -625,7 +615,6 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
                 cwd="/tmp"
                 existingSubBlockId={subBlockId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
                 onShellExited={onShellExited}
             />
         ));
@@ -726,7 +715,6 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
                 cwd="/tmp"
                 existingSubBlockId={subBlockId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
                 onShellExited={onShellExited}
             />
         ));
@@ -758,7 +746,6 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
                 cwd="/tmp"
                 existingSubBlockId={subBlockId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
                 onShellExited={onShellExited}
             />
         ));
@@ -795,7 +782,6 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
                 cwd="/tmp"
                 existingSubBlockId={subBlockId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${subBlockId}`);
@@ -820,7 +806,6 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
                 cwd="/tmp"
                 existingSubBlockId={subBlockId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${subBlockId}`);
@@ -846,7 +831,6 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
                 cwd="/tmp"
                 existingSubBlockId={subBlockId}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${subBlockId}`);
@@ -902,7 +886,6 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
                 cwd="/tmp"
                 existingSubBlockId={subBlockId()}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${oldId}`);
@@ -949,7 +932,6 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
                 cwd="/tmp"
                 existingSubBlockId={subBlockId()}
                 onSubBlockCreated={(id) => setSubBlockId(id)}
-                agentPaneZoom={() => 1}
             />
         ));
 
@@ -986,7 +968,6 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
                 cwd="/tmp"
                 existingSubBlockId={subBlockId()}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${oldId}`);
@@ -1036,7 +1017,6 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
                 cwd="/tmp"
                 existingSubBlockId={subBlockId()}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${initialId}`);
@@ -1112,7 +1092,6 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
                 cwd="/tmp"
                 existingSubBlockId={subBlockId()}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${initialId}`);
@@ -1189,7 +1168,6 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
                 cwd="/tmp"
                 existingSubBlockId={subBlockId()}
                 onSubBlockCreated={() => {}}
-                agentPaneZoom={() => 1}
             />
         ));
         resolveSeedFetch(`block:${idA}`);
