@@ -1,7 +1,9 @@
 # SPEC: a native reverse proxy in agentmux-srv for friendly dev-server hostnames — not Traefik, not a sidecar
 
 **Date:** 2026-09-19
-**Status:** proposed — nothing in this document has shipped
+**Status:** implemented — see "Implementation notes (2026-09-19)" at the end
+of this document for what shipped, verification depth, and where the actual
+implementation diverged (or didn't) from what's proposed below.
 **Author:** Camper
 **Repo state:** main @ `bdd3270aa` (v0.56.8+)
 **Related:** `docs/reports/REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md`
@@ -146,6 +148,18 @@ explicit is more debuggable than inferred, and this is squarely in the
 class of capability the two prior reports already flagged AgentMux's
 agent-facing API as needing more of, not less.
 
+**Resolved (2026-09-20): implement (2) as an MCP tool, not a CLI.** The
+concern that motivated considering a CLI instead — that every MCP tool's
+schema sits in context for the whole session whether or not it's called —
+doesn't apply here: this environment already defers most `agentmux`-family
+MCP tool schemas behind `ToolSearch` (observed directly, not assumed —
+most `mcp__agentmux__*` tools arrive in the system prompt as name-only
+until explicitly searched for), so a new `RegisterDevServer` tool costs
+essentially nothing in context unless an agent actually calls it. That
+removes the token-cost argument for a CLI and leaves only MCP's advantage:
+an explicit schema the model can't get the invocation syntax wrong on,
+versus a CLI's flag-guessing/retry risk. Build it as a normal MCP tool.
+
 ## 4. Explicitly out of scope
 
 - **TLS/ACME.** Pure loopback HTTP is sufficient — nothing here ever
@@ -166,27 +180,28 @@ agent-facing API as needing more of, not less.
 
 ## 5. Open questions requiring a decision before implementation
 
-1. **Where does the proxy listen, and is one port enough?** A single fixed
-   port (e.g. `:8090`) with Host-header routing to every project across
-   every agent is the simplest design and matches claw's own model (all
-   projects shared Traefik's 80/443). Confirm this is acceptable before
-   building — the alternative (one published port per project) reintroduces
-   exactly the port-juggling this whole feature exists to remove.
-2. **Registration mechanism (§3.2)** — needs an explicit choice among the
-   three options, not a default assumption. Recommendation stated, decision
-   not made.
-3. **Does the proxy need to survive `agentmux-srv` restarts independent of
-   any single agent's container?** Given `REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md`'s
-   finding that a container agent's *own* container is destroyed and
-   recreated on every restart, the registration table for that agent's
-   projects will need to be rebuilt from scratch each time regardless of
-   which option in §3.2 is chosen — worth designing for from the start
-   rather than treating as a later bug.
+1. ~~Where does the proxy listen, and is one port enough?~~ — **resolved**:
+   `:8090`, a single fixed port, Host-header routing to every project
+   across every agent. Confirmed free in this codebase before use (see
+   "Implementation notes" below).
+2. ~~Registration mechanism (§3.2)~~ — **resolved**: option 2, implemented
+   as an MCP tool (`RegisterDevServer`). See §3.2's resolution note for why
+   the token-cost objection to MCP doesn't hold in this environment.
+3. ~~Does the proxy need to survive `agentmux-srv` restarts independent of
+   any single agent's container?~~ — **resolved, as anticipated**: the
+   routing table is a plain in-memory `HashMap` with no persistence: an
+   `agentmux-srv` restart (or a container recreate on drift) loses every
+   registration for that agent, by design, matching
+   `REPORT_HOST_AGENT_SANDBOX_RESTART_CONTROL_GAP_2026_09_19.md`'s finding
+   that the container itself doesn't survive either. An agent must call
+   `RegisterDevServer` again after either kind of restart — not automated
+   in this PR (see "Implementation notes" for why).
 4. **Naming collisions.** Two different agents both running a project
    named `pulse` would collide on `pulse-<agent>.localhost` only if agent
    names themselves collide — which `AGENTMUX_AGENT_ID` is already assumed
    unique for elsewhere in this codebase (jekt trust, container naming).
-   Worth stating as a stated assumption here too, not a new one.
+   Worth stating as a stated assumption here too, not a new one. Unaffected
+   by implementation — still just a stated assumption, not newly verified.
 
 ## 6. Non-claim
 
@@ -197,3 +212,73 @@ no TLS requirement, small fixed feature surface). A tool built the way
 DDEV or Lando are — many independent, loosely-coupled project stacks with
 no single process that already knows about all of them — would reasonably
 make the opposite call.
+
+## Implementation notes (2026-09-19)
+
+Shipped as proposed, with the following concrete choices and one deviation:
+
+- **Network name:** `agentmux-agents` (§3.1) — `AGENTMUX_DOCKER_NETWORK` in
+  `agentmux-srv/src/backend/container.rs`. Created idempotently (tolerates
+  a 409/"already exists" from `bollard::Docker::create_network`) and every
+  container is attached to it via `connect_network` on every
+  `ensure_running`, not just at creation — additive to the existing
+  `network_mode: "bridge"` / `extra_hosts: host.docker.internal:host-gateway`
+  setup, which is untouched.
+- **Proxy port:** `:8090` (§5.1) — `DEV_PROXY_PORT` in the new
+  `agentmux-srv/src/backend/dev_proxy.rs`. Confirmed free before use (no
+  other `TcpListener::bind`/config default in this crate claims it).
+- **Registration route:** `POST /api/v1/agent/dev_server/register`,
+  backing the `RegisterDevServer` MCP tool
+  (`agentmux-mcp/src/tool_schemas.rs` + `main.rs`). Identity is verified
+  via the same `verified_block_id`/`UiAutomationAuth` mechanism
+  `ClosePane`/`UIClick`/`UIQuery` already use — no client-supplied agent id
+  or backend address; the container's dev-proxy-network IP is resolved
+  server-side from `ContainerManager::agent_network_ip`, keyed off the
+  CALLER's own verified identity.
+- **Cleanup on container stop:** wired into `ContainerManager::stop`/
+  `remove` themselves (§3.2's "needed" list didn't specify which), via a
+  registry reference (`ContainerRuntimeHandle::set_dev_proxy_registry`,
+  re-attached on every Docker reconnect since a reconnect creates a fresh
+  `ContainerManager`) rather than a separate close-pane-saga hook — this
+  keeps cleanup correct for the drift-recreate path inside
+  `ensure_running` too, not just an explicit future stop/restart feature.
+- **One deviation from "streamed... hyper's client, the natural tool"
+  (§0/proxy handler description):** the proxy forwards requests via
+  `reqwest` (already a workspace dependency, given the `stream` feature)
+  rather than a raw `hyper` client — same streaming behavior (request and
+  response bodies are streamed via `Body::from_stream`/`wrap_stream`, never
+  buffered whole), less code than hand-rolling connection pooling and
+  header plumbing on top of bare `hyper`. No functional difference for
+  this spec's HTTP-only, no-websocket-upgrade scope.
+
+**Verification depth:** `cargo build`/`cargo test` pass across
+`agentmux-common`, `agentmux-srv`, and `agentmux-mcp` (4048 srv tests, 215
+common, 26 mcp — zero regressions). Beyond that:
+- `backend::dev_proxy::tests` includes a real end-to-end test: an actual
+  bound TCP listener standing in for a dev server, the real proxy router in
+  front of it, and a real `reqwest` client request carrying a `Host`
+  header — confirms the full path (Host parsing → lookup → forward →
+  stream response back) and that an unregistered Host 404s cleanly.
+- `backend::container::tests::itest_dev_proxy_network_attach_and_ip_resolution`
+  (Docker-gated, `#[ignore]` by default, run manually against this
+  session's real Docker Desktop daemon) confirms against REAL Docker: the
+  shared network is created, a real container is attached to it,
+  `agent_network_ip` resolves a real routable IPv4 address, and `remove`
+  clears that agent's registrations from a live registry.
+- `server::tests::register_dev_server_*` (4 tests) exercise the actual
+  HTTP route (`POST /api/v1/agent/dev_server/register`) through
+  `build_router` + `tower::oneshot`: unsigned request → 401, empty
+  project / zero port → 400 (before Docker is even consulted), and
+  Docker-unavailable → 503, all against the real handler code, not a
+  mock of it.
+- **What did NOT run:** a full click-through-the-actual-MCP-stdio-tool
+  call (`agentmux-mcp`'s `RegisterDevServer` invoking the live route over
+  a real `AGENTMUX_LOCAL_URL`/`AGENTMUX_AUTH_KEY`/`AGENTMUX_JEKT_KEY`
+  triple from inside a real container agent's own process) — driving that
+  requires a full agent spawn this pass didn't attempt. The HTTP route
+  itself, the Docker networking, and the MCP tool's JSON-RPC
+  request/response shape were each verified independently instead (above);
+  the seam between "agentmux-mcp sends this exact request" and "the route
+  accepts it" is covered by matching Rust types
+  (`RegisterDevServerRequest`/`Response` in `agentmux-common`) shared by
+  both sides, not by an observed live call.

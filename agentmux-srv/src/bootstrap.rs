@@ -1768,6 +1768,12 @@ pub fn build_app_state(
     let shared_store_for_cron = stores.shared_store.clone();
     let broker = bg.broker;
 
+    // Built before `container_manager` below so its constructor block can
+    // wire the two together (`set_dev_proxy_registry`) — `stop`/`remove`
+    // then clear an agent's routes when its container goes away. See
+    // docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+    let dev_proxy = crate::backend::dev_proxy::DevProxyRegistry::new();
+
     AppState {
         auth_key: config.auth_key.clone(),
         lan_key: config.lan_key.clone(),
@@ -1839,6 +1845,7 @@ pub fn build_app_state(
             let handle = std::sync::Arc::new(
                 crate::backend::container::ContainerRuntimeHandle::connect_at_startup(),
             );
+            handle.set_dev_proxy_registry(dev_proxy.clone());
             let handle_check = handle.clone();
             tokio::spawn(async move {
                 if handle_check.is_available().await {
@@ -1852,6 +1859,7 @@ pub fn build_app_state(
             });
             handle
         },
+        dev_proxy,
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         cron_scheduler: crate::backend::cron::CronScheduler::new(
             shared_store_for_cron,

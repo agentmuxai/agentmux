@@ -188,7 +188,16 @@ async fn main() {
     let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
+    let dev_proxy_registry = state.dev_proxy.clone();
     let router = build_router(state);
+
+    // Native dev-proxy (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
+    // — a small standalone HTTP server on its own fixed port, separate from
+    // the web/ws listeners above (Host-header routing to container-internal
+    // addresses, not part of AgentMux's own API surface). Detached: a bind
+    // failure or later error is logged inside `serve` itself and never
+    // fatal to srv startup, same posture as `lan_listeners`' reconcile loop.
+    tokio::spawn(backend::dev_proxy::serve(dev_proxy_registry));
 
     // Hand the LAN listener supervisor its router now that one exists —
     // `build_router` consumes `AppState`, which owns the supervisor, so this

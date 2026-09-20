@@ -44,7 +44,11 @@ portable-pty = "0.9"
 sysinfo = "0.35"
 parking_lot = "0.12"
 notify = "7"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
+# "stream" is needed by backend/dev_proxy.rs's request/response body
+# streaming (`Body::wrap_stream` / `Response::bytes_stream`) — the native
+# reverse proxy forwards a dev server's traffic without buffering it whole
+# in memory. See docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 # OS-native secret storage (macOS Keychain / Windows Credential Manager /
 # Linux Secret Service) for Armory API keys. See
 # docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
