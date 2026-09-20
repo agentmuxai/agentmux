@@ -139,6 +139,19 @@ export interface PaneTabStripProps<T> {
      *  for every existing consumer (editor file tabs, agent History strip)
      *  that doesn't pass it. */
     onReorder?: (blockId: string, targetId: string, position: "before" | "after") => void;
+
+    /** This Pane's own stable identity (the caller's `nodeModel.nodeId`) —
+     *  required whenever `onReorder` is passed. `paneTabItemType` is one
+     *  module-level constant shared by EVERY `PaneTabStrip` instance in the
+     *  window, so without this, a pill dragged from a DIFFERENT pane would
+     *  pass `canDrop` (wrong-pane false affirmative: dimming/insertion-line
+     *  feedback shown, then a silent no-op on drop, since
+     *  `moveMemberInStack` correctly refuses a cross-pane move but nothing
+     *  told the user beforehand). Rides in the drag payload as
+     *  `sourceNodeId` and is checked against THIS strip's own `paneKey` in
+     *  `canDrop` — cross-pane drops are Phase 4's job (§3.3), not silently
+     *  half-supported here. ReAgent P1 on PR #3444. */
+    paneKey?: string;
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -309,6 +322,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             onDoubleClick={props.onTabDoubleClick}
                             renderLabel={props.renderLabel}
                             onReorder={props.onReorder}
+                            paneKey={props.paneKey}
                         />
                     )}
                 </For>
@@ -360,6 +374,7 @@ interface PaneTabStripItemProps<T> {
     onDoubleClick?: (tab: T) => void;
     renderLabel?: (tab: T) => JSX.Element;
     onReorder?: (blockId: string, targetId: string, position: "before" | "after") => void;
+    paneKey?: string;
 }
 
 function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
@@ -383,13 +398,25 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         if (!el) return;
         const cleanupDraggable = draggable({
             element: el,
-            getInitialData: () => ({ kind: "pane-tab", blockId: id(), type: paneTabItemType }),
+            getInitialData: () => ({
+                kind: "pane-tab",
+                blockId: id(),
+                type: paneTabItemType,
+                sourceNodeId: props.paneKey,
+            }),
             onDragStart: () => setIsDragging(true),
             onDrop: () => setIsDragging(false),
         });
         const cleanupDropTarget = dropTargetForElements({
             element: el,
-            canDrop: ({ source }) => source.data.type === paneTabItemType && source.data.blockId !== id(),
+            // Same-pane only — a pill dragged from a DIFFERENT pane (a
+            // different `sourceNodeId`) is rejected here rather than
+            // accepted-then-silently-no-op'd on drop. Cross-pane drop is
+            // Phase 4 (§3.3), not yet implemented. ReAgent P1 on PR #3444.
+            canDrop: ({ source }) =>
+                source.data.type === paneTabItemType &&
+                source.data.blockId !== id() &&
+                source.data.sourceNodeId === props.paneKey,
             onDrag: ({ location }) => {
                 setDropSide(dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX));
             },
