@@ -46,6 +46,30 @@ pub(crate) async fn handle_register_dev_server(
         )
             .into_response();
     }
+    // `project` becomes a DNS label in `<project>-<agent>.localhost` (see
+    // `DevProxyRegistry::routing_key`) — validate it as one instead of only
+    // checking non-empty. An unvalidated value containing e.g. '.' or
+    // whitespace would previously register successfully and hand the caller
+    // back a URL that can never actually route, discovered only when they
+    // tried to open it. reagent P2, PR #3439.
+    let is_hostname_label = !project.is_empty()
+        && project.len() <= 63
+        && !project.starts_with('-')
+        && !project.ends_with('-')
+        && project
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !is_hostname_label {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "project must be a valid hostname label: lowercase \
+                          letters, digits, and hyphens only, not starting or \
+                          ending with a hyphen, 63 characters or fewer"
+            })),
+        )
+            .into_response();
+    }
     if req.port == 0 {
         return (
             StatusCode::BAD_REQUEST,
