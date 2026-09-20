@@ -7,8 +7,10 @@
 `ui:color`/`frame:activebordercolor` system this now also feeds the header),
 `docs/specs/SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md` (Draft, 2026-06-23
 — documents `AGENTMUX_AGENT_COLOR` as part of its original design; that
-assumption is now stale, see §5), `docs/specs/SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md`
-(the larger, not-yet-implemented follow-up this spec's own findings fed into)
+assumption is now stale, see §5). A larger, not-yet-implemented follow-up
+(persisting explicit picks to agent identity, unifying the tab-select
+indicator) exists as local notes only — not committed yet, so not cited by
+path here (`docs/specs/README.md`'s no-dangling-pointer rule).
 
 ---
 
@@ -111,10 +113,10 @@ Three additional changes, all part of the same PR:
 
 `SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md` (Status: Draft) documents
 `AGENTMUX_AGENT_COLOR` as the header's base layer in its §7 interaction
-table — now inaccurate. Left as Draft rather than retroactively edited;
-`SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md` is the actual current
-design going forward and supersedes it in practice, but a formal
-Status-line update to that June doc is a small follow-up, not bundled here.
+table — now inaccurate. Left as Draft rather than retroactively edited; the
+locally-noted follow-up mentioned above is the actual current design going
+forward and supersedes it in practice, but a formal Status-line update to
+that June doc is a small follow-up, not bundled here.
 
 ## 6. Verification
 
