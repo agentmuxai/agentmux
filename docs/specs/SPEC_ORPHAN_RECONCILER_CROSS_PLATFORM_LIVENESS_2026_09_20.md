@@ -1,7 +1,7 @@
 # SPEC: Real crash-orphan liveness check on macOS/Linux (closes #1569)
 
 **Date:** 2026-09-20
-**Status:** proposed
+**Status:** implemented — PR #3458.
 **Related:** `docs/retro/wrr-design-2026-04-28.md` (why WRR is Windows-only),
 `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md` (origin spec for
 `orphan_reconcile.rs`), `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md`
