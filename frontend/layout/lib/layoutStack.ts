@@ -39,10 +39,10 @@
 
 import { ObjectService } from "@/app/store/services";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { findNode } from "./layoutNode";
+import { findNode, findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { closeNode } from "./layoutMagnify";
-import { effectiveStack, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
+import { effectiveStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 
 export { effectiveStack };
 
@@ -213,18 +213,22 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
 }
 
 /**
- * Reorder `blockId` within the SAME pane's (`nodeId`'s) stack, to `position`
- * relative to `targetBlockId`. Applies the local optimistic edit immediately
- * (so the tab strip reacts instantly to a drag) — same "local mutation is
- * this client's own source of truth" pattern every mutator in this file
- * uses. Also fires the matching `pane.moveTab` RPC, fire-and-forget (not
- * awaited — a failure is logged only, same posture as every other mutator
- * here, none of which reconciles against RPC failure): it exists so OTHER
- * windows/tabs watching this same layout see the move too, via the queued
- * `stackmove` action `pane.moveTab` sends (this client's own local edit
- * already reflects it, so it doesn't need to wait on or re-apply its own
- * queued action).
- * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
+ * Reorder `blockId` within the SAME pane's (`nodeId`'s) stack (when
+ * `targetBlockId` is also a member of it), OR move `blockId` into a
+ * DIFFERENT pane's stack (when `targetBlockId` belongs elsewhere) — Phase 3
+ * and Phase 4 of SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1/§3.4,
+ * sharing one entry point since the caller (a drop handler) doesn't need to
+ * know in advance which case applies; this function resolves it the same
+ * way the backend's `move_stack_member` does. Applies the local optimistic
+ * edit immediately (so the tab strip reacts instantly to a drag) — same
+ * "local mutation is this client's own source of truth" pattern every
+ * mutator in this file uses. Also fires the matching `pane.moveTab` RPC,
+ * fire-and-forget (not awaited — a failure is logged only, same posture as
+ * every other mutator here, none of which reconciles against RPC failure):
+ * it exists so OTHER windows/tabs watching this same layout see the move
+ * too, via the queued `stackmove` action `pane.moveTab` sends (this
+ * client's own local edit already reflects it, so it doesn't need to wait
+ * on or re-apply its own queued action).
  */
 export function moveBlockInStack(
     model: LayoutModel,
@@ -239,9 +243,19 @@ export function moveBlockInStack(
         console.error("moveBlockInStack: node not found or has no data", nodeId);
         return;
     }
-    if (!moveMemberInStack(node.data, blockId, targetBlockId, position, activate)) {
+    let applied: boolean;
+    if (effectiveStack(node.data).includes(targetBlockId)) {
+        applied = moveMemberInStack(node.data, blockId, targetBlockId, position, activate);
+    } else {
+        // Cross-pane (§3.4): `targetBlockId` isn't in `nodeId`'s own leaf —
+        // find whichever leaf it DOES belong to and move across, rather
+        // than requiring the caller to already know the target's node id.
+        const targetNode = findNodeByBlockId(model.treeState.rootNode, targetBlockId);
+        applied = !!targetNode?.data && moveMemberAcrossStacks(node.data, targetNode.data, blockId, activate);
+    }
+    if (!applied) {
         console.error(
-            "moveBlockInStack: blockId or targetBlockId is not a member of this node's stack",
+            "moveBlockInStack: could not apply — blockId is not a member of the source pane, or targetBlockId was not found anywhere",
             nodeId,
             blockId,
             targetBlockId

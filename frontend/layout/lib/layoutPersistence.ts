@@ -6,7 +6,7 @@ import { fireAndForget } from "@/util/util";
 import { isTileDragInFlight } from "./dragInFlight";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
-import { addMemberToStack, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
+import { addMemberToStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -337,15 +337,11 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             if (leaf.id === targetLeaf.id) {
                 moveMemberInStack(leaf.data, action.blockid, action.targetblockid, position, action.focused);
             } else {
-                // Cross-pane move: not yet reachable from any UI (Phase 3 of
-                // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md only sends
-                // same-pane reorders) — position-aware cross-leaf placement
-                // is Phase 4's job. Logged, not silently dropped.
-                console.error(
-                    "StackMove across panes is not yet supported by the frontend handler (Phase 4)",
-                    action.blockid,
-                    action.targetblockid
-                );
+                // Cross-pane move (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+                // §3.4) — `position` is irrelevant here (a cross-pane
+                // header-drop always appends), same as `moveBlockInStack`'s
+                // own cross-leaf branch.
+                moveMemberAcrossStacks(leaf.data, targetLeaf.data, action.blockid, action.focused);
             }
             break;
         }

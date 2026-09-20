@@ -167,6 +167,16 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const handleReorder = (blockId: string, targetId: string, position: "before" | "after") => {
         moveBlockInStack(layoutModel, nodeModel.nodeId, blockId, targetId, position);
     };
+    // Cross-pane drop-to-append (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.4): a pill dragged from a DIFFERENT pane was dropped on this
+    // Pane's header — append it, active, at the end of THIS pane's stack.
+    // `targetId` only needs to identify this pane's own leaf (any current
+    // member does); `moveBlockInStack` resolves the rest.
+    const handleReceiveForeignTab = (blockId: string) => {
+        const target = activeBlockId();
+        if (!target) return;
+        moveBlockInStack(layoutModel, nodeModel.nodeId, blockId, target, "end", true);
+    };
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
 
@@ -180,6 +190,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             onActivate={handleActivate}
             onClose={handleClose}
             onReorder={handleReorder}
+            onReceiveForeignTab={handleReceiveForeignTab}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>
                 renamingId() === id ? (
