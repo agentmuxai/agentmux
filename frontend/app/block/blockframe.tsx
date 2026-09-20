@@ -273,7 +273,18 @@ function EndIcons(props: {
                 input (AgentFooter.tsx) instead of here — see
                 SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md.
                 Terminal keeps the header mic unchanged. */}
-            <Show when={props.viewModel?.voiceHandle && props.blockView !== "agent"}>
+            {/* POSITIVE guard, deliberately. This used to read
+                `props.blockView !== "agent"`, which shows the mic whenever the view
+                type is merely UNKNOWN — and `blockView` comes from
+                `blockData()?.meta?.view` (below), which is null while the block's
+                MuxObject is still loading. So an unresolved pane could render a
+                stray header mic that then vanished. Only `term` wants one here
+                (agent panes render their own beside the composer,
+                SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md;
+                browser/editor expose no voiceHandle at all — keymodel.ts:163), so
+                naming it makes the unresolved state render nothing, which is the
+                safe default. See SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4. */}
+            <Show when={props.viewModel?.voiceHandle && props.blockView === "term"}>
                 <MicButton
                     blockId={props.blockId()}
                     handle={props.viewModel.voiceHandle!()}
