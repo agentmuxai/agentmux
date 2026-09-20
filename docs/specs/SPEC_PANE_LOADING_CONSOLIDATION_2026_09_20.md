@@ -181,8 +181,22 @@ renders nothing (the safe default).
 - **Deadlock**, per §4 — mitigated by the mount/reveal split, but it is the failure mode
   to review hardest.
 - **A single authority means a single point of hang.** If one gate never reports, the
-  pane never reveals. Mitigations: named gates surfaced in diagnostics, plus a bounded
-  reveal timeout that logs loudly and reveals anyway — degrading to today's behaviour
-  rather than an indefinite cover.
+  pane never reveals.
+
+  An earlier draft of this section proposed "a bounded reveal timeout that logs loudly
+  and reveals anyway — degrading to today's behaviour rather than an indefinite cover."
+  **That was wrong on its own terms and is not what shipped.** Today's behaviour *is*
+  an indefinite cover: `agent-view.tsx` waits for `historyPainted && authPhaseSettled`
+  with no forced-reveal path at all. A timeout would therefore have been a behaviour
+  change introduced under the banner of preserving behaviour — and the case most likely
+  to trip it is the legitimate one this cover exists for: a persisted-session pane
+  replaying a large transcript while auth settles and subagents backfill. Force-revealing
+  that mid-assembly produces exactly the flicker §3 is about. (reagent P1 on #3462.)
+
+  What shipped instead: `warnAfterMs` (default 8s) **logs** which gates are outstanding
+  and leaves the cover up, giving full diagnosability at zero behavioural cost.
+  `revealTimeoutMs` exists as an explicit per-caller opt-in for a surface where partial
+  content genuinely beats waiting; **no call site sets it today.** The default path is
+  covered by its own test, since a default nothing exercises is a default nobody checks.
 - **Fade-feel regressions** across five call sites with individually tuned timings; phase
   1 exists to prove the timeline is unchanged before anything is deleted.

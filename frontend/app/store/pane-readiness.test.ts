@@ -82,33 +82,67 @@ describe("createPaneReadiness", () => {
     });
 
     /**
-     * The failure mode a single authority introduces: one gate that never reports
-     * would hide the pane forever. It must degrade to today's behaviour (pane
-     * visible) rather than an indefinite cover, and say which gate was stuck.
+     * THE behaviour-preservation test, and the one that matters most.
+     *
+     * The code this replaces waited indefinitely for its conditions. A slow
+     * persisted-session pane (large transcript replay, auth settling, subagent
+     * backfill) is the legitimate slow case AND the one the cover exists for, so
+     * force-revealing it after N seconds would expose exactly the half-assembled
+     * pane this consolidation eliminates. Exercises the DEFAULT — no override —
+     * because that is what every real call site uses. (reagent P1 on #3462.)
      */
-    it("reveals anyway after the timeout, naming the stuck gates", () => {
-        const onTimeout = vi.fn();
+    it("by default never force-reveals, however long a gate takes", () => {
         const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-        const { value: r, dispose } = inRoot(() =>
-            createPaneReadiness({ revealTimeoutMs: 5000, label: "block:abc", onTimeout })
-        );
-        r.gate("history");
-        r.gate("never-completes");
-        r.gate("history-2")();
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ label: "block:slow" }));
+        const history = r.gate("history");
+        r.gate("auth");
 
-        expect(r.phase()).toBe("assembling");
-        vi.advanceTimersByTime(5001);
+        vi.advanceTimersByTime(10 * 60 * 1000); // ten minutes
+        expect(r.phase()).toBe("assembling"); // still covered, as before
+        expect(r.pendingGates().sort()).toEqual(["auth", "history"]);
 
-        expect(r.phase()).toBe("revealing");
-        expect(onTimeout).toHaveBeenCalledWith(expect.arrayContaining(["history", "never-completes"]));
-        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("never-completes"));
+        history();
+        expect(r.phase()).toBe("assembling"); // auth still outstanding
         errSpy.mockRestore();
         dispose();
     });
 
-    it("does not fire the timeout once every gate completed in time", () => {
+    it("warns loudly about stuck gates without revealing them away", () => {
         const onTimeout = vi.fn();
-        const { value: r, dispose } = inRoot(() => createPaneReadiness({ revealTimeoutMs: 5000, onTimeout }));
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { value: r, dispose } = inRoot(() =>
+            createPaneReadiness({ warnAfterMs: 5000, label: "block:abc", onTimeout })
+        );
+        r.gate("history");
+        r.gate("never-completes");
+
+        vi.advanceTimersByTime(5001);
+
+        expect(onTimeout).toHaveBeenCalledWith(expect.arrayContaining(["history", "never-completes"]));
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("never-completes"));
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("cover stays up"));
+        expect(r.phase()).toBe("assembling"); // warned, NOT revealed
+        errSpy.mockRestore();
+        dispose();
+    });
+
+    it("force-reveals only when a caller explicitly opts in via revealTimeoutMs", () => {
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { value: r, dispose } = inRoot(() =>
+            createPaneReadiness({ revealTimeoutMs: 5000, label: "block:bounded" })
+        );
+        r.gate("never-completes");
+
+        vi.advanceTimersByTime(5001);
+        expect(r.phase()).toBe("revealing");
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Forcing reveal"));
+        errSpy.mockRestore();
+        dispose();
+    });
+
+    it("does not warn once every gate completed in time", () => {
+        const onTimeout = vi.fn();
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ warnAfterMs: 5000, onTimeout }));
         const done = r.gate("history");
         done();
         vi.advanceTimersByTime(10000);
@@ -136,7 +170,7 @@ describe("createPaneReadiness", () => {
 
     it("clears its timeout on dispose so a closed pane cannot fire it", () => {
         const onTimeout = vi.fn();
-        const { value: r, dispose } = inRoot(() => createPaneReadiness({ revealTimeoutMs: 1000, onTimeout }));
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ warnAfterMs: 1000, onTimeout }));
         r.gate("history");
         dispose();
         vi.advanceTimersByTime(5000);

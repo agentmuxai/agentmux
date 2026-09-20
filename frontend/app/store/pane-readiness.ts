@@ -42,12 +42,24 @@
  * content itself produces. Nothing in this module may ever be used to decide
  * whether a component mounts.
  *
- * ## Never hangs
+ * ## A stuck gate is reported, NOT force-revealed
  *
  * A single authority is also a single point of hang: one gate that never reports
- * would hide the pane forever. `revealTimeoutMs` bounds that — on expiry the pane
- * reveals anyway and logs which gates were outstanding, degrading to today's
- * behaviour rather than an indefinite cover.
+ * would hide the pane forever. The tempting mitigation — reveal anyway after N
+ * seconds — is wrong here, and an earlier draft of this module got it wrong:
+ *
+ *   - The behaviour it replaces waits INDEFINITELY for its two conditions. A
+ *     forced reveal is therefore a behaviour change, not a safety net.
+ *   - The slow case is the legitimate one. A persisted-session agent pane replays
+ *     a large transcript, settles auth, and backfills subagents; that is exactly
+ *     the load most likely to exceed any timeout, and exactly the pane this cover
+ *     exists to hide while it assembles. Revealing it half-built is the flicker
+ *     this consolidation is meant to eliminate.
+ *
+ * So by default the cover stays until every gate reports, and `warnAfterMs` only
+ * LOGS which gates are outstanding — full diagnosability, zero behaviour change.
+ * A caller that genuinely wants a bound opts in with `revealTimeoutMs`; nothing
+ * does today.
  */
 
 import { createSignal, onCleanup } from "solid-js";
@@ -72,24 +84,31 @@ export interface PaneReadiness {
 
 export interface PaneReadinessOptions {
     /**
-     * How long `assembling` may last before revealing anyway. Matches the spirit of
-     * the 2s bound `waitForMuxObjectSettled` already uses for a stuck MOS fetch.
+     * Log (do NOT reveal) if gates are still outstanding after this long. Pure
+     * diagnostics — the cover stays up. Defaults to 8s.
+     */
+    warnAfterMs?: number;
+    /**
+     * Opt-in hard bound: force the reveal if gates are still outstanding after
+     * this long. **Off by default, deliberately** — see the module comment. Only
+     * set this for a surface where showing partial content genuinely beats waiting.
      */
     revealTimeoutMs?: number;
-    /** Identifies the pane in the timeout warning. */
+    /** Identifies the pane in the warning. */
     label?: string;
-    /** Seam for tests. */
+    /** Seam for tests. Fires on the warn deadline, whether or not a reveal follows. */
     onTimeout?: (pending: string[]) => void;
 }
 
-const DEFAULT_REVEAL_TIMEOUT_MS = 8000;
+const DEFAULT_WARN_AFTER_MS = 8000;
 
 /**
  * Creates a readiness controller. Call inside a reactive owner — the timeout is
  * cleared on cleanup so a disposed pane cannot fire it.
  */
 export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadiness {
-    const revealTimeoutMs = opts.revealTimeoutMs ?? DEFAULT_REVEAL_TIMEOUT_MS;
+    const warnAfterMs = opts.warnAfterMs ?? DEFAULT_WARN_AFTER_MS;
+    const revealTimeoutMs = opts.revealTimeoutMs;
     const [phase, setPhase] = createSignal<PaneReadinessPhase>("assembling");
     const [pending, setPending] = createSignal<string[]>([]);
 
@@ -115,18 +134,22 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         if (timeoutId != null) return;
         timeoutId = setTimeout(() => {
             timeoutId = null;
+            if (phase() !== "assembling") return;
             const stuck = pending();
-            if (phase() === "assembling") {
-                // Loud on purpose: a pane that silently recovers still hides a bug.
-                console.error(
-                    `[pane-readiness] ${opts.label ?? "pane"}: revealing after ${revealTimeoutMs}ms with ` +
-                        `gate(s) still pending: ${stuck.join(", ") || "(none)"}. ` +
-                        `A gate was registered and never completed.`
-                );
-                opts.onTimeout?.(stuck);
-                toRevealing();
-            }
-        }, revealTimeoutMs);
+            // Loud on purpose: a pane stuck behind a cover is a bug worth seeing,
+            // even though we do NOT hide it by revealing half-built content.
+            console.error(
+                `[pane-readiness] ${opts.label ?? "pane"}: still assembling after ${warnAfterMs}ms; ` +
+                    `gate(s) pending: ${stuck.join(", ") || "(none)"}. ` +
+                    (revealTimeoutMs != null
+                        ? `Forcing reveal (revealTimeoutMs=${revealTimeoutMs}ms was set).`
+                        : `Still waiting — the cover stays up until every gate reports.`)
+            );
+            opts.onTimeout?.(stuck);
+            // Only an explicit opt-in bound reveals early. The default waits, which
+            // is what the pre-consolidation code did.
+            if (revealTimeoutMs != null) toRevealing();
+        }, revealTimeoutMs != null ? Math.min(warnAfterMs, revealTimeoutMs) : warnAfterMs);
     };
 
     const gate = (name: string): (() => void) => {
