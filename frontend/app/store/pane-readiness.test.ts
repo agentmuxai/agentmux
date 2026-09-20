@@ -140,6 +140,51 @@ describe("createPaneReadiness", () => {
         dispose();
     });
 
+    /**
+     * The warn and reveal deadlines are INDEPENDENT. An earlier revision armed a
+     * single timer at `Math.min(warnAfterMs, revealTimeoutMs)` and force-revealed
+     * whenever it fired, so a caller asking for a 20s hard bound got revealed at
+     * the 8s default warn instead — a silent violation of the bound it requested.
+     * Only `revealTimeoutMs < warnAfterMs` was covered, which is why it survived.
+     * (reagent P1 on #3462, round 2.)
+     */
+    it("honours a revealTimeoutMs LONGER than warnAfterMs", () => {
+        const onTimeout = vi.fn();
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { value: r, dispose } = inRoot(() =>
+            createPaneReadiness({ warnAfterMs: 8000, revealTimeoutMs: 20000, label: "block:slow", onTimeout })
+        );
+        r.gate("history");
+
+        vi.advanceTimersByTime(8001); // warn deadline only
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(r.phase()).toBe("assembling"); // warned, NOT revealed at 8s
+
+        vi.advanceTimersByTime(11000); // still short of 20s
+        expect(r.phase()).toBe("assembling");
+
+        vi.advanceTimersByTime(1001); // now past the caller's bound
+        expect(r.phase()).toBe("revealing");
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Forcing reveal"));
+        errSpy.mockRestore();
+        dispose();
+    });
+
+    it("warns once, not once per gate registered after the deadline", () => {
+        const onTimeout = vi.fn();
+        const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const { value: r, dispose } = inRoot(() => createPaneReadiness({ warnAfterMs: 5000, onTimeout }));
+        r.gate("history");
+        vi.advanceTimersByTime(5001);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+
+        r.gate("late"); // must not re-arm the deadline
+        vi.advanceTimersByTime(60000);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        errSpy.mockRestore();
+        dispose();
+    });
+
     it("does not warn once every gate completed in time", () => {
         const onTimeout = vi.fn();
         const { value: r, dispose } = inRoot(() => createPaneReadiness({ warnAfterMs: 5000, onTimeout }));

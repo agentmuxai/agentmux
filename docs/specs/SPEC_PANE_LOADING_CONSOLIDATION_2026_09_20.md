@@ -198,5 +198,12 @@ renders nothing (the safe default).
   `revealTimeoutMs` exists as an explicit per-caller opt-in for a surface where partial
   content genuinely beats waiting; **no call site sets it today.** The default path is
   covered by its own test, since a default nothing exercises is a default nobody checks.
+
+  The two are **independent deadlines on independent timers.** A first attempt armed a
+  single timer at `Math.min(warnAfterMs, revealTimeoutMs)` and revealed whenever it
+  fired, so a caller asking for a 20s hard bound was revealed at the 8s *warn* instead —
+  a silent violation of the bound it had asked for. It survived review once because only
+  `revealTimeoutMs < warnAfterMs` was tested; the reversed ordering is now a test.
+  (reagent P1 on #3462, round 2.)
 - **Fade-feel regressions** across five call sites with individually tuned timings; phase
   1 exists to prove the timeline is unchanged before anything is deleted.

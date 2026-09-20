@@ -60,6 +60,10 @@
  * LOGS which gates are outstanding — full diagnosability, zero behaviour change.
  * A caller that genuinely wants a bound opts in with `revealTimeoutMs`; nothing
  * does today.
+ *
+ * The two are INDEPENDENT deadlines on independent timers. Collapsing them into
+ * one timer at `Math.min(...)` makes a caller's explicit hard bound silently
+ * shrink to the warn interval — see the comment on `armTimers`.
  */
 
 import { createSignal, onCleanup } from "solid-js";
@@ -96,15 +100,19 @@ export interface PaneReadinessOptions {
     revealTimeoutMs?: number;
     /** Identifies the pane in the warning. */
     label?: string;
-    /** Seam for tests. Fires on the warn deadline, whether or not a reveal follows. */
+    /**
+     * Seam for tests. Fires with the outstanding gates each time a deadline
+     * elapses while still assembling — so a caller that sets both options and
+     * misses both deadlines sees it twice, once per deadline.
+     */
     onTimeout?: (pending: string[]) => void;
 }
 
 const DEFAULT_WARN_AFTER_MS = 8000;
 
 /**
- * Creates a readiness controller. Call inside a reactive owner — the timeout is
- * cleared on cleanup so a disposed pane cannot fire it.
+ * Creates a readiness controller. Call inside a reactive owner — both deadline
+ * timers are cleared on cleanup so a disposed pane cannot fire them.
  */
 export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadiness {
     const warnAfterMs = opts.warnAfterMs ?? DEFAULT_WARN_AFTER_MS;
@@ -112,44 +120,76 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
     const [phase, setPhase] = createSignal<PaneReadinessPhase>("assembling");
     const [pending, setPending] = createSignal<string[]>([]);
 
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    // Two INDEPENDENT deadlines, deliberately two timers. An earlier revision
+    // armed a single timer at `Math.min(warnAfterMs, revealTimeoutMs)` and
+    // force-revealed whenever it fired, so `revealTimeoutMs: 20000` against the
+    // default 8s warn revealed at 8s — silently breaking the hard bound the
+    // caller asked for. The deadlines mean different things; they don't collapse.
+    // (reagent P1 on #3462, round 2.)
+    let warnTimerId: ReturnType<typeof setTimeout> | null = null;
+    let revealTimerId: ReturnType<typeof setTimeout> | null = null;
+    // Each deadline is one-shot. Without this, a gate registered after a
+    // deadline already elapsed would re-arm it (the id is back to null) and
+    // warn again about the same stuck pane.
+    let warnFired = false;
+    let revealFired = false;
     // Gates registered so far. A pane that registers none reveals immediately, so
     // non-agent panes are unaffected by this module existing.
     let everRegistered = false;
 
-    const clearTimer = () => {
-        if (timeoutId != null) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
+    const clearTimers = () => {
+        if (warnTimerId != null) {
+            clearTimeout(warnTimerId);
+            warnTimerId = null;
+        }
+        if (revealTimerId != null) {
+            clearTimeout(revealTimerId);
+            revealTimerId = null;
         }
     };
 
     const toRevealing = () => {
         if (phase() !== "assembling") return;
-        clearTimer();
+        clearTimers();
         setPhase("revealing");
     };
 
-    const armTimeout = () => {
-        if (timeoutId != null) return;
-        timeoutId = setTimeout(() => {
-            timeoutId = null;
-            if (phase() !== "assembling") return;
-            const stuck = pending();
-            // Loud on purpose: a pane stuck behind a cover is a bug worth seeing,
-            // even though we do NOT hide it by revealing half-built content.
-            console.error(
-                `[pane-readiness] ${opts.label ?? "pane"}: still assembling after ${warnAfterMs}ms; ` +
-                    `gate(s) pending: ${stuck.join(", ") || "(none)"}. ` +
-                    (revealTimeoutMs != null
-                        ? `Forcing reveal (revealTimeoutMs=${revealTimeoutMs}ms was set).`
-                        : `Still waiting — the cover stays up until every gate reports.`)
-            );
-            opts.onTimeout?.(stuck);
-            // Only an explicit opt-in bound reveals early. The default waits, which
-            // is what the pre-consolidation code did.
-            if (revealTimeoutMs != null) toRevealing();
-        }, revealTimeoutMs != null ? Math.min(warnAfterMs, revealTimeoutMs) : warnAfterMs);
+    const armTimers = () => {
+        if (warnTimerId == null && !warnFired) {
+            warnTimerId = setTimeout(() => {
+                warnTimerId = null;
+                warnFired = true;
+                if (phase() !== "assembling") return;
+                const stuck = pending();
+                // Loud on purpose: a pane stuck behind a cover is a bug worth
+                // seeing, even though we do NOT hide it by revealing half-built
+                // content.
+                console.error(
+                    `[pane-readiness] ${opts.label ?? "pane"}: still assembling after ${warnAfterMs}ms; ` +
+                        `gate(s) pending: ${stuck.join(", ") || "(none)"}. ` +
+                        `Still waiting — the cover stays up until every gate reports` +
+                        (revealTimeoutMs != null ? ` or revealTimeoutMs=${revealTimeoutMs}ms elapses.` : `.`)
+                );
+                opts.onTimeout?.(stuck);
+            }, warnAfterMs);
+        }
+        // Only an explicit opt-in bound reveals early. The default leaves this
+        // timer unarmed entirely, which is what the pre-consolidation code did.
+        if (revealTimeoutMs != null && revealTimerId == null && !revealFired) {
+            revealTimerId = setTimeout(() => {
+                revealTimerId = null;
+                revealFired = true;
+                if (phase() !== "assembling") return;
+                const stuck = pending();
+                console.error(
+                    `[pane-readiness] ${opts.label ?? "pane"}: Forcing reveal after ` +
+                        `revealTimeoutMs=${revealTimeoutMs}ms; gate(s) never reported: ` +
+                        `${stuck.join(", ") || "(none)"}.`
+                );
+                opts.onTimeout?.(stuck);
+                toRevealing();
+            }, revealTimeoutMs);
+        }
     };
 
     const gate = (name: string): (() => void) => {
@@ -160,7 +200,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         }
         everRegistered = true;
         setPending((p) => [...p, name]);
-        armTimeout();
+        armTimers();
 
         let released = false;
         return () => {
@@ -179,7 +219,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
 
     const revealComplete = () => {
         if (phase() === "live") return;
-        clearTimer();
+        clearTimers();
         setPhase("live");
     };
 
@@ -189,7 +229,7 @@ export function createPaneReadiness(opts: PaneReadinessOptions = {}): PaneReadin
         if (!everRegistered && phase() === "assembling") toRevealing();
     });
 
-    onCleanup(clearTimer);
+    onCleanup(clearTimers);
 
     return {
         phase,
