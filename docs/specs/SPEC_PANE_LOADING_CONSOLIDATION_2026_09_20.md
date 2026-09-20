@@ -8,7 +8,7 @@ and an opt-in (default-off) reveal bound;
 `<PaneLoadingCover>` (§5.3) now the single owner of `.agent-pane-loading-overlay`,
 adopted by both `agent-view.tsx` and `AgentPicker.tsx` — indicator #4 in §2 is gone and
 #3 no longer renders its own markup; the header-mic guard inverted to positive (§5.4).
-Phases 3 and 4 follow in the PR stacked on that one: indicators #1 and #2 now route through the same
+Phases 3 and 4 follow in PR #3464: indicators #1 and #2 now route through the same
 controller and cover, the cover's styles moved out of the `.agent-view` cascade into
 `element/PaneLoadingCover.scss`, coverage became an explicit input (§5.3), and
 `BlockFrame` subscribes to `isLoading()`.
