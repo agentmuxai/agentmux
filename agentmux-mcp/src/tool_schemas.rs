@@ -911,7 +911,7 @@ pub(crate) const GLOBAL_MEMORY_READ_TOOL: &str = r#"{
 
 pub(crate) const GLOBAL_MEMORY_WRITE_TOOL: &str = r#"{
   "name": "GlobalMemoryWrite",
-  "description": "Create a new Global Memory entry, or update an existing one by id. Global Memory is inherited by EVERY agent in this workspace at launch — this is workspace-wide shared state, not your own private memory (use MemoryWrite for that). Every write is retained as a version internally, though history/diff/revert for Global Memory is not yet exposed as a tool. Cannot create or touch AgentMux's own system-tier (highest-priority, override-wording) entries — those are managed exclusively through the Armory UI.",
+  "description": "Create a new Global Memory entry, or update an existing one by id. Global Memory is inherited by EVERY agent in this workspace at launch — this is workspace-wide shared state, not your own private memory (use MemoryWrite for that). Every write is retained as a version (see GlobalMemoryHistory) — nothing is ever silently lost. Cannot create or touch AgentMux's own system-tier (highest-priority, override-wording) entries — those are managed exclusively through the Armory UI.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -941,6 +941,45 @@ pub(crate) const GLOBAL_MEMORY_REMOVE_TOOL: &str = r#"{
       "id": { "type": "string", "description": "The entry id to remove (from GlobalMemoryList)" }
     },
     "required": ["id"]
+  }
+}"#;
+
+pub(crate) const GLOBAL_MEMORY_HISTORY_TOOL: &str = r#"{
+  "name": "GlobalMemoryHistory",
+  "description": "List every recorded version of one Global Memory entry, newest first. Global Memory is inherited by EVERY agent in this workspace at launch — this is the audit trail for that workspace-wide shared state, not your own native memory (use MemoryHistory for that). Each entry shows who/what wrote it (source: human, agent_inferred, jekt, or revert) and when. Use it to review how an entry changed over time, or to find a version id to pass to GlobalMemoryDiff/GlobalMemoryRevert.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The Global Memory entry id to show history for (from GlobalMemoryList)" }
+    },
+    "required": ["id"]
+  }
+}"#;
+
+pub(crate) const GLOBAL_MEMORY_DIFF_TOOL: &str = r#"{
+  "name": "GlobalMemoryDiff",
+  "description": "Show a line-based diff between two recorded versions of a Global Memory entry (workspace-wide shared state, not your own native memory — use MemoryDiff for that). Get version ids from GlobalMemoryHistory.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The Global Memory entry id both versions belong to (from GlobalMemoryList)" },
+      "from_version_id": { "type": "string", "description": "The earlier version id (from GlobalMemoryHistory)" },
+      "to_version_id":   { "type": "string", "description": "The later version id (from GlobalMemoryHistory)" }
+    },
+    "required": ["id", "from_version_id", "to_version_id"]
+  }
+}"#;
+
+pub(crate) const GLOBAL_MEMORY_REVERT_TOOL: &str = r#"{
+  "name": "GlobalMemoryRevert",
+  "description": "Restore a Global Memory entry's live content to a prior recorded version. Global Memory is inherited by EVERY agent in this workspace at launch, so this changes what every agent — not just you — is instructed with at their next launch (use MemoryRevert to restore your own native memory instead). This does NOT delete history — it records a new version (source: \"revert\") whose content matches the target, same as `git revert`. Use it to undo a bad or fabricated Global Memory write once you've confirmed via GlobalMemoryHistory/GlobalMemoryDiff which version to restore. Cannot revert AgentMux's own system-tier entries.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The Global Memory entry id to revert (from GlobalMemoryList)" },
+      "version_id": { "type": "string", "description": "The version id to restore (from GlobalMemoryHistory)" }
+    },
+    "required": ["id", "version_id"]
   }
 }"#;
 

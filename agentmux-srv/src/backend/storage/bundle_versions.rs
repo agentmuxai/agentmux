@@ -10,15 +10,17 @@
 //! `updated_at`; this exists specifically because Global Memory is about to
 //! gain a write path an agent, not just a human at the Armory UI, can reach.
 //!
-//! Only the WRITE side (`bundle_version_insert`, called via
+//! The WRITE side (`bundle_version_insert`, called via
 //! `Store::bundle_upsert_with_version` in `bundles.rs` on every
 //! `globalmemory.write` AND the Armory UI's own `upsertmemory` save path)
-//! is wired into an RPC/MCP surface today. `bundle_version_list`/
-//! `bundle_version_get` (the read side — history, diff, revert) are
-//! implemented and tested here but deliberately not yet exposed anywhere —
-//! a `GlobalMemoryHistory`-equivalent MCP tool / Armory UI is out of scope
-//! for this pass. Recording history with no way to see it yet is still
-//! strictly better than not recording it at all.
+//! and the READ side (`bundle_version_list`/`bundle_version_get`, called by
+//! `global_memory_history_impl`/`global_memory_diff_impl`/
+//! `global_memory_revert_impl` in `app_api/mod.rs`, backing the
+//! `GlobalMemoryHistory`/`GlobalMemoryDiff`/`GlobalMemoryRevert` MCP tools)
+//! are both wired into the agent-facing MCP surface now — see
+//! `docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md`. No
+//! Armory UI surface for this yet — that remains out of scope (MCP/REST
+//! only, per that spec's own non-goals).
 
 use rusqlite::params;
 use sha2::{Digest, Sha256};
@@ -184,10 +186,11 @@ impl Store {
     /// (`bundles.rs`) performs its own inline `SELECT written_by,
     /// content_hash, source_detail ... LIMIT 1` query instead, so its
     /// ownership check and the write it gates happen in one transaction
-    /// (see that method's own doc comment for why). The read side of a
-    /// future GlobalMemoryHistory tool remains otherwise unbuilt
-    /// (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this method is
-    /// exercised directly by this file's own tests in the meantime.
+    /// (see that method's own doc comment for why). Backs the
+    /// `GlobalMemoryHistory` MCP tool (`global_memory_history_impl`,
+    /// `server/app_api/mod.rs`) as of
+    /// SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md's Phase-3
+    /// follow-up — also still exercised directly by this file's own tests.
     pub fn bundle_version_list(&self, bundle_id: &str) -> Result<Vec<BundleVersionSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -212,9 +215,11 @@ impl Store {
         Ok(rows)
     }
 
-    /// One version by id, full content included — the lookup a diff/revert
-    /// feature would build on later (mirrors `agent_native_memory_version_get`).
-    #[allow(dead_code)] // not yet called — see this module's own doc comment; kept for the diff/revert follow-up this spec's Phase 0 anticipates.
+    /// One version by id, full content included — the lookup `diff`/`revert`
+    /// build on (mirrors `agent_native_memory_version_get`). Called by
+    /// `global_memory_diff_impl`/`global_memory_revert_impl`
+    /// (`app_api/mod.rs`), which back the `GlobalMemoryDiff`/
+    /// `GlobalMemoryRevert` MCP tools.
     pub fn bundle_version_get(&self, version_id: &str) -> Result<Option<BundleVersion>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
