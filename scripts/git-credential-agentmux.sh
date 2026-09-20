@@ -142,7 +142,7 @@ else
 fi
 
 if [[ -z "$token" ]]; then
-    # Strict mode, or a genuine (non-exit-2) failure that we already explained
+    # Strict mode, or a genuine (non-exit-3) failure that we already explained
     # above: refuse rather than let git silently escalate to another helper.
     if [[ "${AGENTMUX_GIT_CRED_STRICT:-0}" == "1" ]]; then
         echo "git-credential-agentmux: no App token for '$owner' as '$agent' (strict mode)" >&2
@@ -151,7 +151,7 @@ if [[ -z "$token" ]]; then
     if [[ $MINT_HARD_FAIL -eq 1 ]]; then
         echo "git-credential-agentmux: falling through to the next helper -- if that is the shared admin credential, this push is NOT running as '$agent'" >&2
     fi
-    exit 0   # exit 2 case only: no App provisioned, nothing to say
+    exit 0   # exit 3 case only: no App provisioned, nothing to say
 fi
 
 printf 'protocol=%s\n' "${protocol:-https}"
