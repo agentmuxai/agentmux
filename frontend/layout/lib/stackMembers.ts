@@ -45,6 +45,33 @@ export function removeMemberFromStack(data: TabLayoutData, blockId: string): boo
  * sides. The caller commits the tree.
  * SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
  */
+/**
+ * Move `blockId` OUT of `sourceData`'s stack and INTO `targetData`'s stack
+ * (a plain append, then optionally activated there) — the cross-pane
+ * counterpart to `moveMemberInStack`'s same-leaf reorder. Mirrors the
+ * backend's cross-leaf branch of `move_stack_member`
+ * (`agentmux-srv/src/backend/layout/mod.rs`): `remove_stack_member` +
+ * `push_stack_member`-style append, composed the same way. Returns `false`
+ * and changes NEITHER side when `blockId` isn't a member of `sourceData`,
+ * or is its only member (removing a leaf's last member is closing the
+ * pane, a different operation — the caller's job, same guard
+ * `moveMemberInStack`'s sibling `removeMemberFromStack` already enforces
+ * for the same-leaf case).
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4.
+ */
+export function moveMemberAcrossStacks(
+    sourceData: TabLayoutData,
+    targetData: TabLayoutData,
+    blockId: string,
+    activate: boolean
+): boolean {
+    const sourceMembers = effectiveStack(sourceData);
+    if (!sourceMembers.includes(blockId) || sourceMembers.length <= 1) return false;
+    if (!removeMemberFromStack(sourceData, blockId)) return false;
+    addMemberToStack(targetData, blockId, activate);
+    return true;
+}
+
 export function addMemberToStack(data: TabLayoutData, blockId: string, activate: boolean): void {
     const stack = effectiveStack(data);
     data.blockStack = stack.includes(blockId) ? [...stack] : [...stack, blockId];
