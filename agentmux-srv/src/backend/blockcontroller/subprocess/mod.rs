@@ -49,7 +49,11 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 use crate::backend::mps;
 
-mod argv;
+// `pub(crate)` (not private): `argv::build_side_question_argv` is reused by
+// the `/btw` side-question turn builder in
+// `server/agent_handlers/side_question.rs`, outside this module. Every
+// other item in `argv` keeps its own narrower visibility.
+pub(crate) mod argv;
 mod container_spawn;
 mod host_spawn;
 mod session;

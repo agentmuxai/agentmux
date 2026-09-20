@@ -34,6 +34,7 @@
 @use "styles/shell-node";
 @use "styles/loading-overlay";
 @use "styles/picker-fade";
+@use "styles/btw";
 
 // Wrapper stack for the pane-level tab strip (AgentPaneChrome, agent-view.tsx):
 // strip on top, content region filling the remainder. Owned by chrome, not

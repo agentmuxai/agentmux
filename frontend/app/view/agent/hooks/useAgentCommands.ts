@@ -222,6 +222,67 @@ export interface UseAgentCommandsOptions {
      * promoting them into the document at that moment.
      */
     pendingMessages?: Accessor<import("../state").PendingMessage[]>;
+    /**
+     * `quick-fork.ts`'s `quickForkAgent`, threaded in so `/fork`'s handler
+     * can trigger the same fork-to-sibling-tab action the pane's right-click
+     * "Quick Fork" context-menu item already uses (`agent-model.ts`'s
+     * `getBodyContextMenuItems`). Bound to `() => quickForkAgent(model)` at
+     * the `useAgentCommands({...})` call site in agent-view.tsx, where
+     * `model` is the `AgentViewModel` instance satisfying `QuickForkModel`.
+     * Optional (defaults to a no-op resolving `false` in
+     * `buildCommandContext`) so the many call sites that don't exercise
+     * `/fork` — this file's own test suite — don't all need updating.
+     */
+    quickFork?: () => Promise<boolean>;
+    /**
+     * `btw.ts`'s `askSideQuestion`, threaded in so `/btw`'s handler can
+     * fire the actual backend request. Bound to `(question) =>
+     * askSideQuestion(model.blockId, question, paneModel.document())` at
+     * the `useAgentCommands({...})` call site in agent-view.tsx — mirrors
+     * `quickFork` above exactly. Optional (defaults to a stub resolving
+     * `{ requestId: "" }` in `buildCommandContext`) so the many call sites
+     * that don't exercise `/btw` — this file's own test suite — don't all
+     * need updating. This hook, not `btw.ts`, owns opening/updating the
+     * `btwOverlay` signal below — see `SlashCommandContext.askSideQuestion`'s
+     * doc comment for why the two are bundled into one context field
+     * instead of a separate "open the overlay" call.
+     */
+    askSideQuestion?: (question: string) => Promise<{ requestId: string }>;
+}
+
+/**
+ * State backing the floating `/btw` overlay (`components/BtwOverlay.tsx`).
+ * Owned by this hook (mirrors `pickerSpec`/`helpVisible`) so the view only
+ * ever reads it, never derives it independently.
+ */
+export interface BtwOverlayState {
+    /**
+     * Unique per ask — minted fresh every time `askSideQuestion` is called,
+     * BEFORE any backend `requestId` is known. Lets `BtwOverlay` tell two
+     * different asks apart even when their question text happens to be
+     * identical, and — critically — gives it something to key a local-state
+     * reset on: asking a second `/btw` while the overlay from a prior ask is
+     * still mounted does NOT unmount/remount the component (`btwOverlay()`
+     * never passes through a falsy value between two truthy asks, so
+     * `<Show>` in agent-view.tsx reuses the same instance), so
+     * `BtwOverlay`'s own local `answer`/`done`/`error` signals would
+     * otherwise carry the PREVIOUS ask's leftover state into the new one.
+     * See `BtwOverlay.tsx`'s own reset effect, keyed on this field.
+     */
+    askId: number;
+    /** The question exactly as typed, shown immediately on open — before
+     *  `requestId` (and therefore any streamed answer) is even known. */
+    question: string;
+    /**
+     * `null` until the backend request is accepted. The overlay's MPS
+     * subscription (`block:<blockId>:btw:<requestId>`) can't start before
+     * this is set — there's nothing to scope it to yet.
+     */
+    requestId: string | null;
+    /** Set if the backend request itself failed (not a streaming-answer
+     *  error, which the overlay's own subscription handles separately).
+     *  Non-null and `requestId` non-null never coexist. */
+    error: string | null;
 }
 
 export interface UseAgentCommands {
@@ -304,6 +365,24 @@ export interface UseAgentCommands {
      * filter). Consumed by SlashHelpPanel to render the grouped list.
      */
     availableCommands: () => SlashCommand[];
+    /**
+     * `/btw` overlay state. Non-null while the overlay should be showing —
+     * set the instant `ctx.askSideQuestion` is called (so the question
+     * renders immediately, before the backend request even resolves) and
+     * updated in place as `requestId`/`error` arrive. agent-view.tsx reads
+     * this to mount `<BtwOverlay />`, mirroring `pickerSpec`/`helpVisible`.
+     */
+    btwOverlay: Accessor<BtwOverlayState | null>;
+    /** Close the /btw overlay (Esc / click-outside / explicit close). */
+    closeBtw: () => void;
+    /**
+     * Fire a `/btw` side question and open/update `btwOverlay` — the same
+     * function bound onto `SlashCommandContext.askSideQuestion` for the
+     * `/btw` command handler to call. Exposed here too (mirroring
+     * `btwOverlay`/`closeBtw`) so callers/tests can drive it directly
+     * without going through the slash-command dispatcher.
+     */
+    askSideQuestion: (question: string) => Promise<{ requestId: string }>;
     /**
      * Runs the controller refresh /login deferred because a turn was
      * actively streaming when it succeeded (see
@@ -461,6 +540,53 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     };
     const closeHelp = (): void => {
         setHelpVisible(false);
+    };
+
+    // ── /btw overlay state ────────────────────────────────────────────
+    // askSideQuestion (defined below, once — referenced by both ctx and the
+    // returned UseAgentCommands, not rebuilt per buildCommandContext call,
+    // same as openPicker/openHelp above) both fires the backend request AND
+    // drives this signal open/updated — see BtwOverlayState's own doc
+    // comment and SlashCommandContext.askSideQuestion's for why the two
+    // aren't split into separate context fields the way openPicker/openHelp
+    // are (there's no "just open the overlay with nothing to ask" case).
+    const [btwOverlay, setBtwOverlay] = createSignal<BtwOverlayState | null>(null);
+    // Monotonic per-hook-instance counter — see BtwOverlayState.askId's doc
+    // comment for why each ask needs an id distinct from its question text.
+    let nextBtwAskId = 0;
+    const closeBtw = (): void => {
+        setBtwOverlay(null);
+    };
+    // Opens the overlay immediately (question visible, requestId still
+    // null) so the user sees SOMETHING happened before the backend
+    // round-trip resolves, then updates it in place once that resolves —
+    // see BtwOverlayState's doc comment for why requestId/error are
+    // mutually exclusive outcomes of the same call. Rethrows on failure
+    // (after recording it into the overlay) so btw.ts's handler can also
+    // surface it as its own SlashResult error, same as every other
+    // command's failure path.
+    //
+    // Matched below by askId, not question text — two asks can legitimately
+    // carry identical text (reagentx P1 on PR #3440: matching by question
+    // also let a second ask's resolution land on a first ask's still-open
+    // state if the text happened to repeat). askId also gives BtwOverlay
+    // something to key its local-state reset effect on when the component
+    // instance is reused across two overlapping asks (see BtwOverlayState's
+    // doc comment).
+    const askSideQuestion = async (question: string): Promise<{ requestId: string }> => {
+        const askId = nextBtwAskId++;
+        setBtwOverlay({ askId, question, requestId: null, error: null });
+        try {
+            const result = await (opts.askSideQuestion ?? (async () => ({ requestId: "" })))(question);
+            setBtwOverlay((prev) =>
+                prev && prev.askId === askId ? { ...prev, requestId: result.requestId } : prev,
+            );
+            return result;
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            setBtwOverlay((prev) => (prev && prev.askId === askId ? { ...prev, error: message } : prev));
+            throw e;
+        }
     };
 
     // Set by /login's finalizeLoginSuccess (login.ts) when it must skip an
@@ -803,6 +929,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         resetCancelled: opts.resetCancelled,
         openPicker,
         openHelp,
+        quickFork: opts.quickFork ?? (async () => false),
+        askSideQuestion,
     });
 
     const completions = (prefix: string): SlashCommand[] => {
@@ -1742,6 +1870,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         closeHelp,
         availableCommands,
         flushPendingControllerRefresh,
+        btwOverlay,
+        closeBtw,
+        askSideQuestion,
     };
 }
 

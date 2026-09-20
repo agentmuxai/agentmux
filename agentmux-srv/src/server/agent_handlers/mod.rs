@@ -10,6 +10,7 @@ mod instance;
 mod session;
 mod bundle;
 mod input;
+mod side_question;
 
 use std::sync::Arc;
 
@@ -19,6 +20,11 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use super::AppState;
 
 pub use input::register_agent_input_handlers;
+// `/btw` slash command backend — registered alongside
+// `register_agent_input_handlers` in `server/websocket.rs` (both need the
+// same `AgentTurnDeps`-shaped wiring), not folded into
+// `register_agent_handlers` below.
+pub use side_question::register as register_side_question_handlers;
 // Re-exported for `bootstrap::install_agent_turn_delivery`, which starts an
 // agent turn from the reactive handler's message sender rather than over RPC.
 pub use input::{run_agent_turn, AgentTurnDeps, TurnRegistration};

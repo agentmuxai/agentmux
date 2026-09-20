@@ -3099,3 +3099,110 @@ describe("useAgentCommands — §2.3a: background-only turns don't hold messages
         });
     });
 });
+
+// reagentx P1 on PR #3440: a second `/btw` asked while the overlay from a
+// prior ask is still mounted does not unmount/remount BtwOverlay — Show
+// never sees btwOverlay() go through a falsy value between two truthy
+// asks, so the same component instance (and its local answer/done/error
+// signals) carries over. Fixed by giving each ask a unique askId the
+// overlay resets its local state on, matched here by asserting askId
+// changes across two overlapping asks and that a resolution correctly
+// targets its OWN ask, not a same-text earlier one still in flight.
+describe("useAgentCommands — /btw overlay askId (reagentx P1 on PR #3440)", () => {
+    const BTW_BLOCK_ID = "block-btw-askid";
+
+    afterEach(() => {
+        unregisterPane(BTW_BLOCK_ID);
+    });
+
+    function makeCommands(
+        model: AgentPaneModel,
+        askSideQuestion: (question: string) => Promise<{ requestId: string }>,
+    ) {
+        return useAgentCommands({
+            blockId: BTW_BLOCK_ID,
+            model,
+            block: () => undefined,
+            provider: () => undefined,
+            documentNodes: () => [],
+            log: () => {},
+            setAuthUrl: () => {},
+            canRetry: () => false,
+            loginWaiting: () => false,
+            setAuthNotice: () => {},
+            notifyControllerHealthy: () => {},
+            forceControllerRefresh: async () => true,
+            beginRecoveryFlow: () => {},
+            endRecoveryFlow: () => {},
+            isCancelled: () => false,
+            resetCancelled: () => {},
+            isBackendTurnActive: () => false,
+            isBackendTurnConfirmedIdle: () => true,
+            backToPicker: async () => {},
+            askSideQuestion,
+        });
+    }
+
+    it("mints a distinct askId for a second ask, even with identical question text", async () => {
+        const model = registerPane(BTW_BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = makeCommands(model, async () => ({ requestId: "r1" }));
+
+            await commands.askSideQuestion("same text");
+            const firstAskId = commands.btwOverlay()?.askId;
+            expect(firstAskId).toBeDefined();
+
+            await commands.askSideQuestion("same text");
+            const secondAskId = commands.btwOverlay()?.askId;
+
+            expect(secondAskId).toBeDefined();
+            expect(secondAskId).not.toBe(firstAskId);
+            dispose();
+        });
+    });
+
+    it("a slow first ask's resolution does not clobber a second, faster ask's overlay state", async () => {
+        const model = registerPane(BTW_BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            let resolveFirst: (v: { requestId: string }) => void;
+            const firstPending = new Promise<{ requestId: string }>((res) => {
+                resolveFirst = res;
+            });
+            let callCount = 0;
+            const commands = makeCommands(model, (question) => {
+                callCount += 1;
+                // First call hangs until resolved manually below; every
+                // later call (the second, overlapping ask) resolves
+                // immediately — reproduces "ask again before the first
+                // ask's RPC round-trip has returned".
+                return callCount === 1 ? firstPending : Promise.resolve({ requestId: `r-${question}` });
+            });
+
+            const firstAsk = commands.askSideQuestion("first question");
+            // The first ask's overlay is open, requestId still null (RPC in flight).
+            expect(commands.btwOverlay()?.question).toBe("first question");
+            expect(commands.btwOverlay()?.requestId).toBeNull();
+
+            await commands.askSideQuestion("second question");
+            expect(commands.btwOverlay()?.question).toBe("second question");
+            expect(commands.btwOverlay()?.requestId).toBe("r-second question");
+            const secondAskId = commands.btwOverlay()?.askId;
+
+            // The first ask's RPC finally resolves — its stale `then` must
+            // NOT overwrite the second ask's now-current overlay state.
+            resolveFirst!({ requestId: "r-first question" });
+            await firstAsk;
+
+            expect(commands.btwOverlay()?.question).toBe("second question");
+            expect(commands.btwOverlay()?.requestId).toBe("r-second question");
+            expect(commands.btwOverlay()?.askId).toBe(secondAskId);
+            dispose();
+        });
+    });
+});

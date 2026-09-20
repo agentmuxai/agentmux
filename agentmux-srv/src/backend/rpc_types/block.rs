@@ -360,6 +360,30 @@ pub struct CommandAgentInputData {
     pub message_id: Option<String>,
 }
 
+/// Data for AskSideQuestionCommand — the `/btw` slash command's one-shot,
+/// tool-less side question. `context_snapshot` is a frontend-supplied
+/// compact rendering of the asking pane's currently-visible transcript,
+/// prepended to `question` as the prompt sent to the CLI (there is no
+/// `--resume`/live session context on this path — see
+/// `server/agent_handlers/side_question.rs`'s module doc comment for why).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandAskSideQuestionData {
+    pub block_id: String,
+    pub question: String,
+    #[serde(default)]
+    pub context_snapshot: String,
+}
+
+/// Result of AskSideQuestionCommand. `request_id` is the correlator the
+/// caller uses to scope its `EVENT_BTW_ANSWER_CHUNK` subscription:
+/// `block:<block_id>:btw:<request_id>`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct AskSideQuestionResult {
+    pub request_id: String,
+}
+
 /// Data for AgentStopCommand — stop the running subprocess.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
