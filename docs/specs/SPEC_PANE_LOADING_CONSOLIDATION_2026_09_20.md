@@ -2,8 +2,14 @@
 
 **Date:** 2026-09-20
 **Type:** Architecture proposal
-**Status:** proposed — nothing implemented. Supersedes nothing; consolidates behaviour
-currently spread across the sites inventoried in §2.
+**Status:** active — phases 1 and 2 and the §5.4 chrome guard ship with this spec.
+Landed: `PaneReadiness` (§5.1/§5.2) with named gates and a bounded reveal timeout;
+`<PaneLoadingCover>` (§5.3) now the single owner of `.agent-pane-loading-overlay`,
+adopted by both `agent-view.tsx` and `AgentPicker.tsx` — indicator #4 in §2 is gone and
+#3 no longer renders its own markup; the header-mic guard inverted to positive (§5.4).
+Not started: phase 3 (folding the block-level `ready()` spinner and `<Suspense>`
+fallback, §2 #1-#2, into the same cover), phase 4's chrome `isLoading()` subscription,
+phase 5 (browser pane, §2 #6-#7).
 **Motivating evidence:** `docs/reports/REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md`
 (measured timeline, `spin:2` observation, §F regression).
 **Related:** `REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`,

@@ -2,7 +2,14 @@
 
 **Date:** 2026-09-20
 **Type:** Analysis (measured live via CDP against a `task dev` instance). No code change.
-**Status:** proposed — findings and recommendations only; nothing here has shipped.
+**Status:** active — the analysis stands as written; its recommendations are now partly
+built. Shipped: recommendation 1's single readiness authority and recommendation 2's
+stated-not-inferred gates (phase 1), the single cover that removes the duplicate
+`.agent-pane-loading-overlay` owner in §4.4/§3.4 (phase 2), and recommendation 4's
+positive chrome guard. §F's regression was fixed in #3456. Outstanding: recommendation 3
+(explicit coverage assertion), recommendation 5 (chrome subscribes to readiness), and
+the §5 stray-microphone hypothesis, which remains UNREPRODUCED — the positive guard
+removes the mechanism without confirming it was ever the cause.
 **Scope examined:** `frontend/app/block/block.tsx` (the `ready()` gate and its
 BrainSpinner), `frontend/app/block/blockframe.tsx` (pane chrome, header mic),
 `frontend/app/view/agent/agent-view.tsx` (`.agent-pane-loading-overlay` and its
