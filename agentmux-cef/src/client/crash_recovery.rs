@@ -76,6 +76,34 @@ impl AgentMuxHandler {
             );
         }
 
+        // On Windows, a crash that also takes the HWND down is caught by
+        // WRR's native WM_DESTROY hook, which re-emits HostShouldQuit and
+        // wakes the orphan reconciler (see orphan_reconcile.rs's own module
+        // doc). There's no equivalent native hook on macOS/Linux, so a
+        // renderer crash there previously left the reconciler un-triggered
+        // until the NEXT normal last-window-close — this call closes that
+        // gap directly from the one cross-platform signal CEF already gives
+        // us for an unexpected termination. Not needed on Windows, where
+        // the WRR path already covers this (#1569,
+        // SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md).
+        //
+        // Placed here, before every branch below (not at the function's
+        // end), on purpose: the memory-paused-OOM, crash-budget-exceeded
+        // "give up", and frontend-assets-missing paths all `return` early
+        // (reagent P1, PR #3458 — a first attempt at the end of this
+        // function silently never ran for any of those three cases,
+        // including the crash-budget "abandon auto-recovery" path, which
+        // is arguably the case most likely to correlate with a genuinely
+        // torn-down host window). This call doesn't depend on anything
+        // those branches compute — CEF only calls this handler at all for
+        // an unexpected termination (no "clean exit" TerminationStatus
+        // variant exists), so it's correct to fire unconditionally, this
+        // early. Safe to call with `browser` unresolved either —
+        // reconcile_and_drain re-derives its plan from the whole reducer
+        // snapshot, not from whichever browser crashed.
+        #[cfg(not(target_os = "windows"))]
+        crate::commands::orphan_reconcile::reconcile_and_drain(&self.state);
+
         // ── Gated renderer recovery (SPEC_GATED_RENDERER_RECOVERY §6.B) ──
         // A renderer OOM while the system commit limit is exhausted is
         // transient OS pressure, NOT a broken renderer — no amount of retrying

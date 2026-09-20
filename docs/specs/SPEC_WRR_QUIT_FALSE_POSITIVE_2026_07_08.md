@@ -1,6 +1,10 @@
 # SPEC — WRR quit gate fires on a live window (false exit on non-last window close)
 
-- **Status:** Draft → implementing
+- **Status:** implemented — PR #2043 (merged 2026-07-09, the day after
+  this spec). Corrected 2026-09-20: this line had said "Draft →
+  implementing" for over two months after the fix actually shipped —
+  found stale while researching #1569, an unrelated fix to a sibling
+  file (`orphan_reconcile.rs`) in the same quit/reconciliation area.
 - **Date:** 2026-07-08
 - **Author:** AgentA
 - **Scope:** A minimal, independently-shippable slice of L1 from
@@ -238,7 +242,7 @@ Also fixed en route: `wrap_task!` in `win_event.rs` needs explicit `use cef::rc:
 - `docs/specs/SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` (L1, the item this slices from)
 - `docs/specs/SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md` (§3.3, §7 — WRR gap previously scoped,
   not started)
-- `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` §2 (confirms WRR is still the
+- `docs/archive/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` §2 (confirms WRR is still the
   dominant, unwired quit path)
 - `docs/specs/SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md` (the sibling frontend-count bug,
   same recycle-close root event, different symptom)

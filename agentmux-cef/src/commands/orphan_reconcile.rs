@@ -224,14 +224,19 @@ wrap_task! {
 ///    hostless-pool cleanup and the documented direct `quit_message_loop`
 ///    Stage-2 executions.
 ///
-/// Platform note: `classify_hwnd` hard-codes `Live` on macOS/Linux (#1569),
-/// so the zombie/hostless buckets — and every Windows-looking branch below —
-/// are empty there; macOS/Linux quit flows run entirely through
-/// `on_before_close`'s own consumption + Stage-2 gate. The residual mixed
-/// case on Windows (user-kind zombies alongside hostless entries, where
-/// Stage 2's `browser_list` gate can never fire) is bounded by the WRR quit
-/// watchdog (SPEC_WRR_QUIT_FALSE_POSITIVE Step D), which quits on the OS
-/// signal with a loud desync log.
+/// Platform note: `classify_hwnd` now does a real liveness check on every
+/// platform — `IsWindow` on Windows, `Browser::is_valid()` elsewhere (#1569,
+/// fixed via SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md —
+/// this comment previously said macOS/Linux hard-coded `Live` and the
+/// zombie/hostless buckets were dead weight there; that's no longer true).
+/// What's still Windows-only is the *trigger*: this function only runs off
+/// `HostShouldQuit`, which on macOS/Linux only fires via the normal
+/// last-window-close path, not a crash — the same spec adds a second,
+/// crash-triggered call from `on_render_process_terminated` to cover that.
+/// The residual mixed case on Windows (user-kind zombies alongside hostless
+/// entries, where Stage 2's `browser_list` gate can never fire) is bounded
+/// by the WRR quit watchdog (SPEC_WRR_QUIT_FALSE_POSITIVE Step D), which
+/// quits on the OS signal with a loud desync log.
 fn ui_thread_reconcile(state: &Arc<AppState>) {
     let browser_pairs = state.list_browsers();
     let shadow_keys: HashSet<String> = state
@@ -449,14 +454,25 @@ fn classify_hwnd(browser: &Browser) -> HwndStatus {
         }
     }
     // On Linux/macOS `cef_window_handle_t` is `u64` (X11 XID / NSView ptr),
-    // not the Win32 HWND tuple-struct, so `wh.0.is_null()` doesn't typecheck.
-    // We don't have an `IsWindow` equivalent here either — treat any host
-    // with a Browser as Live for orphan-reconcile classification. The Win32
-    // path keeps the strict liveness check that landed in #702.
+    // not the Win32 HWND tuple-struct, so `wh.0.is_null()` doesn't typecheck
+    // and there's no `IsWindow` equivalent to call. `Browser::is_valid()` is
+    // CEF's own cross-platform liveness signal instead — it goes false once
+    // `OnBeforeClose` has run, which is exactly the crash-orphan case this
+    // classification exists to catch (#1569). It's a different kind of
+    // check than the Win32 arm's `IsWindow` (that one probes the native
+    // window; this probes the CEF-level object), but the outcome — did this
+    // browser get torn down without us hearing about it — is the same
+    // question. Like `IsWindow`, it does NOT prove the renderer is
+    // responsive (see state/promote_liveness.rs's suspend/resume caveat) —
+    // only that the CEF object itself hasn't been torn down.
     #[cfg(not(target_os = "windows"))]
     {
         let _ = host;
-        HwndStatus::Live
+        if browser.is_valid() != 0 {
+            HwndStatus::Live
+        } else {
+            HwndStatus::Dead
+        }
     }
 }
 
