@@ -549,7 +549,7 @@ pub struct UiQueryRequest {
 // `Reload`/`Eval` only succeed when the caller's own pane resolves to a
 // DEDICATED browser-pane CDP target (not a DOM node inside a page shared
 // with other panes / the app's own chrome) — enforced host-side by
-// `agentmux-cef/src/browser_api/routes.rs::require_dedicated_browser_pane`.
+// `agentmux-cef/src/browser_api/routes.rs::reject_if_shared_target`.
 // See docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md.
 
 /// `POST /api/v1/ui/browser/navigate`
