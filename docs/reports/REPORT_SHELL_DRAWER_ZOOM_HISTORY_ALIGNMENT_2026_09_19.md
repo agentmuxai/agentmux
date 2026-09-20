@@ -1,7 +1,12 @@
 # REPORT: Shell drawer zoom — why history alignment feels "all over the place"
 
 **Date:** 2026-09-19
-**Status:** proposed — analysis only; this report changes no code.
+**Status:** implemented — the fixes this investigation produced ship with it, not after
+it. Drawer scrollback depth and the replay-before-fit ordering (§A4, §A5) in #3455, which
+also carries this report; the MuxObject atom-eviction fix behind "Ctrl+Wheel zoom does
+nothing" (addendum B) in #3454; the drawer's coordinate-space decoupling in #3456.
+The original 2026-09-19 body below was written as analysis-only and is preserved as
+written — addenda A and B record what later measurement confirmed and what it falsified.
 **Related:**
 `docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md` (drawer-only initial-paint zoom bug, fixed),
 `docs/specs/SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md` (Windows PSReadLine cursor-tracking thaw, fixed),
