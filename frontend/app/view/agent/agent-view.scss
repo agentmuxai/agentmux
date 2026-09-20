@@ -310,7 +310,29 @@
     // SPEC_AGENT_PANE_PROGRESS_BAR_FULL_PERIMETER_2026_09_18.md — still no
     // reserved layout space, only the offset from the ring itself was ever
     // new (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md).
-    inset: 2px;
+    //
+    // A transparent 2px BORDER, not `inset: 2px` — deliberate. `inset: 2px`
+    // and `.pane-stack::after`'s `border: 2px solid` (PaneChrome.scss) are
+    // two different CSS box-model computations (absolute-position offset
+    // arithmetic vs. border-width subtraction) even though both nominally
+    // mean "2px." Chromium can round them to different device pixels on
+    // fractional container sizes — confirmed live, and via ReAgent review
+    // on this PR (#3443): a first attempt closed that gap by widening this
+    // element's own painted ring instead, which broke as soon as the
+    // gap-hiding assumption ("the opaque border fully covers the extra
+    // pixel") met the *actual* border, which is translucent by default
+    // (`--border-color: rgba(255,255,255,0.16)`, theme.scss) and fully
+    // transparent in the single/unsplit-focused case
+    // (`.pane-stack-focused-alone::after { border-color: transparent; }`,
+    // this file) — in both, the extra pixel doesn't hide, it shows. Using
+    // the SAME mechanism (`border`) as `.pane-stack::after` for this
+    // element's own inset, instead of independently-computed pixel offsets,
+    // means both boxes ask the layout engine to solve the identical
+    // "2px border, 0 inset" problem against the same containing block, so
+    // there's nothing left to fix via a translucency-dependent hack. See
+    // docs/retro/RETRO_AGENT_PANE_PROGRESS_RING_TOP_EDGE_GAP_2026_09_19.md.
+    inset: 0;
+    border: 2px solid transparent;
     // Matches the ring's own radius so the masked frame below (which has
     // no border-radius awareness of its own beyond what its box carries)
     // doesn't poke square corners past the pane's actual rounded corners.
