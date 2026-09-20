@@ -599,6 +599,27 @@ pub(super) fn handle_create_block_in_stack(
     events
 }
 
+/// Reorder `block_id` within its own pane, or move it into a different
+/// pane — a same-leaf reorder never changes which member is visible unless
+/// `activate` is set. Refuses (an `Error` event, tree untouched) when either
+/// block doesn't exist in the tab's tree, or `block_id` is its source leaf's
+/// only member (that's closing the pane, a different command).
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
+pub(super) fn handle_layout_stack_move(
+    state: &mut State,
+    tab_id: String,
+    block_id: String,
+    target_block_id: String,
+    position: agentmux_common::StackMovePosition,
+    activate: bool,
+    correlation_id: String,
+) -> Vec<Event> {
+    let not_found = format!("block {block_id} or {target_block_id} not found, or {block_id} is its pane's only tab");
+    stack_tree_edit(state, "LayoutStackMove", tab_id, correlation_id, not_found, |root| {
+        crate::backend::layout::move_stack_member(root, &block_id, &target_block_id, position, activate)
+    })
+}
+
 fn unknown_tab(state: &mut State, op: &str, tab_id: &str) -> Vec<Event> {
     let v = state.bump_version();
     vec![Event::Error {
@@ -2803,6 +2824,95 @@ mod tests {
         assert!(matches!(events.as_slice(), [Event::LayoutTreeReplaced { .. }]), "got {events:?}");
         let data = state.tabs[&tab_id].rootnode.as_ref().unwrap().data.clone().unwrap();
         assert_eq!((data.block_id.as_str(), data.active_block_id.as_str()), ("b", "b"));
+    }
+
+    // ── LayoutStackMove (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1) ────
+
+    #[test]
+    fn layout_stack_move_reorders_within_the_same_pane() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(stacked_leaf("pane", &["a", "b", "c"], "a"));
+
+        let events = update(
+            &mut state,
+            Command::LayoutStackMove {
+                tab_id: tab_id.clone(),
+                block_id: "c".into(),
+                target_block_id: "a".into(),
+                position: agentmux_common::StackMovePosition::Before,
+                activate: false,
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(events.as_slice(), [Event::LayoutTreeReplaced { slices: None, .. }]), "got {events:?}");
+        let data = only_leaf_data(&state, &tab_id);
+        assert_eq!(data.block_stack, vec!["c".to_string(), "a".to_string(), "b".to_string()]);
+        assert_eq!(data.block_id, "a", "not activated, and reorder alone must not switch the visible tab");
+    }
+
+    #[test]
+    fn layout_stack_move_moves_a_tab_into_a_different_pane() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "a");
+        seed_block(&mut state, &tab_id, "b");
+        seed_block(&mut state, &tab_id, "c");
+        let root = agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![stacked_leaf("src", &["a", "b"], "a"), leaf_node("dst", "c")],
+            ..Default::default()
+        };
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+
+        let events = update(
+            &mut state,
+            Command::LayoutStackMove {
+                tab_id: tab_id.clone(),
+                block_id: "b".into(),
+                target_block_id: "c".into(),
+                position: agentmux_common::StackMovePosition::End,
+                activate: true,
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(events.as_slice(), [Event::LayoutTreeReplaced { slices: None, .. }]), "got {events:?}");
+        let tree = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        let src = tree.children[0].data.as_ref().unwrap();
+        assert_eq!(src.block_stack, vec!["a".to_string()], "removed from the source pane");
+        let dst = tree.children[1].data.as_ref().unwrap();
+        assert_eq!(dst.block_stack, vec!["c".to_string(), "b".to_string()]);
+        assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("b", "b"));
+    }
+
+    #[test]
+    fn layout_stack_move_rejects_stripping_a_pane_to_zero_members() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "a");
+        seed_block(&mut state, &tab_id, "c");
+        seed_block(&mut state, &tab_id, "d");
+        let root = agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![leaf_node("src", "a"), stacked_leaf("dst", &["c", "d"], "c")],
+            ..Default::default()
+        };
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+        let before = state.tabs[&tab_id].rootnode.clone();
+
+        let events = update(
+            &mut state,
+            Command::LayoutStackMove {
+                tab_id: tab_id.clone(),
+                block_id: "a".into(),
+                target_block_id: "d".into(),
+                position: agentmux_common::StackMovePosition::After,
+                activate: false,
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+        assert_eq!(state.tabs[&tab_id].rootnode, before, "tree must be untouched on refusal");
     }
 
     #[test]

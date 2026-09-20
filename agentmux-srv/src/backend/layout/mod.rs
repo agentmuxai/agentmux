@@ -13,7 +13,7 @@
 //! (shipped in PR #686) — the Rust implementations must produce identical
 //! state transitions for identical inputs.
 
-use agentmux_common::{FlexDirection, LayoutNode, ResizeOp, SplitPosition};
+use agentmux_common::{FlexDirection, LayoutNode, ResizeOp, SplitPosition, StackMovePosition};
 use uuid::Uuid;
 
 // ── Error type ─────────────────────────────────────────────────────────────
@@ -273,6 +273,131 @@ pub fn remove_stack_member(tree: &mut LayoutNode, block_id: &str) -> bool {
     tree.children
         .iter_mut()
         .any(|child| remove_stack_member(child, block_id))
+}
+
+/// Move `block_id` to `position` relative to `target_block_id`: a same-leaf
+/// reorder when both are already members of one leaf's stack, otherwise a
+/// cross-leaf move (removed from its source leaf via [`remove_stack_member`],
+/// placed into `target_block_id`'s leaf via a position-aware push). Returns
+/// `false`, leaving the tree untouched, when either block doesn't exist in
+/// the tree, or when `block_id` is its source leaf's only member (that's
+/// closing the pane, a different command).
+///
+/// Deliberately NOT a same-leaf-and-cross-leaf-both composition of
+/// `remove_stack_member` + a push: `remove_stack_member`'s neighbour
+/// reassignment assumes the member is actually leaving its leaf, and wrongly
+/// switches the visible tab if applied to a same-leaf reorder of the
+/// currently-visible member (see
+/// `move_stack_member_reorder_does_not_change_which_tab_is_visible` in
+/// `tests.rs`). The same-leaf branch below never touches
+/// `block_id`/`active_block_id` unless `activate` is explicitly set.
+///
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
+pub fn move_stack_member(
+    tree: &mut LayoutNode,
+    block_id: &str,
+    target_block_id: &str,
+    position: StackMovePosition,
+    activate: bool,
+) -> bool {
+    if block_id == target_block_id {
+        return true; // already exactly there
+    }
+    let Some(source_leaf) = find_leaf_containing_block(tree, block_id) else {
+        return false;
+    };
+    let source_members = leaf_members(source_leaf.data.as_ref().expect("leaf has data"));
+    if source_members.iter().any(|m| m == target_block_id) {
+        return reorder_within_leaf(tree, block_id, target_block_id, position, activate);
+    }
+    // Validate the destination exists BEFORE mutating anything — otherwise
+    // a bad `target_block_id` would still remove `block_id` from its source
+    // leaf and then fail to place it anywhere, corrupting the tree.
+    if find_leaf_containing_block(tree, target_block_id).is_none() {
+        return false;
+    }
+    if source_members.len() <= 1 {
+        return false; // the leaf's only member — removing it is "close the pane"
+    }
+    if !remove_stack_member(tree, block_id) {
+        return false;
+    }
+    push_stack_member_at(tree, target_block_id, block_id, position, activate)
+}
+
+/// Splice `block_id` to `position` relative to `target_block_id` within the
+/// SAME leaf's stack. Both must already be members of that leaf (checked by
+/// the caller, `move_stack_member`). Only touches `block_id`/`active_block_id`
+/// when `activate` is set — a reorder alone never changes which member is
+/// visible.
+fn reorder_within_leaf(
+    tree: &mut LayoutNode,
+    block_id: &str,
+    target_block_id: &str,
+    position: StackMovePosition,
+    activate: bool,
+) -> bool {
+    if let Some(data) = tree.data.as_mut() {
+        let members = leaf_members(data);
+        if members.iter().any(|m| m == block_id) && members.iter().any(|m| m == target_block_id) {
+            let mut next: Vec<String> = members.into_iter().filter(|m| m != block_id).collect();
+            let target_idx = next.iter().position(|m| m == target_block_id).expect("target survives removal");
+            let insert_at = match position {
+                StackMovePosition::Before => target_idx,
+                StackMovePosition::After => target_idx + 1,
+                StackMovePosition::End => next.len(),
+            };
+            next.insert(insert_at, block_id.to_string());
+            data.block_stack = next;
+            if activate {
+                data.block_id = block_id.to_string();
+                data.active_block_id = block_id.to_string();
+            }
+            return true;
+        }
+    }
+    tree.children
+        .iter_mut()
+        .any(|child| reorder_within_leaf(child, block_id, target_block_id, position, activate))
+}
+
+/// Position-aware variant of [`push_stack_member`]: adds `block_id` to the
+/// stack of the leaf holding `target_block_id`, at `position` relative to
+/// `target_block_id` instead of always appending. Promotes a single-block
+/// leaf (empty `block_stack`) into a real stack first, exactly like
+/// `push_stack_member` does.
+fn push_stack_member_at(
+    tree: &mut LayoutNode,
+    target_block_id: &str,
+    block_id: &str,
+    position: StackMovePosition,
+    activate: bool,
+) -> bool {
+    if let Some(data) = tree.data.as_mut() {
+        if data.block_id == target_block_id || data.block_stack.iter().any(|b| b == target_block_id) {
+            if data.block_stack.is_empty() {
+                data.block_stack = vec![data.block_id.clone()];
+                data.active_block_id = data.block_id.clone();
+            }
+            if !data.block_stack.iter().any(|b| b == block_id) {
+                let target_idx = data.block_stack.iter().position(|b| b == target_block_id).expect("target present");
+                let insert_at = match position {
+                    StackMovePosition::Before => target_idx,
+                    StackMovePosition::After => target_idx + 1,
+                    StackMovePosition::End => data.block_stack.len(),
+                };
+                data.block_stack.insert(insert_at, block_id.to_string());
+            }
+            if activate {
+                data.block_id = block_id.to_string();
+                data.active_block_id = block_id.to_string();
+            }
+            return true;
+        }
+    }
+    tree.children
+        .iter_mut()
+        .any(|child| push_stack_member_at(child, target_block_id, block_id, position, activate))
 }
 
 /// Removes every leaf whose `data.block_id` is not in `live_block_ids`,

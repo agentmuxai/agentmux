@@ -5,7 +5,7 @@
 //! from `frontend/layout/tests/layoutTree.test.ts` (PR #686) — the
 //! TypeScript test suite is the behavioral oracle.
 
-use agentmux_common::{FlexDirection, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition};
+use agentmux_common::{FlexDirection, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition, StackMovePosition};
 use uuid::Uuid;
 use super::*;
 
@@ -1562,6 +1562,114 @@ fn activate_stack_member_switches_the_visible_tab() {
     let data = root.data.clone().unwrap();
     assert_eq!((data.block_id.as_str(), data.active_block_id.as_str()), ("b", "b"));
     assert!(!activate_stack_member(&mut root, "nope"));
+}
+
+// ── move_stack_member (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1) ──────
+
+#[test]
+fn move_stack_member_is_a_noop_when_block_and_target_are_the_same() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b", "c"], 1.0);
+    let before = root.clone();
+    assert!(move_stack_member(&mut root, "b", "b", StackMovePosition::After, false));
+    assert_eq!(root, before);
+}
+
+#[test]
+fn move_stack_member_reorders_within_the_same_leaf_before_target() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b", "c"], 1.0);
+    assert!(move_stack_member(&mut root, "c", "b", StackMovePosition::Before, false));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["a", "c", "b"]));
+}
+
+#[test]
+fn move_stack_member_reorders_within_the_same_leaf_after_target() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b", "c"], 1.0);
+    assert!(move_stack_member(&mut root, "a", "b", StackMovePosition::After, false));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["b", "a", "c"]));
+}
+
+#[test]
+fn move_stack_member_reorders_to_end_within_the_same_leaf() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b", "c"], 1.0);
+    assert!(move_stack_member(&mut root, "a", "b", StackMovePosition::End, false));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["b", "c", "a"]));
+}
+
+#[test]
+fn move_stack_member_reorder_does_not_change_which_tab_is_visible() {
+    // The currently-visible member is reordered without `activate` — it
+    // must stay visible. A naive remove-then-reinsert composition (reusing
+    // `remove_stack_member`'s neighbour-activation as-is) would wrongly
+    // switch the visible tab here, since that function's reassignment rule
+    // assumes the member is actually leaving its leaf.
+    let mut root = leaf_with_stack("pane", "b", &["a", "b", "c"], 1.0);
+    assert!(move_stack_member(&mut root, "b", "c", StackMovePosition::After, false));
+    let data = root.data.unwrap();
+    assert_eq!(data.block_stack, strings(&["a", "c", "b"]));
+    assert_eq!(data.block_id, "b", "reordering the visible tab must not switch away from it");
+    assert_eq!(data.active_block_id, "b");
+}
+
+#[test]
+fn move_stack_member_moves_across_leaves_removing_from_source() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf_with_stack("src", "a", &["a", "b"], 1.0), leaf_with_stack("dst", "c", &["c", "d"], 1.0)],
+    );
+    assert!(move_stack_member(&mut root, "b", "d", StackMovePosition::After, false));
+    let src = root.children[0].data.clone().unwrap();
+    assert_eq!(src.block_stack, strings(&["a"]), "removed from the source leaf");
+    let dst = root.children[1].data.clone().unwrap();
+    assert_eq!(dst.block_stack, strings(&["c", "d", "b"]), "placed after the target in the destination leaf");
+    assert_eq!(dst.block_id, "c", "not activated");
+}
+
+#[test]
+fn move_stack_member_cross_leaf_promotes_a_single_block_destination_into_a_stack() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf_with_stack("src", "a", &["a", "b"], 1.0), leaf("dst", "c", 1.0)],
+    );
+    assert!(move_stack_member(&mut root, "b", "c", StackMovePosition::Before, true));
+    let dst = root.children[1].data.clone().unwrap();
+    assert_eq!(dst.block_stack, strings(&["b", "c"]));
+    assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("b", "b"), "activate: true");
+}
+
+#[test]
+fn move_stack_member_refuses_to_strip_the_source_leaf_to_zero_members() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("src", "a", 1.0), leaf_with_stack("dst", "c", &["c", "d"], 1.0)],
+    );
+    let before = root.clone();
+    assert!(!move_stack_member(&mut root, "a", "d", StackMovePosition::After, false));
+    assert_eq!(root, before, "a leaf's only member can't be moved out from under it — that's closing the pane");
+}
+
+#[test]
+fn move_stack_member_refuses_when_target_block_is_not_in_any_leaf() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b"], 1.0);
+    let before = root.clone();
+    assert!(!move_stack_member(&mut root, "a", "missing", StackMovePosition::After, false));
+    assert_eq!(root, before, "must not partially mutate when the destination doesn't exist");
+}
+
+#[test]
+fn move_stack_member_refuses_when_source_block_is_not_in_any_leaf() {
+    let mut root = leaf_with_stack("pane", "a", &["a", "b"], 1.0);
+    let before = root.clone();
+    assert!(!move_stack_member(&mut root, "missing", "a", StackMovePosition::After, false));
+    assert_eq!(root, before);
 }
 
 #[test]
