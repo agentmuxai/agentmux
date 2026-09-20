@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-19
 **Author:** Agent3
-**Status:** proposed — design + phased task breakdown, no implementation yet.
+**Status:** active — Phase 1 (§6, `LayoutStackMove` reducer command, backend
+only) implemented in PR #3441. Phase 2 (§3.6, reserved whole-pane drag space)
+implemented in PR #3442. Phases 3-6 (the actual drag-gesture wiring: same-pane
+reorder, cross-pane drops, tear-off-to-floating-pane) not started.
 **Scope:** Dragging an individual **Pane Tab** pill (the pills rendered by
 `PaneHeaderTabStrip`/`PaneTabStrip`, one per `block_stack` member — see
 terminology below) to: reorder it within its own Pane, move it into a
