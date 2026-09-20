@@ -1,7 +1,7 @@
 # SPEC: decommission the env-var pane color system; header inherits the agent's identity color
 
 **Date:** 2026-09-20
-**Status:** implemented in #TBD — see §4 for exactly what shipped
+**Status:** implemented in #3452 — see §4 for exactly what shipped
 **Author:** Camper
 **Related:** `docs/specs/SPEC_AGENT_COLOR_2026_08_08.md` (the persisted per-agent
 `ui:color`/`frame:activebordercolor` system this now also feeds the header),
