@@ -22,7 +22,7 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { createEffect, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { atoms } from "@/store/global";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
@@ -89,6 +89,24 @@ export interface PaneTabStripProps<T> {
      *  omitted, the button stays the bare 28×28px glyph the editor and
      *  terminal strips use, so labelling one pane can't widen the others. */
     addLabel?: string;
+
+    /** Opt in to reserving a small, non-scrolling-content spacer after the
+     *  "+", present only once the strip is actually overflowing. Once a
+     *  Pane's tab strip fills its whole header row, there is otherwise no
+     *  space left in that row to grab for "drag the whole pane" — this
+     *  spacer restores it, reachable by scrolling the strip to its end.
+     *  Renders at zero width (and is skipped by the overflow measurement
+     *  itself — see PaneTabStrip.scss) until overflow is real, so it costs
+     *  nothing in the common case, where the header's own natural leftover
+     *  space already serves this purpose. Deliberately NOT a drag target or
+     *  handler of its own — it stays part of whichever ordinary "drag the
+     *  whole pane" region already covers the header
+     *  (see PaneHeaderTabStrip.tsx). Only meaningful for a strip used as a
+     *  Pane's own header (PaneHeaderTabStrip); other consumers (the editor's
+     *  file-tab strip, the agent History strip) render inside a Pane's
+     *  content, not its header, and leave this off.
+     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6. */
+    reserveDragHandle?: boolean;
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -96,6 +114,23 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     let lastMeasuredWidth: number | undefined;
     let widthResetTimeout: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => clearTimeout(widthResetTimeout));
+
+    // `reserveDragHandle` (§3.6) — re-measured on every resize of the strip
+    // itself (tab add/remove, pane resize, window resize, zoom change all
+    // land here for free via ResizeObserver, unlike the width-transition
+    // effect above which only reacts to `tabs.length`). The spacer starts at
+    // zero width, so its own presence never feeds back into this
+    // measurement until AFTER overflow is already real from the tabs alone.
+    const [overflowing, setOverflowing] = createSignal(false);
+    onMount(() => {
+        const el = stripRef;
+        if (!el || !props.reserveDragHandle) return;
+        const measure = () => setOverflowing(el.scrollWidth > el.clientWidth);
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        measure();
+        onCleanup(() => ro.disconnect());
+    });
 
     // FLIP-style width transition, opt-in via `animateWidth` (see that
     // prop's own doc comment for why it's opt-in, and PaneTabStrip.scss's
@@ -266,6 +301,12 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             </Show>
                         </button>
                     </Tooltip>
+                </Show>
+                <Show when={props.reserveDragHandle}>
+                    <div
+                        class="pane-tab-strip-drag-handle"
+                        classList={{ "pane-tab-strip-drag-handle--active": overflowing() }}
+                    />
                 </Show>
             </div>
         </div>

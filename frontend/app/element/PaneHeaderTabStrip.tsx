@@ -92,6 +92,10 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             onAdd={props.onAdd}
             addTitle={props.addTitle}
             addLabel={props.addLabel}
+            // §3.6 — this is a Pane's own header row (the whole-pane drag
+            // handle, blockframe.tsx's `data-role="block-header"`), the one
+            // strip usage where reserving drag space after the "+" matters.
+            reserveDragHandle
         />
     );
 
