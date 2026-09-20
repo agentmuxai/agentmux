@@ -12,8 +12,21 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
+
+// PaneTabStrip's `reserveDragHandle` (always on for a Pane header, §3.6 of
+// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) observes the strip via
+// ResizeObserver — not present in jsdom by default. Stubbed, not exercised —
+// this file doesn't test overflow behavior itself (PaneTabStrip.test.tsx
+// does); this just keeps these tests from crashing on mount.
+beforeEach(() => {
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+    };
+});
 
 const blockFrameHeaderCalls: any[] = [];
 vi.mock("@/app/block/blockframe", () => ({

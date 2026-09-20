@@ -305,6 +305,119 @@ describe("PaneTabStrip", () => {
     });
 });
 
+// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6: once the tab strip
+// overflows and the user scrolls to its end, there's otherwise no space left
+// in a Pane's header to grab for "drag the whole pane" — the strip itself
+// has claimed the whole row. `reserveDragHandle` opts a strip into rendering
+// a small, non-scrolling-content spacer after the "+" that stays part of the
+// ordinary whole-pane drag region (nothing here registers a competing drag
+// handler — see PaneHeaderTabStrip.tsx for how the header's own draggable
+// treats it). Zero width until the strip is actually overflowing, so it
+// doesn't waste space in the common (non-overflowing) case, where the
+// header's own natural dead space already serves this purpose.
+describe("PaneTabStrip — reserveDragHandle (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6)", () => {
+    let roCb: (() => void) | undefined;
+    let scrollWidth = 100;
+    let clientWidth = 100;
+
+    beforeEach(() => {
+        roCb = undefined;
+        scrollWidth = 100;
+        clientWidth = 100;
+        Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+            configurable: true,
+            get() { return scrollWidth; },
+        });
+        Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+            configurable: true,
+            get() { return clientWidth; },
+        });
+        (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+            constructor(cb: () => void) { roCb = cb; }
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        };
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("omits the drag-handle spacer entirely when reserveDragHandle is not passed", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                onAdd={vi.fn()}
+            />
+        ));
+        expect(container.querySelector(".pane-tab-strip-drag-handle")).toBeNull();
+    });
+
+    it("renders the spacer at zero width when the strip is not overflowing", () => {
+        scrollWidth = 100;
+        clientWidth = 100;
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                onAdd={vi.fn()}
+                reserveDragHandle
+            />
+        ));
+        roCb?.();
+        const handle = container.querySelector(".pane-tab-strip-drag-handle");
+        expect(handle).not.toBeNull();
+        expect(handle?.classList.contains("pane-tab-strip-drag-handle--active")).toBe(false);
+    });
+
+    it("activates the spacer once the strip is overflowing", () => {
+        scrollWidth = 250;
+        clientWidth = 150;
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                onAdd={vi.fn()}
+                reserveDragHandle
+            />
+        ));
+        roCb?.();
+        const handle = container.querySelector(".pane-tab-strip-drag-handle");
+        expect(handle?.classList.contains("pane-tab-strip-drag-handle--active")).toBe(true);
+    });
+
+    it("is the true last child of .pane-tab-strip-inner, after the + button", () => {
+        scrollWidth = 250;
+        clientWidth = 150;
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                onAdd={vi.fn()}
+                addTitle="New tab"
+                reserveDragHandle
+            />
+        ));
+        roCb?.();
+        const inner = container.querySelector(".pane-tab-strip-inner");
+        expect(inner?.lastElementChild?.classList.contains("pane-tab-strip-drag-handle")).toBe(true);
+    });
+});
+
 // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4 / Codex's review of
 // PR #2768: a plain CSS `transition: width` never fires for this box (width
 // stays `auto` the whole time — only its DOM-content-driven USED size
