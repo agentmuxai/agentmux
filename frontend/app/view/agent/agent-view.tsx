@@ -1,7 +1,6 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import {
     snapshot as layoutSnapshot,
@@ -35,6 +34,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
 import { muxEventSubscribe } from "@/app/store/mps";
+import { createPaneReadiness } from "@/app/store/pane-readiness";
+import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
@@ -833,8 +834,21 @@ const AgentPresentationView = ({
     // fade starts. `showLoadingOverlay` then unmounts the overlay entirely
     // once the fade transition has had time to finish, instead of leaving
     // an invisible-but-present pointer-events:none div forever.
-    const [historyLoaded, setHistoryLoaded] = createSignal(false);
-    const [showLoadingOverlay, setShowLoadingOverlay] = createSignal(true);
+    // One readiness authority for this pane — see
+    // docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md. Phase 1 changes no
+    // behaviour: the same two conditions gate the reveal, the fade still runs for
+    // 220ms, and the overlay still unmounts after it. What changes is that "may the
+    // pane appear" is now ONE stated decision instead of several components each
+    // deciding independently — a prerequisite for collapsing the four overlapping
+    // loading indicators (two were measured on screen at once) in later phases.
+    //
+    // The phase maps onto exactly what the two old booleans encoded:
+    //   assembling → covered, not yet fading   (was: !historyLoaded && showOverlay)
+    //   revealing  → covered, fading            (was:  historyLoaded && showOverlay)
+    //   live       → unmounted                  (was: !showOverlay)
+    const readiness = createPaneReadiness({ label: `block:${model.blockId}` });
+    const releaseHistoryGate = readiness.gate("history");
+    const releaseAuthGate = readiness.gate("auth");
     // Separate from `historyLoaded` below: this only means "the transcript
     // has actually painted" — the effect after `status` is defined (further
     // down) decides whether that's enough to start the fade, or whether the
@@ -1192,10 +1206,24 @@ const AgentPresentationView = ({
         const phase = status.launchPhase();
         return phase !== null && phase.kind !== "resolving-cli" && phase.kind !== "checking-auth";
     });
+    // Report each dependency to the readiness controller as it completes, rather
+    // than re-deriving "are we done yet" from a conjunction. Same two conditions,
+    // same resulting moment — but now each one STATES that it is finished, so a
+    // stuck reveal names the gate (`readiness.pendingGates()`) instead of being an
+    // unexplained hang. Both releases are idempotent, so re-running this effect on
+    // an unrelated signal change is harmless.
     createEffect(() => {
-        if (historyPainted() && authPhaseSettled() && !historyLoaded()) {
-            setHistoryLoaded(true);
-            loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+        if (historyPainted()) releaseHistoryGate();
+    });
+    createEffect(() => {
+        if (authPhaseSettled()) releaseAuthGate();
+    });
+    // `revealing` → `live`: hold the overlay mounted for the fade's own duration
+    // (matching _loading-overlay.scss's transition) before unmounting, so it fades
+    // as one visual unit with the spinner instead of vanishing mid-transition.
+    createEffect(() => {
+        if (readiness.phase() === "revealing") {
+            loadingOverlayFadeTimeout = setTimeout(() => readiness.revealComplete(), 220);
         }
     });
 
@@ -2184,14 +2212,7 @@ const AgentPresentationView = ({
                 the whole load. Keeping it out here also keeps it unscaled, so the
                 cover can't be 69%-sized by the pane zoom.
                 See REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md §F. */}
-            <Show when={showLoadingOverlay()}>
-                <div
-                    class="agent-pane-loading-overlay"
-                    classList={{ "is-fading": historyLoaded(), "is-reduced-motion": atoms.prefersReducedMotionAtom() }}
-                >
-                    <BrainSpinner fading={historyLoaded()} />
-                </div>
-            </Show>
+            <PaneLoadingCover phase={readiness.phase} />
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Gradient progress bar — marching-ants shimmer traced around
                 the full pane perimeter while working, hidden at rest.
