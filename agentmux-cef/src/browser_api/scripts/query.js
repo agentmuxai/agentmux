@@ -38,10 +38,15 @@
 
   // Snapshot whatever has focus right now as our Element shape.
   // Returns null when nothing meaningful is focused (document.body
-  // is the default resting state; there's no input focus to report).
-  window.__amq_focus_info = () => {
+  // is the default resting state; there's no input focus to report) OR
+  // when the focused element isn't ALLOWED for `blockId` (see
+  // __amq_allowed_for, defined below — ownership check must come first
+  // here since focus_info is agent-reachable via BrowserFocusInfo and a
+  // Path-2 caller must not be able to read another pane's focus state).
+  window.__amq_focus_info = (blockId) => {
     const el = document.activeElement;
     if (!el || el === document.body) return null;
+    if (!window.__amq_allowed_for(el, blockId)) return null;
     const r = el.getBoundingClientRect();
     const attrs = {};
     for (const a of el.attributes) attrs[a.name] = a.value;
@@ -145,6 +150,19 @@
     if (!el) return false;
     el.focus();
     return true;
+  };
+
+  // True if whatever currently has focus is ALLOWED for `blockId` (see
+  // __amq_allowed_for) — false if nothing is focused, or the focused
+  // element belongs to a different pane. Used by
+  // /agentmux/browser/dispatch_key's no-`selector` path: without a
+  // selector to scope to, "wherever focus currently is" could be a
+  // different pane entirely on a shared page, so that path must verify
+  // ownership before sending keystrokes/text instead of dispatching blind.
+  window.__amq_focus_owned_by = (blockId) => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return false;
+    return window.__amq_allowed_for(el, blockId);
   };
 
   window.__amq_query = (selector, limit, blockId) => {

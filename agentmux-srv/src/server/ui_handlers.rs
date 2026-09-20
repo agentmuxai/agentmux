@@ -1,9 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Agent-facing UI automation (`UIScreenshot` / `UIClick` / `UIQuery` MCP
-//! tools) — proxies to the paired CEF host's `/agentmux/browser/*` CDP
-//! routes (`agentmux-cef/src/browser_api/`).
+//! Agent-facing UI automation (`UIScreenshot` / `UIClick` / `UIQuery`, and
+//! the browser-pane deep-control tools `BrowserNavigate` / `BrowserBack` /
+//! `BrowserForward` / `BrowserReload` / `BrowserEval` / `BrowserDispatchKey`
+//! / `BrowserFocusElement` / `BrowserFocusInfo`) — proxies to the paired CEF
+//! host's `/agentmux/browser/*` CDP routes (`agentmux-cef/src/browser_api/`).
+//! See docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md for the
+//! browser-pane tools' own design (they additionally require the caller's
+//! own pane to be a dedicated browser pane — enforced host-side, not here).
 //!
 //! **`block_id` is never a client-supplied field on any request here**
 //! (2026-08-19, reagent + Codex review, PR #2662 — a bare client-supplied
@@ -35,7 +40,9 @@ use base64::Engine as _;
 use serde_json::json;
 
 use agentmux_common::api_types::{
-    UiAutomationAuth, UiClickRequest, UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse,
+    UiAutomationAuth, UiBrowserDispatchKeyRequest, UiBrowserEvalRequest, UiBrowserFocusElementRequest,
+    UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest, UiClickRequest,
+    UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse,
 };
 
 use super::{AppState, HostIpc};
@@ -358,6 +365,267 @@ pub(crate) async fn handle_ui_query(
         "[ui-automation] query"
     );
     let data = host_resp.get("data").cloned().unwrap_or(json!({ "matches": [] }));
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// Proxies `route` with `body` and checks the host's `{ok, ...}` envelope.
+/// Shared by the write-only browser-pane tools (navigate/back/forward/
+/// reload/focus_element/dispatch_key) — they differ only in which
+/// route/body they send, not in how they interpret an ack-only reply.
+async fn proxy_ack(
+    state: &AppState,
+    host: &HostIpc,
+    route: &str,
+    body: serde_json::Value,
+) -> Result<(), Response> {
+    let host_resp = proxy_to_host(state, host, route, body)
+        .await
+        .map_err(|e| err_response(StatusCode::BAD_GATEWAY, e))?;
+    if host_resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = host_resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown host error")
+            .to_string();
+        return Err(err_response(StatusCode::BAD_REQUEST, err));
+    }
+    Ok(())
+}
+
+/// `POST /api/v1/ui/browser/navigate` — backs `BrowserNavigate`. Own pane
+/// only, and only when it's a dedicated browser pane (checked host-side).
+pub(crate) async fn handle_ui_browser_navigate(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserNavigateRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    if let Err(resp) = proxy_ack(
+        &state,
+        &host,
+        "navigate",
+        json!({ "block_id": block_id, "url": req.url }),
+    )
+    .await
+    {
+        return resp;
+    }
+    tracing::info!(
+        agent_id = %req.auth.agent_id, block_id = %block_id, url = %req.url,
+        "[ui-automation] browser navigate"
+    );
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/back` — backs `BrowserBack`.
+pub(crate) async fn handle_ui_browser_back(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserHistoryRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    if let Err(resp) = proxy_ack(&state, &host, "back", json!({ "block_id": block_id })).await {
+        return resp;
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser back");
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/forward` — backs `BrowserForward`.
+pub(crate) async fn handle_ui_browser_forward(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserHistoryRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    if let Err(resp) = proxy_ack(&state, &host, "forward", json!({ "block_id": block_id })).await {
+        return resp;
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser forward");
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/reload` — backs `BrowserReload`.
+pub(crate) async fn handle_ui_browser_reload(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserHistoryRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    if let Err(resp) = proxy_ack(
+        &state,
+        &host,
+        "reload",
+        json!({ "block_id": block_id, "ignore_cache": req.ignore_cache.unwrap_or(false) }),
+    )
+    .await
+    {
+        return resp;
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser reload");
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/eval` — backs `BrowserEval`. Returns the
+/// host's `{result, type, exception}` shape verbatim under `data`, same
+/// passthrough pattern `handle_ui_query` uses for `matches`.
+pub(crate) async fn handle_ui_browser_eval(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserEvalRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    let host_resp = match proxy_to_host(
+        &state,
+        &host,
+        "eval",
+        json!({
+            "block_id": block_id,
+            "script": req.script,
+            "await_promise": req.await_promise.unwrap_or(false),
+        }),
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
+    };
+    if host_resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = host_resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown host error")
+            .to_string();
+        return err_response(StatusCode::BAD_REQUEST, err);
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser eval");
+    let data = host_resp
+        .get("data")
+        .cloned()
+        .unwrap_or(json!({ "result": null, "type": "undefined", "exception": null }));
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/dispatch_key` — backs `BrowserDispatchKey`.
+pub(crate) async fn handle_ui_browser_dispatch_key(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserDispatchKeyRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    if let Err(resp) = proxy_ack(
+        &state,
+        &host,
+        "dispatch_key",
+        json!({
+            "block_id": block_id,
+            "selector": req.selector,
+            "text": req.text,
+            "key": req.key,
+        }),
+    )
+    .await
+    {
+        return resp;
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser dispatch_key");
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/focus_element` — backs `BrowserFocusElement`.
+pub(crate) async fn handle_ui_browser_focus_element(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserFocusElementRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    if let Err(resp) = proxy_ack(
+        &state,
+        &host,
+        "focus_element",
+        json!({ "block_id": block_id, "selector": req.selector }),
+    )
+    .await
+    {
+        return resp;
+    }
+    tracing::info!(
+        agent_id = %req.auth.agent_id, block_id = %block_id, selector = %req.selector,
+        "[ui-automation] browser focus_element"
+    );
+    (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/focus_info` — backs `BrowserFocusInfo`. Returns
+/// the host's `{focused}` shape verbatim under `data`.
+pub(crate) async fn handle_ui_browser_focus_info(
+    State(state): State<AppState>,
+    Json(req): Json<UiBrowserFocusInfoRequest>,
+) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let host = match get_host_ipc(&state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    let host_resp = match proxy_to_host(&state, &host, "focus_info", json!({ "block_id": block_id })).await {
+        Ok(v) => v,
+        Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
+    };
+    if host_resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = host_resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown host error")
+            .to_string();
+        return err_response(StatusCode::BAD_REQUEST, err);
+    }
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser focus_info");
+    let data = host_resp.get("data").cloned().unwrap_or(json!({ "focused": null }));
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 

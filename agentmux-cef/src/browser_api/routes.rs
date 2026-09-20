@@ -146,7 +146,7 @@ pub async fn focus_info(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -164,17 +164,24 @@ pub async fn focus_info(
         return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
     }
 
-    // focus_info intentionally reports whatever has focus in the whole
-    // page, not scoped to this block — it's a read of global page state
-    // (mirrors document.activeElement's own semantics), not an action on
-    // this block specifically. Not currently reachable via any
-    // agent-facing MCP tool (see SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md
-    // Phase 1 scope), so this is unchanged from its original behavior.
+    // Scoped to this block's own [data-blockid] subtree on a shared page —
+    // see resolver::ResolvedTarget::scope_to_block — same as query/click.
+    // NOT scoped for a dedicated browser-pane target, which already IS
+    // this block's own isolated page. (reagent P0, PR #3445: this used to
+    // report document.activeElement for the WHOLE resolved page
+    // unconditionally, reasoned as safe only because focus_info wasn't yet
+    // reachable by any agent — this PR's own BrowserFocusInfo tool is what
+    // makes that reasoning stale.)
+    let block_id_js = if scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
     let eval_result = match cdp
         .call(
             "Runtime.evaluate",
             json!({
-                "expression": "__amq_focus_info()",
+                "expression": format!("__amq_focus_info({block_id_js})"),
                 "returnByValue": true,
             }),
         )
@@ -225,10 +232,14 @@ pub async fn eval(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "eval", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let eval_result = match cdp
         .call(
@@ -595,25 +606,29 @@ pub async fn dispatch_key(
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
 
-    // Optionally focus a selector first.
+    // Helper is needed on every path below (selector-focus AND the
+    // no-selector ownership check), so inject it unconditionally
+    // up front rather than duplicating the injection in both branches.
+    let helper = include_str!("scripts/query.js");
+    if let Err(e) = cdp
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": helper, "returnByValue": false }),
+        )
+        .await
+    {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
+    }
+    let block_id_js = if scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
+
     if let Some(sel) = &req.selector {
-        let helper = include_str!("scripts/query.js");
-        if let Err(e) = cdp
-            .call(
-                "Runtime.evaluate",
-                json!({ "expression": helper, "returnByValue": false }),
-            )
-            .await
-        {
-            let _ = cdp.close().await;
-            return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
-        }
+        // Focus a specific, ownership-checked selector first.
         let sel_js = serde_json::to_string(sel).unwrap_or_else(|_| "\"\"".into());
-        let block_id_js = if scope_to_block {
-            serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
-        } else {
-            "null".to_string()
-        };
         let script = format!("__amq_focus({sel_js}, {block_id_js})");
         let reply = cdp
             .call(
@@ -633,6 +648,40 @@ pub async fn dispatch_key(
             return ok_body(ApiResponse::err(format!(
                 "dispatch_key: selector {sel:?} matched no element"
             )));
+        }
+    } else if scope_to_block {
+        // No selector: keys/text land on whatever currently has focus on
+        // the resolved page. For a dedicated browser pane that page
+        // already IS this block's own content, so that's fine as-is. But
+        // for a SHARED page (this branch), "whatever has focus" could be
+        // a different pane entirely — verify ownership before dispatching
+        // blind. (reagent P0, PR #3445: this branch didn't exist before;
+        // an omitted selector against a shared target dispatched
+        // unconditionally to the page's current focus, letting an agent
+        // inject keystrokes into another pane's focused element.)
+        let owned_expr = format!("__amq_focus_owned_by({block_id_js})");
+        let reply = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": owned_expr, "returnByValue": true }),
+            )
+            .await;
+        let owned = reply
+            .as_ref()
+            .ok()
+            .and_then(|v| v.get("result"))
+            .and_then(|r| r.get("value"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !owned {
+            let _ = cdp.close().await;
+            return ok_body(ApiResponse::err(
+                "dispatch_key: no `selector` was given, and the element currently \
+                 focused on this shared page isn't in your own pane (or nothing is \
+                 focused there) — pass `selector` to focus an element in your own \
+                 pane first."
+                    .to_string(),
+            ));
         }
     }
 
@@ -709,10 +758,14 @@ pub async fn navigate(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "navigate", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let reply = cdp.call("Page.navigate", json!({ "url": req.url })).await;
     let _ = cdp.close().await;
@@ -747,10 +800,14 @@ pub async fn back(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "back", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     // `Page.navigateToHistoryEntry` needs an entryId; simpler to call
     // Page.goBack which CDP exposes directly.
@@ -779,10 +836,14 @@ pub async fn forward(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "forward", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let reply = cdp.call("Page.goForward", json!({})).await;
     let _ = cdp.close().await;
@@ -811,10 +872,14 @@ pub async fn reload(
         );
     }
 
-    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
+    if let Err(e) = reject_if_shared_target(scope_to_block, "reload", &req.block_id) {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(e));
+    }
 
     let reply = cdp
         .call("Page.reload", json!({ "ignoreCache": req.ignore_cache }))
@@ -868,6 +933,38 @@ async fn open_cdp_for_block(
     Err(last_err)
 }
 
+/// Rejects `eval`/`navigate`/`back`/`forward`/`reload` against a Path-2
+/// (shared-window) target. Those CDP calls (`Runtime.evaluate`,
+/// `Page.navigate`/`goBack`/`goForward`/`reload`) act on the resolved
+/// page AS A WHOLE — there is no way to scope `Page.navigate` to "just
+/// this block's subtree" the way `query`/`click_element` scope a DOM
+/// lookup. For a Path 1 target (a dedicated `view: "browser"` pane) that
+/// whole page already IS this block's own isolated content, so acting on
+/// it is safe. For a Path 2 target (any other pane — agent/terminal/
+/// editor/etc., a DOM node inside a page SHARED with the main/pool/
+/// floating window's own chrome and every other pane in it) it is not:
+/// `eval` would run arbitrary JS with access to the entire shared page,
+/// and `navigate`/`back`/`forward`/`reload` would navigate or rewrite
+/// history for that whole shared window out from under every other pane
+/// in it, for a `block_id` that isn't even a browser pane. See
+/// `resolver::ResolvedTarget::scope_to_block` and
+/// `docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md` §2-3.1.
+///
+/// Deliberately sync/pure (no `CdpSession` param) so it's unit-testable
+/// without a live CDP connection — callers close their own session on the
+/// `Err` path, same as every other error branch in this file.
+fn reject_if_shared_target(scope_to_block: bool, op: &str, block_id: &str) -> Result<(), String> {
+    if scope_to_block {
+        return Err(format!(
+            "{op}: block {block_id:?} is not a dedicated browser pane. {op} acts on the \
+             whole resolved page, which for this block is a page SHARED with other panes \
+             and the app's own chrome, not an isolated page — only a `view: \"browser\"` \
+             pane block is a safe target for this operation."
+        ));
+    }
+    Ok(())
+}
+
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {
     headers
         .get("authorization")
@@ -879,4 +976,34 @@ fn authorized(headers: &HeaderMap, expected: &str) -> bool {
 
 fn ok_body<T>(body: ApiResponse<T>) -> (StatusCode, Json<ApiResponse<T>>) {
     (StatusCode::OK, Json(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reject_if_shared_target;
+
+    #[test]
+    fn allows_a_dedicated_browser_pane_target() {
+        assert!(reject_if_shared_target(false, "eval", "block-1").is_ok());
+    }
+
+    #[test]
+    fn rejects_a_shared_window_target_with_a_clear_message() {
+        let err = reject_if_shared_target(true, "navigate", "block-1")
+            .expect_err("a shared-window target must be rejected");
+        assert!(err.contains("navigate"), "message should name the rejected operation: {err}");
+        assert!(err.contains("block-1"), "message should name the offending block: {err}");
+        assert!(
+            err.contains("not a dedicated browser pane"),
+            "message should explain why: {err}"
+        );
+    }
+
+    #[test]
+    fn every_op_name_this_module_calls_it_with_appears_in_the_message() {
+        for op in ["eval", "navigate", "back", "forward", "reload"] {
+            let err = reject_if_shared_target(true, op, "b").unwrap_err();
+            assert!(err.starts_with(op), "expected message to start with {op:?}: {err}");
+        }
+    }
 }
