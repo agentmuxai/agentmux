@@ -30,7 +30,7 @@ import clsx from "clsx";
 import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { CopyButton } from "../element/copybutton";
-import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
+import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
 import { hueToHeaderBg, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
@@ -38,6 +38,12 @@ import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 
 const NumActiveConnColors = 8;
+
+/** Fixed header background for every non-agent pane with no other color
+ * source — see headerStyle's fallback branch. Matches the L=16% used by
+ * hueToHeaderBg for visual consistency, low saturation so it reads as
+ * neutral rather than tinted toward any particular hue. */
+const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";
 
 /**
  * Build a "Pane Color" submenu — mirrors the "Replace With..." submenu pattern
@@ -371,26 +377,6 @@ function BlockFrame_Header(
         return name;
     });
 
-    const agentColor = createMemo(() => {
-        const bd = blockData();
-        if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
-            const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
-            const agentId = detectAgentFromEnv(blockEnv);
-            if (agentId) return detectAgentColor(blockEnv, agentId);
-        }
-        return null;
-    });
-
-    const agentTextColor = createMemo(() => {
-        const bd = blockData();
-        if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
-            const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
-            const agentId = detectAgentFromEnv(blockEnv);
-            if (agentId) return detectAgentTextColor(blockEnv, agentId);
-        }
-        return null;
-    });
-
     const viewIconUnion = createMemo(() => {
         const bd = blockData();
         if (bd?.meta?.["frame:icon"]) return bd.meta["frame:icon"];
@@ -506,13 +492,29 @@ function BlockFrame_Header(
         const style: JSX.CSSProperties = {};
         const hue = blockData()?.meta?.["frame:hue"];
         if (typeof hue === "number") {
-            // User-chosen hue overrides the env-var agent color.
+            // Explicit "Pane Color" picker choice wins over the agent's
+            // default identity color.
             style["background-color"] = hueToHeaderBg(hue);
+            style.color = pickReadableTextColor(hueToHeaderBg(hue)) ?? undefined;
         } else {
-            const ac = agentColor();
-            const atc = agentTextColor();
-            if (ac) style["background-color"] = ac;
-            if (atc) style.color = atc;
+            // No explicit hue: fall back to this agent's own persisted
+            // identity color (SPEC_AGENT_COLOR_2026_08_08.md's
+            // `frame:activebordercolor`, already seeded per-agent for the
+            // border) instead of the decommissioned env-var-driven color
+            // system — see SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md.
+            const ac = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
+            if (ac) {
+                style["background-color"] = ac;
+                style.color = pickReadableTextColor(ac) ?? undefined;
+            } else if (blockData()?.meta?.view !== "agent") {
+                // Every non-agent pane (terminal, browser, editor, preview,
+                // etc.) gets ONE fixed header color instead of the default
+                // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
+                // constant, not per-pane-type or randomized. User request
+                // 2026-09-20.
+                style["background-color"] = NON_AGENT_DEFAULT_HEADER_BG;
+                style.color = pickReadableTextColor(NON_AGENT_DEFAULT_HEADER_BG) ?? undefined;
+            }
         }
         return style;
     });
@@ -896,16 +898,20 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // Gated by isUsableFocusRingColor: the focused ring is the selection
     // affordance, so identity colors that would render it invisible
     // (near-black / transparent / unparseable) fall back to the accent ring.
-    // The header keeps the raw color (see BlockFrame_Header's agentColor).
+    // The header keeps the same source (see BlockFrame_Header's headerStyle).
+    //
+    // Reads the agent's own persisted `frame:activebordercolor`
+    // (SPEC_AGENT_COLOR_2026_08_08.md) rather than the decommissioned
+    // env-var color system — see
+    // SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md. A plain terminal
+    // pane that merely has AGENTMUX_AGENT_ID exported (never a real
+    // agent-launched block, so never seeded with frame:activebordercolor)
+    // no longer picks up a color from that alone — only real agents do.
     const blockAgentColor = createMemo(() => {
         if (!props.preview && blockData()?.meta?.view === "term") {
-            const blockEnv = blockData()?.meta?.["cmd:env"] as Record<string, string> | undefined;
-            const agentId = detectAgentFromEnv(blockEnv);
-            if (agentId) {
-                const color = detectAgentColor(blockEnv, agentId);
-                if (isUsableFocusRingColor(color)) {
-                    return color;
-                }
+            const color = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
+            if (isUsableFocusRingColor(color)) {
+                return color;
             }
         }
         return null;

@@ -199,6 +199,7 @@ partial list.
 | [`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07`](SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md) | SPEC: GitHub review-notification agent detection — username-first, tag as fallback |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15`](SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md) | Spec: Agent-facing Global Memory API (MCP tools to add/list/read a Global Memory entry) |
+| [`SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20`](SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) | SPEC: decommission the env-var pane color system; header inherits the agent's identity color |
 | [`SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11`](SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) | SPEC: Agent History as a pane tab, composer draft preservation, and a scrolling link row |
 | [`SPEC_AGENT_HISTORY_SEARCH_2026_09_17`](SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md) | SPEC: agent-facing conversation history search |
 | [`SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10`](SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md) | SPEC: Agent-Driven Interactive PTY Shell API |

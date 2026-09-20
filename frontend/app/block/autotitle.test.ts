@@ -8,6 +8,7 @@ import {
     generateAutoTitle,
     getEffectiveTitle,
     isUsableFocusRingColor,
+    pickReadableTextColor,
     shouldAutoGenerateTitle,
 } from "./autotitle";
 
@@ -69,6 +70,58 @@ describe("isUsableFocusRingColor", () => {
         assert.isFalse(isUsableFocusRingColor("red"));
         assert.isFalse(isUsableFocusRingColor("not-a-color"));
         assert.isFalse(isUsableFocusRingColor("#12"));
+    });
+});
+
+describe("pickReadableTextColor", () => {
+    test("picks black text on light hex backgrounds", () => {
+        assert.equal(pickReadableTextColor("#f5f5f5"), "#000000"); // near-white gray
+        assert.equal(pickReadableTextColor("#ffffff"), "#000000");
+    });
+
+    test("picks white text on dark hex backgrounds", () => {
+        assert.equal(pickReadableTextColor("#1e3a5f"), "#ffffff"); // AgentA dark blue
+        assert.equal(pickReadableTextColor("#000000"), "#ffffff");
+    });
+
+    // reagent P1, PR #3452: parseCssColor had no hsl() branch, so both of
+    // this feature's own hsl()-producing call sites (hueToHeaderBg,
+    // NON_AGENT_DEFAULT_HEADER_BG) silently computed no text color at all.
+    test("handles hsl()/hsla() — the exact formats this feature's own callers produce", () => {
+        // hueToHeaderBg(H) => `hsl(${H}, 28%, 16%)` — dark regardless of hue.
+        assert.equal(pickReadableTextColor("hsl(0, 28%, 16%)"), "#ffffff");
+        assert.equal(pickReadableTextColor("hsl(218, 28%, 16%)"), "#ffffff");
+        // NON_AGENT_DEFAULT_HEADER_BG.
+        assert.equal(pickReadableTextColor("hsl(220, 12%, 16%)"), "#ffffff");
+        // A light hsl() should still pick black text.
+        assert.equal(pickReadableTextColor("hsl(60, 80%, 90%)"), "#000000");
+        // hsla() with alpha, and deg-suffixed hue.
+        assert.equal(pickReadableTextColor("hsla(220, 12%, 16%, 1)"), "#ffffff");
+        assert.equal(pickReadableTextColor("hsl(220deg, 12%, 16%)"), "#ffffff");
+    });
+
+    // codex P1, PR #3452: a fixed `luminance > 0.5` cutoff is not the real
+    // black/white contrast crossover (that's ~0.179) — it picked white for
+    // several of this app's own AGENT_COLOR_PALETTE entries even though
+    // black reads far better against them.
+    test("picks the higher-contrast choice at the crossover, not a luminance>0.5 cutoff", () => {
+        // #f59e0b (amber, AGENT_COLOR_PALETTE): L≈0.44 — below the old 0.5
+        // cutoff (would wrongly pick white, ~2.15:1) but well above the
+        // real crossover (~0.179), so black (~9.78:1) is correct.
+        assert.equal(pickReadableTextColor("#f59e0b"), "#000000");
+        // #eab308 (gold): L≈0.498 — same story, just barely below 0.5.
+        assert.equal(pickReadableTextColor("#eab308"), "#000000");
+        // A background well below the real crossover still correctly picks
+        // white (e.g. AgentA's #1e3a5f, L≈0.04, already covered above) —
+        // this test is about the 0.179–0.5 band specifically, not a
+        // wholesale threshold flip.
+    });
+
+    test("returns null for unparseable/blank input", () => {
+        assert.isNull(pickReadableTextColor(null));
+        assert.isNull(pickReadableTextColor(undefined));
+        assert.isNull(pickReadableTextColor(""));
+        assert.isNull(pickReadableTextColor("not-a-color"));
     });
 });
 

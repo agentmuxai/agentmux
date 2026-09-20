@@ -715,8 +715,6 @@ impl Controller for ShellController {
             // start as plain "Terminal".
             if !has_agent_id {
                 c.env_remove("AGENTMUX_AGENT_ID");
-                c.env_remove("AGENTMUX_AGENT_COLOR");
-                c.env_remove("AGENTMUX_AGENT_TEXT_COLOR");
                 c.env_remove("WAVEMUX_AGENT_ID");
                 c.env_remove("WAVEMUX_AGENT_COLOR");
             }
@@ -1768,10 +1766,13 @@ mod agent_id_for_jekt_tests {
 
     #[test]
     fn other_global_cmd_env_keys_remain_injectable() {
-        // Cosmetic/unrelated global defaults (colors, arbitrary user
-        // cmd_env entries) are unaffected — only the two identity keys are
-        // excluded.
-        assert!(is_global_cmd_env_injectable("AGENTMUX_AGENT_COLOR"));
+        // Unrelated global defaults (arbitrary user cmd_env entries) are
+        // unaffected — only the two identity keys are excluded. Was
+        // AGENTMUX_AGENT_COLOR before that var's decommission (2026-09-20,
+        // SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) — swapped to a
+        // generic name so this test doesn't reference a var with no live
+        // meaning left in the codebase.
+        assert!(is_global_cmd_env_injectable("SOME_COSMETIC_VAR"));
         assert!(is_global_cmd_env_injectable("SOME_OTHER_VAR"));
     }
 
