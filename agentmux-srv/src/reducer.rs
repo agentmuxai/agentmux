@@ -146,6 +146,16 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             meta,
             activate,
         } => layout::handle_create_block_in_stack(state, tab_id, target_block_id, meta, activate),
+        // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1 — reorder within a
+        // pane or move a tab into a different pane.
+        Command::LayoutStackMove {
+            tab_id,
+            block_id,
+            target_block_id,
+            position,
+            activate,
+            correlation_id,
+        } => layout::handle_layout_stack_move(state, tab_id, block_id, target_block_id, position, activate, correlation_id),
         // SPEC_864 Phase 4 — queue-append pass-through (the reducer does
         // not model pendingbackendactions in TabRecord; the persist
         // subscriber appends to db_layout from the event).

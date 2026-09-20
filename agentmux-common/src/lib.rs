@@ -30,6 +30,7 @@ pub use data_paths::{
 pub use errors::{AgentMuxError, AmxCode};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, ResizeOp, SplitPosition,
+    StackMovePosition,
 };
 pub use runtime_mode::{is_dev_build_exe, is_dev_self, RuntimeMode};
 pub use toolchain_path::{
