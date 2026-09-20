@@ -1,0 +1,11 @@
+#!/bin/sh
+# commit-msg hook: strip ALL Co-Authored-By trailers, regardless of who they
+# name. Policy (2026-09-20): only the actual person/identity who opened the
+# PR should be attributed -- no co-author trailers at all, AI or human.
+MSG_FILE="$1"
+
+sed -i -E '/^Co-Authored-By:/Id' "$MSG_FILE"
+
+# Trim trailing blank lines left behind (the trailer is usually preceded by a
+# blank separator line, which would otherwise be left dangling at the end).
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$MSG_FILE"
