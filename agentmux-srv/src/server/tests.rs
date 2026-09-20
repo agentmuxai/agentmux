@@ -764,6 +764,30 @@ async fn register_dev_server_rejects_an_empty_project_before_touching_docker() {
 }
 
 #[tokio::test]
+async fn register_dev_server_rejects_a_non_hostname_safe_project_before_touching_docker() {
+    // reagent P2, PR #3439: a `project` that isn't a valid DNS label
+    // (contains '.', whitespace, etc.) must 400 clearly instead of
+    // registering successfully and handing back a URL that can never
+    // actually route.
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["project"] = serde_json::json!("pulse.app");
+    body["port"] = serde_json::json!(3000);
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/agent/dev_server/register")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn register_dev_server_rejects_a_zero_port() {
     let state = test_state();
     let (_agent_id, auth) = signed_ui_auth(&state, "b1");

@@ -222,7 +222,18 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request) -> Respons
 
     let mut builder = state.client.request(parts.method.clone(), &target_url);
     for (name, value) in parts.headers.iter() {
-        if name == header::HOST {
+        // Same hop-by-hop exclusion as the response path below, applied to
+        // the request side: `Host` describes a connection to THIS proxy, not
+        // the backend, and `Transfer-Encoding`/`Connection` describe the
+        // client's connection to us. Forwarding `Transfer-Encoding: chunked`
+        // verbatim alongside the independently re-streamed
+        // `reqwest::Body::wrap_stream` body would assert a chunked encoding
+        // reqwest is not actually producing — a conflicting signal that can
+        // break the forwarded request. reagent P1, PR #3439.
+        if name == header::HOST
+            || name == header::TRANSFER_ENCODING
+            || name == header::CONNECTION
+        {
             continue;
         }
         builder = builder.header(name.clone(), value.clone());
@@ -450,5 +461,60 @@ mod tests {
         assert_eq!(missing_resp.status(), StatusCode::NOT_FOUND);
         let missing_body = missing_resp.text().await.expect("body");
         assert!(missing_body.contains("no dev server registered"));
+    }
+
+    /// reagent P1, PR #3439: hop-by-hop headers describing the CLIENT's
+    /// connection to THIS proxy (`Transfer-Encoding`, `Connection`) must not
+    /// be forwarded to the backend — the outbound body is independently
+    /// re-streamed via `reqwest::Body::wrap_stream`, so a forwarded
+    /// `Transfer-Encoding: chunked` would assert an encoding reqwest isn't
+    /// actually producing. Confirmed by having the fake backend report back
+    /// exactly which headers it received, not by inspecting the proxy's
+    /// outbound request in isolation — the same "real HTTP, not an
+    /// in-process function call" standard as the test above.
+    #[tokio::test]
+    async fn hop_by_hop_request_headers_are_not_forwarded_to_the_backend() {
+        let backend_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake backend");
+        let backend_addr = backend_listener.local_addr().unwrap();
+        let backend_router = Router::new().fallback(any(
+            |req: Request| async move {
+                let saw_transfer_encoding =
+                    req.headers().contains_key(header::TRANSFER_ENCODING);
+                let saw_connection = req.headers().contains_key(header::CONNECTION);
+                (
+                    StatusCode::OK,
+                    format!("te={saw_transfer_encoding} conn={saw_connection}"),
+                )
+            },
+        ));
+        tokio::spawn(async move {
+            let _ = axum::serve(backend_listener, backend_router).await;
+        });
+
+        let registry = DevProxyRegistry::new();
+        registry.register("pulse", "korp", backend_addr).await;
+
+        let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind proxy");
+        let proxy_addr = proxy_listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(proxy_listener, router(registry)).await;
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://{proxy_addr}/anything"))
+            .header(header::HOST, "pulse-korp.localhost:8090")
+            .header(header::TRANSFER_ENCODING, "chunked")
+            .header(header::CONNECTION, "keep-alive")
+            .send()
+            .await
+            .expect("request through proxy");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.text().await.expect("body");
+        assert_eq!(body, "te=false conn=false");
     }
 }
