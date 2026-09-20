@@ -290,6 +290,7 @@ partial list.
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
 | [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
 | [`SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17`](SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md) | SPEC: External-link routing + single robust "Restore" recovery |
+| [`SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05`](SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md) | Host Orphan-Instance Reconciliation — 2026-05-05 |
 | [`SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03`](SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md) | SPEC — In-app (no-shell) Claude OAuth login, revived, at all three auth surfaces |
 | [`SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16`](SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md) | SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle |
 | [`SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17`](SPEC_INSTANCE_DISCOVERY_FOR_TOOLING_2026_09_17.md) | SPEC: tooling must discover an instance, not assume a well-known port |
@@ -324,6 +325,7 @@ partial list.
 | [`SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19`](SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md) | SPEC: a native reverse proxy in agentmux-srv for friendly dev-server hostnames — not Traefik, not a sidecar |
 | [`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md) | SPEC: Durable, location-consistent, transparent native memory |
 | [`SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10`](SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md) | SPEC: Restore the ghost-text suggestion when the composer is cleared back to empty |
+| [`SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20`](SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md) | SPEC: Real crash-orphan liveness check on macOS/Linux (closes #1569) |
 | [`SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) | Pane block-stack mount flicker — root causes + reveal-gate generalization |
 | [`SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18`](SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md) | SPEC: A pane's chrome must resolve its own tab's LayoutModel, never "whichever tab is globally active" |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
@@ -553,7 +555,6 @@ partial list.
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
 | [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
-| [`SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05`](SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md) | Host Orphan-Instance Reconciliation — 2026-05-05 |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
 | [`SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10`](SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md) | SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation |

@@ -1,7 +1,15 @@
 # Host Orphan-Instance Reconciliation — 2026-05-05
 
 **Owner:** AgentA
-**Status:** proposed — spec
+**Status:** implemented — PR #702 (merged 2026-05-06, the day after this
+spec). Corrected 2026-09-20: this line had said "proposed" for over four
+months despite `agentmux-cef/src/commands/orphan_reconcile.rs` shipping
+and being actively maintained since (most recently touched by #3141,
+2026-09-09) — found stale while researching #1569, which fixes a gap in
+that same file. Note this spec's own design has since evolved further
+under `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` (#2081)
+— that later spec is the more current description of the module's
+"sanitize-then-decide" shape.
 **Layer:** 2 (host) — coordinates with Layer 1 (launcher) via existing event bus
 **Master ref:** [`MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](./MASTER_REDUCER_STACK_STATUS_2026-05-05.md), specifically §4.3 (host reducer scope), §4.4 (browsers/pool scaffolding), §9.1 (cross-process dispatch blocker).
 
