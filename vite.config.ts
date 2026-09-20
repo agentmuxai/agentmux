@@ -233,7 +233,16 @@ export default defineConfig({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },
             include: "**/*.svg",
         }),
-        solid(),
+        // `hot: false` under Vitest. vite-plugin-solid enables solid-refresh
+        // whenever `command === "serve" && mode !== "production"` (dist/esm/
+        // index.mjs:164), which is true for a Vitest run — it then injects the
+        // `/@solid-refresh` virtual module, and Vitest's module runner rejects
+        // that specifier ("The argument 'filename' must be a file URL object...
+        // Received 'file:///@solid-refresh'"), failing EVERY Solid component
+        // test file at import time before a single test runs. HMR is
+        // meaningless in a test run, so turning it off there costs nothing and
+        // leaves dev/build behavior identical.
+        solid({ hot: !process.env.VITEST }),
         tailwindcss(),
         stripKatexLegacyFonts(),
     ],
