@@ -8,7 +8,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { type SignalAtom, fireAndForget } from "@/util/util";
-import { batch, createSignal, onCleanup } from "solid-js";
+import { batch, createSignal, getOwner, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
 import { getApi } from "./app-api";
 
@@ -218,11 +218,56 @@ function reloadMuxObject<T extends MuxObj>(oref: string): Promise<T> {
  * Setting via ._set() updates the local cache and optionally pushes to the server.
  */
 function getMuxObjectAtom<T extends MuxObj>(oref: string): SignalAtom<T> {
-    const wov = getMuxObjectValue<T>(oref);
-    const atom = () => wov.getData().value;
+    // Resolve the cache entry on every read rather than capturing it once.
+    //
+    // `cleanMuxObjectCache` (below) evicts any entry with `refCount === 0` once
+    // its holdTime lapses, and this function — unlike `useMuxObjectValue` —
+    // deliberately takes no refCount, because it has no lifecycle hook to give
+    // one back. So an atom that captured its `wov` kept reading a signal that
+    // nothing writes to after the first eviction: `updateMuxObject` re-resolves
+    // the oref, gets a NEW entry, and writes there. The object looked updated
+    // from the store's side (it even logs "MuxObj updated") while every
+    // component holding the stale closure was frozen on the pre-eviction value,
+    // permanently and silently.
+    //
+    // This bit surfaced as "Ctrl+Wheel zoom does nothing in the agent Shell
+    // drawer" — its sub-block is headless, so nothing else holds a refCount on
+    // it, and it was always evicted within a GC tick or two. A top-level
+    // terminal pane's block is held by layout code through `useMuxObjectValue`,
+    // which is why the same gesture kept working there. Reopening the drawer
+    // "fixed" it only because that rebuilt the atom against the fresh entry.
+    // See docs/reports/REPORT_SHELL_DRAWER_ZOOM_HISTORY_ALIGNMENT_2026_09_19.md §B.
+    //
+    // Late-binding keeps the read reactive (getData() still tracks the current
+    // signal) and lets an evicted entry transparently re-fetch, at the cost of
+    // one Map lookup per read.
+    // Pin the entry for the caller's reactive lifetime when there is one.
+    //
+    // Late-binding the read (below) is not enough on its own: a SolidJS memo or
+    // effect only re-runs when a signal IT IS SUBSCRIBED TO changes. Once the
+    // entry is evicted and `updateMuxObject` re-creates it, the new entry has a
+    // BRAND NEW signal that no existing dependent is subscribed to, so nothing
+    // ever re-triggers them — they never re-read, and late-binding never gets a
+    // chance to help. Keeping the entry alive for as long as a reactive owner
+    // depends on it preserves signal identity, which is what reactivity needs.
+    //
+    // Guarded on `getOwner()`: outside a reactive root there is no cleanup hook
+    // to hand the refCount back, and an unconditional increment would pin every
+    // oref forever — turning a staleness bug into an unbounded cache leak.
+    const owner = getOwner();
+    if (owner != null) {
+        const pinned = getMuxObjectValue<T>(oref);
+        pinned.refCount++;
+        onCleanup(() => {
+            pinned.refCount--;
+        });
+    }
+    const atom = () => getMuxObjectValue<T>(oref).getData().value;
     (atom as any)._set = (value: T | ((prev: T) => T)) => {
         const nextValue =
-            typeof value === "function" ? (value as (prev: T) => T)(wov.getData().value) : value;
+            typeof value === "function"
+                ? (value as (prev: T) => T)(getMuxObjectValue<T>(oref).getData().value)
+                : value;
         setObjectValue(nextValue, false);
     };
     return atom as unknown as SignalAtom<T>;
