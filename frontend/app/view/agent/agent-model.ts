@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, createEffect, onCleanup } from "solid-js";
+import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { NodeModel } from "@/layout/index";
@@ -19,7 +19,6 @@ import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
-import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
@@ -84,8 +83,6 @@ export class AgentViewModel implements ViewModel {
     // before AgentFooter mounts (or after it unmounts) it's a no-op.
     voiceTargetRef: { current: PaneVoiceHandle | null } = { current: null };
 
-    _activityFlash: () => boolean = () => false;
-
     voiceHandle = (): PaneVoiceHandle => ({
         appendFinal: (text: string) => this.voiceTargetRef.current?.appendFinal(text),
         setInterim: (text: string) => this.voiceTargetRef.current?.setInterim(text),
@@ -109,25 +106,6 @@ export class AgentViewModel implements ViewModel {
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);
         this.agentDefinitions = useAgentDefinitions()[0];
-
-        // Flash signal: set true briefly when the activity summary changes to a
-        // new non-empty value. Compare to previous so unrelated meta writes
-        // (status, agentName, etc.) during an active turn don't trigger
-        // spurious flashes.
-        const [activityFlash, setActivityFlash] = createSignal(false);
-        let flashTimer: ReturnType<typeof setTimeout> | undefined;
-        let prevActivity: string | undefined;
-        createEffect(() => {
-            const activity = readActivitySummary(this.blockAtom()?.meta);
-            if (activity && activity !== prevActivity) {
-                clearTimeout(flashTimer);
-                setActivityFlash(true);
-                flashTimer = setTimeout(() => setActivityFlash(false), 600);
-            }
-            prevActivity = activity;
-        });
-        onCleanup(() => clearTimeout(flashTimer));
-        this._activityFlash = activityFlash;
 
         // Drive the pane's title from block meta — launching an agent sets
         // `agentName` / `agentIcon` and the frame title automatically picks
@@ -162,24 +140,12 @@ export class AgentViewModel implements ViewModel {
             // identically.
             return "Agent";
         };
-        this.viewText = (): HeaderElem[] => {
-            const elems: HeaderElem[] = [];
-
-            // Per-turn live mini-summary — prefers the Haiku-derived
-            // term:ambient_summary (useAgentActivitySummary.ts), falling back to
-            // the free CLI-emitted term:osc_title (useBlockActivity.ts). Persists
-            // across turns; flashes briefly when a new summary lands.
-            const activity = readActivitySummary(this.blockAtom()?.meta);
-            if (activity && activity.length > 0) {
-                elems.push({
-                    elemtype: "text",
-                    text: activity,
-                    className: this._activityFlash() ? "term-activity term-activity--flash" : "term-activity",
-                });
-            }
-
-            return elems;
-        };
+        // The per-turn Haiku-derived mini-summary (term:ambient_summary,
+        // useAgentActivitySummary.ts) used to render here via readActivitySummary.
+        // Removed from the pane header 2026-09-20 (user request, part of the
+        // pane-color unification pass) — generation itself is untouched since
+        // swarm-model.ts also reads term:ambient_summary for the Swarm view.
+        this.viewText = (): HeaderElem[] => [];
         this.noPadding = () => true;
         // True exactly when something above this Block is already rendering
         // a replacement header — i.e. pane-leaf-chrome.tsx's hoisted branch,

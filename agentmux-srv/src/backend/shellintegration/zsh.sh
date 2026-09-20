@@ -58,7 +58,7 @@ _agentmux_si_agent_env() {
     _agentmux_si_blocked && return
     local current_agent=""
     if [[ -n "$AGENTMUX_AGENT_ID" ]]; then
-        current_agent="AGENTMUX_AGENT_ID:$AGENTMUX_AGENT_ID:COLOR:$AGENTMUX_AGENT_COLOR"
+        current_agent="AGENTMUX_AGENT_ID:$AGENTMUX_AGENT_ID"
     fi
     if [[ "$current_agent" != "$_AGENTMUX_SI_LAST_AGENT" ]]; then
         _AGENTMUX_SI_LAST_AGENT="$current_agent"
@@ -66,11 +66,6 @@ _agentmux_si_agent_env() {
             local escaped
             escaped=$(_agentmux_si_json_escape "$AGENTMUX_AGENT_ID")
             local payload="{\"AGENTMUX_AGENT_ID\":\"$escaped\""
-            if [[ -n "$AGENTMUX_AGENT_COLOR" ]]; then
-                local color_escaped
-                color_escaped=$(_agentmux_si_json_escape "$AGENTMUX_AGENT_COLOR")
-                payload="$payload,\"AGENTMUX_AGENT_COLOR\":\"$color_escaped\""
-            fi
             payload="$payload}"
             printf '\033]16162;E;%s\007' "$payload"
         else
