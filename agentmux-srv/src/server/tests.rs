@@ -991,6 +991,139 @@ async fn ui_query_returns_host_matches() {
     assert_eq!(json["data"]["matches"][0]["text"], "Sign in");
 }
 
+// ── Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20) ──
+
+#[tokio::test]
+async fn ui_browser_navigate_proxies_to_host_after_registration() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ok":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["url"] = serde_json::json!("https://example.com");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/browser/navigate")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], true);
+}
+
+/// The exact scenario the §3.1 fix in `browser_api::routes` exists for
+/// (an agent whose own pane isn't a dedicated browser pane calling
+/// `BrowserNavigate`): the CEF host rejects it with a clear error, and
+/// this must surface intact through srv, not get swallowed or turned into
+/// a generic 500.
+#[tokio::test]
+async fn ui_browser_navigate_surfaces_the_host_side_shared_target_rejection() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(
+        r#"{"ok":false,"error":"navigate: block \"b1\" is not a dedicated browser pane."}"#,
+        "tok-abc",
+    )
+    .await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["url"] = serde_json::json!("https://example.com");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/browser/navigate")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], false);
+    assert!(json["error"].as_str().unwrap().contains("not a dedicated browser pane"));
+}
+
+#[tokio::test]
+async fn ui_browser_eval_returns_host_result() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(
+        r#"{"ok":true,"data":{"result":"hello","type":"string","exception":null}}"#,
+        "tok-abc",
+    )
+    .await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["script"] = serde_json::json!("document.title");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/browser/eval")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["result"], "hello");
+}
+
+#[tokio::test]
+async fn ui_browser_navigate_rejects_a_forged_agent_identity() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{"ok":true}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (victim_agent_id, _victim_auth) = signed_ui_auth(&state, "victim-block");
+    let (_attacker_agent_id, attacker_auth) = signed_ui_auth(&state, "attacker-block");
+    let mut forged = attacker_auth;
+    forged["agent_id"] = serde_json::json!(victim_agent_id);
+    forged["url"] = serde_json::json!("https://example.com");
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .uri("/api/v1/ui/browser/navigate")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(forged.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "browser-pane deep-control routes must use the same identity verification as UIClick/UIQuery"
+    );
+}
+
 #[tokio::test]
 async fn reactive_agents_returns_empty_list() {
     let app = test_router();

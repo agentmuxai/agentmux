@@ -540,6 +540,81 @@ pub struct UiQueryRequest {
     pub limit: Option<u32>,
 }
 
+// ── Browser-pane deep control (Navigate/Back/Forward/Reload/Eval/
+//    DispatchKey/FocusElement/FocusInfo) ─────────────────────────────────
+//
+// Same `UiAutomationAuth`-derived own-pane scoping as the UI-automation
+// section above (block_id is never a client field, always server-derived
+// via `verified_block_id`). Additionally, `Navigate`/`Back`/`Forward`/
+// `Reload`/`Eval` only succeed when the caller's own pane resolves to a
+// DEDICATED browser-pane CDP target (not a DOM node inside a page shared
+// with other panes / the app's own chrome) — enforced host-side by
+// `agentmux-cef/src/browser_api/routes.rs::reject_if_shared_target`.
+// See docs/specs/SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md.
+
+/// `POST /api/v1/ui/browser/navigate`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserNavigateRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub url: String,
+}
+
+/// `POST /api/v1/ui/browser/back`, `/forward`, `/reload` — all three only
+/// need the target block id; `ignore_cache` is meaningful for `/reload`
+/// only (ignored by back/forward, mirrors `browser_api::types::HistoryReq`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserHistoryRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_cache: Option<bool>,
+}
+
+/// `POST /api/v1/ui/browser/eval`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserEvalRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub script: String,
+    /// If true and the script returns a Promise, wait for it to resolve
+    /// before returning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub await_promise: Option<bool>,
+}
+
+/// `POST /api/v1/ui/browser/dispatch_key`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserDispatchKeyRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Optional CSS selector: focus this element before dispatching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// Exactly one of `text`/`key` must be set. Sent via `Input.insertText`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Named key (`Enter`, `Tab`, `Escape`, `Backspace`, arrow keys,
+    /// `Space`) sent as a `keyDown`+`keyUp` pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// `POST /api/v1/ui/browser/focus_element`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserFocusElementRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub selector: String,
+}
+
+/// `POST /api/v1/ui/browser/focus_info`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserFocusInfoRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+}
+
 /// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
 /// See docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md.
 ///

@@ -608,6 +608,19 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
+        // Browser-pane deep control (SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md)
+        // — own-pane-only, same identity model as the ui/* routes above.
+        // navigate/back/forward/reload/eval additionally require the
+        // caller's own pane to be a dedicated browser pane (checked
+        // host-side in browser_api::routes::reject_if_shared_target).
+        .route("/api/v1/ui/browser/navigate", post(ui_handlers::handle_ui_browser_navigate))
+        .route("/api/v1/ui/browser/back", post(ui_handlers::handle_ui_browser_back))
+        .route("/api/v1/ui/browser/forward", post(ui_handlers::handle_ui_browser_forward))
+        .route("/api/v1/ui/browser/reload", post(ui_handlers::handle_ui_browser_reload))
+        .route("/api/v1/ui/browser/eval", post(ui_handlers::handle_ui_browser_eval))
+        .route("/api/v1/ui/browser/dispatch_key", post(ui_handlers::handle_ui_browser_dispatch_key))
+        .route("/api/v1/ui/browser/focus_element", post(ui_handlers::handle_ui_browser_focus_element))
+        .route("/api/v1/ui/browser/focus_info", post(ui_handlers::handle_ui_browser_focus_info))
         // Pane lifecycle (SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) —
         // `ClosePane`. Own-pane identity is verified the same way as the
         // ui/* routes above (`verified_block_id`); the target pane, when
