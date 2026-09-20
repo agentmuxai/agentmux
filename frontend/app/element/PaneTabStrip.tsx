@@ -23,6 +23,7 @@
  */
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { atoms } from "@/store/global";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
@@ -30,6 +31,28 @@ import "./PaneTabStrip.scss";
 // Matches the other reveal-gate/cross-fade durations added alongside this
 // one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
 const WIDTH_TRANSITION_MS = 160;
+
+/** Drag payload tag for a Pane Tab pill, mirroring the existing
+ *  `tileItemType`/`tabItemType` module-level constants
+ *  (tilelayout-shared.tsx / tabbar-dnd.ts) — a distinct tag so a dragged
+ *  pill is never mistaken for a whole-Pane or Window-Tab drag by any
+ *  existing drop target.
+ *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1. */
+export const paneTabItemType = "PANE_TAB_ITEM";
+
+/**
+ * Which side of a hovered pill's rect a dragged pill should land on, given
+ * the pointer's clientX. Pure and exported so it's unit-testable in
+ * isolation — the actual drag gesture (pragmatic-dnd, real pointer events)
+ * has no unit-test coverage anywhere in this codebase (jsdom has no real
+ * HTML5 drag/pointer pipeline; see droppable-tab.tsx/TileLayout.core.tsx,
+ * both untested at that layer for the same reason). This is the one piece
+ * of the interaction's logic pure enough to verify directly.
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2.
+ */
+export function dropPositionForPointerX(rect: Pick<DOMRect, "left" | "width">, clientX: number): "before" | "after" {
+    return clientX < rect.left + rect.width / 2 ? "before" : "after";
+}
 
 export interface PaneTabStripProps<T> {
     tabs: T[];
@@ -107,6 +130,15 @@ export interface PaneTabStripProps<T> {
      *  content, not its header, and leave this off.
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.6. */
     reserveDragHandle?: boolean;
+
+    /** Opt in to same-pane drag-reorder (Phase 3 of
+     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.2): `(blockId, targetId,
+     *  position)` fires when a pill was dropped onto another pill in this
+     *  SAME strip. Omitted entirely (the default) → no draggable()/
+     *  dropTargetForElements() registered on any pill, zero behavior change
+     *  for every existing consumer (editor file tabs, agent History strip)
+     *  that doesn't pass it. */
+    onReorder?: (blockId: string, targetId: string, position: "before" | "after") => void;
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -276,6 +308,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             onClose={props.onClose}
                             onDoubleClick={props.onTabDoubleClick}
                             renderLabel={props.renderLabel}
+                            onReorder={props.onReorder}
                         />
                     )}
                 </For>
@@ -326,11 +359,57 @@ interface PaneTabStripItemProps<T> {
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
     renderLabel?: (tab: T) => JSX.Element;
+    onReorder?: (blockId: string, targetId: string, position: "before" | "after") => void;
 }
 
 function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const id = () => props.getId(props.tab);
     const attention = () => props.getAttention?.(props.tab) ?? false;
+    let pillRef: HTMLDivElement | undefined;
+    const [isDragging, setIsDragging] = createSignal(false);
+    const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
+
+    // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.1/§3.2). Gated entirely on `onReorder` being passed — every existing
+    // consumer that doesn't (editor file tabs, agent History strip) gets no
+    // draggable()/dropTargetForElements() registration at all, zero behavior
+    // change. A pill is simultaneously a drag SOURCE (itself) and a drop
+    // TARGET (for another pill being dragged onto it) — same dual-role
+    // pattern droppable-tab.tsx's own tab buttons already use for the outer
+    // Window Tab bar.
+    onMount(() => {
+        if (!props.onReorder) return;
+        const el = pillRef;
+        if (!el) return;
+        const cleanupDraggable = draggable({
+            element: el,
+            getInitialData: () => ({ kind: "pane-tab", blockId: id(), type: paneTabItemType }),
+            onDragStart: () => setIsDragging(true),
+            onDrop: () => setIsDragging(false),
+        });
+        const cleanupDropTarget = dropTargetForElements({
+            element: el,
+            canDrop: ({ source }) => source.data.type === paneTabItemType && source.data.blockId !== id(),
+            onDrag: ({ location }) => {
+                setDropSide(dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX));
+            },
+            onDragLeave: () => setDropSide(null),
+            onDrop: ({ source, location }) => {
+                setDropSide(null);
+                const blockId = source.data.blockId as string | undefined;
+                if (!blockId) return;
+                // Computed fresh here, not reused from the `onDrag`-updated
+                // signal above — avoids relying on that signal's last value
+                // still being current at the exact moment of drop.
+                const position = dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX);
+                props.onReorder!(blockId, id(), position);
+            },
+        });
+        onCleanup(() => {
+            cleanupDraggable();
+            cleanupDropTarget();
+        });
+    });
 
     const onMouseDown = (e: MouseEvent) => {
         // Middle-click → close (matches VS Code / Chrome convention).
@@ -372,8 +451,12 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 classList={{
                     "pane-tab--active": props.active,
                     "pane-tab--attention": attention(),
+                    "pane-tab--dragging": isDragging(),
+                    "pane-tab--drop-before": dropSide() === "before",
+                    "pane-tab--drop-after": dropSide() === "after",
                     ...(props.getTabClass?.(props.tab) ?? {}),
                 }}
+                ref={(el) => { pillRef = el; }}
                 onMouseDown={onMouseDown}
                 onClick={onClick}
                 onDblClick={onDblClick}

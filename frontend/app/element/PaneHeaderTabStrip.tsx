@@ -96,6 +96,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             // handle, blockframe.tsx's `data-role="block-header"`), the one
             // strip usage where reserving drag space after the "+" matters.
             reserveDragHandle
+            onReorder={props.onReorder}
         />
     );
 
