@@ -8,9 +8,12 @@ and an opt-in (default-off) reveal bound;
 `<PaneLoadingCover>` (§5.3) now the single owner of `.agent-pane-loading-overlay`,
 adopted by both `agent-view.tsx` and `AgentPicker.tsx` — indicator #4 in §2 is gone and
 #3 no longer renders its own markup; the header-mic guard inverted to positive (§5.4).
-Not started: phase 3 (folding the block-level `ready()` spinner and `<Suspense>`
-fallback, §2 #1-#2, into the same cover), phase 4's chrome `isLoading()` subscription,
-phase 5 (browser pane, §2 #6-#7).
+Phases 3 and 4 follow in the PR stacked on that one: indicators #1 and #2 now route through the same
+controller and cover, the cover's styles moved out of the `.agent-view` cascade into
+`element/PaneLoadingCover.scss`, coverage became an explicit input (§5.3), and
+`BlockFrame` subscribes to `isLoading()`.
+Not started: phase 5 (browser pane, §2 #6-#7), which needs a different design than
+originally specified — see §6.1.
 **Motivating evidence:** `docs/reports/REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md`
 (measured timeline, `spin:2` observation, §F regression).
 **Related:** `REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md`,
@@ -153,7 +156,42 @@ renders nothing (the safe default).
 3. **Collapse #1 and #2** into the same cover, keeping `ready()` as mount gating only
    (§4).
 4. **Chrome subscribes** (§5.4) and the mic guard is inverted.
-5. **Browser pane** (#6-7) adopts the controller.
+5. **Browser pane** (#6-7) adopts the controller. **Revised — see §6.1.**
+
+### 6.1 Phase 5 does not fit the controller as written
+
+Phase 5 was specified on the assumption that #6/#7 are assembly indicators like
+the rest. They are not, and implementing it as a fold would break the controller.
+
+`browser-view.tsx`'s spinner is driven by `model.loadingAtom()`, which is
+**cyclic**: it flips true→false→true again on every reload, back/forward and
+redirect chain, for the whole life of the pane. `PaneReadiness` is deliberately
+**one-way** — `assembling → revealing → live`, with a gate registered after
+reveal treated as a no-op precisely so that a late dependency cannot yank the
+cover back over content the user is already reading. Making it re-entrant to
+accommodate a page load would delete that guarantee for every other pane.
+
+The same distinction already appears twice elsewhere and is resolved the same
+way both times: the block `<Suspense>` fallback (§2 #1) and the Shell drawer's
+re-seed spinner (§2 #5) are *mid-life* affordances, kept, and merely suppressed
+while the one-time cover is up. #7 (the post-first-paint badge) is that same
+category and stays — it also carries deliberate anti-flicker design of its own
+(`SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`) and a
+`data-pane-overlay` attribute the native pane flip logic depends on.
+
+Only #6 — the *first* load, when there is genuinely nothing behind it — is
+initial assembly. The correct form of phase 5 is therefore **not** a fold but a
+gate: `browser-view` registers `readiness.gate("first-paint")` and releases it
+on the first `loadingAtom()` true→false transition, after which #6 is deleted
+outright and the block-level cover hides that window instead.
+
+That needs a readiness handle reachable from view code, which does not exist
+yet: views receive `viewModel`, not the controller. The obvious shortcut — the
+blockId-keyed `BlockComponentModel` registry — is not safe to use for it as-is,
+because that entry is adopted across mounts (`block.tsx`'s create-vs-adopt
+ownership dance, and the P0 it already caused), so a view could pick up another
+mount's controller. Phase 5 should introduce that plumbing deliberately rather
+than borrow the registry for it.
 
 ## 7. Acceptance criteria
 

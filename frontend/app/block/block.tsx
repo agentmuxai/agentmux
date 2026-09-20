@@ -243,6 +243,7 @@ function BlockFull({ nodeModel, viewModel, readiness }: FullBlockProps): JSX.Ele
             preview={false}
             blockModel={blockModel}
             viewModel={viewModel}
+            isLoading={() => readiness?.isLoading() ?? false}
         >
             <div class="block-focuselem">
                 <input
