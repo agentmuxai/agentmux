@@ -45,6 +45,26 @@ import { createSignal } from "solid-js";
 import { fadeOutStartupSplash } from "@/app/init/startup-splash";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 
+// Diagnostic only — answers "how often does a reveal actually hit
+// MAX_GATE_MS instead of settling naturally", which nothing logged before
+// this (see TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md /
+// the per-pane sequential-reveal spec). `hitCap: true` means the gate was
+// forced open before a real quiet window was found — worth distinguishing
+// from `source: "orphaned-hold"`, which means the paired
+// scheduleRevealLift/scheduleLeafRevealLift call never arrived at all
+// (a bug, not ordinary busy-ness) and forced the gate via its safety net.
+function logGateOutcome(
+    scope: string,
+    source: "settle" | "orphaned-hold",
+    hitCap: boolean,
+    elapsedMs: number,
+): void {
+    const level = source === "orphaned-hold" || hitCap ? console.warn : console.info;
+    level(
+        `[perf] tab-reveal ${scope} source=${source} settled=${!hitCap} elapsed=${elapsedMs.toFixed(0)}ms`,
+    );
+}
+
 /** Hard cap on how long a gate stays up. Past this, content reveals even
  *  if the long-task stream hasn't gone quiet — protects against perma-busy
  *  content (streaming agent, etc.) holding the gate open. */
@@ -97,7 +117,7 @@ function armFallback(handle: DetectorHandle, onSettle: () => void, ms: number): 
  *  calling `onSettle` once a clean window is observed or the hard cap
  *  trips. Idempotent re-entry: cancels any detector already running on
  *  this same handle first. */
-function startDetector(handle: DetectorHandle, onSettle: () => void): void {
+function startDetector(handle: DetectorHandle, onSettle: (hitCap: boolean, elapsedMs: number) => void): void {
     const startedAt = performance.now();
     let lastLongTaskAt = startedAt;
 
@@ -108,7 +128,7 @@ function startDetector(handle: DetectorHandle, onSettle: () => void): void {
         // back to the hard cap — without longtask data we can't detect
         // the actual settle moment, so wait the full MAX_GATE_MS budget
         // rather than the shorter SETTLE_MS, which would reveal mid-mount.
-        armFallback(handle, onSettle, MAX_GATE_MS);
+        armFallback(handle, () => onSettle(true, MAX_GATE_MS), MAX_GATE_MS);
         return;
     }
 
@@ -126,7 +146,7 @@ function startDetector(handle: DetectorHandle, onSettle: () => void): void {
     } catch {
         // longtask observer not supported (Safari historically). Same
         // hard-cap fallback reasoning as the no-PO path above.
-        armFallback(handle, onSettle, MAX_GATE_MS);
+        armFallback(handle, () => onSettle(true, MAX_GATE_MS), MAX_GATE_MS);
         return;
     }
 
@@ -144,7 +164,7 @@ function startDetector(handle: DetectorHandle, onSettle: () => void): void {
         if (settledSinceLastBusy || hardCapHit) {
             observer.disconnect();
             handle.observer = null;
-            onSettle();
+            onSettle(hardCapHit, now - startedAt);
             return;
         }
         requestAnimationFrame(tick);
@@ -182,7 +202,8 @@ const tabHandle = newHandle();
  *  `fadeOutStartupSplash` is idempotent: a no-op once the splash is gone,
  *  so calling it on every gate lift (including ordinary tab switches) is
  *  safe. */
-function liftTabGate(): void {
+function liftTabGate(source: "settle" | "orphaned-hold", hitCap: boolean, elapsedMs: number): void {
+    logGateOutcome(`whole-tab target=${gateTargetTabId() ?? "?"}`, source, hitCap, elapsedMs);
     setTabSwitching(false);
     setGateTargetTabId(null);
     fadeOutStartupSplash();
@@ -214,7 +235,9 @@ export function holdRevealGate(targetTabId: string): void {
     setGateTargetTabId(targetTabId);
     setTabSwitching(true);
     cancelDetector(tabHandle);
-    armFallback(tabHandle, liftTabGate, MAX_GATE_MS);
+    // Firing here means scheduleRevealLift() was never called to replace
+    // this safety net — an orphaned hold, not ordinary settle latency.
+    armFallback(tabHandle, () => liftTabGate("orphaned-hold", true, MAX_GATE_MS), MAX_GATE_MS);
 }
 
 /**
@@ -224,7 +247,7 @@ export function holdRevealGate(targetTabId: string): void {
  */
 export function scheduleRevealLift(): void {
     setTabSwitching(true);
-    startDetector(tabHandle, liftTabGate);
+    startDetector(tabHandle, (hitCap, elapsedMs) => liftTabGate("settle", hitCap, elapsedMs));
 }
 
 // ─── Leaf-scoped gate (generalization — SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22) ──
@@ -308,9 +331,16 @@ function isLeafGenerationStale(nodeId: string, generation: number): boolean {
 /** Common "this generation is done" path for both the hold-timeout and the
  *  settle-detected outcomes. A no-op if a newer generation has since taken
  *  over — that generation owns the gate now and will resolve it itself. */
-function resolveLeafGeneration(nodeId: string, generation: number): void {
+function resolveLeafGeneration(
+    nodeId: string,
+    generation: number,
+    source: "settle" | "orphaned-hold",
+    hitCap: boolean,
+    elapsedMs: number,
+): void {
     leafCancels.delete(nodeId);
     if (generation !== currentLeafGeneration(nodeId)) return;
+    logGateOutcome(`leaf node=${nodeId}`, source, hitCap, elapsedMs);
     leafResolvedGeneration.set(nodeId, generation);
     removeGatingNode(nodeId);
 }
@@ -335,7 +365,13 @@ export function holdLeafRevealGate(nodeId: string): number {
     cancelLeaf(nodeId);
     const generation = currentLeafGeneration(nodeId) + 1;
     leafGeneration.set(nodeId, generation);
-    const timer = setTimeout(() => resolveLeafGeneration(nodeId, generation), MAX_GATE_MS);
+    // Firing here means scheduleLeafRevealLift() was never called to
+    // replace this safety net — an orphaned hold, not ordinary settle
+    // latency.
+    const timer = setTimeout(
+        () => resolveLeafGeneration(nodeId, generation, "orphaned-hold", true, MAX_GATE_MS),
+        MAX_GATE_MS,
+    );
     leafCancels.set(nodeId, () => clearTimeout(timer));
     return generation;
 }
@@ -352,7 +388,7 @@ export function scheduleLeafRevealLift(nodeId: string, generation: number): void
     addGatingNode(nodeId);
     cancelLeaf(nodeId);
     const cancel = scheduleOnSettle(
-        () => resolveLeafGeneration(nodeId, generation),
+        ({ hitCap, elapsedMs }) => resolveLeafGeneration(nodeId, generation, "settle", hitCap, elapsedMs),
         { settleMs: SETTLE_MS, maxMs: MAX_GATE_MS },
     );
     leafCancels.set(nodeId, cancel);
