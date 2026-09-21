@@ -1,7 +1,7 @@
 # SPEC: cross-channel agent history resolution
 
 **Date:** 2026-09-21
-**Status:** implemented in part — §3.1 shipped; §3.2/§3.3 (link history,
+**Status:** active — §3.1 shipped in #3480; §3.2/§3.3 (link history,
 shared-store persistence) remain proposed. Root cause originally confirmed by
 static code trace across `agentmux` @ `4ab7a9ea9`; **§2.5 records what live
 verification subsequently proved this spec's first revision got wrong** — the
