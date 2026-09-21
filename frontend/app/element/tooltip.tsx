@@ -139,7 +139,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                         ref={registerFloating}
                         style={`${floatingStyle()};opacity:${isVisible() ? 1 : 0};transition:opacity 200ms ease`}
                         class={cn(
-                            "bg-gray-800 border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
+                            "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
                         )}
                         data-pane-overlay
                     >

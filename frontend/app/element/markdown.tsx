@@ -170,7 +170,7 @@ const Markdown = (props: MarkdownProps) => {
         code: Code,
         pre: (props: any) => <CodeBlock children={props.children} onClickExecute={onClickExecute} />,
         table: (props: any) => <TableBlock>{props.children}</TableBlock>,
-        thead: (props: any) => <thead class="border-b border-border bg-white/[0.03]">{props.children}</thead>,
+        thead: (props: any) => <thead class="border-b border-border bg-hover">{props.children}</thead>,
         tbody: (props: any) => <tbody>{props.children}</tbody>,
         tr: (props: any) => <tr class="border-b border-border/40 last:border-0">{props.children}</tr>,
         th: (props: any) => {

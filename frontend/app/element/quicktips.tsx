@@ -7,7 +7,7 @@ import { For, JSX } from "solid-js";
 
 const KeyCap = (props: { children?: JSX.Element }): JSX.Element => {
     return (
-        <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-gray-700 whitespace-nowrap">
+        <div class="inline-block px-2 py-1 mx-[1px] font-mono text-[0.85em] text-foreground bg-highlightbg rounded-[3px] border border-border whitespace-nowrap">
             {props.children}
         </div>
     );
@@ -17,7 +17,7 @@ const IconBox = (props: { children?: JSX.Element; variant?: "accent" | "secondar
     const variant = props.variant ?? "accent";
     const colorClasses =
         variant === "secondary"
-            ? "text-secondary bg-white/5 border-white/10 [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary"
+            ? "text-secondary bg-hover border-border [&_svg]:fill-secondary [&_svg_#arrow1]:fill-primary [&_svg_#arrow2]:fill-primary"
             : "text-accent-400 bg-accent-400/10 border-accent-400/20 [&_svg]:fill-accent-400 [&_svg_#arrow1]:fill-accent-400 [&_svg_#arrow2]:fill-accent-400";
 
     return (
@@ -98,13 +98,13 @@ const KeyBinding = (props: { keyDecl: string }): JSX.Element => {
 const QuickTips = (): JSX.Element => {
     return (
         <div class="flex flex-col w-full gap-6 @container">
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-white/10 hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Header Icons</span>
                 </div>
                 <div class="grid grid-cols-1 @lg:grid-cols-2 gap-3">
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-window-maximize fa-fw" />
                         </IconBox>
@@ -113,7 +113,7 @@ const QuickTips = (): JSX.Element => {
                             <KeyBinding keyDecl="Cmd:m" />
                         </div>
                     </div>
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-laptop fa-fw" />
                         </IconBox>
@@ -122,13 +122,13 @@ const QuickTips = (): JSX.Element => {
                             <KeyBinding keyDecl="Cmd:g" />
                         </div>
                     </div>
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-cog fa-fw" />
                         </IconBox>
                         <span class="text-[15px]">Pane Settings</span>
                     </div>
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-xmark-large fa-fw" />
                         </IconBox>
@@ -140,7 +140,7 @@ const QuickTips = (): JSX.Element => {
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-white/10 hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Important Keybindings</span>
@@ -151,11 +151,11 @@ const QuickTips = (): JSX.Element => {
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
                             Main Keybindings
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">New Tab</span>
                             <KeyBinding keyDecl="Cmd:t" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">New Terminal Pane</span>
                             <KeyBinding keyDecl="Cmd:n" />
                         </div>
@@ -165,15 +165,15 @@ const QuickTips = (): JSX.Element => {
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
                             Tab Switching ({PLATFORM === PlatformMacOS ? "Cmd" : "Alt"})
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Switch To Nth Tab</span>
                             <KeyBinding keyDecl="Cmd:Digit" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Previous Tab</span>
                             <KeyBinding keyDecl="Cmd:[" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Next Tab</span>
                             <KeyBinding keyDecl="Cmd:]" />
                         </div>
@@ -183,11 +183,11 @@ const QuickTips = (): JSX.Element => {
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
                             Pane Navigation (Ctrl-Shift)
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Navigate Between Panes</span>
                             <KeyBinding keyDecl="Ctrl:Shift:Arrows" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Focus Nth Pane</span>
                             <KeyBinding keyDecl="Ctrl:Shift:Digit" />
                         </div>
@@ -197,19 +197,19 @@ const QuickTips = (): JSX.Element => {
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
                             Split Panes
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Split Right</span>
                             <KeyBinding keyDecl="Cmd:d" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Split Below</span>
                             <KeyBinding keyDecl="Shift:Cmd:d" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Split in Direction</span>
                             <KeyBinding keyDecl="Ctrl:Shift:s + Arrows" />
                         </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
+                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Resize Single Border</span>
                             <KeyBinding keyDecl="Shift + Drag" />
                         </div>
@@ -217,13 +217,13 @@ const QuickTips = (): JSX.Element => {
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-white/10 hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">More Tips</span>
                 </div>
                 <div class="flex flex-col gap-2">
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-computer-mouse fa-fw" />
                         </IconBox>
@@ -231,7 +231,7 @@ const QuickTips = (): JSX.Element => {
                             <b>Tabs</b> - Right click any tab to change backgrounds or rename.
                         </span>
                     </div>
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-cog fa-fw" />
                         </IconBox>
@@ -239,7 +239,7 @@ const QuickTips = (): JSX.Element => {
                             <b>Web View</b> - Click the gear in the web view to set your homepage
                         </span>
                     </div>
-                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
+                    <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-cog fa-fw" />
                         </IconBox>
@@ -250,13 +250,13 @@ const QuickTips = (): JSX.Element => {
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-white/10 hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Need More Help?</span>
                 </div>
                 <div class="grid grid-cols-1 @sm:grid-cols-2 gap-2">
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-brands fa-discord fa-fw" />
                         </IconBox>
@@ -269,7 +269,7 @@ const QuickTips = (): JSX.Element => {
                             Join Our Discord
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-sliders fa-fw" />
                         </IconBox>
@@ -282,7 +282,7 @@ const QuickTips = (): JSX.Element => {
                             Configuration Options
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-keyboard fa-fw" />
                         </IconBox>
@@ -295,7 +295,7 @@ const QuickTips = (): JSX.Element => {
                             All Keybindings
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-book fa-fw" />
                         </IconBox>
@@ -308,7 +308,7 @@ const QuickTips = (): JSX.Element => {
                             Full Documentation
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-bug fa-fw" />
                         </IconBox>
@@ -338,7 +338,7 @@ const QuickTips = (): JSX.Element => {
                     <p>
                         To report bugs, request features, or flag issues with AI-generated content:
                     </p>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors mt-1">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors mt-1">
                         <IconBox variant="secondary">
                             <i class="fa-brands fa-github fa-fw" />
                         </IconBox>

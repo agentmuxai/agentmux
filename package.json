@@ -27,7 +27,8 @@
         "coverage": "vitest run --coverage",
         "test:e2e": "vitest run --no-file-parallelism test/e2e",
         "clean": "task clean",
-        "lint:scss": "stylelint \"frontend/**/*.scss\" --allow-empty-input"
+        "lint:scss": "stylelint \"frontend/**/*.scss\" --allow-empty-input",
+        "lint:theme-colors": "eslint --config eslint.theme-colors.config.js frontend/app"
     },
     "devDependencies": {
         "@emnapi/core": "^1.11.1",

@@ -377,5 +377,15 @@ jobs:
       # Run it bare and read the exit code:  npx tsc --noEmit -p tsconfig.citypecheck.json; echo $?
       - name: tsc --noEmit
         run: npx tsc --noEmit -p tsconfig.citypecheck.json
+      # Standalone, narrow config (eslint.theme-colors.config.js) --
+      # deliberately NOT eslint.config.js's general ruleset, which has
+      # 1200+ pre-existing violations unrelated to this and would make this
+      # gate meaningless noise. Catches a real, shipped bug class: a raw
+      # Tailwind palette color (text-white, bg-gray-800, hover:text-white)
+      # ignores the app's [data-theme] system entirely and silently breaks
+      # on whichever theme polarity the author wasn't looking at -- see
+      # docs/specs/SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md.
+      - name: Theme-aware color lint (no hardcoded Tailwind palette colors)
+        run: npm run lint:theme-colors
       - name: vitest run
         run: npx vitest run
