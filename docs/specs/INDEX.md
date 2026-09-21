@@ -16,6 +16,7 @@ See also:
 | Spec | Summary |
 |---|---|
 | [**TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17**](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | **CANONICAL tracking doc** (issue #3338) for the dock / working-indicator / input-gate / auto-backgrounding family — read this before any of the ~22 docs it indexes |
+| [SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) | Per-pane progressive tab-switch reveal — replaces the global long-task-quiet signal (breaks down with several busy panes) with a per-pane structural readiness milestone |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |
@@ -55,6 +56,7 @@ See also:
 
 | Spec | Summary |
 |---|---|
+| [**TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21**](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | **CANONICAL tracking doc** for typing/keystroke responsiveness across the terminal and agent pane (umbrella: Discussion #1161, live open work: issue #3361) — read this before any of the docs it indexes |
 | [SPEC_BULLETPROOF_TERMINALS_2026_05_21](SPEC_BULLETPROOF_TERMINALS_2026_05_21.md) | Terminal resilience requirements |
 | [SPEC_PERSISTENT_SHELL_NODE_2026_06_11](SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md) | Long-lived shell nodes (persistent PTY) |
 | [SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | Stop / teardown for persistent shells |
@@ -882,6 +884,7 @@ partial list.
 | [`SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14`](SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14.md) | Spec: Content-Aware Tab Sizing (VS Code Model) |
 | [`SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03`](SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03.md) | SPEC — Workspace tabs as a continuous surface with their content ("folder" model) |
 | [`SPEC_TAB_GAPS_AND_NAMING_2026_04_25`](SPEC_TAB_GAPS_AND_NAMING_2026_04_25.md) | Spec: Constant Tab Gaps + Plain-Language Default Names |
+| [`SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21`](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) | SPEC: Per-pane progressive reveal on tab switch, and a readiness signal that survives sustained streaming |
 | [`SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07`](SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md) | Tab tear-off — position match + Chrome-style paint |
 | [`SPEC_TERMINAL_FLOW_CONTROL_2026_05_30`](SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md) | SPEC: Terminal flow control (PTY backpressure) |
 | [`SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31`](SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md) | SPEC: Terminal Predictive Local Echo |
@@ -950,6 +953,7 @@ partial list.
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 | [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | TRACKING — Agent availability & automatic backgrounding |
+| [`TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | TRACKING — Typing & terminal input responsiveness |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions |
 
 ### historical
