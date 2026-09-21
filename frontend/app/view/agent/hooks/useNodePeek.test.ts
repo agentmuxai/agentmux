@@ -80,7 +80,7 @@ describe("useNodePeek", () => {
         });
     });
 
-    it("freezes an already-showing peek through a leave while the primary button is held", () => {
+    it("still closes an already-showing peek on leave even while the primary button is held (reagentx P1 on PR #3470 — a frozen leave got stuck open forever)", () => {
         const spy = vi.spyOn(pointerDragState, "isPrimaryButtonDown").mockReturnValue(false);
         createRoot((dispose) => {
             const peek = useNodePeek(50);
@@ -90,7 +90,20 @@ describe("useNodePeek", () => {
 
             spy.mockReturnValue(true);
             peek.handlePeekLeave();
-            expect(peek.isPeeking()).toBe(true);
+            expect(peek.isPeeking()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("does not start peeking if the button goes down during the pending enter delay", () => {
+        const spy = vi.spyOn(pointerDragState, "isPrimaryButtonDown").mockReturnValue(false);
+        createRoot((dispose) => {
+            const peek = useNodePeek(50);
+            peek.handlePeekEnter();
+            vi.advanceTimersByTime(30);
+            spy.mockReturnValue(true);
+            vi.advanceTimersByTime(20);
+            expect(peek.isPeeking()).toBe(false);
             dispose();
         });
     });

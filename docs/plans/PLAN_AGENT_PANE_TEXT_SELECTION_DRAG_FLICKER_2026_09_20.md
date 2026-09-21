@@ -124,23 +124,32 @@ it appears:
   listeners registered with `capture: true` (so they observe every button transition regardless of
   which element the event lands on or whether it stops propagation), plus a `blur` listener to
   reset state if the mouse is released outside the window.
-- **`frontend/app/view/agent/hooks/useNodePeek.ts`** — both `handlePeekEnter` and
-  `handlePeekLeave` now no-op while `isPrimaryButtonDown()` is true. This freezes whatever peek
-  state was already showing through the whole drag (not just gating new mounts), matching the
-  desired UX of no peek chrome popping in/out mid-drag-select.
+- **`frontend/app/view/agent/hooks/useNodePeek.ts`** — only `handlePeekEnter` (mount) no-ops
+  while `isPrimaryButtonDown()` is true; `handlePeekLeave` (unmount) is never gated. Original
+  version gated both ("freeze whatever was showing") — **reagentx P1 on PR #3470** caught that
+  this left a peek stuck open indefinitely whenever its row's mouseleave fired mid-drag but the
+  button was released somewhere else afterward, since no further mouseenter/mouseleave would ever
+  fire for a row the cursor had already left. Unmounting doesn't reintroduce the hit-testing
+  problem this fix targets (removing an obstruction from under the cursor can't break selection
+  the way adding one does), so ungating leave entirely closes the stuck-open hole with no
+  trade-off against the original bug. Also re-checks `isPrimaryButtonDown()` again when the
+  enter-delay timer fires, not just at the initial call, since the button can go down during that
+  window.
 - **`frontend/app/element/tooltip.tsx`** (`Tooltip`, the shared hover-triggered Portal-rendered
   tooltip primitive used across the app — pane tab strips, widget-bar buttons, etc., not just
-  agent-pane rows) — same gate applied to its `handleMouseEnter`/`handleMouseLeave`. This was
-  added in response to the user separately reporting the identical flicker on the browser pane's
-  address-bar input; investigation did not find a hover-driven Portal mechanism specifically
-  wired to that `<input>` itself (it is a plain native text field with no nearby overlay logic in
-  `browser-nav-bar.tsx`), but `Tooltip` is a widely-reused primitive that likely sits near enough
-  to many text inputs app-wide (including via its use on nearby toolbar buttons) that gating it
-  the same way generalizes the fix broadly. If the address-bar case persists after this fix, it
-  has a different root cause — see the follow-up note below.
-- Tests: `frontend/app/util/pointer-drag-state.test.ts` (new), `useNodePeek.test.ts` (3 new cases:
-  gated enter, frozen leave, resumes after release), `frontend/app/element/tooltip.test.tsx` (new,
-  4 cases covering the same three behaviors plus the ungated baseline).
+  agent-pane rows) — same enter-only gate, same reasoning, same reagentx finding (identical
+  stuck-open defect, fixed the same way). Added in response to the user separately reporting the
+  identical flicker on the browser pane's address-bar input; investigation did not find a
+  hover-driven Portal mechanism specifically wired to that `<input>` itself (it is a plain native
+  text field with no nearby overlay logic in `browser-nav-bar.tsx`), but `Tooltip` is a
+  widely-reused primitive that likely sits near enough to many text inputs app-wide (including via
+  its use on nearby toolbar buttons) that gating it the same way generalizes the fix broadly. If
+  the address-bar case persists after this fix, it has a different root cause — see the follow-up
+  note below.
+- Tests: `frontend/app/util/pointer-drag-state.test.ts` (new), `useNodePeek.test.ts` (4 new cases:
+  gated enter, leave still closes while held, enter-delay button-down race, resumes after
+  release), `frontend/app/element/tooltip.test.tsx` (new, 4 cases covering the same behaviors plus
+  the ungated baseline).
 
 **Follow-up, not yet done:** if the browser-pane address-bar flicker is still reproducible after
 this change, it needs its own targeted investigation — the concrete mechanism there (if any)

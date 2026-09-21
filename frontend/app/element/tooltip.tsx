@@ -74,21 +74,26 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     // stationary over the anchor can still react — see the effect below.
     const [isHovering, setIsHovering] = createSignal(false);
 
-    // Both no-op while the mouse's primary button is held — a text-
-    // selection drag elsewhere on the page still delivers mouseenter/
-    // mouseleave to whatever anchor the cursor sweeps over, and letting
-    // either through here would mount/unmount this Portal-rendered panel
-    // under the cursor mid-drag, which was intermittently breaking the
-    // browser's native selection-extend hit-testing — the same mechanism
-    // `useNodePeek`'s `PeekOverlay` had. See pointer-drag-state.ts and
+    // Entry (mount) no-ops while the mouse's primary button is held — a
+    // text-selection drag elsewhere on the page still delivers mouseenter
+    // to whatever anchor the cursor sweeps over, and letting it through
+    // here would mount this Portal-rendered panel under the cursor
+    // mid-drag, which was intermittently breaking the browser's native
+    // selection-extend hit-testing — the same mechanism `useNodePeek`'s
+    // `PeekOverlay` had. See pointer-drag-state.ts and
     // docs/plans/PLAN_AGENT_PANE_TEXT_SELECTION_DRAG_FLICKER_2026_09_20.md.
+    // Leave (unmount) is deliberately NOT gated — see that hook's own
+    // comment (reagentx P1 on PR #3470): gating it too left a tooltip
+    // stuck open indefinitely whenever mouseleave fired mid-drag but the
+    // button was released elsewhere, since no further mouseenter/
+    // mouseleave would ever fire for an anchor the cursor had already left.
     const handleMouseEnter = () => {
         if (forceOpen() || isPrimaryButtonDown()) return;
         setIsHovering(true);
     };
 
     const handleMouseLeave = () => {
-        if (forceOpen() || isPrimaryButtonDown()) return;
+        if (forceOpen()) return;
         setIsHovering(false);
     };
 
