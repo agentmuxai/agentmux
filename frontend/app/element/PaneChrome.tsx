@@ -19,7 +19,7 @@
  */
 
 import { createMemo, createSignal, type JSX } from "solid-js";
-import { computeBlockColorBg, computeFocusRingBorderColor } from "@/app/block/blockframe";
+import { computeBlockActiveBorderColor, computeBlockColorBg, computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -120,14 +120,19 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // show it as a pill even while another fork is active. Read here (not
     // folded into tabInfos above) since it needs the current theme's
     // polarity, which label/icon description has no reason to depend on.
+    //
+    // computeBlockActiveBorderColor, NOT computeFocusRingBorderColor — the
+    // latter also folds in the single shared atoms.tabAtom() tab-level
+    // bg:activebordercolor override, which would collapse every pill's
+    // underline to that one tab-wide color instead of each block's own
+    // (reagent P1, PR #3484).
     const tabColors = createMemo(() => {
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
-        const tabMeta = atoms.tabAtom()?.meta;
         const colors = new Map<string, PaneTabColors>();
         for (const blockId of tabIds()) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            const underline = computeFocusRingBorderColor(true, meta, tabMeta);
+            const underline = computeBlockActiveBorderColor(meta);
             const background = computeBlockColorBg(meta, isLightTheme);
             if (underline || background) colors.set(blockId, { underline, background });
         }
