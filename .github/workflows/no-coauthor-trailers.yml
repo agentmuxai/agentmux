@@ -41,6 +41,11 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
+          set -euo pipefail
+          # Without -e, a failed gh api call (rate limit, network, auth)
+          # leaves the command substitution empty and the script proceeds
+          # as if the PR were clean -- fail-open on an API error instead of
+          # failing loudly. -e turns that into a hard job failure.
           # gh api's --jq takes a single expression string, not jq's own
           # --arg — the pattern is passed via env instead and read with
           # jq's env.PATTERN, not shell-interpolated into the expression.
