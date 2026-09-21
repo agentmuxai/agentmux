@@ -342,6 +342,22 @@ function Block(props: BlockProps): JSX.Element {
             const vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
             createdViewModels.push(vm);
             setViewModel(vm);
+            // Dispose on the effect's OWN cleanup, not just the component's.
+            // This effect re-runs while the preview stays mounted (a block's
+            // meta changing is enough), and every run built a fresh private
+            // ViewModel while the previous one stayed alive — the
+            // component-level onCleanup below only ever disposes the last of
+            // them. For an editor preview each stranded ViewModel keeps a live
+            // `editor:file_changed` subscription, so a pane open during file
+            // churn accumulated tens of thousands of them and took the
+            // renderer down (issue #3482; confirmed by the leak guard's stack
+            // pointing exactly here).
+            //
+            // Safe precisely because of what the comment above establishes: a
+            // preview's ViewModel is private to this mount — never registered,
+            // never published, never adoptable — so nothing else can be
+            // holding the one we are replacing.
+            onCleanup(() => vm?.dispose?.());
             return;
         }
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
