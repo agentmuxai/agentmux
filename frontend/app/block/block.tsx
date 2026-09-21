@@ -303,6 +303,11 @@ function Block(props: BlockProps): JSX.Element {
     // nor dispose a ViewModel it merely adopted from the registry.
     let registeredBcm: BlockComponentModel | null = null;
     const createdViewModels: ViewModel[] = [];
+    // A preview mount's own ViewModel, kept across effect re-runs so the
+    // effect does not strand a live one on every run (#3482 — see the preview
+    // branch below). Rebuilt only when the view type actually changes.
+    let previewViewModel: ViewModel | null = null;
+    let previewViewType: string | null = null;
     createEffect(() => {
         const view = viewType();
         if (!view) return;
@@ -339,25 +344,34 @@ function Block(props: BlockProps): JSX.Element {
         // disposed on its own unmount, and never registered or published
         // anywhere another mount could adopt or overwrite.
         if (props.preview) {
-            const vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
-            createdViewModels.push(vm);
-            setViewModel(vm);
-            // Dispose on the effect's OWN cleanup, not just the component's.
-            // This effect re-runs while the preview stays mounted (a block's
-            // meta changing is enough), and every run built a fresh private
-            // ViewModel while the previous one stayed alive — the
-            // component-level onCleanup below only ever disposes the last of
-            // them. For an editor preview each stranded ViewModel keeps a live
-            // `editor:file_changed` subscription, so a pane open during file
-            // churn accumulated tens of thousands of them and took the
-            // renderer down (issue #3482; confirmed by the leak guard's stack
-            // pointing exactly here).
+            // REUSE across effect re-runs rather than rebuilding. This effect
+            // re-runs while the preview stays mounted — a block's meta
+            // changing is enough — and rebuilding here stranded the previous
+            // ViewModel alive, since the component-level onCleanup below only
+            // ever disposes the last one. For an editor preview every
+            // stranded instance keeps a live `editor:file_changed`
+            // subscription, so a pane open during file churn accumulated tens
+            // of thousands of them and took the renderer down (#3482,
+            // confirmed by the leak guard's stack pointing exactly here).
             //
-            // Safe precisely because of what the comment above establishes: a
-            // preview's ViewModel is private to this mount — never registered,
-            // never published, never adoptable — so nothing else can be
-            // holding the one we are replacing.
-            onCleanup(() => vm?.dispose?.());
+            // Deliberately fixed by NOT creating the extra ViewModel, rather
+            // than by disposing it on re-run: `dispose()` is not safe to call
+            // for a preview. A preview shares its blockId with the real mount
+            // (tabcontent.tsx's renderPreview passes the same leaf nodeModel),
+            // and some view models additionally register themselves in their
+            // OWN blockId-keyed global store — `EditorViewModel.dispose()`
+            // calls `unregisterEditorPane(this.blockId)`, which would delete
+            // the slot the still-live real editor pane depends on, making its
+            // next dispatch throw "dispatch for unregistered pane". The
+            // surrounding comment's "never registered, never published" only
+            // ever held for the BCM registry, not for those. Caught by
+            // reagentx P1 on PR #3483.
+            if (previewViewModel == null || previewViewType !== view) {
+                previewViewModel = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+                previewViewType = view;
+                createdViewModels.push(previewViewModel);
+            }
+            setViewModel(previewViewModel);
             return;
         }
         const bcm = getBlockComponentModel(props.nodeModel.blockId);
