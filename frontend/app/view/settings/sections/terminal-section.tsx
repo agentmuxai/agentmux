@@ -4,7 +4,110 @@
 import { For, Show, type JSX } from "solid-js";
 
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
+import type { SettingsIndexEntry } from "../settings-model";
 import { set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+
+// ── Search index — see appearance-section.tsx's header comment for the pattern. ──
+
+export const TERMINAL_SETTINGS = {
+    fontSize: {
+        id: "terminal.font_size",
+        label: "Font size",
+        description: "Terminal font size in pixels (8–32)",
+        section: "terminal",
+        keywords: ["text size", "zoom", "make text bigger", "font scale", "term:fontsize"],
+    },
+    fontFamily: {
+        id: "terminal.font_family",
+        label: "Font family",
+        description: "Comma-separated font fallback list",
+        section: "terminal",
+        keywords: ["typeface", "monospace font", "term:fontfamily"],
+    },
+    terminalTheme: {
+        id: "terminal.theme",
+        label: "Terminal color theme",
+        section: "terminal",
+        keywords: ["terminal colors", "ansi colors", "color scheme", "term:theme"],
+    },
+    scrollback: {
+        id: "terminal.scrollback",
+        label: "Scrollback lines",
+        description: "Number of lines kept in terminal scrollback (1000–100000)",
+        section: "terminal",
+        keywords: ["scroll history", "buffer size", "history lines", "term:scrollback"],
+    },
+    copyOnSelect: {
+        id: "terminal.copy_on_select",
+        label: "Copy on select",
+        description: "Automatically copy selected text to clipboard",
+        section: "terminal",
+        keywords: ["auto copy", "clipboard", "select to copy", "term:copyonselect"],
+    },
+    shiftEnterNewline: {
+        id: "terminal.shift_enter_newline",
+        label: "Shift+Enter → new line",
+        description: "In agent composer: Shift+Enter inserts a newline instead of submitting",
+        section: "terminal",
+        keywords: ["newline", "multiline input", "composer keybinding", "term:shiftenternewline"],
+    },
+    bracketedPaste: {
+        id: "terminal.bracketed_paste",
+        label: "Bracketed paste",
+        description: "Allow programs to detect pasted text vs. typed text",
+        section: "terminal",
+        keywords: ["paste mode", "term:allowbracketedpaste"],
+    },
+    terminalTransparency: {
+        id: "terminal.transparency",
+        label: "Terminal transparency",
+        description: "Terminal background transparency (0 = opaque, 1 = fully transparent)",
+        section: "terminal",
+        keywords: ["transparent terminal", "opacity", "term:transparency"],
+    },
+    scrollSensitivity: {
+        id: "terminal.scroll_sensitivity",
+        label: "Scroll sensitivity",
+        description: "Scroll wheel speed multiplier for terminal panes (0.1–10, default 1). Independent of the OS scroll-speed setting.",
+        section: "terminal",
+        keywords: ["scroll speed", "mouse wheel speed", "term:scrollsensitivity"],
+    },
+    cpuMemBadge: {
+        id: "terminal.cpu_mem_badge",
+        label: "Show CPU/mem badge",
+        description: "Show a live CPU%/memory usage badge in the top-right corner of terminal panes",
+        section: "terminal",
+        keywords: ["cpu usage", "memory usage", "resource badge", "term:showstatsbadge"],
+    },
+    predictiveEcho: {
+        id: "terminal.predictive_echo",
+        label: "Predictive echo",
+        description: "Show local predictive echo of typed characters while waiting on a slow/remote shell",
+        section: "terminal",
+        keywords: ["local echo", "typing lag", "ssh latency", "term:predictiveecho"],
+    },
+    predictiveEchoThreshold: {
+        id: "terminal.predictive_echo_threshold",
+        label: "Predictive echo threshold",
+        description: "Round-trip latency (ms) above which predictive echo kicks in",
+        section: "terminal",
+        keywords: ["echo latency", "round trip time", "term:predictiveecho:thresholdms"],
+    },
+    agentMaxRuntime: {
+        id: "terminal.agent_max_runtime",
+        label: "Agent max runtime",
+        description: "Hours before the watchdog kills a long-running agent pane. 0 = no limit.",
+        section: "terminal",
+        keywords: ["max runtime", "runtime limit", "watchdog", "term:agentmaxruntimehours"],
+    },
+    agentIdleTimeout: {
+        id: "terminal.agent_idle_timeout",
+        label: "Agent idle timeout",
+        description: "Minutes of PTY silence before the watchdog kills an idle agent pane. 0 = no limit.",
+        section: "terminal",
+        keywords: ["idle timeout", "auto-lock", "sleep", "inactivity timer", "term:agentidletimeoutmins"],
+    },
+} satisfies Record<string, SettingsIndexEntry>;
 
 // ── Section: Terminal ─────────────────────────────────────────────────────────
 
@@ -16,8 +119,9 @@ export function TerminalSection(): JSX.Element {
     return (
         <div class="settings-section-body">
             <SettingRow
-                label="Font size"
-                description="Terminal font size in pixels (8–32)"
+                id={TERMINAL_SETTINGS.fontSize.id}
+                label={TERMINAL_SETTINGS.fontSize.label}
+                description={TERMINAL_SETTINGS.fontSize.description}
                 control={
                     <input
                         class="setting-number"
@@ -31,8 +135,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Font family"
-                description="Comma-separated font fallback list"
+                id={TERMINAL_SETTINGS.fontFamily.id}
+                label={TERMINAL_SETTINGS.fontFamily.label}
+                description={TERMINAL_SETTINGS.fontFamily.description}
                 control={
                     <input
                         class="setting-text"
@@ -45,7 +150,8 @@ export function TerminalSection(): JSX.Element {
             />
             <Show when={termThemes().length > 0}>
                 <SettingRow
-                    label="Terminal color theme"
+                    id={TERMINAL_SETTINGS.terminalTheme.id}
+                    label={TERMINAL_SETTINGS.terminalTheme.label}
                     control={
                         <select
                             class="setting-select"
@@ -61,8 +167,9 @@ export function TerminalSection(): JSX.Element {
                 />
             </Show>
             <SettingRow
-                label="Scrollback lines"
-                description="Number of lines kept in terminal scrollback (1000–100000)"
+                id={TERMINAL_SETTINGS.scrollback.id}
+                label={TERMINAL_SETTINGS.scrollback.label}
+                description={TERMINAL_SETTINGS.scrollback.description}
                 control={
                     <input
                         class="setting-number setting-number--wide"
@@ -76,8 +183,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Copy on select"
-                description="Automatically copy selected text to clipboard"
+                id={TERMINAL_SETTINGS.copyOnSelect.id}
+                label={TERMINAL_SETTINGS.copyOnSelect.label}
+                description={TERMINAL_SETTINGS.copyOnSelect.description}
                 control={
                     <ToggleControl
                         checked={!!(s()["term:copyonselect"] as boolean)}
@@ -86,8 +194,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Shift+Enter → new line"
-                description="In agent composer: Shift+Enter inserts a newline instead of submitting"
+                id={TERMINAL_SETTINGS.shiftEnterNewline.id}
+                label={TERMINAL_SETTINGS.shiftEnterNewline.label}
+                description={TERMINAL_SETTINGS.shiftEnterNewline.description}
                 control={
                     <ToggleControl
                         checked={!!(s()["term:shiftenternewline"] as boolean)}
@@ -96,8 +205,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Bracketed paste"
-                description="Allow programs to detect pasted text vs. typed text"
+                id={TERMINAL_SETTINGS.bracketedPaste.id}
+                label={TERMINAL_SETTINGS.bracketedPaste.label}
+                description={TERMINAL_SETTINGS.bracketedPaste.description}
                 control={
                     <ToggleControl
                         checked={s()["term:allowbracketedpaste"] !== false}
@@ -106,8 +216,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Terminal transparency"
-                description="Terminal background transparency (0 = opaque, 1 = fully transparent)"
+                id={TERMINAL_SETTINGS.terminalTransparency.id}
+                label={TERMINAL_SETTINGS.terminalTransparency.label}
+                description={TERMINAL_SETTINGS.terminalTransparency.description}
                 control={
                     <SliderControl
                         min={0} max={1} step={0.05}
@@ -117,8 +228,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Scroll sensitivity"
-                description="Scroll wheel speed multiplier for terminal panes (0.1–10, default 1). Independent of the OS scroll-speed setting."
+                id={TERMINAL_SETTINGS.scrollSensitivity.id}
+                label={TERMINAL_SETTINGS.scrollSensitivity.label}
+                description={TERMINAL_SETTINGS.scrollSensitivity.description}
                 control={
                     <input
                         class="setting-number setting-number--wide"
@@ -132,8 +244,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Show CPU/mem badge"
-                description="Show a live CPU%/memory usage badge in the top-right corner of terminal panes"
+                id={TERMINAL_SETTINGS.cpuMemBadge.id}
+                label={TERMINAL_SETTINGS.cpuMemBadge.label}
+                description={TERMINAL_SETTINGS.cpuMemBadge.description}
                 control={
                     <ToggleControl
                         checked={s()["term:showstatsbadge"] !== false}
@@ -142,8 +255,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Predictive echo"
-                description="Show local predictive echo of typed characters while waiting on a slow/remote shell"
+                id={TERMINAL_SETTINGS.predictiveEcho.id}
+                label={TERMINAL_SETTINGS.predictiveEcho.label}
+                description={TERMINAL_SETTINGS.predictiveEcho.description}
                 control={
                     <ToggleControl
                         checked={!!(s()["term:predictiveecho"] as boolean)}
@@ -153,9 +267,10 @@ export function TerminalSection(): JSX.Element {
             />
             <Show when={!!(s()["term:predictiveecho"] as boolean)}>
                 <SettingRow
+                    id={TERMINAL_SETTINGS.predictiveEchoThreshold.id}
                     indent
-                    label="Predictive echo threshold"
-                    description="Round-trip latency (ms) above which predictive echo kicks in"
+                    label={TERMINAL_SETTINGS.predictiveEchoThreshold.label}
+                    description={TERMINAL_SETTINGS.predictiveEchoThreshold.description}
                     control={
                         <input
                             class="setting-number setting-number--wide"
@@ -170,8 +285,9 @@ export function TerminalSection(): JSX.Element {
                 />
             </Show>
             <SettingRow
-                label="Agent max runtime"
-                description="Hours before the watchdog kills a long-running agent pane. 0 = no limit."
+                id={TERMINAL_SETTINGS.agentMaxRuntime.id}
+                label={TERMINAL_SETTINGS.agentMaxRuntime.label}
+                description={TERMINAL_SETTINGS.agentMaxRuntime.description}
                 control={
                     <input
                         class="setting-number setting-number--wide"
@@ -185,8 +301,9 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Agent idle timeout"
-                description="Minutes of PTY silence before the watchdog kills an idle agent pane. 0 = no limit."
+                id={TERMINAL_SETTINGS.agentIdleTimeout.id}
+                label={TERMINAL_SETTINGS.agentIdleTimeout.label}
+                description={TERMINAL_SETTINGS.agentIdleTimeout.description}
                 control={
                     <input
                         class="setting-number setting-number--wide"

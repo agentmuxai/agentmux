@@ -56,6 +56,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { muxEventSubscribe } from "@/app/store/mps";
+import { fuzzySearch } from "@/app/util/fuzzysearch";
 import { ConfirmModal } from "@/element/modal";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { ObjectService } from "@/app/store/services";
@@ -814,7 +815,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // SEARCH_LIMIT while searching — see resourceKey/fetcher above).
     // Matches instance_name first, falling back to definition_name for
     // rows without a custom instance name (e.g. freshly-created agents).
-    // SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md.
+    // SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md. Fuzzy (typo-tolerant)
+    // since SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §5 — no `keywords`
+    // concept here (agent names are free text, not a fixed vocabulary), so
+    // this consumer gets the shared utility's typo/reorder tolerance, not
+    // synonym matching.
     const filteredRows = createMemo(() => {
         const q = nameQuery();
         // `rowsStore.list`, not `rows()` — see the reconcile effect above;
@@ -822,7 +827,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         // identity across a refetch.
         const all = rowsStore.list;
         if (!q) return all;
-        return all.filter((r) => (r.instance_name || r.definition_name).toLowerCase().includes(q));
+        return fuzzySearch(all, q, {
+            keys: [{ name: "searchName", getFn: (r) => r.instance_name || r.definition_name }],
+        });
     });
     // Distinct from `isEmpty()`: the fetch found real rows, but the
     // filter narrowed them all away — not "you have no agents."

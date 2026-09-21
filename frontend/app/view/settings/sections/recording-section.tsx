@@ -17,7 +17,59 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createMicLevelMeter } from "@/app/hook/useMicLevelMeter";
 import { pickMime } from "@/app/hook/whisperVoiceEngine";
+import type { SettingsIndexEntry } from "../settings-model";
 import { MaskedKeyField, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+
+// ── Search index — see appearance-section.tsx's header comment for the pattern. ──
+
+export const RECORDING_SETTINGS = {
+    enableVoiceInput: {
+        id: "recording.enable_voice_input",
+        label: "Enable voice input",
+        description: "Show the microphone button on agent and terminal panes",
+        section: "recording",
+        keywords: ["microphone", "speech to text", "dictation", "voice:enabled"],
+    },
+    engine: {
+        id: "recording.engine",
+        label: "Engine",
+        description: "whisper.cpp runs fully offline; Groq sends audio to Groq's API",
+        section: "recording",
+        keywords: ["transcription engine", "stt engine", "whisper", "groq", "voice:engine"],
+    },
+    groqApiKey: {
+        id: "recording.groq_api_key",
+        label: "Groq API key",
+        description: "Sent once, over HTTPS, from the AgentMux backend on this machine directly to api.groq.com — never to any other AgentMux service.",
+        section: "recording",
+        keywords: ["groq key", "api key", "voice:groqApiKey"],
+    },
+    whisperCliPath: {
+        id: "recording.whisper_cli_path",
+        label: "whisper-cli path",
+        section: "recording",
+        keywords: ["whisper path", "local transcription binary", "voice:whisperCliPath"],
+    },
+    model: {
+        id: "recording.model",
+        label: "Model",
+        description: "Auto-downloaded on first use. Only one of Model or Model file path applies at a time — file path takes precedence if both are set.",
+        section: "recording",
+        keywords: ["whisper model", "transcription model", "voice:whisperModel"],
+    },
+    modelFilePath: {
+        id: "recording.model_file_path",
+        label: "Model file path",
+        section: "recording",
+        keywords: ["custom model path", "ggml model", "voice:whisperModelPath"],
+    },
+    inputDevice: {
+        id: "recording.input_device",
+        label: "Input device",
+        section: "recording",
+        keywords: ["microphone device", "audio input", "voice:inputDeviceId"],
+    },
+} satisfies Record<string, SettingsIndexEntry>;
 
 type PathStatus = "idle" | "checking" | "found" | "not-found";
 
@@ -253,14 +305,16 @@ export function RecordingSection(): JSX.Element {
     return (
         <div class="settings-section-body">
             <SettingRow
-                label="Enable voice input"
-                description="Show the microphone button on agent and terminal panes"
+                id={RECORDING_SETTINGS.enableVoiceInput.id}
+                label={RECORDING_SETTINGS.enableVoiceInput.label}
+                description={RECORDING_SETTINGS.enableVoiceInput.description}
                 control={<ToggleControl checked={enabled()} onChange={(v) => set("voice:enabled", v)} />}
             />
             <Show when={enabled()}>
                 <SectionHeader label="Transcription engine" />
                 <SettingRow
-                    label="Engine"
+                    id={RECORDING_SETTINGS.engine.id}
+                    label={RECORDING_SETTINGS.engine.label}
                     control={
                         <select class="setting-select" value={engine()} onChange={(e) => set("voice:engine", e.currentTarget.value)}>
                             <option value="groq">Groq (cloud)</option>
@@ -270,12 +324,13 @@ export function RecordingSection(): JSX.Element {
                             </Show>
                         </select>
                     }
-                    description="whisper.cpp runs fully offline; Groq sends audio to Groq's API"
+                    description={RECORDING_SETTINGS.engine.description}
                 />
 
                 <Show when={engine() === "groq"}>
                     <SettingRow
-                        label="Groq API key"
+                        id={RECORDING_SETTINGS.groqApiKey.id}
+                        label={RECORDING_SETTINGS.groqApiKey.label}
                         control={
                             <MaskedKeyField
                                 value={s()["voice:groqApiKey"] as string | undefined}
@@ -283,13 +338,14 @@ export function RecordingSection(): JSX.Element {
                                 placeholder="paste key — never displayed again after saving"
                             />
                         }
-                        description="Sent once, over HTTPS, from the AgentMux backend on this machine directly to api.groq.com — never to any other AgentMux service."
+                        description={RECORDING_SETTINGS.groqApiKey.description}
                     />
                 </Show>
 
                 <Show when={engine() === "whisper-local"}>
                     <SettingRow
-                        label="whisper-cli path"
+                        id={RECORDING_SETTINGS.whisperCliPath.id}
+                        label={RECORDING_SETTINGS.whisperCliPath.label}
                         control={
                             <PathField
                                 value={s()["voice:whisperCliPath"] as string | undefined}
@@ -299,7 +355,8 @@ export function RecordingSection(): JSX.Element {
                         }
                     />
                     <SettingRow
-                        label="Model"
+                        id={RECORDING_SETTINGS.model.id}
+                        label={RECORDING_SETTINGS.model.label}
                         control={
                             <select
                                 class="setting-select"
@@ -322,12 +379,13 @@ export function RecordingSection(): JSX.Element {
                                 <option value="custom">custom path…</option>
                             </select>
                         }
-                        description="Auto-downloaded on first use. Only one of Model or Model file path applies at a time — file path takes precedence if both are set."
+                        description={RECORDING_SETTINGS.model.description}
                     />
                     <Show when={modelChoice() === "custom"}>
                         <SettingRow
+                            id={RECORDING_SETTINGS.modelFilePath.id}
                             indent
-                            label="Model file path"
+                            label={RECORDING_SETTINGS.modelFilePath.label}
                             control={
                                 <PathField
                                     value={s()["voice:whisperModelPath"] as string | undefined}
@@ -341,7 +399,8 @@ export function RecordingSection(): JSX.Element {
 
                 <SectionHeader label="Microphone" />
                 <SettingRow
-                    label="Input device"
+                    id={RECORDING_SETTINGS.inputDevice.id}
+                    label={RECORDING_SETTINGS.inputDevice.label}
                     control={
                         <select
                             class="setting-select"

@@ -14,9 +14,13 @@ export function set(key: string, value: unknown): void {
 
 // ── SettingRow primitive ──────────────────────────────────────────────────────
 
-export function SettingRow(p: { label: string; description?: string; control: JSX.Element; indent?: boolean; stacked?: boolean }): JSX.Element {
+export function SettingRow(p: { id?: string; label: string; description?: string; control: JSX.Element; indent?: boolean; stacked?: boolean }): JSX.Element {
     return (
-        <div class="setting-row" classList={{ "setting-row--indent": p.indent, "setting-row--stacked": p.stacked }}>
+        <div
+            id={p.id ? `setting-${p.id}` : undefined}
+            class="setting-row"
+            classList={{ "setting-row--indent": p.indent, "setting-row--stacked": p.stacked }}
+        >
             <div class="setting-row-label">
                 <span class="setting-row-name">{p.label}</span>
                 <Show when={p.description}>

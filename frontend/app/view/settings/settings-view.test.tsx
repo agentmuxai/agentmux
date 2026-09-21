@@ -13,25 +13,36 @@
  * rather than an RPC mock.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./sections/appearance-section", () => ({
+// importOriginal, not a bare replacement object: each section file now also
+// exports a *_SETTINGS search-index registry (SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md
+// §3.2) that settings-index.ts aggregates and SettingsSearchBar reads — a
+// bare `{ AppearanceSection: ... }` mock would strip that export out from
+// under settings-index.ts too, since it replaces the whole module.
+vi.mock("./sections/appearance-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
     AppearanceSection: () => <div data-testid="appearance-section" />,
 }));
-vi.mock("./sections/window-panes-section", () => ({
+vi.mock("./sections/window-panes-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
     WindowPanesSection: () => <div data-testid="window-section" />,
 }));
-vi.mock("./sections/terminal-section", () => ({
+vi.mock("./sections/terminal-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
     TerminalSection: () => <div data-testid="terminal-section" />,
 }));
-vi.mock("./sections/sounds-section", () => ({
+vi.mock("./sections/sounds-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
     SoundsSection: () => <div data-testid="sounds-section" />,
 }));
-vi.mock("./sections/recording-section", () => ({
+vi.mock("./sections/recording-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
     RecordingSection: () => <div data-testid="recording-section" />,
 }));
-vi.mock("./sections/advanced-section", () => ({
+vi.mock("./sections/advanced-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
     AdvancedSection: () => <div data-testid="advanced-section" />,
 }));
 
@@ -117,5 +128,54 @@ describe("SettingsView pane title", () => {
         ) as HTMLButtonElement;
         advancedButton.click();
         expect(model.viewName()).toBe("Advanced");
+    });
+});
+
+// SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5/§6.
+describe("SettingsView search bar", () => {
+    afterEach(() => cleanup());
+
+    function renderSettings() {
+        const model = new SettingsViewModel("test-block", null as any);
+        render(() => (
+            <SettingsView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+        ));
+        return { model };
+    }
+
+    it("shows no results dropdown when the query is empty", () => {
+        renderSettings();
+        expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
+    });
+
+    it("finds a setting by a curated synonym, not just its literal label", () => {
+        renderSettings();
+        const input = screen.getByTestId("settings-search-input");
+        fireEvent.input(input, { target: { value: "dark mode" } });
+        const results = screen.getAllByTestId("settings-search-result");
+        expect(results[0]).toHaveTextContent("Theme");
+    });
+
+    it("switches section and clears the query when a cross-section result is selected", () => {
+        const { model } = renderSettings();
+        expect(model.activeSection()).toBe("appearance");
+        const input = screen.getByTestId("settings-search-input");
+        // "clipboard" only matches a Terminal-section setting (Copy on
+        // select) — not anything in the default Appearance section — so
+        // selecting it must switch sections, not just filter within one.
+        fireEvent.input(input, { target: { value: "clipboard" } });
+        const result = screen.getAllByTestId("settings-search-result")[0];
+        expect(result).toHaveTextContent("Copy on select");
+        fireEvent.click(result);
+        expect(model.activeSection()).toBe("terminal");
+        expect(model.query()).toBe("");
+        expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
+    });
+
+    it("shows an empty state for a query with no match", () => {
+        renderSettings();
+        const input = screen.getByTestId("settings-search-input");
+        fireEvent.input(input, { target: { value: "xyzzy_nonexistent_setting" } });
+        expect(screen.getByTestId("settings-search-empty")).toBeInTheDocument();
     });
 });

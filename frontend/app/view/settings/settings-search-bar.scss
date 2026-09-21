@@ -1,0 +1,118 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.settings-search-bar {
+    position: relative;
+    flex-shrink: 0;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-search-input-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--panel-bg-color);
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+}
+
+.settings-search-icon {
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.settings-search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--main-text-color);
+    font-size: 13px;
+    font-family: var(--base-font, inherit);
+
+    &::placeholder {
+        color: var(--secondary-text-color);
+    }
+}
+
+.settings-search-clear {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 2px;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.settings-search-results {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: calc(100% - 1px);
+    z-index: 5;
+    background: var(--panel-bg-color);
+    border: 1px solid var(--border-color);
+    max-height: 320px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.settings-search-result {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 7px 10px;
+    cursor: default;
+    user-select: none;
+
+    &.selected {
+        background: var(--highlight-bg-color);
+    }
+
+    &:hover:not(.selected) {
+        background: var(--hover-bg-color);
+    }
+}
+
+.settings-search-result-label {
+    font-size: 13px;
+    color: var(--main-text-color);
+}
+
+.settings-search-result-desc {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.settings-search-empty {
+    padding: var(--space-4) 10px;
+    text-align: center;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    font-style: italic;
+}
+
+// Brief highlight after a search result scrolls a row into view — see
+// SettingsView's handleSelectResult.
+.setting-row--search-highlight {
+    animation: settings-search-highlight-fade 1.5s ease-out;
+}
+
+@keyframes settings-search-highlight-fade {
+    0% {
+        background: var(--highlight-bg-color);
+    }
+    100% {
+        background: transparent;
+    }
+}
