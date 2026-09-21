@@ -668,6 +668,83 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The registry fallback — `working_dir_from_registry` — is the path for a
+    /// live agent with NO `db_agents` row, which is the common case (launching
+    /// an agent does not create one). Every other test here inserts a real row,
+    /// so `instance_get_by_slug` always succeeds and this path never runs;
+    /// a regression in slug derivation or `source_agents_base` handling would
+    /// ship undetected. reagentx P2 on PR #3480.
+    #[test]
+    fn sessions_resolve_via_the_registry_when_the_agent_has_no_db_row() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        // The registry stores working_dir RELATIVE to source_agents_base.
+        let base = tmp.path().join("agentsbase");
+        let resolved_dir = base.join("agenty-0629j").to_string_lossy().to_string();
+
+        let registry = crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 3,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-agenty".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: "def-agenty".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: Some(base.to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let dir = std::env::temp_dir().join(format!("amux-hist-reg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "registry-session");
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                "",
+                &resolved_dir,
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        // Deliberately EMPTY store: no db_agents row, so resolution has to come
+        // from the registry record above or not at all.
+        let store = Store::open_in_memory().unwrap();
+
+        // The display name is "AgentY"; callers pass the derived slug.
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(total, 1, "registry fallback must resolve the working directory");
+        assert_eq!(sessions[0].session_id, "registry-session");
+
+        // An unrelated agent must not inherit it by coincidence.
+        let (_, other_total, _) = service
+            .sessions_for_agent(&store, "someone-else", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(other_total, 0, "an unrelated slug must not match");
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     fn insert_test_agent_and_link(store: &Store, agent_id: &str, account_id: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
