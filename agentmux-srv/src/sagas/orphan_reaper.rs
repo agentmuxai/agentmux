@@ -28,6 +28,7 @@
 //   apart from "not loaded yet" from here.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::backend::blockcontroller;
@@ -39,6 +40,27 @@ const FIRST_SWEEP_DELAY: Duration = Duration::from_secs(120);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// How long a block must stay unplaced before it is reaped.
 pub(crate) const MIN_ORPHAN_AGE: Duration = Duration::from_secs(90);
+
+/// Diagnostic-only counters updated at the end of every `sweep()` — for the
+/// periodic `mem_attribution` log (`sysinfo.rs`) to correlate commit/handle
+/// growth against reaper activity. A `candidates`/`first_seen_len` that
+/// climbs sweep over sweep without a matching rise in `reaped_cumulative`
+/// would mean the reaper keeps finding (but not managing to close) the same
+/// growing set of blocks — worth seeing directly rather than inferred from
+/// commit numbers alone.
+static LAST_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
+static LAST_FIRST_SEEN_LEN: AtomicUsize = AtomicUsize::new(0);
+static REAPED_CUMULATIVE: AtomicU64 = AtomicU64::new(0);
+
+/// `(candidates found this sweep, first_seen entries carried across sweeps,
+/// cumulative blocks reaped since process start)`.
+pub fn last_sweep_stats() -> (usize, usize, u64) {
+    (
+        LAST_CANDIDATES.load(Ordering::Relaxed),
+        LAST_FIRST_SEEN_LEN.load(Ordering::Relaxed),
+        REAPED_CUMULATIVE.load(Ordering::Relaxed),
+    )
+}
 
 /// Start the periodic sweep. Called once from `main` after `AppState` exists.
 pub fn install(state: &AppState) {
@@ -66,6 +88,7 @@ pub(crate) async fn sweep(
     min_age: Duration,
 ) -> Vec<String> {
     let candidates = unplaced_agent_blocks(state).await;
+    let candidate_count = candidates.len();
     first_seen.retain(|id, _| candidates.contains(id));
     let mut due = Vec::new();
     for id in candidates {
@@ -85,6 +108,12 @@ pub(crate) async fn sweep(
             }
             Err(e) => tracing::warn!(block_id = %id, error = %e, "orphan_reaper: close failed; will retry next sweep"),
         }
+    }
+
+    LAST_CANDIDATES.store(candidate_count, Ordering::Relaxed);
+    LAST_FIRST_SEEN_LEN.store(first_seen.len(), Ordering::Relaxed);
+    if !reaped.is_empty() {
+        REAPED_CUMULATIVE.fetch_add(reaped.len() as u64, Ordering::Relaxed);
     }
     reaped
 }
@@ -273,6 +302,42 @@ mod tests {
         let s = state.srv_state.lock().await;
         assert!(!s.blocks.contains_key(&orphan), "orphan closed");
         assert!(s.blocks.contains_key(&placed), "placed block untouched");
+    }
+
+    /// `last_sweep_stats()`'s cumulative-reaped counter is process-wide
+    /// (shared with every other test in this binary, since it's a plain
+    /// static) and other tests in this module call `sweep` concurrently —
+    /// so this only asserts the one property that's safe under that:
+    /// monotonic, non-decreasing, and increases by at least what THIS
+    /// sweep reaped. It deliberately does not assert an exact value for
+    /// `candidates`/`first_seen`, which the last-writer-wins semantics of a
+    /// shared static make inherently racy to pin down under parallel tests.
+    #[tokio::test]
+    async fn last_sweep_stats_reaped_cumulative_is_monotonic_across_a_real_reap() {
+        let state = test_state();
+        let tab = seed_tab(&state).await;
+        // A placed block is required for the tab to have a real layout
+        // tree at all — an empty tree is indistinguishable from "not
+        // loaded yet" and the whole tab is skipped (see
+        // `a_tab_with_no_layout_tree_is_skipped`), so an unplaced block on
+        // its own would never even become a candidate.
+        let placed = seed_block(&state, &tab, "agent").await;
+        let orphan = seed_block(&state, &tab, "agent").await;
+        place(&state, &tab, &[&placed]).await;
+
+        let (_, _, before) = last_sweep_stats();
+        let t0 = Instant::now();
+        let mut seen = HashMap::new();
+        let age = Duration::from_secs(90);
+        sweep(&state, &mut seen, t0, age).await; // first sighting, not yet due
+        let reaped = sweep(&state, &mut seen, t0 + age, age).await;
+        assert_eq!(reaped, vec![orphan]);
+
+        let (_, _, after) = last_sweep_stats();
+        assert!(
+            after >= before + 1,
+            "cumulative reaped count must have grown by at least the one block this sweep reaped: before={before}, after={after}"
+        );
     }
 
     /// A block that gets placed between sweeps (skip_placement then a stack
