@@ -265,6 +265,7 @@ partial list.
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
 | [`SPEC_CODEX_JSONL_CONTRACT_2026_08_08`](SPEC_CODEX_JSONL_CONTRACT_2026_08_08.md) | Codex CLI JSONL Adapter Contract |
+| [`SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21`](SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md) | SPEC: harden the Tailwind color system against silent per-theme breakage |
 | [`SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02`](SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md) | Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently |
 | [`SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11`](SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md) | Composer: Shift+ArrowUp triggers history recall before the top line is fully selected |
 | [`SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16`](SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md) | SPEC: Composer Strip — Auth/Compact Side Stability Across the Row-Count Boundary |
