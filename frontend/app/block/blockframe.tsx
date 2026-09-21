@@ -40,6 +40,22 @@ import { TitleBar } from "./titlebar";
 
 const NumActiveConnColors = 8;
 
+/**
+ * The darkened/muted background a block's own assigned color resolves to —
+ * shared by BlockFrame_Header's headerStyle and PaneChrome's inactive
+ * pane-tab pills (PaneTabStrip.tsx), so a pill for a background tab reads as
+ * the same color its header would show if it were active. See
+ * headerBgForEffectiveColor's own doc comment for the darkened-vs-bright
+ * theme-polarity rule. Returns undefined when the block has no color of its
+ * own (neither frame:hue nor frame:activebordercolor set) — callers fall
+ * back to their own default background.
+ */
+export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
 /** Fixed header background for every non-agent pane with no other color
  * source — see headerStyle's fallback branch. Matches the L=16% used by
  * hueToHeaderBg for visual consistency, low saturation so it reads as
@@ -517,11 +533,9 @@ function BlockFrame_Header(
         // still true on a LIGHT theme (user request 2026-09-21): darkening
         // reads as broken/muddy against a light UI, so light themes keep
         // matching the border's full-strength color instead.
-        const hue = blockData()?.meta?.["frame:hue"];
-        const ac = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
-        const bg = headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+        const bg = computeBlockColorBg(blockData()?.meta, isLightTheme);
         if (bg) {
             style["background-color"] = bg;
             style.color = pickReadableTextColor(bg) ?? undefined;

@@ -40,6 +40,20 @@ const WIDTH_TRANSITION_MS = 160;
  *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1. */
 export const paneTabItemType = "PANE_TAB_ITEM";
 
+/** A tab's own pane color, split into the two treatments PaneChrome's
+ *  hue/identity-color system already gives a block (blockframe.tsx):
+ *  `underline` is the vivid border-strength color (shown only on the
+ *  active tab, replacing the generic `--accent-color`); `background` is
+ *  the same darkened/muted tone the block's OWN header would show
+ *  (shown only on inactive tabs, so a background tab still reads as
+ *  "this one's color" instead of going fully transparent). Either can be
+ *  absent on its own (a block with no color assigned yields both
+ *  undefined) — callers fall back to the strip's existing plain chrome. */
+export interface PaneTabColors {
+    underline?: string;
+    background?: string;
+}
+
 /**
  * Which side of a hovered pill's rect a dragged pill should land on, given
  * the pointer's clientX. Pure and exported so it's unit-testable in
@@ -90,6 +104,10 @@ export interface PaneTabStripProps<T> {
     /** Extra classes beyond active/attention (e.g. an editor preview tab's
      *  italic label, a fork's running/idle status accent). */
     getTabClass?: (tab: T) => Record<string, boolean>;
+    /** This tab's own pane color (PaneChrome only — every other consumer,
+     *  editor file tabs and the agent History strip, omits it and gets
+     *  zero behavior change). See `PaneTabColors`' own doc comment. */
+    getColor?: (tab: T) => PaneTabColors | undefined;
 
     onActivate: (id: string) => void;
     /** Omit entirely (not just disable) to render tabs with no close ×. */
@@ -358,6 +376,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             getTooltip={props.getTooltip}
                             getAttention={props.getAttention}
                             getTabClass={props.getTabClass}
+                            getColor={props.getColor}
                             onActivate={props.onActivate}
                             onClose={props.onClose}
                             onDoubleClick={props.onTabDoubleClick}
@@ -410,6 +429,7 @@ interface PaneTabStripItemProps<T> {
     getTooltip?: (tab: T) => string;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
+    getColor?: (tab: T) => PaneTabColors | undefined;
     onActivate: (id: string) => void;
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
@@ -503,6 +523,22 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         props.onClose?.(id());
     };
 
+    // Only meaningful for a background (inactive) pill — an active pill's
+    // background stays the plain `--block-bg-color` connecting it to the
+    // pane content below (unchanged design intent, PaneTabStrip.scss); its
+    // OWN color shows instead as the underline just below. Read via a CSS
+    // custom property (not a direct inline `background-color`) so the
+    // existing `:hover` rule's plain `background` declaration still wins on
+    // hover, same pattern as tab.tsx's `--tab-color`.
+    const colorStyle = (): JSX.CSSProperties => {
+        const c = props.getColor?.(props.tab);
+        if (!c) return {};
+        return {
+            ...(c.background ? { "--pane-tab-bg": c.background } : {}),
+            ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
+        } as JSX.CSSProperties;
+    };
+
     // Tooltip (Portal-based) rather than native `title` — the strip has
     // overflow:hidden, which would clip a CSS tooltip, and native `title`
     // is slow/inconsistent in CEF. The Tooltip's wrapper div carries the
@@ -524,6 +560,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     "pane-tab--drop-after": dropSide() === "after",
                     ...(props.getTabClass?.(props.tab) ?? {}),
                 }}
+                style={colorStyle()}
                 ref={(el) => { pillRef = el; }}
                 onMouseDown={onMouseDown}
                 onClick={onClick}

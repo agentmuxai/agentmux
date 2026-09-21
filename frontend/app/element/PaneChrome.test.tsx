@@ -56,6 +56,7 @@ vi.mock("@/app/block/blockutil", () => ({
 
 vi.mock("@/app/block/blockframe", () => ({
     computeFocusRingBorderColor: () => undefined,
+    computeBlockColorBg: () => undefined,
 }));
 
 const showContextMenu = vi.fn();
@@ -94,6 +95,9 @@ vi.mock("@/app/store/global", () => ({
     // pane-tab-picker.ts surfaces a failed add as a toast — unused on the
     // success paths here, but the module imports it at load time.
     pushNotification: vi.fn(),
+    // tabColors' theme-polarity read (PaneChrome.tsx) — no test here cares
+    // about theme, so a fixed "no theme set" accessor is enough.
+    getSettingsKeyAtom: () => () => undefined,
 }));
 
 let capturedOnSelect: ((blockDef: any) => void) | undefined;
