@@ -57,7 +57,14 @@
     right: 16px;
     top: calc(100% - 1px);
     z-index: 5;
-    background: var(--panel-bg-color);
+    // --panel-bg-color is deliberately translucent app-wide (the
+    // window-opacity feature) — wrong choice for a floating overlay that
+    // needs to read as solid over the settings rows behind it (reported:
+    // dropdown background see-through, hard to read). --modal-bg-color is
+    // the token this codebase already uses for exactly that (see
+    // _recent-sessions.scss's .agent-row-menu) — a real opaque color per
+    // theme, not an alpha-blended one.
+    background: var(--modal-bg-color);
     border: 1px solid var(--border-color);
     max-height: 320px;
     overflow-y: auto;
