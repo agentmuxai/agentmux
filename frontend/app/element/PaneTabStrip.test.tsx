@@ -177,6 +177,22 @@ describe("PaneTabStrip", () => {
         }
     });
 
+    it("applies pane-tab--colored (gates PaneTabStrip.scss's lighter-on-hover rule) only for a tab with its own background", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={(t: T) => (t.id === "a" ? { background: "#112233" } : undefined)}
+                onActivate={vi.fn()}
+            />
+        ));
+        const tabs = container.querySelectorAll<HTMLElement>(".pane-tab");
+        expect(tabs[0].classList.contains("pane-tab--colored")).toBe(true);
+        expect(tabs[1].classList.contains("pane-tab--colored")).toBe(false);
+    });
+
     it("does not render the + button when onAdd is omitted", () => {
         render(() => (
             <PaneTabStrip

@@ -212,6 +212,20 @@
         }
     }
 
+    // A background (inactive) tab with its own pane color hovers to a
+    // LIGHTER version of that same color, not the generic white tint above
+    // — `filter: brightness` on top of the resting --pane-tab-bg rather
+    // than a separate lightened color value, so it's guaranteed to track
+    // whatever hue that pill actually has. `:not(&--active)` matters:
+    // without it this would beat --active's own `background:
+    // var(--block-bg-color)` (equal-or-higher specificity) on a colored
+    // tab that's ALSO the active one, breaking the "active tab always
+    // shows the plain surface, connects to content below" rule below.
+    &--colored:hover:not(&--active) {
+        background: var(--pane-tab-bg);
+        filter: brightness(1.4);
+    }
+
     &--active {
         background: var(--block-bg-color);
         color: var(--main-text-color);

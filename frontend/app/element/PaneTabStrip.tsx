@@ -558,6 +558,10 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     "pane-tab--dragging": isDragging(),
                     "pane-tab--drop-before": dropSide() === "before",
                     "pane-tab--drop-after": dropSide() === "after",
+                    // Gates PaneTabStrip.scss's lighter-on-hover treatment —
+                    // only a tab with its own color gets it; every other
+                    // consumer's plain hover tint is untouched.
+                    "pane-tab--colored": !!props.getColor?.(props.tab)?.background,
                     ...(props.getTabClass?.(props.tab) ?? {}),
                 }}
                 style={colorStyle()}
