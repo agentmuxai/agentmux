@@ -6,6 +6,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import {
     atoms,
     getBlockComponentModel,
@@ -32,7 +33,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { hueToHeaderBg, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import { headerBgForEffectiveColor, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -56,6 +57,9 @@ const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";
  */
 function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     const currentHue = blockData?.meta?.["frame:hue"] as number | undefined;
+    // Only real agent panes have an identity color to persist into — see
+    // setHue's own doc comment for why "Default" never passes this.
+    const agentId = blockData?.meta?.agentId as string | undefined;
     const colorItems: ContextMenuItem[] = [
         {
             label: "Default",
@@ -67,7 +71,7 @@ function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
             label,
             swatchColor: hueToActiveBorder(hue),
             checked: currentHue === hue,
-            click: () => setHue(blockData.oid, hue),
+            click: () => setHue(blockData.oid, hue, agentId),
         })),
     ];
     // Leading separator (not trailing): the caller may append a view-settings
@@ -501,31 +505,34 @@ function BlockFrame_Header(
     });
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
+        // One rule for both color sources — see headerBgForEffectiveColor's
+        // own doc comment. An explicit "Pane Color" pick
+        // (frame:hue) wins over the agent's passive persisted identity
+        // color (SPEC_AGENT_COLOR_2026_08_08.md's `frame:activebordercolor`,
+        // already seeded per-agent for the border); either way the header
+        // gets the SAME darkened/muted treatment on a dark theme
+        // (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's deferred
+        // consolidation) instead of the decommissioned env-var-driven color
+        // system, or (pre-2026-09-21) the identity color at full strength —
+        // still true on a LIGHT theme (user request 2026-09-21): darkening
+        // reads as broken/muddy against a light UI, so light themes keep
+        // matching the border's full-strength color instead.
         const hue = blockData()?.meta?.["frame:hue"];
-        if (typeof hue === "number") {
-            // Explicit "Pane Color" picker choice wins over the agent's
-            // default identity color.
-            style["background-color"] = hueToHeaderBg(hue);
-            style.color = pickReadableTextColor(hueToHeaderBg(hue)) ?? undefined;
-        } else {
-            // No explicit hue: fall back to this agent's own persisted
-            // identity color (SPEC_AGENT_COLOR_2026_08_08.md's
-            // `frame:activebordercolor`, already seeded per-agent for the
-            // border) instead of the decommissioned env-var-driven color
-            // system — see SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md.
-            const ac = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
-            if (ac) {
-                style["background-color"] = ac;
-                style.color = pickReadableTextColor(ac) ?? undefined;
-            } else if (blockData()?.meta?.view !== "agent") {
-                // Every non-agent pane (terminal, browser, editor, preview,
-                // etc.) gets ONE fixed header color instead of the default
-                // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
-                // constant, not per-pane-type or randomized. User request
-                // 2026-09-20.
-                style["background-color"] = NON_AGENT_DEFAULT_HEADER_BG;
-                style.color = pickReadableTextColor(NON_AGENT_DEFAULT_HEADER_BG) ?? undefined;
-            }
+        const ac = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
+        const themeId = getSettingsKeyAtom("window:theme")();
+        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const bg = headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+        if (bg) {
+            style["background-color"] = bg;
+            style.color = pickReadableTextColor(bg) ?? undefined;
+        } else if (blockData()?.meta?.view !== "agent") {
+            // Every non-agent pane (terminal, browser, editor, preview,
+            // etc.) gets ONE fixed header color instead of the default
+            // near-black (--block-bg-solid-color: rgb(0,0,0)) — a single
+            // constant, not per-pane-type or randomized. User request
+            // 2026-09-20.
+            style["background-color"] = NON_AGENT_DEFAULT_HEADER_BG;
+            style.color = pickReadableTextColor(NON_AGENT_DEFAULT_HEADER_BG) ?? undefined;
         }
         return style;
     });
@@ -788,22 +795,25 @@ export function computeFocusRingBorderColor(
         if (tabActiveBorderColor) {
             return tabActiveBorderColor;
         }
-        // frame:activebordercolor is a passive default (per-agent identity
-        // color, seeded once at launch — see SPEC_AGENT_COLOR_2026_08_08.md);
         // frame:hue is an explicit user choice from the pane-header "Pane
-        // Color" picker (pane-color-menu.ts's setHue). The explicit choice
+        // Color" picker (pane-color-menu.ts's setHue); frame:activebordercolor
+        // is a passive default (per-agent identity color, seeded once at
+        // launch — see SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice
         // must win whenever it's present, or picking a hue on an agent pane
         // would have no visible effect (reagent P1, PR #2477) — hue is
-        // therefore checked LAST. Clearing the hue picker sets frame:hue to
-        // `null` (not delete), which correctly falls through here
+        // therefore checked FIRST (this used to check activebordercolor
+        // first and return before ever reaching hue, silently reintroducing
+        // the exact bug #2477 fixed — SPEC_AGENT_HEADER_COLOR_UNIFICATION_
+        // 2026_09_20.md's follow-up). Clearing the hue picker sets frame:hue
+        // to `null` (not delete), which correctly falls through here
         // (typeof null !== "number") back to the agent's default color
         // rather than to no color at all.
-        if (blockMeta?.["frame:activebordercolor"]) {
-            return blockMeta["frame:activebordercolor"] as string;
-        }
         const hue = blockMeta?.["frame:hue"];
         if (typeof hue === "number") {
             return hueToActiveBorder(hue);
+        }
+        if (blockMeta?.["frame:activebordercolor"]) {
+            return blockMeta["frame:activebordercolor"] as string;
         }
         return undefined;
     }
@@ -811,12 +821,15 @@ export function computeFocusRingBorderColor(
     if (tabBorderColor) {
         return tabBorderColor;
     }
-    if (blockMeta?.["frame:bordercolor"]) {
-        return blockMeta["frame:bordercolor"] as string;
-    }
+    // Same precedence fix as the focused branch above, for the unfocused
+    // (dimmed) border — frame:bordercolor is frame:activebordercolor's
+    // passive-default counterpart, not an explicit choice.
     const hue = blockMeta?.["frame:hue"];
     if (typeof hue === "number") {
         return hueToBorder(hue);
+    }
+    if (blockMeta?.["frame:bordercolor"]) {
+        return blockMeta["frame:bordercolor"] as string;
     }
     return undefined;
 }
@@ -905,22 +918,28 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
     const [frameEl, setFrameEl] = createSignal<HTMLDivElement | undefined>(undefined);
 
-    // Agent color for border — matches header color on agent-loaded terminals.
+    // Agent color for border — matches header color and
+    // computeFocusRingBorderColor's precedence on agent-loaded terminals.
     // Gated by isUsableFocusRingColor: the focused ring is the selection
     // affordance, so identity colors that would render it invisible
     // (near-black / transparent / unparseable) fall back to the accent ring.
     // The header keeps the same source (see BlockFrame_Header's headerStyle).
     //
-    // Reads the agent's own persisted `frame:activebordercolor`
-    // (SPEC_AGENT_COLOR_2026_08_08.md) rather than the decommissioned
-    // env-var color system — see
-    // SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md. A plain terminal
-    // pane that merely has AGENTMUX_AGENT_ID exported (never a real
-    // agent-launched block, so never seeded with frame:activebordercolor)
-    // no longer picks up a color from that alone — only real agents do.
+    // Explicit "Pane Color" pick (frame:hue) wins over the agent's passive
+    // persisted `frame:activebordercolor` (SPEC_AGENT_COLOR_2026_08_08.md) —
+    // same precedence as computeFocusRingBorderColor and headerStyle, so a
+    // hue picked on a term pane actually shows up here instead of only in
+    // the header (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's
+    // deferred consolidation). A plain terminal pane that merely has
+    // AGENTMUX_AGENT_ID exported (never a real agent-launched block, so
+    // never seeded with frame:activebordercolor) no longer picks up a color
+    // from that alone — only real agents (or an explicit hue pick) do.
     const blockAgentColor = createMemo(() => {
         if (!props.preview && blockData()?.meta?.view === "term") {
-            const color = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
+            const hue = blockData()?.meta?.["frame:hue"];
+            const color = typeof hue === "number"
+                ? hueToActiveBorder(hue)
+                : (blockData()?.meta?.["frame:activebordercolor"] as string | undefined);
             if (isUsableFocusRingColor(color)) {
                 return color;
             }
