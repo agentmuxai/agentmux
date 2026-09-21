@@ -635,8 +635,23 @@ async function initAppInner() {
     getApi().sendLog(`Init Bare - Host app mode: ${hostApp}`);
 
     if (!hostApp) {
-        // Non-host: wait for the host to emit agentmux-init with IDs
-        getApi().onAgentMuxInit(initMuxWrap);
+        // Non-host: wait for the host to emit agentmux-init with IDs.
+        //
+        // `onAgentMuxInit` invokes this fire-and-forget (`cef-api.ts` just
+        // calls `callback(payload)` — no await, no catch), so unlike the host
+        // paths there is no caller to receive a re-thrown fatal error. Without
+        // this handler it would surface only as an unhandled rejection, which
+        // the global forwarder logs but never turns into a startup card — and
+        // `initMuxWrap`'s `finally` would still reveal the body, reproducing
+        // the exact blank window this is meant to fix, just on a different
+        // path. reagentx P1 on PR #3486.
+        getApi().onAgentMuxInit((payload) => {
+            void initMuxWrap(payload).catch((error) => {
+                console.error("[onAgentMuxInit] Initialization failed:", error);
+                getApi().sendLog(`[onAgentMuxInit] ERROR: ${error}`);
+                showStartupError(String(error));
+            });
+        });
     }
     setKeyUtilPlatform(platform);
     loadFonts();
