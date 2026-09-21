@@ -17,30 +17,14 @@ use index::SessionIndex;
 /// named-agent registry, for agents that have no `db_agents` row — launching
 /// an agent does not create one, so a live agent commonly exists only here.
 ///
-/// Mirrors `native_memory_handlers::memory_dir_for_registry_record`'s
-/// reconstruction rule exactly: `source_agents_base` joined with the relative
-/// `working_dir`, with legacy (v1/v2) records lacking a base falling back to
-/// the current channel's agents dir.
+/// Both halves come from `backend::agent_registry_lookup`, which owns the only
+/// copy of the slug-matching and path-reconstruction rules. This function
+/// previously re-implemented both inline; reagentx P2 on PR #3480 flagged that
+/// duplication against `native_memory_handlers`' copy, since a later fix to
+/// either one would silently miss the other.
 fn working_dir_from_registry(agent_id: &str) -> Option<String> {
-    let registry_dir = crate::registry::resolve_shared_registry_dir()?;
-    let registry = crate::registry::Registry::open(registry_dir).ok()?;
-    let queried_slug = crate::backend::storage::store::derive_slug(agent_id);
-    let rec = registry
-        .list_active()
-        .ok()?
-        .into_iter()
-        .find(|r| crate::backend::storage::store::derive_slug(&r.data.instance_name) == queried_slug)?;
-    let base = rec
-        .data
-        .source_agents_base
-        .clone()
-        .or_else(|| std::env::var("AGENTMUX_AGENTS_DIR").ok())?;
-    Some(
-        std::path::Path::new(&base)
-            .join(&rec.data.working_dir)
-            .to_string_lossy()
-            .to_string(),
-    )
+    let rec = crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)?;
+    crate::backend::agent_registry_lookup::working_dir_from_record(&rec)
 }
 
 /// The history service exposed to the RPC layer.

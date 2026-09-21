@@ -215,14 +215,13 @@ pub(crate) fn resolve_agent_uuid(
 pub(crate) fn find_active_registry_record_by_slug(
     agent_id: &str,
 ) -> Option<crate::registry::NamedAgentRecord> {
-    let registry_dir = crate::registry::resolve_shared_registry_dir()?;
-    let registry = crate::registry::Registry::open(registry_dir).ok()?;
-    let queried_slug = crate::backend::storage::store::derive_slug(agent_id);
-    registry
-        .list_active()
-        .ok()?
-        .into_iter()
-        .find(|r| crate::backend::storage::store::derive_slug(&r.data.instance_name) == queried_slug)
+    // Thin alias. The implementation moved to
+    // `backend::agent_registry_lookup` so `backend::history` could share it
+    // rather than keep a second copy of the slug-matching rules (reagentx P2,
+    // PR #3480). Kept as a named function here because this module's callers
+    // and its own tests refer to it, and the name says what it is at those
+    // call sites.
+    crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)
 }
 
 /// Resolve a memory dir for `agent_id` from the global named-agent registry.
