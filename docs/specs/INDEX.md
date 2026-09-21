@@ -310,7 +310,7 @@ partial list.
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
-| [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access |
+| [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
