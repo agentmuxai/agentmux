@@ -1,7 +1,7 @@
 # SPEC: pane header informational text becomes a hover tooltip
 
 **Date:** 2026-09-21
-**Status:** implemented — see §5 for what shipped
+**Status:** implemented in #3488 — see §5 for what shipped
 **Author:** AgentO
 **Related:** `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`
 (the redesign whose side effect this fixes), `docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md`,
