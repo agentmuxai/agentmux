@@ -28,8 +28,10 @@ import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import clsx from "clsx";
+import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
@@ -337,6 +339,69 @@ function EndIcons(props: {
     );
 }
 
+/**
+ * Floating content anchored to an existing DOM ref, shown while `visible`.
+ * Unlike the shared `Tooltip` component (element/tooltip.tsx), which always
+ * wraps its children in a NEW div to own the hover listeners itself, this
+ * attaches to a ref the caller already owns — `BlockFrame_Header`'s own
+ * root div carries several existing handlers/ref assignments
+ * (onContextMenu, dragHandleRef, drag-region data attrs, …), and wrapping
+ * it in another div just to reuse `Tooltip` would restructure a heavily-
+ * tuned, comment-dense component for no real benefit. Reuses the exact
+ * same floating-ui middleware/positioning and CSS classes as `Tooltip`
+ * for visual consistency — see SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md.
+ */
+function AnchoredTooltip(props: { anchor: () => HTMLElement | null; visible: boolean; content: JSX.Element }): JSX.Element {
+    const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
+    let floatingEl: HTMLElement | undefined;
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const updatePosition = async () => {
+        const anchorEl = props.anchor();
+        if (!anchorEl || !floatingEl) return;
+        const pos = await computePosition(anchorEl, floatingEl, {
+            placement: "bottom",
+            middleware: [offset(6), flip(), shift({ padding: 12 })],
+        });
+        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+    };
+
+    createEffect(() => {
+        if (!props.visible) {
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = null;
+            return;
+        }
+        const anchorEl = props.anchor();
+        if (!anchorEl || !floatingEl) return;
+        // Deferred a frame so the Portal below has time to insert
+        // floatingEl into the DOM before floating-ui traverses ancestors —
+        // same reasoning as Tooltip's own registerFloating.
+        requestAnimationFrame(() => {
+            if (!props.visible) return;
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = autoUpdate(anchorEl, floatingEl!, updatePosition);
+        });
+    });
+
+    onCleanup(() => cleanupAutoUpdate?.());
+
+    return (
+        <Show when={props.visible}>
+            <Portal>
+                <div
+                    ref={(el) => { floatingEl = el; }}
+                    style={floatingStyle()}
+                    class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
+                    data-pane-overlay
+                >
+                    {props.content}
+                </div>
+            </Portal>
+        </Show>
+    );
+}
+
 function BlockFrame_Header(
     props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error; blockId: Accessor<string> }
 ): JSX.Element {
@@ -363,6 +428,16 @@ function BlockFrame_Header(
     const preIconButton = createMemo(() => util.useAtomValueSafe(props.viewModel?.preIconButton));
     const manageConnection = createMemo(() => util.useAtomValueSafe(props.viewModel?.manageConnection));
     const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
+
+    // SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md: the header's own
+    // informational text (a terminal's command/exit-status/OSC-title, or
+    // any future viewText/frame:text user) used to render inline, full
+    // width. Now that PaneHeaderTabStrip's pill strip fills most of the
+    // row by default, that text gets squeezed into a thin sliver against
+    // the right edge — replaced with a tooltip, shown while hovering the
+    // header, instead.
+    const [headerHovering, setHeaderHovering] = createSignal(false);
+    let headerRef: HTMLDivElement | undefined;
 
     // Track previous magnified state for one-time activity report
     let prevMagnifiedState = props.nodeModel.isMagnified();
@@ -493,16 +568,14 @@ function BlockFrame_Header(
         }
         return elems;
     });
-    // True when the textelems wrapper has visible content (summary text or an
-    // error indicator). Used to conditionally apply max-width to the name
-    // region — see block.scss .block-frame-default-header--has-summary.
-    const hasSummary = createMemo(() => {
-        if (props.error != null) return true;
-        const htu = headerTextUnion();
-        if (typeof htu === "string") return !util.isBlank(htu);
-        if (Array.isArray(htu)) return htu.length > 0;
-        return false;
-    });
+    // True when the textelems wrapper has visible INLINE content — just the
+    // error indicator now that the summary text itself only ever renders
+    // inside AnchoredTooltip (SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md).
+    // Used to conditionally apply max-width to the name region — see
+    // block.scss .block-frame-default-header--has-summary. Squeezing the
+    // name region for text that no longer takes any inline row space would
+    // shrink it for no reason.
+    const hasSummary = createMemo(() => props.error != null);
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         // One rule for both color sources — see headerBgForEffectiveColor's
@@ -547,9 +620,14 @@ function BlockFrame_Header(
             }}
             data-role="block-header"
             data-testid="block-header"
-            ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}
+            ref={(el) => {
+                if (dragHandleRef) dragHandleRef.current = el;
+                headerRef = el;
+            }}
             onContextMenu={onContextMenu}
             onDblClick={() => props.nodeModel.toggleMagnify()}
+            onMouseEnter={() => setHeaderHovering(true)}
+            onMouseLeave={() => setHeaderHovering(false)}
             style={headerStyle()}
         >
             {preIconButtonElem()}
@@ -580,7 +658,6 @@ function BlockFrame_Header(
                 />
             </Show>
             <div class="block-frame-textelems-wrapper">
-                {headerTextElems()}
                 <Show when={props.error != null}>
                     <div
                         class="iconbutton disabled"
@@ -593,6 +670,11 @@ function BlockFrame_Header(
                     </div>
                 </Show>
             </div>
+            <AnchoredTooltip
+                anchor={() => headerRef ?? null}
+                visible={headerHovering() && headerTextElems().length > 0}
+                content={<>{headerTextElems()}</>}
+            />
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons
                     viewModel={props.viewModel}
