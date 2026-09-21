@@ -457,6 +457,20 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         }
     }
 
+    // Subsystem counters alongside the memory numbers, same log line/target
+    // so `muxlog srv grep mem_attribution` correlates them for free — added
+    // while investigating a newly-reported leak (2026-09-20) that turned out
+    // not to match either previously-fixed Section-handle mechanism
+    // (#2666/#2722, both already in this build): a block/PID count that
+    // climbs without bound, or reaper candidates that never resolve to
+    // `reaped`, point at these two newer subsystems specifically rather than
+    // requiring a repeat of the manual handle64 archaeology those fixes needed.
+    let (tracker_blocks, tracker_pids) = crate::backend::process_tracker::registry::global()
+        .map(|r| r.stats())
+        .unwrap_or((0, 0));
+    let (reaper_candidates, reaper_first_seen, reaper_reaped_cumulative) =
+        crate::sagas::orphan_reaper::last_sweep_stats();
+
     tracing::info!(
         target: "mem_attribution",
         commit_used_gb = format!("{:.2}", commit_used_gb),
@@ -468,6 +482,11 @@ fn log_memory_attribution(sys: &mut sysinfo::System, commit_used_gb: f64, commit
         unattributed_gb = format!("{:.2}", unattributed_gb),
         handles_top = %handles_top_str,
         process_count = samples.len(),
+        tracker_blocks = tracker_blocks,
+        tracker_pids = tracker_pids,
+        reaper_candidates = reaper_candidates,
+        reaper_first_seen = reaper_first_seen,
+        reaper_reaped_cumulative = reaper_reaped_cumulative,
         "commit attribution"
     );
 }

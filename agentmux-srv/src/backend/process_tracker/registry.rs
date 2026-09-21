@@ -126,6 +126,18 @@ impl AgentProcessRegistry {
         }
     }
 
+    /// `(tracked block count, summed last-known PID count across all
+    /// blocks)` — diagnostic-only, for the periodic `mem_attribution` log
+    /// (`sysinfo.rs`) to correlate against commit/handle growth. A block
+    /// count that grows without bound (no matching `remove` on pane close)
+    /// or a PID count far exceeding what's actually open would both be
+    /// visible here well before the commit-side symptom is undeniable.
+    pub fn stats(&self) -> (usize, usize) {
+        let map = self.inner.lock();
+        let pids: usize = map.values().map(|e| e.last_pids.len()).sum();
+        (map.len(), pids)
+    }
+
     /// Processes the agent started through its tools (see
     /// [`agent_started`]) — for the RPC endpoint, Swarm and the pane-close
     /// confirmation. Excludes the CLI itself, conhost and MCP servers;
@@ -244,6 +256,31 @@ mod tests {
         // silently skip tracker registration" behavior the module doc for
         // `AgentProcessRegistry` promises. Must not panic.
         track_spawned("test-block-track-spawned-no-global", 999_999);
+    }
+
+    #[test]
+    fn stats_reflects_tracked_block_count_and_drops_on_remove() {
+        // A fresh, non-global registry (not `global()`) — this counts
+        // entries this test itself created, not whatever other tests
+        // running in parallel have registered against the process-wide
+        // `GLOBAL`. `stats()` backs the `mem_attribution` diagnostic log
+        // (sysinfo.rs) added while investigating a 2026-09-20 leak report.
+        let registry = AgentProcessRegistry::new(None);
+        assert_eq!(registry.stats(), (0, 0), "empty registry");
+
+        registry.ensure_tracker("block-a");
+        assert_eq!(registry.stats(), (1, 0), "one block, no poll yet so no known pids");
+
+        registry.ensure_tracker("block-b");
+        assert_eq!(registry.stats().0, 2, "two distinct blocks tracked");
+
+        // Re-registering the same block is idempotent (per ensure_tracker's
+        // own doc comment) — must not double-count.
+        registry.ensure_tracker("block-a");
+        assert_eq!(registry.stats().0, 2, "re-registering an existing block does not grow the count");
+
+        registry.remove("block-a");
+        assert_eq!(registry.stats().0, 1, "removed block no longer counted");
     }
 
     // This test used to be `#[ignore]`d as "environment-dependent", blaming
