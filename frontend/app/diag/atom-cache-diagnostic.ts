@@ -42,10 +42,22 @@ export function collectAtomCacheDiagnostics() {
     };
 }
 
-/** Exported for tests — the log line, split from the timer that drives it. */
+/**
+ * Exported for tests — the log line, split from the timer that drives it.
+ *
+ * Deliberately `console.log`, not `console.debug`: `log-pipe.ts` forwards
+ * `debug` to the Rust host as `tracing::debug!`, and `logging.rs`'s default
+ * `EnvFilter` is `"info"` — a `debug`-level line is silently dropped from
+ * the host log unless `RUST_LOG`/equivalent is raised, with no error
+ * anywhere in the chain (confirmed live: the very first shipped version of
+ * this file used `console.debug` and never once appeared in a real host log
+ * despite firing correctly every 30s, verified via a direct CDP
+ * `Runtime.evaluate` check against the running window). `console.log` maps
+ * to `tracing::info!` (`backend.rs`'s `fe_log_structured`), matching
+ * `mem_attribution`'s own level choice on the Rust side.
+ */
 export function logAtomCacheDiagnostics() {
-    // eslint-disable-next-line no-console
-    console.debug("[atom-cache-diag]", JSON.stringify(collectAtomCacheDiagnostics()));
+    console.log("[atom-cache-diag]", JSON.stringify(collectAtomCacheDiagnostics()));
 }
 
 setInterval(logAtomCacheDiagnostics, REPORT_INTERVAL_MS);
