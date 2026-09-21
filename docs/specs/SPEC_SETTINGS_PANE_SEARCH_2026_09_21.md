@@ -1,7 +1,7 @@
 # SPEC: Reusable fuzzy/synonym search utility, first shipped in the Settings pane
 
 **Date:** 2026-09-21
-**Status:** proposed
+**Status:** implemented — PR #3479.
 **Related:** `docs/specs/SPEC_SETTINGS_PANE_2026_06_25.md`, `docs/specs/SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md`,
 `docs/specs/SPEC_SETTINGS_AUDIT_GOOD_PICKINGS_2026_08_19.md` (Settings pane history),
 `docs/specs/command-palette.md` (existing search-UX precedent, migrated onto this utility — §4),
