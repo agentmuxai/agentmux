@@ -1,10 +1,10 @@
 # Bug Report — Pane-Tab Pill Colors Collapse to the Selected Tab's Color
 
 **Date:** 2026-09-21
-**Status:** analysis — one real, confirmed contributing bug found and fixed
-(PR #3484); the user's exact live repro could not be reproduced afterward,
-and a second live repro attempt on the unfixed code ALSO failed to
-reproduce it — see §4. Root cause of the live symptom is not fully closed.
+**Status:** implemented in #3484 — see §6 for the confirmed root cause and
+fix. §2 and §4 are kept as-written below (including their now-superseded
+"could not reproduce" conclusion) since the process that got from "can't
+reproduce" to "found it live" is itself worth keeping.
 **Area:** `PaneChrome.tsx` / `PaneTabStrip.tsx` pane-tab pill coloring
 (the feature added in PR #3484, itself a follow-up to #3476's header/border
 pane-color consolidation)
@@ -122,3 +122,49 @@ that will show directly whether the underlying **data** changed (a real
 write-path bug) or only the **rendering** picked the wrong data for a
 given pill (a read-path bug), which this analysis wasn't able to
 distinguish from the outside.
+
+## 6. Root cause found — it's §5's read/data question answered: neither
+
+The user reported seeing the bug live a second time, in the SAME running
+dev instance this analysis's §4 had just tested against. Rather than
+speculate further, connected to that instance directly via its CDP debug
+port (`http://localhost:9223`, the dev build's
+`--remote-debugging-port`), read each pill's **actual computed**
+`background-color` (not just the `--pane-tab-bg` custom property §4
+checked) via `getComputedStyle`, and captured a real screenshot
+(`Page.captureScreenshot`) of the live window.
+
+The computed backgrounds were, in fact, all distinct:
+`Swarm=rgb(29,52,52)`, `Sysinfo=rgb(52,41,29)`, `Terminal 1=rgb(52,29,52)`
+— confirming §5's "data vs. rendering" question with a third answer
+neither option anticipated: **the data and the rendering were both
+already correct.** The screenshot showed why it still looked broken:
+`hueToHeaderBg`'s `hsl(hue, 28%, 16%)` — reused as-is for pane-tab pill
+backgrounds — is tuned for a large, full-width header bar, where even a
+subtle tint reads clearly. On a ~20px pane-tab pill, three different hues
+at 16% lightness are close enough to black, and close enough to *each
+other*, that they're not reliably distinguishable at a glance — especially
+next to an uncolored pill's fully-transparent background and an *active*
+colored pill's plain `--block-bg-color` (itself a similar near-black),
+both of which paint as "no visible tint" for a different reason. Selecting
+a different tab changes *which* pill shows which of these three
+visually-similar-but-technically-different "looks no different from
+black" treatments — reading, at a glance, exactly like "the other tabs'
+colors changed to match."
+
+**Fix**: added `hueToPaneTabBg` (`hsl(hue, 42%, 24%)` — higher saturation
+and lightness than the header's 28%/16%) and a parallel
+`paneTabBgForEffectiveColor`/`computeBlockTabPillBg`, sharing
+`headerBgForEffectiveColor`'s exact light/dark-theme branching logic (now
+parameterized by which dark-theme deriver to use) rather than duplicating
+it. `PaneChrome.tsx`'s `tabColors` memo now calls the pill-specific
+variant; the header itself (`blockframe.tsx`'s `headerStyle`) is
+untouched, still using the original `hueToHeaderBg` treatment the user had
+already confirmed looks right. Re-verified live via the same CDP
+screenshot technique: `Swarm/Sysinfo/Terminal 1` now render as clearly
+distinct teal/brown/purple, not uniform near-black.
+
+Only the dark-theme treatment was addressed here — light theme was
+already flagged as needing further refinement in a separate pass, and the
+light-theme branch (`hueToActiveBorder`/raw hex, full vivid strength) is
+untouched by this fix.

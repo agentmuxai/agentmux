@@ -19,7 +19,7 @@
  */
 
 import { createMemo, createSignal, type JSX } from "solid-js";
-import { computeBlockActiveBorderColor, computeBlockColorBg, computeFocusRingBorderColor } from "@/app/block/blockframe";
+import { computeBlockActiveBorderColor, computeBlockTabPillBg, computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -133,7 +133,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         for (const blockId of tabIds()) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
             const underline = computeBlockActiveBorderColor(meta);
-            const background = computeBlockColorBg(meta, isLightTheme);
+            const background = computeBlockTabPillBg(meta, isLightTheme);
             if (underline || background) colors.set(blockId, { underline, background });
         }
         return colors;

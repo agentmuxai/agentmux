@@ -33,7 +33,14 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { headerBgForEffectiveColor, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import {
+    headerBgForEffectiveColor,
+    hueToActiveBorder,
+    hueToBorder,
+    paneTabBgForEffectiveColor,
+    PANE_HUE_OPTIONS,
+    setHue,
+} from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -54,6 +61,18 @@ export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLigh
     const hue = blockMeta?.["frame:hue"];
     const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
     return headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
+/** Same as computeBlockColorBg, for a pane-tab pill's own background
+ * instead of the pane header's — see hueToPaneTabBg's own doc comment for
+ * why a small pill needs a more visible dark-theme treatment than the
+ * header's identical-looking-but-actually-distinct 16%-lightness colors,
+ * which live-reproduced as pill colors appearing to collapse to one shared
+ * value (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
+export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return paneTabBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
 }
 
 /** Fixed header background for every non-agent pane with no other color

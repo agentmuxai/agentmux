@@ -63,7 +63,7 @@ vi.mock("@/app/block/blockframe", () => ({
     // one tab-wide value).
     computeBlockActiveBorderColor: (meta: any) =>
         meta?.["frame:hue"] != null ? `underline-${meta["frame:hue"]}` : undefined,
-    computeBlockColorBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
+    computeBlockTabPillBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
 }));
 
 const showContextMenu = vi.fn();
