@@ -17,17 +17,20 @@
  * three copies) so it can be handed straight to `<PeekOverlay rowEl={rowEl}>`
  * without each caller re-deriving its own accessor wrapper.
  *
- * Both handlers no-op while the mouse's primary button is held (see
- * `pointer-drag-state.ts`): a header row's mouseenter/mouseleave still
- * fires normally while the user is dragging out a text selection (native
- * selection-drag does not suppress hover events), and letting either one
- * through mid-drag mounts/unmounts the Portal-rendered `PeekOverlay` under
- * the cursor, which was intermittently breaking the browser's native
- * selection-extend hit-testing — see
+ * Entry (mount) no-ops while the mouse's primary button is held (see
+ * `pointer-drag-state.ts`): a header row's mouseenter still fires normally
+ * while the user is dragging out a text selection (native selection-drag
+ * does not suppress hover events), and mounting the Portal-rendered
+ * `PeekOverlay` under the cursor mid-drag was intermittently breaking the
+ * browser's native selection-extend hit-testing — see
  * docs/plans/PLAN_AGENT_PANE_TEXT_SELECTION_DRAG_FLICKER_2026_09_20.md.
- * Freezing whatever peek state was already showing (rather than only
- * gating entry) also matches the desired UX: no peek chrome popping in and
- * out while the user is mid-drag-select.
+ * Leave (unmount) is deliberately NOT gated: removing an overlay from
+ * under the cursor doesn't reintroduce that hit-testing problem, and
+ * freezing it too — reagentx P1 on PR #3470 — left a peek stuck open
+ * indefinitely whenever its row's mouseleave fired mid-drag but the mouse
+ * button was later released somewhere else, since no further
+ * mouseenter/mouseleave would ever fire for a row the cursor had already
+ * left.
  */
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
@@ -50,10 +53,16 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
     const handlePeekEnter = () => {
         if (isPrimaryButtonDown()) return;
         clearTimeout(timer);
-        timer = setTimeout(() => setIsPeeking(true), delayMs);
+        // Re-checked when the delay elapses, not just at call time: the
+        // primary button can go down during the delay window (enter fired
+        // just before mousedown), and without this check the timeout would
+        // still mount the overlay mid-drag.
+        timer = setTimeout(() => {
+            if (isPrimaryButtonDown()) return;
+            setIsPeeking(true);
+        }, delayMs);
     };
     const handlePeekLeave = () => {
-        if (isPrimaryButtonDown()) return;
         clearTimeout(timer);
         setIsPeeking(false);
     };

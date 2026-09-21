@@ -64,10 +64,13 @@ describe("Tooltip", () => {
         expect(screen.queryByText("tip content")).toBeNull();
     });
 
-    it("freezes an already-open tooltip through a leave while the primary button is held", async () => {
+    it("still closes an already-open tooltip on leave even while the primary button is held (reagentx P1 on PR #3470 — a frozen leave got stuck open forever)", async () => {
+        // delayMs=0 so the close path's own hideTimeout (unrelated to this
+        // fix — it's the existing fade-out grace period) resolves in the
+        // same tick as the gate check being asserted here.
         const spy = vi.spyOn(pointerDragState, "isPrimaryButtonDown").mockReturnValue(false);
         render(() => (
-            <Tooltip content={<span>tip content</span>}>
+            <Tooltip content={<span>tip content</span>} delayMs={0}>
                 <span>anchor</span>
             </Tooltip>
         ));
@@ -78,7 +81,7 @@ describe("Tooltip", () => {
         spy.mockReturnValue(true);
         fireEvent.mouseLeave(screen.getByText("anchor").parentElement!);
         await tick();
-        expect(screen.getByText("tip content")).toBeInTheDocument();
+        expect(screen.queryByText("tip content")).toBeNull();
     });
 
     it("resumes normal hover behavior once the button is released", async () => {
