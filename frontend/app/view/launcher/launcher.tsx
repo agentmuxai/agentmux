@@ -291,7 +291,7 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
             <Show when={model.activeParent()}>
                 {(parent) => (
                     <div
-                        class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-white"
+                        class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-foreground"
                         onClick={() => model.goBack()}
                     >
                         <i class="fa-sharp fa-solid fa-chevron-left" />
@@ -314,8 +314,8 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
                                 "flex flex-col items-center justify-center rounded-md p-2 text-center",
                                 "transition-colors duration-150",
                                 index() === selectedIndex()
-                                    ? "bg-white/20 text-white"
-                                    : "bg-white/5 hover:bg-white/10 text-secondary hover:text-white"
+                                    ? "bg-highlightbg text-foreground"
+                                    : "bg-hover hover:bg-highlightbg text-secondary hover:text-foreground"
                             )}
                             style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
                         >
