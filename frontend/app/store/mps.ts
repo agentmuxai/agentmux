@@ -34,19 +34,51 @@ function mpsReconnectHandler() {
     }
 }
 
+/**
+ * Subscriber count for a single event type past which we warn once. A pane
+ * normally holds one subscription per event type, so hundreds of subscribers
+ * for one type means a caller is subscribing without unsubscribing.
+ *
+ * This exists because that leak is otherwise invisible until it takes the app
+ * down: issue #3482 accumulated ~43,000 subscribers for `editor:file_changed`,
+ * all with the identical scope, and the only symptom until the crash was a
+ * resubscribe payload quietly growing by 45 bytes every event.
+ */
+const SUBSCRIBER_LEAK_WARN_THRESHOLD = 200;
+const leakWarnedEventTypes = new Set<string>();
+
+/**
+ * Build the resubscribe command for `eventType`.
+ *
+ * **Scopes are deduplicated.** `scopes` is a subscription filter, so repeating
+ * the same scope tells the backend nothing it did not already know — but the
+ * array is rebuilt from every live subscriber and re-sent on every subscribe,
+ * so a caller that subscribes repeatedly to one scope makes each message
+ * bigger than the last. In #3482 that grew to a 2.9 MB message re-sent ~13
+ * times a second, which was enough to take the renderer down.
+ *
+ * Dedup bounds the payload by the number of DISTINCT scopes, which is what it
+ * should always have been, and holds even when a caller over-subscribes.
+ */
 function makeMuxReSubCommand(eventType: string): RpcMessage {
     let subjects = muxEventSubjects.get(eventType);
     if (subjects == null) {
         return { command: "eventunsub", data: eventType };
     }
     let subreq: SubscriptionRequest = { event: eventType, scopes: [], allscopes: false };
+    const seen = new Set<string>();
     for (const scont of subjects) {
         if (isBlank(scont.scope)) {
             subreq.allscopes = true;
             subreq.scopes = [];
             break;
         }
-        subreq.scopes.push(scont.scope);
+        const scope = scont.scope as string;
+        if (seen.has(scope)) {
+            continue;
+        }
+        seen.add(scope);
+        subreq.scopes.push(scope);
     }
     return { command: "eventsub", data: subreq };
 }
@@ -75,6 +107,22 @@ function muxEventSubscribe(...subscriptions: MuxEventSubscription[]): () => void
         subjects.push(subcont);
         unsubs.push({ id, eventType: subscription.eventType });
         eventTypeSet.add(subscription.eventType);
+        // Name the leaking caller at the point it leaks, rather than leaving a
+        // slow crash as the only evidence (#3482). Dedup above keeps the wire
+        // payload bounded, but the subscriber list itself still grows, and
+        // every entry pins a live handler closure.
+        if (
+            subjects.length >= SUBSCRIBER_LEAK_WARN_THRESHOLD &&
+            !leakWarnedEventTypes.has(subscription.eventType)
+        ) {
+            leakWarnedEventTypes.add(subscription.eventType);
+            console.warn(
+                `[mps] ${subjects.length} live subscribers for "${subscription.eventType}" ` +
+                    `(scope=${subscription.scope ?? "<all>"}) — this is almost certainly a ` +
+                    `subscribe-without-unsubscribe leak. See issue #3482.`,
+                new Error("subscriber leak stack").stack,
+            );
+        }
     }
     for (const eventType of eventTypeSet) {
         updateMuxEventSub(eventType);
