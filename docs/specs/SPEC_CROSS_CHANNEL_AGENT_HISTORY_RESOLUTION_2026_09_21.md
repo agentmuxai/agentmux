@@ -1,12 +1,12 @@
 # SPEC: cross-channel agent history resolution
 
 **Date:** 2026-09-21
-**Status:** §3.1 + §3.5 implemented; §3.2/§3.3 (link history, shared-store
-persistence) still proposed. Root cause originally confirmed by static code
-trace across `agentmux` @ `4ab7a9ea9`; **§2.5 records what live verification
-subsequently proved this spec's first revision got wrong** — the identity-link
-model it assumed cannot work at all for the common case, and the shipped fix
-resolves by working directory instead. Read §2.5 before §3.
+**Status:** implemented in part — §3.1 shipped; §3.2/§3.3 (link history,
+shared-store persistence) remain proposed. Root cause originally confirmed by
+static code trace across `agentmux` @ `4ab7a9ea9`; **§2.5 records what live
+verification subsequently proved this spec's first revision got wrong** — the
+identity-link model it assumed cannot work at all for the common case, and the
+shipped fix resolves by working directory instead. Read §2.5 before §3.
 **Trigger:** Repo owner, after repeatedly being unable to have an agent find
 its own past conversations across an AgentMux restart onto a new version.
 Named as the top priority: "we often need to restart agentmux in a new
@@ -18,7 +18,7 @@ not touch), `SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
 `retro-provider-account-switch-loses-agent-history-2026-09-17.md` (proposed,
 unshipped — root-caused half of this problem already; this spec completes
 the diagnosis and turns it into a design).
-**Related:** `SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09-20.md` (the
+**Related:** `SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md` (the
 sibling per-instance-storage problem for Global Memory — same architectural
 shape, different subsystem; that spec's multi-*machine* cloud-sync scope is
 deliberately NOT proposed here, see §3.3), `SPEC_MUXSPECT_CROSS_TIER_

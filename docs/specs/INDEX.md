@@ -277,6 +277,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02`](SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md) | SPEC — Promote Mode to the composer strip; retire the nested "Controls" panel under Log |
 | [`SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30`](SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) | SPEC — Composer strip: two-line wrap when the pane narrows |
 | [`SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10`](SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10.md) | SPEC: Copy Button Silently Failing (Three Stacked Bugs) |
+| [`SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21`](SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) | SPEC: cross-channel agent history resolution |
 | [`SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07`](SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md) | Spec: Ctrl+Shift+Scroll zooms every pane in the window at once |
 | [`SPEC_DEV_ENV_ISOLATION`](SPEC_DEV_ENV_ISOLATION.md) | Dev-Build Environment Isolation |
 | [`SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19`](SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md) | SPEC: Fix misleading guidance when a second `task dev` instance collides |
