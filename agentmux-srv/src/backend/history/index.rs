@@ -226,10 +226,41 @@ fn default_isolated_roots() -> Vec<PathBuf> {
     }
 }
 
+/// Normalize a working directory for use as an index key.
+///
+/// Separators are unified and trailing ones dropped so the same directory
+/// written `C:\x\y`, `C:/x/y` and `C:/x/y/` all collide on one key. Case is
+/// folded on Windows only: its filesystem is case-insensitive, so `C:\Users`
+/// and `c:\users` are genuinely the same directory — but on Linux they are
+/// two different directories, and folding case there would merge the history
+/// of two unrelated agents.
+pub(crate) fn normalize_working_dir(dir: &str) -> String {
+    let unified = dir.replace('\\', "/");
+    let trimmed = unified.trim_end_matches('/');
+    if cfg!(windows) {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// In-memory index of discovered sessions.
 pub struct SessionIndex {
     /// session_id -> SessionMeta
     sessions: Mutex<HashMap<String, SessionMeta>>,
+    /// normalized working directory -> session_ids.
+    ///
+    /// The identity index below can only find sessions for an agent that has
+    /// a `db_agent_identity_links` row binding it to the identity bundle its
+    /// transcripts were written under. An agent running on ambient
+    /// credentials has no such row (and its registry record's `identity_id`
+    /// reads `"default"`), so for that — the common — case the identity index
+    /// resolves to nothing at all while the transcripts sit on disk perfectly
+    /// intact. The working directory is recorded both in the transcript
+    /// itself (`cwd`) and on the agent's own row, which makes it the join key
+    /// that actually holds for those agents. See
+    /// `docs/specs/SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md`.
+    by_working_dir: Mutex<HashMap<String, Vec<String>>>,
     /// identity_id -> session_ids (only non-empty `SessionMeta::identity_id`
     /// values are indexed here). Maintained alongside `sessions` so "this
     /// identity's sessions" is an O(k) HashMap lookup + small per-identity
@@ -256,6 +287,7 @@ impl SessionIndex {
     ) -> Self {
         SessionIndex {
             sessions: Mutex::new(HashMap::new()),
+            by_working_dir: Mutex::new(HashMap::new()),
             by_identity: Mutex::new(HashMap::new()),
             adapters,
             isolated_roots,
@@ -277,6 +309,7 @@ impl SessionIndex {
 
         let mut new_sessions: HashMap<String, SessionMeta> = HashMap::new();
         let mut new_by_identity: HashMap<String, Vec<String>> = HashMap::new();
+        let mut new_by_working_dir: HashMap<String, Vec<String>> = HashMap::new();
 
         for adapter in &self.adapters {
             let files = match adapter.discover_files() {
@@ -299,6 +332,12 @@ impl SessionIndex {
                         if !meta.identity_id.is_empty() {
                             new_by_identity
                                 .entry(meta.identity_id.clone())
+                                .or_default()
+                                .push(meta.session_id.clone());
+                        }
+                        if !meta.working_directory.is_empty() {
+                            new_by_working_dir
+                                .entry(normalize_working_dir(&meta.working_directory))
                                 .or_default()
                                 .push(meta.session_id.clone());
                         }
@@ -328,8 +367,28 @@ impl SessionIndex {
 
         *sessions = new_sessions;
         *self.by_identity.lock().unwrap() = new_by_identity;
+        *self.by_working_dir.lock().unwrap() = new_by_working_dir;
 
         (discovered, updated, new_count)
+    }
+
+    /// Every session recorded as having run in `working_directory`.
+    ///
+    /// Matching is on the normalized full path ([`normalize_working_dir`]),
+    /// never a substring: `list`'s `project` filter uses `contains`, which
+    /// would make an agent in `/agents/foo` also claim every session from
+    /// `/agents/foo-2`.
+    pub fn list_for_working_directory(&self, working_directory: &str) -> Vec<SessionMeta> {
+        if working_directory.is_empty() {
+            return Vec::new();
+        }
+        let key = normalize_working_dir(working_directory);
+        let by_working_dir = self.by_working_dir.lock().unwrap();
+        let Some(session_ids) = by_working_dir.get(&key) else {
+            return Vec::new();
+        };
+        let sessions = self.sessions.lock().unwrap();
+        session_ids.iter().filter_map(|id| sessions.get(id)).cloned().collect()
     }
 
     /// This identity's sessions, sorted/paginated the same way `list` is —
