@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.56.10 — 2026-09-21
+
+- feat(panes): drag a Pane Tab onto another pane's header to move it into that pane
+- fix(pane-color): decommission env-var color system, unify header with agent identity color
+- feat(memory): expose Global Memory's audit trail via GlobalMemoryHistory/Diff/Revert
+- fix(store): keep MuxObject atoms reactive across cache eviction
+- fix(term): honour term:scrollback in the agent Shell drawer, and fit the terminal before replaying scrollback
+- fix(agent): render the Shell drawer outside the per-pane zoom so it renders at a 1:1 device-pixel ratio
+- fix(panes): consolidate pane loading into one readiness authority and one overlay owner
+- chore(hooks): track commit-msg hook, strip Co-Authored-By trailers
+- fix(panes): fold the block-level ready-gate spinner and Suspense fallback into the shared loading cover
+- feat(sysinfo): add process-tracker/orphan-reaper counters to the mem_attribution diagnostic log
+
 ## 0.56.9 — 2026-09-20
 
 - fix(agents): Swarm's process list and the pane-close confirmation count only processes the agent started — not the agent CLI itself, conhost, or MCP servers; the composer's "⚙ N" badge is removed
