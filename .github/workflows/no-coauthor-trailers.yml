@@ -18,16 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
+    env:
+      # Shared by both steps so the self-test actually exercises the same
+      # pattern the real check uses, not an independent hardcoded copy that
+      # could silently drift and keep passing after PATTERN regresses.
+      PATTERN: '(?m)^Co-authored-by:\s*.+<.+@.+>\s*$'
     steps:
       - name: Self-test (negative control — must run before the real check)
         run: |
           # A regex that ever regresses to matching nothing must fail loudly,
           # not report green forever.
           echo '{"commit":{"message":"fix: x\n\nCo-authored-by: Bad <bad@example.com>"}}' \
-            | jq -e '.commit.message | test("(?m)^Co-authored-by:\\s*.+<.+@.+>\\s*$"; "i")' >/dev/null \
+            | jq -e '.commit.message | test(env.PATTERN; "i")' >/dev/null \
             || { echo "::error::self-test failed: known-bad trailer was NOT matched"; exit 1; }
           echo '{"commit":{"message":"docs: explain why Co-authored-by trailers are rejected"}}' \
-            | jq -e '.commit.message | test("(?m)^Co-authored-by:\\s*.+<.+@.+>\\s*$"; "i") | not' >/dev/null \
+            | jq -e '.commit.message | test(env.PATTERN; "i") | not' >/dev/null \
             || { echo "::error::self-test failed: prose mention was incorrectly matched"; exit 1; }
 
       - name: Check commits and PR description for Co-Authored-By trailers
@@ -35,7 +40,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          PATTERN: '(?m)^Co-authored-by:\s*.+<.+@.+>\s*$'
         run: |
           # gh api's --jq takes a single expression string, not jq's own
           # --arg — the pattern is passed via env instead and read with
