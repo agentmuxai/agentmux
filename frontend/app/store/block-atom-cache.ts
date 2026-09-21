@@ -47,6 +47,28 @@ export function cleanupBlockAtomCache(blockId: string) {
     }
 }
 
+/**
+ * Diagnostic-only snapshot — added while investigating a 2026-09-20
+ * latency/memory report. `cachedBlockCount` is how many distinct blockIds
+ * currently hold at least one cached `createRoot`-wrapped memo here
+ * (`getBlockMetaKeyAtom` et al.); `totalMemoCount` sums every cached memo
+ * across all of them. Only `cleanupBlockAtomCache` (called on real block
+ * unregistration, NOT on a keep-alive block merely going dormant — see
+ * `block-component-registry.ts`'s `setKeepAliveBlockDormant`) removes an
+ * entry, so a block that stays stacked-but-dormant indefinitely keeps its
+ * entries here, which in turn keeps their `MOS.getMuxObjectAtom` refCount
+ * pins alive (`mos.ts`'s `getMuxObjectCacheStats`). See
+ * `frontend/app/diag/atom-cache-diagnostic.ts`, which reports this
+ * alongside the other two related caches' own stats.
+ */
+export function getBlockAtomCacheStats(): { cachedBlockCount: number; totalMemoCount: number } {
+    let totalMemoCount = 0;
+    for (const bc of blockAtomCache.values()) {
+        totalMemoCount += bc.size;
+    }
+    return { cachedBlockCount: blockAtomCache.size, totalMemoCount };
+}
+
 function getSingleConnAtomCache(connName: string): Map<string, () => any> {
     return getSingleBlockAtomCache(connName);
 }

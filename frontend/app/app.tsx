@@ -6,6 +6,10 @@
 // SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §7.4, and #1326.
 import "./diag/replace-child-diagnostic";
 
+// Periodic, read-only atom-cache/registry diagnostics — see the module
+// header for context (a 2026-09-20 latency/memory report).
+import "./diag/atom-cache-diagnostic";
+
 import { Workspace } from "@/app/workspace/workspace";
 import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
 import { showTextInputContextMenu } from "@/store/contextmenu";

@@ -358,6 +358,27 @@ function cleanMuxObjectCache() {
 // Periodically clean up stale MuxObject cache entries
 setInterval(cleanMuxObjectCache, 30000);
 
+/**
+ * Diagnostic-only snapshot of `muxObjectValueCache` — added while
+ * investigating a 2026-09-20 latency/memory report. `pinnedEntries` is the
+ * count with `refCount > 0`: these survive `cleanMuxObjectCache` regardless
+ * of `holdTime`, since #3454 made `getMuxObjectAtom` pin an entry for its
+ * calling reactive owner's entire lifetime (see that function's own doc
+ * comment). A `pinnedEntries` count that climbs without bound and never
+ * comes back down as panes go dormant/close would point at exactly that
+ * mechanism; see `frontend/app/diag/atom-cache-diagnostic.ts`, which reports
+ * this alongside `block-atom-cache.ts`'s and the block registry's own stats.
+ */
+function getMuxObjectCacheStats(): { totalEntries: number; pinnedEntries: number; totalRefCount: number } {
+    let pinnedEntries = 0;
+    let totalRefCount = 0;
+    for (const wov of muxObjectValueCache.values()) {
+        if (wov.refCount > 0) pinnedEntries++;
+        totalRefCount += wov.refCount;
+    }
+    return { totalEntries: muxObjectValueCache.size, pinnedEntries, totalRefCount };
+}
+
 /** Non-reactive read — returns the current value without tracking. */
 function getObjectValue<T extends MuxObj>(oref: string): T {
     const wov = getMuxObjectValue<T>(oref);
@@ -378,6 +399,7 @@ export {
     callBackendService,
     getObjectValue,
     getMuxObjectAtom,
+    getMuxObjectCacheStats,
     getMuxObjectLoadingAtom,
     loadAndPinMuxObject,
     makeORef,
