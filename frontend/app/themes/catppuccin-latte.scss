@@ -93,6 +93,13 @@
     --color-success: var(--success-color);
     --color-panel: var(--panel-bg-color);
     --color-hover: var(--hover-bg-color);
+    // --color-hoverbg/--color-highlightbg (SPEC_COLOR_THEME_TOKEN_HARDENING
+    // _2026_09_21.md): these two legacy Tailwind tokens were never synced
+    // like --color-hover above, so every theme except the hardcoded
+    // tailwindsetup.css default silently fell back to that default's
+    // fixed white tint -- invisible/washed-out on any light theme.
+    --color-hoverbg: var(--hover-bg-color);
+    --color-highlightbg: var(--highlight-bg-color);
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
 }
