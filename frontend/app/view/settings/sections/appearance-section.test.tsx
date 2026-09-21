@@ -75,3 +75,19 @@ describe("Appearance — startup splash toggle", () => {
         expect(setConfig.mock.calls[0][1]).toEqual({ "splash:disabled": false });
     });
 });
+
+// SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.2/§6 — a search result's
+// `id={`setting-${entry.id}`}` must resolve to a real DOM element, since
+// that's the only link SettingsSearchBar's scrollIntoView/highlight has
+// back to the actual rendered row; it isn't type-checked.
+describe("Appearance — SettingRow ids for search scroll-to-result", () => {
+    afterEach(() => cleanup());
+
+    it("gives the Theme row a DOM id matching its registry entry's id", async () => {
+        render(() => <AppearanceSection />);
+        const { APPEARANCE_SETTINGS } = await import("./appearance-section");
+        const el = document.getElementById(`setting-${APPEARANCE_SETTINGS.theme.id}`);
+        expect(el).not.toBeNull();
+        expect(el?.querySelector(".setting-row-name")?.textContent).toBe("Theme");
+    });
+});

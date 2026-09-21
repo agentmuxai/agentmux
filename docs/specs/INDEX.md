@@ -357,6 +357,7 @@ partial list.
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_PANE_COMPLETION_2026_07_14`](SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md) | SPEC — Settings pane: fill out the remaining sections (completes SPEC_SETTINGS_PANE_2026_06_25) |
+| [`SPEC_SETTINGS_PANE_SEARCH_2026_09_21`](SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md) | SPEC: Reusable fuzzy/synonym search utility, first shipped in the Settings pane |
 | [`SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19`](SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md) | SPEC — Settings: new "Recording / Input" section (mic setup, engine config, test-your-mic) |
 | [`SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07`](SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md) | SPEC: Shared filesystem-watcher framework — audit + design |
 | [`SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17`](SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17.md) | SPEC: Shell-integration scripts must be per-instance, not machine-global |
