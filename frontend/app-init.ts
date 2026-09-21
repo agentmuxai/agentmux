@@ -62,6 +62,7 @@ import {
     startLauncherEventReducer,
 } from "@/app/store/launcher-event-reducer";
 import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
+import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -634,8 +635,23 @@ async function initAppInner() {
     getApi().sendLog(`Init Bare - Host app mode: ${hostApp}`);
 
     if (!hostApp) {
-        // Non-host: wait for the host to emit agentmux-init with IDs
-        getApi().onAgentMuxInit(initMuxWrap);
+        // Non-host: wait for the host to emit agentmux-init with IDs.
+        //
+        // `onAgentMuxInit` invokes this fire-and-forget (`cef-api.ts` just
+        // calls `callback(payload)` — no await, no catch), so unlike the host
+        // paths there is no caller to receive a re-thrown fatal error. Without
+        // this handler it would surface only as an unhandled rejection, which
+        // the global forwarder logs but never turns into a startup card — and
+        // `initMuxWrap`'s `finally` would still reveal the body, reproducing
+        // the exact blank window this is meant to fix, just on a different
+        // path. reagentx P1 on PR #3486.
+        getApi().onAgentMuxInit((payload) => {
+            void initMuxWrap(payload).catch((error) => {
+                console.error("[onAgentMuxInit] Initialization failed:", error);
+                getApi().sendLog(`[onAgentMuxInit] ERROR: ${error}`);
+                showStartupError(String(error));
+            });
+        });
     }
     setKeyUtilPlatform(platform);
     loadFonts();
@@ -779,6 +795,18 @@ async function initMuxWrap(initOpts: AgentMuxInitOpts) {
     } catch (e) {
         getApi().sendLog("Error in initMux " + e.message + "\n" + e.stack);
         console.error("Error in initMux", e);
+        // A fatal startup failure must not be swallowed here. This catch
+        // deliberately tolerates late, non-essential failures (the reducers
+        // and crash-release wiring at the end of this function) so one of
+        // them cannot take the whole window down — but swallowing EVERYTHING
+        // meant a missing core object left `initHostMux`'s `showStartupError`
+        // card unreachable, while the `finally` below still revealed the
+        // body. The user got a blank window and a console line. Re-throwing
+        // only the fatal class keeps the tolerance for the former and gets
+        // the latter in front of someone.
+        if (e instanceof MuxInitFatalError) {
+            throw e;
+        }
     } finally {
         // First-paint + new-window reveal coordination — see issue
         // #774. The body was hidden at line 324 before any rendering;
@@ -815,9 +843,21 @@ async function reinitMux() {
     );
 
     await MOS.reloadMuxObject<Client>(MOS.makeORef("client", savedInitOpts.clientId));
-    const muxWindow = await MOS.reloadMuxObject<MuxWindow>(MOS.makeORef("window", savedInitOpts.windowId));
-    const ws = await MOS.reloadMuxObject<Workspace>(MOS.makeORef("workspace", muxWindow.workspaceid));
-    const initialTab = await MOS.reloadMuxObject<Tab>(MOS.makeORef("tab", savedInitOpts.tabId));
+    const muxWindow = requireLoaded(
+        await MOS.reloadMuxObject<MuxWindow>(MOS.makeORef("window", savedInitOpts.windowId)),
+        "window",
+        savedInitOpts.windowId
+    );
+    const ws = requireLoaded(
+        await MOS.reloadMuxObject<Workspace>(MOS.makeORef("workspace", muxWindow.workspaceid)),
+        "workspace",
+        muxWindow.workspaceid
+    );
+    const initialTab = requireLoaded(
+        await MOS.reloadMuxObject<Tab>(MOS.makeORef("tab", savedInitOpts.tabId)),
+        "tab",
+        savedInitOpts.tabId
+    );
     await MOS.reloadMuxObject<LayoutState>(MOS.makeORef("layout", initialTab.layoutstate));
     reloadAllWorkspaceTabs(ws);
     // Title is driven by installWindowTitleEffect() (set up in initMux)
@@ -1083,7 +1123,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     // ensures client/window/workspace are loaded into the cache before rendering
     t = performance.now();
-    const [client, muxWindow, initialTab] = await withTimeout(
+    const [clientRaw, muxWindowRaw, initialTabRaw] = await withTimeout(
         Promise.all([
             MOS.loadAndPinMuxObject<Client>(MOS.makeORef("client", initOpts.clientId)),
             MOS.loadAndPinMuxObject<MuxWindow>(MOS.makeORef("window", initOpts.windowId)),
@@ -1092,10 +1132,13 @@ async function initMux(initOpts: AgentMuxInitOpts) {
         RPC_TIMEOUT,
         "loadAndPin client/window/tab"
     );
+    const client = requireLoaded(clientRaw, "client", initOpts.clientId);
+    const muxWindow = requireLoaded(muxWindowRaw, "window", initOpts.windowId);
+    const initialTab = requireLoaded(initialTabRaw, "tab", initOpts.tabId);
     tlog("loadAndPin client/window/tab", t);
 
     t = performance.now();
-    const [ws, layoutState] = await withTimeout(
+    const [wsRaw, layoutState] = await withTimeout(
         Promise.all([
             MOS.loadAndPinMuxObject<Workspace>(MOS.makeORef("workspace", muxWindow.workspaceid)),
             MOS.reloadMuxObject<LayoutState>(MOS.makeORef("layout", initialTab.layoutstate)),
@@ -1103,6 +1146,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
         RPC_TIMEOUT,
         "loadAndPin workspace/layout"
     );
+    const ws = requireLoaded(wsRaw, "workspace", muxWindow.workspaceid);
     tlog("loadAndPin workspace/layout", t);
 
     t = performance.now();
