@@ -81,6 +81,20 @@ export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLi
  * neutral rather than tinted toward any particular hue. */
 const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";
 
+/** Opaque background for a pane-tab pill whose block has NO color of its
+ * own. Must never be transparent: the pill sits on top of the header row,
+ * whose background is the ACTIVE block's color — a transparent pill shows
+ * that color through, so every uncolored tab appears to take on whichever
+ * tab is selected (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md §7).
+ * Dark theme: the same fixed color this block's own header would show
+ * (NON_AGENT_DEFAULT_HEADER_BG for non-agent panes). Light theme, or an
+ * agent pane (whose uncolored header has no fixed color): the theme's
+ * opaque block surface. */
+export function computeBlockTabPillNeutralBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string {
+    if (!isLightTheme && blockMeta?.view !== "agent") return NON_AGENT_DEFAULT_HEADER_BG;
+    return "var(--block-bg-solid-color)";
+}
+
 /**
  * Build a "Pane Color" submenu — mirrors the "Replace With..." submenu pattern
  * (pane-actions.ts). Looks and acts exactly like the rest of the context menu:

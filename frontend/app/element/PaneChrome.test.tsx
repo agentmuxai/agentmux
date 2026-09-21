@@ -64,6 +64,7 @@ vi.mock("@/app/block/blockframe", () => ({
     computeBlockActiveBorderColor: (meta: any) =>
         meta?.["frame:hue"] != null ? `underline-${meta["frame:hue"]}` : undefined,
     computeBlockTabPillBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
+    computeBlockTabPillNeutralBg: () => "neutral",
 }));
 
 const showContextMenu = vi.fn();
@@ -331,9 +332,18 @@ describe("renderPaneChromeShell — per-tab pane color", () => {
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
 
         const h = headerCalls.at(-1);
-        expect(h.getColor("b1")).toEqual({ underline: "underline-10", background: "bg-10" });
-        expect(h.getColor("b2")).toEqual({ underline: "underline-20", background: "bg-20" });
-        expect(h.getColor("b3")).toBeUndefined();
+        expect(h.getColor("b1")).toEqual({ underline: "underline-10", background: "bg-10", neutralBackground: "neutral" });
+        expect(h.getColor("b2")).toEqual({ underline: "underline-20", background: "bg-20", neutralBackground: "neutral" });
+        expect(h.getColor("b3")).toEqual({ underline: undefined, background: undefined, neutralBackground: "neutral" });
+    });
+
+    it("an uncolored tab still gets an opaque neutral background, so the header's active-tab tint never shows through it", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 180 } });
+        setObjectValue("block:b2", { meta: {} });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        expect(headerCalls.at(-1).getColor("b2")?.neutralBackground).toBe("neutral");
     });
 });
 

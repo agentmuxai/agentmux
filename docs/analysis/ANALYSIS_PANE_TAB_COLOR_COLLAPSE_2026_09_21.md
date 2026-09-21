@@ -1,7 +1,7 @@
 # Bug Report — Pane-Tab Pill Colors Collapse to the Selected Tab's Color
 
 **Date:** 2026-09-21
-**Status:** implemented in #3484 — see §6 for the confirmed root cause and
+**Status:** implemented in #3484 — see §7 for the confirmed root cause and
 fix. §2 and §4 are kept as-written below (including their now-superseded
 "could not reproduce" conclusion) since the process that got from "can't
 reproduce" to "found it live" is itself worth keeping.
@@ -168,3 +168,31 @@ Only the dark-theme treatment was addressed here — light theme was
 already flagged as needing further refinement in a separate pass, and the
 light-theme branch (`hueToActiveBorder`/raw hex, full vivid strength) is
 untouched by this fix.
+
+## 7. Actual root cause — transparent uncolored pills show the header's tint
+
+§6's contrast fix was real but did not resolve the report: the user still
+saw the collapse after it landed. A live CDP read of every pill's ancestor
+chain showed why. `BlockFrame_Header`'s `headerStyle` paints the whole
+header row with the **active** block's color (e.g. `rgb(52,29,52)` while
+Terminal 1 is active), and the tab strip sits on top of that row. A pill
+whose block has **no color of its own** (Terminal 2, Help) resolved to
+`background: var(--pane-tab-bg, transparent)` — fully transparent — so it
+displayed the header's color through itself. Selecting Swarm retints the
+header teal, and every uncolored pill turns teal with it. That is exactly
+the reported symptom: "the last two tabs change to the same color as the
+first tab."
+
+**Fix**: every pill in `PaneChrome` now gets an opaque `neutralBackground`
+(`computeBlockTabPillNeutralBg`: on a dark theme, the fixed
+`NON_AGENT_DEFAULT_HEADER_BG` its own header would show; on a light theme
+or for an agent pane, `var(--block-bg-solid-color)`), emitted as
+`--pane-tab-neutral-bg` and used as the fallback when `--pane-tab-bg` is
+absent. The plain-hover white tint is now layered over that neutral
+background instead of replacing it, so hovering doesn't expose the tint
+either. Other `PaneTabStrip` consumers (editor file tabs, the agent History
+strip) don't set the variable, so they keep the old transparent behavior.
+
+Verified live on the dev instance: with Terminal 1 active, Terminal 2 and
+Help show `rgb(36,39,46)`. After clicking Swarm they stay that same neutral
+gray (screenshot confirmed) instead of turning teal.

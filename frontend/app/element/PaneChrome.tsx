@@ -19,7 +19,12 @@
  */
 
 import { createMemo, createSignal, type JSX } from "solid-js";
-import { computeBlockActiveBorderColor, computeBlockTabPillBg, computeFocusRingBorderColor } from "@/app/block/blockframe";
+import {
+    computeBlockActiveBorderColor,
+    computeBlockTabPillBg,
+    computeBlockTabPillNeutralBg,
+    computeFocusRingBorderColor,
+} from "@/app/block/blockframe";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -134,7 +139,11 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
             const underline = computeBlockActiveBorderColor(meta);
             const background = computeBlockTabPillBg(meta, isLightTheme);
-            if (underline || background) colors.set(blockId, { underline, background });
+            // Always set: the header behind the strip is tinted with the
+            // ACTIVE block's color, so a transparent uncolored pill would
+            // appear to take on whichever tab is selected.
+            const neutralBackground = computeBlockTabPillNeutralBg(meta, isLightTheme);
+            colors.set(blockId, { underline, background, neutralBackground });
         }
         return colors;
     });

@@ -159,6 +159,23 @@ describe("PaneTabStrip", () => {
         expect(tabs[1].style.getPropertyValue("--pane-tab-underline")).toBe("");
     });
 
+    it("sets --pane-tab-neutral-bg for a tab with only a neutralBackground, without marking it colored", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={() => ({ neutralBackground: "#101010" })}
+                onActivate={vi.fn()}
+            />
+        ));
+        const tab = container.querySelectorAll<HTMLElement>(".pane-tab")[1];
+        expect(tab.style.getPropertyValue("--pane-tab-neutral-bg")).toBe("#101010");
+        expect(tab.style.getPropertyValue("--pane-tab-bg")).toBe("");
+        expect(tab.classList.contains("pane-tab--colored")).toBe(false);
+    });
+
     it("sets neither custom property when getColor is omitted or returns undefined for a tab", () => {
         const { container } = render(() => (
             <PaneTabStrip
