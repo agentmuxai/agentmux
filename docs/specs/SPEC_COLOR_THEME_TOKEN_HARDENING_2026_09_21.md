@@ -1,7 +1,7 @@
 # SPEC: harden the Tailwind color system against silent per-theme breakage
 
 **Date:** 2026-09-21
-**Status:** implemented — see §6 for exactly what shipped
+**Status:** implemented in #3478 — see §6 for exactly what shipped
 **Related:** `docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md` (the
 pane-color consolidation work that surfaced this — its own precedent fix used
 the exact bug pattern documented here, on the ICON only, and left the LABEL
