@@ -188,7 +188,14 @@
     gap: var(--space-1);
     padding: 0 var(--space-1) 0 var(--space-2);
     border-right: 1px solid var(--border-color);
-    background: transparent;
+    // A background (inactive) tab with its own pane color (PaneChrome's
+    // `getColor`, --pane-tab-bg set inline per-pill) shows that color's
+    // darkened/muted tone here instead of going fully transparent — same
+    // treatment its own header would show if it were active. Absent
+    // (undefined var) for every other consumer (editor file tabs, the
+    // agent History strip) and for a tab with no color assigned, where
+    // this is exactly the old plain `transparent`.
+    background: var(--pane-tab-bg, transparent);
     color: var(--secondary-text-color);
     cursor: default;
     user-select: none;
@@ -205,13 +212,31 @@
         }
     }
 
+    // A background (inactive) tab with its own pane color hovers to a
+    // LIGHTER version of that same color, not the generic white tint above
+    // — `filter: brightness` on top of the resting --pane-tab-bg rather
+    // than a separate lightened color value, so it's guaranteed to track
+    // whatever hue that pill actually has. `:not(&--active)` matters:
+    // without it this would beat --active's own `background:
+    // var(--block-bg-color)` (equal-or-higher specificity) on a colored
+    // tab that's ALSO the active one, breaking the "active tab always
+    // shows the plain surface, connects to content below" rule below.
+    &--colored:hover:not(&--active) {
+        background: var(--pane-tab-bg);
+        filter: brightness(1.4);
+    }
+
     &--active {
         background: var(--block-bg-color);
         color: var(--main-text-color);
         // Subtle bottom-border that visually connects the active tab to the
         // pane content below (the strip's own border-bottom is hidden under
-        // the active tab via the negative margin trick).
-        box-shadow: inset 0 -2px 0 0 var(--accent-color);
+        // the active tab via the negative margin trick). Matches this tab's
+        // OWN pane color (PaneChrome's `getColor`, --pane-tab-underline set
+        // inline per-pill — the same vivid color blockframe.tsx's border
+        // uses for this block) when it has one, falling back to the generic
+        // accent color for every other consumer and for an uncolored tab.
+        box-shadow: inset 0 -2px 0 0 var(--pane-tab-underline, var(--accent-color));
     }
 
     // "Attention" tabs (unsaved changes, needs-review, …) always show their

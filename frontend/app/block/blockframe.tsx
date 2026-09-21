@@ -35,12 +35,47 @@ import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { headerBgForEffectiveColor, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import {
+    headerBgForEffectiveColor,
+    hueToActiveBorder,
+    hueToBorder,
+    paneTabBgForEffectiveColor,
+    PANE_HUE_OPTIONS,
+    setHue,
+} from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 
 const NumActiveConnColors = 8;
+
+/**
+ * The darkened/muted background a block's own assigned color resolves to —
+ * shared by BlockFrame_Header's headerStyle and PaneChrome's inactive
+ * pane-tab pills (PaneTabStrip.tsx), so a pill for a background tab reads as
+ * the same color its header would show if it were active. See
+ * headerBgForEffectiveColor's own doc comment for the darkened-vs-bright
+ * theme-polarity rule. Returns undefined when the block has no color of its
+ * own (neither frame:hue nor frame:activebordercolor set) — callers fall
+ * back to their own default background.
+ */
+export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
+/** Same as computeBlockColorBg, for a pane-tab pill's own background
+ * instead of the pane header's — see hueToPaneTabBg's own doc comment for
+ * why a small pill needs a more visible dark-theme treatment than the
+ * header's identical-looking-but-actually-distinct 16%-lightness colors,
+ * which live-reproduced as pill colors appearing to collapse to one shared
+ * value (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
+export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return paneTabBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
 
 /** Fixed header background for every non-agent pane with no other color
  * source — see headerStyle's fallback branch. Matches the L=16% used by
@@ -590,11 +625,9 @@ function BlockFrame_Header(
         // still true on a LIGHT theme (user request 2026-09-21): darkening
         // reads as broken/muddy against a light UI, so light themes keep
         // matching the border's full-strength color instead.
-        const hue = blockData()?.meta?.["frame:hue"];
-        const ac = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
-        const bg = headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+        const bg = computeBlockColorBg(blockData()?.meta, isLightTheme);
         if (bg) {
             style["background-color"] = bg;
             style.color = pickReadableTextColor(bg) ?? undefined;
@@ -867,6 +900,38 @@ function ConnStatusOverlay({
  * overrides the default — callers fall back to their own default (accent
  * when focused, the dim border color otherwise) via `var(--x, <default>)`.
  */
+/**
+ * The vivid, border-strength color a block's OWN color resolves to — no
+ * tab-level override consulted at all, unlike computeFocusRingBorderColor
+ * below (which folds in tabMeta's bg:activebordercolor for the single
+ * currently-focused block's outer ring). PaneChrome's pane-tab pills need
+ * this pure per-block form: computing each pill's own color by handing
+ * every one through computeFocusRingBorderColor with the SAME shared
+ * tabMeta would let one tab-wide bg:activebordercolor collapse every
+ * pill's underline to that one color, defeating the point of a per-block
+ * underline (reagent P1, PR #3484).
+ *
+ * frame:hue is an explicit user choice from the pane-header "Pane Color"
+ * picker (pane-color-menu.ts's setHue); frame:activebordercolor is a
+ * passive default (per-agent identity color, seeded once at launch — see
+ * SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice must win whenever
+ * it's present, or picking a hue on an agent pane would have no visible
+ * effect (reagent P1, PR #2477) — hue is therefore checked FIRST. Clearing
+ * the hue picker sets frame:hue to `null` (not delete), which correctly
+ * falls through here (typeof null !== "number") back to the agent's
+ * default color rather than to no color at all.
+ */
+export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefined): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    if (typeof hue === "number") {
+        return hueToActiveBorder(hue);
+    }
+    if (blockMeta?.["frame:activebordercolor"]) {
+        return blockMeta["frame:activebordercolor"] as string;
+    }
+    return undefined;
+}
+
 export function computeFocusRingBorderColor(
     isFocused: boolean,
     blockMeta: Block["meta"] | undefined,
@@ -877,27 +942,13 @@ export function computeFocusRingBorderColor(
         if (tabActiveBorderColor) {
             return tabActiveBorderColor;
         }
-        // frame:hue is an explicit user choice from the pane-header "Pane
-        // Color" picker (pane-color-menu.ts's setHue); frame:activebordercolor
-        // is a passive default (per-agent identity color, seeded once at
-        // launch — see SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice
-        // must win whenever it's present, or picking a hue on an agent pane
-        // would have no visible effect (reagent P1, PR #2477) — hue is
-        // therefore checked FIRST (this used to check activebordercolor
-        // first and return before ever reaching hue, silently reintroducing
-        // the exact bug #2477 fixed — SPEC_AGENT_HEADER_COLOR_UNIFICATION_
-        // 2026_09_20.md's follow-up). Clearing the hue picker sets frame:hue
-        // to `null` (not delete), which correctly falls through here
-        // (typeof null !== "number") back to the agent's default color
-        // rather than to no color at all.
-        const hue = blockMeta?.["frame:hue"];
-        if (typeof hue === "number") {
-            return hueToActiveBorder(hue);
-        }
-        if (blockMeta?.["frame:activebordercolor"]) {
-            return blockMeta["frame:activebordercolor"] as string;
-        }
-        return undefined;
+        // This used to inline the hue/activebordercolor check itself,
+        // checking activebordercolor first and returning before ever
+        // reaching hue — silently reintroducing the exact bug #2477 fixed
+        // (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's follow-up).
+        // Now shares computeBlockActiveBorderColor's already-correct
+        // hue-first precedence instead of duplicating it.
+        return computeBlockActiveBorderColor(blockMeta);
     }
     const tabBorderColor = tabMeta?.["bg:bordercolor"] as string | undefined;
     if (tabBorderColor) {
