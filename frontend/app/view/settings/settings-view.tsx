@@ -5,7 +5,8 @@ import { For, Match, Show, Switch, type JSX } from "solid-js";
 
 import { fullConfigAtom } from "@/app/store/global";
 import { invokeCommand } from "@/app/platform/ipc";
-import { SETTINGS_SECTION_LABELS, type SettingsSection, type SettingsViewModel } from "./settings-model";
+import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
+import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
 import { TerminalSection } from "./sections/terminal-section";
@@ -57,6 +58,12 @@ const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 
+// Brief on-screen confirmation that a search result actually landed on the
+// right row — the CSS class does the fade, this just applies/removes it.
+// docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
+const SEARCH_HIGHLIGHT_MS = 1500;
+const SEARCH_HIGHLIGHT_CLASS = "setting-row--search-highlight";
+
 export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.Element {
     const section = () => props.model.activeSection();
     const setSection = (s: SettingsSection) => props.model.setSection(s);
@@ -65,6 +72,21 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
         const path = await invokeCommand<string>("ensure_settings_file");
         await invokeCommand("open_in_editor", { path });
     };
+
+    function handleSelectResult(entry: SettingsIndexEntry) {
+        setSection(entry.section);
+        // The target section's row only exists in the DOM once its <Match>
+        // arm has (re-)rendered for the new section — queueMicrotask, not a
+        // same-tick lookup, mirrors the same pattern the command palette
+        // uses for its own post-mount focus() (command-palette.tsx).
+        queueMicrotask(() => {
+            const el = document.getElementById(`setting-${entry.id}`);
+            if (!el) return;
+            el.scrollIntoView({ block: "center" });
+            el.classList.add(SEARCH_HIGHLIGHT_CLASS);
+            setTimeout(() => el.classList.remove(SEARCH_HIGHLIGHT_CLASS), SEARCH_HIGHLIGHT_MS);
+        });
+    }
 
     return (
         <div class="settings-view-container">
@@ -105,6 +127,11 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                 </For>
             </nav>
             <div class="settings-body">
+                <SettingsSearchBar
+                    query={props.model.query}
+                    setQuery={props.model.setQuery}
+                    onSelectResult={handleSelectResult}
+                />
                 <ConfigErrorsBanner />
                 <Switch>
                     <Match when={section() === "appearance"}>

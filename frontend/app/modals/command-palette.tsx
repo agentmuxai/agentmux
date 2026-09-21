@@ -9,6 +9,7 @@ import { commandRegistry, type CommandEntry } from "@/app/store/command-registry
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
 import { Modal } from "@/element/modal";
+import { fuzzySearch } from "@/app/util/fuzzysearch";
 import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import "./command-palette.scss";
 
@@ -31,15 +32,19 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     let inputRef!: HTMLInputElement;
 
     const filtered = createMemo(() => {
-        const q = query().toLowerCase().trim();
+        const q = query().trim();
         const all = sortCommands(commandRegistry.all());
-        if (!q) return all;
-        return all.filter(
-            (cmd) =>
-                cmd.label.toLowerCase().includes(q) ||
-                cmd.id.toLowerCase().includes(q) ||
-                cmd.category.toLowerCase().includes(q)
-        );
+        if (!q) return all; // browsing, unfiltered: keep category+label order
+        // Relevance-ranked while actively searching — best match first, same
+        // as every other command palette (VS Code included) — rather than
+        // still being category+label sorted mid-search.
+        return fuzzySearch(all, q, {
+            keys: [
+                { name: "label", weight: 0.6 },
+                { name: "category", weight: 0.25 },
+                { name: "id", weight: 0.15 },
+            ],
+        });
     });
 
     // Clamp selectedIdx when results change

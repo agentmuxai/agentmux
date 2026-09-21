@@ -5,7 +5,100 @@ import { For, Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
+import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+
+// ── Search index — one entry per row below, named-key so re-ordering rows
+// can't silently misalign an entry with the wrong row (see settings-model.ts's
+// SettingsIndexEntry doc comment). label/description here are the single
+// source of truth the JSX reads from — see each row's `label={...}` below. ──
+
+export const APPEARANCE_SETTINGS = {
+    theme: {
+        id: "appearance.theme",
+        label: "Theme",
+        description: "UI color theme for all windows",
+        section: "appearance",
+        keywords: ["dark mode", "light mode", "color scheme", "appearance mode", "window:theme"],
+    },
+    splash: {
+        id: "appearance.splash",
+        label: "Startup splash screen",
+        description: "Show the AgentMux splash while the app starts. Applies at the next launch — the launcher reads this before the app itself is running.",
+        section: "appearance",
+        keywords: ["splash screen", "boot screen", "loading screen", "disable splash", "splash:disabled"],
+    },
+    transparency: {
+        id: "appearance.transparency",
+        label: "Window transparency",
+        description: "Enable background transparency and blur",
+        section: "appearance",
+        keywords: ["transparent window", "glass effect", "translucent", "window:transparent"],
+    },
+    opacity: {
+        id: "appearance.opacity",
+        label: "Opacity",
+        description: "Window background opacity (35–100%)",
+        section: "appearance",
+        keywords: ["window opacity", "transparency level", "glass opacity", "window:opacity"],
+    },
+    blur: {
+        id: "appearance.blur",
+        label: "Background blur",
+        description: "Blur the content behind the window",
+        section: "appearance",
+        keywords: ["blur effect", "frosted glass", "backdrop blur", "window:blur"],
+    },
+    paneGap: {
+        id: "appearance.pane_gap",
+        label: "Pane gap size",
+        description: "Pixels between tiled panes (0–20)",
+        section: "appearance",
+        keywords: ["pane spacing", "tile gap", "split gap", "pane margin", "window:tilegapsize"],
+    },
+    reduceMotion: {
+        id: "appearance.reduce_motion",
+        label: "Reduce motion",
+        description: "Disable CSS animations and transitions",
+        section: "appearance",
+        keywords: ["disable animations", "accessibility", "motion sickness", "animation speed", "window:reducedmotion"],
+    },
+    bgColor: {
+        id: "appearance.bg_color",
+        label: "Background color",
+        description: "Custom background color override (hex). Leave blank to use the theme default.",
+        section: "appearance",
+        keywords: ["custom background", "hex color", "window color", "window:bgcolor"],
+    },
+    magnifiedOpacity: {
+        id: "appearance.magnified_opacity",
+        label: "Magnified opacity",
+        description: "Background opacity of a pane while magnified (0–1)",
+        section: "appearance",
+        keywords: ["zoom opacity", "focus mode opacity", "pane zoom", "window:magnifiedblockopacity"],
+    },
+    magnifiedSize: {
+        id: "appearance.magnified_size",
+        label: "Magnified size",
+        description: "Scale factor applied to a pane while magnified",
+        section: "appearance",
+        keywords: ["zoom scale", "pane zoom factor", "magnify scale", "window:magnifiedblocksize"],
+    },
+    magnifiedBlurPrimary: {
+        id: "appearance.magnified_blur_primary",
+        label: "Magnified blur (primary)",
+        description: "Backdrop blur, in pixels, applied to the magnified pane itself",
+        section: "appearance",
+        keywords: ["focused pane blur", "zoom blur", "window:magnifiedblockblurprimarypx"],
+    },
+    magnifiedBlurSecondary: {
+        id: "appearance.magnified_blur_secondary",
+        label: "Magnified blur (secondary)",
+        description: "Backdrop blur, in pixels, applied to the other panes behind it",
+        section: "appearance",
+        keywords: ["background pane blur", "other panes blur", "window:magnifiedblockblursecondarypx"],
+    },
+} satisfies Record<string, SettingsIndexEntry>;
 
 // ── Section: Appearance ───────────────────────────────────────────────────────
 
@@ -16,8 +109,9 @@ export function AppearanceSection(): JSX.Element {
     return (
         <div class="settings-section-body">
             <SettingRow
-                label="Theme"
-                description="UI color theme for all windows"
+                id={APPEARANCE_SETTINGS.theme.id}
+                label={APPEARANCE_SETTINGS.theme.label}
+                description={APPEARANCE_SETTINGS.theme.description}
                 control={
                     <select
                         class="setting-select"
@@ -31,8 +125,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Startup splash screen"
-                description="Show the AgentMux splash while the app starts. Applies at the next launch — the launcher reads this before the app itself is running."
+                id={APPEARANCE_SETTINGS.splash.id}
+                label={APPEARANCE_SETTINGS.splash.label}
+                description={APPEARANCE_SETTINGS.splash.description}
                 control={
                     <ToggleControl
                         // Stored inverted (`splash:disabled`, false by default) because
@@ -45,8 +140,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Window transparency"
-                description="Enable background transparency and blur"
+                id={APPEARANCE_SETTINGS.transparency.id}
+                label={APPEARANCE_SETTINGS.transparency.label}
+                description={APPEARANCE_SETTINGS.transparency.description}
                 control={
                     <ToggleControl
                         checked={transparent()}
@@ -56,9 +152,10 @@ export function AppearanceSection(): JSX.Element {
             />
             <Show when={transparent()}>
                 <SettingRow
+                    id={APPEARANCE_SETTINGS.opacity.id}
                     indent
-                    label="Opacity"
-                    description="Window background opacity (35–100%)"
+                    label={APPEARANCE_SETTINGS.opacity.label}
+                    description={APPEARANCE_SETTINGS.opacity.description}
                     control={
                         <SliderControl
                             min={0.35} max={1} step={0.05}
@@ -68,9 +165,10 @@ export function AppearanceSection(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    id={APPEARANCE_SETTINGS.blur.id}
                     indent
-                    label="Background blur"
-                    description="Blur the content behind the window"
+                    label={APPEARANCE_SETTINGS.blur.label}
+                    description={APPEARANCE_SETTINGS.blur.description}
                     control={
                         <ToggleControl
                             checked={!!(s()["window:blur"] as boolean)}
@@ -80,8 +178,9 @@ export function AppearanceSection(): JSX.Element {
                 />
             </Show>
             <SettingRow
-                label="Pane gap size"
-                description="Pixels between tiled panes (0–20)"
+                id={APPEARANCE_SETTINGS.paneGap.id}
+                label={APPEARANCE_SETTINGS.paneGap.label}
+                description={APPEARANCE_SETTINGS.paneGap.description}
                 control={
                     <input
                         class="setting-number"
@@ -95,8 +194,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Reduce motion"
-                description="Disable CSS animations and transitions"
+                id={APPEARANCE_SETTINGS.reduceMotion.id}
+                label={APPEARANCE_SETTINGS.reduceMotion.label}
+                description={APPEARANCE_SETTINGS.reduceMotion.description}
                 control={
                     <ToggleControl
                         checked={!!(s()["window:reducedmotion"] as boolean)}
@@ -105,8 +205,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Background color"
-                description="Custom background color override (hex). Leave blank to use the theme default."
+                id={APPEARANCE_SETTINGS.bgColor.id}
+                label={APPEARANCE_SETTINGS.bgColor.label}
+                description={APPEARANCE_SETTINGS.bgColor.description}
                 control={
                     <input
                         class="setting-text"
@@ -119,8 +220,9 @@ export function AppearanceSection(): JSX.Element {
             />
             <SectionHeader label="Pane hover-magnify" />
             <SettingRow
-                label="Magnified opacity"
-                description="Background opacity of a pane while magnified (0–1)"
+                id={APPEARANCE_SETTINGS.magnifiedOpacity.id}
+                label={APPEARANCE_SETTINGS.magnifiedOpacity.label}
+                description={APPEARANCE_SETTINGS.magnifiedOpacity.description}
                 control={
                     <SliderControl
                         min={0} max={1} step={0.05}
@@ -130,8 +232,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Magnified size"
-                description="Scale factor applied to a pane while magnified"
+                id={APPEARANCE_SETTINGS.magnifiedSize.id}
+                label={APPEARANCE_SETTINGS.magnifiedSize.label}
+                description={APPEARANCE_SETTINGS.magnifiedSize.description}
                 control={
                     <input
                         class="setting-number setting-number--wide"
@@ -145,8 +248,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Magnified blur (primary)"
-                description="Backdrop blur, in pixels, applied to the magnified pane itself"
+                id={APPEARANCE_SETTINGS.magnifiedBlurPrimary.id}
+                label={APPEARANCE_SETTINGS.magnifiedBlurPrimary.label}
+                description={APPEARANCE_SETTINGS.magnifiedBlurPrimary.description}
                 control={
                     <input
                         class="setting-number"
@@ -160,8 +264,9 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Magnified blur (secondary)"
-                description="Backdrop blur, in pixels, applied to the other panes behind it"
+                id={APPEARANCE_SETTINGS.magnifiedBlurSecondary.id}
+                label={APPEARANCE_SETTINGS.magnifiedBlurSecondary.label}
+                description={APPEARANCE_SETTINGS.magnifiedBlurSecondary.description}
                 control={
                     <input
                         class="setting-number"
