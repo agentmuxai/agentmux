@@ -127,6 +127,23 @@ export function getBlockComponentModel(blockId: string): BlockComponentModel {
     return blockComponentModelMap.get(blockId);
 }
 
+/**
+ * Diagnostic-only snapshot — added while investigating a 2026-09-20
+ * latency/memory report. `dormantCount` is how many registered blocks are
+ * currently marked as hidden-but-mounted keep-alive stack members
+ * (`setKeepAliveBlockDormant`) — these stay registered (and keep pinning
+ * their `block-atom-cache.ts`/`mos.ts` entries) until their stack member is
+ * actually removed (tab closed within that pane), not just while dormant.
+ * A `dormantCount` that only ever grows across a long session, for a
+ * pane-stacking-heavy workflow, would point at that as a real (if narrower
+ * than "every tab ever opened") contributor. See
+ * `frontend/app/diag/atom-cache-diagnostic.ts`, which reports this
+ * alongside the two atom-cache modules' own stats.
+ */
+export function getBlockComponentRegistryStats(): { registeredCount: number; dormantCount: number } {
+    return { registeredCount: blockComponentModelMap.size, dormantCount: dormantKeepAliveBlockIds.size };
+}
+
 export function getAllBlockComponentModels(): BlockComponentModel[] {
     return Array.from(blockComponentModelMap.entries())
         .filter(([blockId]) => !dormantKeepAliveBlockIds.has(blockId))
