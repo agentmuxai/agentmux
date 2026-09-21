@@ -139,3 +139,66 @@ describe("getMuxObjectAtom — survives cache eviction", () => {
         expect((atom() as any)?.meta?.["term:zoom"]).toBe(2.0);
     });
 });
+
+describe("getMuxObjectCacheStats", () => {
+    beforeEach(() => {
+        vi.resetModules();
+    });
+
+    it("counts a pinned entry (live reactive owner) separately from an unpinned one", async () => {
+        const MOS = await import("./mos");
+
+        // Unpinned: getMuxObjectAtom called with no reactive owner in scope.
+        // The atom is lazy — creation only happens on first read.
+        MOS.getMuxObjectAtom("block:stats-unpinned")();
+
+        const dispose = createRoot((disposeFn) => {
+            MOS.getMuxObjectAtom("block:stats-pinned");
+            return disposeFn;
+        });
+
+        const stats = MOS.getMuxObjectCacheStats();
+        expect(stats.totalEntries).toBe(2);
+        expect(stats.pinnedEntries).toBe(1);
+        expect(stats.totalRefCount).toBe(1);
+
+        dispose();
+    });
+
+    it("reflects refCount dropping back to zero after the owner disposes", async () => {
+        const MOS = await import("./mos");
+        const dispose = createRoot((disposeFn) => {
+            MOS.getMuxObjectAtom("block:stats-dispose");
+            return disposeFn;
+        });
+        expect(MOS.getMuxObjectCacheStats().pinnedEntries).toBe(1);
+
+        dispose();
+        expect(MOS.getMuxObjectCacheStats().pinnedEntries).toBe(0);
+        // Entry itself is still cached (only the periodic sweep evicts it) —
+        // this getter must not mutate the cache as a side effect of reading it.
+        expect(MOS.getMuxObjectCacheStats().totalEntries).toBe(1);
+    });
+
+    it("sums refCount across multiple owners pinning the same oref", async () => {
+        const MOS = await import("./mos");
+        const disposeA = createRoot((disposeFn) => {
+            MOS.getMuxObjectAtom("block:stats-shared");
+            return disposeFn;
+        });
+        const disposeB = createRoot((disposeFn) => {
+            MOS.getMuxObjectAtom("block:stats-shared");
+            return disposeFn;
+        });
+
+        const stats = MOS.getMuxObjectCacheStats();
+        expect(stats.totalEntries).toBe(1);
+        expect(stats.pinnedEntries).toBe(1);
+        expect(stats.totalRefCount).toBe(2);
+
+        disposeA();
+        expect(MOS.getMuxObjectCacheStats().totalRefCount).toBe(1);
+        disposeB();
+        expect(MOS.getMuxObjectCacheStats().totalRefCount).toBe(0);
+    });
+});

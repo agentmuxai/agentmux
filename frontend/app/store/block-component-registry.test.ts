@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     getAllBlockComponentModelEntries,
     getAllBlockComponentModels,
+    getBlockComponentRegistryStats,
     isBlockDormant,
     registerBlockComponentModel,
     setKeepAliveBlockDormant,
@@ -84,6 +85,34 @@ describe("getAllBlockComponentModels / getAllBlockComponentModelEntries", () => 
 
         registerBlockComponentModel("b1", { viewModel: { viewType: "term" } } as any);
         expect(getAllBlockComponentModels()).toHaveLength(1);
+    });
+});
+
+// Added while investigating a 2026-09-20 latency/memory report — see the
+// getter's own doc comment for what a rising dormantCount over a long
+// session would mean.
+describe("getBlockComponentRegistryStats", () => {
+    it("counts registered blocks and, separately, how many are currently dormant", () => {
+        registerBlockComponentModel("b1", { viewModel: { viewType: "term" } } as any);
+        registerBlockComponentModel("b2", { viewModel: { viewType: "term" } } as any);
+        registerBlockComponentModel("b3", { viewModel: { viewType: "agent" } } as any);
+        setKeepAliveBlockDormant("b2", true);
+
+        expect(getBlockComponentRegistryStats()).toEqual({ registeredCount: 3, dormantCount: 1 });
+    });
+
+    it("does NOT drop dormantCount just because a block goes dormant-but-stays-stacked — only unregister does", () => {
+        registerBlockComponentModel("b1", { viewModel: { viewType: "term" } } as any);
+        setKeepAliveBlockDormant("b1", true);
+        expect(getBlockComponentRegistryStats().dormantCount).toBe(1);
+
+        // Simulate time passing with the tab merely hidden, never closed —
+        // this is exactly the "stacked and abandoned" scenario under
+        // investigation. Nothing here should change the count.
+        expect(getBlockComponentRegistryStats().dormantCount).toBe(1);
+
+        unregisterBlockComponentModel("b1");
+        expect(getBlockComponentRegistryStats().dormantCount).toBe(0);
     });
 });
 
