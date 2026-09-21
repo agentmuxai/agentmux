@@ -11,7 +11,7 @@ name: No Co-Authored-By trailers
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   check:
