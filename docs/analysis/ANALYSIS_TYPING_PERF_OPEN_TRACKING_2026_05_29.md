@@ -1,6 +1,7 @@
 # ANALYSIS — Open typing-perf tracking items + consolidation proposal
 
-**Status:** analysis
+**Status:** superseded — this was a snapshot of what was open as of 2026-05-29; that role is now `TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`, which has the current state.
+**Superseded-by:** `docs/specs/TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`
 
 **Date:** 2026-05-29
 **Owner:** Agent1

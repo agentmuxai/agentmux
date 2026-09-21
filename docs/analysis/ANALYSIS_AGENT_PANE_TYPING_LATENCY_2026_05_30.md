@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Author:** AgentA
-**Status:** analysis — Root cause confirmed (code + measured data). Fix not yet implemented — plan below.
+**Status:** implemented — root cause confirmed (code + measured data); shipped in #1213, in a different shape than the plan below (see the 2026-05-31 update note immediately below). Verified in code 2026-09-21: `MarkdownBlock.tsx`'s `STREAM_RENDER_MS` throttle is still present, unmodified in substance.
 **Priority:** 🔴 Critical (user-flagged: "highest priority… it is critical").
 
 ---
