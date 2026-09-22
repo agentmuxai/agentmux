@@ -343,7 +343,11 @@ function EndIcons(props: {
         <>
             <Show when={(endIconButtons()?.length ?? 0) > 0}>
                 <For each={endIconButtons()}>
-                    {(button) => <IconButton decl={button} />}
+                    {(button) =>
+                        button.elemtype === "toggleiconbutton"
+                            ? <ToggleIconButton decl={button} />
+                            : <IconButton decl={button} />
+                    }
                 </For>
                 <div class="block-frame-btn-separator" aria-hidden="true" />
             </Show>

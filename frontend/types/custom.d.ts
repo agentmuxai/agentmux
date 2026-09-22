@@ -570,7 +570,7 @@ declare global {
         setViewName?: (name: string) => Promise<void>;
         viewText?: Accessor<string | HeaderElem[]>;
         preIconButton?: Accessor<IconButtonDecl>;
-        endIconButtons?: Accessor<IconButtonDecl[]>;
+        endIconButtons?: Accessor<(IconButtonDecl | ToggleIconButtonDecl)[]>;
         blockBg?: Accessor<MetaType>;
         noHeader?: Accessor<boolean>;
         manageConnection?: Accessor<boolean>;
