@@ -1,7 +1,7 @@
 # SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical
 
 **Date:** 2026-09-21
-**Status:** in progress — repo-owner-approved direction, scope confirmed by a
+**Status:** active — repo-owner-approved direction, scope confirmed by a
 full-codebase audit (this document). Shipping as sequential PRs, one per phase.
 **Landed:** the `instance_get_by_slug` fail-closed fix (#3500), registry-guard
 test coverage (#3503), Phase 0's shared resolver (#3504, which also subsumes
