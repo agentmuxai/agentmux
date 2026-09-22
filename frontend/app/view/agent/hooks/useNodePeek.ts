@@ -35,7 +35,7 @@
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { PEEK_ENTER_DELAY_MS } from "../components/hover-anchor";
-import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
+import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 
 export interface NodePeek {
     isPeeking: Accessor<boolean>;
@@ -66,6 +66,24 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
         clearTimeout(timer);
         setIsPeeking(false);
     };
+
+    // `handlePeekEnter` drops the enter that arrives mid-drag. If the drag
+    // then ends with the cursor still on this row, no further enter ever
+    // fires for it and the peek stays shut until the user leaves and comes
+    // back. Re-check the real hover state when the button is released
+    // (reagentx P2 on PR #3470).
+    //
+    // Routed back through `handlePeekEnter` rather than setting
+    // `isPeeking` directly, so the enter delay and its own
+    // `isPrimaryButtonDown()` re-check still apply — releasing the button
+    // should behave exactly like arriving on the row now, not like having
+    // already waited.
+    onCleanup(
+        onPrimaryButtonRelease(() => {
+            if (rowEl()?.matches(":hover")) handlePeekEnter();
+        }),
+    );
+
     onCleanup(() => clearTimeout(timer));
 
     return { isPeeking, rowEl, setRowEl, handlePeekEnter, handlePeekLeave };
