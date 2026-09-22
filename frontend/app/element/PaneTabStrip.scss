@@ -255,6 +255,22 @@
         // --pane-tab-bg at all and so keeps the old value byte-for-byte.
         background: var(--pane-tab-bg, var(--block-bg-color));
         color: var(--main-text-color);
+
+        // The base `&:hover` above is `.pane-tab:hover` — specificity
+        // (0,2,0) against this rule's (0,1,0) — so without this it wins on
+        // the active tab and repaints it with the generic tint over
+        // --pane-tab-neutral-bg, throwing away the color the rule above
+        // just gave it (reagent P1, PR #3492). Restating the resting
+        // background at equal specificity, later in source order, is what
+        // takes it back.
+        //
+        // No hover tint at all, deliberately, and for the same reason
+        // `&--colored:hover:not(&--active)` skips the active tab: hover is
+        // an affordance for "you can select this", and this one already is
+        // selected.
+        &:hover {
+            background: var(--pane-tab-bg, var(--block-bg-color));
+        }
         // Subtle bottom-border that visually connects the active tab to the
         // pane content below (the strip's own border-bottom is hidden under
         // the active tab via the negative margin trick). Matches this tab's

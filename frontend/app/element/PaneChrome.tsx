@@ -25,6 +25,7 @@ import {
     computeBlockTabPillBg,
     computeBlockTabPillNeutralBg,
     computeFocusRingBorderColor,
+    computeMixedPaneHeaderBg,
 } from "@/app/block/blockframe";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
@@ -189,14 +190,18 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             distinct.add(computeBlockColorBg(meta, isLightTheme));
             if (distinct.size > 1) break;
         }
-        const only = distinct.size === 1 ? [...distinct][0] : undefined;
-        if (only != null) return only;
-        // Same neutral an uncolored PILL resolves to (computeBlockTabPillNeutralBg)
-        // — "the tail went neutral" and "this pill has no color" must never
-        // be two different neutrals in the same row. Keyed on the active
-        // block's meta, since that's the block whose header this is.
-        const activeMeta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))()?.meta;
-        return computeBlockTabPillNeutralBg(activeMeta, isLightTheme);
+        // The tabs agree — hand back NOTHING and let BlockFrame_Header do
+        // exactly what it always did (the active block's own color, else
+        // its agent/non-agent default). That covers both "they all share a
+        // color" (the active block resolves to that same color anyway) and
+        // "none of them has one", so an uncolored single-agent pane keeps
+        // its untouched default instead of being forced to a value this
+        // memo picked. Only a genuinely mixed pane needs an override.
+        if (distinct.size <= 1) return undefined;
+        // One value per theme, independent of every block's meta — see
+        // computeMixedPaneHeaderBg for why the pill's own neutral (which
+        // varies by meta.view) is the wrong thing here (reagent P1).
+        return computeMixedPaneHeaderBg(isLightTheme);
     });
 
     // Rename (double-click a pill). The override shows the new name at once,

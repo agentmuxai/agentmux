@@ -44,15 +44,17 @@ export const paneTabItemType = "PANE_TAB_ITEM";
  *  hue/identity-color system already gives a block (blockframe.tsx):
  *  `underline` is the vivid border-strength color (shown only on the
  *  active tab, replacing the generic `--accent-color`); `background` is
- *  the same darkened/muted tone the block's OWN header would show
- *  (shown only on inactive tabs, so a background tab still reads as
- *  "this one's color" instead of going fully transparent). Either can be
- *  absent on its own (a block with no color assigned yields both
- *  undefined) — callers fall back to the strip's existing plain chrome.
- *  `neutralBackground` is the opaque resting background for a tab with no
- *  `background` of its own — needed wherever the strip sits on a tinted
- *  surface (PaneChrome's header takes the ACTIVE tab's color), where the
- *  default transparent pill would show that tint through. */
+ *  the same darkened/muted tone the block's OWN header would show, on
+ *  EVERY tab that has one — active included
+ *  (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md §2.2; it used to be
+ *  inactive-only, which left the selected tab as the only colorless pill
+ *  in the strip once the header behind it stopped carrying the color).
+ *  Either can be absent on its own (a block with no color assigned yields
+ *  both undefined) — callers fall back to the strip's existing plain
+ *  chrome. `neutralBackground` is the opaque resting background for a tab
+ *  with no `background` of its own — needed wherever the strip sits on a
+ *  tinted surface, where the default transparent pill would show that
+ *  tint through. */
 export interface PaneTabColors {
     underline?: string;
     background?: string;
@@ -528,13 +530,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         props.onClose?.(id());
     };
 
-    // Only meaningful for a background (inactive) pill — an active pill's
-    // background stays the plain `--block-bg-color` connecting it to the
-    // pane content below (unchanged design intent, PaneTabStrip.scss); its
-    // OWN color shows instead as the underline just below. Read via a CSS
-    // custom property (not a direct inline `background-color`) so the
-    // existing `:hover` rule's plain `background` declaration still wins on
-    // hover, same pattern as tab.tsx's `--tab-color`.
+    // Applies to every pill, active included: `--pane-tab-bg` is what both
+    // the resting rule and `&--active` resolve, so a selected tab paints
+    // its own color too and only falls back to the plain
+    // `--block-bg-color` when it has none
+    // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md §2.2). Read via a CSS
+    // custom property rather than a direct inline `background-color` so the
+    // stylesheet keeps control of precedence across the resting / hover /
+    // active rules, same pattern as tab.tsx's `--tab-color`.
     const colorStyle = (): JSX.CSSProperties => {
         const c = props.getColor?.(props.tab);
         if (!c) return {};

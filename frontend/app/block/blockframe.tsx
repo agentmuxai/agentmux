@@ -96,6 +96,27 @@ export function computeBlockTabPillNeutralBg(blockMeta: Block["meta"] | undefine
 }
 
 /**
+ * Header background for a pane whose tabs do NOT agree on a single color —
+ * SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md.
+ *
+ * Deliberately takes no block meta. `computeBlockTabPillNeutralBg` above
+ * resolves to two different concrete dark-theme colors depending on
+ * `meta.view` (agent vs not), which is correct for a PILL — a pill belongs
+ * to exactly one block. It is wrong for the pane header, which belongs to
+ * the whole pane: feeding it the ACTIVE block's meta made the tail's color
+ * change when you switched between an agent tab and a terminal tab in the
+ * same mixed pane — reintroducing, in the neutral branch, the exact
+ * "the tail tracks the active tab" bug the spec exists to remove
+ * (reagent P1, PR #3492).
+ *
+ * A mixed pane has no single `view` to consult, so this hardcodes the
+ * non-agent side of that split: one value per theme, for every pane.
+ */
+export function computeMixedPaneHeaderBg(isLightTheme: boolean): string {
+    return isLightTheme ? "var(--block-bg-solid-color)" : NON_AGENT_DEFAULT_HEADER_BG;
+}
+
+/**
  * Build a "Pane Color" submenu — mirrors the "Replace With..." submenu pattern
  * (pane-actions.ts). Looks and acts exactly like the rest of the context menu:
  * expands on hover, fully clickable, consistent with every other menu. Each

@@ -58,14 +58,24 @@ in the pane (§3.1 defines "effective"), in tab order.
 Every pill keeps its own color. The **active** pill needed one follow-up
 change to make that true — see §2.2.
 
-The "app default" is the same value an uncolored pane's header shows
-today, and the same value `computeBlockTabPillNeutralBg` already returns
-for an uncolored pill — `NON_AGENT_DEFAULT_HEADER_BG`
-(`hsl(220, 12%, 16%)`) on a dark theme for a non-agent pane, and
-`var(--block-bg-solid-color)` on a light theme or for an agent pane.
-Reusing that function is the point: "the tail went neutral" and "this
-pill has no color" must never resolve to two different neutrals in the
-same row.
+The "app default" is **one value per theme, for every pane**
+(`computeMixedPaneHeaderBg`): `NON_AGENT_DEFAULT_HEADER_BG`
+(`hsl(220, 12%, 16%)`) on a dark theme, `var(--block-bg-solid-color)` on
+a light one.
+
+It deliberately does **not** reuse `computeBlockTabPillNeutralBg`, which
+resolves to two different dark-theme colors depending on `meta.view`
+(agent vs not). That split is right for a *pill* — a pill belongs to one
+block. It is wrong for the header, which belongs to the whole pane: the
+first cut passed it the ACTIVE block's meta, so in a mixed
+agent-plus-terminal pane (this spec's own motivating example) the tail
+changed color when you switched between them — reintroducing, inside the
+neutral branch, the exact bug this spec exists to remove (reagent P1, PR
+#3492). A mixed pane has no single `view` to consult, so there must be no
+`view` in the input at all.
+
+When the tabs **do** agree, the header gets no override whatsoever and
+`BlockFrame_Header` keeps doing exactly what it always did — see §3.2.
 
 ### 2.1 Why this rule
 
@@ -95,7 +105,14 @@ row still expressed it. Neutralizing the tail removed the thing that was
 compensating.
 
 So `&--active` now resolves `var(--pane-tab-bg, var(--block-bg-color))`:
-its own color when it has one, the plain surface when it doesn't. The
+its own color when it has one, the plain surface when it doesn't. It
+needs a `&--active:hover` restatement to survive: the base `&:hover`
+rule is `.pane-tab:hover`, specificity (0,2,0) against `&--active`'s
+(0,1,0), so it otherwise wins on the active tab and repaints it with the
+generic tint over `--pane-tab-neutral-bg` — throwing the color straight
+back away (reagent P1, PR #3492). That restatement carries no hover tint,
+for the same reason `&--colored:hover:not(&--active)` skips the active
+tab: hover says "you can select this", and this one already is. The
 original "the active tab shows the content surface, connecting to the
 pane body below" intent is still served — by the underline immediately
 below it, which was always the explicit signal for that connection.
@@ -135,9 +152,16 @@ there, next to the existing `tabColors` memo (§ `PaneChrome.tsx:134`),
 which walks `tabIds()`, collects the distinct `computeBlockColorBg`
 results, and returns:
 
-- the single shared color, when the set has exactly one member and that
-  member is defined;
-- otherwise `computeBlockTabPillNeutralBg(activeMeta, isLightTheme)`.
+- `undefined` when the set has 0 or 1 members — the tabs agree, so hand
+  back nothing and let `BlockFrame_Header` run its existing logic
+  untouched. That covers "they all share a color" (the active block
+  resolves to that same color anyway) *and* "none of them has one" (an
+  uncolored agent pane keeps its untouched default rather than being
+  forced to a value this memo chose). It is also what makes "single-tab
+  panes are byte-identical" true by construction rather than by matching
+  a value;
+- otherwise `computeMixedPaneHeaderBg(isLightTheme)` — no block meta in
+  the input, per §2.
 
 Pass it to `BlockFrame` as a new optional prop on `BlockFrameProps`
 (`blocktypes.ts`, beside `leadingTabStrip` — the prop is only ever set by
