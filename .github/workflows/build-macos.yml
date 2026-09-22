@@ -10,7 +10,6 @@ name: build-macos
 #   APPLE_ID                     Apple ID email for notarytool
 #   APPLE_PASSWORD               App-specific password (appleid.apple.com)
 #   APPLE_TEAM_ID                10-char Team ID
-#   A5AF_PACKAGES_TOKEN          npm GitHub Packages token (@a5af scope)
 #   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 #
 # See docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md for full design notes.
@@ -105,14 +104,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-
-      - name: Auth npm for @a5af GitHub Packages
-        shell: bash
-        run: |
-          {
-            echo "@a5af:registry=https://npm.pkg.github.com"
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
-          } >> .npmrc
 
       - name: Install frontend dependencies
         run: npm install
