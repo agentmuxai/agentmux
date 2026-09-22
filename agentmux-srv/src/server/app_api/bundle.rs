@@ -345,7 +345,7 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.self.get: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 Ok(Some(bundle_self_get_impl(&state, &req.agent_id).await?))
             })
         })
@@ -402,7 +402,7 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("agent.project_instructions: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
 
                 let agent = resolve_agent_for_s1(&state, &req.agent_id)
                     .map_err(|e| format!("agent.project_instructions: {e}"))?;

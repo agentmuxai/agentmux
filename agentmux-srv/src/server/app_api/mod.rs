@@ -2738,12 +2738,70 @@ pub(super) fn find_editor_block(mstore: &Store, tab_id: &str) -> Result<Option<B
 // S1 enforcement helper
 // ---------------------------------------------------------------------------
 
-pub(super) fn check_s1(ctx: &RpcContext, req_agent_id: &str) -> Result<(), String> {
-    if ctx.agent_id.is_empty() {
+/// S1: the caller may only act on itself.
+///
+/// `ctx.agent_id` is stamped at `bus:register` and is the agent's slug;
+/// `req_agent_id` is whatever the request named. Both are compared **as
+/// canonical `db_agents.id`s** when they are not already byte-identical, so a
+/// caller that authenticates with its slug and names itself by id (or by a
+/// differently-cased slug) is recognised as itself.
+///
+/// **Both sides resolve, or neither does.** Phase 4 of
+/// `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` §6 proposed stamping the
+/// resolved id into `RpcContext` at registration instead, and flags the hazard
+/// itself: resolving one side of this equality while the other stays a slug
+/// silently denies **every** caller, turning an authz boundary into a
+/// permanent outage that no test of the allow path would catch. Resolving both
+/// here, at the single point of comparison, has no such window — there is no
+/// deploy ordering in which one side has migrated and the other has not.
+///
+/// The byte-equality fast path is deliberate and load-bearing: it is the
+/// overwhelmingly common case, it costs no store lookup, and it makes this
+/// function's behaviour for existing callers *identical* to the pre-migration
+/// version. Resolution only ever runs where the old code would already have
+/// returned `FORBIDDEN`, so this can admit calls that used to be rejected but
+/// can never reject one that used to be admitted.
+///
+/// Admitting more is safe here precisely because resolution is per-input and
+/// fails closed: two different inputs resolve to one id only when they name
+/// one agent, and an ambiguous slug (two agents, one slug) resolves to
+/// `Err` on both sides — so a collision denies rather than granting.
+///
+/// A failed resolution is reported as `agent_id mismatch`, never "no such
+/// agent": whether some other agent exists is not something an unauthorised
+/// caller should be able to probe through this boundary.
+/// Takes the store rather than `&AppState` because the handlers do not agree
+/// on what they capture — some clone the whole state into the closure, others
+/// clone `mstore` alone — and a borrowed `&AppState` cannot escape into a
+/// `'static` future.
+pub(super) fn check_s1(
+    store: &crate::backend::storage::store::Store,
+    ctx: &RpcContext,
+    req_agent_id: &str,
+) -> Result<(), String> {
+    check_s1_resolved(store, &ctx.agent_id, req_agent_id)
+}
+
+/// `check_s1`'s decision over plain strings, so it can be tested without
+/// constructing an `RpcContext`.
+fn check_s1_resolved(
+    store: &crate::backend::storage::store::Store,
+    ctx_agent_id: &str,
+    req_agent_id: &str,
+) -> Result<(), String> {
+    if ctx_agent_id.is_empty() {
         return Err("FORBIDDEN: unauthenticated agent connection".to_string());
     }
-    if ctx.agent_id != req_agent_id {
-        return Err("FORBIDDEN: agent_id mismatch".to_string());
+    if ctx_agent_id == req_agent_id {
+        return Ok(());
+    }
+    let mismatch = || "FORBIDDEN: agent_id mismatch".to_string();
+    let caller = crate::backend::agent_resolve::resolve_agent_id(store, ctx_agent_id)
+        .map_err(|_| mismatch())?;
+    let target =
+        crate::backend::agent_resolve::resolve_agent_id(store, req_agent_id).map_err(|_| mismatch())?;
+    if caller != target {
+        return Err(mismatch());
     }
     Ok(())
 }
@@ -4323,5 +4381,147 @@ mod identity_self_accounts_tests {
         let accounts = result["accounts"].as_array().unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0]["account_id"], json!("acct-good"));
+    }
+}
+
+#[cfg(test)]
+mod s1_tests {
+    use super::check_s1_resolved;
+    use crate::backend::storage::agents::test_agent_def;
+    use crate::backend::storage::store::Store;
+
+    // `resolve_agent_id`'s registry tier reads the real `~/.agentmux` unless
+    // AGENTMUX_HOME_OVERRIDE is set, which would make the deny assertions
+    // depend on which agents happen to be running. Same crate-wide guard the
+    // env var's other consumers take.
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_GUARD;
+
+    fn with_store<T>(f: impl FnOnce(&Store) -> T) -> T {
+        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path().to_str().unwrap());
+        let store = Store::open_in_memory().unwrap();
+        let out = f(&store);
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        out
+    }
+
+    fn agent(store: &Store, id: &str, name: &str, slug: &str) {
+        let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+        def.slug = slug.to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        assert_eq!(def.slug, slug, "fixture precondition: slug not suffix-resolved");
+    }
+
+    #[test]
+    fn allows_a_caller_acting_on_itself_by_the_same_string() {
+        with_store(|store| {
+            // The fast path: no store lookup, behaviour identical to the
+            // pre-migration byte comparison.
+            assert!(check_s1_resolved(store, "agenty", "agenty").is_ok());
+        });
+    }
+
+    #[test]
+    fn denies_an_unauthenticated_connection() {
+        with_store(|store| {
+            let err = check_s1_resolved(store, "", "agenty").unwrap_err();
+            assert!(err.contains("unauthenticated"), "got: {err}");
+        });
+    }
+
+    // The assertion that matters. §7 warns that testing only the allow path
+    // would let a half-migrated comparison through: an implementation that
+    // resolved one side and not the other would deny everyone, and one that
+    // resolved nothing would admit everyone. This pins the deny direction.
+    #[test]
+    fn denies_a_caller_naming_a_different_agent() {
+        with_store(|store| {
+            agent(store, "def-a", "Agent A", "agent-a");
+            agent(store, "def-b", "Agent B", "agent-b");
+
+            let err = check_s1_resolved(store, "agent-a", "agent-b").unwrap_err();
+            assert!(err.contains("mismatch"), "got: {err}");
+            // …and by the other agent's canonical id, which is the form this
+            // change newly teaches the comparison to understand.
+            assert!(check_s1_resolved(store, "agent-a", "def-b").is_err());
+        });
+    }
+
+    // The capability this phase adds: the caller authenticates with its slug
+    // (what `bus:register` stamps) but names itself by canonical id. Byte
+    // comparison rejected that; both sides now resolve to the same id.
+    #[test]
+    fn allows_a_caller_that_names_itself_by_canonical_id() {
+        with_store(|store| {
+            agent(store, "def-a", "Agent A", "agent-a");
+            assert!(check_s1_resolved(store, "agent-a", "def-a").is_ok());
+        });
+    }
+
+    // The spec's named hazard, pinned in the direction that actually bites.
+    // §6 Phase 4 proposed stamping the RESOLVED id into `RpcContext` at
+    // `bus:register`; had that landed while request bodies kept sending slugs,
+    // every caller would compare `"def-a" != "agent-a"` and be denied — a
+    // total authz outage that no allow-path test using matching forms would
+    // notice. Both sides resolving makes the comparison indifferent to which
+    // form either side carries, so that deploy ordering cannot happen.
+    #[test]
+    fn allows_a_caller_stamped_with_a_canonical_id_that_names_itself_by_slug() {
+        with_store(|store| {
+            agent(store, "def-a", "Agent A", "agent-a");
+            assert!(check_s1_resolved(store, "def-a", "agent-a").is_ok());
+        });
+    }
+
+    // A slug shared by two agents identifies neither, so it must not authorize
+    // anything — resolution fails closed on both sides and the caller is
+    // denied rather than silently granted one of the two.
+    #[test]
+    fn denies_a_caller_whose_slug_is_ambiguous() {
+        with_store(|store| {
+            let mut tmpl = test_agent_def("tmpl-1", "Shared Template", "claude", "agent", 1, "");
+            tmpl.slug = "shared-template".to_string();
+            tmpl.is_seeded = 1;
+            store.agent_def_insert(&mut tmpl).unwrap();
+
+            let mut a = crate::backend::storage::agents::AgentInstance {
+                id: "launch-a".to_string(),
+                definition_id: "tmpl-1".to_string(),
+                parent_instance_id: String::new(),
+                block_id: String::new(),
+                session_id: String::new(),
+                status: "init".to_string(),
+                github_context: String::new(),
+                started_at: 1,
+                ended_at: 0,
+                created_at: 1,
+                identity_id: String::new(),
+                memory_id: String::new(),
+                instance_name: "Launch A".to_string(),
+                working_directory: String::new(),
+                display_hidden: false,
+            };
+            store.instance_create(&a).unwrap();
+            a.id = "launch-b".to_string();
+            a.instance_name = "Launch B".to_string();
+            store.instance_create(&a).unwrap();
+
+            let err = check_s1_resolved(store, "shared-template", "tmpl-1").unwrap_err();
+            assert!(err.contains("mismatch"), "got: {err}");
+        });
+    }
+
+    // An unresolvable agent must not be distinguishable from a mismatch:
+    // whether some other agent exists is not something this boundary should
+    // let an unauthorized caller probe.
+    #[test]
+    fn reports_an_unknown_agent_as_a_mismatch_not_as_not_found() {
+        with_store(|store| {
+            agent(store, "def-a", "Agent A", "agent-a");
+            let err = check_s1_resolved(store, "agent-a", "no-such-agent").unwrap_err();
+            assert!(err.contains("mismatch"), "got: {err}");
+            assert!(!err.to_lowercase().contains("unknown"), "leaks existence: {err}");
+        });
     }
 }

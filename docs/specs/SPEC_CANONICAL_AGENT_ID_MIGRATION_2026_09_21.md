@@ -392,18 +392,59 @@ deciding, not assumed here.
 separate defect in the same files and should land on its own, ideally first.
 
 ### Phase 4 — S1 WS-RPC authorization (§2 #3)
-Highest-severity category (this is an authz boundary, not just a lookup),
-but mechanically simple once Phase 0 exists: `RpcContext.agent_id` gets
-stamped with the *resolved* id at `bus:register` time
-(`server/websocket.rs`) instead of the raw slug, and `check_s1`'s equality
-check is then comparing ids on both sides unchanged. The 22 call sites
-(§2.5.4) need no individual changes if `req.agent_id` is *also* resolved
-before reaching `check_s1` — confirm whether `req.agent_id` at each call
-site is itself a slug needing the same resolve-before-compare treatment,
-since if only one side of the equality is resolved and the other isn't,
-this phase would silently and permanently break authorization for every
-caller rather than just failing loudly — this needs explicit, deliberate
-verification during implementation, not assumed from this spec alone.
+
+> **Implemented, but not the way this section proposed.** Resolution happens
+> inside `check_s1` — both sides, at the single point of comparison — rather
+> than by stamping `RpcContext.agent_id` at `bus:register`. Rationale below;
+> the original proposal is kept for the record because the hazard it flagged
+> is exactly what drove the change.
+
+As originally written: highest-severity category (this is an authz boundary,
+not just a lookup), but mechanically simple once Phase 0 exists —
+`RpcContext.agent_id` gets stamped with the *resolved* id at `bus:register`
+time (`server/websocket.rs`) instead of the raw slug, and `check_s1`'s
+equality check is then comparing ids on both sides unchanged. The 22 call
+sites (§2.5.4) need no individual changes if `req.agent_id` is *also*
+resolved before reaching `check_s1` — *"if only one side of the equality is
+resolved and the other isn't, this phase would silently and permanently break
+authorization for every caller rather than just failing loudly."*
+
+**Why the implementation diverged.** That warning is not a risk to be verified
+away; it is inherent to splitting the two sides across two places. Stamping at
+registration migrates the caller's side at deploy time, while the request
+side changes only when every MCP client and frontend caller starts sending
+ids — so there is a window, of unbounded length, in which the two sides carry
+different forms and every S1 call is denied. No amount of care at
+implementation time removes it, because the two halves are not deployed
+together.
+
+Resolving both sides inside `check_s1` has no such window: whichever form
+either side happens to carry, the comparison is made on canonical ids.
+Specifically:
+
+- A byte-equality fast path runs first, so the common case costs no store
+  lookup and behaves *identically* to the pre-migration comparison.
+- Resolution only runs where the old code would already have returned
+  `FORBIDDEN`. This phase can therefore admit calls that used to be rejected,
+  and can never reject one that used to be admitted.
+- Admitting more is safe because resolution is per-input and fails closed: two
+  inputs resolve to one id only when they name one agent, and an ambiguous
+  slug resolves to `Err` on *both* sides, so a collision denies rather than
+  granting one of the two agents' access.
+- A failed resolution reports `agent_id mismatch`, never "no such agent", so
+  the boundary cannot be used to probe which agents exist.
+
+`check_s1` takes the store rather than `&AppState` because the handlers do not
+agree on what they capture — some clone the whole state into the closure,
+others clone `mstore` alone — and a borrowed `&AppState` cannot escape into a
+`'static` future.
+
+Per §7, the tests pin the deny direction, not just the allow path. Two
+mutations were run to confirm they are load-bearing: skipping resolution
+entirely (admit anything) fails exactly the three deny tests, and the
+half-migrated comparison this section warned about — resolved caller against
+raw request value — fails exactly the one test written for it and nothing
+else.
 
 ### Phase 5 — Cron + frontend registration + bashwrap cleanup
 Smaller follow-ups, safe to batch into one PR: `CronCreate`'s `target`

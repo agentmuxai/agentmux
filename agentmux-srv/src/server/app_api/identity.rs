@@ -18,7 +18,7 @@ fn register_identity_self_accounts(engine: &Arc<WshRpcEngine>, state: &AppState)
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("identity.self.accounts: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 Ok(Some(identity_self_accounts_impl(&state, &req.agent_id).await?))
             })
         }),
@@ -51,7 +51,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("identity.account.upsert: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 if req.secret.is_empty() {
                     return Err("identity.account.upsert: secret must not be empty".to_string());
                 }
@@ -241,7 +241,7 @@ fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppSta
                 if !req.account_id.is_empty() {
                     // Stored-account path: S1 + ownership verification, then probe
                     // using the stored keychain secret (shared with the REST path).
-                    check_s1(&ctx, &req.agent_id)?;
+                    check_s1(&state.mstore, &ctx, &req.agent_id)?;
                     return Ok(Some(
                         identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await?,
                     ));
@@ -278,7 +278,7 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String, provider: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
 
                 // Link rows are keyed by definition id, not the S1 slug —
                 // unlinking by slug always matched zero rows (silent no-op).
