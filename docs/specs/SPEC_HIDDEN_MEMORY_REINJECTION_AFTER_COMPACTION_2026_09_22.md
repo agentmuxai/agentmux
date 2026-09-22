@@ -214,6 +214,12 @@ applies directly.
   by the existing send path for a structurally identical case.
 
 **Still genuinely open after this pass (real unknowns, not just untraced code):**
+- **The hidden-response suppression gap (§3.3, "newly discovered, third
+  pass")** — the single most important unresolved item as of this update.
+  Not a code-reading gap; a design decision (two-phase hidden turn window)
+  that still needs to be built and tested. Blocks calling this feature
+  "hidden" honestly until closed — the current implementation state hides
+  only the outgoing side.
 - Whether the `MemoryReinjected` reducer command (§3.3) should be dispatched
   from `useAgentStream.ts` synchronously, in the same code path that already
   dispatches `CompactionBoundary` — this is the natural placement (dispatch
@@ -361,6 +367,36 @@ an ordinary message — still calling the same underlying send RPC underneath
 with the full `<system-reminder>`-wrapped content, just skipping the
 pending-zone/promotion path that would otherwise create a visible
 `UserMessageNode`.
+
+**Newly discovered, 2026-09-22, third pass (implementation attempt surfaced
+this — not caught by code reading alone):** suppressing the outgoing message
+is only half the problem. This is a genuine CLI turn — the model produces a
+real response to it, same as any other message. If only the *outgoing* side
+is hidden, that response streams through the normal pipeline unmodified and
+renders as an ordinary, visible `AgentMessageNode` — a visible assistant
+reply to an invisible user message. Two failure modes, either one bad
+enough to block on: it can leak information about what was reinjected (the
+model may reference specific memory content in acknowledging it), or at
+minimum it reads as a non-sequitur assistant turn with no visible prompt.
+
+**Resolution, proposed here (not yet built or tested):** treat this as a
+genuine two-phase hidden window, mirroring `CompactionStarted`/
+`CompactionBoundary`'s own start/end shape rather than a single event.
+`MemoryReinjectionStarted` (dispatched at send time) sets a
+`hidingReinjectionTurn: true`-shaped pane flag alongside the normal
+turn-bookkeeping `TurnStart` already needs (so `workingFromPhase`/queued-
+while-busy logic — §2 — stays correct); every node-creation path that would
+otherwise push an `AgentMessageNode`/tool node while that flag is set
+suppresses instead, until the turn's own `Done`/`result` arrives, at which
+point `MemoryReinjectionBoundary` clears the flag AND pushes the single
+`MemoryReinjectionNode` label (§3.2) — so the whole hidden exchange, both
+directions, collapses to one label row, not just its first half.
+
+This is real new surface area — a pane-level "suppress this turn's visible
+output" mode doesn't exist anywhere in the codebase today — and needs its
+own careful test coverage (does it correctly re-enable rendering on error/
+interrupt, not just the success path?) before being trusted. Flagged as the
+next concrete implementation step, not designed further here.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 
