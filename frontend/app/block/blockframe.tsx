@@ -34,6 +34,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
+import { partitionHeaderElems } from "./header-elems";
 import { buildPaneContextMenu } from "./pane-actions";
 import {
     headerBgForEffectiveColor,
@@ -601,30 +602,46 @@ function BlockFrame_Header(
         preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null,
     );
 
-    const headerTextElems = createMemo(() => {
-        const elems: JSX.Element[] = [];
+    // Only *passive* header content moves into the hover tooltip; real
+    // controls keep rendering inline on the row exactly as they always
+    // did. See header-elems.ts for why (reagent P1 on PR #3488: the
+    // terminal's "Multi Input ON" button became unclickable, because the
+    // pointer has to leave the header — dismissing the tooltip — to reach
+    // it, and a persistent mode warning ended up hover-gated).
+    const splitHeaderElems = createMemo(() => {
         const htu = headerTextUnion();
+        // A bare string is always passive.
         if (typeof htu === "string") {
-            if (!util.isBlank(htu)) {
-                elems.push(
-                    <div class="block-frame-text ellipsis">
-                        &lrm;{htu}
-                    </div>
-                );
-            }
-        } else if (Array.isArray(htu)) {
-            elems.push(...renderHeaderElements(htu, props.preview));
+            if (util.isBlank(htu)) return { inline: [] as HeaderElem[], tooltip: [] as HeaderElem[] };
+            return { inline: [] as HeaderElem[], tooltip: [{ elemtype: "text", text: htu } as HeaderElem] };
         }
-        return elems;
+        if (Array.isArray(htu)) return partitionHeaderElems(htu);
+        return { inline: [] as HeaderElem[], tooltip: [] as HeaderElem[] };
     });
-    // True when the textelems wrapper has visible INLINE content — just the
-    // error indicator now that the summary text itself only ever renders
-    // inside AnchoredTooltip (SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md).
-    // Used to conditionally apply max-width to the name region — see
-    // block.scss .block-frame-default-header--has-summary. Squeezing the
-    // name region for text that no longer takes any inline row space would
-    // shrink it for no reason.
-    const hasSummary = createMemo(() => props.error != null);
+    const inlineHeaderElems = createMemo(() => renderHeaderElements(splitHeaderElems().inline, props.preview));
+    const tooltipHeaderElems = createMemo(() => {
+        const htu = headerTextUnion();
+        // Preserve the plain-string rendering exactly (`.block-frame-text
+        // ellipsis` + the LRM mark) rather than routing it through
+        // HeaderTextElem, which wraps text differently.
+        if (typeof htu === "string") {
+            return util.isBlank(htu)
+                ? []
+                : [
+                      <div class="block-frame-text ellipsis">
+                          &lrm;{htu}
+                      </div>,
+                  ];
+        }
+        return renderHeaderElements(splitHeaderElems().tooltip, props.preview);
+    });
+    // True when the textelems wrapper has visible INLINE content — the
+    // error indicator, or an interactive header element that stayed on the
+    // row. Passive text now only renders inside AnchoredTooltip
+    // (SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md), so it must not
+    // squeeze the name region. Used to conditionally apply max-width to
+    // that region — see block.scss .block-frame-default-header--has-summary.
+    const hasSummary = createMemo(() => props.error != null || splitHeaderElems().inline.length > 0);
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         // One rule for both color sources — see headerBgForEffectiveColor's
@@ -705,6 +722,7 @@ function BlockFrame_Header(
                 />
             </Show>
             <div class="block-frame-textelems-wrapper">
+                {inlineHeaderElems()}
                 <Show when={props.error != null}>
                     <div
                         class="iconbutton disabled"
@@ -719,8 +737,8 @@ function BlockFrame_Header(
             </div>
             <AnchoredTooltip
                 anchor={() => headerRef ?? null}
-                visible={headerHovering() && headerTextElems().length > 0}
-                content={<>{headerTextElems()}</>}
+                visible={headerHovering() && tooltipHeaderElems().length > 0}
+                content={<>{tooltipHeaderElems()}</>}
             />
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons

@@ -91,21 +91,76 @@ common to both today. Extending the hover region to the full pane body
 would require touching both trees; deferred as a follow-up if it turns
 out the header row alone isn't the natural gesture users reach for.
 
+## 3a. Only *passive* content moves — controls stay on the row
+
+The first cut of this change moved **all** of `headerTextUnion()` into the
+tooltip. That was wrong: `viewText()` is not uniformly informational. The
+same array also carries real controls, and two things broke (reagent P1 on
+PR #3488, raised twice — on open and again on re-review):
+
+1. **A control became unreachable.** `termViewModel`'s "Multi Input ON"
+   textbutton (`title: "…click to disable"`, `onClick:
+   setIsTermMultiInput(false)`) now existed only inside the tooltip. The
+   tooltip is anchored `placement: "bottom"` with `offset(6)` via a
+   `Portal`, and closes on the header's own `onMouseLeave` with no delay
+   and no hover-bridging — so a pointer travelling from the header toward
+   the button leaves the header's bounding box, and dismisses the button,
+   before reaching it. Not clickable by mouse at all.
+2. **A persistent mode warning got hover-gated.** "Multi Input ON" is
+   telling the user their keystrokes are going to *every* connected
+   terminal. That has to be visible without being asked for.
+
+Hover-bridging the tooltip (a close delay plus listeners on the floated
+content) would have fixed (1) and not (2). The fix is instead to
+**partition** the elements — `frontend/app/block/header-elems.ts`:
+
+- `isInteractiveHeaderElem(elem)` — true for anything the user can act on.
+  `input`/`toggleiconbutton`/`connectionbutton`/`menubutton` always;
+  `iconbutton` only with a real `click` and neither `noAction` nor
+  `disabled` (so termViewModel's exit-code glyph stays passive);
+  `textbutton` and `text` only with an `onClick`; `div` if it handles
+  anything itself or contains anything that does, recursively.
+- `partitionHeaderElems(elems)` — `{ inline, tooltip }`, order preserved
+  within each. A `div` is never split across the two: its children are
+  laid out by the div itself, so one interactive descendant pins the whole
+  div inline.
+
+`inline` renders in `.block-frame-textelems-wrapper` exactly as everything
+did before this spec; only `tooltip` goes to `AnchoredTooltip`. An unknown
+future `elemtype` defaults to passive — a new *control* adds its case,
+whereas defaulting the other way would silently pin every new
+informational element to the row and re-create the width problem this
+spec exists to fix.
+
+This keeps the original goal intact: the squeeze was caused by long
+command lines and OSC titles, all of which are passive. The controls that
+stay are short and few.
+
+The helper lives in its own import-free module rather than in
+`blockframe.tsx` specifically so it is unit-testable — see §5.
+
 ## 4. Side effect: `hasSummary`'s meaning narrowed
 
 `hasSummary` (drives the `--has-summary` CSS class, which caps the pane
 name's width at 60% on agent panes to make room for text alongside it)
 used to be true whenever there was an error **or** non-empty header text.
-Since the text itself no longer takes any inline row space, squeezing the
-name region for it made no sense anymore — `hasSummary` now reflects only
-`props.error != null`, the one thing still rendered inline in
+Since passive text no longer takes any inline row space, squeezing the
+name region for it made no sense anymore — `hasSummary` now reflects
+`props.error != null` **or** a non-empty `inline` partition (§3a), i.e.
+exactly the things still rendered inline in
 `.block-frame-textelems-wrapper`.
 
 ## 5. What shipped / verification
 
 - `AnchoredTooltip` component and its wiring into `BlockFrame_Header`
   (`frontend/app/block/blockframe.tsx`).
-- `hasSummary` narrowed to `props.error != null` (§4).
+- `frontend/app/block/header-elems.ts` — the interactive/passive partition
+  (§3a), with 13 unit tests in `header-elems.test.ts` covering every
+  `elemtype`, the `noAction`/`disabled`/missing-handler cases, nested
+  divs, and order preservation. Being an import-free pure module, it
+  needs no mocking, which is what makes the part of this change that
+  actually regressed testable at all.
+- `hasSummary` widened back to cover inline controls (§4).
 - No changes to `termViewModel.ts`/`agent-model.ts` — this only changes
   *where* `viewText()`'s output renders, not what any view type produces.
 
