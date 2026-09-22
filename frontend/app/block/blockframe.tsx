@@ -825,20 +825,6 @@ function ConnStatusOverlay({
 }
 
 /**
- * The same per-block/tab border-color resolution `BlockMask` (below) paints
- * onto `.block-mask` — extracted so hoisted pane chrome (AgentPaneChrome,
- * TermPaneChrome) can paint the IDENTICAL color onto its own outer selection
- * ring instead of hardcoding `--accent-color`. Without this, a pane's
- * `frame:activebordercolor`/`frame:hue` (agent identity color seeded at
- * launch, SPEC_AGENT_COLOR_2026_08_08.md, or an explicit "Pane Color" picker
- * choice) or tab-level `bg:bordercolor`/`bg:activebordercolor` would still
- * compute correctly here but never reach the new outer ring that replaced
- * `.block-mask` as the visible perimeter once chrome was hoisted outside it
- * (codex P2, reagent P2, PR #3226). Returns `undefined` when nothing
- * overrides the default — callers fall back to their own default (accent
- * when focused, the dim border color otherwise) via `var(--x, <default>)`.
- */
-/**
  * The vivid, border-strength color a block's OWN color resolves to — no
  * tab-level override consulted at all, unlike computeFocusRingBorderColor
  * below (which folds in tabMeta's bg:activebordercolor for the single
@@ -870,6 +856,24 @@ export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefin
     return undefined;
 }
 
+/**
+ * The same per-block/tab border-color resolution `BlockMask` (below) paints
+ * onto `.block-mask` — extracted so hoisted pane chrome (AgentPaneChrome,
+ * TermPaneChrome) can paint the IDENTICAL color onto its own outer selection
+ * ring instead of hardcoding `--accent-color`. Without this, a pane's
+ * `frame:activebordercolor`/`frame:hue` (agent identity color seeded at
+ * launch, SPEC_AGENT_COLOR_2026_08_08.md, or an explicit "Pane Color" picker
+ * choice) or tab-level `bg:bordercolor`/`bg:activebordercolor` would still
+ * compute correctly here but never reach the new outer ring that replaced
+ * `.block-mask` as the visible perimeter once chrome was hoisted outside it
+ * (codex P2, reagent P2, PR #3226). Returns `undefined` when nothing
+ * overrides the default — callers fall back to their own default (accent
+ * when focused, the dim border color otherwise) via `var(--x, <default>)`.
+ *
+ * Unlike computeBlockActiveBorderColor above, this DOES consult tab-level
+ * meta (`bg:activebordercolor` / `bg:bordercolor`), which is why the pill
+ * underlines can't use it — see that function's own comment.
+ */
 export function computeFocusRingBorderColor(
     isFocused: boolean,
     blockMeta: Block["meta"] | undefined,
