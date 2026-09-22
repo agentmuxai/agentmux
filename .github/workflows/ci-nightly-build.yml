@@ -9,10 +9,13 @@ name: CI — nightly cross-platform build + test
 # shipping platforms, nightly, so a Linux/macOS BUILD break is caught instead of
 # shipping unnoticed. NOT packaging — that's Phase B (artifacts).
 #
-# Windows is the REQUIRED leg (primary platform); ubuntu + macOS are NON-BLOCKING
-# (continue-on-error) until greened — same staged approach as before. Standard
-# GitHub-hosted runners only (free on public repos for any workload; only LARGER
-# runners are billed — invariant CI-1). Run on demand via the Actions tab.
+# Windows and ubuntu both BLOCK; macOS is non-blocking (continue-on-error).
+# Ubuntu was advisory "until greened" and is now greened — it also carries the
+# ubuntu-only `RPC bindings are current` gate, which enforced nothing while the
+# leg could not fail (see the `continue-on-error` note on `build-and-test`).
+# Standard GitHub-hosted runners only (free on public repos for any workload;
+# only LARGER runners are billed — invariant CI-1). Run on demand via the
+# Actions tab.
 #
 # --test-threads=1: accumulated test-isolation flakes (process-shared in-memory
 # FileStore, a focus-flag global) flake under parallel runs; serial is
@@ -50,7 +53,24 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    # Windows AND ubuntu block; macOS stays advisory.
+    #
+    # This was `!= 'windows-latest'`, i.e. ubuntu was advisory too — which
+    # silently defeated the superset invariant this workflow exists to provide
+    # (reagentx P1 on #3489). The `RPC bindings are current` step below is
+    # ubuntu-only on purpose (platform-independent output, and the script runs
+    # its own `cargo test`, not worth paying for three times), so under the old
+    # expression it ran on the one leg whose failures were swallowed: RPC
+    # binding drift on `main` would have gone undetected exactly as it did
+    # before this workflow was touched. A gate that cannot fail is not a gate.
+    #
+    # Ubuntu is safe to block on, by the same standard SPEC_CI_CHECK_PLACEMENT_
+    # PROTOCOL_2026_09_21.md applied to ci-pr.yml: the ubuntu leg passed on its
+    # own merits in all 5 most recent nightly runs (job-level conclusions, not
+    # the run-level status that `continue-on-error` masks). macOS keeps
+    # `continue-on-error` — it has no gate of its own that anything depends on,
+    # and is the leg most prone to toolchain churn.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md's contributing
     # cause #1 (no timeout-minutes -> a hung runner occupies the job for
     # GitHub's 360-minute default) was fixed on ci-pr.yml but explicitly
@@ -185,6 +205,20 @@ jobs:
       - name: cargo test -p agentmux-cef --features test-authfile
         run: cargo test -p agentmux-cef --features test-authfile -- --test-threads=1
 
+      # Superset invariant (protocol §3). Needs a Rust toolchain and a built
+      # agentmux-srv, which this job already has, so it belongs here rather
+      # than in the `gates` job. Ubuntu only: the generated output is
+      # platform-independent (.gitattributes normalizes to LF), and this
+      # script runs its own `cargo test -p agentmux-srv export_bindings`,
+      # which is not something to pay for three times across the matrix.
+      #
+      # Ubuntu-only is only sound because the ubuntu leg BLOCKS — see the
+      # `continue-on-error` note on this job. If that is ever loosened back to
+      # advisory, this gate silently stops gating.
+      - name: RPC bindings are current
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/check-rpc-bindings.sh
+
   frontend:
     name: vitest
     runs-on: ubuntu-latest
@@ -197,3 +231,66 @@ jobs:
       - run: npm ci
       - name: vitest run
         run: npx vitest run
+
+  # The superset invariant from
+  # docs/specs/SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md §3: every PR
+  # check must also run here, except the ones that structurally cannot (R1).
+  #
+  # Before this job existed the nightly had 8 steps to the PR checks' 22, so
+  # RPC codegen, type-checking, the color lint and every whole-tree grep gate
+  # ran ONLY on PRs — meaning nothing re-verified them against `main` after
+  # merge. These are all seconds-long and this job runs in parallel with the
+  # 19-37 min build legs, so it does not move the nightly's wall clock.
+  #
+  # DELIBERATELY NOT MIRRORED HERE (protocol R1 — these cannot work on a
+  # schedule, and their absence is a decision, not an oversight):
+  #   * no-coauthor-trailers (separate workflow) reads the PR BODY.
+  #   * The doc RATCHETS and every *changed-files-scoped* gate
+  #     (check-doc-status.sh, check-docs-lifecycle.mjs, gen-docs-index.sh
+  #     --check, check-spec-citations.sh, check-doc-links.mjs,
+  #     check-new-spec-status.mjs) only fail a change that ADDS debt. With no
+  #     diff to attribute debt to they degrade into whole-repo assertions that
+  #     fail forever on the ~165 pre-existing violations — which ci-pr.yml's
+  #     own comment records as how three earlier attempts died.
+  gates:
+    name: PR-parity gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+
+      # Commands below are kept identical to their ci-pr.yml counterparts --
+      # including `tsconfig.citypecheck.json` (not tsconfig.json) and the
+      # `npm run` indirection for the color lint -- so the two cannot drift
+      # into checking subtly different things.
+      - name: tsc --noEmit
+        run: npx tsc --noEmit -p tsconfig.citypecheck.json
+
+      - name: Theme-aware color lint (no hardcoded Tailwind palette colors)
+        run: npm run lint:theme-colors
+
+      - name: RPC codegen hygiene
+        run: node scripts/check-rpc-codegen-hygiene.mjs
+
+      # Whole-tree gates (not changed-files scoped), so they are meaningful
+      # without a PR diff.
+      - name: No living doc references the removed CLAUDE.md
+        run: bash scripts/check-claude-md-references.sh
+      - name: docs/ directory map is accurate
+        run: node scripts/check-docs-dir-map.mjs
+      - name: Menu positioning gate
+        run: bash scripts/check-menu-positioning.sh
+      - name: Scrollbar cursor gate
+        run: bash scripts/check-scrollbar-cursor.sh
+      - name: Ligature font gate
+        run: bash scripts/check-ligature-fonts.sh
+      - name: cef-verify self-test
+        run: bash scripts/cef-verify.test.sh
+      - name: Input-handler layout-read gate
+        run: bash tools/lint/check-input-handler-layout-reads.sh
+      - name: muxbus credential store gate
+        run: bash scripts/check-muxbus-credential-store.sh
