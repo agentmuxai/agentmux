@@ -689,8 +689,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn classified_failure_surfaces_cause_and_stderr() {
-        use std::io::Write as _;
-        use std::os::unix::fs::PermissionsExt as _;
 
         let path = std::env::temp_dir()
             .join(format!("amux-stub-claude-{}.sh", uuid::Uuid::new_v4()));
@@ -745,8 +743,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn classified_failure_reads_error_past_stderr_cap() {
-        use std::io::Write as _;
-        use std::os::unix::fs::PermissionsExt as _;
 
         let path = std::env::temp_dir()
             .join(format!("amux-stub-claude-big-{}.sh", uuid::Uuid::new_v4()));
