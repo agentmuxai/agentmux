@@ -23,13 +23,23 @@
  */
 
 let primaryButtonDown = false;
+const releaseListeners = new Set<() => void>();
 
 function handlePointerDown(e: PointerEvent): void {
     if (e.button === 0) primaryButtonDown = true;
 }
 
 function handlePointerRelease(e: PointerEvent): void {
-    if (e.button === 0) primaryButtonDown = false;
+    if (e.button !== 0) return;
+    primaryButtonDown = false;
+    // Iterating the live Set on purpose, NOT a copy. Set iteration is
+    // defined under concurrent deletion: an entry removed before it is
+    // reached is simply not visited. That is the behaviour we want — if one
+    // listener's teardown unsubscribes another (a component unmounting a
+    // child), the unsubscribed one must not then be called. A defensive
+    // `[...releaseListeners]` copy would call it anyway, which is worse, not
+    // safer.
+    for (const cb of releaseListeners) cb();
 }
 
 function handleWindowBlur(): void {
@@ -48,4 +58,26 @@ if (typeof window !== "undefined") {
 
 export function isPrimaryButtonDown(): boolean {
     return primaryButtonDown;
+}
+
+/**
+ * Run `cb` when the primary button is released. Returns an unsubscribe.
+ *
+ * Exists because gating hover on `isPrimaryButtonDown()` is only half a
+ * rule. The gate drops the mouseenter that arrived mid-drag — and if the
+ * drag ENDS with the cursor still sitting on the same anchor, no further
+ * mouseenter/mouseleave ever fires for it, so the tooltip/peek stays shut
+ * until the user leaves and re-enters. Consumers use this to re-check
+ * `el.matches(":hover")` at the moment the drag ends and open if the
+ * cursor is in fact still there (reagentx P2 on PR #3470, both call
+ * sites).
+ *
+ * Deliberately NOT fired from `handleWindowBlur`: the button state is
+ * reset there because we may never see the pointerup, but the window has
+ * just lost focus, and `:hover` can still match — resyncing then would
+ * pop an overlay onto a background window.
+ */
+export function onPrimaryButtonRelease(cb: () => void): () => void {
+    releaseListeners.add(cb);
+    return () => releaseListeners.delete(cb);
 }

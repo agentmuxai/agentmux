@@ -13,7 +13,7 @@ import {
 import { createEffect, createSignal, JSX, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { Properties as CSSProperties } from "csstype";
-import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
+import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 
 interface TooltipProps {
     children?: JSX.Element;
@@ -91,6 +91,18 @@ function TooltipInner(props: TooltipProps): JSX.Element {
         if (forceOpen() || isPrimaryButtonDown()) return;
         setIsHovering(true);
     };
+
+    // The gate above drops the mouseenter that arrives mid-drag. If the drag
+    // then ends with the cursor still on this anchor, no further mouseenter
+    // ever fires for it and the tooltip stays shut until the user leaves and
+    // comes back. Re-check the real hover state when the button is released
+    // (reagentx P2 on PR #3470).
+    onCleanup(
+        onPrimaryButtonRelease(() => {
+            if (forceOpen()) return;
+            if (referenceEl?.matches(":hover")) setIsHovering(true);
+        }),
+    );
 
     const handleMouseLeave = () => {
         if (forceOpen()) return;
