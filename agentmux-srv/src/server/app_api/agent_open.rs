@@ -813,13 +813,26 @@ pub(crate) async fn open_agent_impl(
                     event_bus.broadcast_mux_obj_updates(&updates);
                 }
 
+                // codex P2 on PR #3513: this used to be safe to hardcode --
+                // before eager resume existed, a freshly created pane could
+                // only ever be `STATUS_INIT` at this point. Now that
+                // `resync_controller` above is handed real identity stores,
+                // a pane seeded with a registry-derived `agent:sessionid`
+                // (picker reattach, an agent definition with prior history)
+                // can come back already `running`. Read the real status
+                // the same way the existing-pane branch above does, rather
+                // than tell the caller "init" for a pane that's actually
+                // live.
+                let status = blockcontroller::get_block_controller_status(&block_id)
+                    .map(|s| s.shellprocstatus)
+                    .unwrap_or_else(|| "init".to_string());
                 Ok(AgentOpenResult {
                     block_id,
                     tab_id,
                     agent_id: cmd.agent_id,
                     provider: agent.provider,
                     controller_type: controller_type.to_string(),
-                    status: "init".to_string(),
+                    status,
                     created: true,
                 })
 }
