@@ -28,6 +28,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use super::{
+    delete_controller, get_controller, register_controller, remove_controller_entry_only,
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
     STATUS_RUNNING,
 };
@@ -1077,6 +1078,48 @@ impl PersistentSubprocessController {
         true
     }
 
+    /// True unless a concurrent `resync_controller` has already replaced
+    /// THIS controller object in the global registry with a different one.
+    /// codex P1 on PR #3513 (4th round): `register_controller` inserts a
+    /// new controller (and `resync_controller`'s replace path
+    /// `stop_for_replace`s + evicts an old one) independently of anything
+    /// `try_eager_resume` is doing — `spawning_in_progress` only guards
+    /// against a race with a message on THIS SAME controller object, not
+    /// against the whole object being torn out from under it. Without this
+    /// check, a forced resync landing while this attempt is still blocked
+    /// in the identity gate above would stop-and-evict this controller,
+    /// register a replacement, and this call — oblivious to any of that —
+    /// would go on to spawn anyway: a real child process attached to a
+    /// controller no longer reachable through the registry (unstoppable
+    /// through any normal path), potentially racing the replacement for
+    /// the very same `--resume <sid>`.
+    ///
+    /// Always `true` when `self_ref` was never set — a controller built
+    /// directly for a unit test, bypassing `resync_controller`/
+    /// `register_controller` entirely, was never wired into the registry
+    /// and has nothing to race against; this check would otherwise always
+    /// (and vacuously) fail for it. Every controller that actually reaches
+    /// `start()` in production has `self_ref` set — `resync_controller`
+    /// calls `set_self_ref()` immediately after `register_controller`, for
+    /// every controller type that has one — so this early return never
+    /// masks the real race.
+    fn still_registered_for_replace_check(&self) -> bool {
+        let Some(weak) = self.self_ref.lock().unwrap().clone() else {
+            return true;
+        };
+        let Some(arc_self) = weak.upgrade() else {
+            // Should not happen while `self` is being called through that
+            // same Arc, but if it ever did, there's no registry entry left
+            // to compare against — decline rather than assume it's fine.
+            return false;
+        };
+        let dyn_self: Arc<dyn Controller> = arc_self;
+        match get_controller(&self.block_id) {
+            Some(registered) => Arc::ptr_eq(&dyn_self, &registered),
+            None => false,
+        }
+    }
+
     /// `start()`'s eager-resume attempt for a pane with a captured
     /// `agent:sessionid`. Never returns an error — every failure mode here
     /// is "fall back to lazy", not "fail the resync"; see `start()`'s own
@@ -1248,6 +1291,21 @@ impl PersistentSubprocessController {
                 return EagerResumeOutcome::DeclinedTo("identity/credential spawn gate did not pass");
             }
         };
+
+        // codex P1 on PR #3513 (4th round): re-check AFTER the (possibly
+        // slow) gate above, not just before it — a concurrent forced
+        // resync could have replaced this controller in the registry
+        // while the gate was resolving. See
+        // `still_registered_for_replace_check`'s own doc comment.
+        if !self.still_registered_for_replace_check() {
+            tracing::warn!(
+                block_id = %self.block_id,
+                "eager-resume declined: this controller was replaced in the registry while \
+                 resolving the identity gate — aborting to avoid an orphaned/duplicate spawn"
+            );
+            self.inner.lock().unwrap().spawning_in_progress = false;
+            return EagerResumeOutcome::DeclinedTo("controller was replaced during eager resume");
+        }
 
         let config = PersistentSpawnConfig {
             cli_command,
@@ -9050,6 +9108,63 @@ setInterval(() => {}, 1000);
             !c.inner.lock().unwrap().spawning_in_progress,
             "the spawn claim must still be released on this decline path"
         );
+    }
+
+    // codex P1 on PR #3513 (4th re-review): a concurrent forced
+    // `ControllerResync` can evict this exact controller from the global
+    // registry and register a replacement WHILE this attempt is still
+    // blocked resolving the identity gate above — a cross-controller race
+    // `spawning_in_progress` (scoped to this one controller object) cannot
+    // prevent. Simulated here by replacing the registry entry before
+    // `start()` even runs: the check only cares whether the registry has
+    // moved on by the time it runs, not exactly when that happened.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn declines_when_controller_was_replaced_during_the_identity_gate() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let block_id = "blk-replaced-mid-gate";
+        let store = make_store();
+        wire_bare_instance(&store, block_id);
+        let stub = write_stub();
+        let c = controller(block_id).with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = Arc::new(PersistentSubprocessController { mstore: Some(store), ..c });
+        c.set_self_ref();
+        register_controller(block_id, c.clone());
+
+        // Simulate the race: by the time this attempt reaches its
+        // still-registered check, a concurrent resync has already torn
+        // this controller out of the registry and installed a replacement.
+        remove_controller_entry_only(block_id);
+        let replacement = Arc::new(controller(block_id));
+        register_controller(block_id, replacement.clone());
+
+        let _kill_on_drop = KillOnDrop(c.as_ref());
+        let meta = meta_with_session("sid-race", &[stub.to_string_lossy().as_ref()]);
+        let result = Controller::start(c.as_ref(), meta, None, false);
+        assert!(result.is_ok(), "declining must not fail the resync: {result:?}");
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "must not spawn once this controller has been replaced in the registry"
+        );
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "the spawn claim must still be released on this decline path"
+        );
+        let still_registered = get_controller(block_id).unwrap();
+        assert!(
+            Arc::ptr_eq(&still_registered, &(replacement as Arc<dyn Controller>)),
+            "the replacement must remain the one registered — untouched by the declined attempt"
+        );
+
+        delete_controller(block_id);
     }
 
     // See `declines_when_gate_denies`'s comment on `flavor = "multi_thread"`.
