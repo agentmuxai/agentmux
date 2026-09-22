@@ -83,6 +83,21 @@ vi.mock("@/app/store/global", () => {
     };
 });
 
+// SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md: `requestNodeFocus()` used to be
+// a no-op, so InsertNode/FocusNode/MagnifyNodeToggle calling it here was
+// inert. Now real, it reaches into `@/app/store/global`'s `atoms` (which
+// this file's own minimal mock above deliberately doesn't provide — these
+// tests exercise pure tree-mutation logic, not app-wide focus plumbing) via
+// `getLayoutModelForStaticTab()`. Mocked out entirely rather than backfilled
+// into the mock above, same reasoning as that mock's own narrow surface.
+vi.mock("@/app/store/focusManager", () => ({
+    focusManager: {
+        requestNodeFocus: () => {},
+        refocusNode: () => {},
+        claimFocusOnMount: () => {},
+    },
+}));
+
 function createLayoutModel(): LayoutModel {
     const [getTab] = createSignal<Tab>({
         otype: "tab",
