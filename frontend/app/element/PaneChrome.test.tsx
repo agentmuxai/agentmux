@@ -56,6 +56,15 @@ vi.mock("@/app/block/blockutil", () => ({
 
 vi.mock("@/app/block/blockframe", () => ({
     computeFocusRingBorderColor: () => undefined,
+    // Meta-driven (not a fixed stub) so tabColors' per-block regression test
+    // below can prove each tab's own color survives independently — a fixed
+    // stub would pass even with reagent's P1 bug (PR #3484: every pill
+    // reading the SAME shared atoms.tabAtom() collapsed every underline to
+    // one tab-wide value).
+    computeBlockActiveBorderColor: (meta: any) =>
+        meta?.["frame:hue"] != null ? `underline-${meta["frame:hue"]}` : undefined,
+    computeBlockTabPillBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
+    computeBlockTabPillNeutralBg: () => "neutral",
 }));
 
 const showContextMenu = vi.fn();
@@ -94,6 +103,9 @@ vi.mock("@/app/store/global", () => ({
     // pane-tab-picker.ts surfaces a failed add as a toast — unused on the
     // success paths here, but the module imports it at load time.
     pushNotification: vi.fn(),
+    // tabColors' theme-polarity read (PaneChrome.tsx) — no test here cares
+    // about theme, so a fixed "no theme set" accessor is enough.
+    getSettingsKeyAtom: () => () => undefined,
 }));
 
 let capturedOnSelect: ((blockDef: any) => void) | undefined;
@@ -302,6 +314,36 @@ describe("renderPaneChromeShell — tab derivation", () => {
 
         expect(screen.getByText("Renamed")).toBeInTheDocument();
         expect(screen.queryByText("Original")).not.toBeInTheDocument();
+    });
+});
+
+// reagent P1, PR #3484: tabColors used to call computeFocusRingBorderColor
+// with the SAME shared atoms.tabAtom() meta for every pill — if that tab
+// had a tab-wide bg:activebordercolor override, every pill's underline
+// collapsed to that one shared value instead of each block's own color.
+// Fixed by switching to computeBlockActiveBorderColor, a pure per-block
+// helper that never consults tab-level meta at all.
+describe("renderPaneChromeShell — per-tab pane color", () => {
+    it("each stack member's own color survives independently — no collapse to a shared value", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: { "frame:hue": 20 } });
+        setObjectValue("block:b3", { meta: {} }); // no color of its own
+        mockLayoutModel = fakeLayoutModel(["b1", "b2", "b3"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        const h = headerCalls.at(-1);
+        expect(h.getColor("b1")).toEqual({ underline: "underline-10", background: "bg-10", neutralBackground: "neutral" });
+        expect(h.getColor("b2")).toEqual({ underline: "underline-20", background: "bg-20", neutralBackground: "neutral" });
+        expect(h.getColor("b3")).toEqual({ underline: undefined, background: undefined, neutralBackground: "neutral" });
+    });
+
+    it("an uncolored tab still gets an opaque neutral background, so the header's active-tab tint never shows through it", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 180 } });
+        setObjectValue("block:b2", { meta: {} });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        expect(headerCalls.at(-1).getColor("b2")?.neutralBackground).toBe("neutral");
     });
 });
 

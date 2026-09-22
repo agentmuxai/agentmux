@@ -19,8 +19,14 @@
  */
 
 import { createMemo, createSignal, type JSX } from "solid-js";
-import { computeFocusRingBorderColor } from "@/app/block/blockframe";
-import { atoms, MOS, pushNotification } from "@/app/store/global";
+import {
+    computeBlockActiveBorderColor,
+    computeBlockTabPillBg,
+    computeBlockTabPillNeutralBg,
+    computeFocusRingBorderColor,
+} from "@/app/block/blockframe";
+import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
+import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
@@ -29,6 +35,7 @@ import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemory, type PaneTabInfo } from "./pane-tab-model";
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
+import type { PaneTabColors } from "./PaneTabStrip";
 
 function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
@@ -111,6 +118,36 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         return infos;
     });
 
+    // Each pill's own pane color (SPEC_AGENT_COLOR_2026_08_08.md's identity
+    // color / the "Pane Color" picker's frame:hue), same source
+    // BlockFrame_Header's own header/border use — every stack member is a
+    // distinct blockId with its own meta, so a fork with its own color must
+    // show it as a pill even while another fork is active. Read here (not
+    // folded into tabInfos above) since it needs the current theme's
+    // polarity, which label/icon description has no reason to depend on.
+    //
+    // computeBlockActiveBorderColor, NOT computeFocusRingBorderColor — the
+    // latter also folds in the single shared atoms.tabAtom() tab-level
+    // bg:activebordercolor override, which would collapse every pill's
+    // underline to that one tab-wide color instead of each block's own
+    // (reagent P1, PR #3484).
+    const tabColors = createMemo(() => {
+        const themeId = getSettingsKeyAtom("window:theme")();
+        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const colors = new Map<string, PaneTabColors>();
+        for (const blockId of tabIds()) {
+            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
+            const underline = computeBlockActiveBorderColor(meta);
+            const background = computeBlockTabPillBg(meta, isLightTheme);
+            // Always set: the header behind the strip is tinted with the
+            // ACTIVE block's color, so a transparent uncolored pill would
+            // appear to take on whichever tab is selected.
+            const neutralBackground = computeBlockTabPillNeutralBg(meta, isLightTheme);
+            colors.set(blockId, { underline, background, neutralBackground });
+        }
+        return colors;
+    });
+
     // Rename (double-click a pill). The override shows the new name at once,
     // before the write round-trips back through the block's meta.
     const [renamingId, setRenamingId] = createSignal<string | null>(null);
@@ -190,6 +227,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getId={(id) => id}
             getLabel={labelOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
+            getColor={(id) => tabColors().get(id)}
             onActivate={handleActivate}
             onClose={handleClose}
             onReorder={handleReorder}
