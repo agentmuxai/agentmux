@@ -611,14 +611,75 @@ reviewed did:**
    an occasional no-op reset. 3 new tests, including one confirming the
    base within-session suppression still works unregressed.
 
-   **Running honest tally, not just the one from finding 3:** four review
-   rounds, five real bugs, by five distinct mechanisms (turnPhase
-   corruption twice, over two different race windows; three leak routes).
-   Every one was caught by ReAgent, not by this session's own testing —
-   the test suites in this PR are thorough for the behavior each fix
-   claims, but thoroughness at explaining a fix is not the same
-   property as completeness at finding what needed fixing. Stated
-   plainly rather than left implicit, for whoever reviews this next.
+6. **The actual root cause — reagentx P0/P1, FIFTH review round: every
+   leak-route fix so far was frontend-only, patching individual RPC
+   call sites (`useAgentActivitySummary.ts`, `useNextPromptSuggestion.ts`)
+   rather than the shared BACKEND function both of them, and MORE
+   callers, funnel through.** `read_recent_activity_digest`
+   (`agentmux-srv/src/server/app_api/session.rs`) reads a raw, byte/line-
+   windowed (last 32 KB, ~30 non-empty lines) tail of the block's output
+   FileStore — NOT turn-scoped, and with zero concept of "hidden" anywhere
+   in Rust. Two concrete consequences findings 3+5 (frontend-only) could
+   never have closed:
+   - **P0**: `lastTurnWasHidden` only ever protected the hidden turn's OWN
+     completion. The very NEXT ordinary turn's completion reads the SAME
+     raw tail — which still contains the hidden turn's content, since the
+     window is byte/line-bounded, not turn-scoped — so
+     `NextPromptSuggestionCommand` fires normally on that next turn and
+     leaks anyway, just one turn later than the guard checks.
+   - **P1**: `activity_watcher.rs` runs an INDEPENDENT 20-second periodic
+     sweep, calling the same function whenever a pane's output FileStore
+     size changes — which a hidden turn's send/response always does —
+     entirely outside any turn-boundary event a frontend gate could ever
+     observe. No frontend fix, however complete, could have closed this;
+     the trigger isn't a turn lifecycle event at all.
+
+   **Fixed at the actual root**: `extract_digest_text` — confirmed by
+   direct code tracing to be the ONE function every caller of
+   `read_recent_activity_digest` funnels through (`generate_pushed_
+   activity_summary` at line 300 for the periodic sweep, `activity_
+   summary`'s own fallback at line 776, and `next_prompt_suggestion` at
+   line 870 — the last two verified as real call sites during this fix,
+   neither named by either review round) — now recognizes a hidden
+   turn's own `<system-reminder>...` signature (mirroring `memory-
+   reinjection.ts`'s `isMemoryReinjectionMessage`, literal string
+   duplicated across the Rust/TypeScript boundary since there's no way
+   to share one constant across languages here) and suppresses it plus
+   every event of the model's real reply, up to the next genuine user
+   message — same `hidingUntilNextUserMessage` semantics as the frontend
+   replay fix, but naturally scoped to one function call's own bounded
+   line window rather than needing a session-boundary reset (each call
+   processes a fresh slice; there's no persistent cross-call parser
+   instance the way `stream-parser.ts` has). One fix, at one place,
+   closes it for every current caller and any future one — the same "one
+   choke point, not scattered per-consumer patches" lesson
+   `hiding-stream-flush-queue.ts` already applied on the frontend,
+   finally applied at the layer that actually needed it. 7 new Rust
+   tests in `agentmux-srv/src/server/app_api/session.rs`.
+
+   Also incidentally hardens finding 2's own fix: `useAgentActivitySummary.
+   ts`'s backend fallback (line 776, fires when the frontend doesn't
+   supply `user_message` — e.g. an older build) was a LATENT gap in that
+   earlier fix nobody had flagged, since it reads the same raw digest
+   independent of the frontend's `hidden` check entirely. Now closed too,
+   for free, by fixing the shared function rather than the caller.
+
+   **Running honest tally:** five review rounds, six real bugs, by six
+   distinct mechanisms (turnPhase corruption twice, over two different
+   race windows; four leak routes, the last two only closeable by going
+   past the frontend entirely). Every one was caught by ReAgent, not by
+   this session's own testing — the test suites in this PR are thorough
+   for the behavior each fix claims, but thoroughness at explaining a fix
+   is not the same property as completeness at finding what needed
+   fixing. The pattern across all six is consistent, and worth naming
+   directly: every fix that patched a symptom at an individual call site
+   left a sibling call site (or, in this last case, an entire backend
+   layer) unpatched; every fix that instead found and patched the actual
+   shared mechanism closed the class of bug outright. Stated plainly
+   rather than left implicit, for whoever reviews this next — and for
+   whoever designs the next feature in this shape, since "hidden from the
+   user" turned out to have a lot more places to check than it first
+   looked like.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 

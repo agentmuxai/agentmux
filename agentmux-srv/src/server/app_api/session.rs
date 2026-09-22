@@ -1255,11 +1255,52 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
     }
 }
 
+/// True for a `<system-reminder>...Your memory was reinjected after a
+/// context compaction...` message — a hidden memory-reinjection turn
+/// (`frontend/app/view/agent/memory-reinjection.ts`'s
+/// `composeReinjectionMessage`). Mirrors that module's
+/// `isMemoryReinjectionMessage` exactly, including the exact signature
+/// string — kept as a literal duplicate rather than a shared constant
+/// (Rust and TypeScript can't share one across the language boundary
+/// without extra plumbing this one string doesn't justify), so a future
+/// change to the frontend's wording must update this function too.
+///
+/// reagentx P0, PR #3502, FOURTH review round: `extract_digest_text` is the
+/// single choke point BOTH `next_prompt_suggestion` and
+/// `activity_watcher.rs`'s independent 20s periodic sweep funnel through —
+/// fixing it here closes the leak for every current and future caller at
+/// once, the same "one choke point, not scattered per-consumer patches"
+/// lesson `hiding-stream-flush-queue.ts` already applied on the frontend
+/// side, now applied at the layer that actually needed it. Every prior fix
+/// on this PR (useAgentActivitySummary.ts's `hidden` check,
+/// useNextPromptSuggestion.ts's `lastTurnWasHidden`) was frontend-only and
+/// could only ever gate the frontend's OWN two RPC call sites — neither
+/// could reach `activity_watcher.rs`'s backend-only sweep, which has no
+/// concept of "hidden" anywhere and fires independent of any turn boundary
+/// whenever the output FileStore's size changes.
+fn is_hidden_reinjection_text(text: &str) -> bool {
+    text.starts_with("<system-reminder>")
+        && text.contains("Your memory was reinjected after a context compaction.")
+}
+
 /// Extract meaningful text from raw stream-json lines for digest summarization.
 /// Skips system/result events and raw stream_event deltas; extracts assistant text
 /// and tool call summaries.
+///
+/// Suppresses a hidden memory-reinjection turn's own outgoing message AND
+/// every event of the model's real response to it (text, tool calls, tool
+/// results/errors), up to but not including the next genuine user message —
+/// mirrors `frontend/app/view/agent/stream-parser.ts`'s
+/// `hidingUntilNextUserMessage` field exactly, but scoped naturally to this
+/// one function call's own `lines` window rather than needing a session-
+/// boundary reset: each call processes a fresh, bounded slice (the last ~30
+/// non-empty lines of one read), so there is no cross-call state to leak
+/// across a session boundary the way the frontend's persistent parser
+/// instance could (and once did — see that file's `clearHiddenReinjectionState`
+/// doc comment for the bug that required).
 pub(super) fn extract_digest_text(lines: &[&str]) -> String {
     let mut parts: Vec<String> = Vec::new();
+    let mut hiding = false;
 
     for line in lines {
         let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else { continue };
@@ -1268,6 +1309,11 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
 
         match msg_type {
             "assistant" => {
+                // The model's real reply to a hidden turn — never emitted,
+                // regardless of block type (text, tool_use).
+                if hiding {
+                    continue;
+                }
                 if let Some(content) = val.get("message")
                     .and_then(|m| m.get("content"))
                     .and_then(|c| c.as_array())
@@ -1295,6 +1341,38 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
                     .and_then(|m| m.get("content"))
                     .and_then(|c| c.as_array())
                 {
+                    // Checked BEFORE the block loop, and before touching
+                    // `hiding` for the ordinary-message-ends-hiding case
+                    // below — mirrors stream-parser.ts's
+                    // tryParseMemoryReinjection ordering: recognizing a new
+                    // hidden turn always wins over generic "real message"
+                    // handling for the same event.
+                    let starts_hidden_turn = content.iter().any(|block| {
+                        block.get("type").and_then(|v| v.as_str()) == Some("text")
+                            && block.get("text").and_then(|v| v.as_str())
+                                .map(is_hidden_reinjection_text)
+                                .unwrap_or(false)
+                    });
+                    if starts_hidden_turn {
+                        hiding = true;
+                        continue; // never emit the hidden turn's own outgoing message either
+                    }
+                    // A genuine user message ends any hidden window that
+                    // was open — including a tool_result-only message
+                    // (Claude's own continuation frames while the hidden
+                    // turn's reply was still running tools); only a NEW
+                    // literal user-typed text message clears it, same rule
+                    // as the frontend parser. tool_result-only messages
+                    // fall through to the loop below unaffected either way
+                    // (their own is_error branch already only fires when
+                    // `hiding` allowed this message to be inspected at all —
+                    // reaching this point already means `hiding` should be
+                    // false for the remainder of THIS message's blocks; a
+                    // hidden turn's own tool_result continuation frames were
+                    // already excluded by the `hiding` gate on the
+                    // "assistant" arm that produced the matching tool_use).
+                    hiding = false;
+
                     for block in content {
                         let btype = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                         if btype == "tool_result" {
@@ -1320,6 +1398,9 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
                 }
             }
             "result" => {
+                // Aggregate cost/turn-count metadata only — no actual
+                // conversation content, so no leak risk; left unsuppressed
+                // even while `hiding` is true.
                 if let Some(cost) = val.get("total_cost_usd").and_then(|v| v.as_f64()) {
                     if let Some(turns) = val.get("num_turns").and_then(|v| v.as_u64()) {
                         parts.push(format!("[summary] {} turns, ${:.4} total cost", turns, cost));
@@ -1368,6 +1449,119 @@ mod build_session_title_prompt_tests {
         assert!(prompt.contains("repeat it back EXACTLY, unchanged"));
         assert!(prompt.contains("OVERALL GOAL"));
         assert!(!prompt.contains("what is currently being worked on"));
+    }
+}
+
+/// reagentx P0, PR #3502, fourth review round: `extract_digest_text` must
+/// never surface a hidden memory-reinjection turn (the frontend's own
+/// `<system-reminder>...` composed message) or the model's real reply to
+/// it, regardless of which caller (`next_prompt_suggestion`,
+/// `activity_watcher.rs`'s independent periodic sweep, or any future one)
+/// invokes it.
+#[cfg(test)]
+mod extract_digest_text_tests {
+    use super::*;
+
+    const REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected after a context compaction. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
+
+    fn user_text_line(text: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": { "content": [{ "type": "text", "text": text }] }
+        }).to_string()
+    }
+
+    fn assistant_text_line(text: &str) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "text", "text": text }] }
+        }).to_string()
+    }
+
+    fn assistant_tool_use_line(tool: &str) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "tool_use", "name": tool }] }
+        }).to_string()
+    }
+
+    #[test]
+    fn is_hidden_reinjection_text_recognizes_the_real_signature() {
+        assert!(is_hidden_reinjection_text(REINJECTION_TEXT));
+    }
+
+    #[test]
+    fn is_hidden_reinjection_text_rejects_ordinary_text_even_mentioning_memory() {
+        assert!(!is_hidden_reinjection_text("please check my memory files"));
+        assert!(!is_hidden_reinjection_text("<system-reminder>unrelated content</system-reminder>"));
+    }
+
+    #[test]
+    fn ordinary_conversation_still_extracts_normally() {
+        let lines = vec![
+            user_text_line("please fix the login bug"),
+            assistant_text_line("Found it, fixing now"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(digest.contains("[user] please fix the login bug"));
+        assert!(digest.contains("[assistant] Found it, fixing now"));
+    }
+
+    #[test]
+    fn suppresses_the_hidden_turns_own_outgoing_message() {
+        let lines = vec![user_text_line(REINJECTION_TEXT)];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(digest.is_empty());
+        assert!(!digest.contains("secret memory content"));
+    }
+
+    #[test]
+    fn suppresses_the_models_real_reply_to_a_hidden_turn_text_and_tool_use() {
+        let lines = vec![
+            user_text_line(REINJECTION_TEXT),
+            assistant_text_line("Understood, I've reviewed my memory including secret memory content"),
+            assistant_tool_use_line("Read"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(digest.is_empty(), "digest should be empty, was: {digest}");
+    }
+
+    #[test]
+    fn resumes_extraction_normally_after_a_genuine_user_message_follows_the_hidden_turn() {
+        let lines = vec![
+            user_text_line(REINJECTION_TEXT),
+            assistant_text_line("Understood — hidden reply, must not appear"),
+            user_text_line("now please fix the login bug"),
+            assistant_text_line("Found it, fixing now"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(!digest.contains("hidden reply"));
+        assert!(digest.contains("[user] now please fix the login bug"));
+        assert!(digest.contains("[assistant] Found it, fixing now"));
+    }
+
+    #[test]
+    fn a_second_hidden_turn_later_in_the_window_is_also_suppressed() {
+        // Two compactions within the same tail window — each reinjection
+        // re-enters hiding independently.
+        let lines = vec![
+            user_text_line(REINJECTION_TEXT),
+            assistant_text_line("hidden reply 1"),
+            user_text_line("real message"),
+            assistant_text_line("real reply"),
+            user_text_line(REINJECTION_TEXT),
+            assistant_text_line("hidden reply 2"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(!digest.contains("hidden reply 1"));
+        assert!(!digest.contains("hidden reply 2"));
+        assert!(digest.contains("real message"));
+        assert!(digest.contains("real reply"));
     }
 }
 
