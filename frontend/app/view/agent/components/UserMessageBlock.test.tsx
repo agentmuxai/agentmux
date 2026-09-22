@@ -22,6 +22,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UserMessageBlock } from "./UserMessageBlock";
 import type { UserMessageNode } from "../types";
+import * as pointerDragState from "@/app/util/pointer-drag-state";
+import { PEEK_ENTER_DELAY_MS } from "./hover-anchor";
 
 afterEach(() => {
     cleanup();
@@ -440,5 +442,66 @@ describe("UserMessageBlock — startup injection", () => {
                 vi.useRealTimers();
             }
         });
+    });
+});
+
+// reagentx P1 on #3470, third round. This component has TWO hover paths and
+// only the `useNodePeek` one was gated: a collapsed STARTUP row routes
+// through the private `handleMouseEnter`, so a text-selection drag sweeping
+// across it still expanded the row and mounted the Portal-rendered body
+// preview under the cursor mid-drag — the exact flicker this PR removes,
+// surviving in the scenario the PR title names.
+describe("UserMessageBlock — startup row does not expand mid-drag", () => {
+    const renderStartup = () =>
+        render(() => <UserMessageBlock node={startupNode} pinned={false} onTogglePin={() => {}} />);
+
+    it("stays collapsed on hover while the primary button is held", () => {
+        const spy = vi.spyOn(pointerDragState, "isPrimaryButtonDown").mockReturnValue(true);
+        vi.useFakeTimers();
+        try {
+            const { container } = renderStartup();
+            const root = container.querySelector(".agent-user-message") as HTMLElement;
+            fireEvent.mouseEnter(root);
+            vi.advanceTimersByTime(PEEK_ENTER_DELAY_MS + 50);
+            expect(root.classList.contains("agent-user-message--collapsed")).toBe(true);
+        } finally {
+            vi.useRealTimers();
+            spy.mockRestore();
+        }
+    });
+
+    // The counterpart, so the gate cannot degrade into "never expands".
+    it("still expands on hover when no drag is in progress", () => {
+        const spy = vi.spyOn(pointerDragState, "isPrimaryButtonDown").mockReturnValue(false);
+        vi.useFakeTimers();
+        try {
+            const { container } = renderStartup();
+            const root = container.querySelector(".agent-user-message") as HTMLElement;
+            fireEvent.mouseEnter(root);
+            vi.advanceTimersByTime(PEEK_ENTER_DELAY_MS + 50);
+            expect(root.classList.contains("agent-user-message--collapsed")).toBe(false);
+        } finally {
+            vi.useRealTimers();
+            spy.mockRestore();
+        }
+    });
+
+    // The button can go down DURING the delay window — enter fires just
+    // before mousedown. Without the re-check at timer fire, the pending
+    // timeout still expands the row mid-drag.
+    it("does not expand if the button goes down during the pending delay", () => {
+        const spy = vi.spyOn(pointerDragState, "isPrimaryButtonDown").mockReturnValue(false);
+        vi.useFakeTimers();
+        try {
+            const { container } = renderStartup();
+            const root = container.querySelector(".agent-user-message") as HTMLElement;
+            fireEvent.mouseEnter(root);
+            spy.mockReturnValue(true); // drag starts inside the delay
+            vi.advanceTimersByTime(PEEK_ENTER_DELAY_MS + 50);
+            expect(root.classList.contains("agent-user-message--collapsed")).toBe(true);
+        } finally {
+            vi.useRealTimers();
+            spy.mockRestore();
+        }
     });
 });

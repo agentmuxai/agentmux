@@ -50,6 +50,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
 import { PEEK_ENTER_DELAY_MS } from "./hover-anchor";
 import { useNodePeek } from "../hooks/useNodePeek";
+import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 import { PeekOverlay } from "./PeekOverlay";
 
 interface UserMessageBlockProps {
@@ -65,12 +66,33 @@ interface UserMessageBlockProps {
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
-    let rootEl: HTMLDivElement | undefined;
 
+    // Gated exactly like `useNodePeek`'s sibling path below, and for the same
+    // reason. This component has TWO hover paths — collapsible (startup) rows
+    // use this private one, everything else uses the hook — and only the hook
+    // was gated. `onMouseEnter={collapsible() ? handleMouseEnter : ...}` meant
+    // a text-selection drag sweeping across a COLLAPSED STARTUP ROW still
+    // scheduled `setHovering(true)`, flipped `bodyMode()` to "overlay", and
+    // mounted the Portal-rendered body preview under the cursor mid-drag.
+    //
+    // That is the exact flicker this PR exists to remove, surviving in the
+    // precise scenario its own title names ("dragging left across collapsible
+    // header rows") — reagentx P1 on #3470.
     const handleMouseEnter = () => {
+        if (isPrimaryButtonDown()) return;
         clearTimeout(enterTimer);
-        enterTimer = setTimeout(() => setHovering(true), PEEK_ENTER_DELAY_MS);
+        // Re-checked when the delay elapses, not just at call time: the button
+        // can go down during the delay window (enter fired just before
+        // mousedown), and without this the timeout would still mount the
+        // overlay mid-drag.
+        enterTimer = setTimeout(() => {
+            if (isPrimaryButtonDown()) return;
+            setHovering(true);
+        }, PEEK_ENTER_DELAY_MS);
     };
+    // Leave is deliberately NOT gated — see tooltip.tsx's note: gating unmount
+    // too strands an overlay open forever when the leave fires mid-drag and
+    // the button is released elsewhere.
     const handleMouseLeave = () => {
         clearTimeout(enterTimer);
         setHovering(false);
@@ -102,7 +124,27 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // bodyMode() === "overlay" above) rather than a metadata summary, so
     // this is gated to the non-collapsible case only.
     const peekTick = useTick(1000);
-    const { isPeeking, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    // `setRowEl` is wired to the row below and `rowEl` is read by both
+    // PeekOverlays. This component used to keep its own private `rootEl` and
+    // never register it, so the hook's own `rowEl` signal stayed permanently
+    // undefined — and the drag-release hover resync in useNodePeek could
+    // never fire for this one call site, silently reproducing the very
+    // stuck-closed defect that resync exists to fix (reagentx P1 on #3470).
+    // One element reference, owned by the hook.
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } =
+        useNodePeek();
+
+    // The collapsible path's own drag-release resync. `useNodePeek` already
+    // does this for the non-collapsible path, but a collapsed startup row
+    // never routes through `handlePeekEnter`, so it needs its own — otherwise
+    // a drag that ENDS on a collapsed row leaves it stuck shut until the
+    // cursor leaves and returns, which is the mirror-image defect of the one
+    // above.
+    onCleanup(
+        onPrimaryButtonRelease(() => {
+            if (collapsible() && peekRowEl()?.matches(":hover")) handleMouseEnter();
+        }),
+    );
     const peekTimeText = createMemo(() => {
         if (collapsible() || !isPeeking()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
@@ -158,7 +200,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
 
     return (
         <div
-            ref={(el) => (rootEl = el)}
+            ref={setPeekRowEl}
             class={clsx("agent-user-message", {
                 "agent-user-message--startup": collapsible(),
                 "agent-user-message--collapsed": collapsible() && !expanded(),
@@ -199,7 +241,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             </Show>
             <PeekOverlay
                 show={bodyMode() === "overlay"}
-                rowEl={() => rootEl}
+                rowEl={peekRowEl}
                 class="agent-user-message-peek-overlay"
                 // Full width, left-aligned: this variant renders a real
                 // message body (sometimes kilobytes of startup payload),
@@ -217,7 +259,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             <Show when={!collapsible()}>
                 <PeekOverlay
                     show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
-                    rowEl={() => rootEl}
+                    rowEl={peekRowEl}
                 >
                     <Show when={peekTimeText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
