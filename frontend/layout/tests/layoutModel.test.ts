@@ -13,6 +13,7 @@ import {
     LayoutTreeSplitHorizontalAction,
     LayoutTreeSetPendingAction,
     LayoutTreeCommitPendingAction,
+    LayoutTreeFocusNodeAction,
 } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
@@ -77,9 +78,27 @@ vi.mock("@/app/store/global", () => {
 // tests exercise pure tree-mutation logic, not app-wide focus plumbing) via
 // `getLayoutModelForStaticTab()`. Mocked out entirely rather than backfilled
 // into the mock above, same reasoning as that mock's own narrow surface.
+//
+// `requestNodeFocus` is a capturing spy, not a plain no-op: ReAgent P0 on PR
+// #3519 caught treeReducer calling the real requestNodeFocus() INLINE inside
+// its switch statement, before localTreeStateAtom (and focusedNodeIdStack)
+// ever committed — so it resolved to the PREVIOUSLY-focused node, stale by
+// exactly one selection. This spy exists so a test below can assert what
+// treeReducer's own state looks like AT THE MOMENT requestNodeFocus() fires,
+// which a plain no-op (or a test that mocks getLayoutModelForStaticTab
+// directly, bypassing treeReducer's real call-ordering entirely) cannot
+// catch. `requestNodeFocusCaptureModel` is set by the test right before it
+// triggers the action under test.
+let requestNodeFocusCaptureModel: LayoutModel | null = null;
+const requestNodeFocusCaptures: { focusedNodeId: string | undefined; focusedNodeDataId: string | undefined }[] = [];
 vi.mock("@/app/store/focusManager", () => ({
     focusManager: {
-        requestNodeFocus: () => {},
+        requestNodeFocus: () => {
+            requestNodeFocusCaptures.push({
+                focusedNodeId: requestNodeFocusCaptureModel?.focusedNodeId,
+                focusedNodeDataId: requestNodeFocusCaptureModel?.focusedNode()?.id,
+            });
+        },
         refocusNode: () => {},
         claimFocusOnMount: () => {},
     },
@@ -117,10 +136,64 @@ describe("LayoutModel", () => {
     beforeEach(() => {
         layoutStateSignals.clear();
         vi.useFakeTimers();
+        requestNodeFocusCaptureModel = null;
+        requestNodeFocusCaptures.length = 0;
     });
 
     afterEach(() => {
         vi.useRealTimers();
+    });
+
+    // ReAgent P0 on PR #3519 (SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md):
+    // treeReducer's FocusNode case used to call focusManager.requestNodeFocus()
+    // BEFORE this function's own state commit further down (localTreeStateAtom
+    // ._set() and the focusedNodeIdStack sync). Since requestNodeFocus() ->
+    // refocusNode() resolves "the focused node" via a memo keyed off
+    // localTreeStateAtom(), and focusNode()'s own no-op guard reads
+    // focusedNodeIdStack, calling it mid-switch meant both read the
+    // PREVIOUSLY-focused node — every pane selection would have re-focused
+    // the OLD pane, not the one just clicked/navigated to.
+    it("only calls requestNodeFocus() AFTER the newly-focused node is visible in committed state", () => {
+        const model = createLayoutModel();
+        const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: first,
+            magnified: false,
+            focused: true,
+        } as LayoutTreeInsertNodeAction);
+
+        const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
+        model.treeReducer(
+            {
+                type: LayoutTreeActionType.SplitHorizontal,
+                targetNodeId: model.treeState.rootNode!.id,
+                newNode: second,
+                position: "after",
+                focused: false,
+            } as LayoutTreeSplitHorizontalAction,
+            false
+        );
+        vi.advanceTimersByTime(20);
+
+        // Sanity: `first` is still focused, `second` exists but isn't.
+        expect(model.treeState.focusedNodeId).toBe(first.id);
+        requestNodeFocusCaptures.length = 0;
+
+        // Now select `second` — the interaction this whole PR is about
+        // (click, arrow-key nav, Cmd+1..9 all funnel through this same
+        // FocusNode action).
+        requestNodeFocusCaptureModel = model;
+        model.treeReducer({
+            type: LayoutTreeActionType.FocusNode,
+            nodeId: second.id,
+        } as LayoutTreeFocusNodeAction);
+
+        expect(requestNodeFocusCaptures).toHaveLength(1);
+        // Both reads happened at the moment requestNodeFocus() fired — if
+        // either still names `first`, the fix regressed.
+        expect(requestNodeFocusCaptures[0].focusedNodeId).toBe(second.id);
+        expect(requestNodeFocusCaptures[0].focusedNodeDataId).toBe(second.id);
     });
 
     it("creates a root node and focuses it when inserting the first block", () => {
