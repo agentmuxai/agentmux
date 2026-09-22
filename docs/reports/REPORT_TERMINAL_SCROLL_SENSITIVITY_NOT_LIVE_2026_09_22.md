@@ -1,8 +1,8 @@
 # Report — Terminal "Scroll sensitivity" setting requires a pane reload to take effect
 
 **Date:** 2026-09-22
-**Status:** implemented — see §8 for what shipped (differs slightly from
-§6's proposed fix)
+**Status:** implemented in #3509 — see §8 for what shipped (differs
+slightly from §6's proposed fix)
 **Area:** `frontend/app/view/settings/sections/terminal-section.tsx` (setting
 UI), `frontend/app/view/term/termwrap.ts` (xterm.js construction),
 `frontend/app/view/term/term.tsx` +
