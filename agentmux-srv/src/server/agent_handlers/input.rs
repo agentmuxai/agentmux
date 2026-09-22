@@ -892,6 +892,14 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let deps = deps_ai.clone();
             async move {
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
+                // Authoritative hidden-window gate for ambient digest reads
+                // (next_prompt_suggestion / activity_summary / activity_watcher)
+                // — set here, not reconstructed from transcript bytes. See
+                // session::set_hidden_reinjection_active's doc comment.
+                crate::server::app_api::session::set_hidden_reinjection_active(
+                    &cmd.blockid,
+                    cmd.hidden.unwrap_or(false),
+                );
                 run_agent_turn(
                     &deps,
                     cmd.blockid,

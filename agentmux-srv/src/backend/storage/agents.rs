@@ -1951,11 +1951,33 @@ impl Store {
     }
 
     /// Resolve an agent by its persisted `slug` — the App-API self-lookup
-    /// (`AGENTMUX_AGENT_ID` is the slug). Matches ONLY `slug`; deliberately
-    /// single-purpose after reagentx P1 on PR #2428 (round 2): a lookup
-    /// that also matched another column let a coincidental cross-namespace
-    /// collision return an unrelated agent's memory/identity/bundle. Hidden
-    /// rows are excluded.
+    /// (`AGENTMUX_AGENT_ID` is the slug) — **only if exactly one agent has
+    /// it**. Matches ONLY `slug`; deliberately single-purpose after reagentx
+    /// P1 on PR #2428 (round 2): a lookup that also matched another column
+    /// let a coincidental cross-namespace collision return an unrelated
+    /// agent's memory/identity/bundle. Hidden rows are excluded.
+    ///
+    /// `None` means "no agent" *or* "more than one agent" — callers already
+    /// treat both as "fall back to another source", so they are not
+    /// distinguished. The fallbacks are themselves fail-closed
+    /// (`agent_registry_lookup::find_active_record_by_slug`), so refusing
+    /// here routes to another refusal rather than to a guess.
+    ///
+    /// **Why ambiguity returns `None` rather than the most recently updated
+    /// row:** `db_agents.slug` has no `UNIQUE` constraint, deliberately —
+    /// `instance_create` copies its template's slug verbatim onto every
+    /// launch, so two launches of one template is all it takes (see
+    /// `migrations.rs`, which declines the index for this reason). This
+    /// function used to `ORDER BY updated_at DESC LIMIT 1` and hand the
+    /// winner's `definition_id` and `working_directory` to the caller.
+    /// `HistoryService::sessions_for_agent` consults it to resolve an
+    /// agent's *conversation history*, so guessing wrong does not degrade
+    /// gracefully — it discloses one agent's transcripts to another, and
+    /// deterministically: the same wrong agent won every time. A slug simply
+    /// does not identify an agent when it collides, so the honest answer is
+    /// "unknown". Same rule and same reasoning as
+    /// [`crate::backend::agent_registry_lookup::find_active_record_by_slug`]
+    /// (PR #3480), which this mirrors for `db_agents`.
     pub fn instance_get_by_slug(&self, slug: &str) -> Result<Option<AgentInstance>, StoreError> {
         if slug.is_empty() {
             return Ok(None);
@@ -1963,15 +1985,20 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(
             "SELECT {INSTANCE_COLUMNS} FROM db_agents
-             WHERE slug = ?1 AND is_template = 0 AND user_hidden = 0
-             ORDER BY updated_at DESC, created_at DESC
-             LIMIT 1"
+             WHERE slug = ?1 AND is_template = 0 AND user_hidden = 0"
         ))?;
-        match stmt.query_row(params![slug], map_instance_row) {
-            Ok(a) => Ok(Some(a)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
+        let mut matches = stmt
+            .query_map(params![slug], map_instance_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        if matches.len() > 1 {
+            tracing::warn!(
+                slug = %slug,
+                matches = matches.len(),
+                "db_agents slug collision: refusing to resolve an agent by slug alone"
+            );
+            return Ok(None);
         }
+        Ok(matches.pop())
     }
 
     /// Partial update of an agent's launch state. Only `Some` fields are
@@ -2687,6 +2714,54 @@ mod tests {
         let by_slug = store.instance_get_by_slug("shared-name").unwrap()
             .expect("must find agent B by slug");
         assert_eq!(by_slug.id, "def-b", "slug lookup must never resolve to A's row");
+    }
+
+    // A slug does not identify an agent once two rows share one, so the
+    // honest answer is "unknown" — same fail-closed rule
+    // `agent_registry_lookup::find_active_record_by_slug` adopted for the
+    // registry in PR #3480, here for `db_agents`.
+    //
+    // The duplicate is built the way the shipping app builds one, not by
+    // hand: `instance_create` copies `def.slug` verbatim and does no
+    // collision suffixing of its own (only `agent_def_insert` does), and per
+    // its own doc comment every fresh launch of a TEMPLATE creates its own
+    // row. So launching one template twice is enough — no hand-edited
+    // database, no second definition, nothing a real install cannot reach.
+    // `migrations.rs` declines a UNIQUE index on `db_agents(slug)` for
+    // exactly this reason.
+    #[test]
+    fn instance_get_by_slug_fails_closed_when_one_template_is_launched_twice() {
+        let store = Store::open_in_memory().unwrap();
+
+        let mut tmpl = test_agent_def("tmpl-1", "Shared Template", "claude", "agent", 1, "");
+        tmpl.slug = "shared-template".to_string();
+        tmpl.is_seeded = 1;
+        store.agent_def_insert_local_only(&mut tmpl, None).unwrap();
+        assert_eq!(tmpl.slug, "shared-template", "fixture precondition");
+
+        let mut first = instance("launch-a", "tmpl-1");
+        first.instance_name = "Launch A".to_string();
+        store.instance_create(&first).unwrap();
+
+        let mut second = instance("launch-b", "tmpl-1");
+        second.instance_name = "Launch B".to_string();
+        store.instance_create(&second).unwrap();
+
+        // Precondition: two distinct launch rows really do exist and really
+        // do share the template's slug. If this ever stops holding, the
+        // assertion below would pass vacuously.
+        let a = store.instance_get("launch-a").unwrap().expect("launch A row");
+        let b = store.instance_get("launch-b").unwrap().expect("launch B row");
+        assert_ne!(a.id, b.id, "two launches must be two rows");
+
+        // Before this guard, `ORDER BY updated_at DESC LIMIT 1` handed back
+        // whichever row was touched last — deterministically the same wrong
+        // agent every time — and `HistoryService::sessions_for_agent` then
+        // resolved one agent's conversation history into the other's request.
+        assert!(
+            store.instance_get_by_slug("shared-template").unwrap().is_none(),
+            "an ambiguous slug must resolve to nothing, never to an arbitrary winner"
+        );
     }
 
     #[test]

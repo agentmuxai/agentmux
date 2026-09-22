@@ -46,12 +46,14 @@ name: CI (PR) — compile tests + run
 # public repos).
 #
 # NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
-# "check --tests + test (windows-latest)" and "vitest" as required status checks
-# in branch protection. Job/check names are unchanged from before this split
-# specifically so an existing branch-protection rule referencing them by name
-# keeps working — renaming to identify the lane in the name (e.g. "PR fast: ...")
-# would silently orphan that rule until someone with admin access updates it,
-# which isn't verifiable from a code change alone.
+# "CI required" (the aggregate job below) as a required status check in
+# branch protection — NOT "check --tests + test (windows-latest)" or "vitest"
+# individually. #3506: pinning the matrix leg by its expanded name broke the
+# instant that leg was made path-conditional (#3491) — a matrix job skipped
+# by a job-level `if:` reports under its UNEXPANDED name only, so the pinned
+# context can never arrive on a PR that legitimately skips it, and the PR is
+# permanently BLOCKED. "CI required" exists specifically so branch protection
+# never again needs to reference a matrix leg's expanded name directly.
 #
 # --test-threads=1 mirrors the nightly (process-shared in-memory FileStore + a
 # focus-flag global flake under parallel runs; serial is deterministic).
@@ -554,3 +556,59 @@ jobs:
         run: npm run lint:theme-colors
       - name: vitest run
         run: npx vitest run
+
+  # Single context for branch protection to point at, instead of pinning
+  # `rust` and `frontend` individually. #3506: `rust` is a matrix job, and a
+  # matrix job skipped by a job-level `if:` reports under its UNEXPANDED name
+  # ("check --tests + test (${{ matrix.os }})") — never the per-leg name
+  # ("... (windows-latest)") branch protection was pinned to. That context
+  # then never arrives on a docs-only PR (the one shape
+  # SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md was built for), and the PR
+  # is permanently BLOCKED regardless of review or re-runs. Live example:
+  # #3505. Introduced by #3491, filed as #3506.
+  #
+  # `if: always()` + an explicit per-job result check
+  # (scripts/ci-required-check.mjs), NOT bare `needs: [...]` success gating —
+  # GitHub's default `needs` gate fails THIS job on any legitimately SKIPPED
+  # dependency, reproducing the exact bug one level up. See that script's own
+  # header for the full reasoning, including why an unrecognized `result`
+  # value fails closed rather than passing.
+  #
+  # `docs` IS included, and that is a deliberate policy change — stated plainly
+  # because this job originally, and correctly, excluded it on the grounds that
+  # "adding it here would silently make doc-gate failures block merges for the
+  # first time — a real policy change, not a bug fix". That reasoning was sound
+  # when the aggregate job was a targeted fix for the matrix-name bug.
+  #
+  # What changed is the evidence. `docs` is not a branch-protection context, so
+  # while it was also absent here, NOTHING consumed its result: it could fail
+  # outright and the PR still merged. On a documentation-only PR that is the
+  # whole gate, because `rust` and `frontend` both skip — so the one PR shape
+  # this lane was built for had no substantive blocking check at all.
+  #
+  # Observed live on #3510: a malformed spec Status header — precisely the
+  # content error this gate exists to catch — with `doc status + grep gates`
+  # red, `CI required` green, and two approvals on it. It was caught only by
+  # reading the job log by hand.
+  #
+  # So the choice is not "policy change vs. no policy change"; it is "doc gate
+  # advisory" vs. "doc gate blocking", and it was silently the former. Making
+  # it blocking is the change; leaving it advisory was also a policy, just an
+  # unstated one. #3506.
+  #
+  # Safe with the existing script: `docs` has no job-level `if:`, so it always
+  # runs and reports success/failure — never `skipped` — and
+  # evaluateRequiredJobs already treats `failure` as fatal.
+  ci-required:
+    name: CI required
+    needs: [changes, docs, rust, frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci-required-check.mjs
+          sparse-checkout-cone-mode: false
+      - env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci-required-check.mjs

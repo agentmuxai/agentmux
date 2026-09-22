@@ -426,6 +426,69 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     );
                 })()}
             </Show>
+            <Show when={props.node() && props.node().type === "memory_reinjection"}>
+                {(() => {
+                    // Label-only row — deliberately never carries the actual
+                    // memory body text; that content only ever exists in the
+                    // real message already sent to the CLI, never in this
+                    // node's own data. See
+                    // docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md
+                    // §3.2.
+                    const n = props.node() as Extract<DocumentNode, { type: "memory_reinjection" }>;
+                    const fmt = formatCompactNumber;
+                    const countLabel = `${n.globalMemoryCount} global, ${n.personalMemoryCount} personal`;
+                    // Per-entry breakdown + real byte totals — "the token
+                    // count of each" (§4) surfaced on hover, same PeekOverlay
+                    // pattern the other compaction-family nodes already use
+                    // above rather than a second, different disclosure UI.
+                    const breakdownText = createMemo(() => {
+                        if (!isPeeking()) return null;
+                        peekTick();
+                        const lines = n.perEntryTokens.map(
+                            (e) => `${e.source === "global" ? "🌐" : "👤"} ${e.label} — ~${fmt(e.tokens)} tok (est.), ${fmt(e.sizeBytes)} B`,
+                        );
+                        const totalsLine = `Total: ${fmt(n.totalSizeBytes.global)} B global, ${fmt(n.totalSizeBytes.personal)} B personal`;
+                        // Informational suggestion text only, §3.4.3 — no
+                        // action affordance (compress button / "create a
+                        // WorkItem" click) is wired here. §3.4.4 leaves
+                        // whether that action ever auto-fires (vs. requires
+                        // explicit confirmation) as an open product
+                        // decision; building an interactive trigger for an
+                        // unresolved interaction would mean guessing at it.
+                        // Text-only guidance carries none of that risk.
+                        const suggestionLines =
+                            n.sizeBand === "high" || n.sizeBand === "critical"
+                                ? [
+                                      "",
+                                      "Personal memory has grown large. Consider:",
+                                      "• Compress: MemoryList → consolidate with MemoryWrite (check MemoryHistory/MemoryDiff first)",
+                                      "• Delegate: hand the next segment of work to another agent via WorkEnqueue",
+                                  ]
+                                : [];
+                        return [...lines, totalsLine, ...suggestionLines].join("\n");
+                    });
+                    return (
+                        <div
+                            ref={setPeekRowEl}
+                            class={`agent-memory-reinjection agent-memory-reinjection--${n.sizeBand}`}
+                            onMouseEnter={handlePeekEnter}
+                            onMouseLeave={handlePeekLeave}
+                        >
+                            <div class="agent-memory-reinjection-label">
+                                🧠 Memory reinjected — {countLabel} (~{fmt(n.estimatedTokens)} tok, est.)
+                            </div>
+                            <PeekOverlay show={isPeeking() && breakdownText() != null} rowEl={peekRowEl}>
+                                {/* white-space: pre-line (see scss) renders the \n-joined
+                                    per-entry lines without needing Solid's <For>, which
+                                    this file doesn't otherwise import. */}
+                                <div class="agent-node-peek-tooltip-meta agent-memory-reinjection-tooltip">
+                                    {breakdownText()}
+                                </div>
+                            </PeekOverlay>
+                        </div>
+                    );
+                })()}
+            </Show>
             <Show when={props.node() && props.node().type === "day_divider"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "day_divider" }>;

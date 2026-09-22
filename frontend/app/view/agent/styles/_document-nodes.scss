@@ -1970,6 +1970,59 @@
     }
 }
 
+// Label-only row for a hidden memory reinjection — SPEC_HIDDEN_MEMORY_
+// REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.2/§3.4.2. Deliberately a
+// single label + hover-only breakdown (PeekOverlay, same pattern as
+// .agent-context-compacted's time tooltip above), never the actual memory
+// body text — the "put just a label" requirement.
+//
+// Band colors reuse AgentComposerStrip's own --low/--mid/--high/--critical
+// mapping (_composer-strip.scss's .agent-composer-strip-ctx--{band}) rather
+// than inventing a second scheme — low/mid read as routine, high/critical
+// escalate exactly the way the context-fill meter already trains users to
+// recognize.
+.agent-memory-reinjection {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px var(--space-2);
+    user-select: none;
+
+    .agent-memory-reinjection-label {
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        padding: 2px 10px;
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border-radius: 10px;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
+        color: var(--secondary-text-color);
+    }
+
+    &--low  .agent-memory-reinjection-label { color: var(--secondary-text-color); }
+    &--mid  .agent-memory-reinjection-label { color: var(--main-text-color); }
+    &--high .agent-memory-reinjection-label { color: var(--warning-color); }
+    // Bold + a leading warning glyph, same escalation treatment Tier 3's
+    // countdown text uses (.agent-composer-strip-ctx-countdown--critical) —
+    // reused rather than re-decided, per that spec's own "strengthen the
+    // inline label, don't add new chrome" precedent.
+    &--critical .agent-memory-reinjection-label {
+        color: var(--error-color);
+        font-weight: 600;
+
+        &::before {
+            content: "⚠ ";
+        }
+    }
+}
+
+// Multi-line per-entry token/byte breakdown — the "token count of each"
+// requirement, surfaced on hover rather than inline (would make the label
+// itself unreadably long for more than a couple of entries).
+.agent-memory-reinjection-tooltip {
+    white-space: pre-line;
+    text-align: left;
+}
+
 // A `--resume` attempt's outcome, surfaced as an explicit transcript divider
 // so the pane's scrollback can never silently disagree with what the model
 // actually has in context — SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.

@@ -17,7 +17,7 @@ fn register_memory_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.list: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 Ok(Some(memory_list_impl(&state, &req.agent_id)?))
             })
         }),
@@ -35,7 +35,7 @@ fn register_memory_read(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String, filename: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.read: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 Ok(Some(memory_read_impl(&state, &req.agent_id, &req.filename)?))
             })
         }),
@@ -53,7 +53,7 @@ fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 struct Req { agent_id: String, filename: String, content: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.write: {e}"))?;
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&state.mstore, &ctx, &req.agent_id)?;
                 memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, None)?;
                 Ok(None)
             })
