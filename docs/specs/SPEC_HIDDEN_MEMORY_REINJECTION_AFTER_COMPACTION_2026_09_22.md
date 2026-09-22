@@ -1,6 +1,13 @@
 # Spec: Hidden memory reinjection after compaction
 
-**Status:** proposed
+**Status:** active — the hidden-injection primitive, the memory-reinjection
+trigger/suppression (live and history-replay), and the size-band warning
+with informational compress/delegate guidance shipped in PR #3502. NOT yet
+built: the `WorkEnqueue` delegation action itself (§3.4.3 — deliberately
+text-only pending the auto-fire-vs-confirm decision, §3.4.4), the opt-out
+setting (§7 Q1), and live-instance verification (§3.3's own "what's still
+open" note) — nothing in this PR's authoring session had access to a
+running instance.
 **Date:** 2026-09-22
 **Author:** AgentA (agent, `~/.agentmux/agents/agenta-07017`), per direct request from the human operator.
 **Related:** `SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md` (the prior
