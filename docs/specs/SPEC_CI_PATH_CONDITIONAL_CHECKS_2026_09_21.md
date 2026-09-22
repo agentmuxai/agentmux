@@ -2,7 +2,11 @@
 
 **Date:** 2026-09-21
 **Status:** implemented — #3491 (`scripts/ci-classify-changes.mjs` + its unit
-tests, and the `changes` job in `.github/workflows/ci-pr.yml`).
+tests, and the `changes` job in `.github/workflows/ci-pr.yml`). **Corrected
+2026-09-22 (#3507):** #3491 shipped with a real regression this spec did not
+anticipate — see the erratum in §1 and §5's now-outdated "No `ci-gate`
+aggregate job" bullet. Original text preserved below; corrections are called
+out inline rather than silently edited.
 **Trigger:** Repo owner: *"can builds be conditional on files? if the PR only
 has md files, it should require no builds."*
 **Builds on:** `SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md` (what belongs
@@ -29,6 +33,21 @@ This matters here specifically: `ci-pr.yml`'s header records that
 `"check --tests + test (windows-latest)"` and `"vitest"` are intended as
 required status checks, and that job names are frozen so the branch-protection
 rule keeps matching them.
+
+> **Erratum, 2026-09-22 (#3506, fixed by #3507):** this paragraph missed a
+> case, and the miss reached production. `"frozen job names"` does not help a
+> MATRIX job: when a matrix job is skipped by a job-level `if:`, GitHub
+> reports one check under the job's **unexpanded** name (`"check --tests +
+> test (${{ matrix.os }})"`, the literal template string) — never the
+> **expanded** per-leg name (`"check --tests + test (windows-latest)"`) that
+> branch protection was actually pinned to, which only exists once the job
+> runs. A docs-only PR that skips `rust` therefore never produces the
+> expanded context, and is permanently `BLOCKED` regardless of review or
+> re-runs — live example #3505, the first genuinely docs-only PR after #3491
+> shipped. §5's "No `ci-gate` aggregate job" bullet below is corrected to
+> match: that aggregate now exists (`ci-required` in `ci-pr.yml`), branch
+> protection points at it instead of the matrix leg, and this exact class of
+> bug can no longer recur regardless of what jobs get renamed or added later.
 
 **Therefore: job-level `if:` only. The workflow-level `paths:` key is banned in
 `ci-pr.yml`,** and this spec exists partly to make that a written rule rather
@@ -168,13 +187,29 @@ A PR touching any code is completely unaffected.
   have run. The cheap guard, if it ever seems warranted, is a grep gate in the
   `docs` job — deliberately not added now, since adding an untriggered gate
   for a hypothetical is its own cost.
-- **No `ci-gate` aggregate job.** The widely-recommended terminal aggregate
+- **No `ci-gate` aggregate job.** *(Corrected 2026-09-22 — this decision is
+  no longer current; see the erratum in §1. Original reasoning preserved
+  below for the record.)* The widely-recommended terminal aggregate
   (`needs:` everything, `if: always()`) would let branch protection point at a
   single context. It is a genuine improvement but requires repointing branch
   protection, which needs repository-admin access this change does not have.
   Noted as a follow-up, not silently skipped. Note also the trap if it is
   added later: an aggregate job that can itself be skipped always reports
   success, so it needs a level of indirection to be meaningful.
+
+  **What actually shipped (#3507):** the "follow-up" arrived sooner than
+  expected — as the fix for the exact `if:` correctly warns about above. This
+  spec deferred the aggregate as a nice-to-have; the trigger for actually
+  building it was `rust` being a matrix job, which made the deferred case a
+  live production bug instead of a hypothetical one. `ci-required` in
+  `ci-pr.yml` `needs: [changes, rust, frontend]`, runs unconditionally
+  (`if: always()`), and avoids exactly the trap this bullet warned about: it
+  does NOT rely on GitHub's default `needs`-success gating (which would fail
+  it on any legitimately skipped leg) — `scripts/ci-required-check.mjs`
+  inspects each dependency's own `result` explicitly, treating `success`/
+  `skipped` as passing and everything else (`failure`, `cancelled`, an
+  unrecognized value) as failing closed. Branch protection was repointed at
+  this one job in the same change.
 - **No third-party action.** `dorny/paths-filter` is the usual choice and is
   fine, but it answers "ANY" (R1), needs SHA-pinning and extra permissions, and
   would put the safety-critical logic somewhere untestable. A dozen lines of
