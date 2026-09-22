@@ -83,6 +83,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     const termSettings = createMemo(() => termSettingsAtom());
     const termMode = createMemo(() => blockData()?.meta?.["term:mode"] ?? "term");
     const termFontSize = createMemo(() => model.fontSizeAtom());
+    const termScrollSensitivity = createMemo(() => model.scrollSensitivityAtom());
     const isFocused = createMemo(() => model.nodeModel.isFocused());
     const isMI = createMemo(() => atoms.isTermMultiInput());
     const isBasicTerm = createMemo(() => blockData()?.meta?.controller != "cmd");
@@ -249,6 +250,21 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         if (termWrap?.terminal && termWrap.loaded) {
             termWrap.terminal.options.fontSize = fs;
             termWrap.handleResize();
+        }
+    });
+
+    // Update scroll sensitivity in-place when the setting changes — was
+    // previously only applied at Terminal construction, so changing it in
+    // Settings had no effect on already-open panes until reopened.
+    // A separate effect from font size above (not folded in): unlike a font
+    // size change, a sensitivity change doesn't affect cell geometry, so
+    // there's nothing here that needs handleResize().
+    // See REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md.
+    createEffect(() => {
+        const ss = termScrollSensitivity();
+        const termWrap = model.termRef.current;
+        if (termWrap?.terminal && termWrap.loaded) {
+            termWrap.terminal.options.scrollSensitivity = ss;
         }
     });
 

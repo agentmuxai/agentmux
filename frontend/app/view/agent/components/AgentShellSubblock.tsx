@@ -17,6 +17,7 @@
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms, getSettingsPrefixAtom, staticTabId, MOS } from "@/app/store/global";
 import { resolveTermScrollback } from "@/app/view/term/termscrollback";
+import { resolveTermScrollSensitivity } from "@/app/view/term/termscrollsensitivity";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -308,6 +309,14 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     const termSettingsAtom = getSettingsPrefixAtom("term");
     const termScrollback = createMemo(() => resolveTermScrollback(termSettingsAtom(), subBlockAtom()?.()?.meta));
 
+    // term:scrollsensitivity has no per-block override (unlike scrollback
+    // above) — same global-only design as term.tsx's own use of this
+    // resolver (termscrollsensitivity.ts's header comment), so only the
+    // settings bag is read, no sub-block meta.
+    const termScrollSensitivity = createMemo(() =>
+        resolveTermScrollSensitivity(termSettingsAtom()["term:scrollsensitivity"])
+    );
+
     // Apply zoom-driven font-size changes to the live terminal in place —
     // mirrors term.tsx:234-241. Only for LIVE updates (Ctrl+Wheel while the
     // shell is already open, or a meta push from elsewhere); the initial
@@ -328,6 +337,22 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         if (termWrap?.terminal && loaded) {
             termWrap.terminal.options.fontSize = fs;
             termWrap.handleResize();
+        }
+    });
+
+    // Apply scroll-sensitivity changes to the live terminal in place — was
+    // previously only read at TermWrap construction, so changing the
+    // setting had no effect until the shell was closed and reopened. A
+    // separate effect from font size above (not folded in): a sensitivity
+    // change doesn't affect cell geometry, so there's nothing here that
+    // needs handleResize(). See REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md.
+    createEffect(() => {
+        const ss = termScrollSensitivity();
+        // Same unconditional-read reasoning as the font-size effect above —
+        // subscribes to wrapLoaded() on this effect's own first run too.
+        const loaded = wrapLoaded();
+        if (termWrap?.terminal && loaded) {
+            termWrap.terminal.options.scrollSensitivity = ss;
         }
     });
 
