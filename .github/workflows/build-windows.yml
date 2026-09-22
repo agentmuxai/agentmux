@@ -11,7 +11,6 @@ name: build-windows
 # stock CEF binary with zero override capability).
 #
 # Required repo secrets (Settings → Secrets → Actions):
-#   A5AF_PACKAGES_TOKEN      npm GitHub Packages token (@a5af scope)
 #   CI_APP_ID / CI_APP_PRIVATE_KEY   GitHub App creds (org secrets); a
 #                                   short-lived token for agentmuxai/cef is
 #                                   minted per run, replacing CEF_RUNTIME_TOKEN
@@ -103,14 +102,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-
-      - name: Auth npm for @a5af GitHub Packages
-        shell: bash
-        run: |
-          {
-            echo "@a5af:registry=https://npm.pkg.github.com"
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
-          } >> .npmrc
 
       - run: npm install
 
