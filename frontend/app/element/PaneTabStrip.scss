@@ -140,9 +140,28 @@
     // "minimal, exact polish deferred" posture as the same-pane reorder
     // feedback above (`--dragging`/`--drop-before`/`--drop-after` on
     // `.pane-tab`).
+    // Only applied when this strip IS the drop zone — a strip not hosted in
+    // a Pane header row. Header-hosted strips (every pane, via
+    // PaneHeaderTabStrip) highlight the whole header instead; see
+    // `.pane-header--foreign-hover` below.
     &--foreign-hover {
         box-shadow: inset 0 0 0 1px var(--accent-color);
     }
+}
+
+// Same drop-to-append hover as above, on the whole Pane header row — the
+// actual drop zone (`foreignDropRootFor`, PaneTabStrip.tsx). Applied
+// imperatively to blockframe.tsx's `[data-role="block-header"]` element,
+// which is why this rule is a bare class rather than nested under
+// `.pane-tab-strip`. `outline` rather than the `box-shadow` used above:
+// the header row already carries its own box-shadow in the has-summary
+// case (block.scss), and outline is a separate property, so the highlight
+// composes instead of replacing it. Negative offset keeps the 1px inside
+// the row's own bounds, so it can't be clipped by the pane's rounded
+// corners or overlap the neighbouring pane.
+.pane-header--foreign-hover {
+    outline: 1px solid var(--accent-color);
+    outline-offset: -1px;
 }
 
 // The zoomed layer — carries the flex layout the outer box used to own

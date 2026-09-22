@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { dropPositionForPointerX, PaneTabStrip } from "./PaneTabStrip";
+import { dropPositionForPointerX, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
 
 afterEach(() => cleanup());
 
@@ -397,6 +397,67 @@ describe("dropPositionForPointerX", () => {
 
     it("returns after exactly at the midpoint", () => {
         expect(dropPositionForPointerX(rect, 120)).toBe("after");
+    });
+});
+
+// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4: the cross-pane drop zone is
+// the target pane's ENTIRE header row, not just its tab strip — a pane with
+// one short tab leaves most of the row empty, and aiming at the strip alone
+// to move a tab there is fussy. Tested at the element-resolution level for
+// the same reason `dropPositionForPointerX` is (no real drag pipeline in
+// jsdom), and because getting the element wrong fails SILENTLY: pragmatic-dnd
+// never fires a handler for an element the pointer never reaches, which is
+// exactly how the cross-pane move in PR #3447 shipped dead in the UI with
+// green unit tests (ReAgent P0).
+describe("foreignDropRootFor", () => {
+    const withHeader = (inner: HTMLElement) => {
+        const header = document.createElement("div");
+        header.setAttribute("data-role", "block-header");
+        header.appendChild(inner);
+        return header;
+    };
+
+    it("resolves to the enclosing pane header row, not the strip", () => {
+        const strip = document.createElement("div");
+        const header = withHeader(strip);
+        expect(foreignDropRootFor(strip)).toBe(header);
+    });
+
+    it("finds the header row through intervening wrappers", () => {
+        // PaneHeaderTabStrip hands the strip to BlockFrame_Header as
+        // `leadingTabStrip`, which wraps it in its own
+        // `.block-frame-default-header-tabstrip` div — so the header is a
+        // grandparent, never the direct parent. A parentElement check
+        // instead of closest() would miss it.
+        const strip = document.createElement("div");
+        const wrapper = document.createElement("div");
+        wrapper.appendChild(strip);
+        const header = withHeader(wrapper);
+        expect(foreignDropRootFor(strip)).toBe(header);
+    });
+
+    it("falls back to the strip itself when it is not inside a pane header", () => {
+        // The editor's file-tab strip and the agent History strip render
+        // inside a pane's CONTENT. Neither opts into cross-pane drops
+        // today, so this is defensive — but it must never resolve to some
+        // unrelated ancestor, which would register the drop target on a
+        // region the user has no reason to read as a tab area.
+        const strip = document.createElement("div");
+        const contentArea = document.createElement("div");
+        contentArea.appendChild(strip);
+        expect(foreignDropRootFor(strip)).toBe(strip);
+    });
+
+    it("resolves to the NEAREST header when panes are nested in the DOM", () => {
+        // Sibling panes aren't nested, but a pane's content can host a
+        // surface that has its own header-like chrome; nearest-wins is the
+        // only correct reading — a tab must join the pane you're pointing
+        // at, never an ancestor pane.
+        const strip = document.createElement("div");
+        const inner = withHeader(strip);
+        const outer = withHeader(inner);
+        expect(foreignDropRootFor(strip)).toBe(inner);
+        expect(foreignDropRootFor(strip)).not.toBe(outer);
     });
 });
 
