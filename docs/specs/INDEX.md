@@ -334,6 +334,7 @@ partial list.
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
 | [`SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19`](SPEC_PANE_HEADER_HEIGHT_TAB_INDICATOR_2026_04_19.md) | SPEC: Pane Header Height + Tab Active Indicator Edge-to-Edge |
+| [`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21`](SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md) | SPEC: the header row's leftover "tail" (the + and the bar) goes app-default when a pane's tabs disagree on a color, instead of tracking the active tab |
 | [`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20`](SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md) | SPEC: Pane tab strip — editor-style in-pane tabs for agent and terminal panes |
 | [`SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12`](SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md) | SPEC: Bind the pane tab strip to its own pane's zoom, and fix top scroll-clearance for short agent conversations |
 | [`SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md) | SPEC: Pane tab strip — compact (shrink-to-fit) sizing + double-click rename |

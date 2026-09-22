@@ -21,6 +21,7 @@
 import { createMemo, createSignal, type JSX } from "solid-js";
 import {
     computeBlockActiveBorderColor,
+    computeBlockColorBg,
     computeBlockTabPillBg,
     computeBlockTabPillNeutralBg,
     computeFocusRingBorderColor,
@@ -148,6 +149,56 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         return colors;
     });
 
+    // The header row's background, when the pane's tabs don't agree on a
+    // single color — SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md.
+    //
+    // The row is ONE element, painted by BlockFrame_Header with the ACTIVE
+    // block's color, and the tab strip sits on top of it. Everything the
+    // pills don't cover (the "+", the gap after the last pill, the run of
+    // bar out to the end icons — the "tail") is therefore the active tab's
+    // color, and changes on every tab switch. Fine when a pane held one
+    // widget or a stack of same-colored forks; the universal pane-tabs
+    // redesign made a pane of differently-colored widgets the normal case,
+    // where the tail became a large block of color that moved.
+    //
+    // A pane with one color is *about* that color. A pane with several has
+    // no single color to be about, so picking one isn't information.
+    //
+    // Computed here rather than in blockframe.tsx because this is the only
+    // component that has both the pane's whole tab list and the theme;
+    // BlockFrame_Header renders one block and is handed a color, which
+    // keeps every tab-set-aware decision in one place and leaves every
+    // non-PaneChrome BlockFrame consumer untouched by construction.
+    const headerTailBg = createMemo(() => {
+        const themeId = getSettingsKeyAtom("window:theme")();
+        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const ids = tabIds();
+        // Compare the RESOLVED background strings, not the meta that
+        // produced them: two blocks that land on the same rendered color
+        // are the same color here even if one got there via frame:hue and
+        // the other via its agent identity color.
+        //
+        // `undefined` (no color of its own) is its own distinct member, not
+        // a wildcard — one colored tab beside one uncolored tab is two
+        // colors, and the colored one is not the pane's color. Several
+        // uncolored tabs collapse to the single value `undefined`, which
+        // then falls through to the same neutral below anyway.
+        const distinct = new Set<string | undefined>();
+        for (const blockId of ids) {
+            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
+            distinct.add(computeBlockColorBg(meta, isLightTheme));
+            if (distinct.size > 1) break;
+        }
+        const only = distinct.size === 1 ? [...distinct][0] : undefined;
+        if (only != null) return only;
+        // Same neutral an uncolored PILL resolves to (computeBlockTabPillNeutralBg)
+        // — "the tail went neutral" and "this pill has no color" must never
+        // be two different neutrals in the same row. Keyed on the active
+        // block's meta, since that's the block whose header this is.
+        const activeMeta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))()?.meta;
+        return computeBlockTabPillNeutralBg(activeMeta, isLightTheme);
+    });
+
     // Rename (double-click a pill). The override shows the new name at once,
     // before the write round-trips back through the block's meta.
     const [renamingId, setRenamingId] = createSignal<string | null>(null);
@@ -228,6 +279,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getLabel={labelOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
             getColor={(id) => tabColors().get(id)}
+            headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
             onClose={handleClose}
             onReorder={handleReorder}

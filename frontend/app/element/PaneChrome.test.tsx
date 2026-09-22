@@ -65,6 +65,10 @@ vi.mock("@/app/block/blockframe", () => ({
         meta?.["frame:hue"] != null ? `underline-${meta["frame:hue"]}` : undefined,
     computeBlockTabPillBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
     computeBlockTabPillNeutralBg: () => "neutral",
+    // Meta-driven for the same reason as the two above: headerTailBg's whole
+    // job is to compare these resolved values across tabs, so a fixed stub
+    // would make every pane look single-colored and pass vacuously.
+    computeBlockColorBg: (meta: any) => (meta?.["frame:hue"] != null ? `color-${meta["frame:hue"]}` : undefined),
 }));
 
 const showContextMenu = vi.fn();
@@ -344,6 +348,86 @@ describe("renderPaneChromeShell — per-tab pane color", () => {
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
 
         expect(headerCalls.at(-1).getColor("b2")?.neutralBackground).toBe("neutral");
+    });
+});
+
+// SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md: the header row is ONE element
+// painted with the active block's color, and the tab strip sits on top of
+// it — so the leftover "tail" (the "+" and the bar out to the end icons)
+// changed color on every tab switch in a pane whose tabs have different
+// colors. A pane with several colors has no single color to be about, so
+// the tail goes app-default instead of picking one.
+describe("renderPaneChromeShell — header tail color", () => {
+    /** Renders with `activeId` active and returns the headerBgOverride the
+     *  shell handed down. The whole point of the rule is that this value
+     *  does NOT depend on activeId, so every test below checks it across
+     *  every tab rather than trusting one. */
+    function tailBgWithActive(stack: string[], activeId: string): string | undefined {
+        mockLayoutModel = fakeLayoutModel(stack);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => activeId }), <div>content</div>) as any);
+        const bg = headerCalls.at(-1).headerBgOverride;
+        cleanup();
+        return bg;
+    }
+    function tailBgAcrossEveryActiveTab(stack: string[]): (string | undefined)[] {
+        return stack.map((id) => tailBgWithActive(stack, id));
+    }
+
+    it("a lone colored tab colors the tail — the single-tab case is unchanged", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        expect(tailBgWithActive(["b1"], "b1")).toBe("color-10");
+    });
+
+    it("a lone uncolored tab gets the app default", () => {
+        setObjectValue("block:b1", { meta: {} });
+        expect(tailBgWithActive(["b1"], "b1")).toBe("neutral");
+    });
+
+    it("tabs that all share one color keep colouring the tail, whichever is active", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: { "frame:hue": 10 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["color-10", "color-10"]);
+    });
+
+    it("tabs with different colors give the app default, whichever is active", () => {
+        // The reported bug: selecting Swarm turned the whole bar teal,
+        // selecting Terminal 1 turned it purple.
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: { "frame:hue": 20 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["neutral", "neutral"]);
+    });
+
+    it("one colored + one uncolored tab gives the app default — no color is the pane's color", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: {} });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["neutral", "neutral"]);
+    });
+
+    it("two of three tabs agreeing is not agreement", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b3", { meta: { "frame:hue": 20 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2", "b3"])).toEqual(["neutral", "neutral", "neutral"]);
+    });
+
+    it("several uncolored tabs give the app default, same as one", () => {
+        setObjectValue("block:b1", { meta: {} });
+        setObjectValue("block:b2", { meta: {} });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["neutral", "neutral"]);
+    });
+
+    it("recomputes when a tab's own color changes, without a tab switch", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: { "frame:hue": 10 } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+        expect(headerCalls.at(-1).headerBgOverride).toBe("color-10");
+
+        // Recolor the INACTIVE tab: the pane stops agreeing on a color, so
+        // the tail must drop to the default even though nothing about the
+        // active tab changed.
+        setObjectValue("block:b2", { meta: { "frame:hue": 20 } });
+        expect(headerCalls.at(-1).headerBgOverride).toBe("neutral");
     });
 });
 

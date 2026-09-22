@@ -568,7 +568,13 @@ function BlockFrame_Header(
         // matching the border's full-strength color instead.
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
-        const bg = computeBlockColorBg(blockData()?.meta, isLightTheme);
+        // An explicit override wins over this block's own color: the row is
+        // shared with the tab strip's leftover "tail", which must not track
+        // whichever tab is active when the pane's tabs disagree on a color
+        // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md). Set only by
+        // PaneChrome; every other BlockFrame consumer leaves it undefined
+        // and keeps the behavior below unchanged.
+        const bg = props.headerBgOverride ?? computeBlockColorBg(blockData()?.meta, isLightTheme);
         if (bg) {
             style["background-color"] = bg;
             style.color = pickReadableTextColor(bg) ?? undefined;
