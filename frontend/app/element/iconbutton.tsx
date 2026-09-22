@@ -57,7 +57,14 @@ export function ToggleIconButton({ decl, className }: ToggleIconButtonProps): JS
             classList={{ active: active(), disabled }}
             title={title()}
             aria-label={title()}
-            style={{ color: decl.iconColor ?? "inherit" }}
+            // Unlike IconButton, deliberately NOT `?? "inherit"` — an inline
+            // style always wins over a class selector regardless of
+            // specificity, so forcing "inherit" here would silently block
+            // iconbutton.scss's `.toggle.active { color: var(--accent-color) }`
+            // from ever tinting the icon. Omitting the property (undefined)
+            // when no explicit iconColor is set lets the class rule apply
+            // normally; an explicit iconColor still overrides it either way.
+            style={{ color: decl.iconColor }}
             onClick={() => decl.active?._set(!active())}
             disabled={disabled}
         >
