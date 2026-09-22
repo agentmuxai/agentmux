@@ -510,8 +510,21 @@ describe("PaneLeafChrome — RCA verification (non-keep-alive hoist path)", () =
     // test should PASS, refuting the non-keep-alive half of the hoist-
     // deadlock theory in SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md.
     // If it TIMES OUT instead, that confirms the deadlock is real here too.
-    it("resolves chrome-root even when the view type is already \"agent\" on the very first synchronous render", async () => {
-        setBlockView("b1", "agent"); // already resolved BEFORE render — the claimed trigger condition
+    //
+    // **The view type must be in `HOISTS_OWN_CHROME` but NOT in
+    // `KEEP_ALIVE_TYPES`**, or this test silently answers the wrong
+    // question. This originally used `"agent"`, which is in BOTH
+    // (`KEEP_ALIVE_TYPES = {"term", "agent"}`), so `keepAlive()` latched
+    // true, `chromeNodeModel()` took the `viewModelSlots` override branch,
+    // and `content` rendered the `<For>` keep-alive branch — exercising the
+    // path that was ALREADY fixed at :320 rather than the plain
+    // `<Key>`/`<Block>` fallback this PR exists to probe. A pass or a fail
+    // would both have been uninformative (reagentx P1 on #3459).
+    //
+    // `"editor"` is in `HOISTS_OWN_CHROME` and absent from
+    // `KEEP_ALIVE_TYPES`, so it lands on the non-keep-alive branch.
+    it("resolves chrome-root even when the view type is already resolved (non-keep-alive) on the very first synchronous render", async () => {
+        setBlockView("b1", "editor"); // already resolved BEFORE render — the claimed trigger condition
         const [activeBlockId] = createSignal("b1");
         const nodeModel = makeRealisticNodeModel({ activeBlockId }); // REAL signal-backed activeViewModel, not a static fake
         const PaneLeafChrome = await loadPaneLeafChrome();
