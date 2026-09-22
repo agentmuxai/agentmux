@@ -138,6 +138,12 @@ pub struct Handler {
     /// target agent's lowercased name. In-memory only (same lifecycle as
     /// `audit_log`) — not persisted across a restart.
     nudge_counters: HashMap<String, NudgeCounterState>,
+    /// Maps a caller-supplied slug to its canonical `db_agents.id`, so this
+    /// handler's registries are keyed by an enforced-unique id instead of a
+    /// slug two agents can share. See [`AgentKeyResolver`] and
+    /// [`Handler::canonical_key`]. `None` (unset) keeps the pre-Phase-2
+    /// lowercased-slug keying exactly.
+    agent_key_resolver: Option<AgentKeyResolver>,
 }
 
 impl Handler {
@@ -158,7 +164,34 @@ impl Handler {
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
             nudge_counters: HashMap::new(),
+            agent_key_resolver: None,
         }
+    }
+
+    /// Install the slug → `db_agents.id` resolver. See [`AgentKeyResolver`].
+    pub fn set_agent_key_resolver(&mut self, resolver: AgentKeyResolver) {
+        self.agent_key_resolver = Some(resolver);
+    }
+
+    /// The key this handler's registries use for `agent_id`.
+    ///
+    /// The canonical `db_agents.id` when the agent resolves to exactly one,
+    /// else the lowercased slug — which is what every key site used before
+    /// Phase 2, so an unresolvable agent (or a handler with no resolver
+    /// installed, as in most tests) behaves exactly as it did.
+    ///
+    /// Deliberately NOT used for the alias registry: aliases are the *stable*
+    /// `AGENTMUX_AGENT_ID` by design (see `alias_to_block`), so they stay
+    /// slug-keyed and are looked up with the raw lowercased value.
+    fn canonical_key(&self, agent_id: &str) -> String {
+        if let Some(resolve) = &self.agent_key_resolver {
+            if let Some(id) = resolve(agent_id) {
+                if !id.is_empty() {
+                    return id;
+                }
+            }
+        }
+        agent_id.to_lowercase()
     }
 
     /// Set the input sender function for message injection.
@@ -231,7 +264,7 @@ impl Handler {
             return Err(format!("invalid agent ID: {}", agent_id));
         }
 
-        let agent_key = agent_id.to_lowercase();
+        let agent_key = self.canonical_key(agent_id);
 
         // Remove existing registration for this agent
         let evicted_block = self.agent_to_block.remove(&agent_key);
@@ -308,7 +341,7 @@ impl Handler {
 
     /// Unregister an agent.
     pub fn unregister_agent(&mut self, agent_id: &str) {
-        let agent_key = agent_id.to_lowercase();
+        let agent_key = self.canonical_key(agent_id);
         if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
             self.log_audit_registration("unregister", agent_id, &block_id, None, None);
@@ -386,14 +419,15 @@ impl Handler {
     /// Update the last_seen timestamp for an agent.
     #[allow(dead_code)]
     pub fn update_last_seen(&mut self, agent_id: &str) {
-        if let Some(info) = self.agent_info.get_mut(&agent_id.to_lowercase()) {
+        let key = self.canonical_key(agent_id);
+        if let Some(info) = self.agent_info.get_mut(&key) {
             info.last_seen = now_unix_millis();
         }
     }
 
     /// Get agent registration by agent ID.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        self.agent_info.get(&agent_id.to_lowercase())
+        self.agent_info.get(&self.canonical_key(agent_id))
     }
 
     /// Get agent registration by block ID.
@@ -479,11 +513,16 @@ impl Handler {
         // registry (see `alias_to_block`'s doc comment: a jekt addressed to
         // the stable AGENTMUX_AGENT_ID resolves here once the primary key
         // has moved on to the live display name).
-        let target_key = req.target_agent.to_lowercase();
+        // Two keys, deliberately: the primary registry is canonical-id keyed
+        // (Phase 2) while the alias registry is keyed by the STABLE slug by
+        // design — see `alias_to_block`. Resolving the alias lookup too would
+        // break every jekt addressed to a stable AGENTMUX_AGENT_ID.
+        let target_key = self.canonical_key(&req.target_agent);
+        let alias_key = req.target_agent.to_lowercase();
         let block_id = match self
             .agent_to_block
             .get(&target_key)
-            .or_else(|| self.alias_to_block.get(&target_key))
+            .or_else(|| self.alias_to_block.get(&alias_key))
         {
             Some(id) => id.clone(),
             None => {
@@ -1240,6 +1279,11 @@ impl ReactiveHandler {
 
     pub fn set_message_sender(&self, sender: MessageSender) {
         self.inner.lock().unwrap().set_message_sender(sender);
+    }
+
+    /// Install the slug → `db_agents.id` resolver. See [`AgentKeyResolver`].
+    pub fn set_agent_key_resolver(&self, resolver: AgentKeyResolver) {
+        self.inner.lock().unwrap().set_agent_key_resolver(resolver);
     }
 
     pub fn set_agent_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {

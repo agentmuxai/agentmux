@@ -3298,3 +3298,130 @@ fn non_reentrant_try_get_agent_by_block_finds_the_registration() {
         .expect("an uncontended call must find the registration");
     assert_eq!(found.registration_nonce, 42);
 }
+
+// -- Phase 2: canonical-id keying (SPEC_CANONICAL_AGENT_ID_MIGRATION) --
+
+/// A resolver standing in for `agent_resolve::resolve_agent_id`, mapping an
+/// exact caller-supplied string to a canonical id. Returns `None` for anything
+/// it does not know, exercising the fallback path.
+///
+/// Matching is case-SENSITIVE on purpose. These tests turn on two display
+/// casings of one name resolving to two different agents — the exact case
+/// `derive_slug` collapses and this phase exists to separate — so a
+/// case-insensitive lookup here would map both to the first entry and quietly
+/// test nothing. (It did, on the first run of
+/// `colliding_slugs_no_longer_evict_each_other`.)
+fn test_resolver(pairs: &'static [(&'static str, &'static str)]) -> AgentKeyResolver {
+    Arc::new(move |agent_id: &str| {
+        pairs
+            .iter()
+            .find(|(slug, _)| *slug == agent_id)
+            .map(|(_, id)| (*id).to_string())
+    })
+}
+
+fn recording_handler() -> (Handler, Arc<Mutex<Vec<(String, Vec<u8>)>>>) {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sink = sent.clone();
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sink.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    (handler, sent)
+}
+
+/// The defect Phase 2 exists to fix. Two agents whose display names derive the
+/// same slug ("AgentY"/"AGENTY" → "agenty") used to share one registry key, so
+/// the second registration EVICTED the first and every jekt addressed to that
+/// slug went to whichever registered last. Keyed by `db_agents.id` they are
+/// two entries, and each is reachable by its own id.
+#[tokio::test]
+async fn colliding_slugs_no_longer_evict_each_other() {
+    let (mut handler, sent) = recording_handler();
+    handler.set_agent_key_resolver(test_resolver(&[
+        ("AgentY", "def-a"),
+        ("AGENTY", "def-b"),
+        ("def-a", "def-a"),
+        ("def-b", "def-b"),
+    ]));
+
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+    handler.register_agent("AGENTY", "block-b", None).unwrap();
+
+    // Both survive: pre-Phase-2 the second would have evicted the first.
+    assert!(handler.get_agent("AgentY").is_some(), "first registration must survive");
+    assert!(handler.get_agent("AGENTY").is_some(), "second registration must exist");
+
+    // And each routes to its OWN block, not to whichever registered last.
+    for (target, expected_block) in [("def-a", "block-a"), ("def-b", "block-b")] {
+        let resp = handler.inject_message(InjectionRequest {
+            target_agent: target.to_string(),
+            message: "hi".to_string(),
+            request_id: Some(format!("req-{target}")),
+            ..Default::default()
+        });
+        assert!(resp.success, "{target} must be reachable: {:?}", resp.error);
+        assert_eq!(resp.block_id.as_deref(), Some(expected_block), "{target} routed wrong");
+    }
+    assert!(!sent.lock().unwrap().is_empty(), "delivery actually happened");
+}
+
+/// Without a resolver the handler must behave exactly as it did before Phase 2
+/// — lowercased-slug keying, collisions and all. This is what keeps every
+/// pre-existing test meaningful rather than silently exercising a new path.
+#[test]
+fn without_a_resolver_keying_is_unchanged() {
+    let mut handler = Handler::new();
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+    handler.register_agent("AGENTY", "block-b", None).unwrap();
+
+    // Same slug, so the second still evicts the first: the old behaviour.
+    let found = handler.get_agent("agenty").expect("slug lookup still works");
+    assert_eq!(found.block_id, "block-b", "last registration wins, as before");
+}
+
+/// An agent the store cannot resolve — no `db_agents` row, or a slug two
+/// agents share, which `resolve_agent_id` refuses rather than guessing — must
+/// keep working on the slug key rather than dropping off the registry.
+#[tokio::test]
+async fn an_unresolvable_agent_still_registers_and_receives() {
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(test_resolver(&[("known", "def-known")]));
+
+    handler.register_agent("stranger", "block-s", None).unwrap();
+    assert!(handler.get_agent("stranger").is_some(), "must not drop off the registry");
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "stranger".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-s".to_string()),
+        ..Default::default()
+    });
+    assert!(resp.success, "unresolvable agent must stay reachable: {:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-s"));
+}
+
+/// The alias registry is keyed by the STABLE slug by design, so it must NOT be
+/// canonicalized — a jekt addressed to a stable `AGENTMUX_AGENT_ID` has to keep
+/// resolving after the primary key moved to a canonical id.
+#[tokio::test]
+async fn alias_lookup_survives_canonical_keying_of_the_primary_registry() {
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(test_resolver(&[("Renamed", "def-a"), ("def-a", "def-a")]));
+
+    // Primary registration lands under the canonical id, with the stable slug
+    // recorded as an alias — the shape input.rs's Register tail produces.
+    handler
+        .register_agent_with_nonce("Renamed", "block-a", None, 0, Some("stable-id"))
+        .unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "stable-id".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-alias".to_string()),
+        ..Default::default()
+    });
+    assert!(resp.success, "alias target must still resolve: {:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-a"));
+}
