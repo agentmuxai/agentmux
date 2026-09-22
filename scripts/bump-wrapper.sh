@@ -65,17 +65,17 @@ bump "$@"
 # npm install --package-lock-only. The full-install path regenerates peer/dev
 # metadata based on the local npm version, producing large noisy diffs when
 # the machine's npm differs from whatever wrote the committed lockfile (P2 on
-# #1548). A targeted node edit avoids that churn — dependency graph unchanged.
+# #1548). scripts/sync-lockfile-version.mjs does the targeted edit and,
+# critically, preserves the file's existing indentation instead of always
+# writing 2-space — an inline `node -e` version of this used to hardcode
+# 2-space, silently reformatting this repo's 4-space lockfile on every
+# release (~24,000-line diff, zero dependency changes). See that script's
+# header comment for the full story, and scripts/sync-lockfile-version.test.mjs
+# for the regression coverage.
 echo ""
 echo "bump-wrapper: syncing package-lock.json …"
-node -e "
-  const fs = require('fs');
-  const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
-  const ver = require('./package.json').version;
-  lock.version = ver;
-  if (lock.packages && lock.packages['']) lock.packages[''].version = ver;
-  fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
-" 2>/dev/null || {
+NEW_VER="$(node -p "require('./package.json').version")"
+node "$(dirname "${BASH_SOURCE[0]}")/sync-lockfile-version.mjs" "$NEW_VER" || {
     echo "ERROR: package-lock.json version update failed" >&2
     exit 1
 }
