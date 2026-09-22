@@ -1995,7 +1995,7 @@ impl PersistentSubprocessController {
                 // since the persistent process never exits between turns.
                 // Without this, `turn_active` would go stale after turn 1.
                 self.mark_turn_active_and_publish();
-                let inner = self.inner.lock().unwrap();
+                let mut inner = self.inner.lock().unwrap();
                 let tx = inner.stdin_tx.as_ref()
                     .ok_or("persistent process not running after spawn")?;
                 // Persist only AFTER a successful send — reagentx P1 on PR
@@ -2009,6 +2009,34 @@ impl PersistentSubprocessController {
                 // `send_user_message`'s existing (correct) ordering.
                 tx.try_send(json_str.clone())
                     .map_err(|e| format!("stdin send failed: {e}"))?;
+                // codex P1 on PR #3513: track this message into the CURRENT
+                // generation's retry batch, same as the drain loop already
+                // does for queued deliveries (see that call site's own doc
+                // comment on why every message beyond the seed needs this,
+                // not just the one that triggered the spawn). `DeliverDirect`
+                // itself never did this — harmless for a spawn that never
+                // attempted `--resume` (`MessageAppendedToRetryBatch` is a
+                // no-op on `NotTracking`, see `persistent_resume::update`'s
+                // catch-all) or one whose resume already confirmed success,
+                // but a real gap for a still-unconfirmed one: eager resume
+                // (issue #3463) can reach `DeliverDirect` with its `--resume`
+                // attempt not yet confirmed and NO seed message already
+                // tracked (unlike every other resume-respawn, which always
+                // has one) — this is what actually closes that gap, not just
+                // the `SpawnedWithResume` routing fix above. Read the
+                // generation and apply in this SAME lock acquisition
+                // (already held for `try_send`) — reagentx P1 on PR #2373
+                // via the drain loop's identical concern: a separate
+                // acquisition risks a concurrent respawn bumping
+                // `spawn_generation` in between, making this event carry a
+                // stale generation that `update()`'s catch-all silently
+                // ignores.
+                let generation = inner.spawn_generation;
+                let seq = inner.take_next_message_seq();
+                inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
+                    generation,
+                    entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
+                });
                 drop(inner);
                 self.persist_message_to_blockfile(&json_str);
                 self.emit_message_accepted(config.message_id.as_deref());
@@ -3220,7 +3248,34 @@ impl PersistentSubprocessController {
                         retry: persistent_resume::RetryPayload { config: config.clone(), messages: vec![retry_json] },
                     })
                 }
-                _ => inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation }),
+                // `--resume <sid>` WAS attempted, just with no message of
+                // our own to seed the retry batch with — the eager-resume
+                // path (issue #3463), which revives a session with nothing
+                // queued rather than in response to a message. codex P1 on
+                // PR #3513: routing this to `SpawnedFresh` below (the
+                // catch-all's original behavior) discarded `attempted_sid`
+                // entirely, leaving `NotTracking` in place for a spawn that
+                // in fact has an unconfirmed `--resume` in flight. If that
+                // resume turns out to be stale and a direct message arrives
+                // before the failure is detected, `MessageAppendedToRetryBatch`
+                // below has nothing to append it to and no retry ever fires
+                // when the doomed process exits — the message is silently
+                // lost. An empty `messages` starts the SAME `AwaitingOutcome`
+                // tracking a seeded resume gets; `MessageAppendedToRetryBatch`
+                // (`DeliverDirect`, below) is what fills it in as messages
+                // actually arrive. Never reachable before eager resume
+                // existed — every other caller either omits `--resume`
+                // entirely (`respawn_once_for_leftover_queue` clears
+                // `session_id` first) or always has a real payload
+                // (`BecomeSpawner`, `retry_after_resume_failure`).
+                (Some(sid), None) => {
+                    inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
+                        generation,
+                        attempted_sid: sid,
+                        retry: persistent_resume::RetryPayload { config: config.clone(), messages: vec![] },
+                    })
+                }
+                (None, _) => inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation }),
             };
             (generation, effects)
         };
@@ -8718,7 +8773,23 @@ setInterval(() => {}, 1000);
             // three consecutive runs, always immediately after the first
             // test that reaches this guard via the success path. A direct,
             // synchronous OS-level kill by pid has no such gap.
-            if let Some(pid) = self.0.inner.lock().unwrap().current_pid {
+            // `.unwrap_or_else(PoisonError::into_inner)`, not `.unwrap()`:
+            // this Drop impl runs during a panicking unwind whenever a test
+            // assertion fails while it holds `inner`'s lock (every
+            // assertion in this module that pattern-matches `inner.resume`
+            // does, since the match arms borrow from the guard). A plain
+            // `.unwrap()` here would panic a SECOND time on the resulting
+            // `PoisonError` — a panic during a panic's unwind, which Rust
+            // escalates straight to `abort()`. Confirmed live: an
+            // intentionally-failing assertion in this exact spot surfaced
+            // as `STATUS_STACK_BUFFER_OVERRUN` with no test-failure message
+            // printed at all, not a normal, readable assertion failure —
+            // exactly this double-panic. The underlying data is still
+            // valid after a poison (the panic happened elsewhere, this
+            // struct's own fields are untouched); recovering it here is
+            // safe and is what actually lets a future real assertion
+            // failure in this module report itself normally.
+            if let Some(pid) = self.0.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).current_pid {
                 #[cfg(windows)]
                 let _ = std::process::Command::new("taskkill")
                     .args(["/F", "/PID", &pid.to_string()])
@@ -9081,5 +9152,98 @@ setInterval(() => {{}}, 1000);
             c.inner.lock().unwrap().current_pid.is_none(),
             "must not spawn at all while another spawn's claim is already held"
         );
+    }
+
+    // codex P1 on PR #3513 (re-review): eager resume attempts `--resume
+    // <sid>` but starts with no message of its own to seed the retry batch
+    // with (unlike every other resume-respawn, which always has one). If
+    // that resume turns out to be stale and a direct message arrives before
+    // the failure is detected, the message must still be tracked so a
+    // confirmed stale-resume retry can redeliver it — otherwise it is
+    // silently lost when the doomed process exits. Proven at the STATE
+    // level rather than by actually killing the process and racing the
+    // stderr reader: this is really two composed fixes (spawn_process's
+    // event-routing, and DeliverDirect's own tracking call), and asserting
+    // on `ResumeState` directly pins each independently of the other's
+    // timing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_direct_message_after_eager_resume_is_tracked_for_stale_resume_retry() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        let stub = write_stub();
+        let c = controller("blk-track-direct").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController {
+            mstore: Some(store),
+            ..c
+        };
+        let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
+
+        Controller::start(&c, meta, None, false).unwrap();
+        assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+        // The resume attempt must be tracked as AwaitingOutcome (not
+        // NotTracking/SpawnedFresh) even with nothing delivered yet — this
+        // is the `spawn_process` routing half of the fix.
+        {
+            let inner = c.inner.lock().unwrap();
+            match &inner.resume {
+                persistent_resume::ResumeState::AwaitingOutcome { attempted_sid, retry, .. } => {
+                    assert_eq!(attempted_sid, "resumed-session");
+                    assert!(retry.messages.is_empty(), "no seed message — nothing delivered yet");
+                }
+                other => panic!("expected AwaitingOutcome with no messages yet, got {other:?}"),
+            }
+        }
+
+        // A direct message now must land in that SAME tracking state — the
+        // DeliverDirect half of the fix.
+        //
+        // Plain raw text, NOT a pre-formatted stream-json envelope —
+        // `send_message` does that wrapping itself (`content: message`).
+        // Every OTHER test in this file passing a full envelope as `message`
+        // (e.g. `shutdown_tests::start()`) gets away with it because those
+        // stubs only ever check the outer `m.type`, never `m.message.
+        // content` — so the resulting double-wrap is invisible to them.
+        // THIS test asserts on the tracked entry's actual content, so it
+        // needs the API used as a real caller (a human typing "hi") would.
+        let msg = "hi";
+        let config = PersistentSpawnConfig {
+            cli_command: "node".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        c.send_message(msg.to_string(), config).unwrap();
+
+        let inner = c.inner.lock().unwrap();
+        match &inner.resume {
+            persistent_resume::ResumeState::AwaitingOutcome { retry, .. } => {
+                assert_eq!(
+                    retry.messages.len(),
+                    1,
+                    "the direct message must be tracked into the retry batch, not silently dropped"
+                );
+                // Parse and check the semantic content rather than hardcode
+                // `send_message`'s exact wrapped-string format — this proves
+                // the RIGHT message was tracked without this test being
+                // fragile to that internal format ever changing.
+                let tracked: serde_json::Value = serde_json::from_str(&retry.messages[0].json)
+                    .expect("tracked entry must be valid JSON");
+                assert_eq!(tracked["message"]["content"], msg);
+            }
+            other => panic!("expected AwaitingOutcome with the tracked message, got {other:?}"),
+        }
     }
 }
