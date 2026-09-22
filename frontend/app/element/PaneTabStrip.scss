@@ -194,8 +194,11 @@
     // treatment its own header would show if it were active. Absent
     // (undefined var) for every other consumer (editor file tabs, the
     // agent History strip) and for a tab with no color assigned, where
-    // this is exactly the old plain `transparent`.
-    background: var(--pane-tab-bg, transparent);
+    // this is exactly the old plain `transparent` — unless the caller
+    // supplied --pane-tab-neutral-bg (PaneChrome does, because its header
+    // row is tinted with the ACTIVE tab's color, which a transparent pill
+    // would show through).
+    background: var(--pane-tab-bg, var(--pane-tab-neutral-bg, transparent));
     color: var(--secondary-text-color);
     cursor: default;
     user-select: none;
@@ -204,7 +207,11 @@
     transition: background 80ms ease, color 80ms ease;
 
     &:hover {
-        background: rgba(255, 255, 255, 0.03);
+        // The white tint is layered ON TOP of the resting neutral
+        // background rather than replacing it, so hovering an uncolored
+        // tab never exposes the header's active-tab tint underneath.
+        background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)),
+            var(--pane-tab-neutral-bg, transparent);
         color: var(--main-text-color);
 
         .pane-tab-close {

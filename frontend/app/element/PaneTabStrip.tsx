@@ -48,10 +48,15 @@ export const paneTabItemType = "PANE_TAB_ITEM";
  *  (shown only on inactive tabs, so a background tab still reads as
  *  "this one's color" instead of going fully transparent). Either can be
  *  absent on its own (a block with no color assigned yields both
- *  undefined) — callers fall back to the strip's existing plain chrome. */
+ *  undefined) — callers fall back to the strip's existing plain chrome.
+ *  `neutralBackground` is the opaque resting background for a tab with no
+ *  `background` of its own — needed wherever the strip sits on a tinted
+ *  surface (PaneChrome's header takes the ACTIVE tab's color), where the
+ *  default transparent pill would show that tint through. */
 export interface PaneTabColors {
     underline?: string;
     background?: string;
+    neutralBackground?: string;
 }
 
 /**
@@ -536,6 +541,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         return {
             ...(c.background ? { "--pane-tab-bg": c.background } : {}),
             ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
+            ...(c.neutralBackground ? { "--pane-tab-neutral-bg": c.neutralBackground } : {}),
         } as JSX.CSSProperties;
     };
 
