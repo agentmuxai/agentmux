@@ -129,4 +129,19 @@ export interface BlockFrameProps {
      *  without losing its real identity — see `leadingTabStrip`'s own doc
      *  comment for the bug this split fixes. */
     trailingAddButton?: JSX.Element;
+
+    /** Explicit header-row background, overriding the active block's own
+     *  pane color (`computeBlockColorBg`) and the non-agent default.
+     *
+     *  Only ever set by PaneChrome, via PaneHeaderTabStrip, and only when
+     *  this pane's tabs don't agree on a single color — the header row is
+     *  one element shared by the pills and the leftover "tail" (the "+"
+     *  and the bar), so without this the tail repaints itself with
+     *  whichever tab is active. See
+     *  SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md.
+     *
+     *  Deliberately a resolved color string, not the tab set itself:
+     *  BlockFrame_Header renders ONE block and has no business knowing
+     *  what else is in the pane. */
+    headerBgOverride?: string;
 }

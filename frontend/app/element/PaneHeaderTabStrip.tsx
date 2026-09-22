@@ -47,6 +47,12 @@ export interface PaneHeaderTabStripProps<T> extends PaneTabStripProps<T> {
     connBtnRef?: { current: HTMLDivElement | null };
     changeConnModalAtom?: import("@/util/util").SignalAtom<boolean>;
     error?: Error;
+    /** Explicit header-row background, overriding the active block's own
+     *  pane color. Set by PaneChrome when this pane's tabs don't agree on
+     *  a single color — see SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md.
+     *  Passed straight through to BlockFrame_Header; this component adds
+     *  no policy of its own. */
+    headerBgOverride?: string;
 }
 
 export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.Element {
@@ -118,6 +124,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             error={props.error}
             leadingTabStrip={usePillStrip() ? pillStrip : undefined}
             trailingAddButton={addButtonOnly}
+            headerBgOverride={props.headerBgOverride}
         />
     );
 }

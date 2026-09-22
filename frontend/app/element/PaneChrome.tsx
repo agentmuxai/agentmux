@@ -21,9 +21,11 @@
 import { createMemo, createSignal, type JSX } from "solid-js";
 import {
     computeBlockActiveBorderColor,
+    computeBlockColorBg,
     computeBlockTabPillBg,
     computeBlockTabPillNeutralBg,
     computeFocusRingBorderColor,
+    computeMixedPaneHeaderBg,
 } from "@/app/block/blockframe";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
@@ -148,6 +150,77 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         return colors;
     });
 
+    // The header row's background, when the pane's tabs don't agree on a
+    // single color — SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md.
+    //
+    // The row is ONE element, painted by BlockFrame_Header with the ACTIVE
+    // block's color, and the tab strip sits on top of it. Everything the
+    // pills don't cover (the "+", the gap after the last pill, the run of
+    // bar out to the end icons — the "tail") is therefore the active tab's
+    // color, and changes on every tab switch. Fine when a pane held one
+    // widget or a stack of same-colored forks; the universal pane-tabs
+    // redesign made a pane of differently-colored widgets the normal case,
+    // where the tail became a large block of color that moved.
+    //
+    // A pane with one color is *about* that color. A pane with several has
+    // no single color to be about, so picking one isn't information.
+    //
+    // Computed here rather than in blockframe.tsx because this is the only
+    // component that has both the pane's whole tab list and the theme;
+    // BlockFrame_Header renders one block and is handed a color, which
+    // keeps every tab-set-aware decision in one place and leaves every
+    // non-PaneChrome BlockFrame consumer untouched by construction.
+    const headerTailBg = createMemo(() => {
+        const themeId = getSettingsKeyAtom("window:theme")();
+        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const ids = tabIds();
+        // Compare the RESOLVED background strings, not the meta that
+        // produced them: two blocks that land on the same rendered color
+        // are the same color here even if one got there via frame:hue and
+        // the other via its agent identity color.
+        //
+        // `undefined` (no color of its own) is NOT one member — uncolored
+        // blocks do not all render the same header.
+        //
+        // `BlockFrame_Header`'s own fallback (blockframe.tsx) branches on
+        // `meta.view` when there is no color: a non-agent block gets
+        // `NON_AGENT_DEFAULT_HEADER_BG`, an agent block gets nothing and
+        // stays translucent. So an uncolored block's EFFECTIVE header
+        // background is a function of its view, and keying this set on the
+        // color alone made a pane of two uncolored tabs — one agent, one
+        // not — collapse to `size === 1`, skip the override entirely, and
+        // hand the header straight back to that per-view fallback. The tail
+        // then changed color with the active tab: the exact bug this
+        // component exists to remove, surviving in the one case nothing
+        // tested (reagent P1 on #3492).
+        //
+        // Deliberately not `computeBlockTabPillNeutralBg` as the key: that
+        // helper is theme-conditional (it collapses agent and non-agent to
+        // one value in light theme) while the header fallback above is not,
+        // so it would under-discriminate on a light-theme mixed pane.
+        const headerKeyOf = (meta: Block["meta"] | undefined): string =>
+            computeBlockColorBg(meta, isLightTheme) ??
+            (meta?.view === "agent" ? " agent-default" : " non-agent-default");
+        const distinct = new Set<string>();
+        for (const blockId of ids) {
+            const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
+            distinct.add(headerKeyOf(meta));
+            if (distinct.size > 1) break;
+        }
+        // The tabs agree — hand back NOTHING and let BlockFrame_Header do
+        // exactly what it always did (the active block's own color, else
+        // its agent/non-agent default). That covers both "they all share a
+        // color" (the active block resolves to that same color anyway) and
+        // "none of them has one", so an uncolored single-agent pane keeps
+        // its untouched default instead of being forced to a value this
+        // memo picked. Only a genuinely mixed pane needs an override.
+        if (distinct.size <= 1) return undefined;
+        // One value per theme, independent of every block's meta — see
+        // computeMixedPaneHeaderBg for why the pill's own neutral (which
+        // varies by meta.view) is the wrong thing here (reagent P1).
+        return computeMixedPaneHeaderBg(isLightTheme);
+    });
+
     // Rename (double-click a pill). The override shows the new name at once,
     // before the write round-trips back through the block's meta.
     const [renamingId, setRenamingId] = createSignal<string | null>(null);
@@ -228,6 +301,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getLabel={labelOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
             getColor={(id) => tabColors().get(id)}
+            headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
             onClose={handleClose}
             onReorder={handleReorder}
