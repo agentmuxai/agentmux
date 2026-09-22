@@ -55,7 +55,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode;
 
 /**
  * Raw markdown text block
@@ -462,6 +462,35 @@ export interface CompactionStartedNode {
     id: string;
     trigger: "manual" | "auto";
     startedAt: number;
+}
+
+/**
+ * Label-only record of a hidden Global Memory + Personal Memory reinjection,
+ * fired once per real `CompactionBoundary` event. See
+ * docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md
+ * §3.2. Deliberately carries NO content field — the actual memory bodies are
+ * sent to the model in a real message this node never stores or renders;
+ * that is the hiding mechanism itself (nothing to leak, not something hidden
+ * via CSS/a collapsed-by-default flag on real content).
+ */
+export interface MemoryReinjectionNode {
+    type: "memory_reinjection";
+    id: string;
+    globalMemoryCount: number;
+    personalMemoryCount: number;
+    /** Sum of estimateTokens() over every entry sent — labeled "(est.)" wherever shown, per §2/§4. */
+    estimatedTokens: number;
+    perEntryTokens: Array<{
+        label: string;
+        source: "global" | "personal";
+        tokens: number;
+        sizeBytes: number;
+    }>;
+    /** Real on-disk byte totals per source — §3.4.1. Not an estimate, unlike estimatedTokens. */
+    totalSizeBytes: { global: number; personal: number };
+    /** Driven by Personal-memory bytes alone, never the combined total — §3.4.2. */
+    sizeBand: "low" | "mid" | "high" | "critical";
+    at: number;
 }
 
 /**

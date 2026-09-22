@@ -25,6 +25,7 @@ import type {
     DocumentNode,
     DocumentState,
     HistoryLinkNode,
+    MemoryReinjectionNode,
     SectionNode,
     SessionOutcomeNode,
 } from "../types";
@@ -170,6 +171,103 @@ describe("DocumentRow — compaction nodes", () => {
         renderRow(startedNode("auto"));
         expect(screen.getByText(/Compacting conversation/i)).toBeInTheDocument();
         expect(screen.getByText(/context filled up/i)).toBeInTheDocument();
+    });
+});
+
+/**
+ * DocumentRow — memory_reinjection node
+ * (SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.2).
+ *
+ * The label-only row for a hidden memory reinjection. The single most
+ * important property under test here isn't what renders — it's what
+ * DOESN'T: this node's own data never carries the actual memory body text
+ * (§3.2's hiding mechanism is "never stored," not "stored but hidden"), so
+ * there is nothing for a rendering bug in this component to leak even in
+ * principle. The negative assertions below exist to catch a future
+ * regression that accidentally threads real content onto this node type.
+ */
+describe("DocumentRow — memory_reinjection node", () => {
+    const reinjectionNode = (overrides: Partial<MemoryReinjectionNode> = {}): MemoryReinjectionNode => ({
+        type: "memory_reinjection",
+        id: "mr-1",
+        globalMemoryCount: 2,
+        personalMemoryCount: 3,
+        estimatedTokens: 450,
+        perEntryTokens: [
+            { label: "global-note", source: "global", tokens: 100, sizeBytes: 400 },
+            { label: "personal-file.md", source: "personal", tokens: 350, sizeBytes: 1400 },
+        ],
+        totalSizeBytes: { global: 800, personal: 4200 },
+        sizeBand: "low",
+        at: Date.now(),
+        ...overrides,
+    });
+
+    it("renders the label with counts and the estimated token total, never any body text", () => {
+        const { container } = renderRow(reinjectionNode());
+        // JSX interpolation splits this across several text nodes, so a
+        // getByText string/regex match (which doesn't span nodes) can't be
+        // used directly — check the row's full textContent instead, same
+        // as the hover-tooltip assertions below already do.
+        const label = container.querySelector(".agent-memory-reinjection-label");
+        expect(label?.textContent).toMatch(/Memory reinjected/i);
+        expect(label?.textContent).toMatch(/2 global, 3 personal/i);
+        expect(label?.textContent).toMatch(/~450 tok, est\.\)/i);
+    });
+
+    it("applies the size-band modifier class the node carries", () => {
+        const { container } = renderRow(reinjectionNode({ sizeBand: "critical" }));
+        expect(container.querySelector(".agent-memory-reinjection--critical")).not.toBeNull();
+        expect(container.querySelector(".agent-memory-reinjection--low")).toBeNull();
+    });
+
+    it("on hover: shows the per-entry breakdown and real byte totals, still no body text", () => {
+        vi.useFakeTimers();
+        const { container } = renderRow(reinjectionNode());
+        const el = container.querySelector(".agent-memory-reinjection") as HTMLElement;
+        fireEvent.mouseEnter(el);
+        vi.advanceTimersByTime(100);
+
+        const tooltip = document.body.querySelector(".agent-memory-reinjection-tooltip");
+        expect(tooltip).not.toBeNull();
+        expect(tooltip?.textContent).toMatch(/global-note/);
+        expect(tooltip?.textContent).toMatch(/~100 tok \(est\.\), 400 B/);
+        expect(tooltip?.textContent).toMatch(/personal-file\.md/);
+        // formatCompactNumber compacts 4200 -> "4.2k" (matches formatCompactNumber.test.ts's own documented behavior), not "4,200".
+        expect(tooltip?.textContent).toMatch(/Total: 800 B global, 4\.2k B personal/);
+        vi.useRealTimers();
+    });
+
+    it("below the mid band, the hover tooltip shows NO compress/delegate suggestion — §3.4.2's silent-below-mid rule", () => {
+        vi.useFakeTimers();
+        const { container } = renderRow(reinjectionNode({ sizeBand: "low" }));
+        fireEvent.mouseEnter(container.querySelector(".agent-memory-reinjection") as HTMLElement);
+        vi.advanceTimersByTime(100);
+
+        const tooltip = document.body.querySelector(".agent-memory-reinjection-tooltip");
+        expect(tooltip?.textContent).not.toMatch(/consider/i);
+        expect(tooltip?.textContent).not.toMatch(/WorkEnqueue/);
+        vi.useRealTimers();
+    });
+
+    it("at high/critical bands, the hover tooltip includes the compress-or-delegate suggestion — informational only, §3.4.3", () => {
+        vi.useFakeTimers();
+        for (const band of ["high", "critical"] as const) {
+            cleanup();
+            const { container } = renderRow(reinjectionNode({ sizeBand: band }));
+            fireEvent.mouseEnter(container.querySelector(".agent-memory-reinjection") as HTMLElement);
+            vi.advanceTimersByTime(100);
+
+            const tooltip = document.body.querySelector(".agent-memory-reinjection-tooltip");
+            expect(tooltip?.textContent).toMatch(/consider/i);
+            expect(tooltip?.textContent).toMatch(/MemoryWrite/);
+            expect(tooltip?.textContent).toMatch(/WorkEnqueue/);
+            // Informational text only — no button/link for this suggestion.
+            // Confirmed by absence, not just by not asserting for one: this
+            // node type renders no interactive elements at all today.
+            expect(container.querySelectorAll("button, a").length).toBe(0);
+        }
+        vi.useRealTimers();
     });
 });
 

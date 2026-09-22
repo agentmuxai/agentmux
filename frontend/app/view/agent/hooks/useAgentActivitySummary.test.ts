@@ -106,6 +106,43 @@ describe("useAgentActivitySummary — trigger", () => {
         },
     );
 
+    it("does NOT fire for a hidden turn (memory reinjection) — reagentx P0, PR #3502", async () => {
+        // useAgentActivitySummary used to forward pendingContent
+        // unconditionally, regardless of source — for a hidden memory-
+        // reinjection turn (memory-reinjection-controller.ts), that meant
+        // the full composed message got sent to an ambient LLM call whose
+        // result becomes the human-visible pane title, defeating the whole
+        // point of "hidden." A hidden turn's own pendingContent is now
+        // always a content-free placeholder anyway (defense in depth), but
+        // this test pins the actual gate: even if it somehow carried real
+        // text, `hidden: true` alone must suppress the call outright.
+        const { setPhase, dispose } = setup();
+
+        setPhase({
+            kind: "Submitting",
+            submittedAt: 1,
+            pendingContent: "some text that must never reach an ambient call",
+            hidden: true,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(hub.activitySummary).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("still fires normally when hidden is explicitly false or omitted", async () => {
+        hub.activitySummary.mockResolvedValue({ summary: "t", tokens: null });
+        const { setPhase, dispose } = setup();
+
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "ordinary message", hidden: false });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(hub.activitySummary).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
     it("discards a stale result superseded by a newer Submitting transition before it resolves", async () => {
         let resolveFirst!: (v: unknown) => void;
         hub.activitySummary

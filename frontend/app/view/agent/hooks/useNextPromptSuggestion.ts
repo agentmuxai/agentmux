@@ -132,10 +132,30 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     // Scoped to this mount — see useAgentActivitySummary.ts's doc comment for
     // why the wire `generation` is Date.now() instead of this counter.
     let activeTurnId = 0;
+    // Remembers whether the MOST RECENT Submitting was a hidden turn
+    // (memory-reinjection-controller.ts) — read by the turnJustEndedAtom
+    // effect below, which has no TurnPhase of its own to inspect (it's a
+    // bare edge-counter, per the module doc comment's own reasoning for why
+    // it exists instead of watching `Done` directly).
+    //
+    // This guard is NOT optional the way useAgentActivitySummary.ts's
+    // `phase.hidden` check alone would be here — reagentx P0 (second
+    // review round) on PR #3502: NextPromptSuggestionCommand's backend
+    // implementation (`read_recent_activity_digest`/`extract_digest_text`,
+    // agentmux-srv/src/server/app_api/session.rs) reads the raw FileStore
+    // OUTPUT TAIL directly — both the hidden turn's full composed
+    // <system-reminder> memory dump AND the model's real reply to it are
+    // sitting right there in it, with no concept of "hidden" on the
+    // backend side at all. Passing `hidden` through the RPC payload
+    // wouldn't help unless the backend read path also honored it (out of
+    // scope here) — the only fix available at this layer is to never issue
+    // the call in the first place for a hidden turn's own completion.
+    let lastTurnWasHidden = false;
 
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind === "Submitting") {
             activeTurnId++;
+            lastTurnWasHidden = phase.hidden === true;
             clearSuggestion(blockId); // guard 1 — see module doc comment
         }
     }));
@@ -143,6 +163,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     // `defer: true` — skip the run at mount, same reasoning as
     // useAgentActivitySummary.ts.
     createEffect(on(turnJustEndedAtom, () => {
+        if (lastTurnWasHidden) return; // see lastTurnWasHidden's own doc comment above
         const myTurnId = activeTurnId;
 
         RpcApi.NextPromptSuggestionCommand(

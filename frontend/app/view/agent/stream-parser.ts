@@ -19,6 +19,7 @@ import {
     JektMessageNode,
     JektTier,
     JektTrust,
+    MemoryReinjectionNode,
     STATUS_ICONS,
     StreamEvent,
     TextEvent,
@@ -31,6 +32,7 @@ import {
     ToolResultEvent,
     UserMessageEvent,
 } from "./types";
+import { buildMemoryReinjectionNodeFromReplay } from "./memory-reinjection";
 
 /**
  * Detects the auto-generated startup payload by its literal first
@@ -206,6 +208,38 @@ export class ClaudeCodeStreamParser {
     // unset here means the peek tooltip correctly shows no time rather than
     // a confidently wrong one.
     private isReplay: boolean;
+    // True from the moment userMessageToNode recognizes a hidden memory-
+    // reinjection turn (tryParseMemoryReinjection) until the NEXT real
+    // user_message event — every OTHER event type in between (text,
+    // thinking, tool_call, tool_result, agent_message, error_result) is
+    // suppressed at the top of eventToNode. This is the REPLAY half of
+    // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.2 —
+    // the live path's suppression is createHidingStreamFlushQueue, entirely
+    // separate; this field exists because parseHistoryLines.ts re-derives
+    // nodes from the raw on-disk provider transcript (which DOES contain
+    // the hidden turn's own real content and the model's real response to
+    // it) independent of whatever the live queue wrapper did in the
+    // original session. Defaults false for both live and replay parsers —
+    // only ever set true by userMessageToNode itself.
+    private hidingUntilNextUserMessage = false;
+    // MUST be cleared at every session boundary — reagentx P1, PR #3502,
+    // second review round: parseHistoryLines.ts reuses ONE parser instance
+    // across an entire concatenated multi-session lines array (it already
+    // has precedent for exactly this class of session-boundary reset:
+    // lastSessionStats = null on an agentmux_session_outcome "fresh"
+    // boundary). Without a matching reset here, a hidden reinjection turn
+    // landing as the LAST turn of a session before a process restart/
+    // resume leaves the flag above stuck true across the boundary,
+    // silently suppressing every event of the NEXT, unrelated session
+    // until some future real user_message eventually appears — dropping
+    // genuine conversation history, not just failing to hide something.
+    // clearHiddenReinjectionState() below is the one sanctioned way to
+    // clear it from outside this class, called from parseHistoryLines.ts
+    // at the same point the existing lastSessionStats reset already
+    // happens.
+    clearHiddenReinjectionState(): void {
+        this.hidingUntilNextUserMessage = false;
+    }
 
     /**
      * `skipIds` accepts either a static `ReadonlySet<string>` (for
@@ -330,6 +364,16 @@ export class ClaudeCodeStreamParser {
      * Convert stream event to document node
      */
     private eventToNode(event: StreamEvent): DocumentNode | null {
+        // See hidingUntilNextUserMessage's own doc comment. A hidden
+        // reinjection's own user_message event is handled below in the
+        // normal switch (userMessageToNode decides whether it's a NEW
+        // hidden turn, in which case the flag is (re)set, or an ordinary
+        // turn that ends this one) — every other event type in between is
+        // suppressed outright, matching the live path's queue-level
+        // suppression as closely as a stateless-per-line replay parse can.
+        if (this.hidingUntilNextUserMessage && event.type !== "user_message") {
+            return null;
+        }
         switch (event.type) {
             case "text":
                 return this.textToNode(event as TextEvent);
@@ -639,6 +683,22 @@ export class ClaudeCodeStreamParser {
      * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
      */
     private userMessageToNode(event: UserMessageEvent): DocumentNode {
+        // Checked FIRST, ahead of tryParseJekt — a reinjection message can
+        // never also be a jekt block (composeReinjectionMessage's own fixed
+        // <system-reminder> wrapper doesn't match JEKT_BLOCK_RE), so order
+        // doesn't matter for correctness, but checking the marker that also
+        // flips replay-suppression state first keeps this method's control
+        // flow in one place rather than splitting it around tryParseJekt.
+        const reinjection = this.tryParseMemoryReinjection(event);
+        if (reinjection) {
+            this.hidingUntilNextUserMessage = true;
+            return reinjection;
+        }
+        // A genuine user turn ends whatever hidden window was open — even
+        // one this same event.type check just confirmed isn't itself
+        // another reinjection.
+        this.hidingUntilNextUserMessage = false;
+
         const jekt = this.tryParseJekt(event);
         if (jekt) return jekt;
 
@@ -705,6 +765,27 @@ export class ClaudeCodeStreamParser {
             direction,
             timestamp: event.timestamp || Date.now(),
         };
+    }
+
+    /**
+     * Detects a hidden memory-reinjection turn re-encountered as a plain
+     * user-role event — the replay-time counterpart to tryParseJekt, same
+     * "special marker occupying the whole user-message payload" shape.
+     * Delegates the actual recognition/reconstruction to
+     * `memory-reinjection.ts`'s `buildMemoryReinjectionNodeFromReplay`
+     * (shared, so this parser and any future replay-adjacent consumer can't
+     * independently drift on what counts as a valid reinjection message —
+     * same rationale `compact-boundary.ts` was extracted for). Returns
+     * `null` for anything that isn't a well-formed match, so an ordinary
+     * message that happens to start with `<system-reminder>` for some other
+     * reason still falls through to normal plain-text rendering.
+     *
+     * Spec: docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.2.
+     */
+    private tryParseMemoryReinjection(event: UserMessageEvent): MemoryReinjectionNode | null {
+        return buildMemoryReinjectionNodeFromReplay(event.message, {
+            eventTimestamp: event.timestamp || Date.now(),
+        });
     }
 
     /** Inline API error node — surfaced when the CLI result frame carries is_error:true. */

@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { parseHistoryLines } from "./parseHistoryLines";
 import { contextCompactedNodeId } from "./compact-boundary";
+import { composeReinjectionMessage } from "./memory-reinjection";
 import type { ToolNode } from "./types";
 
 // The Claude translator passes through events that already match the
@@ -254,6 +255,76 @@ describe("parseHistoryLines", () => {
             const outcomes = nodes.filter((n) => n.type === "session_outcome");
             expect(outcomes).toHaveLength(1);
             expect((outcomes[0] as { outcome: string }).outcome).toBe("resumed");
+        });
+    });
+
+    /**
+     * reagentx P1, PR #3502, second review round: a hidden memory-
+     * reinjection turn (memory-reinjection.ts's composeReinjectionMessage)
+     * landing as the LAST turn of a session, immediately before an
+     * `agentmux_session_outcome` boundary, must not suppress the NEXT
+     * session's real content. Before the fix, `hidingUntilNextUserMessage`
+     * stayed stuck `true` across the boundary (nothing reset it), silently
+     * dropping every event of the following session from the replayed
+     * transcript until some future real user_message happened to appear.
+     */
+    describe("hidden memory-reinjection state resets at a session boundary (reagentx P1, PR #3502)", () => {
+        const outcomeLine = (outcome: "fresh" | "resumed"): string =>
+            JSON.stringify({
+                type: "system",
+                subtype: "agentmux_session_outcome",
+                outcome,
+                attempted_sid: "sid-1",
+                actual_sid: null,
+                timestamp: "2026-08-09T12:00:00Z",
+            });
+
+        const hiddenReinjectionLine = (): string =>
+            line({
+                type: "user_message",
+                message: composeReinjectionMessage([
+                    { label: "g1", source: "global", body: "global body", sizeBytes: 11 },
+                ]),
+            });
+
+        it("a session boundary after a hidden turn does not swallow the NEXT session's real content", () => {
+            const lines = [
+                hiddenReinjectionLine(),
+                line({ type: "text", content: "the model's real reply to the hidden turn" }),
+                outcomeLine("fresh"),
+                // Next session's genuine content — must NOT be suppressed.
+                line({ type: "text", content: "real content from the next session" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+
+            const markdownTexts = nodes.filter((n) => n.type === "markdown").map((n) => (n as { content: string }).content);
+            expect(markdownTexts).toContain("real content from the next session");
+        });
+
+        it("also resets across a 'resumed' boundary, not just 'fresh'", () => {
+            const lines = [
+                hiddenReinjectionLine(),
+                outcomeLine("resumed"),
+                line({ type: "text", content: "real content after resume" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+
+            const markdownTexts = nodes.filter((n) => n.type === "markdown").map((n) => (n as { content: string }).content);
+            expect(markdownTexts).toContain("real content after resume");
+        });
+
+        it("still suppresses correctly WITHIN one session — no regression to the base fix", () => {
+            const lines = [
+                hiddenReinjectionLine(),
+                line({ type: "text", content: "the model's real reply — must stay hidden" }),
+                line({ type: "user_message", message: "a real, ordinary next message" }),
+                line({ type: "text", content: "visible again after the real user message" }),
+            ];
+            const { nodes } = parseHistoryLines(lines, "claude-stream-json");
+
+            const markdownTexts = nodes.filter((n) => n.type === "markdown").map((n) => (n as { content: string }).content);
+            expect(markdownTexts).not.toContain("the model's real reply — must stay hidden");
+            expect(markdownTexts).toContain("visible again after the real user message");
         });
     });
 

@@ -149,6 +149,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     context_compacted: false,
     // One-shot announcement (the PreCompact hook fires once) — not chunked.
     compaction_started: false,
+    // One-shot label built from a completed compact_boundary — never chunked, and never carries content to stream in the first place (§3.2 of its spec).
+    memory_reinjection: false,
     // Arrives as a single complete user_message event, not chunk-by-chunk.
     jekt_message: false,
     // One-shot marker, same as context_compacted — not chunked.

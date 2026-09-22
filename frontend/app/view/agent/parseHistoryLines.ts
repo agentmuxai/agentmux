@@ -195,6 +195,20 @@ export function parseHistoryLines(
         // docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
         if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
             parser.flushPending();
+            // reagentx P1, PR #3502, second review round: a hidden
+            // memory-reinjection turn (tryParseMemoryReinjection) landing
+            // as the LAST turn of a session before this boundary would
+            // otherwise leave the parser's hiding-suppression state stuck
+            // on across it, silently dropping every event of the NEXT
+            // session until some future real user_message appears.
+            // Unconditional on this frame merely being SEEN (not gated on
+            // `data` parsing successfully or on which outcome it reports,
+            // unlike the narrower `lastSessionStats` reset below) — any
+            // session boundary is a safe point to stop trusting a flag
+            // that was only ever meant to span a single turn, and a stuck
+            // suppression that silently eats real history is a worse
+            // failure than an occasional no-op reset.
+            parser.clearHiddenReinjectionState();
             const data = parseSessionOutcomeFrame(rawEvent);
             // `resumed` outcomes are demoted out of the working transcript
             // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW

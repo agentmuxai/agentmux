@@ -194,7 +194,7 @@ export interface PaneFailure {
  */
 export type TurnPhase =
     | { kind: "Idle" }
-    | { kind: "Submitting"; submittedAt: number; pendingContent: string }
+    | { kind: "Submitting"; submittedAt: number; pendingContent: string; hidden?: boolean }
     | {
           kind: "Streaming";
           bufferSize: number;
@@ -587,7 +587,30 @@ export type AgentPaneCommand =
      * without a separate FileStore read. See
      * docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
      */
-    | { type: "TurnStart"; at: number; content?: string }
+    | {
+          type: "TurnStart";
+          at: number;
+          content?: string;
+          /**
+           * True for a hidden memory-reinjection turn
+           * (`memory-reinjection-controller.ts`) — never set by any
+           * ordinary send. Propagated onto `TurnPhase.Submitting.hidden`
+           * so every ambient side-effect hook keyed off `turnPhase`
+           * (`useAgentActivitySummary.ts`, `useNextPromptSuggestion.ts`,
+           * and any future one) can skip its own LLM call for this turn
+           * without needing separate wiring — `turnPhase` already reaches
+           * them as their effect dependency. Found necessary the hard way:
+           * `useAgentActivitySummary.ts` forwarded `pendingContent`
+           * (unconditionally, regardless of source) to an ambient
+           * summarization call whose result became the human-visible pane
+           * title — reagentx P0 on PR #3502. Defense-in-depth, not the
+           * only fix: `content` for a hidden turn is ALSO never the real
+           * message (see memory-reinjection-controller.ts) — a consumer
+           * that forgets to check `hidden` still never sees real content,
+           * only a safe placeholder.
+           */
+          hidden?: boolean;
+      }
     /**
      * Stream produced session_end (or fallback timer fired). Final
      * stats merged with current turn-tokens. Clears currentTool,
