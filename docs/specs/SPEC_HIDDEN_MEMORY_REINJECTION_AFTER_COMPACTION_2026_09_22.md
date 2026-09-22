@@ -117,17 +117,23 @@ whoever reviews this treats it as a deliberate, novel category rather than
 assuming either precedent (removed-for-being-visible, or already-covered)
 applies directly.
 
-## 2. What's confirmed vs. assumed, from direct code reading (2026-09-22)
+## 2. What's confirmed vs. assumed, from direct code reading (2026-09-22, updated same day after a second verification pass)
 
 **Confirmed:**
 - No existing AgentMux mechanism sends text to a running agent's conversation
-  without it becoming a normal, visible `user_message` transcript node.
-  Checked `handleSendMessage` → `useAgentCommands.ts`'s `sendMessage` →
-  dispatches `TurnStart` with the message as `content` — the standard,
-  fully-visible send path. `postSystemNotification`/`StreamFlush` (the other
-  injection path the synthesized-text audit catalogs) is equally visible.
-  **A hiding mechanism has to be built new; nothing to reuse as-is.**
-- `frontend/util/format-count.ts:63` — `estimateTokens(text) =
+  without it becoming a normal, visible `user_message` transcript node via
+  today's *default* path. Checked `handleSendMessage` →
+  `useAgentCommands.ts`'s `sendMessage` → dispatches `TurnStart` with the
+  message as `content` — the standard, fully-visible send path.
+  `postSystemNotification`/`StreamFlush` (the other injection path the
+  synthesized-text audit catalogs) is equally visible. **A hiding mechanism
+  has to be built new; nothing to reuse as-is.** (Narrowed 2026-09-22, second
+  pass: this does NOT mean a backend change is required — see the
+  now-resolved "backend RPC" item below. The gap is a frontend dispatch
+  choice, not a missing server capability.)
+- The correct function name is `estimateTokenCount`, not `estimateTokens`
+  (this doc's own earlier draft got the name wrong) —
+  `frontend/util/format-count.ts:63` — `estimateTokenCount(text) =
   Math.ceil(text.length / 4)` — the repo's existing chars÷4 estimate
   convention, labeled `(est.)` wherever it's shown
   (`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md`,
@@ -156,22 +162,69 @@ applies directly.
   is Claude-only by construction (`translator/claude.rs` is the only
   translator handling `system`/`compact_boundary` frames). **This spec is
   Claude-only**, same scope as everything it builds on.
+- **NEW, resolved 2026-09-22: the backend RPC needs zero changes.** Traced
+  `run_agent_turn` (`agentmux-srv/src/server/agent_handlers/input.rs:263`) —
+  it takes an arbitrary `message: String` and delivers it to the CLI's
+  stdin; it has no opinion about what UI treatment the frontend gives the
+  resulting turn. The visible `user_message` transcript node is created
+  **client-side**: `useAgentCommands.ts`'s `sendMessage` appends to a
+  pending zone, and the backend's `agent-message-accepted` echo is what
+  promotes that pending entry into a real document node (see the existing
+  comment on `messageId` there: *"the acceptance event promotes it"*).
+  **Message delivery and transcript-node creation are already decoupled in
+  this architecture.** Hiding is therefore a purely frontend concern: a
+  reinjection call still calls the same underlying send RPC with the full
+  `<system-reminder>`-wrapped content, but dispatches a new `MemoryReinjected`
+  reducer command (§3.3) instead of the normal `TurnStart` + pending-zone
+  path, so a `MemoryReinjectionNode` (§3.2) is pushed directly instead of a
+  `UserMessageNode` ever being created. This closes what was previously an
+  open "not traced into the Rust RPC handler" gap.
+- **NEW, resolved 2026-09-22: the idle-vs-queued timing question needs no
+  new logic at all** — reusing `handleSendMessage` as-is (§3.3) already
+  handles both cases correctly, for a reason grounded in existing, already-
+  shipped code rather than assumed:
+  - **Manual `/compact`** never produces a `result` frame — confirmed
+    empirically against a live process in
+    `REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md` §6 (the
+    CLI emits `system/status` → `compact_boundary` → a fresh `system/init` →
+    a synthetic continuation message; never a `result`). Since
+    `AgentEvent::Done`/`TurnEnd` only ever comes from a `result` frame
+    (`translator/claude.rs`), a naive implementation would leave the pane
+    stuck "Working" forever after every manual compact. **AgentMux already
+    has a fix for exactly this** (codex P1, PR #2659):
+    `reducer.ts`'s `CompactionBoundary` case (`:1467-1478`) checks
+    `state.pendingCompactTurn` (set on `TurnStart` when the literal message
+    content is `/compact`, `reducer.ts:637`) and, if the turn is still
+    "working," synchronously sets `turnPhase = { kind: "Done", ... }` as
+    part of processing the very same `CompactionBoundary` command. By the
+    time a reinjection call reads pane state afterward, `workingFromPhase`
+    (`types.ts:472-475`, true only for `Submitting`/`Streaming`/
+    `Interrupting`) already correctly reads `false` for `Done`.
+  - **Auto-triggered compaction** happens mid a real, ongoing turn that
+    continues afterward with its own eventual `result`/`Done` —
+    `pendingCompactTurn` is never set for it (only literal `/compact`
+    content sets it), so `turnPhase` correctly stays `Streaming` at the
+    moment `CompactionBoundary` lands, and `handleSendMessage`'s existing
+    `wasAlreadyWorking` queued-while-busy path (already built, used by every
+    ordinary message sent while a turn is running) handles it with no new
+    code.
 
-**Assumed, not verified — flagged for whoever implements this:**
-- Whether a reinjection send needs to queue behind an already-running turn,
-  or can be assumed to always land in an idle window right after
-  `compact_boundary` fires. `useAgentCommands.sendMessage` already has a
-  queued-while-busy path (`wasAlreadyWorking`); this design assumes reusing
-  it is sufficient, but the actual timing relationship between
-  `compact_boundary` arriving and the pane's turn state needs to be checked
-  empirically before shipping, the same way §6 of the token-accounting
-  report checked `/compact` itself.
-- The exact backend RPC `handleSendMessage` bottoms out on, and whether it
-  is the right place to add a "don't surface as a normal `user_message`"
-  flag, or whether that flag belongs one layer down. Traced as far as
-  `useAgentCommands.ts:944`'s `sendMessage`; not traced into the Rust RPC
-  handler it ultimately calls. Whoever implements this should confirm before
-  committing to the exact shape in §3.2.
+  Net: reuse `handleSendMessage` unmodified for both cases — no special
+  timing logic needed, because this problem was already solved generically
+  by the existing send path for a structurally identical case.
+
+**Still genuinely open after this pass (real unknowns, not just untraced code):**
+- Whether the `MemoryReinjected` reducer command (§3.3) should be dispatched
+  from `useAgentStream.ts` synchronously, in the same code path that already
+  dispatches `CompactionBoundary` — this is the natural placement (dispatch
+  is synchronous in this codebase, so a call placed immediately after reads
+  fresh post-boundary state, per the timing finding above) but hasn't been
+  written yet, so "natural placement" is a design intent, not confirmed
+  working code.
+- Everything in §3.4.4 and §7 — the size-band threshold's exact fraction, the
+  auto-fire-vs-confirm question for `WorkEnqueue`, and the cloud-sharing
+  scope question — remain real product/design decisions, not things further
+  code reading resolves.
 
 ## 3. Design
 
@@ -241,10 +294,15 @@ interface MemoryReinjectionNode {
     id: string;                    // `memory-reinjected-${frameTimestamp}`
     globalMemoryCount: number;
     personalMemoryCount: number;
-    estimatedTokens: number;       // sum of estimateTokens() over every entry sent
+    estimatedTokens: number;       // sum of estimateTokenCount() over every entry sent
     perEntryTokens: Array<{ label: string; source: "global" | "personal"; tokens: number; sizeBytes: number }>;
     totalSizeBytes: { global: number; personal: number };  // real on-disk size, §3.4 — not an estimate, unlike estimatedTokens
-    sizeBand: "low" | "mid" | "high" | "critical";          // §3.4 — driven by personal (the usual culprit), not the combined total
+    // §3.4.2 (revised): computed at build time from Personal's own token
+    // total against `contextWindow * fraction` — stored precomputed
+    // (not recomputed at render time) so a replayed node shows the band
+    // that applied when it happened, not one recomputed against today's
+    // pane config.
+    sizeBand: "low" | "mid" | "high" | "critical";
     at: number;                    // epoch ms, same fallback rules as contextCompactedLiveTimestamp
 }
 ```
@@ -288,15 +346,21 @@ itself goes through it, per §1.2), and reusing it means this reinjection
 correctly participates in the existing queued-while-busy machinery instead
 of needing its own.
 
-The one addition needed on this path: a way to suppress the normal
-`TurnStart`/visible-`user_message` side effect for this specific call, and
-push a `memory_reinjection` node (§3.2) instead of letting the normal
-document-node creation run. The cleanest shape, matching how
+The one addition needed on this path — **confirmed frontend-only, §2** — is a
+way to suppress the normal `TurnStart`/visible-`user_message` side effect for
+this specific call, and push a `memory_reinjection` node (§3.2) instead of
+letting the normal document-node creation run. No backend/Rust change is
+required: `run_agent_turn` (`input.rs:263`) already just forwards an
+arbitrary message string to the CLI, agnostic to how the frontend chooses to
+represent the resulting turn. The cleanest shape, matching how
 `CompactionBoundary`/`CompactionStarted` already have dedicated reducer
 commands rather than overloading `TurnStart`: a new reducer command
 (`MemoryReinjected`) that the reinjection call site dispatches instead of the
 normal `TurnStart` + implicit node creation `handleSendMessage` triggers for
-an ordinary message.
+an ordinary message — still calling the same underlying send RPC underneath
+with the full `<system-reminder>`-wrapped content, just skipping the
+pending-zone/promotion path that would otherwise create a visible
+`UserMessageNode`.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 
@@ -341,6 +405,15 @@ the ask asks for both ("total size" and "token count of each"), and they
 answer different questions: bytes is an exact, storage-level fact; tokens is
 always an estimate here, labeled as such per §2's existing-convention reuse.
 
+**Real data, measured 2026-09-22 against every `identity-store.db` on this
+machine** (same empirical-not-guessed methodology the carry-over spec's §2
+used for Global Memory): this agent's own Personal memory is 22 files
+totaling **61,725 bytes**; the largest single channel measured on this
+machine is **76,164 bytes**. Small in absolute terms today — directly
+informs §3.4.2's threshold choice below, and is worth re-measuring
+periodically as real usage grows rather than treated as a one-time
+constant.
+
 #### 3.4.2 A graduated warning, not a hard cap — resolves §7 open question #2
 
 §6/§7 of the original draft left "is there a size cap" as an open question,
@@ -361,19 +434,45 @@ don't add new chrome" decision, rather than re-deciding a UI question this
 codebase already made once:
 
 ```ts
-// Mirrors ctxBand()'s own thresholds (AgentComposerStrip.tsx:550-556) —
-// same fractions, different denominator. ctxBand bands tokens against the
-// MODEL's compaction threshold; this bands Personal-memory bytes against a
-// HEALTHY-MEMORY threshold (§3.4.4, open question — no established
-// reference point exists the way a context window size does).
-function memorySizeBand(personalBytes: number, healthyThreshold: number): SizeBand {
-    const fraction = personalBytes / healthyThreshold;
-    if (fraction >= 0.9) return "critical";
-    if (fraction >= 0.75) return "high";
-    if (fraction >= 0.5) return "mid";
+// Mirrors ctxBand()'s own thresholds AND its own denominator CHOICE
+// (AgentComposerStrip.tsx:550-556) — same fractions, and (revised
+// 2026-09-22, second pass) the same "band against a real per-pane
+// reference point" philosophy, not an arbitrary absolute byte number.
+// ctxBand bands the conversation's real token count against the model's
+// OWN compaction threshold (itself a function of contextWindow); this
+// bands Personal memory's ESTIMATED TOKEN total against a fraction of that
+// SAME pane's contextWindow — so the same absolute memory size reads
+// differently on a 32K-context pane than a 200K-context one, which a fixed
+// byte threshold could not do. See the surrounding prose for why bytes
+// alone were rejected and for the real measured data behind the 0.10
+// default.
+function memorySizeBand(personalEstimatedTokens: number, contextWindow: number, fraction = 0.10): SizeBand {
+    const healthyThreshold = contextWindow * fraction;
+    const f = personalEstimatedTokens / healthyThreshold;
+    if (f >= 0.9) return "critical";
+    if (f >= 0.75) return "high";
+    if (f >= 0.5) return "mid";
     return "low";
 }
 ```
+
+**Why tokens-against-context-window, not bytes-against-a-fixed-number
+(revised from the original draft, same day, second pass):** the original
+draft banded raw Personal-memory bytes against a flat "healthy" byte count,
+left as an unresolved open question because — unlike a model's context
+window — no natural reference point exists for "how big is too big" in
+absolute bytes. Reusing `ctxBand()`'s actual *denominator choice*, not just
+its band fractions, removes that problem: there already is a natural
+reference point, the pane's own `contextWindow`, and it's already computed
+and threaded through `AgentComposerStrip.tsx` today. A `0.10` (10%) default
+is proposed, grounded in the real measurement above: this agent's own
+61,725-byte Personal memory is roughly 15,400 estimated tokens (`61,725 ÷
+4`) — under 5% of a 32K-context model's window already, but over 50% of
+a small 8K-context provider config, illustrating exactly why a
+window-relative fraction reads correctly across model sizes where a fixed
+byte number cannot. `0.10` is a proposed starting default, not empirically
+tuned against real "this felt too large" user reports — flagged as
+revisable in §3.4.4.
 
 Banded on **Personal memory alone**, not the combined total (§ intro,
 above) — a large Global Memory total would need its own separate signal if
@@ -432,12 +531,15 @@ wording in the ask — informing, not autonomously acting.
 
 #### 3.4.4 Open — deliberately not resolved here
 
-- The exact `healthyThreshold` in `memorySizeBand()` — no natural reference
-  point exists for "how big is too big" for a memory directory the way a
-  model's context window size already gives `ctxBand()` one. Needs either an
-  empirical pass (measure real Personal-memory sizes across this machine's
-  agents, the same way the carry-over spec measured Global Memory at zero)
-  or a considered fixed default, not guessed at here.
+- ~~The exact `healthyThreshold`~~ — **narrowed 2026-09-22, second pass**:
+  the reference-point problem itself is resolved (§3.4.2 now bands against
+  `contextWindow`, same as `ctxBand()`, using real measured data —
+  `SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md` §2.5's "measure
+  real data, don't guess" methodology, applied here to Personal memory
+  instead of Global). What remains open is narrower: whether `0.10` is the
+  right fraction, which is a product-feel question ("does this feel like it
+  fires too early/late in practice") that only shows up once the feature is
+  actually used, not one more code-reading pass would resolve.
 - Whether "segment work to another agent" ever fires the `WorkEnqueue` call
   automatically (with undo) versus always requiring an explicit click — see
   §3.4.3 point 2.
@@ -547,13 +649,17 @@ want visibility into. Flagged as a should-have, not blocking v1.
    (live + a subsequent history-range overlap, mirroring how
    `contextCompactedNodeId`'s dedup is tested) — confirm only one
    reinjection fires.
-6. **Unit — `memorySizeBand()` (§3.4.2)**: same four-band boundary-value
-   style as `ctxBand()` itself would need — 0%, 49%, 50%, 74%, 75%, 89%,
-   90%, 100%, and past 100% of `healthyThreshold`, asserting the correct
-   band at each. Banded on Personal-memory bytes only — a test with a large
-   Global total and small Personal total must still report a low/mid band,
-   confirming §3.4.2's "Personal alone, not combined" rule isn't silently
-   reverted to a combined sum later.
+6. **Unit — `memorySizeBand()` (§3.4.2)**: `frontend/app/view/agent/
+   memory-reinjection.ts`/`.test.ts` carries a first pass of this today
+   (22 tests, TDD), banded on raw Personal-memory bytes — pending an update
+   to the token/contextWindow-relative signature this section now specifies
+   (§3.4.2 revision, same day). Once updated: same four-band boundary-value
+   style as `ctxBand()` — 0%, 49%, 50%, 74%, 75%, 89%, 90%, 100%, and past
+   100% of the threshold, asserting the correct band at each. Banded on
+   Personal-memory estimated tokens only — a test with a large Global total
+   and small Personal total must still report a low band, confirming
+   §3.4.2's "Personal alone, not combined" rule isn't silently reverted to a
+   combined sum later.
 7. **Manual — `critical` band**: seed enough Personal memory content to
    cross the threshold, compact, and confirm the label shows the bold+⚠
    treatment and both suggested actions (§3.4.3) render. Confirm neither
@@ -601,11 +707,13 @@ want visibility into. Flagged as a should-have, not blocking v1.
    replaces it. That section opens its own new unresolved questions (§3.4.4):
    the exact size-band threshold, and whether the delegation suggestion ever
    auto-fires `WorkEnqueue` versus always requiring explicit confirmation.
-3. Does the reinjection send need to explicitly wait for the pane to be idle,
-   or can it always queue safely behind an in-flight turn (§2, "assumed not
-   verified")? Needs empirical confirmation before implementation, the same
-   way `/compact` itself was empirically verified
-   (`REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md` §6).
+3. ~~Does the reinjection send need to explicitly wait for the pane to be
+   idle~~ — **resolved 2026-09-22, second pass**: no new logic needed.
+   Reusing `handleSendMessage` unmodified handles both the manual case
+   (`pendingCompactTurn` already forces `turnPhase` to `Done` synchronously
+   within the same `CompactionBoundary` reducer case, PR #2659) and the
+   auto case (turn stays genuinely `Streaming`, and the existing queued-
+   while-busy path already handles that generically). See §2.
 4. Should the label be expandable/clickable to reveal the actual content for
    debugging (e.g. for the operator, not hidden from *them* specifically,
    just not shown by default), or strictly label-only with the raw
