@@ -120,6 +120,32 @@ pub(super) fn handle_pop_and_promote_front_pool_window(state: &mut HostState) ->
     }
 }
 
+/// Atomically pop the front of the top-level window-pool queue for eviction
+/// under memory pressure — mirrors `pane_pool::handle_pop_front_pane_pool_for_eviction`
+/// exactly (issue #1936/#2218 follow-up: active eviction for this pool was
+/// explicitly deferred both times pending "if it comes up again"; see
+/// `docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md`). NOT promotion —
+/// `is_pool`/`state.browsers` are left untouched here, same as the
+/// pane-pool version; the caller separately arms and destroys the Browser.
+/// Doing the pop under the same `host_state` mutex every other pool
+/// mutation goes through makes this mutually exclusive with a concurrent
+/// `PopAndPromoteFrontPoolWindow` (a real user promote) for the same front
+/// label, for the identical reason the pane-pool eviction command exists
+/// as its own command rather than a peek-then-separately-dispatch pair.
+pub(super) fn handle_pop_front_pool_for_eviction(state: &mut HostState) -> DispatchOutput {
+    let Some(label) = state.pool.queue.pop_front() else {
+        return DispatchOutput::default();
+    };
+    state.pool.unpromoted.remove(&label);
+    state.pool.respawn_in_flight = false;
+    let queue_len_after = state.pool.queue.len();
+    DispatchOutput {
+        evicted_pool_label: Some(label),
+        pool_size_after: Some(queue_len_after),
+        ..Default::default()
+    }
+}
+
 pub(super) fn handle_promote_pool_window(state: &mut HostState, label: String) -> DispatchOutput {
     // Idempotent no-op for truly unknown labels (reagent P2 PR #654 round 3).
     // Symmetric with `handle_pool_destroyed_before_promote`'s pattern: only
