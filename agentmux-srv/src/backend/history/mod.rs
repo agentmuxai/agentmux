@@ -683,7 +683,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// The registry fallback — `working_dir_from_registry` — is the path for a
+    /// The registry fallback — `registry_record` plus
+    /// `agent_registry_lookup::working_dir_from_record` — is the path for a
     /// live agent with NO `db_agents` row, which is the common case (launching
     /// an agent does not create one). Every other test here inserts a real row,
     /// so `instance_get_by_slug` always succeeds and this path never runs;
