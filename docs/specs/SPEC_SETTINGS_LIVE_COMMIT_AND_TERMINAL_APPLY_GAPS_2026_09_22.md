@@ -1,7 +1,7 @@
 # SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps
 
 **Date:** 2026-09-22
-**Status:** implemented — see §8 for what shipped and how it was verified
+**Status:** implemented in #3509 — see §8 for what shipped and how it was verified
 **Author:** AgentO
 **Related:**
 `docs/reports/REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md`
