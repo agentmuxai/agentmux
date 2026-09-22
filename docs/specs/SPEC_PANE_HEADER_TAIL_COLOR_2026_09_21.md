@@ -1,7 +1,7 @@
 # SPEC: the pane header's tail color follows the pane, not the active tab
 
 **Date:** 2026-09-21
-**Status:** implemented — see §6 for what shipped and how it was verified
+**Status:** implemented in #3492 — see §6 for what shipped and how it was verified
 **Author:** AgentO
 **Related:**
 `docs/specs/SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md` (established
