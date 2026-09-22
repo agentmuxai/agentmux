@@ -629,6 +629,7 @@ export function update(
                         kind: "Submitting",
                         submittedAt: command.at,
                         pendingContent: command.content ?? "",
+                        hidden: command.hidden,
                     },
                     // See pendingCompactTurn's doc comment (types.ts) — always
                     // set explicitly (never left stale) so CompactionBoundary

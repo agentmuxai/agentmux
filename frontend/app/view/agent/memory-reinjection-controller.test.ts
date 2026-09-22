@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { createMemoryReinjectionController } from "./memory-reinjection-controller";
+import { createMemoryReinjectionController, HIDDEN_TURN_PLACEHOLDER_CONTENT } from "./memory-reinjection-controller";
 import type { MemoryEntryInput } from "./memory-reinjection";
 
 function globalEntry(label: string, body: string): MemoryEntryInput {
@@ -15,7 +15,8 @@ function personalEntry(label: string, body: string): MemoryEntryInput {
 function makeController(overrides: {
     contextWindow?: () => number;
     now?: () => number;
-    dispatchTurnStart?: ReturnType<typeof vi.fn<(content: string) => void>>;
+    isPaneWorking?: ReturnType<typeof vi.fn<() => boolean>>;
+    dispatchTurnStart?: ReturnType<typeof vi.fn<(content: string, hidden: boolean) => void>>;
     dispatchTurnReset?: ReturnType<typeof vi.fn<() => void>>;
     sendRpc?: ReturnType<typeof vi.fn<(message: string) => Promise<void>>>;
     fetchEntries?: ReturnType<typeof vi.fn<() => Promise<MemoryEntryInput[]>>>;
@@ -29,7 +30,10 @@ function makeController(overrides: {
     // whose type no longer exposed `.mock`, so the two silently diverged.
     const contextWindow = overrides.contextWindow ?? (() => 10_000);
     const now = overrides.now ?? (() => 1_758_534_000_000);
-    const dispatchTurnStart = overrides.dispatchTurnStart ?? vi.fn<(content: string) => void>();
+    // Default: pane idle. Most tests care about the idle-fires-immediately
+    // path; the busy-deferral describe block below overrides this explicitly.
+    const isPaneWorking = overrides.isPaneWorking ?? vi.fn<() => boolean>().mockReturnValue(false);
+    const dispatchTurnStart = overrides.dispatchTurnStart ?? vi.fn<(content: string, hidden: boolean) => void>();
     const dispatchTurnReset = overrides.dispatchTurnReset ?? vi.fn<() => void>();
     const sendRpc = overrides.sendRpc ?? vi.fn<(message: string) => Promise<void>>().mockResolvedValue(undefined);
     const fetchEntries =
@@ -39,31 +43,41 @@ function makeController(overrides: {
     const controller = createMemoryReinjectionController({
         contextWindow,
         now,
+        isPaneWorking,
         dispatchTurnStart,
         dispatchTurnReset,
         sendRpc,
         fetchEntries,
     });
-    return { controller, dispatchTurnStart, dispatchTurnReset, sendRpc, fetchEntries };
+    return { controller, isPaneWorking, dispatchTurnStart, dispatchTurnReset, sendRpc, fetchEntries };
 }
 
-describe("createMemoryReinjectionController", () => {
+describe("createMemoryReinjectionController — idle pane (fires immediately)", () => {
     it("starts NOT hiding", () => {
         const { controller } = makeController();
         expect(controller.isHiding()).toBe(false);
     });
 
-    it("on trigger: fetches entries, dispatches TurnStart with the composed message, sends via RPC, and enters hiding", async () => {
+    it("on trigger: fetches entries, dispatches TurnStart with a PLACEHOLDER (never the real message), sends the real message via RPC, and enters hiding", async () => {
         const { controller, dispatchTurnStart, sendRpc, fetchEntries } = makeController();
 
         await controller.trigger("2026-09-22T10:00:00.000Z");
 
         expect(fetchEntries).toHaveBeenCalledTimes(1);
         expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
-        const composedMessage = dispatchTurnStart.mock.calls[0][0] as string;
-        expect(composedMessage).toContain("<system-reminder>");
-        expect(composedMessage).toContain("global body");
-        expect(sendRpc).toHaveBeenCalledWith(composedMessage);
+        // Fix 2 (reagentx P0, PR #3502): TurnStart's content must NEVER be
+        // the real composed message — any consumer watching turnPhase
+        // (e.g. useAgentActivitySummary.ts) would otherwise see it.
+        expect(dispatchTurnStart).toHaveBeenCalledWith(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
+        const dispatchedContent = dispatchTurnStart.mock.calls[0][0] as string;
+        expect(dispatchedContent).not.toContain("global body");
+
+        // The REAL content only ever travels through sendRpc.
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+        const sentMessage = sendRpc.mock.calls[0][0] as string;
+        expect(sentMessage).toContain("<system-reminder>");
+        expect(sentMessage).toContain("global body");
+
         expect(controller.isHiding()).toBe(true);
     });
 
@@ -147,5 +161,92 @@ describe("createMemoryReinjectionController", () => {
         await controller.trigger("2026-09-22T10:00:00.000Z");
         const node = controller.onSessionEnd();
         expect(node?.sizeBand).toBe("critical");
+    });
+});
+
+/**
+ * Fix 1, reagentx P0 on PR #3502: dispatching TurnStart while a real turn is
+ * already in flight (the common auto-compaction case — compact_boundary
+ * lands mid an ongoing, still-streaming turn) regresses turnPhase from
+ * Streaming back to Submitting. The controller must defer instead of firing
+ * immediately, and only actually fire once the busy turn's own session_end
+ * has fully resolved.
+ */
+describe("createMemoryReinjectionController — busy pane (defers)", () => {
+    it("does NOT fetch, dispatch, or send when the pane is busy — defers instead", async () => {
+        const { controller, fetchEntries, dispatchTurnStart, sendRpc, isPaneWorking } = makeController({
+            isPaneWorking: vi.fn().mockReturnValue(true),
+        });
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+
+        expect(isPaneWorking).toHaveBeenCalled();
+        expect(fetchEntries).not.toHaveBeenCalled();
+        expect(dispatchTurnStart).not.toHaveBeenCalled();
+        expect(sendRpc).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+    });
+
+    it("maybeFireDeferred is a no-op when nothing was deferred", () => {
+        const { controller, fetchEntries } = makeController();
+        controller.maybeFireDeferred();
+        expect(fetchEntries).not.toHaveBeenCalled();
+    });
+
+    it("maybeFireDeferred fires the deferred trigger once called — fetch/dispatch/send now happen", async () => {
+        const { controller, fetchEntries, dispatchTurnStart, sendRpc, isPaneWorking } = makeController({
+            isPaneWorking: vi.fn().mockReturnValue(true),
+        });
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+        expect(fetchEntries).not.toHaveBeenCalled();
+
+        controller.maybeFireDeferred();
+        // doTrigger is async internally; flush microtasks.
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(fetchEntries).toHaveBeenCalledTimes(1);
+        expect(dispatchTurnStart).toHaveBeenCalledWith(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+        expect(controller.isHiding()).toBe(true);
+        void isPaneWorking; // referenced for clarity only — the mock's return value drove trigger()'s decision above
+    });
+
+    it("a second trigger() call while one is already deferred does not stack a second deferred entry", async () => {
+        const { controller, fetchEntries, isPaneWorking } = makeController({
+            isPaneWorking: vi.fn().mockReturnValue(true),
+        });
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:05:00.000Z");
+
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // Only ONE fetch — the second trigger() call while busy was a no-op,
+        // not a second queued deferral.
+        expect(fetchEntries).toHaveBeenCalledTimes(1);
+        void isPaneWorking;
+    });
+
+    it("full lifecycle: deferred while busy, fires once idle, completes via onSessionEnd like any other hidden turn", async () => {
+        const { controller, isPaneWorking } = makeController({
+            isPaneWorking: vi.fn().mockReturnValue(true),
+        });
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+        expect(controller.isHiding()).toBe(false); // still deferred, not yet hiding
+
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(controller.isHiding()).toBe(true);
+
+        const node = controller.onSessionEnd();
+        expect(node).not.toBeNull();
+        expect(controller.isHiding()).toBe(false);
+        void isPaneWorking;
     });
 });

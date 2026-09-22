@@ -478,6 +478,62 @@ shipping: the same empirical check this spec's own §1.2 citation used for
 `/compact` itself — run it against a real pane and watch what actually
 happens.
 
+**Two real P0 bugs found by ReAgent review on PR #3502, both confirmed and
+fixed same day — recorded because both prove this section's own "should
+be sufficient" reasoning wrong in a way no amount of further code reading
+would have caught, only trying to actually wire it up and having it
+reviewed did:**
+
+1. **`TurnStart` dispatched unconditionally regressed `turnPhase`.** This
+   section's earlier text claimed reusing `TurnStart`/`TurnEnd` "handles
+   both the manual-compact and auto-compact timing cases with no new
+   logic," on the reasoning that a hidden reinjection is a genuinely real
+   turn. True for the STATE MACHINE's tolerance of concurrent turns — false
+   for what actually happened: the controller dispatched `TurnStart`
+   unconditionally, never checking whether a real turn was already in
+   flight. For the common auto-compaction case (`compact_boundary` lands
+   MID an ongoing, still-streaming turn), that regresses `turnPhase` from
+   `Streaming` back to `Submitting` — exactly the flicker
+   `agent-view.tsx`'s real `handleSendMessage` guards against via
+   `if (!wasAlreadyWorking)`, a guard that never applied here because the
+   controller bypasses `handleSendMessage` entirely (by design — see
+   §3.3's delivery rationale). **Fixed**: `memory-reinjection-controller.ts`
+   now checks `isPaneWorking()` and defers (`deferredFrameTimestamp`)
+   rather than firing when busy; the deferred trigger fires via
+   `maybeFireDeferred()`, called from `useAgentStream.ts` immediately AFTER
+   `finalizeTurn()` — the point at which `turnPhase` is genuinely `Done`
+   for whatever turn was in flight, so a fresh `TurnStart` is safe. 5 new
+   tests cover the busy-defers-then-fires lifecycle.
+2. **Real memory content reached `TurnStart.content`/`pendingContent` —
+   readable by ANY consumer watching `turnPhase`, not just this feature's
+   own suppression mechanism.** §3.3's original "single choke point" claim
+   (`StreamFlushQueue`) is correct for document-NODE creation specifically,
+   but was wrongly generalized to "everything that could leak." It is not:
+   `useAgentActivitySummary.ts` watches every `Submitting` transition
+   independent of `StreamFlushQueue` and forwards `pendingContent` to an
+   ambient LLM call whose result becomes the human-visible PANE TITLE —
+   for a hidden reinjection turn, that meant the full composed Global +
+   Personal memory bodies got sent to an LLM and could surface a summary
+   of them in the header, directly defeating "the human operator sees only
+   a label row." A grep for other `Submitting`/`turnJustEndedAtom`
+   consumers during the fix turned up a second, unconfirmed but plausible
+   risk in `useNextPromptSuggestion.ts`'s turn-end ambient call (backend-
+   driven, not raw-content-forwarding — lower severity, not fixed here,
+   flagged as a followup). **Fixed with two layers, not one**, because "did
+   I find every consumer" is exactly the kind of question a single grep
+   pass can get wrong: (a) `TurnStart` gained a `hidden?: boolean` field,
+   propagated onto `TurnPhase.Submitting.hidden` (`agent-pane-state/
+   types.ts`/`reducer.ts`) — `useAgentActivitySummary.ts` now checks it and
+   returns early, with a dedicated regression test (confirmed to actually
+   fail without the guard, same verification discipline as every other
+   fix in this PR); (b) defense in depth, not reliant on (a) alone: a
+   hidden turn's `TurnStart.content` is now always
+   `HIDDEN_TURN_PLACEHOLDER_CONTENT`, a fixed, content-free string — the
+   REAL composed message only ever travels through `sendRpc`'s own
+   argument, which never touches reducer state at all. A consumer that
+   forgets to check `hidden` — including `useNextPromptSuggestion.ts`'s
+   still-open risk above — sees a placeholder, never real content.
+
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 
 Added 2026-09-22, same session as the rest of this spec, per direct follow-up

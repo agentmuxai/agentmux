@@ -44,13 +44,14 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
-import type { AgentPaneEvent, CompactionState, TurnPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase, type AgentPaneEvent, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
+import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
 import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -277,6 +278,15 @@ export function useAgentStream({
     const memoryReinjectionController = createMemoryReinjectionController({
         contextWindow: () => contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
         now: () => Date.now(),
+        // reagentx P0, PR #3502: a real turn is genuinely in flight for the
+        // common auto-compaction case (compact_boundary lands mid an
+        // ongoing turn) — dispatching TurnStart on top of it regresses
+        // turnPhase from Streaming back to Submitting. Same read
+        // agent-view.tsx's own handleSendMessage captures as
+        // wasAlreadyWorking before deciding whether to dispatch TurnStart
+        // at all. See memory-reinjection-controller.ts's module doc
+        // comment, "fix 1".
+        isPaneWorking: () => workingFromPhase(paneSnapshot(blockId)?.turnPhase ?? { kind: "Idle" }),
         fetchEntries: () => fetchMemoryReinjectionEntries(TabRpcClient, agentName ?? ""),
         // Deliberately the raw send RPC, not the full sendMessage/pending-
         // zone path (§3.3 — that path is what creates the visible
@@ -296,9 +306,13 @@ export function useAgentStream({
         // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
         // its rendering differs. See memory-reinjection-controller.ts's
-        // module doc comment.
-        dispatchTurnStart: (content) => {
-            model.dispatchPane({ type: "TurnStart", at: Date.now(), content }, "system");
+        // module doc comment. `content`/`hidden` are always exactly what the
+        // controller itself passes (HIDDEN_TURN_PLACEHOLDER_CONTENT, true) —
+        // this callback forwards verbatim rather than deciding anything, per
+        // "fix 2" in that module's doc comment: the REAL memory content must
+        // never enter reducer state, only sendRpc's own argument above.
+        dispatchTurnStart: (content, hidden) => {
+            model.dispatchPane({ type: "TurnStart", at: Date.now(), content, hidden }, "system");
         },
         dispatchTurnReset: () => {
             model.dispatchPane({ type: "TurnReset" }, "system");
@@ -668,6 +682,14 @@ export function useAgentStream({
                         // flushes arrive after this point.
                         queue.flushNow();
                         finalizeTurn(event.stats ?? null);
+                        // AFTER finalizeTurn — turnPhase is now genuinely
+                        // Done for whatever turn just ended (real or
+                        // hidden). Safe point to fire a reinjection that
+                        // was deferred because THIS turn was still in
+                        // flight when compact_boundary landed (§ "fix 1",
+                        // memory-reinjection-controller.ts) — a no-op if
+                        // nothing is deferred.
+                        memoryReinjectionController.maybeFireDeferred();
                         continue;
                     }
                     // Provider is rate-limited and retrying. Keep lastEventMs
