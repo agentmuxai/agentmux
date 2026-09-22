@@ -97,7 +97,16 @@ that, so this section re-verifies §2 against current `main` and corrects it.
 **Three claims changed; one defect was missed entirely.** The phase plan in
 §6 survives intact — nothing below reorders or removes a phase.
 
-### 2.5.1 Phase 0 is untouched — #3480 did *not* partially deliver it
+### 2.5.1 Phase 0 — #3480 did *not* partially deliver it
+
+> **Status update.** As of the PR that adds `backend/agent_resolve.rs`, Phase 0's
+> shared resolver **now exists** and `resolve_agent_uuid` /
+> `resolve_agent_definition_id` both delegate to it. The remaining Phase 0 item
+> is the §4 safety net (`instance_create`, per §2.5.2), still deliberately
+> unstarted pending the data check §4 asks for. `backend::history`'s inline
+> fourth resolution path is Phase 1's, not Phase 0's — its extra raw-slug
+> fallback is load-bearing and needs its own change. The rest of this section
+> records the state before that, and why #3480 was not it.
 
 Easy to misread, so stated explicitly: #3480 created
 `backend/agent_registry_lookup.rs`, which consolidates three copies of a

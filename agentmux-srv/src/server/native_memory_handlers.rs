@@ -190,15 +190,7 @@ pub(crate) fn resolve_agent_uuid(
     mstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<String, String> {
-    if let Some(instance) = mstore
-        .instance_get_by_slug(agent_id)
-        .map_err(|e| format!("resolve_agent_uuid: store: {e}"))?
-    {
-        return Ok(instance.id);
-    }
-    find_active_registry_record_by_slug(agent_id)
-        .map(|rec| rec.data.definition_id)
-        .ok_or_else(|| format!("resolve_agent_uuid: agent {agent_id} not found"))
+    crate::backend::agent_resolve::resolve_agent_id(mstore, agent_id)
 }
 
 /// Find the global named-agent registry's active record for `agent_id` —

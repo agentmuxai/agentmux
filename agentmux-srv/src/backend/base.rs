@@ -534,6 +534,16 @@ mod tests {
 
     #[test]
     fn test_mux_data_dir_default() {
+        // `agentmux_root()` returns AGENTMUX_HOME_OVERRIDE verbatim, and other
+        // test modules (m0020/m0021 backfills, agent_resolve, registry paths)
+        // set it to a tempdir whose path contains neither ".agentmux" nor
+        // "AGENTMUX". Without this lock the assertion below depends on whether
+        // one of them happens to be mid-test — latent since those tests were
+        // written, and reliably hit once another env-setting module was added.
+        // Same crate-wide guard they take; a local mutex would not help.
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // When env var is not set, should be ~/.agentmux
         let dir = get_mux_data_dir();
         assert!(dir.to_string_lossy().contains(".agentmux") || dir.to_string_lossy().contains("AGENTMUX"));

@@ -2773,32 +2773,15 @@ pub(super) fn resolve_agent_definition_id(
     state: &AppState,
     agent_id: &str,
 ) -> Result<String, String> {
-    if let Ok(Some(instance)) = state.mstore.instance_get_by_slug(agent_id) {
-        if !instance.definition_id.is_empty() {
-            return Ok(instance.definition_id);
-        }
-    }
-    if let Ok(Some(_)) = state.mstore.agent_def_get(agent_id) {
-        return Ok(agent_id.to_string());
-    }
-    // reagentx P1 on PR #2428 (round 4): `instance_get_by_slug` only ever
-    // hits the local `db_agents` table — the common case (per
-    // `bundle_self_get_impl`'s own doc comment a few lines above: launching
-    // an agent does not create a `db_agents` row) is a live agent that only
-    // exists in the global named-agent registry. Without this fallback,
-    // `identity.self.accounts`/`IdentityAccounts` — the exact tool
-    // confirmed live-broken for a real registry-only agent — stayed broken
-    // even after `instance_get_by_slug` existed, since a slug-only agent
-    // never resolves via either branch above. Mirrors the same registry
-    // fallback `bundle_self_get_impl` already has.
-    if let Some(rec) = crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id) {
-        if !rec.data.definition_id.is_empty() {
-            return Ok(rec.data.definition_id);
-        }
-    }
-    Err(format!(
-        "unknown agent '{agent_id}': no instance with that name and no definition with that id"
-    ))
+    // The three tiers this used to spell out inline (db_agents by slug, then
+    // by id, then the registry) are now `agent_resolve`'s, shared with
+    // `resolve_agent_uuid`. The registry tier in particular is load-bearing and
+    // was won the hard way — reagentx P1 on PR #2428 (round 4): the common case
+    // is a live agent with no `db_agents` row at all (launching an agent does
+    // not create one), so `identity.self.accounts`/`IdentityAccounts` stayed
+    // live-broken for registry-only agents even after `instance_get_by_slug`
+    // existed. See `agent_resolve::resolve_agent_id`.
+    crate::backend::agent_resolve::resolve_agent_id(&state.mstore, agent_id)
 }
 
 /// Current unix time in milliseconds (0 if the clock is before the epoch).
