@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-20
 **Author:** Agent3
-**Status:** proposed
+**Status:** implemented (2026-09-22, issue #3463) — with one addition beyond
+this spec's original scope; see the erratum after §3 and the correction to
+§5's "no new plumbing" claim.
 **Triggered by:** `docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md` — during that
 investigation, 3 of 7 agent panes in one window (Clamk, Naki #2, Loap #2)
 turned out to have no live CLI process at all after the app's repeated
@@ -121,6 +123,28 @@ tell these two cases apart — in practice `start()` can likely read
 no new plumbing required at all; confirm this during implementation rather
 than assume.
 
+> **Erratum, 2026-09-22 (issue #3463 comments):** the "no new plumbing
+> required" prediction held for `agent:sessionid` itself, but missed a
+> dependency this spec never examined. Every REAL spawn today —
+> `agent_handlers::input`'s message-send path — first runs the block's env
+> through `identity::resolver::inject_identity_env`, the Layer 3 identity/
+> credential spawn gate (`SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`)
+> that blocks a spawn when the agent's bound account was deleted/revoked
+> since it last ran. `PersistentSubprocessController` had no access to that
+> gate's two stores (`id_store`/`identity_store`), neither did
+> `resync_controller`, nor any of its ~7 call sites. Skipping the gate for
+> eager resume specifically would have let a deauthed agent get silently
+> respawned anyway on whatever ambient credential was lying around — worse
+> than the bug this spec fixes, since an inert pane is at least safely
+> recoverable by a message, while one resumed on the wrong credentials is a
+> real security regression. This DID require new plumbing: `id_store`/
+> `identity_store` now flow through `resync_controller`'s signature (all ~7
+> call sites) and two new fields on `PersistentSubprocessController`, set via
+> an opt-in `with_identity_stores()` builder rather than required `new()`
+> arguments so the ~15 pre-existing test constructors are unaffected. See
+> `PersistentSubprocessController::start()`'s own doc comment for the full
+> reasoning, and §5 below (also corrected).
+
 ---
 
 ## 4. Open question to verify before shipping (not resolved by this spec)
@@ -136,6 +160,19 @@ trigger real work/cost, the fix needs a cheaper signal than a full process
 spawn (e.g. read the session file directly to check "does history exist"
 without invoking the CLI) — implementer should confirm this first.
 
+**Resolved, 2026-09-22: the assumption holds.** The persistent controller
+runs in `--input-format stream-json` — confirmed in `mod.rs`'s own doc
+comments — and the CLI blocks on a stdin read between turns; nothing is
+written to argv or stdin at spawn time beyond the resume flag itself. This
+exact spawn shape (`--resume <sid>`, no queued message) already runs today
+for the forced-restart/model-change respawn path, with no report anywhere
+in this codebase of it triggering a spurious turn or extra cost. Not
+independently re-verified by instrumenting a real API call — inferred from
+the existing, unremarkable production use of the identical path — but
+sufficient confidence to proceed on, given the stronger, cheaper-to-verify
+identity-gate issue (§3's erratum) turned out to be the real blocking
+question.
+
 ---
 
 ## 5. Scope
@@ -144,6 +181,17 @@ without invoking the CLI) — implementer should confirm this first.
 (`agentmux-srv/src/backend/blockcontroller/persistent.rs`), and whatever
 minimal change to `resync_controller`'s new-controller branch
 (`agentmux-srv/src/backend/blockcontroller/mod.rs`) is needed to reach it.
+
+**Corrected, 2026-09-22:** "minimal" undersold what shipped, per §3's
+erratum. The actual in-scope set: `PersistentSubprocessController` (new
+`id_store`/`identity_store`/`auth_key` fields + `with_identity_stores()`),
+`resync_controller`'s signature and all ~7 call sites (`websocket.rs`,
+`agent_open.rs` ×2, `server/mod.rs` ×2, plus test call sites), and the one
+`PersistentSubprocessController::new()` production call site in `mod.rs`.
+Every other controller type (`Shell`/`Subprocess`/`Acp`/`AppServer`) and
+every pre-existing test constructor of `PersistentSubprocessController` is
+untouched — the two new stores are opt-in via the builder, not required
+constructor arguments.
 
 **Out of scope:**
 - `SubprocessController`/`AcpController`/other controller types — not
