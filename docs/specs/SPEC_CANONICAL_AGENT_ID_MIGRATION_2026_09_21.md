@@ -431,13 +431,46 @@ the same registry's data. Frontend Phase 5 (`/reactive/register` callers)
 should land together with this phase or immediately after, since they're
 the same wire contract.
 
-**Migration-window risk specific to this phase:** in-flight jekts/messages
-queued before this PR deploys reference the old slug-keyed registry shape.
-Needs a decision: is a brief registry rebuild-on-restart (every agent
-re-registers on next connect/heartbeat, as they already do today on any
-srv restart) sufficient, or does anything need to survive a mid-flight
-deploy without a restart? Flagging as needing a rollout-safety check before
-merge, not resolved here.
+**Migration-window risk — resolved, 2026-09-22: registry rebuild-on-restart
+is sufficient, and there is nothing in flight to lose.** This section asked
+whether in-flight jekts queued before deploy could reference the old
+slug-keyed shape. Traced through the code:
+
+- **No local queue exists.** `inject_message` is synchronous — it returns
+  `InjectionResponse { success: false, error }` when the target does not
+  resolve. There is no deferred store, retry buffer or pending table; a jekt
+  either lands or fails to its caller immediately.
+- **The registry is in-memory only** (`reactive/handler.rs`'s `HashMap`s), so
+  a restart empties it and agents re-register on reconnect — which already
+  happens on every srv restart today.
+- **The one durable queue is server-side in the cloud** and is
+  claim-before-deliver: `cloud_subscriber.rs` `POST /reactive/ack`s an
+  injection *before* delivering it, and releases it back to pending if local
+  delivery fails. Its own comment records the prior bug where delivering first
+  let two pollers double-deliver. So a deploy mid-delivery releases rather
+  than drops.
+- That cloud queue is keyed by slug and **stays** that way: it is muxbus/WAN,
+  which §5 permanently excludes. It is therefore not a migration window at all
+  but a standing interface, handled by resolving `target_agent` on the way in
+  like every other entry point.
+
+**Implemented differently from the sketch above.** Rather than rekeying the
+maps at each call site, the handler takes an injected `AgentKeyResolver`
+(matching its existing `InputSender`/`AgentIdentityConfirmer` seams, so
+`backend::reactive` gains no storage dependency) and resolves in one place,
+`Handler::canonical_key`. There are ~10 entry points into this handler —
+Slack, Discord, Telegram, WhatsApp, the cloud subscriber, fleet, pane, the
+HTTP routes and the MCP — and resolving at each would have reproduced exactly
+the per-site drift §2 blames for this defect being found four times.
+
+Unresolvable agents fall back to the lowercased slug, i.e. the pre-Phase-2
+key, so an agent with no `db_agents` row keeps working rather than dropping
+off the registry. With no resolver installed the behaviour is byte-identical
+to before, which is what keeps the pre-existing tests meaningful.
+
+The alias registry is deliberately **not** canonicalized: aliases are the
+stable `AGENTMUX_AGENT_ID` by design, so `inject_message_inner` now carries
+two keys — canonical for the primary map, raw slug for the alias map.
 
 ### Phase 3 — Work Queue (§2 #2)
 `target_agent`/`claimed_by` columns store `db_agents.id`. Resolution happens

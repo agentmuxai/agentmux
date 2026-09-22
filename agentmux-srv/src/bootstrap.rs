@@ -1113,6 +1113,21 @@ pub fn spawn_background_subsystems(
 
     // Reactive handler (global singleton) + poller
     let reactive_handler = reactive::get_global_handler();
+    // Phase 2 of SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md: key the
+    // reactive registries by `db_agents.id` instead of a slug two agents can
+    // share. Installed here because this is where the global handler's other
+    // seams are wired; the handler itself keeps no storage dependency.
+    //
+    // `resolve_agent_id` fails closed on an ambiguous slug, and
+    // `canonical_key` then falls back to the lowercased slug — i.e. exactly
+    // the pre-Phase-2 key — so an agent the store cannot resolve keeps working
+    // as it always did rather than dropping off the registry.
+    {
+        let resolver_store = Arc::clone(mstore);
+        reactive_handler.set_agent_key_resolver(Arc::new(move |agent_id: &str| {
+            crate::backend::agent_resolve::resolve_agent_id(&resolver_store, agent_id).ok()
+        }));
+    }
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {
         backend::blockcontroller::send_input(
             block_id,

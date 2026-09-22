@@ -584,6 +584,24 @@ pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<bool, String> + Send +
 /// proceeds unaffected when no positive check is possible.
 pub type AgentIdentityConfirmer = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+/// Resolves a caller-supplied agent id — the human-readable
+/// `AGENTMUX_AGENT_ID` slug — to that agent's canonical `db_agents.id`.
+///
+/// `None` when the agent cannot be resolved to exactly one id: unknown, or a
+/// slug two agents share (both underlying lookups fail closed, so an ambiguous
+/// slug resolves to nothing rather than to an arbitrary winner). The handler
+/// falls back to the lowercased slug in that case, which is what it keyed by
+/// before Phase 2 — so an unresolvable agent behaves exactly as it always did,
+/// and a resolvable one stops sharing a key with anything else that happens to
+/// derive the same slug.
+///
+/// Injected rather than taking a `Store` directly, matching this module's other
+/// seams ([`InputSender`], [`AgentIdentityConfirmer`]): `backend::reactive` has
+/// no storage dependency today and this does not add one.
+///
+/// Phase 2 of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md`.
+pub type AgentKeyResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 #[cfg(test)]
 mod app_api_manifest_contract_tests {
     //! Rust half of the DRY contract check for `agent.send`, described in
