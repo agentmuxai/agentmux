@@ -29,7 +29,44 @@ the original §3.1 text.
 > superseded by this note — do not treat it as current. The keep-alive
 > variant (`viewModelSlots`) is a distinct code path this test does not
 > exercise; whether a live variant of that one still applies is open, tracked
-> in §3.3-erratum below. The live symptom itself (5+ panes permanently blank,
+> in §3.3-erratum below.
+>
+> > **Erratum to the erratum (2026-09-22, AgentY).** The conclusion above is
+> > correct — but the evidence cited for it was not, and the last two
+> > sentences are exactly inverted.
+> >
+> > The CI run named above (`35539258553`) used a pane whose view type is
+> > `"agent"`. **`"agent"` is in `KEEP_ALIVE_TYPES`**
+> > (`pane-leaf-chrome.tsx:101` — `{"term", "agent"}`), so `keepAlive()`
+> > latched true and the render took the `viewModelSlots` branch.
+> > `scopedNodeModel` — the non-keep-alive path — is documented at `:186` as
+> > *"Used only when `!keepAlive()`"* and was never reached. So that run
+> > exercised **only** the keep-alive variant, the precise opposite of what
+> > the sentence above claims, and it could not have said anything about the
+> > non-keep-alive path either way (reagentx P1 on #3459).
+> >
+> > Re-run with `"editor"` — in `HOISTS_OWN_CHROME`, absent from
+> > `KEEP_ALIVE_TYPES`, so it genuinely lands on the non-keep-alive branch —
+> > and **it still passes**. The conclusion therefore stands, now on evidence
+> > that tests the path it is about. The reasoning given above (eager
+> > `content` const, effects run at construction) was right all along; only
+> > its empirical backing was mis-targeted.
+> >
+> > Two consequences worth carrying forward:
+> >
+> > 1. §3.3's open question about the keep-alive variant is **narrower than
+> >    stated**. The original run did exercise that path, and chrome
+> >    resolved — consistent with it having been fixed at `:320`. That does
+> >    not rule out a live variant under conditions the test does not model,
+> >    but it is no longer untested.
+> > 2. This spec cites §8 of `SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`
+> >    as precedent for closing a theory without a disproving test. The
+> >    failure mode here was subtler and worth naming separately: the test
+> >    existed, ran, and passed — it just silently answered a different
+> >    question than the one asked. A green test is not evidence until the
+> >    branch it takes has been checked.
+>
+> The live symptom itself (5+ panes permanently blank,
 > backend data intact) is not in question — only this proposed mechanism for
 > it. See `docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §8 for
 > the last time this codebase prematurely closed a theory about this exact

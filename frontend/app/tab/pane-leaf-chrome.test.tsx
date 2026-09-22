@@ -496,3 +496,56 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
         expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
     });
 });
+
+describe("PaneLeafChrome — RCA verification (non-keep-alive hoist path)", () => {
+    // REGRESSION GUARD for an established invariant. It began as an open
+    // diagnostic; the question is now answered and this pins the answer.
+    //
+    // THE INVARIANT: on the non-keep-alive path, chrome resolves even when
+    // the view type is ALREADY resolved before the first synchronous render
+    // — the condition observed live after an app recovery/restart cycle,
+    // when MOS block meta is already warm.
+    //
+    // WHY IT HOLDS: `content` (line ~327) is a plain, eagerly-constructed
+    // const containing `<Block>`, NOT gated behind `hoisted()`/`chromeVm()`.
+    // SolidJS runs a component's effects at construction regardless of which
+    // `<Show>` branch later consumes the value, so `<Block>`'s
+    // `createEffect` — which publishes the ViewModel — fires whether or not
+    // `hoisted()` is already true. There is no null-latch to deadlock on.
+    //
+    // This refutes the non-keep-alive half of
+    // SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md §3.1, which that
+    // spec's own erratum already concedes. See the erratum-to-the-erratum
+    // there: the run originally cited as proof used a keep-alive view type
+    // and never reached this path, so this test is the first valid evidence
+    // for a conclusion that was reached by reasoning alone.
+    //
+    // If this ever TIMES OUT, the deadlock is real on this path after all
+    // and §3.1's original text is back in play.
+    //
+    // **The view type must be in `HOISTS_OWN_CHROME` but NOT in
+    // `KEEP_ALIVE_TYPES`**, or this test silently answers the wrong
+    // question. This originally used `"agent"`, which is in BOTH
+    // (`KEEP_ALIVE_TYPES = {"term", "agent"}`), so `keepAlive()` latched
+    // true, `chromeNodeModel()` took the `viewModelSlots` override branch,
+    // and `content` rendered the `<For>` keep-alive branch — exercising the
+    // path that was ALREADY fixed at :320 rather than the plain
+    // `<Key>`/`<Block>` fallback this PR exists to probe. A pass or a fail
+    // would both have been uninformative (reagentx P1 on #3459).
+    //
+    // `"editor"` is in `HOISTS_OWN_CHROME` and absent from
+    // `KEEP_ALIVE_TYPES`, so it lands on the non-keep-alive branch.
+    it("resolves chrome-root even when the view type is already resolved (non-keep-alive) on the very first synchronous render", async () => {
+        setBlockView("b1", "editor"); // already resolved BEFORE render — the claimed trigger condition
+        const [activeBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId }); // REAL signal-backed activeViewModel, not a static fake
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("chrome-root")).toBeInTheDocument();
+        }, { timeout: 1000 });
+        expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
+    });
+});
