@@ -112,3 +112,114 @@ pub(crate) fn working_dir_from_record(rec: &NamedAgentRecord) -> Option<String> 
             .to_string(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::{NamedAgentRecordV1, Registry, MAX_SUPPORTED_SCHEMA};
+
+    // These tests drive the real registry through `resolve_shared_registry_dir`,
+    // which reads the process-global `AGENTMUX_HOME_OVERRIDE`. Left unset it
+    // would resolve the developer's own `~/.agentmux` and merge in every real
+    // agent on the machine. Uses the CRATE-WIDE lock every other consumer of
+    // this env var already takes — a module-local mutex does not stop the
+    // races these tests would otherwise have with the migration test modules.
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_GUARD;
+
+    fn with_registry<T>(records: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path().to_str().unwrap());
+
+        let dir = crate::registry::resolve_shared_registry_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let registry = Registry::open(dir).unwrap();
+        for (instance_id, instance_name) in records {
+            registry.upsert(&record(instance_id, instance_name)).unwrap();
+        }
+
+        let out = f();
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        out
+    }
+
+    fn record(instance_id: &str, instance_name: &str) -> NamedAgentRecord {
+        NamedAgentRecord {
+            schema_version: MAX_SUPPORTED_SCHEMA,
+            data: NamedAgentRecordV1 {
+                instance_id: instance_id.to_string(),
+                instance_name: instance_name.to_string(),
+                definition_id: format!("def-{instance_id}"),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: format!("{instance_id}-dir"),
+                source_agents_base: Some("/agents".to_string()),
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "test".to_string(),
+                last_launched_by_version: "test".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn resolves_the_single_record_whose_name_normalizes_to_the_slug() {
+        with_registry(&[("i1", "AgentY")], || {
+            let found = find_active_record_by_slug("agenty").expect("one match resolves");
+            assert_eq!(found.data.instance_id, "i1");
+        });
+    }
+
+    // The module's whole reason for existing: the caller holds a routing slug
+    // while the record stores a display-cased `instance_name`, so both sides
+    // must go through `derive_slug`. Raw string equality here was a real bug
+    // (reagentx, PR #2428).
+    #[test]
+    fn matches_through_derive_slug_on_both_sides_not_raw_equality() {
+        with_registry(&[("i1", "AgentY")], || {
+            assert!(find_active_record_by_slug("AgentY").is_some(), "display casing");
+            assert!(find_active_record_by_slug("AGENTY").is_some(), "upper casing");
+            assert!(find_active_record_by_slug("agenty").is_some(), "already a slug");
+        });
+    }
+
+    #[test]
+    fn returns_none_when_nothing_matches() {
+        with_registry(&[("i1", "AgentY")], || {
+            assert!(find_active_record_by_slug("someone-else").is_none());
+        });
+    }
+
+    // The guard PR #3480 added and #3497 §2.5.3 flagged as never verified.
+    // `derive_slug` lowercases, so "AgentY" and "AGENTY" are two agents with
+    // one slug — nothing enforces a unique `instance_name` across records.
+    // Returning either one hands its `definition_id`/`working_dir` to a caller
+    // resolving conversation history or a memory directory, so the wrong pick
+    // discloses one agent's data to another.
+    #[test]
+    fn refuses_to_resolve_a_slug_two_active_records_share() {
+        with_registry(&[("i1", "AgentY"), ("i2", "AGENTY")], || {
+            assert!(
+                find_active_record_by_slug("agenty").is_none(),
+                "an ambiguous slug must resolve to nothing, never to an arbitrary winner"
+            );
+        });
+    }
+
+    // The disambiguated sibling stays correct exactly where the slug-only
+    // lookup must give up — otherwise refusing the collision would leave
+    // callers that DO know which agent they mean with no way through.
+    #[test]
+    fn definition_scoped_lookup_resolves_a_collision_the_slug_alone_cannot() {
+        with_registry(&[("i1", "AgentY"), ("i2", "AGENTY")], || {
+            let found = find_active_record_by_slug_and_definition("agenty", "def-i2")
+                .expect("definition_id disambiguates");
+            assert_eq!(found.data.instance_id, "i2");
+            assert!(
+                find_active_record_by_slug_and_definition("agenty", "def-nope").is_none(),
+                "an unmatched definition must not fall back to a slug-only guess"
+            );
+        });
+    }
+}
