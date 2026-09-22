@@ -517,22 +517,50 @@ reviewed did:**
    of them in the header, directly defeating "the human operator sees only
    a label row." A grep for other `Submitting`/`turnJustEndedAtom`
    consumers during the fix turned up a second, unconfirmed but plausible
-   risk in `useNextPromptSuggestion.ts`'s turn-end ambient call (backend-
-   driven, not raw-content-forwarding — lower severity, not fixed here,
-   flagged as a followup). **Fixed with two layers, not one**, because "did
-   I find every consumer" is exactly the kind of question a single grep
-   pass can get wrong: (a) `TurnStart` gained a `hidden?: boolean` field,
-   propagated onto `TurnPhase.Submitting.hidden` (`agent-pane-state/
-   types.ts`/`reducer.ts`) — `useAgentActivitySummary.ts` now checks it and
-   returns early, with a dedicated regression test (confirmed to actually
-   fail without the guard, same verification discipline as every other
-   fix in this PR); (b) defense in depth, not reliant on (a) alone: a
-   hidden turn's `TurnStart.content` is now always
+   risk in `useNextPromptSuggestion.ts`'s turn-end ambient call — flagged
+   as a followup, not fixed in that round. **Fixed with two layers, not
+   one**, because "did I find every consumer" is exactly the kind of
+   question a single grep pass can get wrong: (a) `TurnStart` gained a
+   `hidden?: boolean` field, propagated onto `TurnPhase.Submitting.hidden`
+   (`agent-pane-state/types.ts`/`reducer.ts`) — `useAgentActivitySummary.ts`
+   now checks it and returns early, with a dedicated regression test
+   (confirmed to actually fail without the guard, same verification
+   discipline as every other fix in this PR); (b) defense in depth, not
+   reliant on (a) alone: a hidden turn's `TurnStart.content` is now always
    `HIDDEN_TURN_PLACEHOLDER_CONTENT`, a fixed, content-free string — the
    REAL composed message only ever travels through `sendRpc`'s own
-   argument, which never touches reducer state at all. A consumer that
-   forgets to check `hidden` — including `useNextPromptSuggestion.ts`'s
-   still-open risk above — sees a placeholder, never real content.
+   argument, which never touches reducer state at all.
+3. **The "flagged as a followup" `useNextPromptSuggestion.ts` risk was
+   real, and layer (b) above does NOT cover it — confirmed on ReAgent's
+   very next review round, same day.** `NextPromptSuggestionCommand`'s
+   backend implementation (`read_recent_activity_digest`/
+   `extract_digest_text`, `agentmux-srv/src/server/app_api/session.rs`)
+   reads the raw FileStore OUTPUT TAIL directly — both the hidden turn's
+   full composed `<system-reminder>` memory dump and the model's real
+   reply to it are sitting right there in it, with no concept of "hidden"
+   on the backend side at all. This is a DIFFERENT leak shape than finding
+   2: `HIDDEN_TURN_PLACEHOLDER_CONTENT` (defense in depth for consumers
+   reading `pendingContent`/reducer state) provides zero protection here,
+   because this consumer never reads reducer state — it reads the raw
+   process output on disk. **Fixed**: `useNextPromptSuggestion.ts` tracks
+   which turn most recently entered `Submitting` was hidden
+   (`lastTurnWasHidden`, a local closure variable — `turnJustEndedAtom` is
+   a bare edge-counter with no phase data of its own to inspect) and skips
+   the RPC call entirely for a hidden turn's own completion — the only fix
+   available at the frontend layer, since making the backend read path
+   itself hidden-turn-aware would mean persisting "hidden" somewhere the
+   backend can see, out of scope for this PR. 3 new tests, confirmed to
+   fail without the guard.
+
+   **The honest takeaway, not glossed over:** two review rounds on this PR
+   found three real leak vectors by three different routes (document-node
+   creation, `pendingContent` forwarding, raw output-tail reading) for the
+   same underlying feature. There is no proof a fourth doesn't exist —
+   the fix here is scoped to what's been found and confirmed, not a claim
+   of exhaustive coverage. Recorded so a future reviewer treats "hidden"
+   claims about this feature with appropriate skepticism, not because a
+   pattern this scattered inspires confidence that grep-based auditing has
+   found everything.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 
