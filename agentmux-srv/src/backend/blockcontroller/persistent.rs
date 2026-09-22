@@ -1053,6 +1053,30 @@ impl PersistentSubprocessController {
         self
     }
 
+    /// Atomically claims the exclusive spawn right `decide_send_action`'s
+    /// `BecomeSpawner` branch also claims, or declines if one is already
+    /// held (`stdin_tx` live, another spawn in flight, or a drain in
+    /// progress). `true` means the caller now owns the claim and MUST
+    /// release it — either directly (a decline with no message ever
+    /// delivered) or via `drain_queue_after_successful_spawn`/
+    /// `respawn_once_for_leftover_queue` (a spawn attempt was made).
+    ///
+    /// Split out of `try_eager_resume` specifically so this state
+    /// transition is unit-testable on its own — codex P1 on PR #3513
+    /// (the spawn-claim race) found that PR's first fix, tested only
+    /// end-to-end, left this exact step's own removal undetected by every
+    /// test in the file (confirmed by mutation: deleting the claim block
+    /// entirely still passed all 6 eager-resume tests, since none of them
+    /// exercised `try_eager_resume`'s OWN claim step in isolation).
+    fn try_claim_eager_resume_spawn(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.stdin_tx.is_some() || inner.spawning_in_progress || inner.drain_claim {
+            return false;
+        }
+        inner.spawning_in_progress = true;
+        true
+    }
+
     /// `start()`'s eager-resume attempt for a pane with a captured
     /// `agent:sessionid`. Never returns an error — every failure mode here
     /// is "fall back to lazy", not "fail the resync"; see `start()`'s own
@@ -1105,6 +1129,28 @@ impl PersistentSubprocessController {
         // stale persisted value for either would have survived an eager
         // resume that a live message send would have corrected).
         //
+        // Claim exclusivity BEFORE the (possibly slow) identity/env
+        // resolution below, not just before the eventual `spawn_process`
+        // call — codex P1 on PR #3513: the controller is placed in the
+        // global registry before `start()` runs (`resync_controller`'s
+        // "Create new controller" branch), so a concurrent message can
+        // reach `send_message` -> `decide_send_action` while this method is
+        // still resolving the identity gate. Without a claim,
+        // `decide_send_action` sees `stdin_tx: None` and
+        // `spawning_in_progress: false` and becomes ITS OWN spawner —
+        // two processes launched against the same `--resume <sid>`, one
+        // silently overwriting the other's `current_pid`/`stdin_tx`/
+        // `kill_tx` while the first stays alive on the same conversation.
+        // Same exclusivity flag `decide_send_action`'s `BecomeSpawner`
+        // branch claims for a live message — this is the same lock a
+        // concurrent `send_message` acquires, so the check-and-set below is
+        // atomic with respect to it.
+        if !self.try_claim_eager_resume_spawn() {
+            return EagerResumeOutcome::DeclinedTo(
+                "already running or another spawn already in flight — nothing to eagerly resume",
+            );
+        }
+
         // `block_in_place` + `block_on`, not `.await` — `start()` is a sync
         // trait method (shared by every non-async controller type), but its
         // CALLER is not: `resync_controller` (this method's only path in)
@@ -1154,6 +1200,15 @@ impl PersistentSubprocessController {
                     "eager-resume declined: identity/credential spawn gate did not pass — \
                      falling back to lazy (spawns on next message, gated the same way then)"
                 );
+                // Release the claim taken above. Safe even if a message
+                // queued during the gate's wait (`decide_send_action` sees
+                // `spawning_in_progress: true` and routes to `Queued`
+                // rather than becoming its own spawner concurrently with
+                // us) — that entry is not stranded: whichever call next
+                // successfully claims and spawns for this block drains the
+                // WHOLE queue (`drain_queue_after_successful_spawn` doesn't
+                // clear it first), so it rides along on the next attempt.
+                self.inner.lock().unwrap().spawning_in_progress = false;
                 return EagerResumeOutcome::DeclinedTo("identity/credential spawn gate did not pass");
             }
         };
@@ -1168,14 +1223,43 @@ impl PersistentSubprocessController {
             session_id: session_id.to_string(),
             message_id: None,
         };
+        let retry_config = config.clone();
         match self.spawn_process(config, None) {
-            Ok(()) => EagerResumeOutcome::Spawned,
+            Ok(()) => {
+                // Releases the claim and delivers anything that queued
+                // during the gate's wait above — same mechanism
+                // `respawn_once_for_leftover_queue` uses for the identical
+                // "spawned with nothing of our own, but the queue might not
+                // be empty" shape. `mark_turn_active_and_publish()` (the
+                // PUBLISH side of the flag `spawn_process`'s own internal
+                // check already set the RAW side of) only if something is
+                // actually about to be delivered — unconditionally calling
+                // it, like that other caller does, would reintroduce the
+                // exact "perpetually WORKING with nothing queued" bug this
+                // PR fixes for the far more common empty-queue case.
+                if !self.inner.lock().unwrap().pending_send_messages.is_empty() {
+                    self.mark_turn_active_and_publish();
+                }
+                self.drain_queue_after_successful_spawn(retry_config, false);
+                EagerResumeOutcome::Spawned
+            }
             Err(e) => {
                 tracing::warn!(
                     block_id = %self.block_id,
                     error = %e,
                     "eager-resume declined: spawn failed — falling back to lazy"
                 );
+                // Mirrors `release_spawn_claim_and_drain_queue`'s
+                // `!spawn_succeeded` branch: hand off to the fallback
+                // respawn if something queued during the attempt (it needs
+                // a live process to go to), otherwise just release the
+                // claim — there's nothing to drain.
+                let has_leftovers = !self.inner.lock().unwrap().pending_send_messages.is_empty();
+                if has_leftovers {
+                    self.respawn_once_for_leftover_queue(retry_config);
+                } else {
+                    self.inner.lock().unwrap().spawning_in_progress = false;
+                }
                 EagerResumeOutcome::DeclinedTo("spawn failed")
             }
         }
@@ -8622,7 +8706,26 @@ setInterval(() => {}, 1000);
     struct KillOnDrop<'a>(&'a PersistentSubprocessController);
     impl Drop for KillOnDrop<'_> {
         fn drop(&mut self) {
-            let _ = self.0.stop_process(true);
+            // NOT `self.0.stop_process(true)`. That only SENDS a kill
+            // request over a channel to an async task that does the actual
+            // `child.kill()` — `Drop::drop` is sync and can't wait for that
+            // task to run it, and if the test's own `#[tokio::test]`
+            // runtime is tearing down at the same moment (exactly when a
+            // test function is returning), that task can be dropped before
+            // it ever processes the message, leaving the child alive
+            // despite this guard. Confirmed live: with the async form, this
+            // test module hung the whole test BINARY's shutdown on two of
+            // three consecutive runs, always immediately after the first
+            // test that reaches this guard via the success path. A direct,
+            // synchronous OS-level kill by pid has no such gap.
+            if let Some(pid) = self.0.inner.lock().unwrap().current_pid {
+                #[cfg(windows)]
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .output();
+                #[cfg(not(windows))]
+                let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).output();
+            }
         }
     }
 
@@ -8699,6 +8802,17 @@ setInterval(() => {}, 1000);
             c.inner.lock().unwrap().current_pid.is_none(),
             "the identity gate must have blocked the spawn"
         );
+        // codex P1 on PR #3513 (the spawn-claim race): the exclusive claim
+        // taken before the gate runs MUST be released on a decline, not
+        // just on success. A leaked claim here would be worse than the
+        // original bug — instead of a pane that revives on the next
+        // message, it would refuse EVERY future message forever
+        // (`decide_send_action` treats `spawning_in_progress: true` as
+        // "something is already spawning" indefinitely).
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "the spawn claim must be released when the gate declines, or this pane can never send again"
+        );
     }
 
     // See `declines_when_gate_denies`'s comment on `flavor = "multi_thread"`.
@@ -8741,6 +8855,23 @@ setInterval(() => {}, 1000);
             !c.health_monitor.is_active_turn(),
             "an eager resume with nothing queued must not report an active turn"
         );
+        // codex P1 on PR #3513 (the spawn-claim race): the SUCCESS path
+        // must also release the claim, via `drain_queue_after_successful_
+        // spawn`. A leaked claim here would refuse every future message to
+        // this pane forever. That release happens inside a `tokio::spawn`ed
+        // task, not synchronously before `start()` returns — `current_pid`
+        // (what `wait_for_spawn` polls) is set synchronously inside
+        // `spawn_process` itself, well before that task is even scheduled,
+        // so this needs its own short wait rather than piggybacking on
+        // `wait_for_spawn`'s already-satisfied condition.
+        let claim_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if !c.inner.lock().unwrap().spawning_in_progress {
+                break;
+            }
+            assert!(std::time::Instant::now() < claim_deadline, "spawn claim was never released");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
 
         // `_kill_on_drop` force-kills the stub on scope exit, success or
         // panic — see `KillOnDrop`'s own doc comment.
@@ -8810,5 +8941,145 @@ setInterval(() => {{}}, 1000);
 
         // `_kill_on_drop` force-kills the stub on scope exit, success or
         // panic — see `KillOnDrop`'s own doc comment.
+    }
+
+    // codex P1 on PR #3513: the controller is placed in the global registry
+    // before `start()` runs, so a concurrent message can reach
+    // `send_message` while `try_eager_resume` is still resolving the
+    // identity gate. Without a claim held for that whole window, this
+    // concurrent message would see `stdin_tx: None` and
+    // `spawning_in_progress: false` and become its own spawner — a SECOND
+    // process launched against the same `--resume <sid>`, silently
+    // overwriting the first one's `current_pid`/`stdin_tx`/`kill_tx` while
+    // it stays alive on the same conversation.
+    //
+    // Doesn't need real timing/concurrency to prove: `spawning_in_progress:
+    // true` IS the exact state `try_eager_resume` holds for that whole
+    // window (see the claim block at the top of that method). Setting it
+    // directly and calling `send_message` exercises the same
+    // `decide_send_action` branch a genuinely concurrent message would hit.
+    #[test]
+    fn a_message_arriving_while_spawning_in_progress_queues_instead_of_double_spawning() {
+        let c = controller("blk-concurrent");
+        c.inner.lock().unwrap().spawning_in_progress = true;
+
+        let msg = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
+        let config = PersistentSpawnConfig {
+            cli_command: "node".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: String::new(),
+            message_id: None,
+        };
+        let result = c.send_message(msg.to_string(), config);
+
+        assert!(result.is_ok(), "a queued message is accepted, not an error: {result:?}");
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "must NOT spawn a second process while one is already claimed as spawning"
+        );
+        assert_eq!(
+            c.inner.lock().unwrap().pending_send_messages.len(),
+            1,
+            "the message must be queued for the in-flight spawn to drain, not dropped"
+        );
+    }
+
+    // Direct coverage for `try_claim_eager_resume_spawn` itself — see its
+    // own doc comment for why this exists as a separate test rather than
+    // trusting the end-to-end tests above to exercise it: mutation-tested,
+    // deleting `try_eager_resume`'s call to this function (or the function's
+    // own body) is exactly what those tests failed to catch.
+    #[test]
+    fn claim_succeeds_when_nothing_else_is_running_or_spawning() {
+        let c = controller("blk-claim-free");
+        assert!(c.try_claim_eager_resume_spawn());
+        assert!(c.inner.lock().unwrap().spawning_in_progress);
+    }
+
+    #[test]
+    fn claim_fails_when_spawning_is_already_in_progress() {
+        let c = controller("blk-claim-spawning");
+        c.inner.lock().unwrap().spawning_in_progress = true;
+        assert!(!c.try_claim_eager_resume_spawn());
+    }
+
+    #[test]
+    fn claim_fails_when_a_stdin_channel_is_already_live() {
+        // A live `stdin_tx` means the process is already running — eager
+        // resume must not attempt a second spawn just because
+        // `spawning_in_progress` happens to be false at this instant (e.g.
+        // between an earlier spawn completing and the caller having set
+        // anything else).
+        let (tx, _rx) = mpsc::channel::<String>(1);
+        let c = controller("blk-claim-live");
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(!c.try_claim_eager_resume_spawn());
+    }
+
+    #[test]
+    fn claim_fails_during_a_drain() {
+        let c = controller("blk-claim-draining");
+        c.inner.lock().unwrap().drain_claim = true;
+        assert!(!c.try_claim_eager_resume_spawn());
+    }
+
+    // End-to-end wiring check, deterministic rather than timing-dependent:
+    // the four tests above prove `try_claim_eager_resume_spawn` itself is
+    // correct in isolation, but none of the OTHER eager-resume tests would
+    // have caught `try_eager_resume` simply never calling it — confirmed by
+    // mutation, removing that one call left every other test in this module
+    // still passing. This drives the claim through the REAL `start()` entry
+    // point instead of calling the claim function directly, so a future
+    // regression that skips the call (not just breaks the function) fails
+    // here.
+    //
+    // Pre-claiming `spawning_in_progress` before `start()` runs stands in
+    // for "another spawn raced in first" without needing to actually win a
+    // timing race: same effect the eager-resume path itself achieves by
+    // claiming BEFORE its identity gate work, on a real concurrent message.
+    // The identity gate and stub here are otherwise IDENTICAL to
+    // `spawns_with_resume_flag_when_gate_passes`, which proves this exact
+    // setup DOES spawn when unclaimed — so `current_pid` staying `None`
+    // here is real evidence of the early decline, not an artifact of a
+    // broken fixture.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn start_declines_the_whole_attempt_when_the_claim_is_already_held() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        let stub = write_stub();
+        let c = controller("blk-preclaimed").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController {
+            mstore: Some(store),
+            ..c
+        };
+        c.inner.lock().unwrap().spawning_in_progress = true;
+
+        let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+        // Correct behavior never spawns anything here, so there's normally
+        // nothing for this to clean up — it's for a FUTURE regression that
+        // reintroduces the bug this test catches: without it, that failure
+        // mode is a leaked real process hanging the whole test binary's
+        // shutdown (see `KillOnDrop`'s own doc comment), not a clean
+        // assertion failure.
+        let _kill_on_drop = KillOnDrop(&c);
+        let result = Controller::start(&c, meta, None, false);
+        assert!(result.is_ok(), "declining must not fail the resync: {result:?}");
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "must not spawn at all while another spawn's claim is already held"
+        );
     }
 }
