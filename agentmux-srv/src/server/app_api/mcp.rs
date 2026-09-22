@@ -45,7 +45,7 @@ fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 let servers = mstore.mcp_server_list(&identity_store, &req.agent_id)
                     .map_err(|e| format!("mcp.list: {e}"))?;
                 Ok(servers)
@@ -63,7 +63,7 @@ fn register_mcp_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 if !mstore.mcp_server_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("mcp.get: {e}"))?
                 {
@@ -88,7 +88,7 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
 
                 match serde_json::from_str::<serde_json::Value>(&req.config) {
                     Ok(serde_json::Value::Object(_)) => {}
@@ -158,7 +158,7 @@ fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 if !mstore.mcp_server_is_bound_to(&req.agent_id, &req.id)
                     .map_err(|e| format!("mcp.delete: {e}"))?
                 {
@@ -196,7 +196,7 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 // Only global servers (or ones already bound) may be bound, so an
                 // agent can't escalate to read another agent's server config.
                 match identity_store.mcp_server_get(&req.mcp_id)
@@ -237,7 +237,7 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 let unbound = mstore.mcp_server_unbind(&req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.unbind: {e}"))?;
                 if unbound {
@@ -266,7 +266,7 @@ fn register_mcp_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 if !mstore.mcp_server_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("mcp.probe: {e}"))?
                 {
