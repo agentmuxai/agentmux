@@ -13,18 +13,24 @@ use adapter::*;
 use claude_adapter::ClaudeHistoryAdapter;
 use index::SessionIndex;
 
-/// Reconstruct an agent's absolute working directory from the global
-/// named-agent registry, for agents that have no `db_agents` row — launching
-/// an agent does not create one, so a live agent commonly exists only here.
+/// The global named-agent registry record for `agent_id`, for agents that have
+/// no `db_agents` row — launching an agent does not create one, so a live agent
+/// commonly exists only here.
 ///
-/// Both halves come from `backend::agent_registry_lookup`, which owns the only
-/// copy of the slug-matching and path-reconstruction rules. This function
-/// previously re-implemented both inline; reagentx P2 on PR #3480 flagged that
-/// duplication against `native_memory_handlers`' copy, since a later fix to
-/// either one would silently miss the other.
-fn working_dir_from_registry(agent_id: &str) -> Option<String> {
-    let rec = crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)?;
-    crate::backend::agent_registry_lookup::working_dir_from_record(&rec)
+/// Fetched at most once per `sessions_for_agent` call and used for BOTH
+/// fallbacks the record can answer (definition id and working directory).
+/// It used to return just the working directory, which meant the record's
+/// `definition_id` — sitting right there — went unread, and identity-link
+/// resolution fell back to the raw slug instead (reagentx P1 on PR #3480,
+/// re-review).
+///
+/// The lookup itself comes from `backend::agent_registry_lookup`, which owns
+/// the only copy of the slug-matching and path-reconstruction rules; this
+/// function previously re-implemented both inline, which reagentx P2 on the
+/// same PR flagged against `native_memory_handlers`' copy, since a later fix
+/// to either one would silently miss the other.
+fn registry_record(agent_id: &str) -> Option<crate::registry::NamedAgentRecord> {
+    crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)
 }
 
 /// The history service exposed to the RPC layer.
@@ -118,10 +124,35 @@ impl HistoryService {
         // unchanged. Same resolution `app_api::resolve_agent_definition_id`
         // already documents ("listing links by slug always returns empty").
         let instance = store.instance_get_by_slug(agent_id).ok().flatten();
-        let definition_id = instance
+        let definition_from_db = instance.as_ref().map(|i| {
+            if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
+        });
+        let working_dir_from_db = instance
             .as_ref()
-            .map(|i| {
-                if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
+            .map(|i| i.working_directory.clone())
+            .filter(|w| !w.is_empty());
+
+        // One registry read, shared by both fallbacks below, and skipped
+        // entirely when the `db_agents` row already answered both questions.
+        let record = if definition_from_db.is_none() || working_dir_from_db.is_none() {
+            registry_record(agent_id)
+        } else {
+            None
+        };
+
+        // Without the registry step, a registry-only agent (no `db_agents`
+        // row — the common case) fell through to the raw slug here, and the
+        // link table is keyed by definition id, so the query below matched
+        // nothing and the agent's identity-bound sessions silently vanished.
+        // Same third fallback `app_api::resolve_agent_definition_id` already
+        // has, for the same reason. The raw slug remains the last resort: a
+        // caller that already holds a definition id passes through unchanged.
+        let definition_id = definition_from_db
+            .or_else(|| {
+                record
+                    .as_ref()
+                    .map(|r| r.data.definition_id.clone())
+                    .filter(|d| !d.is_empty())
             })
             .unwrap_or_else(|| agent_id.to_string());
 
@@ -143,11 +174,11 @@ impl HistoryService {
         // common case. The working directory is recorded inside the
         // transcript (`cwd`) and on the agent's own row, so it resolves the
         // sessions the identity bundle cannot.
-        let working_directory = instance
-            .as_ref()
-            .map(|i| i.working_directory.clone())
-            .filter(|w| !w.is_empty())
-            .or_else(|| working_dir_from_registry(agent_id));
+        let working_directory = working_dir_from_db.or_else(|| {
+            record
+                .as_ref()
+                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
+        });
         if let Some(dir) = working_directory {
             merged.extend(self.index.list_for_working_directory(&dir));
         }
@@ -721,6 +752,96 @@ mod tests {
             .sessions_for_agent(&store, "someone-else", 0, 10, "created_at", "desc", true)
             .unwrap();
         assert_eq!(other_total, 0, "an unrelated slug must not match");
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A registry-only agent that ALSO has a real identity link — the gap
+    /// reagentx P1 flagged on PR #3480 (re-review). The registry test above
+    /// proves the working-directory fallback, but its record has no identity,
+    /// so the identity-link half was never exercised without a `db_agents`
+    /// row.
+    ///
+    /// The failure it guards is quiet: with no instance row, `definition_id`
+    /// fell back to the raw SLUG, and `db_agent_identity_links.agent_id`
+    /// stores a DEFINITION id — so the link lookup matched zero rows and the
+    /// agent's identity-bound sessions vanished. That is Bug A, reproduced for
+    /// exactly the case the PR's own docs call the common one.
+    ///
+    /// The session here is deliberately in a directory the registry record
+    /// does NOT point at, so the working-directory fallback cannot mask a
+    /// regression by finding it a second way.
+    #[test]
+    fn registry_only_agent_still_resolves_its_identity_linked_sessions() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let base = tmp.path().join("agentsbase");
+        let registry =
+            crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 3,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-linked".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: "def-agenty".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: Some(base.to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let dir = std::env::temp_dir().join(format!("amux-hist-reglink-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "identity-linked-session");
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                "acct-mine",
+                "/somewhere/the/registry/does/not/point",
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        // A definition + identity link, but NO `db_agents` instance row — so
+        // `instance_get_by_slug("agenty")` finds nothing and the definition id
+        // can only come from the registry record above.
+        let store = Store::open_in_memory().unwrap();
+        insert_test_agent_and_link(&store, "def-agenty", "acct-mine");
+
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(
+            total, 1,
+            "a registry-only agent's identity-linked sessions must resolve; \
+             the slug is not a definition id"
+        );
+        assert_eq!(sessions[0].session_id, "identity-linked-session");
+
+        // The registry record must not hand its definition id to a different
+        // agent — resolution stays scoped to the matching slug.
+        let (_, other_total, _) = service
+            .sessions_for_agent(&store, "someone-else", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(other_total, 0, "an unrelated slug must not inherit the link");
 
         match prev {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
