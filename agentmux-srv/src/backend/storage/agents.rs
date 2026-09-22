@@ -1984,10 +1984,14 @@ impl Store {
     /// here routes to another refusal rather than to a guess.
     ///
     /// **Why ambiguity returns `None` rather than the most recently updated
-    /// row:** `db_agents.slug` has no `UNIQUE` constraint, deliberately —
-    /// `instance_create` copies its template's slug verbatim onto every
-    /// launch, so two launches of one template is all it takes (see
-    /// `migrations.rs`, which declines the index for this reason). This
+    /// row:** `db_agents.slug` has no `UNIQUE` constraint — `migrations.rs`
+    /// declines the index deliberately. Both write paths now suffix-resolve
+    /// (#3497 §4), so neither mints a duplicate, but nothing at the schema
+    /// level prevents one: a future writer, a migration, or hand-edited data
+    /// still can. (An earlier revision of this comment claimed
+    /// `instance_create` copied its template's slug onto every launch, so two
+    /// launches collided. That was never true of the real launch flow — see
+    /// the spec's §2.5.2 — and is no longer true of the function either.) This
     /// function used to `ORDER BY updated_at DESC LIMIT 1` and hand the
     /// winner's `definition_id` and `working_directory` to the caller.
     /// `HistoryService::sessions_for_agent` consults it to resolve an

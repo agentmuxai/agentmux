@@ -163,12 +163,17 @@ mod tests {
         });
     }
 
-    // The §7 case the spec calls out as having no coverage anywhere. Built the
-    // way a real install builds one: `instance_create` copies its template's
-    // slug verbatim onto every launch, so launching one template twice is
-    // enough. Tier 1 fails closed (#3500), tier 2 misses because a slug is not
-    // an id, tier 3 finds nothing in the isolated registry — so the whole
-    // resolver refuses rather than naming an arbitrary winner.
+    // The §7 case the spec calls out as having no coverage anywhere.
+    //
+    // The duplicate is forced rather than launched: both write paths
+    // suffix-resolve since #3497 §4, so two `instance_create` calls no longer
+    // collide. Forcing it one row at a time keeps the assertion honest — the
+    // single-row case must RESOLVE, so the refusal below is caused by the
+    // second row and not by the slug matching nothing.
+    //
+    // Tier 1 fails closed (#3500), tier 2 misses because a slug is not an id,
+    // tier 3 finds nothing in the isolated registry — so the whole resolver
+    // refuses rather than naming an arbitrary winner.
     #[test]
     fn refuses_a_slug_two_rows_share() {
         with_isolated_home(|| {
