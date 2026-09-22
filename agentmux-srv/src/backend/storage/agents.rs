@@ -589,25 +589,11 @@ impl Store {
         } else {
             agent.slug.clone()
         };
-        // Collision-resolve: scan for existing slugs matching base or base-N.
-        // Reads uniqueness from `db_agents` — the consolidated table surfaces
-        // both definition slugs and template-instance projections, so a slug
-        // collision against an instance-derived row is caught here too.
-        let mut candidate = base.clone();
-        let mut n: u32 = 2;
-        loop {
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
-                params![candidate],
-                |row| row.get(0),
-            )?;
-            if count == 0 {
-                break;
-            }
-            candidate = format!("{}-{}", base, n);
-            n += 1;
-        }
-        agent.slug = candidate;
+        // Collision-resolve against every `db_agents` slug — the consolidated
+        // table surfaces definition slugs and template-instance projections
+        // alike, so a collision against an instance-derived row is caught here
+        // too. Shared with `instance_create` so the two cannot drift.
+        agent.slug = resolve_slug_collision(&conn, &base)?;
         let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
         let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
@@ -1638,6 +1624,17 @@ impl Store {
                 // copied from the template, bindings + launch state from the
                 // launch. ON CONFLICT covers an id the caller reuses on a
                 // retry (the App-API stub path).
+                //
+                // The slug is collision-resolved rather than copied verbatim
+                // from the template (#3497 §4). `agent_def_insert` has always
+                // done this; this path did not, making it the one writer that
+                // could mint a duplicate slug into a column with no UNIQUE
+                // constraint. In practice the launch flow names its agent and
+                // goes through `agent_def_insert`, so this branch is reached
+                // only by handing `instance_create` a seeded template id
+                // directly — this closes the function's contract rather than an
+                // observed fault (§2.5.2).
+                let launch_slug = resolve_slug_collision(&conn, &def.slug)?;
                 conn.execute(
                     "INSERT INTO db_agents (
                         id, name, icon, description,
@@ -1700,7 +1697,7 @@ impl Store {
                         def.auto_start,
                         def.restart_on_crash,
                         def.idle_timeout_minutes,
-                        def.slug,
+                        launch_slug,
                         def.branch_label,
                         inst.identity_id,
                         inst.memory_id,
@@ -1950,6 +1947,29 @@ impl Store {
         Ok(out)
     }
 
+    /// Force a row's `slug` to an exact value, bypassing collision resolution.
+    ///
+    /// **Tests only, and deliberately awkward to reach for.** Both write paths
+    /// now suffix-resolve (#3497 §4), so a test cannot build two rows sharing a
+    /// slug through the normal API any more — and the read-path guards
+    /// (`instance_get_by_slug`, `agent_resolve::resolve_agent_id`, `check_s1`)
+    /// exist precisely for that state. Without this, those tests still *pass*,
+    /// but vacuously: the lookup returns nothing because nothing matches the
+    /// slug, not because the guard refused an ambiguous one. That is the
+    /// failure mode the guards were written to prevent, reproduced in their own
+    /// tests.
+    ///
+    /// The state is still reachable in production — no `UNIQUE` constraint
+    /// backs the column, so a future writer, a migration, or hand-edited data
+    /// can produce it. Defence in depth: prevent it on write, refuse it on
+    /// read, and test both.
+    #[cfg(test)]
+    pub(crate) fn test_force_slug(&self, id: &str, slug: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE db_agents SET slug = ?2 WHERE id = ?1", params![id, slug])?;
+        Ok(())
+    }
+
     /// Resolve an agent by its persisted `slug` — the App-API self-lookup
     /// (`AGENTMUX_AGENT_ID` is the slug) — **only if exactly one agent has
     /// it**. Matches ONLY `slug`; deliberately single-purpose after reagentx
@@ -1964,10 +1984,14 @@ impl Store {
     /// here routes to another refusal rather than to a guess.
     ///
     /// **Why ambiguity returns `None` rather than the most recently updated
-    /// row:** `db_agents.slug` has no `UNIQUE` constraint, deliberately —
-    /// `instance_create` copies its template's slug verbatim onto every
-    /// launch, so two launches of one template is all it takes (see
-    /// `migrations.rs`, which declines the index for this reason). This
+    /// row:** `db_agents.slug` has no `UNIQUE` constraint — `migrations.rs`
+    /// declines the index deliberately. Both write paths now suffix-resolve
+    /// (#3497 §4), so neither mints a duplicate, but nothing at the schema
+    /// level prevents one: a future writer, a migration, or hand-edited data
+    /// still can. (An earlier revision of this comment claimed
+    /// `instance_create` copied its template's slug onto every launch, so two
+    /// launches collided. That was never true of the real launch flow — see
+    /// the spec's §2.5.2 — and is no longer true of the function either.) This
     /// function used to `ORDER BY updated_at DESC LIMIT 1` and hand the
     /// winner's `definition_id` and `working_directory` to the caller.
     /// `HistoryService::sessions_for_agent` consults it to resolve an
@@ -2255,6 +2279,43 @@ impl Store {
 /// [`map_instance_row`] expects.
 const INSTANCE_COLUMNS: &str = "id, last_block_id, session_id, status, github_context, started_at, ended_at, \
      created_at, identity_id, memory_id, instance_name, working_directory, user_hidden";
+
+/// The first of `base`, `base-2`, `base-3`, … that no `db_agents` row holds.
+///
+/// Shared by `agent_def_insert_local_only` and `instance_create` so the two
+/// write paths cannot drift: `db_agents.slug` carries no `UNIQUE` constraint
+/// (deliberately — see `migrations.rs`), so uniqueness is only ever as good as
+/// the agreement between every path that inserts one. It held in only one of
+/// them until #3497 §4.
+///
+/// Callers must already hold the connection lock — the scan and the INSERT
+/// have to be one critical section, or two concurrent inserts race to the
+/// same candidate.
+///
+/// There is deliberately no "exclude this row id" option. It looks necessary
+/// for `instance_create`'s `ON CONFLICT(id) DO UPDATE` path — a row
+/// re-resolving its own slug would otherwise collide with itself — but that
+/// clause does not assign `slug` at all, so on the conflict path the computed
+/// value is discarded and an exclusion could never be observed (ReAgent P2 on
+/// #3514). On the insert path the row does not exist yet, so there is nothing
+/// to exclude either. If `slug` is ever added to that `DO UPDATE SET`, this
+/// becomes real and needs revisiting.
+fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) -> rusqlite::Result<String> {
+    let mut candidate = base.to_string();
+    let mut n: u32 = 2;
+    loop {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+            params![candidate],
+            |row| row.get(0),
+        )?;
+        if count == 0 {
+            return Ok(candidate);
+        }
+        candidate = format!("{base}-{n}");
+        n += 1;
+    }
+}
 
 /// Project a non-template `db_agents` row (selected with
 /// [`INSTANCE_COLUMNS`]) into the `AgentInstance` shape: the row's id is
@@ -2716,21 +2777,58 @@ mod tests {
         assert_eq!(by_slug.id, "def-b", "slug lookup must never resolve to A's row");
     }
 
-    // A slug does not identify an agent once two rows share one, so the
-    // honest answer is "unknown" — same fail-closed rule
-    // `agent_registry_lookup::find_active_record_by_slug` adopted for the
-    // registry in PR #3480, here for `db_agents`.
+    // The §4 safety net. `instance_create` used to bind `def.slug` verbatim,
+    // making it the one writer that could mint a duplicate — `agent_def_insert`
+    // has always suffix-resolved, and no UNIQUE constraint backs the column.
     //
-    // The duplicate is built the way the shipping app builds one, not by
-    // hand: `instance_create` copies `def.slug` verbatim and does no
-    // collision suffixing of its own (only `agent_def_insert` does), and per
-    // its own doc comment every fresh launch of a TEMPLATE creates its own
-    // row. So launching one template twice is enough — no hand-edited
-    // database, no second definition, nothing a real install cannot reach.
-    // `migrations.rs` declines a UNIQUE index on `db_agents(slug)` for
-    // exactly this reason.
+    // Note this is a contract fix, not a fix for an observed fault: the launch
+    // flow names its agent and goes through `agent_def_insert`, so this branch
+    // is reached only by handing `instance_create` a seeded template id
+    // directly. A data check across 47 databases found 0 duplicate slugs and 18
+    // launches, none inheriting a template's slug (§2.5.2).
     #[test]
-    fn instance_get_by_slug_fails_closed_when_one_template_is_launched_twice() {
+    fn two_launches_of_one_template_get_distinct_slugs() {
+        let store = Store::open_in_memory().unwrap();
+        let mut tmpl = test_agent_def("tmpl-1", "Shared Template", "claude", "agent", 1, "");
+        tmpl.slug = "shared-template".to_string();
+        tmpl.is_seeded = 1;
+        store.agent_def_insert_local_only(&mut tmpl, None).unwrap();
+
+        let mut first = instance("launch-a", "tmpl-1");
+        first.instance_name = "Launch A".to_string();
+        store.instance_create(&first).unwrap();
+        let mut second = instance("launch-b", "tmpl-1");
+        second.instance_name = "Launch B".to_string();
+        store.instance_create(&second).unwrap();
+
+        // Neither launch may leave a resolvable duplicate behind: whatever
+        // slugs they got, no slug may name two non-template rows.
+        let conn = store.conn.lock().unwrap();
+        let dupes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM (SELECT slug FROM db_agents
+                 WHERE is_template = 0 AND user_hidden = 0 AND slug <> ''
+                 GROUP BY slug HAVING COUNT(*) > 1)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(dupes, 0, "a template launch must not mint a duplicate slug");
+    }
+
+    // A slug does not identify an agent once two rows share one, so the honest
+    // answer is "unknown" — the same fail-closed rule
+    // `agent_registry_lookup::find_active_record_by_slug` adopted for the
+    // registry in #3480, here for `db_agents` (#3500).
+    //
+    // This test predates the §4 safety net above and used to build its
+    // duplicate by launching one template twice, on the reasoning that
+    // `instance_create` copied `def.slug` verbatim. That is no longer true —
+    // and was never true of the real launch flow either (§2.5.2) — so the
+    // duplicate is now forced deliberately. The state remains reachable in
+    // production: no UNIQUE constraint backs the column.
+    #[test]
+    fn instance_get_by_slug_fails_closed_when_two_rows_share_a_slug() {
         let store = Store::open_in_memory().unwrap();
 
         let mut tmpl = test_agent_def("tmpl-1", "Shared Template", "claude", "agent", 1, "");
@@ -2747,20 +2845,34 @@ mod tests {
         second.instance_name = "Launch B".to_string();
         store.instance_create(&second).unwrap();
 
-        // Precondition: two distinct launch rows really do exist and really
-        // do share the template's slug. If this ever stops holding, the
-        // assertion below would pass vacuously.
-        let a = store.instance_get("launch-a").unwrap().expect("launch A row");
-        let b = store.instance_get("launch-b").unwrap().expect("launch B row");
-        assert_ne!(a.id, b.id, "two launches must be two rows");
+        // Both write paths suffix-resolve now (§4 safety net), so two launches
+        // no longer collide on their own — see
+        // `two_launches_of_one_template_get_distinct_slugs`. Force the duplicate
+        // this guard exists for.
+        //
+        // Done in two steps on purpose. Asserting only the final `None` cannot
+        // tell "refused an ambiguous slug" from "nothing matched that slug" —
+        // both are `None`, and after the safety net the second is what a naive
+        // fixture actually produces. Resolving ONE row first pins that the
+        // lookup is live and the fixture is real; the second row is then the
+        // only thing that changed.
+        store.test_force_slug("launch-a", "collide-me").unwrap();
+        let single = store.instance_get_by_slug("collide-me").unwrap();
+        assert_eq!(
+            single.map(|i| i.id).as_deref(),
+            Some("launch-a"),
+            "one row with the slug must resolve — otherwise the check below is vacuous"
+        );
+
+        store.test_force_slug("launch-b", "collide-me").unwrap();
 
         // Before this guard, `ORDER BY updated_at DESC LIMIT 1` handed back
         // whichever row was touched last — deterministically the same wrong
         // agent every time — and `HistoryService::sessions_for_agent` then
         // resolved one agent's conversation history into the other's request.
         assert!(
-            store.instance_get_by_slug("shared-template").unwrap().is_none(),
-            "an ambiguous slug must resolve to nothing, never to an arbitrary winner"
+            store.instance_get_by_slug("collide-me").unwrap().is_none(),
+            "adding a second row with the same slug must flip resolve to refusal"
         );
     }
 
