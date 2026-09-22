@@ -1,7 +1,7 @@
 # Selecting a pane should focus its input — not just opening one
 
-**Status:** proposed — problem confirmed in code, design not yet agreed, nothing
-implemented.
+**Status:** implemented. See §10 for how each open question was actually
+resolved during implementation (some differ from the recommendation below).
 **Date:** 2026-09-22.
 **Severity:** Medium — no data is lost, but every pane switch or pane open costs
 the user a mouse trip before they can type, on the app's most-used, most
@@ -279,3 +279,53 @@ Grounded in this investigation, not exhaustive:
 - The browser pane's focus behavior — already correct.
 - Any change to voice dictation (`PaneVoiceHandle`) beyond reusing its
   registration pattern as precedent.
+
+## 10. Implementation notes — how the open questions actually resolved
+
+- **Q1 (tri-state return vs. `focusWhenReady()`):** neither. `giveFocus()`
+  keeps its original synchronous `boolean` contract unchanged. The "retry"
+  this spec's design section assumed would need a caller-side mechanism
+  turned out not to: each pane's own `onMount` (after its ref — textarea,
+  CodeMirror view, xterm instance — is actually assigned) is itself the
+  natural retry point, via a new `focusManager.claimFocusOnMount(blockId,
+  giveFocus)`. It fires exactly once, exactly when the view becomes ready,
+  with no polling and no `giveFocus()` contract change. Simpler than either
+  option this spec proposed.
+- **Q5 (retry bound):** resolved as suspected — bounded by the view's own
+  mount lifecycle (`onMount`), not a timer or attempt count. No new "mount
+  signal" plumbing was needed: `block-component-registry.ts` already has
+  one implicitly (each view's own `onMount` already exists for its own ref
+  setup), so `claimFocusOnMount` piggybacks on that instead of adding a
+  parallel registration channel.
+- **Q2 (tab switch):** closed in §2a — yes, wired into `setActiveTab()`
+  directly via `focusManager.refocusNode()`, called once the tab-switch
+  perf-mark settle window (the existing double-rAF) completes.
+- **§2b's "wired to a no-op" gap:** fixed by making
+  `focusManager.requestNodeFocus()` delegate to `refocusNode()`. This one
+  change also turned out to cover creation for free: `InsertNode`/
+  `InsertNodeAtIndex` (`layoutModel.ts`'s reducer) already called
+  `requestNodeFocus()` whenever the inserted node was `focused: true`
+  (which pane creation always sets) — it just did nothing. No separate
+  creation-path wiring (as this spec's §3 point 1 anticipated) was needed
+  beyond that one delegation plus the mount-time claim for the case where
+  the reducer fires before the new pane's view has mounted.
+- **Not previously called out, found during implementation:** the
+  background-tab-steals-focus risk. `nodeModel.isFocused()` (what the
+  terminal's pre-existing `giveFocus()` retry used, and the obvious first
+  choice for the new mount-time claim) is scoped to a pane's OWN tab's
+  layout tree, not the active tab — true even for a pane sitting in a
+  background tab, since each tab's layout model persists independently.
+  Using it for `claimFocusOnMount` would have violated §5 constraint 1 (a
+  pane created via `muxsh` in a tab the user isn't looking at would steal
+  the caret out from under them the instant its view mounted). Fixed by
+  scoping the check to "is `blockId` the ACTIVE tab's focused node" instead
+  — `focusManager.claimFocusOnMount` — which also caught and fixed a latent
+  version of the same bug already present in the terminal's own retry
+  logic (§2b of the prior spec undersold this as "a race" — it was that,
+  but the pre-existing `wasFocused` check, once fixed to not always read
+  `false` on first mount, would have reintroduced this exact background-tab
+  leak had it not been replaced).
+- **Q3, Q4, Q6, Q7:** left open — no code in this pass touches read-only/
+  error-state focus behavior, the dummy-focus fallback still exists as a
+  last resort, and the two cross-tab/OS-focus edge cases weren't hit by any
+  test or manual pass.
