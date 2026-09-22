@@ -792,6 +792,94 @@ fn pool_destroy_after_ready_clears_queue() {
     );
 }
 
+// ── Top-level window-pool eviction under memory pressure (issue #1936/#2218
+// follow-up; both closed this as explicitly deferred, "track separately if
+// it comes up again" — docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md is
+// that recurrence) ──────────────────────────────────────────────────────
+//
+// `evict_idle_pool_window` (commands/window_pool.rs) claims the front
+// window-pool label atomically via `PopFrontPoolWindowForEviction`, mirroring
+// `PopFrontPanePoolWindowForEviction`'s own reasoning exactly (mutual
+// exclusion with a concurrent real promote via `PopAndPromoteFrontPoolWindow`
+// for the same front label — same mutex-guarded-dispatch argument, same
+// pool-command shape).
+
+/// Mirrors `pop_front_pane_pool_for_eviction_pops_and_clears_state` for the
+/// top-level window pool: pops the front label, clears it from
+/// `unpromoted`, and resets `respawn_in_flight` in one dispatch — same as
+/// `PopAndPromoteFrontPoolWindow` does for the promote path, which is what
+/// makes the two commands mutually exclusive for a given front label.
+#[test]
+fn pop_front_pool_for_eviction_pops_and_clears_state() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+    assert_eq!(state.pool.queue.len(), 1);
+
+    let out = update(&mut state, HostCommand::PopFrontPoolWindowForEviction);
+    assert!(state.pool.queue.is_empty(), "queue must not retain the evicted label");
+    assert!(state.pool.unpromoted.is_empty());
+    assert!(!state.pool.respawn_in_flight);
+    assert_eq!(out.evicted_pool_label, Some("p1".to_string()));
+    assert_eq!(out.pool_size_after, Some(0));
+}
+
+/// Empty queue must be a genuine no-op — `evict_idle_pool_window` relies on
+/// `evicted_pool_label: None` to bail out cleanly when pressure fires with
+/// nothing left to evict (the memory heartbeat loops on this return value
+/// until it hits this case).
+#[test]
+fn pop_front_pool_for_eviction_on_empty_queue_is_noop() {
+    let mut state = HostState::default();
+    let out = update(&mut state, HostCommand::PopFrontPoolWindowForEviction);
+    assert_eq!(out.evicted_pool_label, None);
+    assert!(state.pool.queue.is_empty());
+    assert!(state.pool.unpromoted.is_empty());
+}
+
+/// A label still in `unpromoted` (mid-flight spawn, no HWND cached yet) must
+/// never be popped for eviction — there is nothing yet to destroy, and
+/// `evict_idle_pool_window`'s HWND-cache lookup would find nothing and log
+/// a "pool short by one" warning if it were. Only `queue` (fully spawned,
+/// ready) is eviction-eligible; same restriction as the pane-pool version,
+/// for the identical reason.
+#[test]
+fn pop_front_pool_for_eviction_does_not_touch_unpromoted_only_label() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+    assert!(state.pool.unpromoted.contains("p1"));
+    assert!(state.pool.queue.is_empty());
+
+    let out = update(&mut state, HostCommand::PopFrontPoolWindowForEviction);
+    assert_eq!(out.evicted_pool_label, None, "an unpromoted-only label has no queue entry to pop");
+    assert!(
+        state.pool.unpromoted.contains("p1"),
+        "must not remove a mid-flight spawn with no HWND yet to destroy"
+    );
+}
+
+/// Eviction and a real user promote must never be able to race for the same
+/// front label: `PopFrontPoolWindowForEviction` and
+/// `PopAndPromoteFrontPoolWindow` both pop under the same `host_state`
+/// mutex, so once one dispatch has claimed a label, the queue no longer
+/// has it for the other to claim — whichever command runs second on an
+/// otherwise-empty queue gets a clean no-op, not a double-claim.
+#[test]
+fn eviction_and_promote_cannot_double_claim_the_same_front_label() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+
+    let evicted = update(&mut state, HostCommand::PopFrontPoolWindowForEviction);
+    assert_eq!(evicted.evicted_pool_label, Some("p1".to_string()));
+
+    let promoted = update(&mut state, HostCommand::PopAndPromoteFrontPoolWindow);
+    assert_eq!(
+        promoted.promoted_pool_label, None,
+        "the label was already claimed by eviction — promote must see an empty queue, not double-claim it"
+    );
+}
+
 // ── B.5 Part 1 pane-pool eviction (issue #2218) ─────────────────────────
 //
 // `evict_idle_pane_pool_window` (commands/window_pool.rs) claims the front

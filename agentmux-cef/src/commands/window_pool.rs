@@ -33,6 +33,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::collections::HashMap;
 
+// `Task`/`WrapTask`/`ImplTask` are what `cef::wrap_task!` expands into —
+// needed for `DestroyPoolHwndTask` (memory-pressure eviction). Same import
+// shape as `pane_pool.rs`'s identical need for its own destroy task.
+#[cfg(target_os = "windows")]
+use cef::{rc::Rc, ImplTask, Task, WrapTask};
+
 use crate::state::{AppState, WindowKind, WindowMeta};
 // The pane-pool subsystem (spawn/promote/evict for `floating-pool-*` frameless
 // windows) now lives in `pane_pool.rs` (extracted — this file was ~2250 lines
@@ -222,6 +228,120 @@ mod demote_cap_tests {
 // now measures the source window's chrome dynamically and computes
 // the new window's outer top-left position itself; backend just
 // uses the supplied anchor verbatim. The constants are gone.
+
+/// Actively evict one idle (fully-spawned, not-yet-promoted) top-level pool
+/// window under memory pressure — mirrors `pane_pool::evict_idle_pane_pool_window`
+/// exactly. Issue #1936 and its successor #2218 both shipped refill
+/// suppression for this pool (`spawn_pool_window`'s pressure guard below)
+/// but explicitly deferred active eviction of an *already*-warm pool,
+/// closing with "can be tracked separately if it comes up again" — it did,
+/// live, 2026-09-20 (`docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md`).
+///
+/// Safe to build now where it wasn't safe to build there: the CEF/Alloy
+/// HWND parent-child close-cascade risk that repeatedly deferred *pane*-pool
+/// eviction work in this codebase (3 failed attempts in April 2026, per
+/// issue #1936's history) is specific to an embedded browser pane being a
+/// `WS_CHILD` of its owning window. A top-level pool window is not owned by
+/// anything — the exact same "unowned top-level window, direct `DestroyWindow`
+/// on the thread that created it is proven-safe" shape `pane_pool.rs`'s own
+/// eviction already relies on for its (structurally identical) frameless
+/// pool windows.
+///
+/// Only pops from `queue` (fully spawned, HWND cached) — never `unpromoted`
+/// (mid-flight spawn, no HWND yet to destroy), same restriction as the
+/// pane-pool version, for the same reason: there is nothing to destroy yet.
+///
+/// Returns `true` iff a label was popped and a destroy was posted, so the
+/// caller (the memory heartbeat) can loop until the pool is fully drained,
+/// matching `evict_idle_pane_pool_window`'s own call-site pattern.
+#[cfg(target_os = "windows")]
+pub fn evict_idle_pool_window(state: &Arc<AppState>) -> bool {
+    let dispatch = state.host_dispatch(crate::reducer::HostCommand::PopFrontPoolWindowForEviction);
+    let Some(label) = dispatch.evicted_pool_label else {
+        return false;
+    };
+    let Some(hwnd) = pool_hwnd_cache().lock().unwrap().remove(&label) else {
+        tracing::warn!(
+            target: "pool:window",
+            label = %label,
+            "[pool] eviction: no cached HWND for queued label — pool short by one"
+        );
+        return false;
+    };
+    let mut task = DestroyPoolHwndTask::new(Arc::clone(state), label.clone(), hwnd as isize);
+    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+    if posted == 0 {
+        tracing::error!(
+            target: "pool:window",
+            label = %label,
+            hwnd,
+            "[pool] eviction: post_task(destroy) failed — window will leak"
+        );
+        return false;
+    }
+    tracing::info!(
+        target: "pool:window",
+        label = %label,
+        "[pool] evicted idle pool window under memory pressure"
+    );
+    true
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn evict_idle_pool_window(_state: &Arc<AppState>) -> bool {
+    // No live-verified reliable destroy path on macOS/Linux for a pool
+    // window yet — mirrors `pane_pool::evict_idle_pane_pool_window`'s
+    // identical Windows-only scope, for the identical reason (nothing to
+    // evict if nothing is ever trimmed here; the pressure spawn-refusal
+    // guard below already degrades to a no-op question off-Windows).
+    false
+}
+
+#[cfg(target_os = "windows")]
+cef::wrap_task! {
+    struct DestroyPoolHwndTask {
+        state: Arc<AppState>,
+        label: String,
+        hwnd: isize,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Arm the browser destruction BEFORE the native DestroyWindow —
+            // same "close_browser(1) first" sequencing as
+            // `pane_pool::DestroyPanePoolHwndTask` and `CloseWindowTask`'s
+            // round 5 (`ui_tasks/window.rs`): this is what drives
+            // on_before_close -> reducer UnregisterBrowser, which cleans
+            // the `state.browsers` map entry. Must run here, on the CEF UI
+            // thread this task is posted to (`cef::ThreadId::UI`) — calling
+            // close_browser off-thread risks a UI-thread hang (same
+            // reasoning as the pane-pool task's own doc comment).
+            {
+                use cef::{ImplBrowser, ImplBrowserHost};
+                if let Some(browser) = self.state.get_browser(&self.label) {
+                    if let Some(host) = browser.host() {
+                        tracing::debug!(
+                            target: "pool:window",
+                            label = %self.label,
+                            "[pool] eviction: close_browser(1) to arm destruction"
+                        );
+                        host.close_browser(1);
+                    }
+                } else {
+                    tracing::warn!(
+                        target: "pool:window",
+                        label = %self.label,
+                        "[pool] eviction: no Browser found for label — state.browsers entry may already be stale"
+                    );
+                }
+            }
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
+                DestroyWindow(self.hwnd as *mut std::ffi::c_void);
+            }
+        }
+    }
+}
 
 /// Spawn a single pool window. Called at startup (N times) and
 /// after each promote (1 refill). Idempotent against the

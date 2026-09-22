@@ -448,6 +448,19 @@ pub enum HostCommand {
     /// Drain all pool windows on shutdown. Idempotent.
     PoolDrainAll,
 
+    /// Atomic pop of the front of the top-level window pool queue for
+    /// memory-pressure eviction (issue #1936/#2218 follow-up — active
+    /// eviction for this pool was explicitly deferred both times pending
+    /// "if it comes up again"; it did, see
+    /// `docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md`) — NOT promotion;
+    /// mirrors `PopFrontPanePoolWindowForEviction` exactly (same
+    /// mutual-exclusion-with-a-real-promote reasoning applies here). Only
+    /// pops from `queue` (fully spawned, HWND cached), never `unpromoted`
+    /// (mid-flight spawn with no HWND yet to destroy) — same scope
+    /// restriction as the pane-pool version, for the same reason.
+    /// Returns the popped label via `DispatchOutput::evicted_pool_label`.
+    PopFrontPoolWindowForEviction,
+
     // ── Pane pool (floating-pool-{uuid}, frameless=true) ────────────────
     /// Pane pool window spawn started. Adds label to pane_pool.unpromoted
     /// and sets respawn_in_flight=true (single-flight semaphore).
@@ -637,6 +650,7 @@ impl std::fmt::Debug for HostCommand {
                 .finish(),
             HostCommand::PopAndPromoteFrontPoolWindow => f.write_str("PopAndPromoteFrontPoolWindow"),
             HostCommand::PoolDrainAll => f.write_str("PoolDrainAll"),
+            HostCommand::PopFrontPoolWindowForEviction => f.write_str("PopFrontPoolWindowForEviction"),
             HostCommand::PanePoolWindowSpawnStart { label } => f
                 .debug_struct("PanePoolWindowSpawnStart")
                 .field("label", label)
@@ -973,6 +987,12 @@ pub struct DispatchOutput {
     /// = already pool-side or unknown browser; caller falls back to the
     /// destroy path.
     pub pool_demote_accepted: bool,
+    /// Set by `PopFrontPoolWindowForEviction` — the label atomically popped
+    /// for memory-pressure eviction, or `None` if the queue was already
+    /// empty. Mirrors `evicted_pane_pool_label`; distinct from
+    /// `promoted_pool_label` so eviction and promotion can never be
+    /// confused with each other, same reasoning as the pane-pool field.
+    pub evicted_pool_label: Option<String>,
     // Pane pool fields (parallel to tab pool above)
     pub pane_pool_spawn_proceeding: bool,
     pub pane_pool_size_after: Option<usize>,
@@ -1167,6 +1187,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::PromotePoolWindow { label } => pool::handle_promote_pool_window(state, label),
         HostCommand::PopAndPromoteFrontPoolWindow => pool::handle_pop_and_promote_front_pool_window(state),
         HostCommand::PoolDrainAll => pool::handle_pool_drain_all(state),
+        HostCommand::PopFrontPoolWindowForEviction => pool::handle_pop_front_pool_for_eviction(state),
         // Pane pool
         HostCommand::PanePoolWindowSpawnStart { label } => pane_pool::handle_pane_pool_spawn_start(state, label),
         HostCommand::PanePoolWindowReady { label } => pane_pool::handle_pane_pool_ready(state, label),

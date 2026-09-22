@@ -156,19 +156,31 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                         "page file (commit) pressure changed"
                     );
                     // B.5 Part 1 (issue #2218): react to the transition, not
-                    // just log it. Entering Warn/Critical trims the pane pool
-                    // (the one pool with a reliable on-demand destroy path
-                    // today — see evict_idle_pane_pool_window's doc comment);
-                    // returning to Normal best-effort refills both pools so a
-                    // transient pressure blip doesn't leave them starved for
-                    // the rest of the session. Both spawn_* fns are already
-                    // internally single-flight + target-size-gated, so calling
-                    // them unconditionally here is safe. Commit-only: RAM
+                    // just log it. Entering Warn/Critical trims BOTH pools
+                    // now — the pane pool via evict_idle_pane_pool_window
+                    // (issue #2218) and, as of
+                    // docs/incident/INCIDENT_2026_09_20_APP_CLOSED.md, the
+                    // top-level window pool via evict_idle_pool_window too
+                    // (issue #1936/#2218 both explicitly deferred this half,
+                    // "track separately if it comes up again" — it did).
+                    // Both now have the same on-demand destroy path an
+                    // unowned top-level window always had available; see
+                    // evict_idle_pool_window's own doc comment for why that
+                    // destroy path was safe to build here even though the
+                    // *embedded-pane* equivalent needed 3 attempts and a
+                    // structural redesign. Returning to Normal best-effort
+                    // refills both pools so a transient pressure blip
+                    // doesn't leave them starved for the rest of the
+                    // session. Every fn called here is already internally
+                    // single-flight + target-size-gated (spawn_*) or
+                    // naturally idempotent on an empty queue (evict_*), so
+                    // calling them unconditionally is safe. Commit-only: RAM
                     // pressure alone (with healthy commit) doesn't risk a
                     // crash the way commit pressure does, so it doesn't
                     // trigger shedding — SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07 §6.
                     if level != crate::memory_pressure::PressureLevel::Normal {
                         while crate::commands::window_pool::evict_idle_pane_pool_window(&state) {}
+                        while crate::commands::window_pool::evict_idle_pool_window(&state) {}
                     } else {
                         crate::commands::window_pool::spawn_pane_pool_window(&state);
                         crate::commands::window_pool::spawn_pool_window(&state);
