@@ -181,11 +181,22 @@ pattern rather than re-deriving it.
   deleting a superseded kind. §3.7 explicitly breaks that habit for
   `agent-stash`, per the ask's own "decommissioned" wording, and says so
   out loud rather than silently deviating.
-- The Memory tab's narrow-width tab-compression today targets
-  `@container modal-mount` — a container name established by
-  `ModalLayer.tsx`'s mount node. No generic "pane body" container-type
-  exists anywhere under `frontend/app/block` today. §3.6 flags this as new
-  design surface, not a drop-in port.
+- The modal's SCSS has TWO container queries, not one, and they don't need
+  the same treatment (reagentx P2 on this PR's own review round — my first
+  draft conflated them). The icon-only tab-label compression
+  (`.agent-stash-modal-tab span { display:none; }`) is scoped to
+  `@container agent-stash`, and `agent-stash` is a `container-name`
+  established on `.agent-stash-modal` itself
+  (`AgentStashModal.scss:53-54`) — the component's OWN root, not any
+  modal-specific ancestor. This one is **already self-contained** and
+  needs no new design; it works identically whether `.agent-stash-modal`
+  sits inside a modal or inside the new pane's own view component. The
+  SEPARATE `min-width:0` rescue (`AgentStashModal.scss:117-122`,
+  `.agent-stash-modal-tabs`/`.agent-stash-modal-panel`) genuinely does
+  target `@container modal-mount`, a name `ModalLayer.tsx`'s mount node
+  establishes — THIS is the one with no generic "pane body"
+  container-type to fall back on. §3.6 corrects the attribution and scopes
+  the open design question to just this second rule.
 
 ## 3. Design
 
@@ -316,15 +327,27 @@ six tabs with real modal coupling (§2.1):
   max-width:none; max-height:none; ... }`). The pane version needs the
   same neutralization, applied against the new pane's own stylesheet
   instead of `.agent-stash-modal-panel`.
-- Its narrow-width tab-compression today keys off `@container
-  modal-mount` (`AgentStashModal.scss:117-122`), a container name that
-  only exists because `ModalLayer.tsx` establishes it on its mount node.
-  No generic "pane body" `container-type` exists anywhere under
-  `frontend/app/block` yet (§2.5) — this is new design surface. Simplest
-  option: establish a `container-name` on the new pane's own root
-  element (scoped to `stash-pane-view.tsx`, no shared/global container
-  infrastructure needed) rather than inventing a repo-wide "every pane is
-  a container" convention this migration doesn't otherwise need.
+- Not Memory-tab-specific, but adjacent and worth resolving in the same
+  pass: the tab STRIP's own icon-only compression
+  (`.agent-stash-modal-tab span { display:none; }`,
+  `AgentStashModal.scss:100-106`) is scoped to `@container agent-stash`,
+  a `container-name` `.agent-stash-modal` establishes on itself
+  (`AgentStashModal.scss:53-54`) — already self-contained, no modal
+  dependency, ports to the new pane unchanged (§2.5 corrects an earlier
+  mis-attribution of this rule).
+- The SEPARATE `min-width:0` flex-sizing rescue
+  (`AgentStashModal.scss:117-122`, `.agent-stash-modal-tabs`/
+  `.agent-stash-modal-panel`) does key off `@container modal-mount`, a
+  container name that only exists because `ModalLayer.tsx` establishes it
+  on its mount node. No generic "pane body" `container-type` exists
+  anywhere under `frontend/app/block` yet (§2.5) — this one IS new design
+  surface. Simplest option: establish a second `container-name` on the
+  new pane's own root element (scoped to `stash-pane-view.tsx`, no
+  shared/global container infrastructure needed) rather than inventing a
+  repo-wide "every pane is a container" convention this migration
+  doesn't otherwise need — though it's also worth checking at
+  implementation time whether this rescue is even still necessary in a
+  pane's flex context before porting it unmodified.
 
 `AgentStashModal.scss`'s OUTER modal-sizing rule (`.modal-panel:has(...)
 { width: min(780px,100%); height:560px; ... }`, with its own doc-commented
