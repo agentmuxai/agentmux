@@ -7,8 +7,9 @@ only) implemented in PR #3441. Phase 2 (§3.6, reserved whole-pane drag space)
 implemented in PR #3442. Phase 3 (§3.1/§3.2, same-pane drag-reorder: the
 `pane.moveTab` RPC, `moveBlockInStack`, and the actual per-pill drag UI)
 implemented in PR #3444. Phase 4 (§3.4, cross-pane drop onto ANOTHER pane's
-header — the tab joins that pane's stack) implemented — PR pending at time of
-writing.
+header — the tab joins that pane's stack) implemented in PR #3447, with the
+drop zone widened from the tabstrip region to the whole header row (§3.4,
+repo-owner correction from live use) in a follow-up PR.
 
 **Deliberate re-ordering of the remaining work, decided with the repo owner
 2026-09-20:** §3.3 (cross-pane drop onto a pane's CONTENT area, with a
@@ -317,8 +318,7 @@ work is at the **commit** step: today's commit (`props.layoutModel.onDrop()`
 ### 3.4 Cross-pane drop on a Pane's HEADER → append as a new tab there (reuse the spring-loaded pattern, scoped one level in)
 
 Hovering a **different** Pane's `PaneHeaderTabStrip` row (its
-`[data-role="block-header"]`, specifically the tabstrip region — not its
-end-icons cluster) with a `kind: "pane-tab"` payload: this is the interaction
+`[data-role="block-header"]`) with a `kind: "pane-tab"` payload: this is the interaction
 the user asked to "reuse the window tab animation" for. What's actually
 reusable is the *pattern* (dwell timer + one-shot hover-flash CSS class +
 commit-on-drop), not a literal call into `tabbar-dnd.ts` (that module is
@@ -329,8 +329,27 @@ kind of target). Concretely:
 - `PaneHeaderTabStrip` (or `PaneChrome`, whichever ends up owning the
   drop-target registration — implementer's call, no architectural
   significance either way) registers a `dropTargetForElements` on the
-  header's tabstrip region, `canDrop: source.data.type === "pane-tab" &&
+  header row, `canDrop: source.data.type === "pane-tab" &&
   source.data.sourceNodeId !== thisNode.id`.
+- **The drop zone is the ENTIRE header row**, including its empty space and
+  its non-tab chrome (ConnectionButton, header text, end-icons cluster, and
+  §3.6's reserved drag-handle spacer) — not just the tabstrip region. An
+  earlier revision of this section scoped it to the tabstrip region and
+  explicitly excluded the end-icons cluster; the repo owner corrected that
+  from live use of Phase 4 ("the drop zone should include the entire pane
+  header, not just the tab portion") — a pane showing one short tab leaves
+  most of its row empty, and aiming at the strip alone to move a tab there
+  is fussy, while the whole row is what reads as "this pane's tab area"
+  mid-drag. Widening it is free: pragmatic-dnd walks UP the DOM on a false
+  `canDrop`, so the per-pill same-pane reorder targets inside the header
+  still win for their own drags, and no other element inside the header
+  registers an element drop target at all. Implemented as
+  `foreignDropRootFor` (PaneTabStrip.tsx), which resolves the strip's
+  enclosing `[data-role="block-header"]` and falls back to the strip box
+  for a strip rendered outside a header (the editor file-tab and agent
+  History strips, neither of which opts into cross-pane drops today).
+  The hover highlight follows the same element, so the feedback outlines
+  exactly the region that accepts the drop.
 - **One real difference from the outer-bar case, worth being deliberate
   about rather than copying blindly:** the outer bar's dwell exists because
   committing means *switching to a hidden Window Tab* — the user needs to see

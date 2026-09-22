@@ -73,6 +73,41 @@ export function dropPositionForPointerX(rect: Pick<DOMRect, "left" | "width">, c
     return clientX < rect.left + rect.width / 2 ? "before" : "after";
 }
 
+/** Selector for the Pane header row that a header-hosted strip lives in —
+ *  `BlockFrame_Header`'s own `data-role`, which is also what TileLayout
+ *  already uses as the whole-pane drag handle. Matched by attribute rather
+ *  than by class (`.block-frame-default-header`) deliberately: `data-role`
+ *  is the stable contract blockframe.tsx exposes for exactly this kind of
+ *  outside-in lookup, while the class name is styling. */
+const PANE_HEADER_SELECTOR = '[data-role="block-header"]';
+
+/**
+ * Which element is the cross-pane drop zone for a strip — the whole Pane
+ * header row when this strip is hosted in one (the normal case, via
+ * PaneHeaderTabStrip), else the strip box itself.
+ *
+ * The drop zone is deliberately the ENTIRE header, not just the pills: a
+ * pane with one short tab leaves most of its header as empty space, and
+ * aiming at a ~100px strip to move a tab there is fussy — the whole row
+ * reads as "this pane's tab area" to a user mid-drag. Widening it costs
+ * nothing, because every drop target inside the header either accepts the
+ * drag itself (the per-pill same-pane reorder targets) or declines and lets
+ * it bubble here (pragmatic-dnd walks up the DOM on a false `canDrop`), and
+ * the header's other chrome — ConnectionButton, EndIcons, the reserved §3.6
+ * drag-handle spacer — registers no element drop target at all.
+ *
+ * Pure and exported for the same reason as `dropPositionForPointerX` above:
+ * the gesture itself can't be unit-tested (no real drag pipeline in jsdom),
+ * but *which element gets the registration* can — and getting that wrong is
+ * silent, since pragmatic-dnd simply never fires a handler for an element
+ * the pointer never reaches (cf. ReAgent's P0 on PR #3447, a cross-pane
+ * move that was dead in the UI while its own unit tests passed).
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4.
+ */
+export function foreignDropRootFor(strip: HTMLElement): HTMLElement {
+    return strip.closest<HTMLElement>(PANE_HEADER_SELECTOR) ?? strip;
+}
+
 export interface PaneTabStripProps<T> {
     tabs: T[];
     activeId: string | null;
@@ -179,10 +214,14 @@ export interface PaneTabStripProps<T> {
     /** Opt in to cross-pane drop-to-append (Phase 4 of
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4): fires with the
      *  dragged pill's `blockId` when a pill dragged from a DIFFERENT pane
-     *  (a different `sourceNodeId`) is dropped anywhere on this strip's row
-     *  — not on a specific pill (that's `onReorder`'s job, same-pane only).
-     *  Registers a SEPARATE `dropTargetForElements` on the strip's own
-     *  container, not a second one on any pill — pragmatic-dnd's registry
+     *  (a different `sourceNodeId`) is dropped anywhere on this pane's
+     *  whole header row — including its empty space and its non-tab chrome,
+     *  not just the pills (`foreignDropRootFor` resolves that element and
+     *  documents why it's the entire row). Position within the row is
+     *  irrelevant: a foreign tab always appends. Same-pane drops onto a
+     *  specific pill are `onReorder`'s job instead.
+     *  Registers a SEPARATE `dropTargetForElements` on that row, not a
+     *  second one on any pill — pragmatic-dnd's registry
      *  is one-registration-per-DOM-element (confirmed via its source, not
      *  assumed), so this deliberately targets a different element than the
      *  per-pill ones `onReorder` uses, rather than risk clobbering them.
@@ -221,10 +260,32 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // to reveal before committing; see the spec's own reasoning for
     // skipping that dwell timer.
     const [foreignHover, setForeignHover] = createSignal(false);
+    // Whether the hover highlight belongs on the strip box itself. False
+    // once the drop zone resolves to the enclosing header row, so the
+    // feedback outlines exactly the area that actually accepts the drop
+    // rather than a sub-region of it. Only ever flips during onMount, i.e.
+    // strictly before `foreignHover` can become true, so the JSX binding
+    // below always reads a settled value.
+    const [highlightStrip, setHighlightStrip] = createSignal(true);
     onMount(() => {
-        const el = stripRef;
-        if (!el || !props.onReceiveForeignTab || !props.paneKey) return;
+        const strip = stripRef;
+        if (!strip || !props.onReceiveForeignTab || !props.paneKey) return;
         const paneKey = props.paneKey;
+        // The whole header row, not just the strip — see
+        // `foreignDropRootFor`'s own doc comment for why, and why the
+        // widening is free with respect to the header's other chrome.
+        const el = foreignDropRootFor(strip);
+        if (el !== strip) {
+            setHighlightStrip(false);
+            // `el` is blockframe.tsx's element, outside this component's own
+            // JSX, so the class goes on imperatively. Removed on cleanup:
+            // the header outlives this strip whenever `pane:tabstrip` is
+            // "multi-only" and a pane drops back to one tab (pillStrip
+            // unmounts, the header row does not), and a stale accent
+            // outline left on that header would be permanent.
+            createEffect(() => el.classList.toggle("pane-header--foreign-hover", foreignHover()));
+            onCleanup(() => el.classList.remove("pane-header--foreign-hover"));
+        }
         const cleanup = dropTargetForElements({
             element: el,
             canDrop: ({ source }) =>
@@ -351,7 +412,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     return (
         <div
             class="pane-tab-strip"
-            classList={{ "pane-tab-strip--foreign-hover": foreignHover() }}
+            classList={{ "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip() }}
             ref={(el) => { stripRef = el; }}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
