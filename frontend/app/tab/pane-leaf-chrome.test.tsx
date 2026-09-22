@@ -498,18 +498,30 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
 });
 
 describe("PaneLeafChrome — RCA verification (non-keep-alive hoist path)", () => {
-    // DIAGNOSTIC, not a claimed-fixed regression test yet. Checks whether
-    // `chromeVm()` can permanently latch null via the non-keep-alive path
-    // when the view type is ALREADY resolved before the first render (the
-    // condition observed live after an app recovery/restart cycle, when
-    // MOS block meta is already warm). `content` (line ~327) is a plain,
-    // eagerly-constructed const containing `<Block>`, unconditionally —
-    // NOT gated behind `hoisted()`/`chromeVm()` — so if SolidJS mounts it
-    // (and runs its `createEffect`) regardless of which `<Show>` branch
-    // ends up using the resulting value, this should resolve fine and this
-    // test should PASS, refuting the non-keep-alive half of the hoist-
-    // deadlock theory in SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md.
-    // If it TIMES OUT instead, that confirms the deadlock is real here too.
+    // REGRESSION GUARD for an established invariant. It began as an open
+    // diagnostic; the question is now answered and this pins the answer.
+    //
+    // THE INVARIANT: on the non-keep-alive path, chrome resolves even when
+    // the view type is ALREADY resolved before the first synchronous render
+    // — the condition observed live after an app recovery/restart cycle,
+    // when MOS block meta is already warm.
+    //
+    // WHY IT HOLDS: `content` (line ~327) is a plain, eagerly-constructed
+    // const containing `<Block>`, NOT gated behind `hoisted()`/`chromeVm()`.
+    // SolidJS runs a component's effects at construction regardless of which
+    // `<Show>` branch later consumes the value, so `<Block>`'s
+    // `createEffect` — which publishes the ViewModel — fires whether or not
+    // `hoisted()` is already true. There is no null-latch to deadlock on.
+    //
+    // This refutes the non-keep-alive half of
+    // SPEC_PANE_DEAD_SPACE_HOIST_DEADLOCK_2026_09_20.md §3.1, which that
+    // spec's own erratum already concedes. See the erratum-to-the-erratum
+    // there: the run originally cited as proof used a keep-alive view type
+    // and never reached this path, so this test is the first valid evidence
+    // for a conclusion that was reached by reasoning alone.
+    //
+    // If this ever TIMES OUT, the deadlock is real on this path after all
+    // and §3.1's original text is back in play.
     //
     // **The view type must be in `HOISTS_OWN_CHROME` but NOT in
     // `KEEP_ALIVE_TYPES`**, or this test silently answers the wrong
