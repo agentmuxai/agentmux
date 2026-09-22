@@ -180,27 +180,57 @@ settles the registry half.
   legacy fallback. Phase 5 inherits only the optional fallback removal.
 - **Subsystems 1–5 are unchanged** from §2's description.
 
-### 2.5.5 Missed defect: the Work Queue has no authorization at all
+### 2.5.5 Missed defect: the Work Queue has no *per-agent* authorization
+
+> **Corrected.** This section first claimed the work-queue endpoints had "no
+> authenticated context" and were reachable from the LAN. That was wrong —
+> they sit inside `auth_middleware` and require a valid `X-AuthKey`. The
+> error was reading the handlers and the storage layer without reading the
+> router's layer stack. Corrected below and in issue #3501; the defect is
+> real but narrower than first written.
 
 §2 #2 and §6 Phase 3 treat the work queue as a *correctness* problem — the
 columns hold slugs and compare by raw SQL equality. That is true but
 understates it.
 
 `handle_work_claim` (`server/work_queue.rs:154`) reads `agent_id` from the
-**request body** and validates only that it is non-empty. There is no
-`check_s1`, no authenticated context, no comparison against the caller's own
-identity. The same pattern holds for the enqueue/heartbeat/complete/release
-handlers (`:138`, `:174`, `:237`, `:251`, `:269`), and the ownership checks
-in `backend/storage/work_queue.rs:262,287,324` are raw equality against
-whatever string the body supplied.
+**request body** and validates only that it is non-empty. Nothing compares it
+against the caller's own identity. The same pattern holds for the
+enqueue/heartbeat/complete/release handlers (`:138`, `:174`, `:237`, `:251`,
+`:269`), and the ownership checks in
+`backend/storage/work_queue.rs:262,287,324` are raw equality against whatever
+string the body supplied.
+
+**What authentication does and does not give you.** The routes are registered
+inside the `auth_middleware` layer (`server/mod.rs:682-689`, layer at `:691`),
+so a valid `X-AuthKey` is required. But that middleware compares against
+`state.auth_key` — a single **server-wide** value (`AppState.auth_key`, seeded
+from config at `bootstrap.rs:1778`). It authenticates *"some caller on this
+instance"*, never *"which agent"*, and every agent already holds that key
+because it is how `agentmux-mcp` reaches the server at all
+(`AGENTMUX_AUTH_KEY`).
+
+So agent A, using entirely legitimate credentials, can claim, complete, cancel
+or heartbeat work targeted at agent B by naming B's slug. This is a
+privilege-separation gap *between agents*, not a perimeter one — the same
+distinction `check_s1` exists to enforce on the WS-RPC surface, where holding
+the channel key is deliberately not sufficient to act as another agent.
 
 §7 asks Phase 3 to prove "`WorkClaim` ownership can't be spoofed by a
-same-named agent". Today it can be spoofed by *any* caller that names the
-target's slug — no collision required. **Canonicalizing these columns to
-`db_agents.id` raises the bar (a UUID is unguessable where a slug is not)
-but does not close the hole**, and treating Phase 3 as the fix for it would
-leave an authorization gap behind a migration that looks like it addressed
-it. This wants its own fix, independent of and ideally before Phase 3.
+same-named agent". Today it can be spoofed by *any agent on the instance* that
+names the target's slug — no collision required. **Canonicalizing these
+columns to `db_agents.id` raises the bar (a UUID is unguessable where a slug
+is not) but does not close the hole**, and treating Phase 3 as the fix for it
+would leave an authorization gap behind a migration that looks like it
+addressed it. This wants its own fix, independent of and ideally before
+Phase 3.
+
+The honest obstacle: this API surface has **no per-agent identity at all** to
+check against today. Unlike the WS-RPC path, which authenticates an agent into
+an `RpcContext`, the work queue has only the shared key — so a per-agent
+credential or equivalent context has to exist before any ownership check can
+be written. That is the design decision this fix turns on, and it is why the
+fix is not a small one. Tracked as #3501.
 
 Related, same subsystem: issue #3276 (work-queue rows targeted at a deleted
 agent become permanently unclaimable).
