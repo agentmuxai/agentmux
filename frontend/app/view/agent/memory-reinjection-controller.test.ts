@@ -61,7 +61,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
     it("on trigger: fetches entries, dispatches TurnStart with a PLACEHOLDER (never the real message), sends the real message via RPC, and enters hiding", async () => {
         const { controller, dispatchTurnStart, sendRpc, fetchEntries } = makeController();
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
         expect(fetchEntries).toHaveBeenCalledTimes(1);
         expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
@@ -81,12 +81,26 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
         expect(controller.isHiding()).toBe(true);
     });
 
+    it("threads reason through to the composed message — fresh_session gets fresh_session wording, not compaction's", async () => {
+        // §3.3 "fresh session" addendum: a persistent identity whose prior
+        // session could not be resumed. trigger()'s second argument must
+        // reach composeReinjectionMessage unchanged.
+        const { controller, sendRpc } = makeController();
+
+        await controller.trigger("2026-09-22T10:00:00.000Z", "fresh_session");
+
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+        const sentMessage = sendRpc.mock.calls[0][0] as string;
+        expect(sentMessage).toMatch(/fresh one was started/);
+        expect(sentMessage).not.toMatch(/compacted into a summary/);
+    });
+
     it("does NOT dispatch or send when there are no entries — §3.1 suppression, at the trigger layer too", async () => {
         const { controller, dispatchTurnStart, sendRpc, fetchEntries } = makeController({
             fetchEntries: vi.fn().mockResolvedValue([]),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
         expect(fetchEntries).toHaveBeenCalledTimes(1);
         expect(dispatchTurnStart).not.toHaveBeenCalled();
@@ -97,10 +111,10 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
     it("ignores a trigger call while already hiding — re-entrancy guard, never stacks a second hidden turn", async () => {
         const { controller, dispatchTurnStart, fetchEntries } = makeController();
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         expect(controller.isHiding()).toBe(true);
 
-        await controller.trigger("2026-09-22T10:05:00.000Z");
+        await controller.trigger("2026-09-22T10:05:00.000Z", "compaction");
         // Still only the first trigger's calls — the second was a no-op.
         expect(fetchEntries).toHaveBeenCalledTimes(1);
         expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
@@ -111,7 +125,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
             sendRpc: vi.fn().mockRejectedValue(new Error("network down")),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
         expect(dispatchTurnReset).toHaveBeenCalledTimes(1);
         expect(controller.isHiding()).toBe(false);
@@ -122,7 +136,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
             fetchEntries: vi.fn().mockRejectedValue(new Error("rpc down")),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
         expect(dispatchTurnStart).not.toHaveBeenCalled();
         expect(sendRpc).not.toHaveBeenCalled();
@@ -138,7 +152,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
 
     it("onSessionEnd returns the built node and clears hiding, once, after a successful hidden turn", async () => {
         const { controller } = makeController();
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         expect(controller.isHiding()).toBe(true);
 
         const node = controller.onSessionEnd();
@@ -158,7 +172,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
         const { controller } = makeController({
             fetchEntries: vi.fn().mockResolvedValue([personalEntry("p1", "x".repeat(3800))]),
         });
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         const node = controller.onSessionEnd();
         expect(node?.sizeBand).toBe("critical");
     });
@@ -178,7 +192,7 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
             isPaneWorking: vi.fn().mockReturnValue(true),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
         expect(isPaneWorking).toHaveBeenCalled();
         expect(fetchEntries).not.toHaveBeenCalled();
@@ -193,12 +207,30 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
         expect(fetchEntries).not.toHaveBeenCalled();
     });
 
+    it("preserves the reason across a defer — a fresh_session trigger deferred while busy still sends fresh_session wording once fired", async () => {
+        const { controller, sendRpc, isPaneWorking } = makeController({
+            isPaneWorking: vi.fn().mockReturnValue(true),
+        });
+
+        await controller.trigger("2026-09-22T10:00:00.000Z", "fresh_session");
+        expect(sendRpc).not.toHaveBeenCalled();
+
+        isPaneWorking.mockReturnValue(false);
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(sendRpc).toHaveBeenCalledTimes(1);
+        const sentMessage = sendRpc.mock.calls[0][0] as string;
+        expect(sentMessage).toMatch(/fresh one was started/);
+    });
+
     it("maybeFireDeferred fires the deferred trigger once called AND genuinely idle — fetch/dispatch/send now happen", async () => {
         const { controller, fetchEntries, dispatchTurnStart, sendRpc, isPaneWorking } = makeController({
             isPaneWorking: vi.fn().mockReturnValue(true),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         expect(fetchEntries).not.toHaveBeenCalled();
 
         // doTrigger() re-checks isPaneWorking() itself right before
@@ -221,8 +253,8 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
             isPaneWorking: vi.fn().mockReturnValue(true),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
-        await controller.trigger("2026-09-22T10:05:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
+        await controller.trigger("2026-09-22T10:05:00.000Z", "compaction");
 
         controller.maybeFireDeferred();
         await Promise.resolve();
@@ -239,7 +271,7 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
             isPaneWorking: vi.fn().mockReturnValue(true),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         expect(controller.isHiding()).toBe(false); // still deferred, not yet hiding
 
         isPaneWorking.mockReturnValue(false); // now genuinely idle
@@ -280,7 +312,7 @@ describe("createMemoryReinjectionController — pane becomes busy DURING the fet
     it("does NOT dispatch TurnStart when the pane became busy during fetchEntries()", async () => {
         const { controller, dispatchTurnStart, sendRpc } = makeRacingController();
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
         expect(dispatchTurnStart).not.toHaveBeenCalled();
         expect(sendRpc).not.toHaveBeenCalled();
@@ -290,7 +322,7 @@ describe("createMemoryReinjectionController — pane becomes busy DURING the fet
     it("defers instead — a subsequent maybeFireDeferred() (once genuinely idle) fires it", async () => {
         const { controller, fetchEntries, dispatchTurnStart, isPaneWorking } = makeRacingController();
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         expect(dispatchTurnStart).not.toHaveBeenCalled();
         expect(fetchEntries).toHaveBeenCalledTimes(1); // the fetch itself still happened — the race is caught AFTER it, not before
 
@@ -312,7 +344,7 @@ describe("createMemoryReinjectionController — pane becomes busy DURING the fet
             isPaneWorking: vi.fn().mockReturnValue(true),
         });
 
-        await controller.trigger("2026-09-22T10:00:00.000Z");
+        await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
         controller.maybeFireDeferred();
         await Promise.resolve();
         await Promise.resolve();

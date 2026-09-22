@@ -1308,9 +1308,9 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
     }
 }
 
-/// True for a `<system-reminder>...Your memory was reinjected after a
-/// context compaction...` message — a hidden memory-reinjection turn
-/// (`frontend/app/view/agent/memory-reinjection.ts`'s
+/// True for a `<system-reminder>...Your memory was reinjected because your
+/// working context was just reset...` message — a hidden memory-reinjection
+/// turn (`frontend/app/view/agent/memory-reinjection.ts`'s
 /// `composeReinjectionMessage`). Mirrors that module's
 /// `isMemoryReinjectionMessage` exactly, including the exact signature
 /// string — kept as a literal duplicate rather than a shared constant
@@ -1331,9 +1331,16 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
 /// could reach `activity_watcher.rs`'s backend-only sweep, which has no
 /// concept of "hidden" anywhere and fires independent of any turn boundary
 /// whenever the output FileStore's size changes.
+/// The signature sentence is reason-independent by design — `fresh_session`
+/// triggers (a persistent identity whose prior session could not be
+/// resumed; SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md
+/// §3.3a) use the same leading sentence as a real compaction, only the
+/// second sentence differs (`memory-reinjection.ts`'s `REASON_CLAUSE`) — so
+/// this one match suppresses both without needing to track which reason
+/// fired.
 fn is_hidden_reinjection_text(text: &str) -> bool {
     text.starts_with("<system-reminder>")
-        && text.contains("Your memory was reinjected after a context compaction.")
+        && text.contains("Your memory was reinjected because your working context was just reset.")
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
@@ -1521,7 +1528,13 @@ mod build_session_title_prompt_tests {
 mod extract_digest_text_tests {
     use super::*;
 
-    const REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected after a context compaction. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
+    const REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected because your working context was just reset. Your recent conversation was just compacted into a summary. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
+
+    /// The `fresh_session` reason's own wording — a distinct second sentence
+    /// from `REINJECTION_TEXT`'s compaction wording, sharing only the fixed
+    /// leading signature sentence. See `is_hidden_reinjection_text`'s doc
+    /// comment for why one match must cover both.
+    const FRESH_SESSION_REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected because your working context was just reset. AgentMux could not resume this agent's prior session, so a fresh one was started — you have none of your prior conversation history, only what is below. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
 
     fn user_text_line(text: &str) -> String {
         serde_json::json!({
@@ -1566,6 +1579,14 @@ mod extract_digest_text_tests {
     }
 
     #[test]
+    fn is_hidden_reinjection_text_recognizes_the_fresh_session_wording_too() {
+        // Same leading signature sentence, different second sentence — the
+        // whole point of keeping the signature reason-independent (see the
+        // function's own doc comment).
+        assert!(is_hidden_reinjection_text(FRESH_SESSION_REINJECTION_TEXT));
+    }
+
+    #[test]
     fn ordinary_conversation_still_extracts_normally() {
         let lines = vec![
             user_text_line("please fix the login bug"),
@@ -1584,6 +1605,20 @@ mod extract_digest_text_tests {
         let digest = extract_digest_text(&refs);
         assert!(digest.is_empty());
         assert!(!digest.contains("secret memory content"));
+    }
+
+    #[test]
+    fn suppresses_a_fresh_session_reinjection_turn_too() {
+        // Same end-to-end suppression, but for the fresh_session reason's
+        // own wording — not just the compaction reason exercised by the
+        // test above.
+        let lines = vec![
+            user_text_line(FRESH_SESSION_REINJECTION_TEXT),
+            assistant_text_line("Understood, I've reviewed my memory including secret memory content"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(digest.is_empty(), "digest should be empty, was: {digest}");
     }
 
     #[test]
