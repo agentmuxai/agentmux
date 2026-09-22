@@ -583,7 +583,16 @@ jobs:
   # the two contexts the matrix-name bug affects, nothing more.
   ci-required:
     name: CI required
-    needs: [changes, rust, frontend]
+    # `docs` is here, not just rust/frontend. It is the only gate that runs on a
+    # documentation-only PR (rust and frontend both skip), it is not itself a
+    # branch-protection context, and before #3506's follow-up nothing consumed
+    # its result — so `doc status + grep gates` could fail outright and the PR
+    # still merged. Observed live on #3510: a malformed spec Status header,
+    # exactly the content error that gate exists to catch, with `CI required`
+    # green and two approvals on it. `docs` has no job-level `if:`, so it always
+    # runs and reports success/failure — never `skipped` — and the script
+    # already treats `failure` as fatal.
+    needs: [changes, docs, rust, frontend]
     if: always()
     runs-on: ubuntu-latest
     steps:
