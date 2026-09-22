@@ -51,15 +51,27 @@ const TipBalloon = (props: TipBalloonProps): JSX.Element => {
         top: "0px",
     });
     let cleanupAutoUpdate: (() => void) | null = null;
+    let frameHandle: number | undefined;
     let rootRef: HTMLDivElement | undefined;
 
     // Airspace cut so the balloon paints over any browser-pane HWND the
     // status bar overlaps — same primitive as the status-bar popovers.
     usePaneOverlay(() => rootRef);
 
+    // The frame handle is tracked so `onCleanup` can cancel a frame that has
+    // not run yet. A tip can be dismissed inside the very frame it mounted in
+    // — a cursor sweeping the status bar crosses several `[data-tip]`
+    // elements per frame, mounting and disposing a balloon for each. Cleanup
+    // then ran with `cleanupAutoUpdate` still null, so it had nothing to
+    // cancel, and the pending frame went on to start an `autoUpdate` that no
+    // longer had any owner to stop it. Each leaked one kept firing on every
+    // later scroll/resize against a disposed component: ~500 throws/second
+    // for ten seconds, 4,718 in one hour, observed live 2026-09-22 09:15Z.
     const registerFloating = (el: HTMLDivElement) => {
         rootRef = el;
-        requestAnimationFrame(() => {
+        if (frameHandle !== undefined) cancelAnimationFrame(frameHandle);
+        frameHandle = requestAnimationFrame(() => {
+            frameHandle = undefined;
             if (!(el instanceof Element)) return;
             const update = async () => {
                 const pos = await computeMenuPosition(
@@ -77,7 +89,11 @@ const TipBalloon = (props: TipBalloonProps): JSX.Element => {
         });
     };
 
-    onCleanup(() => cleanupAutoUpdate?.());
+    onCleanup(() => {
+        if (frameHandle !== undefined) cancelAnimationFrame(frameHandle);
+        cleanupAutoUpdate?.();
+        cleanupAutoUpdate = null;
+    });
 
     return (
         <div
@@ -149,11 +165,21 @@ export const StatusBarTip = (): JSX.Element => {
         document.removeEventListener("focusout", onFocusOut);
     });
 
+    // `keyed` so the element is captured as a plain value, not re-read
+    // reactively. Without it, `target` stayed bound to `activeEl()` for the
+    // balloon's whole life: any position update still in flight when the tip
+    // was dismissed read the freshly-nulled signal and threw
+    // `Cannot read properties of null (reading 'getBoundingClientRect')`.
+    // `keyed` also re-creates the balloon when the cursor moves straight
+    // from one `[data-tip]` to another, which is what we want anyway — a
+    // new anchor needs its own `autoUpdate`, not a mutated reference.
     return (
-        <Show when={activeEl()}>
-            <Portal>
-                <TipBalloon target={activeEl()!} text={activeEl()!.getAttribute("data-tip") ?? ""} />
-            </Portal>
+        <Show when={activeEl()} keyed>
+            {(el) => (
+                <Portal>
+                    <TipBalloon target={el} text={el.getAttribute("data-tip") ?? ""} />
+                </Portal>
+            )}
         </Show>
     );
 };
