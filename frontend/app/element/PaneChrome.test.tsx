@@ -446,6 +446,35 @@ describe("renderPaneChromeShell — header tail color", () => {
         expect(agentActive).toBe("mixed-default");
     });
 
+    // reagent P1 on #3492: the case that shipped broken and untested.
+    //
+    // Neither tab has a color, so keying the distinctness set on the color
+    // alone collapsed both to `undefined`, read the pane as "agreed", and
+    // sent NO override — handing the header back to BlockFrame_Header's own
+    // fallback, which branches on `meta.view`. The non-agent tab then got
+    // NON_AGENT_DEFAULT_HEADER_BG while the agent tab stayed translucent,
+    // so the tail changed colour on every switch: precisely the bug this
+    // whole component exists to remove, surviving in the one shape none of
+    // the other tests cover.
+    //
+    // Asserted as "same across every active tab" rather than against a
+    // literal, because that invariant IS the feature.
+    it("two UNCOLORED tabs of different views still give one stable tail", () => {
+        setObjectValue("block:b1", { meta: { view: "agent" } });
+        setObjectValue("block:b2", { meta: { view: "term" } });
+        const [agentActive, termActive] = tailBgAcrossEveryActiveTab(["b1", "b2"]);
+        expect(agentActive).toBe(termActive);
+        expect(agentActive).toBe("mixed-default");
+    });
+
+    // The counterpart, so the fix above cannot be "always override": tabs
+    // that genuinely render the same header must still send nothing.
+    it("two UNCOLORED tabs of the SAME view still send no override", () => {
+        setObjectValue("block:b1", { meta: { view: "term" } });
+        setObjectValue("block:b2", { meta: { view: "term" } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual([undefined, undefined]);
+    });
+
     it("recomputes when a tab's own color changes, without a tab switch", () => {
         setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
         setObjectValue("block:b2", { meta: { "frame:hue": 10 } });

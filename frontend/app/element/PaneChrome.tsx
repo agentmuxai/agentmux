@@ -179,15 +179,32 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // are the same color here even if one got there via frame:hue and
         // the other via its agent identity color.
         //
-        // `undefined` (no color of its own) is its own distinct member, not
-        // a wildcard — one colored tab beside one uncolored tab is two
-        // colors, and the colored one is not the pane's color. Several
-        // uncolored tabs collapse to the single value `undefined`, which
-        // then falls through to the same neutral below anyway.
-        const distinct = new Set<string | undefined>();
+        // `undefined` (no color of its own) is NOT one member — uncolored
+        // blocks do not all render the same header.
+        //
+        // `BlockFrame_Header`'s own fallback (blockframe.tsx) branches on
+        // `meta.view` when there is no color: a non-agent block gets
+        // `NON_AGENT_DEFAULT_HEADER_BG`, an agent block gets nothing and
+        // stays translucent. So an uncolored block's EFFECTIVE header
+        // background is a function of its view, and keying this set on the
+        // color alone made a pane of two uncolored tabs — one agent, one
+        // not — collapse to `size === 1`, skip the override entirely, and
+        // hand the header straight back to that per-view fallback. The tail
+        // then changed color with the active tab: the exact bug this
+        // component exists to remove, surviving in the one case nothing
+        // tested (reagent P1 on #3492).
+        //
+        // Deliberately not `computeBlockTabPillNeutralBg` as the key: that
+        // helper is theme-conditional (it collapses agent and non-agent to
+        // one value in light theme) while the header fallback above is not,
+        // so it would under-discriminate on a light-theme mixed pane.
+        const headerKeyOf = (meta: Block["meta"] | undefined): string =>
+            computeBlockColorBg(meta, isLightTheme) ??
+            (meta?.view === "agent" ? " agent-default" : " non-agent-default");
+        const distinct = new Set<string>();
         for (const blockId of ids) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            distinct.add(computeBlockColorBg(meta, isLightTheme));
+            distinct.add(headerKeyOf(meta));
             if (distinct.size > 1) break;
         }
         // The tabs agree — hand back NOTHING and let BlockFrame_Header do
