@@ -3350,8 +3350,11 @@ async fn colliding_slugs_no_longer_evict_each_other() {
     handler.register_agent("AGENTY", "block-b", None).unwrap();
 
     // Both survive: pre-Phase-2 the second would have evicted the first.
-    assert!(handler.get_agent("AgentY").is_some(), "first registration must survive");
-    assert!(handler.get_agent("AGENTY").is_some(), "second registration must exist");
+    // Checked by canonical id, not by the shared slug — that slug is now
+    // ambiguous and deliberately addresses neither, which
+    // `a_slug_two_agents_share_addresses_neither` pins.
+    assert!(handler.get_agent("def-a").is_some(), "first registration must survive");
+    assert!(handler.get_agent("def-b").is_some(), "second registration must exist");
 
     // And each routes to its OWN block, not to whichever registered last.
     for (target, expected_block) in [("def-a", "block-a"), ("def-b", "block-b")] {
@@ -3424,4 +3427,89 @@ async fn alias_lookup_survives_canonical_keying_of_the_primary_registry() {
     });
     assert!(resp.success, "alias target must still resolve: {:?}", resp.error);
     assert_eq!(resp.block_id.as_deref(), Some("block-a"));
+}
+
+/// ReAgent P1 on #3520. `canonical_key` reads the store, so if lookups
+/// re-resolved every call, a transient store failure *after* a successful
+/// registration would make the key fall back to the lowercased slug — which no
+/// longer matches the canonical id the entry is stored under. The agent would
+/// report "not found" while registered and healthy: the same registry-lookup
+/// failure this phase removes, re-introduced through resolver flakiness.
+///
+/// The binding is pinned at registration, so this resolver answers once and
+/// then fails forever, and the agent must stay reachable regardless.
+#[tokio::test]
+async fn a_registered_agent_survives_the_resolver_failing_afterwards() {
+    let calls = Arc::new(Mutex::new(0usize));
+    let counter = calls.clone();
+    let flaky: AgentKeyResolver = Arc::new(move |agent_id: &str| {
+        let mut n = counter.lock().unwrap();
+        *n += 1;
+        // Succeeds only on the first call — every later one behaves like a
+        // busy/locked SQLite read, which `resolve_agent_id` reports as an
+        // error and the bootstrap resolver maps to `None`.
+        if *n == 1 && agent_id == "AgentY" {
+            Some("def-a".to_string())
+        } else {
+            None
+        }
+    });
+
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(flaky);
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+
+    // Every one of these would miss if the key were recomputed per call.
+    assert!(handler.get_agent("AgentY").is_some(), "get_agent must not depend on the resolver");
+    handler.update_last_seen("AgentY");
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "AgentY".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-flaky".to_string()),
+        ..Default::default()
+    });
+    assert!(resp.success, "registered agent must stay reachable: {:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-a"));
+
+    assert!(*calls.lock().unwrap() >= 1, "resolver was consulted at registration");
+}
+
+/// Addressing by a slug two registered agents share must resolve to NOTHING
+/// rather than to whichever registered last — the same fail-closed rule
+/// `instance_get_by_slug` and `find_active_record_by_slug` follow. Each agent
+/// is still reachable by its own canonical id.
+#[tokio::test]
+async fn a_slug_two_agents_share_addresses_neither() {
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(test_resolver(&[
+        ("AgentY", "def-a"),
+        ("AGENTY", "def-b"),
+        ("def-a", "def-a"),
+        ("def-b", "def-b"),
+    ]));
+
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+    handler.register_agent("AGENTY", "block-b", None).unwrap();
+
+    // "agenty" is what BOTH display names lowercase to.
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agenty".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-ambig".to_string()),
+        ..Default::default()
+    });
+    assert!(!resp.success, "an ambiguous slug must not deliver to an arbitrary winner");
+
+    // …while the canonical ids still address each precisely.
+    for (target, block) in [("def-a", "block-a"), ("def-b", "block-b")] {
+        let ok = handler.inject_message(InjectionRequest {
+            target_agent: target.to_string(),
+            message: "hi".to_string(),
+            request_id: Some(format!("req-{target}")),
+            ..Default::default()
+        });
+        assert!(ok.success, "{target} must remain reachable by id: {:?}", ok.error);
+        assert_eq!(ok.block_id.as_deref(), Some(block));
+    }
 }

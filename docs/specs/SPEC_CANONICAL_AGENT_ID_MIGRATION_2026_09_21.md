@@ -472,6 +472,22 @@ The alias registry is deliberately **not** canonicalized: aliases are the
 stable `AGENTMUX_AGENT_ID` by design, so `inject_message_inner` now carries
 two keys — canonical for the primary map, raw slug for the alias map.
 
+**The slug → key binding is pinned at registration, and lookups never re-run
+the resolver** (ReAgent P1 on #3520). Resolving on every lookup would read the
+store each time, so a transient failure there — a busy or locked SQLite read —
+would fall back to the lowercased slug, which no longer matches the
+canonical-id key the entry is stored under. The lookup would miss and report
+"agent not found" for an agent that is registered and healthy: this phase's own
+failure mode, re-introduced through resolver flakiness rather than slug
+collision. Pinning once makes every later lookup independent of store
+availability.
+
+A consequence worth stating: when two agents register under one slug, that slug
+becomes `Ambiguous` and addresses **neither**, rather than whichever registered
+last. Each remains reachable by its canonical id. That is the same fail-closed
+rule `instance_get_by_slug` and `find_active_record_by_slug` already follow, now
+applied to message routing.
+
 ### Phase 3 — Work Queue (§2 #2)
 `target_agent`/`claimed_by` columns store `db_agents.id`. Resolution happens
 at `WorkEnqueue`/`WorkClaim` time (server-side, via Phase 0), so the MCP
