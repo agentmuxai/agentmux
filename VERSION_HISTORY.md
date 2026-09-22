@@ -1,5 +1,32 @@
 # AgentMux Version History
 
+## 0.56.11 — 2026-09-22
+
+- feat(panes): widen the cross-pane Pane Tab drop zone to the whole pane header
+- fix(identity): backfill orphaned pre-fix identity history into the shared tree
+- fix(cef): actively evict the top-level window pool under sustained memory pressure
+- fix(agent-pane): stop text-selection drags from being interrupted by hover-triggered peek/tooltip overlays
+- feat(diag): add periodic atom-cache/registry memory diagnostics
+- fix(diag): atom-cache diagnostics used console.debug, invisible under the host's default info-level filter
+- fix(pane-color): consolidate header/border precedence, persist explicit picks to agent identity, theme-aware header darkening
+- fix(theme): sync hoverbg/highlightbg Tailwind tokens per-theme, fix raw palette-color usages, add color-token lint gate
+- feat(settings): search bar with synonym-aware matching, shared fuzzy-search utility used by command palette and agent picker too
+- fix(settings): search dropdown background was translucent, hard to read
+- fix(pane-tabs): inactive pane-tab pills show their block's own darkened color, active tab's underline matches its vivid border color
+- diag(tab-reveal): log whether a reveal gate settled naturally or hit its timeout cap
+- fix(block): stop stranding a preview ViewModel on every effect re-run, and bound the mps resubscribe payload
+- fix(history): resolve an agent's sessions by working directory, not only identity links
+- fix(init): surface a fatal startup failure instead of revealing a blank window
+- fix(pane-header): move terminal/agent header text into a hover tooltip instead of squeezing it against the tab strip
+- fix(muxbus): notice that Linux will prompt for the keyring password too, not just macOS
+- ci: slim the Windows PR job to a compile gate and restore the nightly superset
+- ci: skip the build on documentation-only PRs
+- fix(pane-header): keep interactive header elements (terminal "Multi Input ON") on the row instead of inside the hover tooltip
+- fix(pane-header): the header tail (the "+" and the bar) stops repainting itself with whichever tab is active when a pane's tabs have different colors
+- fix(pane-tabs): the selected tab shows its own pane color instead of the plain surface, so it is no longer the only colorless pill in the strip
+- fix(pane-header): the mixed-pane tail color no longer varies with the active tab's view type, and hovering the selected tab no longer strips its color
+- fix(blockframe): remove a duplicate computeBlockActiveBorderColor that broke the typecheck on main
+
 ## 0.56.10 — 2026-09-21
 
 - feat(panes): drag a Pane Tab onto another pane's header to move it into that pane
