@@ -139,6 +139,77 @@ describe("PaneTabStrip", () => {
         expect(tabs[1].classList.contains("custom-preview")).toBe(false);
     });
 
+    it("sets --pane-tab-bg/--pane-tab-underline from getColor, per tab, omitting whichever half is absent", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={(t: T) =>
+                    t.id === "a" ? { background: "#112233", underline: "#445566" } : { background: "#778899" }
+                }
+                onActivate={vi.fn()}
+            />
+        ));
+        const tabs = container.querySelectorAll<HTMLElement>(".pane-tab");
+        expect(tabs[0].style.getPropertyValue("--pane-tab-bg")).toBe("#112233");
+        expect(tabs[0].style.getPropertyValue("--pane-tab-underline")).toBe("#445566");
+        expect(tabs[1].style.getPropertyValue("--pane-tab-bg")).toBe("#778899");
+        expect(tabs[1].style.getPropertyValue("--pane-tab-underline")).toBe("");
+    });
+
+    it("sets --pane-tab-neutral-bg for a tab with only a neutralBackground, without marking it colored", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={() => ({ neutralBackground: "#101010" })}
+                onActivate={vi.fn()}
+            />
+        ));
+        const tab = container.querySelectorAll<HTMLElement>(".pane-tab")[1];
+        expect(tab.style.getPropertyValue("--pane-tab-neutral-bg")).toBe("#101010");
+        expect(tab.style.getPropertyValue("--pane-tab-bg")).toBe("");
+        expect(tab.classList.contains("pane-tab--colored")).toBe(false);
+    });
+
+    it("sets neither custom property when getColor is omitted or returns undefined for a tab", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={() => undefined}
+                onActivate={vi.fn()}
+            />
+        ));
+        const tabs = container.querySelectorAll<HTMLElement>(".pane-tab");
+        for (const tab of tabs) {
+            expect(tab.style.getPropertyValue("--pane-tab-bg")).toBe("");
+            expect(tab.style.getPropertyValue("--pane-tab-underline")).toBe("");
+        }
+    });
+
+    it("applies pane-tab--colored (gates PaneTabStrip.scss's lighter-on-hover rule) only for a tab with its own background", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={(t: T) => (t.id === "a" ? { background: "#112233" } : undefined)}
+                onActivate={vi.fn()}
+            />
+        ));
+        const tabs = container.querySelectorAll<HTMLElement>(".pane-tab");
+        expect(tabs[0].classList.contains("pane-tab--colored")).toBe(true);
+        expect(tabs[1].classList.contains("pane-tab--colored")).toBe(false);
+    });
+
     it("does not render the + button when onAdd is omitted", () => {
         render(() => (
             <PaneTabStrip

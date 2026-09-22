@@ -28,23 +28,76 @@ import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import clsx from "clsx";
+import { autoUpdate } from "@floating-ui/dom";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
+import { partitionHeaderElems } from "./header-elems";
 import { buildPaneContextMenu } from "./pane-actions";
-import { headerBgForEffectiveColor, hueToActiveBorder, hueToBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import {
+    headerBgForEffectiveColor,
+    hueToActiveBorder,
+    hueToBorder,
+    paneTabBgForEffectiveColor,
+    PANE_HUE_OPTIONS,
+    setHue,
+} from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 
 const NumActiveConnColors = 8;
 
+/**
+ * The darkened/muted background a block's own assigned color resolves to —
+ * shared by BlockFrame_Header's headerStyle and PaneChrome's inactive
+ * pane-tab pills (PaneTabStrip.tsx), so a pill for a background tab reads as
+ * the same color its header would show if it were active. See
+ * headerBgForEffectiveColor's own doc comment for the darkened-vs-bright
+ * theme-polarity rule. Returns undefined when the block has no color of its
+ * own (neither frame:hue nor frame:activebordercolor set) — callers fall
+ * back to their own default background.
+ */
+export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
+/** Same as computeBlockColorBg, for a pane-tab pill's own background
+ * instead of the pane header's — see hueToPaneTabBg's own doc comment for
+ * why a small pill needs a more visible dark-theme treatment than the
+ * header's identical-looking-but-actually-distinct 16%-lightness colors,
+ * which live-reproduced as pill colors appearing to collapse to one shared
+ * value (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
+export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
+    return paneTabBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+}
+
 /** Fixed header background for every non-agent pane with no other color
  * source — see headerStyle's fallback branch. Matches the L=16% used by
  * hueToHeaderBg for visual consistency, low saturation so it reads as
  * neutral rather than tinted toward any particular hue. */
 const NON_AGENT_DEFAULT_HEADER_BG = "hsl(220, 12%, 16%)";
+
+/** Opaque background for a pane-tab pill whose block has NO color of its
+ * own. Must never be transparent: the pill sits on top of the header row,
+ * whose background is the ACTIVE block's color — a transparent pill shows
+ * that color through, so every uncolored tab appears to take on whichever
+ * tab is selected (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md §7).
+ * Dark theme: the same fixed color this block's own header would show
+ * (NON_AGENT_DEFAULT_HEADER_BG for non-agent panes). Light theme, or an
+ * agent pane (whose uncolored header has no fixed color): the theme's
+ * opaque block surface. */
+export function computeBlockTabPillNeutralBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string {
+    if (!isLightTheme && blockMeta?.view !== "agent") return NON_AGENT_DEFAULT_HEADER_BG;
+    return "var(--block-bg-solid-color)";
+}
 
 /**
  * Build a "Pane Color" submenu — mirrors the "Replace With..." submenu pattern
@@ -337,6 +390,83 @@ function EndIcons(props: {
     );
 }
 
+/**
+ * Floating content anchored to an existing DOM ref, shown while `visible`.
+ * Unlike the shared `Tooltip` component (element/tooltip.tsx), which always
+ * wraps its children in a NEW div to own the hover listeners itself, this
+ * attaches to a ref the caller already owns — `BlockFrame_Header`'s own
+ * root div carries several existing handlers/ref assignments
+ * (onContextMenu, dragHandleRef, drag-region data attrs, …), and wrapping
+ * it in another div just to reuse `Tooltip` would restructure a heavily-
+ * tuned, comment-dense component for no real benefit. Uses the same CSS
+ * classes as `Tooltip` for visual consistency —
+ * see SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md.
+ *
+ * Positioning goes through `computeMenuPosition`
+ * (`util/menu-position.ts`), not a raw `computePosition` call. That is
+ * the repo-wide rule for any floating surface
+ * (SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20, enforced by
+ * `scripts/check-menu-positioning.sh`), and it matters concretely here:
+ * browser panes are native `CefBrowserView` child windows that paint
+ * ABOVE the webview's DOM, so a tooltip that merely fits the viewport can
+ * still be drawn behind one. `computeMenuPosition` treats those rects as
+ * boundaries; a bare `computePosition` does not, and this tooltip anchors
+ * to a pane header that very often sits right next to a browser pane.
+ */
+function AnchoredTooltip(props: { anchor: () => HTMLElement | null; visible: boolean; content: JSX.Element }): JSX.Element {
+    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
+        position: "fixed",
+        left: "0px",
+        top: "0px",
+    });
+    let floatingEl: HTMLElement | undefined;
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const updatePosition = async () => {
+        const anchorEl = props.anchor();
+        if (!anchorEl || !floatingEl) return;
+        // gutter 6 preserves the original `offset(6)` spacing; flip/shift
+        // equivalents are built into computeMenuPosition.
+        const pos = await computeMenuPosition({ anchor: anchorEl, placement: "bottom", gutter: 6 }, floatingEl);
+        setFloatingStyle(pos.style);
+    };
+
+    createEffect(() => {
+        if (!props.visible) {
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = null;
+            return;
+        }
+        const anchorEl = props.anchor();
+        if (!anchorEl || !floatingEl) return;
+        // Deferred a frame so the Portal below has time to insert
+        // floatingEl into the DOM before floating-ui traverses ancestors —
+        // same reasoning as Tooltip's own registerFloating.
+        requestAnimationFrame(() => {
+            if (!props.visible) return;
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = autoUpdate(anchorEl, floatingEl!, updatePosition);
+        });
+    });
+
+    onCleanup(() => cleanupAutoUpdate?.());
+
+    return (
+        <Show when={props.visible}>
+            <Portal>
+                <div
+                    ref={(el) => { floatingEl = el; }}
+                    style={floatingStyle()}
+                    class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
+                    data-pane-overlay
+                >
+                    {props.content}
+                </div>
+            </Portal>
+        </Show>
+    );
+}
+
 function BlockFrame_Header(
     props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error; blockId: Accessor<string> }
 ): JSX.Element {
@@ -363,6 +493,16 @@ function BlockFrame_Header(
     const preIconButton = createMemo(() => util.useAtomValueSafe(props.viewModel?.preIconButton));
     const manageConnection = createMemo(() => util.useAtomValueSafe(props.viewModel?.manageConnection));
     const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
+
+    // SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md: the header's own
+    // informational text (a terminal's command/exit-status/OSC-title, or
+    // any future viewText/frame:text user) used to render inline, full
+    // width. Now that PaneHeaderTabStrip's pill strip fills most of the
+    // row by default, that text gets squeezed into a thin sliver against
+    // the right edge — replaced with a tooltip, shown while hovering the
+    // header, instead.
+    const [headerHovering, setHeaderHovering] = createSignal(false);
+    let headerRef: HTMLDivElement | undefined;
 
     // Track previous magnified state for one-time activity report
     let prevMagnifiedState = props.nodeModel.isMagnified();
@@ -477,32 +617,46 @@ function BlockFrame_Header(
         preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null,
     );
 
-    const headerTextElems = createMemo(() => {
-        const elems: JSX.Element[] = [];
+    // Only *passive* header content moves into the hover tooltip; real
+    // controls keep rendering inline on the row exactly as they always
+    // did. See header-elems.ts for why (reagent P1 on PR #3488: the
+    // terminal's "Multi Input ON" button became unclickable, because the
+    // pointer has to leave the header — dismissing the tooltip — to reach
+    // it, and a persistent mode warning ended up hover-gated).
+    const splitHeaderElems = createMemo(() => {
         const htu = headerTextUnion();
+        // A bare string is always passive.
         if (typeof htu === "string") {
-            if (!util.isBlank(htu)) {
-                elems.push(
-                    <div class="block-frame-text ellipsis">
-                        &lrm;{htu}
-                    </div>
-                );
-            }
-        } else if (Array.isArray(htu)) {
-            elems.push(...renderHeaderElements(htu, props.preview));
+            if (util.isBlank(htu)) return { inline: [] as HeaderElem[], tooltip: [] as HeaderElem[] };
+            return { inline: [] as HeaderElem[], tooltip: [{ elemtype: "text", text: htu } as HeaderElem] };
         }
-        return elems;
+        if (Array.isArray(htu)) return partitionHeaderElems(htu);
+        return { inline: [] as HeaderElem[], tooltip: [] as HeaderElem[] };
     });
-    // True when the textelems wrapper has visible content (summary text or an
-    // error indicator). Used to conditionally apply max-width to the name
-    // region — see block.scss .block-frame-default-header--has-summary.
-    const hasSummary = createMemo(() => {
-        if (props.error != null) return true;
+    const inlineHeaderElems = createMemo(() => renderHeaderElements(splitHeaderElems().inline, props.preview));
+    const tooltipHeaderElems = createMemo(() => {
         const htu = headerTextUnion();
-        if (typeof htu === "string") return !util.isBlank(htu);
-        if (Array.isArray(htu)) return htu.length > 0;
-        return false;
+        // Preserve the plain-string rendering exactly (`.block-frame-text
+        // ellipsis` + the LRM mark) rather than routing it through
+        // HeaderTextElem, which wraps text differently.
+        if (typeof htu === "string") {
+            return util.isBlank(htu)
+                ? []
+                : [
+                      <div class="block-frame-text ellipsis">
+                          &lrm;{htu}
+                      </div>,
+                  ];
+        }
+        return renderHeaderElements(splitHeaderElems().tooltip, props.preview);
     });
+    // True when the textelems wrapper has visible INLINE content — the
+    // error indicator, or an interactive header element that stayed on the
+    // row. Passive text now only renders inside AnchoredTooltip
+    // (SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md), so it must not
+    // squeeze the name region. Used to conditionally apply max-width to
+    // that region — see block.scss .block-frame-default-header--has-summary.
+    const hasSummary = createMemo(() => props.error != null || splitHeaderElems().inline.length > 0);
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         // One rule for both color sources — see headerBgForEffectiveColor's
@@ -517,11 +671,9 @@ function BlockFrame_Header(
         // still true on a LIGHT theme (user request 2026-09-21): darkening
         // reads as broken/muddy against a light UI, so light themes keep
         // matching the border's full-strength color instead.
-        const hue = blockData()?.meta?.["frame:hue"];
-        const ac = blockData()?.meta?.["frame:activebordercolor"] as string | undefined;
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
-        const bg = headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+        const bg = computeBlockColorBg(blockData()?.meta, isLightTheme);
         if (bg) {
             style["background-color"] = bg;
             style.color = pickReadableTextColor(bg) ?? undefined;
@@ -547,9 +699,14 @@ function BlockFrame_Header(
             }}
             data-role="block-header"
             data-testid="block-header"
-            ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}
+            ref={(el) => {
+                if (dragHandleRef) dragHandleRef.current = el;
+                headerRef = el;
+            }}
             onContextMenu={onContextMenu}
             onDblClick={() => props.nodeModel.toggleMagnify()}
+            onMouseEnter={() => setHeaderHovering(true)}
+            onMouseLeave={() => setHeaderHovering(false)}
             style={headerStyle()}
         >
             {preIconButtonElem()}
@@ -580,7 +737,7 @@ function BlockFrame_Header(
                 />
             </Show>
             <div class="block-frame-textelems-wrapper">
-                {headerTextElems()}
+                {inlineHeaderElems()}
                 <Show when={props.error != null}>
                     <div
                         class="iconbutton disabled"
@@ -593,6 +750,11 @@ function BlockFrame_Header(
                     </div>
                 </Show>
             </div>
+            <AnchoredTooltip
+                anchor={() => headerRef ?? null}
+                visible={headerHovering() && tooltipHeaderElems().length > 0}
+                content={<>{tooltipHeaderElems()}</>}
+            />
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons
                     viewModel={props.viewModel}
@@ -785,6 +947,38 @@ function ConnStatusOverlay({
  * overrides the default — callers fall back to their own default (accent
  * when focused, the dim border color otherwise) via `var(--x, <default>)`.
  */
+/**
+ * The vivid, border-strength color a block's OWN color resolves to — no
+ * tab-level override consulted at all, unlike computeFocusRingBorderColor
+ * below (which folds in tabMeta's bg:activebordercolor for the single
+ * currently-focused block's outer ring). PaneChrome's pane-tab pills need
+ * this pure per-block form: computing each pill's own color by handing
+ * every one through computeFocusRingBorderColor with the SAME shared
+ * tabMeta would let one tab-wide bg:activebordercolor collapse every
+ * pill's underline to that one color, defeating the point of a per-block
+ * underline (reagent P1, PR #3484).
+ *
+ * frame:hue is an explicit user choice from the pane-header "Pane Color"
+ * picker (pane-color-menu.ts's setHue); frame:activebordercolor is a
+ * passive default (per-agent identity color, seeded once at launch — see
+ * SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice must win whenever
+ * it's present, or picking a hue on an agent pane would have no visible
+ * effect (reagent P1, PR #2477) — hue is therefore checked FIRST. Clearing
+ * the hue picker sets frame:hue to `null` (not delete), which correctly
+ * falls through here (typeof null !== "number") back to the agent's
+ * default color rather than to no color at all.
+ */
+export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefined): string | undefined {
+    const hue = blockMeta?.["frame:hue"];
+    if (typeof hue === "number") {
+        return hueToActiveBorder(hue);
+    }
+    if (blockMeta?.["frame:activebordercolor"]) {
+        return blockMeta["frame:activebordercolor"] as string;
+    }
+    return undefined;
+}
+
 export function computeFocusRingBorderColor(
     isFocused: boolean,
     blockMeta: Block["meta"] | undefined,
@@ -795,27 +989,13 @@ export function computeFocusRingBorderColor(
         if (tabActiveBorderColor) {
             return tabActiveBorderColor;
         }
-        // frame:hue is an explicit user choice from the pane-header "Pane
-        // Color" picker (pane-color-menu.ts's setHue); frame:activebordercolor
-        // is a passive default (per-agent identity color, seeded once at
-        // launch — see SPEC_AGENT_COLOR_2026_08_08.md). The explicit choice
-        // must win whenever it's present, or picking a hue on an agent pane
-        // would have no visible effect (reagent P1, PR #2477) — hue is
-        // therefore checked FIRST (this used to check activebordercolor
-        // first and return before ever reaching hue, silently reintroducing
-        // the exact bug #2477 fixed — SPEC_AGENT_HEADER_COLOR_UNIFICATION_
-        // 2026_09_20.md's follow-up). Clearing the hue picker sets frame:hue
-        // to `null` (not delete), which correctly falls through here
-        // (typeof null !== "number") back to the agent's default color
-        // rather than to no color at all.
-        const hue = blockMeta?.["frame:hue"];
-        if (typeof hue === "number") {
-            return hueToActiveBorder(hue);
-        }
-        if (blockMeta?.["frame:activebordercolor"]) {
-            return blockMeta["frame:activebordercolor"] as string;
-        }
-        return undefined;
+        // This used to inline the hue/activebordercolor check itself,
+        // checking activebordercolor first and returning before ever
+        // reaching hue — silently reintroducing the exact bug #2477 fixed
+        // (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's follow-up).
+        // Now shares computeBlockActiveBorderColor's already-correct
+        // hue-first precedence instead of duplicating it.
+        return computeBlockActiveBorderColor(blockMeta);
     }
     const tabBorderColor = tabMeta?.["bg:bordercolor"] as string | undefined;
     if (tabBorderColor) {

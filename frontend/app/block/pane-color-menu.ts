@@ -31,6 +31,20 @@ export function hueToHeaderBg(hue: number): string {
     return `hsl(${hue}, 28%, 16%)`;
 }
 
+/** Derive a pane-tab pill's own darkened background from a hue (0–360).
+ * Deliberately more saturated/lighter than hueToHeaderBg's 28%/16% — that
+ * treatment was tuned for a large, full-width header bar, where even a
+ * subtle tint reads clearly. On a small ~20px pane-tab pill the identical
+ * value is nearly indistinguishable from black and from a neighboring
+ * uncolored (fully transparent) pill, which live-reproduced as "every
+ * pill's color collapses to the same one" even though the underlying
+ * computed colors were, in fact, all distinct
+ * (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md) — a contrast bug, not a
+ * data bug. */
+export function hueToPaneTabBg(hue: number): string {
+    return `hsl(${hue}, 42%, 24%)`;
+}
+
 /** Derive the vivid active-border color from a hue (0–360). */
 export function hueToActiveBorder(hue: number): string {
     return `hsl(${hue}, 65%, 52%)`;
@@ -114,14 +128,32 @@ export function headerBgForEffectiveColor(
     hue: number | undefined,
     activeBorderHex: string | undefined,
     isLightTheme: boolean,
+    // Which dark-theme muted-background deriver to use — defaults to the
+    // header's own hueToHeaderBg. paneTabBgForEffectiveColor (below) reuses
+    // this exact same light/dark precedence, swapping in hueToPaneTabBg's
+    // higher-contrast treatment instead, rather than duplicating the
+    // branching logic itself.
+    darkBgFromHue: (hue: number) => string = hueToHeaderBg,
 ): string | undefined {
     if (isLightTheme) {
         if (typeof hue === "number") return hueToActiveBorder(hue);
         return activeBorderHex;
     }
-    if (typeof hue === "number") return hueToHeaderBg(hue);
-    if (activeBorderHex) return hueToHeaderBg(hexToHue(activeBorderHex));
+    if (typeof hue === "number") return darkBgFromHue(hue);
+    if (activeBorderHex) return darkBgFromHue(hexToHue(activeBorderHex));
     return undefined;
+}
+
+/** Same rule as headerBgForEffectiveColor, for a pane-tab pill's own
+ * background instead of the pane header's — see hueToPaneTabBg's own doc
+ * comment for why the dark-theme treatment needs to be more visible than
+ * the header's at that much smaller element size. */
+export function paneTabBgForEffectiveColor(
+    hue: number | undefined,
+    activeBorderHex: string | undefined,
+    isLightTheme: boolean,
+): string | undefined {
+    return headerBgForEffectiveColor(hue, activeBorderHex, isLightTheme, hueToPaneTabBg);
 }
 
 /**
