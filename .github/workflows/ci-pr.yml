@@ -574,16 +574,34 @@ jobs:
   # header for the full reasoning, including why an unrecognized `result`
   # value fails closed rather than passing.
   #
-  # Deliberately does NOT include `docs` (doc status + grep gates): that job
-  # is not in today's required-contexts set (branch protection currently
-  # requires `check --tests + test (windows-latest)`, `vitest`, and the
-  # unrelated `check` from no-coauthor-trailers.yml), and adding it here
-  # would silently make doc-gate failures block merges for the first time —
-  # a real policy change, not a bug fix. This job exists to replace exactly
-  # the two contexts the matrix-name bug affects, nothing more.
+  # `docs` IS included, and that is a deliberate policy change — stated plainly
+  # because this job originally, and correctly, excluded it on the grounds that
+  # "adding it here would silently make doc-gate failures block merges for the
+  # first time — a real policy change, not a bug fix". That reasoning was sound
+  # when the aggregate job was a targeted fix for the matrix-name bug.
+  #
+  # What changed is the evidence. `docs` is not a branch-protection context, so
+  # while it was also absent here, NOTHING consumed its result: it could fail
+  # outright and the PR still merged. On a documentation-only PR that is the
+  # whole gate, because `rust` and `frontend` both skip — so the one PR shape
+  # this lane was built for had no substantive blocking check at all.
+  #
+  # Observed live on #3510: a malformed spec Status header — precisely the
+  # content error this gate exists to catch — with `doc status + grep gates`
+  # red, `CI required` green, and two approvals on it. It was caught only by
+  # reading the job log by hand.
+  #
+  # So the choice is not "policy change vs. no policy change"; it is "doc gate
+  # advisory" vs. "doc gate blocking", and it was silently the former. Making
+  # it blocking is the change; leaving it advisory was also a policy, just an
+  # unstated one. #3506.
+  #
+  # Safe with the existing script: `docs` has no job-level `if:`, so it always
+  # runs and reports success/failure — never `skipped` — and
+  # evaluateRequiredJobs already treats `failure` as fatal.
   ci-required:
     name: CI required
-    needs: [changes, rust, frontend]
+    needs: [changes, docs, rust, frontend]
     if: always()
     runs-on: ubuntu-latest
     steps:
