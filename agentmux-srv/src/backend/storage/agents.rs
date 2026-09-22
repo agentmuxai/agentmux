@@ -2773,19 +2773,6 @@ mod tests {
         assert_eq!(by_slug.id, "def-b", "slug lookup must never resolve to A's row");
     }
 
-    // A slug does not identify an agent once two rows share one, so the
-    // honest answer is "unknown" — same fail-closed rule
-    // `agent_registry_lookup::find_active_record_by_slug` adopted for the
-    // registry in PR #3480, here for `db_agents`.
-    //
-    // The duplicate is built the way the shipping app builds one, not by
-    // hand: `instance_create` copies `def.slug` verbatim and does no
-    // collision suffixing of its own (only `agent_def_insert` does), and per
-    // its own doc comment every fresh launch of a TEMPLATE creates its own
-    // row. So launching one template twice is enough — no hand-edited
-    // database, no second definition, nothing a real install cannot reach.
-    // `migrations.rs` declines a UNIQUE index on `db_agents(slug)` for
-    // exactly this reason.
     // The §4 safety net. `instance_create` used to bind `def.slug` verbatim,
     // making it the one writer that could mint a duplicate — `agent_def_insert`
     // has always suffix-resolved, and no UNIQUE constraint backs the column.
@@ -2825,8 +2812,19 @@ mod tests {
         assert_eq!(dupes, 0, "a template launch must not mint a duplicate slug");
     }
 
+    // A slug does not identify an agent once two rows share one, so the honest
+    // answer is "unknown" — the same fail-closed rule
+    // `agent_registry_lookup::find_active_record_by_slug` adopted for the
+    // registry in #3480, here for `db_agents` (#3500).
+    //
+    // This test predates the §4 safety net above and used to build its
+    // duplicate by launching one template twice, on the reasoning that
+    // `instance_create` copied `def.slug` verbatim. That is no longer true —
+    // and was never true of the real launch flow either (§2.5.2) — so the
+    // duplicate is now forced deliberately. The state remains reachable in
+    // production: no UNIQUE constraint backs the column.
     #[test]
-    fn instance_get_by_slug_fails_closed_when_one_template_is_launched_twice() {
+    fn instance_get_by_slug_fails_closed_when_two_rows_share_a_slug() {
         let store = Store::open_in_memory().unwrap();
 
         let mut tmpl = test_agent_def("tmpl-1", "Shared Template", "claude", "agent", 1, "");
