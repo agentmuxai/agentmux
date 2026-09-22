@@ -377,6 +377,7 @@ function makeViewModel(suggestion: string | undefined, gen = 1): AgentViewModel 
                 },
             }) as any,
         voiceTargetRef: { current: null },
+        focusTargetRef: { current: null },
     } as unknown as AgentViewModel;
 }
 
@@ -395,6 +396,7 @@ function makeReactiveViewModel(initial: { suggestion: string | undefined; gen: n
                 },
             }) as any,
         voiceTargetRef: { current: null },
+        focusTargetRef: { current: null },
     } as unknown as AgentViewModel;
     return { vm, setState };
 }
@@ -521,7 +523,12 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
 // state into, or read stale state left by, unrelated tests sharing this
 // file's module graph.
 function makeDraftViewModel(blockId: string): AgentViewModel {
-    return { blockId, blockAtom: () => ({ meta: {} }) as any, voiceTargetRef: { current: null } } as unknown as AgentViewModel;
+    return {
+        blockId,
+        blockAtom: () => ({ meta: {} }) as any,
+        voiceTargetRef: { current: null },
+        focusTargetRef: { current: null },
+    } as unknown as AgentViewModel;
 }
 
 describe("AgentFooter composer draft persistence (SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.4)", () => {

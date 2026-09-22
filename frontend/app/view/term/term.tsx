@@ -19,6 +19,7 @@ import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
+import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
@@ -176,7 +177,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         // prevents the shell from executing partial lines mid-paste. Disable per-pane
         // via term:allowbracketedpaste=false for legacy shells that don't support it.
         const termAllowBPM = termBPMAtom() ?? true;
-        const wasFocused = model.termRef.current != null && model.nodeModel.isFocused();
         const termWrap = new TermWrap(
             blockId,
             connectElemRef,
@@ -209,9 +209,17 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             if (searchProps.resultsCount) searchProps.resultsCount._set(results.resultCount);
         };
         fireAndForget(() => termWrap.init());
-        if (wasFocused) {
-            setTimeout(() => model.giveFocus(), 10);
-        }
+        // SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §2c: the old `wasFocused`
+        // precheck above read `model.termRef.current` BEFORE the assignment
+        // three lines up ever ran, so it was always false on a genuine first
+        // mount — this pane's "already implemented" giveFocus() only ever
+        // fired on a re-mount of an already-initialized model. It also used
+        // `nodeModel.isFocused()`, which is true even for a pane sitting in a
+        // BACKGROUND tab (that memo is scoped to the pane's own tab, not the
+        // active one) — swapped for focusManager.claimFocusOnMount's
+        // active-tab-scoped check so a terminal created out of view can't
+        // steal focus from whatever the user is actually looking at.
+        setTimeout(() => focusManager.claimFocusOnMount(blockId, () => model.giveFocus()), 10);
         onCleanup(() => {
             termWrap.dispose();
             rszObs.disconnect();
