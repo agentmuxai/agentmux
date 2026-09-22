@@ -37,14 +37,18 @@ tasks:
             - bash scripts/release.sh {{.CLI_ARGS}}
 
     release:patch:
-        desc: 'Consume pending changesets, force PATCH bump regardless of changeset types, update VERSION_HISTORY (no commit). Then: git commit -m "chore: release vX.Y.Z" && git push.'
+        desc: 'Consume pending changesets, force PATCH bump regardless of changeset types, update VERSION_HISTORY (no commit). Pass -- --dry-run to preview. Then: git commit -m "chore: release vX.Y.Z" && git push.'
         cmds:
-            - bash scripts/release.sh --as patch
+            # {{.CLI_ARGS}} must be forwarded: without it `task release:patch --
+            # --dry-run` silently DROPPED the flag and performed a real release.
+            # `--as patch` stays first so an explicit `-- --as minor` still wins
+            # (release.sh's parser takes the last --as it sees).
+            - bash scripts/release.sh --as patch {{.CLI_ARGS}}
 
     release:minor:
-        desc: 'Consume pending changesets, force MINOR bump regardless of changeset types, update VERSION_HISTORY (no commit). Then: git commit -m "chore: release vX.Y.Z" && git push.'
+        desc: 'Consume pending changesets, force MINOR bump regardless of changeset types, update VERSION_HISTORY (no commit). Pass -- --dry-run to preview. Then: git commit -m "chore: release vX.Y.Z" && git push.'
         cmds:
-            - bash scripts/release.sh --as minor
+            - bash scripts/release.sh --as minor {{.CLI_ARGS}}
 
     package:local:
         desc: 'Alias of `task package` (which is now itself ephemeral — no bump, no git mutation, unique stamped label per build). Kept for muscle memory.'
