@@ -549,7 +549,7 @@ export function useAgentStream({
                         // to await or catch. See
                         // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_
                         // 2026_09_22.md §1.2/§3.3.
-                        void memoryReinjectionController.trigger(compactBoundary.frameTimestamp);
+                        void memoryReinjectionController.trigger(compactBoundary.frameTimestamp, "compaction");
                     }
                     continue;
                 }
@@ -586,6 +586,27 @@ export function useAgentStream({
                             addNodeId(node.id);
                             queue.pushNewNode(node);
                             queue.scheduleFlush();
+                            // A "fresh" outcome means AgentMux could not resume
+                            // this PERSISTENT identity's prior session — the
+                            // model has none of its previous conversation at
+                            // all, the same "just lost prior context"
+                            // situation compact_boundary's reinjection exists
+                            // for (arguably more total loss than compaction,
+                            // which at least leaves a summary). The identity
+                            // (Global/Personal memory) is unchanged by the
+                            // session swap, so it still needs to be back in
+                            // front of the model. Fire the same hidden-
+                            // reinjection turn here too — the controller's own
+                            // busy-pane defer (fix 1/2 above) handles this
+                            // landing while the triggering turn (the message
+                            // that discovered the resume failure) is itself
+                            // still in flight, which is the common case here.
+                            // See SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_
+                            // COMPACTION_2026_09_22.md §3.3a, "fresh session"
+                            // addendum.
+                            if (sessionOutcome.outcome === "fresh") {
+                                void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
+                            }
                         }
                     }
                     continue;
