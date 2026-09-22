@@ -52,7 +52,19 @@ const DOCS_ONLY_PATTERNS = [
  * issue template, a workflow's README) can never be classified as harmless.
  * These directories configure what CI does; a change to them must exercise it.
  */
-const NEVER_DOCS_PREFIXES = [".github/", "scripts/", "tools/", ".changeset/"];
+/**
+ * `.changesets/` is deliberately absent — it belongs in DOCS_ONLY_PATTERNS
+ * above. A `.changeset/` (singular) entry sat here and was dead code: no such
+ * directory exists in this repo (reagentx P2, PR #3491).
+ *
+ * **Do not "correct the typo" by moving `.changesets/` into this list.** Every
+ * PR carries a changeset entry, so classifying them as never-docs would force
+ * a full build on every PR and this mechanism would never fire once. Verified
+ * 2026-09-21: `.changesets/` is read only by `release.sh`, `package*.sh`,
+ * `bump-wrapper.sh`, `dev-local.sh`, `gen-seed.js` and `nightly-release.yml`
+ * — none of which run in the PR lane.
+ */
+const NEVER_DOCS_PREFIXES = [".github/", "scripts/", "tools/"];
 const NEVER_DOCS_EXACT = ["Taskfile.yml", "Taskfile.yaml", ".gitattributes", ".gitignore"];
 
 /** Normalize a path the way git reports it, tolerating quoting and `\` separators. */

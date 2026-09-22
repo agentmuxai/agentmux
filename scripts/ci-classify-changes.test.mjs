@@ -52,6 +52,20 @@ describe("isDocsOnlyPath — R3, CI configuration is never documentation", () =>
         expect(isDocsOnlyPath("tools/muxlog/README.md")).toBe(false);
     });
 
+    it("does NOT treat `.changesets/` as CI config, and that is load-bearing", () => {
+        // reagentx P2 on #3491 spotted a dead `.changeset/` (singular) entry in
+        // NEVER_DOCS_PREFIXES and read it as a typo for the real `.changesets/`.
+        // Removing it was right; "fixing" it would not be. Every PR in this repo
+        // carries a changeset, so classifying them as never-docs would force a
+        // full build on every PR and the skip would never fire once. This test
+        // exists so that change fails loudly instead of quietly neutering the
+        // feature.
+        expect(isDocsOnlyPath(".changesets/1790043689-ci-something-abcd.md")).toBe(true);
+        expect(
+            classifyChanges(["docs/specs/SPEC_A.md", ".changesets/1790043689-x.md"]),
+        ).toMatchObject({ rust: false, frontend: false, docs_only: true });
+    });
+
     it("rejects the build-controlling root files", () => {
         expect(isDocsOnlyPath("Taskfile.yml")).toBe(false);
         expect(isDocsOnlyPath(".gitattributes")).toBe(false);
