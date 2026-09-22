@@ -2276,11 +2276,6 @@ impl Store {
 const INSTANCE_COLUMNS: &str = "id, last_block_id, session_id, status, github_context, started_at, ended_at, \
      created_at, identity_id, memory_id, instance_name, working_directory, user_hidden";
 
-/// Project a non-template `db_agents` row (selected with
-/// [`INSTANCE_COLUMNS`]) into the `AgentInstance` shape: the row's id is
-/// both `id` and `definition_id`, `last_block_id` is `block_id`, chains are
-/// pre-collapsed so `parent_instance_id` is empty, and a row that never
-/// recorded a launch reports `created_at` as `started_at`.
 /// The first of `base`, `base-2`, `base-3`, … that no `db_agents` row holds.
 ///
 /// Shared by `agent_def_insert_local_only` and `instance_create` so the two
@@ -2318,6 +2313,11 @@ fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) -> rusqlite::
     }
 }
 
+/// Project a non-template `db_agents` row (selected with
+/// [`INSTANCE_COLUMNS`]) into the `AgentInstance` shape: the row's id is
+/// both `id` and `definition_id`, `last_block_id` is `block_id`, chains are
+/// pre-collapsed so `parent_instance_id` is empty, and a row that never
+/// recorded a launch reports `created_at` as `started_at`.
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
     let id: String = row.get(0)?;
     let started_at: i64 = row.get(5)?;
