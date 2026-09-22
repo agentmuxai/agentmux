@@ -664,22 +664,67 @@ reviewed did:**
    independent of the frontend's `hidden` check entirely. Now closed too,
    for free, by fixing the shared function rather than the caller.
 
-   **Running honest tally:** five review rounds, six real bugs, by six
+7. **A gap inside finding 6's own fix — reagentx P0, SIXTH review round:
+   `extract_digest_text`'s "user" arm treated ANY non-hidden-marker
+   "type":"user" line as ending the hidden window**, including a
+   tool_result-only line — Claude Code's own continuation frame feeding a
+   tool's output back into the model mid-reply, not something a human
+   typed. A hidden turn whose reply calls a tool (e.g. reads a file) and
+   then continues its text after the tool result comes back produces
+   exactly that shape: `[user REINJECTION] → [assistant tool_use] →
+   [user tool_result] → [assistant continued text]`. The old code's
+   `hiding = false` fired unconditionally on that `[user tool_result]`
+   line, so the tool_use's matching gate on the "assistant" arm no longer
+   applied and the model's continued reply leaked straight into the
+   digest — the exact "regardless of block type" guarantee finding 6's
+   own code comment claimed, broken by the very next kind of frame a
+   real tool-using reply produces.
+
+   Root cause: the raw JSONL format collapses two different things into
+   one `"type":"user"` line — a literal user-typed message and a
+   tool_result continuation frame — and the fix distinguished them only
+   by accident (whichever line happened to arrive), not by content.
+   `stream-parser.ts` never has this problem because its upstream event
+   translator (`claude-translator.ts`) already splits these into
+   distinct event types before `hidingUntilNextUserMessage` ever sees
+   them: a `tool_result` event never reaches `userMessageToNode`, so it
+   can never clear the flag; only an actual `user_message` event does.
+   The Rust code had no equivalent distinction and needed one added
+   directly, since it reads the raw per-line JSON, not translated
+   events.
+
+   **Fixed**: `hiding` is now only cleared when the "user" line's content
+   array contains a `text`-type block — the actual signal that a human
+   typed something, matching `claude-translator.ts`'s `content` is a
+   plain string vs. an array of `tool_result` blocks distinction one
+   layer down (same signal, checked directly on the raw block shape
+   since this code never goes through the translator). A tool_result-only
+   line while `hiding` is true is now skipped entirely rather than
+   resetting the flag. 1 new regression test
+   (`a_tool_result_continuation_frame_mid_hidden_reply_does_not_end_hiding`)
+   reproducing the exact four-line shape above; confirmed it failed
+   against the pre-fix code for the right reason (the continued reply
+   text present in the digest) before applying the fix. Full `session.rs`
+   suite (43 tests) green after.
+
+   **Running honest tally:** six review rounds, seven real bugs, by seven
    distinct mechanisms (turnPhase corruption twice, over two different
-   race windows; four leak routes, the last two only closeable by going
-   past the frontend entirely). Every one was caught by ReAgent, not by
-   this session's own testing — the test suites in this PR are thorough
-   for the behavior each fix claims, but thoroughness at explaining a fix
-   is not the same property as completeness at finding what needed
-   fixing. The pattern across all six is consistent, and worth naming
-   directly: every fix that patched a symptom at an individual call site
-   left a sibling call site (or, in this last case, an entire backend
-   layer) unpatched; every fix that instead found and patched the actual
-   shared mechanism closed the class of bug outright. Stated plainly
-   rather than left implicit, for whoever reviews this next — and for
-   whoever designs the next feature in this shape, since "hidden from the
-   user" turned out to have a lot more places to check than it first
-   looked like.
+   race windows; five leak routes, one of them a gap inside the fix for
+   another). Every one was caught by ReAgent, not by this session's own
+   testing — the test suites in this PR are thorough for the behavior
+   each fix claims, but thoroughness at explaining a fix is not the same
+   property as completeness at finding what needed fixing. The pattern
+   across all seven is consistent, and worth naming directly: every fix
+   that patched a symptom at an individual call site left a sibling call
+   site (or, in finding 6's case, an entire backend layer; in finding
+   7's case, a second shape of input the same call site could receive)
+   unpatched; every fix that instead found and patched the actual shared
+   mechanism, checked against its full input space rather than the one
+   shape a test happened to construct, closed the class of bug outright.
+   Stated plainly rather than left implicit, for whoever reviews this
+   next — and for whoever designs the next feature in this shape, since
+   "hidden from the user" turned out to have a lot more places to check
+   than it first looked like.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 

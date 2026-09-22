@@ -1357,21 +1357,27 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
                         hiding = true;
                         continue; // never emit the hidden turn's own outgoing message either
                     }
-                    // A genuine user message ends any hidden window that
-                    // was open — including a tool_result-only message
-                    // (Claude's own continuation frames while the hidden
-                    // turn's reply was still running tools); only a NEW
-                    // literal user-typed text message clears it, same rule
-                    // as the frontend parser. tool_result-only messages
-                    // fall through to the loop below unaffected either way
-                    // (their own is_error branch already only fires when
-                    // `hiding` allowed this message to be inspected at all —
-                    // reaching this point already means `hiding` should be
-                    // false for the remainder of THIS message's blocks; a
-                    // hidden turn's own tool_result continuation frames were
-                    // already excluded by the `hiding` gate on the
-                    // "assistant" arm that produced the matching tool_use).
-                    hiding = false;
+                    // A "type":"user" line is only a genuine, literal
+                    // user-typed message if it carries a text block — a
+                    // tool_result-only line is Claude Code's own
+                    // continuation frame feeding a tool's output back after
+                    // an assistant tool_use, not something a human typed.
+                    // Mirrors stream-parser.ts: there, tool_result frames
+                    // become a distinct ToolResultEvent that never reaches
+                    // userMessageToNode, so hidingUntilNextUserMessage stays
+                    // set; only an actual UserMessageEvent clears it. If a
+                    // hidden window is open and this is a tool_result-only
+                    // continuation frame, it belongs to the hidden turn's
+                    // own tool call and must stay suppressed too — skip it
+                    // entirely rather than resetting `hiding`.
+                    let has_genuine_user_text = content.iter().any(|block| {
+                        block.get("type").and_then(|v| v.as_str()) == Some("text")
+                    });
+                    if has_genuine_user_text {
+                        hiding = false;
+                    } else if hiding {
+                        continue;
+                    }
 
                     for block in content {
                         let btype = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -1485,6 +1491,16 @@ mod extract_digest_text_tests {
         }).to_string()
     }
 
+    /// A "type":"user" line carrying only a tool_result block — Claude Code's
+    /// own continuation frame feeding a tool's output back after an
+    /// assistant tool_use, NOT a literal user-typed message.
+    fn tool_result_line() -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": { "content": [{ "type": "tool_result", "content": "file contents" }] }
+        }).to_string()
+    }
+
     #[test]
     fn is_hidden_reinjection_text_recognizes_the_real_signature() {
         assert!(is_hidden_reinjection_text(REINJECTION_TEXT));
@@ -1523,6 +1539,25 @@ mod extract_digest_text_tests {
             user_text_line(REINJECTION_TEXT),
             assistant_text_line("Understood, I've reviewed my memory including secret memory content"),
             assistant_tool_use_line("Read"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let digest = extract_digest_text(&refs);
+        assert!(digest.is_empty(), "digest should be empty, was: {digest}");
+    }
+
+    #[test]
+    fn a_tool_result_continuation_frame_mid_hidden_reply_does_not_end_hiding() {
+        // reagent round 6, PR #3502: the hidden turn's own reply runs a tool
+        // (Read) and continues after the tool_result comes back. That
+        // tool_result arrives as its own "type":"user" line — it must NOT be
+        // mistaken for a genuine user message that ends the hidden window,
+        // or the model's continued reply after it leaks straight through.
+        let lines = vec![
+            user_text_line(REINJECTION_TEXT),
+            assistant_text_line("hidden reply, part one"),
+            assistant_tool_use_line("Read"),
+            tool_result_line(),
+            assistant_text_line("hidden reply, part two, after reading memory"),
         ];
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let digest = extract_digest_text(&refs);
