@@ -2,7 +2,30 @@
 
 **Date:** 2026-07-02
 **Type:** Correction + implementation spec
-**Status:** proposed — Ready to schedule
+**Status:** proposed — Ready to schedule. **Corrected 2026-09-20: this status
+line is stale for §B.5 specifically — it was NOT left unimplemented.** Tracked
+as issue #2218 and fixed by PRs #2220/#2221/#2222 (shipped v0.54.4), confirmed
+via `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`
+§2 history entry ("Confirmed *not* a leak (07-16: closing AgentMux instantly
+released 43.6 GB) — it's a live floor that ratchets up because pooled
+renderers weren't torn down on pane close... fixed by PRs #2220/#2221/#2222").
+The shipped fix is **not** literally §B.5(a) as written below (destroy on
+pane close) — that approach was superseded once `docs/retro/retro-window-lifecycle-leak-2026-07-04.md`
+found CEF 148 Views parks the browser on every destroy sequence regardless
+(the renderer leaks no matter how the window dies), so destroy-on-close
+alone would not have worked. The shipped design instead demotes a closing
+promoted pool window back into the warm pool for reuse (`agentmux-cef/src/commands/window_pool.rs::demote_promoted_pool_window`),
+with a pressure-aware demote cap (`effective_pool_demote_cap`, "B.5 Part 2")
+that tightens under `Warn`/`Critical` memory pressure so a demote burst falls
+back to destroy instead of overfilling the pool. §A.4's `--disable-gpu`
+mitigation was explicitly **rejected** as a fix by the repo owner (GPU stays
+enabled by policy) — do not re-propose it. §B.5(d) (surfacing live-renderer
+count + per-renderer commit in Swarm) was **not independently re-verified**
+while writing this note; treat it as open until checked. §B.1-B.4 (the WPS
+broker `persist_map` prune, bounded WS egress channels, `SubagentWatcher`
+event-Vec cap, deterministic browser-pane teardown) were also **not
+re-verified** — do not assume they shipped alongside §B.5 just because it
+did. This correction is scoped to §B.5's core mechanism only.
 **Owner:** asaf
 **Scope:** Corrects `SPEC_MEMORY_ANALYSIS_2026_06_26.md`'s attribution; specifies the AgentMux-side
 memory fixes that survive the correction. See `docs/retro/retro-commit-charge-pagefile-growth-2026-07-02.md`
