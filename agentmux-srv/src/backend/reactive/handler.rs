@@ -144,6 +144,32 @@ pub struct Handler {
     /// [`Handler::canonical_key`]. `None` (unset) keeps the pre-Phase-2
     /// lowercased-slug keying exactly.
     agent_key_resolver: Option<AgentKeyResolver>,
+    /// Lowercased slug → the registry key that slug was registered under,
+    /// pinned at registration time.
+    ///
+    /// **Lookups must not re-run the resolver.** `canonical_key` reads the
+    /// store, and a transient failure there (a busy or locked SQLite read)
+    /// would make it fall back to the lowercased slug — which no longer
+    /// matches the canonical-id key the entry is actually stored under. The
+    /// lookup would then miss and report "agent not found" for an agent that
+    /// is registered and healthy: the same registry-lookup failure this phase
+    /// exists to remove, re-introduced via resolver flakiness (ReAgent P1 on
+    /// #3520). Pinning the binding once makes every later lookup independent
+    /// of store availability.
+    slug_bindings: HashMap<String, SlugBinding>,
+}
+
+/// What a lowercased slug resolves to in [`Handler::slug_bindings`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SlugBinding {
+    /// Exactly one registered agent answers to this slug.
+    Unique(String),
+    /// Two or more registered agents do. The slug does not identify an agent,
+    /// so it resolves to nothing rather than to whichever registered last —
+    /// the same fail-closed rule `instance_get_by_slug` and
+    /// `find_active_record_by_slug` follow. Addressing by canonical id still
+    /// reaches either one.
+    Ambiguous,
 }
 
 impl Handler {
@@ -165,6 +191,7 @@ impl Handler {
             include_source_in_message: false,
             nudge_counters: HashMap::new(),
             agent_key_resolver: None,
+            slug_bindings: HashMap::new(),
         }
     }
 
@@ -183,6 +210,50 @@ impl Handler {
     /// Deliberately NOT used for the alias registry: aliases are the *stable*
     /// `AGENTMUX_AGENT_ID` by design (see `alias_to_block`), so they stay
     /// slug-keyed and are looked up with the raw lowercased value.
+    /// The registry key to look `agent_id` up under.
+    ///
+    /// Never re-runs the resolver for an agent that is already registered —
+    /// see [`Handler::slug_bindings`]. Order:
+    ///
+    /// 1. A direct key hit: the caller addressed the canonical id, or an
+    ///    unresolvable agent by the slug it registered under.
+    /// 2. The binding pinned at registration. `Ambiguous` returns `None`, so a
+    ///    slug two agents share resolves to nothing instead of to one of them.
+    /// 3. Only for an agent this handler has never registered: resolve cold.
+    fn lookup_key(&self, agent_id: &str) -> Option<String> {
+        if self.agent_to_block.contains_key(agent_id) || self.agent_info.contains_key(agent_id) {
+            return Some(agent_id.to_string());
+        }
+        let slug = agent_id.to_lowercase();
+        if self.agent_to_block.contains_key(&slug) || self.agent_info.contains_key(&slug) {
+            return Some(slug);
+        }
+        match self.slug_bindings.get(&slug) {
+            Some(SlugBinding::Unique(key)) => Some(key.clone()),
+            Some(SlugBinding::Ambiguous) => None,
+            None => Some(self.canonical_key(agent_id)),
+        }
+    }
+
+    /// Record that `agent_id` registered under `key`, or mark the slug
+    /// ambiguous if a different agent already answers to it.
+    fn bind_slug(&mut self, agent_id: &str, key: &str) {
+        let slug = agent_id.to_lowercase();
+        match self.slug_bindings.get(&slug) {
+            Some(SlugBinding::Unique(existing)) if existing != key => {
+                tracing::warn!(
+                    slug = %slug,
+                    "reactive registry: two agents share this slug; it no longer addresses either"
+                );
+                self.slug_bindings.insert(slug, SlugBinding::Ambiguous);
+            }
+            Some(_) => {}
+            None => {
+                self.slug_bindings.insert(slug, SlugBinding::Unique(key.to_string()));
+            }
+        }
+    }
+
     fn canonical_key(&self, agent_id: &str) -> String {
         if let Some(resolve) = &self.agent_key_resolver {
             if let Some(id) = resolve(agent_id) {
@@ -265,6 +336,9 @@ impl Handler {
         }
 
         let agent_key = self.canonical_key(agent_id);
+        // Pin slug → key now, so no later lookup depends on the resolver (and
+        // therefore on the store) being reachable. See `slug_bindings`.
+        self.bind_slug(agent_id, &agent_key);
 
         // Remove existing registration for this agent
         let evicted_block = self.agent_to_block.remove(&agent_key);
@@ -341,7 +415,10 @@ impl Handler {
 
     /// Unregister an agent.
     pub fn unregister_agent(&mut self, agent_id: &str) {
-        let agent_key = self.canonical_key(agent_id);
+        let Some(agent_key) = self.lookup_key(agent_id) else {
+            return;
+        };
+        self.slug_bindings.remove(&agent_id.to_lowercase());
         if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
             self.log_audit_registration("unregister", agent_id, &block_id, None, None);
@@ -419,7 +496,9 @@ impl Handler {
     /// Update the last_seen timestamp for an agent.
     #[allow(dead_code)]
     pub fn update_last_seen(&mut self, agent_id: &str) {
-        let key = self.canonical_key(agent_id);
+        let Some(key) = self.lookup_key(agent_id) else {
+            return;
+        };
         if let Some(info) = self.agent_info.get_mut(&key) {
             info.last_seen = now_unix_millis();
         }
@@ -427,7 +506,7 @@ impl Handler {
 
     /// Get agent registration by agent ID.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        self.agent_info.get(&self.canonical_key(agent_id))
+        self.agent_info.get(&self.lookup_key(agent_id)?)
     }
 
     /// Get agent registration by block ID.
@@ -517,7 +596,7 @@ impl Handler {
         // (Phase 2) while the alias registry is keyed by the STABLE slug by
         // design — see `alias_to_block`. Resolving the alias lookup too would
         // break every jekt addressed to a stable AGENTMUX_AGENT_ID.
-        let target_key = self.canonical_key(&req.target_agent);
+        let target_key = self.lookup_key(&req.target_agent).unwrap_or_default();
         let alias_key = req.target_agent.to_lowercase();
         let block_id = match self
             .agent_to_block
