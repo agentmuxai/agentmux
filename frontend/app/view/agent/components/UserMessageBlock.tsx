@@ -65,7 +65,6 @@ interface UserMessageBlockProps {
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
-    let rootEl: HTMLDivElement | undefined;
 
     const handleMouseEnter = () => {
         clearTimeout(enterTimer);
@@ -102,7 +101,15 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // bodyMode() === "overlay" above) rather than a metadata summary, so
     // this is gated to the non-collapsible case only.
     const peekTick = useTick(1000);
-    const { isPeeking, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    // `setRowEl` is wired to the row below and `rowEl` is read by both
+    // PeekOverlays. This component used to keep its own private `rootEl` and
+    // never register it, so the hook's own `rowEl` signal stayed permanently
+    // undefined — and the drag-release hover resync in useNodePeek could
+    // never fire for this one call site, silently reproducing the very
+    // stuck-closed defect that resync exists to fix (reagentx P1 on #3470).
+    // One element reference, owned by the hook.
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } =
+        useNodePeek();
     const peekTimeText = createMemo(() => {
         if (collapsible() || !isPeeking()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
@@ -158,7 +165,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
 
     return (
         <div
-            ref={(el) => (rootEl = el)}
+            ref={setPeekRowEl}
             class={clsx("agent-user-message", {
                 "agent-user-message--startup": collapsible(),
                 "agent-user-message--collapsed": collapsible() && !expanded(),
@@ -199,7 +206,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             </Show>
             <PeekOverlay
                 show={bodyMode() === "overlay"}
-                rowEl={() => rootEl}
+                rowEl={peekRowEl}
                 class="agent-user-message-peek-overlay"
                 // Full width, left-aligned: this variant renders a real
                 // message body (sometimes kilobytes of startup payload),
@@ -217,7 +224,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
             <Show when={!collapsible()}>
                 <PeekOverlay
                     show={isPeeking() && (peekTimeText() != null || peekEstimateText() != null)}
-                    rowEl={() => rootEl}
+                    rowEl={peekRowEl}
                 >
                     <Show when={peekTimeText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
