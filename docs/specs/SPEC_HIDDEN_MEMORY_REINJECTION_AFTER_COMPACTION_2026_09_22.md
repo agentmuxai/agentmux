@@ -605,9 +605,22 @@ here instead of invented fresh.
 
 #### 3.4.3 The suggestion — two concrete actions, not a vague nudge
 
-At `high` band and above, the label's expanded state (§7 open question 4 —
-this is the case that motivates allowing one) surfaces two real actions,
-each backed by an existing AgentMux primitive rather than a new one:
+At `high` band and above, the label's hover tooltip (§7 open question 4's
+"expandable" resolved as an extension of the same PeekOverlay the breakdown
+already uses, not a separate click-to-expand affordance — a simpler v1)
+surfaces guidance toward two real actions, each backed by an existing
+AgentMux primitive rather than a new one:
+
+**Implemented 2026-09-22, sixth pass — informational text only, no action
+wiring.** `DocumentRow.tsx` appends the two bullets below to the existing
+hover breakdown when `sizeBand` is `"high"`/`"critical"`, tested (5 new
+cases in `DocumentRow.test.tsx`, including an explicit assertion that zero
+interactive elements render for this node type). Deliberately does NOT
+wire an actual "compress now" or "create a WorkItem" button — §3.4.4's own
+auto-fire-vs-confirm question is unresolved, and building a clickable
+trigger for an unresolved interaction would mean guessing at UX a human
+hasn't decided. Guidance text carries none of that risk; the actual
+`WorkEnqueue` call described below remains unbuilt.
 
 1. **Compress.** A worded nudge, not an automated rewrite — automatically
    summarizing an agent's own memory without review risks silently discarding

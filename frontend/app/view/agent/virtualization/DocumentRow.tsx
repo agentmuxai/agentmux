@@ -448,7 +448,24 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             (e) => `${e.source === "global" ? "🌐" : "👤"} ${e.label} — ~${fmt(e.tokens)} tok (est.), ${fmt(e.sizeBytes)} B`,
                         );
                         const totalsLine = `Total: ${fmt(n.totalSizeBytes.global)} B global, ${fmt(n.totalSizeBytes.personal)} B personal`;
-                        return [...lines, totalsLine].join("\n");
+                        // Informational suggestion text only, §3.4.3 — no
+                        // action affordance (compress button / "create a
+                        // WorkItem" click) is wired here. §3.4.4 leaves
+                        // whether that action ever auto-fires (vs. requires
+                        // explicit confirmation) as an open product
+                        // decision; building an interactive trigger for an
+                        // unresolved interaction would mean guessing at it.
+                        // Text-only guidance carries none of that risk.
+                        const suggestionLines =
+                            n.sizeBand === "high" || n.sizeBand === "critical"
+                                ? [
+                                      "",
+                                      "Personal memory has grown large. Consider:",
+                                      "• Compress: MemoryList → consolidate with MemoryWrite (check MemoryHistory/MemoryDiff first)",
+                                      "• Delegate: hand the next segment of work to another agent via WorkEnqueue",
+                                  ]
+                                : [];
+                        return [...lines, totalsLine, ...suggestionLines].join("\n");
                     });
                     return (
                         <div
