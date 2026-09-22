@@ -265,6 +265,7 @@ partial list.
 | [`SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) | Spec: CEF proprietary codec support (H.264/AAC) across Windows/macOS/Linux |
 | [`SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md) | Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF) |
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
+| [`SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21`](SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md) | SPEC: skip the build on documentation-only PRs, safely |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
 | [`SPEC_CODEX_JSONL_CONTRACT_2026_08_08`](SPEC_CODEX_JSONL_CONTRACT_2026_08_08.md) | Codex CLI JSONL Adapter Contract |
 | [`SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21`](SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md) | SPEC: harden the Tailwind color system against silent per-theme breakage |

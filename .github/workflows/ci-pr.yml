@@ -99,8 +99,84 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decide which of the jobs below this PR's changed files actually require.
+  # Spec: docs/specs/SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md.
+  #
+  # Read the spec before changing anything here. The short version: a job
+  # skipped by an `if:` reports "skipped", and GitHub counts skipped as
+  # PASSING for a required status check. So a wrong answer does not turn CI
+  # red — it puts a green check on code nobody compiled. Both this job and
+  # the `if:` expressions it feeds are written to fail toward RUNNING.
+  #
+  # Workflow-level `paths:`/`paths-ignore:` is the obvious alternative and is
+  # BANNED here: a workflow skipped that way reports nothing at all, stays
+  # Pending forever, and permanently blocks a PR on a required check.
+  # GitHub's own docs say not to use path filtering on required workflows.
+  changes:
+    name: classify changed files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+      frontend: ${{ steps.classify.outputs.frontend }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Only the classifier is needed. No history: the changed-file list
+          # comes from the API, not from diffing against a base, which
+          # sidesteps the whole `fetch-depth: 1 has no parent to diff` class
+          # of bug that makes this pattern silently wrong elsewhere.
+          sparse-checkout: scripts/ci-classify-changes.mjs
+          sparse-checkout-cone-mode: false
+
+      - id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Deliberately no `set -e`. Every failure path below writes
+        # "run everything" and exits 0. A FAILED changes job would leave its
+        # dependents skipped — i.e. green — which is the exact outcome this
+        # whole design exists to prevent.
+        run: |
+          run_everything() {
+            printf 'rust=true\nfrontend=true\ndocs_only=false\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::running all checks — $1"
+          }
+
+          # R4: only pull requests are eligible. Post-merge runs on main always
+          # do the full job — low volume, and the last gate before a release.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            run_everything "not a pull_request (R4)"
+            exit 0
+          fi
+
+          FILES="$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename' 2>/dev/null)" || FILES=""
+
+          if printf '%s\n' "$FILES" | node scripts/ci-classify-changes.mjs \
+               >/tmp/classify.out 2>/tmp/classify.err; then
+            cat /tmp/classify.out >> "$GITHUB_OUTPUT"
+            echo "::notice::$(cat /tmp/classify.err)"
+            cat /tmp/classify.out
+          else
+            # Writing outputs only on the success path keeps this from
+            # appending a second, conflicting value after a partial write.
+            run_everything "classifier did not run cleanly (R2)"
+          fi
+
   rust:
     name: check --tests + test (${{ matrix.os }})
+    needs: changes
+    # `!= 'false'` rather than `== 'true'`, and `!cancelled()` rather than the
+    # default implicit success(), are both load-bearing. If the `changes` job
+    # fails or is itself skipped, its outputs are the empty string: that is
+    # not 'false', so this job RUNS. Written the obvious way
+    # (`== 'true'`, no status function) a broken classifier would silently
+    # skip the build and report the PR green.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -294,6 +370,11 @@ jobs:
 
   docs:
     name: doc status + grep gates
+    # Intentionally has NO `needs: changes` / `if:`. Its gates (status
+    # vocabulary, the lifecycle ratchet, spec citations, link resolution) are
+    # exactly what a documentation-only PR needs checked — making this one
+    # conditional on "did docs change" would invert the intent, and skipping
+    # it on a docs PR would leave that PR with no gate at all.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -420,6 +501,9 @@ jobs:
 
   frontend:
     name: vitest
+    needs: changes
+    # See the `rust` job's note — same inversion, same reason.
+    if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
