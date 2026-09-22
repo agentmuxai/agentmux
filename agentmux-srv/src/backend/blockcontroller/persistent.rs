@@ -1068,14 +1068,14 @@ impl PersistentSubprocessController {
             return EagerResumeOutcome::DeclinedTo("no mstore configured for this controller");
         };
 
-        // Same fields `agent_handlers::input` reads to build a live message's
-        // spawn config (input.rs's `cli_command`/`cli_args`/`working_dir`/
-        // `env_vars` block) — deliberately NOT that function's own
-        // print-mode fallback default for a missing `cmd:args`: that default
-        // is defensive for a code path this eager-resume one never actually
-        // reaches in practice (`agent_open.rs` always seeds `cmd:args` for
-        // every persistent agent at launch time), and guessing the wrong CLI
-        // mode for a persistent agent is worse than just not eager-resuming.
+        // `cli_command`/`cli_args`/`working_dir` — same meta keys a live
+        // message's spawn config reads. Deliberately NOT
+        // `agent_handlers::input`'s own print-mode fallback default for a
+        // missing `cmd:args`: that default is defensive for a code path this
+        // eager-resume one never actually reaches in practice
+        // (`agent_open.rs` always seeds `cmd:args` for every persistent
+        // agent at launch time), and guessing the wrong CLI mode for a
+        // persistent agent is worse than just not eager-resuming.
         let cli_command = crate::backend::obj::meta_get_string(block_meta, "cmd", "claude");
         let cli_args: Vec<String> = match block_meta.get("cmd:args") {
             Some(serde_json::Value::Array(arr)) => {
@@ -1084,7 +1084,7 @@ impl PersistentSubprocessController {
             _ => return EagerResumeOutcome::DeclinedTo("cmd:args meta missing — refusing to guess CLI flags"),
         };
         let working_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
-        let mut env_vars: HashMap<String, String> = match block_meta.get("cmd:env") {
+        let base_env_vars: HashMap<String, String> = match block_meta.get("cmd:env") {
             Some(serde_json::Value::Object(obj)) => {
                 obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
             }
@@ -1093,32 +1093,70 @@ impl PersistentSubprocessController {
         let resume_flag = crate::backend::obj::meta_get_string(block_meta, "agent:resume_flag", "--resume");
         let session_id_field = crate::backend::obj::meta_get_string(block_meta, "agent:session_id_field", "session_id");
 
-        // BLOCKID/AUTH_KEY: what the bashwrap-invoked tool wrapper needs to
-        // publish MPS output scoped to this block — see the identical
-        // insertion (and its own doc comment) in `agent_handlers::input`.
-        // User-provided `cmd:env` values still take precedence, matching
-        // that same call site's rule.
-        env_vars.entry("AGENTMUX_BLOCKID".to_string()).or_insert_with(|| self.block_id.clone());
-        env_vars.entry("AGENTMUX_AUTH_KEY".to_string()).or_insert_with(|| self.auth_key.clone());
-
-        // The Layer 3 gate. Deliberately the SYNC form — `start()` is not
-        // async — not `inject_identity_env_async`'s `spawn_blocking` wrapper,
-        // which exists for async callers only.
-        if let Err(gate_err) = crate::identity::resolver::inject_identity_env(
-            mstore,
-            id_store,
-            identity_store,
-            &self.block_id,
-            &mut env_vars,
-        ) {
-            tracing::warn!(
-                block_id = %self.block_id,
-                error = %gate_err,
-                "eager-resume declined: identity/credential spawn gate did not pass — \
-                 falling back to lazy (spawns on next message, gated the same way then)"
-            );
-            return EagerResumeOutcome::DeclinedTo("identity/credential spawn gate did not pass");
-        }
+        // Identity gate, MuxBus token, reserved wrapper vars (unconditional
+        // overwrite — AGENTMUX_AUTH_KEY/BLOCKID), agent identity, git
+        // identity, tools PATH: the SAME function a live message send
+        // builds its env with (`agent_handlers::input::
+        // build_persistent_spawn_env`), not a second, independent copy.
+        // codex P1 on PR #3513 found an earlier revision of this method had
+        // built its own partial copy that silently drifted: missing PATH/
+        // MuxBus injection entirely, and `entry().or_insert()` instead of
+        // an unconditional overwrite for the two reserved variables (so a
+        // stale persisted value for either would have survived an eager
+        // resume that a live message send would have corrected).
+        //
+        // `block_in_place` + `block_on`, not `.await` — `start()` is a sync
+        // trait method (shared by every non-async controller type), but its
+        // CALLER is not: `resync_controller` (this method's only path in)
+        // is invoked synchronously and inline from inside
+        // `Box::pin(async move { ... })` handler bodies (`websocket.rs`'s
+        // `COMMAND_CONTROLLER_RESYNC`) and from `async fn open_agent_impl`
+        // (`agent_open.rs`, both call sites). An earlier revision of this
+        // comment argued sync-fn-therefore-safe-to-block and reagent P1 on
+        // PR #3513 correctly rejected that: `build_persistent_spawn_env`
+        // does a real synchronous-equivalent SQLite query plus, for
+        // `SecretRef::Keychain` accounts, a blocking D-Bus/keyring read
+        // (async only via `spawn_blocking`/`.await` internally) — run on a
+        // bare `.await`-less call from here, that starves the tokio worker
+        // it lands on for every unrelated task queued behind it, exactly
+        // the failure class already named and fixed once in this codebase
+        // (`sysinfo.rs`, `identity_auth_spawn.rs`, `websocket.rs`'s own
+        // `COMMAND_CONTROLLER_INPUT` handler — see the latter's comment
+        // citing incident #1782). Worse here than a one-off: this runs once
+        // per persistent pane on `resync_controller`, i.e. potentially many
+        // panes at once, on exactly the mass-reconnect-after-restart
+        // scenario this whole PR exists to improve. `block_in_place` hands
+        // this worker's other queued tasks off to the pool for the
+        // duration; `Handle::current().block_on` then drives the async
+        // function to completion on this now-isolated thread.
+        let block_id = self.block_id.clone();
+        let auth_key = self.auth_key.clone();
+        let gate_result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                crate::server::agent_handlers::input::build_persistent_spawn_env(
+                    mstore,
+                    id_store,
+                    identity_store,
+                    self.broker.clone(),
+                    block_meta,
+                    &block_id,
+                    &auth_key,
+                    base_env_vars,
+                ),
+            )
+        });
+        let env_vars = match gate_result {
+            Ok(env) => env,
+            Err(gate_err) => {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    error = %gate_err,
+                    "eager-resume declined: identity/credential spawn gate did not pass — \
+                     falling back to lazy (spawns on next message, gated the same way then)"
+                );
+                return EagerResumeOutcome::DeclinedTo("identity/credential spawn gate did not pass");
+            }
+        };
 
         let config = PersistentSpawnConfig {
             cli_command,
@@ -2926,6 +2964,18 @@ impl PersistentSubprocessController {
         config: PersistentSpawnConfig,
         resume_retry_payload: Option<persistent_resume::QueuedRetryEntry>,
     ) -> Result<(), String> {
+        // Captured before `resume_retry_payload` is moved further down (the
+        // resume-bookkeeping match), for the turn-active decision near the
+        // end of this function — see that check's own comment. Every
+        // pre-existing caller either passes `Some(payload)` (a message is
+        // about to be delivered directly) or `None` because a message is
+        // already sitting in `pending_send_messages` waiting to be drained
+        // right after this spawn succeeds (`respawn_once_for_leftover_
+        // queue`) — this flag alone can't tell those two `None` cases
+        // apart, which is exactly why the check below also looks at the
+        // queue.
+        let had_retry_payload = resume_retry_payload.is_some();
+
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
 
@@ -3151,8 +3201,24 @@ impl PersistentSubprocessController {
 
         let pid = child.id().unwrap_or(0);
 
-        // Notify the turn-activity tracker that a turn is starting.
-        self.health_monitor.set_active_turn(true);
+        // Notify the turn-activity tracker that a turn is starting — but
+        // only if one actually is. Every pre-existing caller of this method
+        // always has a message about to flow through, one way or the other
+        // (see `had_retry_payload`'s own comment), so this was previously
+        // unconditionally correct. `PersistentSubprocessController::
+        // start()`'s eager-resume path (issue #3463) is the first caller
+        // that genuinely has nothing queued — it revives a session so it is
+        // ready for the NEXT message, the same as `ShellController::
+        // start()` reviving a shell leaves it idle rather than mid-command.
+        // Marking a turn active here with no message ever sent meant a
+        // freshly eager-resumed pane was reported as perpetually WORKING —
+        // to the pane UI, Swarm view, subagent watcher, and shutdown logic,
+        // all of which read this flag — until a human happened to notice
+        // and send it something, since nothing would ever produce the
+        // `result` frame that normally clears it (codex P1 on PR #3513).
+        if had_retry_payload || !self.inner.lock().unwrap().pending_send_messages.is_empty() {
+            self.health_monitor.set_active_turn(true);
+        }
 
         tracing::info!(
             block_id = %self.block_id,
@@ -8545,6 +8611,21 @@ setInterval(() => {}, 1000);
         path
     }
 
+    /// Force-kills the wrapped controller's spawned process on drop —
+    /// including on a PANICKING unwind (a failed `assert!`), not just the
+    /// success path. Without this, an assertion added after a spawn (like
+    /// the `turn_active` one below) leaks the stub's `setInterval`-forever
+    /// node process on failure: on Windows that process holds the test
+    /// binary's inherited stdio pipes open, hanging the ENTIRE test
+    /// binary's shutdown rather than just failing this one test — observed
+    /// directly while mutation-testing that assertion.
+    struct KillOnDrop<'a>(&'a PersistentSubprocessController);
+    impl Drop for KillOnDrop<'_> {
+        fn drop(&mut self) {
+            let _ = self.0.stop_process(true);
+        }
+    }
+
     #[tokio::test]
     async fn does_not_spawn_when_no_session_id() {
         // Regression test: the lazy path (no agent:sessionid) must be
@@ -8580,7 +8661,13 @@ setInterval(() => {}, 1000);
         );
     }
 
-    #[tokio::test]
+    // `flavor = "multi_thread"`: this test's spawn attempt reaches
+    // `try_eager_resume`'s `tokio::task::block_in_place` call — which
+    // panics outright on the default current-thread test runtime (fewer
+    // than one worker thread to hand off to). Production always runs
+    // multi-threaded (`#[tokio::main]`, no flavor override), so this is
+    // what actually reproduces the real call context, not a workaround.
+    #[tokio::test(flavor = "multi_thread")]
     async fn declines_when_gate_denies() {
         // The security property this whole change exists for: an agent
         // whose bound account can never resolve (the same shape a deleted/
@@ -8614,7 +8701,8 @@ setInterval(() => {}, 1000);
         );
     }
 
-    #[tokio::test]
+    // See `declines_when_gate_denies`'s comment on `flavor = "multi_thread"`.
+    #[tokio::test(flavor = "multi_thread")]
     async fn spawns_with_resume_flag_when_gate_passes() {
         // The happy path, end to end: a real process spawn, through the
         // SAME meta-reading code (`cmd`/`cmd:args`/`cmd:cwd`/`cmd:env`) a
@@ -8636,21 +8724,30 @@ setInterval(() => {}, 1000);
             ..c
         };
         let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
 
         let result = Controller::start(&c, meta, None, false);
         assert!(result.is_ok(), "{result:?}");
         assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
         assert_eq!(c.inner.lock().unwrap().session_id.as_deref(), Some("resumed-session"));
 
-        // The stub's `setInterval` never exits on its own — without a hard
-        // kill here it outlives the test, and on Windows a still-running
-        // child holding the test binary's inherited stdio pipes open hangs
-        // the WHOLE test process's shutdown (not just this test) even
-        // though every `#[test]` itself has already reported passing.
-        c.stop_process(true).unwrap();
+        // codex P1 on PR #3513: no message was ever sent, so this pane must
+        // read as idle, not perpetually WORKING. `spawn_process` used to
+        // mark a turn active unconditionally on every spawn — correct for
+        // every OTHER caller (a message is always about to flow through
+        // one way or another) but wrong for eager resume, which revives a
+        // session so it's ready for the next message, not mid-turn.
+        assert!(
+            !c.health_monitor.is_active_turn(),
+            "an eager resume with nothing queued must not report an active turn"
+        );
+
+        // `_kill_on_drop` force-kills the stub on scope exit, success or
+        // panic — see `KillOnDrop`'s own doc comment.
     }
 
-    #[tokio::test]
+    // See `declines_when_gate_denies`'s comment on `flavor = "multi_thread"`.
+    #[tokio::test(flavor = "multi_thread")]
     async fn eager_resume_config_carries_the_resume_flag_and_session_id() {
         // Direct proof the built PersistentSpawnConfig is correct: the stub
         // writes its OWN received argv to a file before printing anything,
@@ -8689,6 +8786,7 @@ setInterval(() => {{}}, 1000);
             ..c
         };
         let meta = meta_with_session("sid-to-resume", &[echo_argv_stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
 
         Controller::start(&c, meta, None, false).unwrap();
         assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
@@ -8710,7 +8808,7 @@ setInterval(() => {{}}, 1000);
             "expected --resume sid-to-resume in argv, got {argv:?}"
         );
 
-        // See the identical comment in `spawns_with_resume_flag_when_gate_passes`.
-        c.stop_process(true).unwrap();
+        // `_kill_on_drop` force-kills the stub on scope exit, success or
+        // panic — see `KillOnDrop`'s own doc comment.
     }
 }
