@@ -1,12 +1,18 @@
 # SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical
 
 **Date:** 2026-09-21
-**Status:** proposed — repo-owner-approved direction, scope confirmed by a
-full-codebase audit (this document). Nothing implemented yet. Expected to
-ship as multiple sequential PRs, one per phase below, not one changeset.
-**§2.5 records a second verification pass against `main` @ `059cc6e`
-(2026-09-22) that corrects three claims in §2/§4/§7 and adds one defect the
-first audit missed. Read §2.5 before planning any phase.**
+**Status:** active — repo-owner-approved direction, scope confirmed by a
+full-codebase audit (this document). Shipping as sequential PRs, one per phase.
+Landed: the `instance_get_by_slug` fail-closed fix (#3500), registry-guard test
+coverage (#3503), Phase 0's shared resolver (#3504, which also subsumes Phase 1
+as §6 defines it), and Phase 4 (#3508).
+Remaining: Phase 0's §4 safety net (low priority, see §2.5.2), Phase 2,
+Phase 3 (blocked on #3501's per-agent identity design), Phase 5.
+**§2.5 records a verification pass against `main` @ `059cc6e` (2026-09-22)
+correcting §2/§4/§7, plus two later self-corrections (§2.5.2, §2.5.5) where
+this document asserted system behaviour inferred from a single function
+without tracing its callers or checking the data. Read §2.5 before planning
+any phase.**
 **Trigger:** Repo owner, after `SPEC_CROSS_CHANNEL_AGENT_HISTORY_
 RESOLUTION_2026_09_21.md` traced a concrete bug to `AGENTMUX_AGENT_ID` (a
 non-unique human-readable slug) being compared against `db_agent_identity_
@@ -102,8 +108,10 @@ that, so this section re-verifies §2 against current `main` and corrects it.
 > **Status update.** As of the PR that adds `backend/agent_resolve.rs`, Phase 0's
 > shared resolver **now exists** and `resolve_agent_uuid` /
 > `resolve_agent_definition_id` both delegate to it. The remaining Phase 0 item
-> is the §4 safety net (`instance_create`, per §2.5.2), still deliberately
-> unstarted pending the data check §4 asks for. `backend::history`'s inline
+> is the §4 safety net (`instance_create`, per §2.5.2 — **lower priority than
+> first written**; the data check §4 asked for has now been run and found no
+> existing collisions to clean up, so what remains is closing a contract gap,
+> not repairing data). `backend::history`'s inline
 > fourth resolution path is Phase 1's, not Phase 0's — its extra raw-slug
 > fallback is load-bearing and needs its own change. The rest of this section
 > records the state before that, and why #3480 was not it.
@@ -127,7 +135,7 @@ fail-closed-on-ambiguity shape (`agent_registry_lookup.rs:64-77`) is exactly
 the `ResolveAgentError::Ambiguous` behavior §4 asks for, already reviewed and
 merged. Phase 0 should mirror it rather than invent a second convention.
 
-### 2.5.2 The §4 safety net half-exists, and its hole is `instance_create`
+### 2.5.2 The §4 safety net half-exists — but `agent_def_insert` is what protects today
 
 §4 asks to "enforce slug uniqueness going forward at agent-creation time
 (reject/rename-suffix a colliding slug at creation)". Half of that is
@@ -143,14 +151,69 @@ verbatim. `migrations.rs:287-290` records this as deliberate: no unique index
 on `db_agents(slug)` is added precisely *because* template-launch projections
 are expected to share their template's slug.
 
-So duplicate slugs are not a hypothetical that requires a hand-edited
-database. **Launching the same template twice produces two `db_agents` rows,
-both `is_template = 0`, both `user_hidden = 0`, both carrying the template's
-slug** — which is exactly the row set `instance_get_by_slug`'s
-`ORDER BY updated_at DESC LIMIT 1` then silently disambiguates by recency.
+> **Corrected after running §4's data check.** This section originally claimed
+> *"launching the same template twice produces two `db_agents` rows … both
+> carrying the template's slug"*, and #3500 shipped citing that as its
+> reproduction. **The launch flow does not do this.** Corrected below; the
+> two paragraphs above remain accurate.
 
-This is the concrete reproduction for the open defect, and it means the
-Phase 0 safety net's target is `instance_create`, not `agent_def_insert`.
+**The data check §4 asks for, run across every AgentMux database on one host:**
+
+```
+databases scanned                          : 47
+db_agents rows                             : 202  (184 templates, 18 launches)
+databases with a duplicate resolvable slug : 0
+slugs colliding case-insensitively         : 0
+collision-suffixed slugs (-2, -3, …)       : 0
+max launches of any ONE template           : 3
+launch slug == its template's slug         : 0  (differs: 18)
+```
+
+Zero collisions — **including a template launched three times**, the exact
+case the original claim said would produce duplicates.
+
+The reason is that a real launch supplies a *name*:
+
+```
+launch  slug='parlo'   name='Parlo'    is_seeded=0  parent_template_id → claude
+launch  slug='maricon' name='Maricon'  is_seeded=0  parent_template_id → claude
+  template  slug='claude'  name='Claude'  is_seeded=1
+```
+
+Every launch slug derives from the launch's own name. Supplying a name creates
+a user definition through `agent_def_insert` — which *does* collision-resolve —
+and `instance_create` then folds into that row (`key = def.id`, since
+`def.is_seeded == 0`). The verbatim-copy branch (`key == inst.id`, binding
+`def.slug`) only runs when `definition_id` names a **seeded template
+directly**, which the launch flow never does.
+
+So this section had it backwards: `agent_def_insert`'s collision scan is not
+the already-solved half to be left alone — **it is the thing actually
+preventing duplicate slugs today**. `instance_create`'s missing guard is a gap
+in that function's contract, reachable by calling it directly (as #3500's
+regression test does, deliberately), but not a path the application takes.
+
+**Consequences:**
+
+- The §4 safety net is **lower priority** than this section first implied. It
+  closes a contract gap, not an occurring fault.
+- §4's deferred decision — audit-and-rename existing collisions, or rely on
+  `Ambiguous` — is **moot on this evidence**: there are no existing collisions
+  to rename.
+- #3500 remains correct: no `UNIQUE` constraint exists, `instance_create` has
+  no guard, and the old `ORDER BY updated_at DESC LIMIT 1` did silently pick a
+  winner. What changes is its urgency — it hardens a reachable-but-unobserved
+  state rather than closing an actively-firing disclosure.
+- #3480's registry-side collisions are a different mechanism (two hosts,
+  `instance_name` casing) and are **unaffected** by this correction.
+- One host is a sample, not proof. Re-run elsewhere before generalising:
+  `SELECT slug, COUNT(*) FROM db_agents WHERE is_template=0 AND user_hidden=0
+  AND slug<>'' GROUP BY slug HAVING COUNT(*)>1`.
+
+Method note, since this is the second correction of its kind in this document
+(see also §2.5.5): both errors came from reading one function in isolation and
+inferring the system's behaviour from it, rather than tracing its callers or
+checking the data. Prefer the data check first where one is cheap.
 
 ### 2.5.3 The registry guard was unverified — now covered
 
@@ -465,9 +528,11 @@ belt-and-suspenders — low-stakes either way, a judgment call for that PR).
   definitions sharing a slug) — the ambiguity already existed in
   `instance_get_by_slug` long before any test covered it. **The registry
   half of that gap is now closed (§2.5.3); Phase 0's own resolver still
-  needs the equivalent.** Build the duplicate-slug fixture the
-  way §2.5.2 describes a real install producing one — two non-template rows
-  sharing a slug — rather than by hand-writing a state the app cannot reach.
+  needs the equivalent.** Build the duplicate-slug fixture as two
+  non-template rows sharing a slug, via `instance_create`. Note per §2.5.2
+  that this exercises a gap in that function's *contract* and is **not** a
+  state the launch flow produces — the test is legitimate, but do not cite it
+  as evidence the fault occurs in practice.
 - **Every subsequent phase:** a regression test asserting the specific bug
   class this spec exists to prevent — two agent definitions sharing a
   slug, verify the phase's subsystem no longer cross-talks between them
@@ -501,10 +566,14 @@ belt-and-suspenders — low-stakes either way, a judgment call for that PR).
   that `db_agents.id` is generated per-machine with no cross-machine
   relationship, and that slug is the only field currently serving that
   role.
-- **High:** §2.5.2's reproduction path — read directly from
-  `instance_create`'s implementation and its own doc comment, and
-  corroborated by `migrations.rs:287-290` documenting the shared-slug
-  projection as intended behavior.
+- **High, and corrected downward:** §2.5.2. That `instance_create` has no
+  slug guard is read directly from its implementation and stands. The
+  *reproduction* built on it — that a real template launch therefore shares
+  its template's slug — was inferred from that function plus
+  `migrations.rs:287-290`, without tracing the launch flow into it, and the
+  data check disproved it (0 collisions in 202 rows; 18 launches, none
+  inheriting a template slug). Confidence in a claim read off one function is
+  confidence about that function, not about the system.
 - **Medium, flagged as open questions rather than guessed at:** the exact
   transition behavior for in-flight state during Phase 2 (registry
   rebuild-on-reconnect) and Phase 3 (work-queue row handling at deploy
