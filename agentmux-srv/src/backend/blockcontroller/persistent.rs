@@ -1092,6 +1092,42 @@ impl PersistentSubprocessController {
             return EagerResumeOutcome::DeclinedTo("no mstore configured for this controller");
         };
 
+        // codex P1 on PR #3513 (third re-review): an `AgentInstance` row
+        // must actually exist for this block before eager resume runs —
+        // NOT merely "the identity gate ran and didn't object". The
+        // continuation/reattach launch flow
+        // (`agent-model.ts`'s `ControllerResync` call, ~line 742) sets
+        // `agent:sessionid` and calls `ControllerResync` BEFORE creating the
+        // instance row and linking the user's selected account (that
+        // happens after, via `CreateAgentInstanceCommand`) — the resync's
+        // own comment there still says "no-op start — waits for first
+        // message", which was true until this PR and is exactly the
+        // invariant this check restores for this specific case.
+        // `inject_identity_env`'s own Step 1 treats "no instance row" as
+        // `Ok(())` — deliberately, for quick-launch panes that were never
+        // meant to go through managed credentials at all (see its own doc
+        // comment) — so relying on the gate ALONE to catch this would let
+        // it silently pass, spawning on whatever ambient/static environment
+        // is around rather than the account the user is about to select in
+        // the very same launch flow. A cheap, synchronous check, done
+        // before the (slow) identity gate work rather than after it.
+        match mstore.instance_get_active_for_block(&self.block_id) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return EagerResumeOutcome::DeclinedTo(
+                    "no AgentInstance row yet for this block — its account/identity setup may still be in flight",
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    error = %e,
+                    "eager-resume declined: instance lookup failed — falling back to lazy"
+                );
+                return EagerResumeOutcome::DeclinedTo("instance lookup failed");
+            }
+        }
+
         // `cli_command`/`cli_args`/`working_dir` — same meta keys a live
         // message's spawn config reads. Deliberately NOT
         // `agent_handlers::input`'s own print-mode fallback default for a
@@ -8705,6 +8741,93 @@ mod eager_resume_tests {
         store.instance_create(&inst).unwrap();
     }
 
+    /// A block with an `AgentInstance` row but NO `AgentDefinition` —
+    /// satisfies the "an instance must actually exist" check
+    /// (codex P1 on PR #3513, third re-review; see `try_eager_resume`'s own
+    /// comment) while keeping the identity gate itself trivially passing:
+    /// `inject_identity_env`'s Step 5 reads a missing definition row as
+    /// "flag=false / no expected provider" (its own doc comment), so the
+    /// oauth-required check never fires. Simpler than `wire_ungated_agent`'s
+    /// full definition+account+link setup for tests that need the gate to
+    /// pass, not fail.
+    fn wire_bare_instance(store: &Store, block_id: &str) {
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        // `instance_create` enforces a real FK to `db_agents` (with a
+        // shared-registry backfill attempt first) — a `definition_id` with
+        // no matching row is `NotFound`, not silently tolerated the way a
+        // missing definition is on the READ side (`inject_identity_env`'s
+        // Step 5). An empty `provider` classifies as neither oauth- nor
+        // api-key-class (`provider_class`'s catch-all), so the gate's
+        // oauth-required check never fires — the minimal definition that
+        // satisfies instance_create without needing a real provider/account.
+        let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: format!("def-for-{block_id}"),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "\u{2726}".to_string(),
+            provider: String::new(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let inst = AgentInstance {
+            id: format!("inst-{block_id}"),
+            definition_id: def.id.clone(),
+            parent_instance_id: String::new(),
+            block_id: block_id.to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 0,
+            ended_at: 0,
+            created_at: 0,
+            identity_id: "id-1".to_string(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&inst).unwrap();
+    }
+
     fn controller(block_id: &str) -> PersistentSubprocessController {
         PersistentSubprocessController::new(
             "tab".to_string(),
@@ -8886,6 +9009,49 @@ setInterval(() => {}, 1000);
         );
     }
 
+    // codex P1 on PR #3513 (third re-review): the continuation/reattach
+    // launch flow (`agent-model.ts`) sets `agent:sessionid` and calls
+    // `ControllerResync` BEFORE creating the `AgentInstance` row and linking
+    // the user's selected account — this is the live shape that reaches
+    // `try_eager_resume` with no instance for its own block yet. Without
+    // this check, `inject_identity_env`'s own "no instance = nothing to
+    // check" Step 1 (deliberate, for quick-launch panes — see its own doc
+    // comment) would let this through, spawning on ambient/static
+    // environment rather than the account about to be linked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn declines_when_no_instance_row_exists_yet() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store(); // deliberately no instance row for this block
+        let stub = write_stub();
+        let c = controller("blk-no-instance-yet").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController {
+            mstore: Some(store),
+            ..c
+        };
+        let meta = meta_with_session("sid-reattach-in-progress", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
+
+        let result = Controller::start(&c, meta, None, false);
+        assert!(result.is_ok(), "declining must not fail the resync: {result:?}");
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "must not eagerly spawn before this block's AgentInstance row exists"
+        );
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "the spawn claim must still be released on this decline path"
+        );
+    }
+
     // See `declines_when_gate_denies`'s comment on `flavor = "multi_thread"`.
     #[tokio::test(flavor = "multi_thread")]
     async fn spawns_with_resume_flag_when_gate_passes() {
@@ -8897,7 +9063,8 @@ setInterval(() => {}, 1000);
             eprintln!("eager_resume_tests: `node` not on PATH — skipping");
             return;
         }
-        let store = make_store(); // no instance row for this block => gate Step 1 passes trivially
+        let store = make_store();
+        wire_bare_instance(&store, "blk-eager"); // codex P1 (3rd re-review): an instance row must exist
         let stub = write_stub();
         let c = controller("blk-eager").with_identity_stores(
             Some(store.clone()),
@@ -8978,6 +9145,7 @@ setInterval(() => {{}}, 1000);
         .unwrap();
 
         let store = make_store();
+        wire_bare_instance(&store, "blk-echo");
         let c = controller("blk-echo").with_identity_stores(
             Some(store.clone()),
             Some(store.clone()),
@@ -9124,6 +9292,7 @@ setInterval(() => {{}}, 1000);
             return;
         }
         let store = make_store();
+        wire_bare_instance(&store, "blk-preclaimed");
         let stub = write_stub();
         let c = controller("blk-preclaimed").with_identity_stores(
             Some(store.clone()),
@@ -9173,6 +9342,7 @@ setInterval(() => {{}}, 1000);
             return;
         }
         let store = make_store();
+        wire_bare_instance(&store, "blk-track-direct");
         let stub = write_stub();
         let c = controller("blk-track-direct").with_identity_stores(
             Some(store.clone()),
