@@ -266,8 +266,16 @@ fn memory_dir_for_blank_working_dir(
     slug: &str,
 ) -> Option<std::path::PathBuf> {
     if !slug.is_empty() {
-        if let Some(rec) = find_active_registry_record_by_slug(slug)
-            .filter(|r| r.data.definition_id == definition_id)
+        // Disambiguates by definition_id *inside* the lookup rather than
+        // filtering after it. Same result when the slug is unique, but under a
+        // collision the slug-only lookup now refuses to guess and returns None
+        // (reagentx P1 on #3480) — this caller knows exactly which agent it
+        // means, so it can still resolve.
+        if let Some(rec) =
+            crate::backend::agent_registry_lookup::find_active_record_by_slug_and_definition(
+                slug,
+                definition_id,
+            )
         {
             if let Some(dir) = memory_dir_for_registry_record(&rec) {
                 return Some(dir);

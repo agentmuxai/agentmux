@@ -850,6 +850,113 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Two live agents whose display names normalize to the SAME slug must not
+    /// be able to read each other's history. reagentx P1 on PR #3480
+    /// (third review).
+    ///
+    /// Registry records are keyed by `instance_id`, and nothing enforces a
+    /// unique `instance_name` across them — so `derive_slug("AgentY")` and
+    /// `derive_slug("AGENTY")` both yield `agenty`. The lookup used to take
+    /// the *first* match in whatever order the registry happened to list, then
+    /// hand that record's `definition_id` and `working_dir` to the caller. For
+    /// this path that means one agent's conversation history silently
+    /// resolving into another agent's `sessions_for_agent` call.
+    ///
+    /// `native_memory_handlers` already guards the same lookup with
+    /// `.filter(|r| r.data.definition_id == definition_id)`, but that guard is
+    /// unavailable here: `definition_id` is precisely what this path is trying
+    /// to resolve. So the lookup itself must refuse to guess.
+    ///
+    /// The assertion is deliberately "not the other agent's session" rather
+    /// than an exact count — failing closed (0 sessions) is the required
+    /// behaviour, but the bug being prevented is *leakage*, so that is what is
+    /// asserted.
+    #[test]
+    fn colliding_slugs_never_resolve_into_another_agents_history() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let base = tmp.path().join("agentsbase");
+        let registry =
+            crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+
+        let mut rec = |instance_id: &str, name: &str, def: &str, dir: &str| {
+            registry
+                .upsert(&crate::registry::NamedAgentRecord {
+                    schema_version: 3,
+                    data: crate::registry::NamedAgentRecordV1 {
+                        instance_id: instance_id.to_string(),
+                        instance_name: name.to_string(),
+                        definition_id: def.to_string(),
+                        identity_id: None,
+                        memory_id: None,
+                        session_id: None,
+                        working_dir: dir.to_string(),
+                        source_agents_base: Some(base.to_string_lossy().to_string()),
+                        created_at_ms: 1,
+                        last_launched_at_ms: 1,
+                        created_by_version: "test".to_string(),
+                        last_launched_by_version: "test".to_string(),
+                    },
+                })
+                .unwrap();
+        };
+        // Both normalize to the slug `agenty`.
+        rec("inst-a", "AgentY", "def-a", "dir-a");
+        rec("inst-b", "AGENTY", "def-b", "dir-b");
+
+        // A session under EACH colliding record, so the assertion does not
+        // depend on which one `list_active()` happens to return first. Whoever
+        // the caller really is, at most one of these is theirs — and the slug
+        // alone cannot say which — so resolving either one is a leak.
+        let dir = std::env::temp_dir().join(format!("amux-hist-collide-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sess_a = write_session(&dir, "agent-a-private-session");
+        let sess_b = write_session(&dir, "agent-b-private-session");
+        let index = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter::in_dir(
+                    vec![DiscoveredFile { file_path: sess_a, mtime_ms: 1 }],
+                    "acct-a",
+                    &base.join("dir-a").to_string_lossy().to_string(),
+                )),
+                Box::new(MockAdapter::in_dir(
+                    vec![DiscoveredFile { file_path: sess_b, mtime_ms: 1 }],
+                    "acct-b",
+                    &base.join("dir-b").to_string_lossy().to_string(),
+                )),
+            ],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        insert_test_agent_and_link(&store, "def-a", "acct-a");
+        insert_test_agent_and_link(&store, "def-b", "acct-b");
+
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+
+        assert_eq!(
+            total,
+            0,
+            "an ambiguous slug must resolve to NO history rather than guessing \
+             an agent; got {:?}",
+            sessions.iter().map(|s| &s.session_id).collect::<Vec<_>>()
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     fn insert_test_agent_and_link(store: &Store, agent_id: &str, account_id: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),

@@ -22,21 +22,75 @@
 use crate::backend::storage::store::derive_slug;
 use crate::registry::NamedAgentRecord;
 
-/// The active registry record whose `instance_name` normalizes to the same
-/// slug as `agent_id`, if any.
-///
-/// `None` when the registry is unavailable, unreadable, or nothing matches —
-/// callers treat all three the same way (fall back to another source), so they
-/// are not distinguished.
-pub(crate) fn find_active_record_by_slug(agent_id: &str) -> Option<NamedAgentRecord> {
+/// Every active registry record whose `instance_name` normalizes to the same
+/// slug as `agent_id`. Usually zero or one; more than one means a collision.
+fn active_records_matching_slug(agent_id: &str) -> Option<Vec<NamedAgentRecord>> {
     let registry_dir = crate::registry::resolve_shared_registry_dir()?;
     let registry = crate::registry::Registry::open(registry_dir).ok()?;
     let queried_slug = derive_slug(agent_id);
-    registry
-        .list_active()
-        .ok()?
+    Some(
+        registry
+            .list_active()
+            .ok()?
+            .into_iter()
+            .filter(|r| derive_slug(&r.data.instance_name) == queried_slug)
+            .collect(),
+    )
+}
+
+/// The active registry record whose `instance_name` normalizes to the same
+/// slug as `agent_id` — **only if exactly one does**.
+///
+/// `None` when the registry is unavailable, unreadable, nothing matches, or
+/// **more than one record matches**. Callers treat the first three the same
+/// way (fall back to another source), so they are not distinguished.
+///
+/// **Why ambiguity returns `None` rather than the first match** (reagentx P1,
+/// PR #3480): registry records are keyed by `instance_id`, and nothing
+/// enforces a unique `instance_name` across them — `derive_slug("AgentY")` and
+/// `derive_slug("AGENTY")` are both `agenty`, which two agents on two hosts
+/// can easily produce. This function used to return whichever matched first in
+/// `list_active()` order, handing that record's `definition_id` and
+/// `working_dir` to the caller. Callers use those to resolve an agent's
+/// *conversation history* and *memory directory*, so guessing wrong does not
+/// degrade gracefully — it discloses one agent's data to another. A slug
+/// simply does not identify an agent when it collides, so the honest answer
+/// is "unknown". Same collision class as Codex P1 on #2901 and reagentx on
+/// #2428.
+///
+/// If you hold a `definition_id`, prefer
+/// [`find_active_record_by_slug_and_definition`] — it resolves the collision
+/// instead of refusing it.
+pub(crate) fn find_active_record_by_slug(agent_id: &str) -> Option<NamedAgentRecord> {
+    let mut matches = active_records_matching_slug(agent_id)?;
+    match matches.len() {
+        1 => matches.pop(),
+        0 => None,
+        n => {
+            tracing::warn!(
+                slug = %derive_slug(agent_id),
+                matches = n,
+                "registry slug collision: refusing to resolve an agent by slug alone"
+            );
+            None
+        }
+    }
+}
+
+/// The active registry record matching both `agent_id`'s slug and an exact
+/// `definition_id`.
+///
+/// For callers that already know which agent they mean. Unlike
+/// [`find_active_record_by_slug`] this stays correct under a slug collision,
+/// because `definition_id` is the disambiguator the slug lacks — so it returns
+/// a record in cases where the slug-only lookup must give up.
+pub(crate) fn find_active_record_by_slug_and_definition(
+    agent_id: &str,
+    definition_id: &str,
+) -> Option<NamedAgentRecord> {
+    active_records_matching_slug(agent_id)?
         .into_iter()
-        .find(|r| derive_slug(&r.data.instance_name) == queried_slug)
+        .find(|r| r.data.definition_id == definition_id)
 }
 
 /// Reconstruct an agent's absolute working directory from its registry record.
