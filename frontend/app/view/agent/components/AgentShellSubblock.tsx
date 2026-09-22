@@ -340,19 +340,27 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         }
     });
 
-    // Apply scroll-sensitivity changes to the live terminal in place — was
-    // previously only read at TermWrap construction, so changing the
-    // setting had no effect until the shell was closed and reopened. A
-    // separate effect from font size above (not folded in): a sensitivity
-    // change doesn't affect cell geometry, so there's nothing here that
-    // needs handleResize(). See REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md.
+    // Apply scroll-sensitivity AND scrollback-depth changes to the live
+    // terminal in place — both were previously only read at TermWrap
+    // construction, so changing either had no effect until the shell was
+    // closed and reopened. Grouped in one effect (not folded into the
+    // font-size effect above): neither affects cell geometry, so nothing
+    // here needs handleResize(). (theme/fontFamily/bracketed-paste — the
+    // other settings audited alongside these for term.tsx — are
+    // deliberately NOT added here: the drawer never resolved any of the
+    // three at construction either, unlike scrollback, so wiring them now
+    // would be new feature support, not a live-update fix — see
+    // SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md §6.2.)
+    // See also REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md.
     createEffect(() => {
         const ss = termScrollSensitivity();
+        const sb = termScrollback();
         // Same unconditional-read reasoning as the font-size effect above —
         // subscribes to wrapLoaded() on this effect's own first run too.
         const loaded = wrapLoaded();
         if (termWrap?.terminal && loaded) {
             termWrap.terminal.options.scrollSensitivity = ss;
+            termWrap.terminal.options.scrollback = sb;
         }
     });
 

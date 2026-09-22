@@ -6,7 +6,7 @@ import { For, Show, type JSX } from "solid-js";
 import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import type { SettingsIndexEntry } from "../settings-model";
-import { SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { NumberControl, SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
 
 // ── Search index — one entry per row below, named-key so re-ordering rows
 // can't silently misalign an entry with the wrong row (see settings-model.ts's
@@ -182,14 +182,11 @@ export function AppearanceSection(): JSX.Element {
                 label={APPEARANCE_SETTINGS.paneGap.label}
                 description={APPEARANCE_SETTINGS.paneGap.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number"
-                        type="number" min={0} max={20}
+                        min={0} max={20} step={1} parse="int"
                         value={(s()["window:tilegapsize"] as number) ?? 4}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 0 && v <= 20) set("window:tilegapsize", v);
-                        }}
+                        onChange={(v) => set("window:tilegapsize", v)}
                     />
                 }
             />
@@ -236,14 +233,11 @@ export function AppearanceSection(): JSX.Element {
                 label={APPEARANCE_SETTINGS.magnifiedSize.label}
                 description={APPEARANCE_SETTINGS.magnifiedSize.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={1} step={0.1}
+                        min={1} step={0.1}
                         value={(s()["window:magnifiedblocksize"] as number) ?? 1.5}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 1) set("window:magnifiedblocksize", v);
-                        }}
+                        onChange={(v) => set("window:magnifiedblocksize", v)}
                     />
                 }
             />
@@ -252,14 +246,11 @@ export function AppearanceSection(): JSX.Element {
                 label={APPEARANCE_SETTINGS.magnifiedBlurPrimary.label}
                 description={APPEARANCE_SETTINGS.magnifiedBlurPrimary.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number"
-                        type="number" min={0}
+                        min={0} step={1} parse="int"
                         value={(s()["window:magnifiedblockblurprimarypx"] as number) ?? 0}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 0) set("window:magnifiedblockblurprimarypx", v);
-                        }}
+                        onChange={(v) => set("window:magnifiedblockblurprimarypx", v)}
                     />
                 }
             />
@@ -268,14 +259,11 @@ export function AppearanceSection(): JSX.Element {
                 label={APPEARANCE_SETTINGS.magnifiedBlurSecondary.label}
                 description={APPEARANCE_SETTINGS.magnifiedBlurSecondary.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number"
-                        type="number" min={0}
+                        min={0} step={1} parse="int"
                         value={(s()["window:magnifiedblockblursecondarypx"] as number) ?? 0}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 0) set("window:magnifiedblockblursecondarypx", v);
-                        }}
+                        onChange={(v) => set("window:magnifiedblockblursecondarypx", v)}
                     />
                 }
             />
