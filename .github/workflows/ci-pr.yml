@@ -38,9 +38,12 @@ name: CI (PR) — compile tests + run
 # which nightly now owns catching); agentmux-bashwrap and agentmux-mcp are
 # independent workspace members not pulled in transitively by the other
 # three, so they need their own explicit `-p` or they'd get no PR-lane gate
-# at all. Windows is the REQUIRED leg (primary platform); ubuntu is
-# non-blocking (continue-on-error) until greened. Standard GitHub-hosted
-# runners only (free on public repos).
+# at all. BOTH legs block as of SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md
+# R2 — ubuntu used to be `continue-on-error` "until greened", which meant it
+# spent ~6 min on every PR and could not fail one while Windows (the slowest
+# leg) was the only real gate. It is greened, and is now the test gate;
+# Windows is a compile-only gate. Standard GitHub-hosted runners only (free on
+# public repos).
 #
 # NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
 # "check --tests + test (windows-latest)" and "vitest" as required status checks

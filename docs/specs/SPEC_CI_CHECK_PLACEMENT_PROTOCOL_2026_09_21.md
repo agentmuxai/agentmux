@@ -1,8 +1,11 @@
 # SPEC: CI check placement protocol — what runs on a PR, what runs nightly
 
 **Date:** 2026-09-21
-**Status:** proposed — the rule and the migration it implies; nothing
-implemented yet.
+**Status:** implemented — #3489. The rule below, plus the migration it
+implies, both land in that PR: #3490 (slimmed PR lane + nightly superset) and
+#3491 (documentation-only PRs skip the build) were squash-merged into its
+branch, so the spec and its implementation reach `main` together. Opened as
+`proposed`; corrected 2026-09-22 once that stopped being true.
 **Trigger:** Repo owner, after the Windows check gated three PRs at 14–15
 minutes each: *"this needs to be organized correct with a protocol... the
 nightly needs all the parts. the PR version needs to be slimmed down."*
@@ -90,6 +93,28 @@ Windows job (37 min of a 37m52s run; macOS 29 min and Ubuntu 19 min run in
 parallel under it). The sixteen missing steps total under ~3 minutes and can
 hang off the existing Ubuntu leg or a sibling job without moving the critical
 path at all.
+
+### 3.1 A check only counts if it can fail the run
+
+"Exists in the nightly" is necessary and **not sufficient**. A step whose
+failure cannot fail the workflow satisfies the set-difference check above
+while enforcing nothing, so the invariant has to be read as:
+
+> Every PR check must also exist in the nightly **on a leg that blocks**.
+
+This is not hypothetical — it was the first thing to go wrong when
+implementing this spec (reagentx P1 on #3489). `RPC bindings are current` was
+added to the nightly's `build-and-test` job gated on
+`if: matrix.os == 'ubuntu-latest'`, while that job carried
+`continue-on-error: ${{ matrix.os != 'windows-latest' }}`. Both statements
+look right in isolation; together they placed the repo's only post-merge
+RPC-drift gate on the one leg whose failures were swallowed. Drift on `main`
+would have gone undetected exactly as before — with the spec, the diff and
+the step list all claiming otherwise.
+
+**When auditing the invariant, check two things per step, not one:** that it
+exists, and that the job it sits in can actually fail. `continue-on-error` and
+a matrix `if:` interact silently, and the failure mode is a green run.
 
 ## 4. What this protocol implies for the current workflows
 

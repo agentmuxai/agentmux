@@ -50,7 +50,24 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    # Windows AND ubuntu block; macOS stays advisory.
+    #
+    # This was `!= 'windows-latest'`, i.e. ubuntu was advisory too — which
+    # silently defeated the superset invariant this workflow exists to provide
+    # (reagentx P1 on #3489). The `RPC bindings are current` step below is
+    # ubuntu-only on purpose (platform-independent output, and the script runs
+    # its own `cargo test`, not worth paying for three times), so under the old
+    # expression it ran on the one leg whose failures were swallowed: RPC
+    # binding drift on `main` would have gone undetected exactly as it did
+    # before this workflow was touched. A gate that cannot fail is not a gate.
+    #
+    # Ubuntu is safe to block on, by the same standard SPEC_CI_CHECK_PLACEMENT_
+    # PROTOCOL_2026_09_21.md applied to ci-pr.yml: the ubuntu leg passed on its
+    # own merits in all 5 most recent nightly runs (job-level conclusions, not
+    # the run-level status that `continue-on-error` masks). macOS keeps
+    # `continue-on-error` — it has no gate of its own that anything depends on,
+    # and is the leg most prone to toolchain churn.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md's contributing
     # cause #1 (no timeout-minutes -> a hung runner occupies the job for
     # GitHub's 360-minute default) was fixed on ci-pr.yml but explicitly
@@ -191,6 +208,10 @@ jobs:
       # platform-independent (.gitattributes normalizes to LF), and this
       # script runs its own `cargo test -p agentmux-srv export_bindings`,
       # which is not something to pay for three times across the matrix.
+      #
+      # Ubuntu-only is only sound because the ubuntu leg BLOCKS — see the
+      # `continue-on-error` note on this job. If that is ever loosened back to
+      # advisory, this gate silently stops gating.
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'
         run: bash scripts/check-rpc-bindings.sh
