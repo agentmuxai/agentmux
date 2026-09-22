@@ -589,7 +589,25 @@ impl Store {
         } else {
             agent.slug.clone()
         };
-        agent.slug = resolve_slug_collision(&conn, &base, None)?;
+        // Collision-resolve: scan for existing slugs matching base or base-N.
+        // Reads uniqueness from `db_agents` — the consolidated table surfaces
+        // both definition slugs and template-instance projections, so a slug
+        // collision against an instance-derived row is caught here too.
+        let mut candidate = base.clone();
+        let mut n: u32 = 2;
+        loop {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+                params![candidate],
+                |row| row.get(0),
+            )?;
+            if count == 0 {
+                break;
+            }
+            candidate = format!("{}-{}", base, n);
+            n += 1;
+        }
+        agent.slug = candidate;
         let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
         let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
@@ -1620,17 +1638,6 @@ impl Store {
                 // copied from the template, bindings + launch state from the
                 // launch. ON CONFLICT covers an id the caller reuses on a
                 // retry (the App-API stub path).
-                //
-                // The slug is collision-resolved rather than copied verbatim
-                // from the template (#3497 §4). `agent_def_insert` has always
-                // done this; this path did not, so it was the one writer that
-                // could mint a duplicate slug — and `db_agents.slug` has no
-                // UNIQUE constraint to catch it. In practice the launch flow
-                // names its agent and goes through `agent_def_insert`, so this
-                // branch is reached only by a caller handing `instance_create`
-                // a seeded template id directly; the guard closes the
-                // function's contract rather than an observed fault (§2.5.2).
-                let launch_slug = resolve_slug_collision(&conn, &def.slug, Some(&inst.id))?;
                 conn.execute(
                     "INSERT INTO db_agents (
                         id, name, icon, description,
@@ -1693,7 +1700,7 @@ impl Store {
                         def.auto_start,
                         def.restart_on_crash,
                         def.idle_timeout_minutes,
-                        launch_slug,
+                        def.slug,
                         def.branch_label,
                         inst.identity_id,
                         inst.memory_id,
@@ -2254,49 +2261,6 @@ const INSTANCE_COLUMNS: &str = "id, last_block_id, session_id, status, github_co
 /// both `id` and `definition_id`, `last_block_id` is `block_id`, chains are
 /// pre-collapsed so `parent_instance_id` is empty, and a row that never
 /// recorded a launch reports `created_at` as `started_at`.
-/// The first of `base`, `base-2`, `base-3`, … that no `db_agents` row holds.
-///
-/// Shared by `agent_def_insert_local_only` and `instance_create` so the two
-/// write paths cannot drift: `db_agents.slug` carries no `UNIQUE` constraint
-/// (deliberately — see `migrations.rs`), so uniqueness is only ever as good as
-/// the agreement between every path that inserts one. It held in only one of
-/// them until #3497 §4.
-///
-/// `exclude_id` skips a row by id, for an upsert re-resolving its own slug:
-/// without it a retry would see the row it is about to replace and suffix a
-/// slug that was already unique.
-///
-/// Callers must already hold the connection lock — the scan and the INSERT
-/// have to be one critical section or two concurrent inserts race to the same
-/// candidate.
-fn resolve_slug_collision(
-    conn: &rusqlite::Connection,
-    base: &str,
-    exclude_id: Option<&str>,
-) -> rusqlite::Result<String> {
-    let mut candidate = base.to_string();
-    let mut n: u32 = 2;
-    loop {
-        let count: i64 = match exclude_id {
-            Some(id) => conn.query_row(
-                "SELECT COUNT(*) FROM db_agents WHERE slug = ?1 AND id <> ?2",
-                params![candidate, id],
-                |row| row.get(0),
-            )?,
-            None => conn.query_row(
-                "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
-                params![candidate],
-                |row| row.get(0),
-            )?,
-        };
-        if count == 0 {
-            return Ok(candidate);
-        }
-        candidate = format!("{base}-{n}");
-        n += 1;
-    }
-}
-
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
     let id: String = row.get(0)?;
     let started_at: i64 = row.get(5)?;
