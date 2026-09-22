@@ -48,6 +48,12 @@ import type { AgentPaneEvent, CompactionState, TurnPhase } from "@/app/store/age
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
+import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
+import { createMemoryReinjectionController } from "./memory-reinjection-controller";
+import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
+import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { useToolChunkStream } from "./hooks/useToolChunkStream";
 import { useShellNodeStream } from "./hooks/useShellNodeStream";
 import { useCompactionStream } from "./hooks/useCompactionStream";
@@ -251,7 +257,58 @@ export function useAgentStream({
     // The single shared RAF-batching queue every producer in this hook
     // pushes into — see this file's top doc comment and
     // stream-flush-queue.ts's module doc for why there must be exactly one.
-    const queue = createStreamFlushQueue(model);
+    //
+    // Wrapped in createHidingStreamFlushQueue BEFORE anything below (or any
+    // of the producer hooks it's handed to) ever sees it — see
+    // docs/specs/SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md
+    // §3.3. `memoryReinjectionController.isHiding` gates every push
+    // uniformly, for every producer this hook has, with no changes needed
+    // to any of them individually — exactly the point of there being one
+    // choke point already.
+    const rawQueue = createStreamFlushQueue(model);
+
+    // Fallback used only when no model id has been observed yet (before the
+    // first message_start of this session) — 200K matches Haiku's real
+    // context window, the smaller of the two values TokensIn's own comment
+    // cites for this provider ("Opus/Sonnet 1M, Haiku 200K"), so an unknown
+    // model under-estimates its budget rather than over-estimates it: the
+    // safer failure direction for a size-band warning (reads as more urgent
+    // than reality, never less).
+    const FALLBACK_CONTEXT_WINDOW = 200_000;
+    let lastSeenModelId: string | undefined;
+
+    const memoryReinjectionController = createMemoryReinjectionController({
+        contextWindow: () => contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
+        now: () => Date.now(),
+        fetchEntries: () => fetchMemoryReinjectionEntries(TabRpcClient, agentName ?? ""),
+        // Deliberately the raw send RPC, not the full sendMessage/pending-
+        // zone path (§3.3 — that path is what creates the visible
+        // UserMessageNode this feature must never produce). This DOES skip
+        // sendMessage's own auth-guard/cmd:args-reapply preamble
+        // (useAgentCommands.ts) — acceptable here because a reinjection
+        // only ever fires immediately after a real compact_boundary, i.e.
+        // strictly mid-session on an already-authenticated, already-running
+        // process, not a cold user-initiated send where that preamble
+        // matters. Flagged, not silently assumed.
+        sendRpc: (message) =>
+            RpcApi.AgentInputCommand(TabRpcClient, {
+                blockid: blockId,
+                message,
+                message_id: `memreinject_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            }).then(() => undefined),
+        // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
+        // reinjection is a completely genuine turn state-machine-wise; only
+        // its rendering differs. See memory-reinjection-controller.ts's
+        // module doc comment.
+        dispatchTurnStart: (content) => {
+            model.dispatchPane({ type: "TurnStart", at: Date.now(), content }, "system");
+        },
+        dispatchTurnReset: () => {
+            model.dispatchPane({ type: "TurnReset" }, "system");
+        },
+    });
+
+    const queue = createHidingStreamFlushQueue(rawQueue, memoryReinjectionController.isHiding);
 
     // Tool-chunk and persistent-shell streaming subscriptions, installed at
     // body scope (not inside onMount) so they tear down even if onMount
@@ -467,6 +524,13 @@ export function useAgentStream({
                             frameTimestamp: compactBoundary.frameTimestamp,
                         });
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                        // Fire-and-forget: trigger() handles its own
+                        // fetch/send failures internally (never throws) and
+                        // its own re-entrancy guard, so nothing here needs
+                        // to await or catch. See
+                        // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_
+                        // 2026_09_22.md §1.2/§3.3.
+                        void memoryReinjectionController.trigger(compactBoundary.frameTimestamp);
                     }
                     continue;
                 }
@@ -532,6 +596,13 @@ export function useAgentStream({
                             // "claude-opus-4-8") — used to seed the context-window
                             // meter per model (Opus/Sonnet 1M, Haiku 200K).
                             const modelId = inner.message?.model as string | undefined;
+                            // Also feeds memoryReinjectionController's own
+                            // contextWindow lookup (§3.4.2) — kept as a
+                            // simple last-seen value rather than threaded
+                            // through TokensIn's dispatch, since the
+                            // controller needs it read synchronously at
+                            // trigger() time, not as reactive pane state.
+                            if (modelId) lastSeenModelId = modelId;
                             const paneEvents = model.dispatchPane({
                                 type: "TokensIn",
                                 input: inputTok,
@@ -566,6 +637,26 @@ export function useAgentStream({
                     // NEXT turn creates fresh nodes instead of appending to the
                     // previous response (which sits above the user's message).
                     if (event.type === "session_end") {
+                        // Checked BEFORE queue.flushNow() below, and against
+                        // the WRAPPED `queue` (not a separate "real" queue
+                        // reference) deliberately: onSessionEnd() flips the
+                        // controller's hiding flag to false as its own side
+                        // effect before returning, so by the time
+                        // pushNewNode is called here the wrapper's own
+                        // isHiding() check already reads false and lets it
+                        // through — no special-casing needed at this call
+                        // site beyond "clear hiding, then push", in that
+                        // order. Returns null (a no-op) for every ordinary
+                        // turn's session_end, which is the overwhelming
+                        // majority of calls here. See
+                        // memory-reinjection-controller.ts's module doc
+                        // comment and SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_
+                        // COMPACTION_2026_09_22.md §3.3.
+                        const reinjectionNode = memoryReinjectionController.onSessionEnd();
+                        if (reinjectionNode && !hasNodeId(reinjectionNode.id)) {
+                            addNodeId(reinjectionNode.id);
+                            queue.pushNewNode(reinjectionNode);
+                        }
                         // Land the turn's own trailing document nodes BEFORE
                         // TurnEnd settles the phase. Without this, the tail
                         // sits in the RAF queue while finalizeTurn dispatches

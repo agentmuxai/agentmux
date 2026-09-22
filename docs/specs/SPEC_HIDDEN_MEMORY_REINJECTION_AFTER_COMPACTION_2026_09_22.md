@@ -214,23 +214,24 @@ applies directly.
   by the existing send path for a structurally identical case.
 
 **Still genuinely open after this pass (real unknowns, not just untraced code):**
-- **The hidden-response suppression gap (§3.3, "newly discovered, third
-  pass")** — the single most important unresolved item as of this update.
-  Not a code-reading gap; a design decision (two-phase hidden turn window)
-  that still needs to be built and tested. Blocks calling this feature
-  "hidden" honestly until closed — the current implementation state hides
-  only the outgoing side.
-- Whether the `MemoryReinjected` reducer command (§3.3) should be dispatched
-  from `useAgentStream.ts` synchronously, in the same code path that already
-  dispatches `CompactionBoundary` — this is the natural placement (dispatch
-  is synchronous in this codebase, so a call placed immediately after reads
-  fresh post-boundary state, per the timing finding above) but hasn't been
-  written yet, so "natural placement" is a design intent, not confirmed
-  working code.
+- ~~The hidden-response suppression gap~~ — **built 2026-09-22, fourth
+  pass.** See §3.3's resolution write-up for what actually shipped (a queue
+  wrapper, not the two-phase reducer-command sketch originally proposed
+  here) and exactly what remains unverified (no live-instance check; the
+  interrupt-mid-hidden-turn path is untested).
+- ~~Whether the `MemoryReinjected` reducer command should be dispatched
+  synchronously~~ — moot: no `MemoryReinjected` reducer command was built.
+  `trigger()`/`onSessionEnd()` are called directly from
+  `useAgentStream.ts`'s existing `CompactionBoundary`/`session_end`
+  handling — see §3.3.
 - Everything in §3.4.4 and §7 — the size-band threshold's exact fraction, the
   auto-fire-vs-confirm question for `WorkEnqueue`, and the cloud-sharing
   scope question — remain real product/design decisions, not things further
   code reading resolves.
+- **New, added with the implementation**: no live-instance verification.
+  Every claim about correctness in §3.3 rests on unit tests against
+  injected fakes plus a clean full-suite run, not an observed real
+  compaction. The interrupt-mid-hidden-turn case specifically is untested.
 
 ## 3. Design
 
@@ -379,24 +380,69 @@ enough to block on: it can leak information about what was reinjected (the
 model may reference specific memory content in acknowledging it), or at
 minimum it reads as a non-sequitur assistant turn with no visible prompt.
 
-**Resolution, proposed here (not yet built or tested):** treat this as a
-genuine two-phase hidden window, mirroring `CompactionStarted`/
-`CompactionBoundary`'s own start/end shape rather than a single event.
-`MemoryReinjectionStarted` (dispatched at send time) sets a
-`hidingReinjectionTurn: true`-shaped pane flag alongside the normal
-turn-bookkeeping `TurnStart` already needs (so `workingFromPhase`/queued-
-while-busy logic — §2 — stays correct); every node-creation path that would
-otherwise push an `AgentMessageNode`/tool node while that flag is set
-suppresses instead, until the turn's own `Done`/`result` arrives, at which
-point `MemoryReinjectionBoundary` clears the flag AND pushes the single
-`MemoryReinjectionNode` label (§3.2) — so the whole hidden exchange, both
-directions, collapses to one label row, not just its first half.
+**Resolution — implemented 2026-09-22, same day, fourth pass. Simpler than
+the two-phase-reducer-command sketch originally proposed here, and worth
+recording exactly why:**
 
-This is real new surface area — a pane-level "suppress this turn's visible
-output" mode doesn't exist anywhere in the codebase today — and needs its
-own careful test coverage (does it correctly re-enable rendering on error/
-interrupt, not just the success path?) before being trusted. Flagged as the
-next concrete implementation step, not designed further here.
+Rather than a `MemoryReinjectionStarted`/`MemoryReinjectionBoundary` pair of
+NEW reducer commands, the actual implementation reuses the REAL `TurnStart`/
+`TurnEnd` completely unmodified for turn-state bookkeeping (§2's own
+finding — a hidden reinjection is a genuinely real turn state-machine-wise,
+so `workingFromPhase`/queued-while-busy already works with zero new
+reducer surface) and solves the rendering-suppression half at a different,
+better layer: `stream-flush-queue.ts`'s own module doc comment establishes
+that `StreamFlushQueue` is ALREADY the single mandatory choke point every
+document-write producer in `useAgentStream.ts` goes through — *"give every
+new producer a pushXxx method here instead of scheduling its own flush."*
+That existing discipline means hiding can be ONE wrapper at that one
+interface (`hiding-stream-flush-queue.ts`'s `createHidingStreamFlushQueue`)
+instead of a pane-level flag checked at every individual node-creation
+branch — safer by construction (a wrapped interface can't be partially
+bypassed the way a scattered `if (hiding) return` could be by a missed
+branch), and needed zero changes to `useToolChunkStream`/`useShellNodeStream`/
+`useCompactionStream`/`useTurnLifecycle`/`usePendingMessageAcceptance` even
+though all five push through the same queue — they simply received the
+already-wrapped instance.
+
+Built as three files, TDD throughout (22 total new tests across the three,
+plus the wiring itself passing a full `npx tsc --noEmit` and the complete
+`frontend/app/view/agent/` + `frontend/app/store/` suite — 182 files, 2835
+tests, zero regressions):
+
+- `hiding-stream-flush-queue.ts` — the wrapper itself. Only the six PUSH
+  methods are gated; read-only/lifecycle methods always delegate (nothing
+  was ever pushed while hiding, so they safely no-op on the real queue's
+  empty pending arrays).
+- `memory-reinjection-controller.ts` — orchestrates trigger → fetch → send
+  → hide → `onSessionEnd()` → label, with ZERO Solid/RPC dependencies of
+  its own (every side effect injected), so the actual logic is unit-tested
+  without a live app. Delivery bypasses the pending-zone entirely by
+  calling the raw send RPC directly (not the full `sendMessage` path) —
+  the other half of "hidden," since that path is what creates the visible
+  `UserMessageNode` this feature must never produce.
+- `memory-reinjection-fetch.ts` — the real `BundleApi`/`NativeMemoryApi`
+  glue (thin, verified by direct reading, not unit-tested — it's pass-
+  through, not logic).
+
+Wired into `useAgentStream.ts` at exactly three points: the queue is wrapped
+once at creation (every downstream producer benefits for free), `trigger()`
+is called right after the existing `CompactionBoundary` dispatch, and
+`onSessionEnd()` is checked at the existing `session_end` handling —
+ordered deliberately BEFORE `queue.pushNewNode`, since clearing the hiding
+flag as `onSessionEnd`'s own side effect is what lets that same push then
+pass through the (now-unhidden) wrapped queue.
+
+**What's still open, honestly:** this closes the RENDERING leak (§3.3's
+main concern) with real, passing test coverage for the controller's own
+success/failure/re-entrancy logic. It has NOT been verified against a live
+running instance — no part of this session had access to one. The
+interrupt-mid-hidden-turn case (user presses Esc while a hidden reinjection
+is in flight) is untested; `TurnEnd`'s existing outcome-selection logic
+(`Interrupting` → `"stopped"`) should apply identically since nothing here
+touches that path, but "should" is not "verified." Recommended before
+shipping: the same empirical check this spec's own §1.2 citation used for
+`/compact` itself — run it against a real pane and watch what actually
+happens.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 
