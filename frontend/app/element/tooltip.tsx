@@ -13,6 +13,7 @@ import {
 import { createEffect, createSignal, JSX, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { Properties as CSSProperties } from "csstype";
+import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 
 interface TooltipProps {
     children?: JSX.Element;
@@ -73,10 +74,35 @@ function TooltipInner(props: TooltipProps): JSX.Element {
     // stationary over the anchor can still react — see the effect below.
     const [isHovering, setIsHovering] = createSignal(false);
 
+    // Entry (mount) no-ops while the mouse's primary button is held — a
+    // text-selection drag elsewhere on the page still delivers mouseenter
+    // to whatever anchor the cursor sweeps over, and letting it through
+    // here would mount this Portal-rendered panel under the cursor
+    // mid-drag, which was intermittently breaking the browser's native
+    // selection-extend hit-testing — the same mechanism `useNodePeek`'s
+    // `PeekOverlay` had. See pointer-drag-state.ts and
+    // docs/plans/PLAN_AGENT_PANE_TEXT_SELECTION_DRAG_FLICKER_2026_09_20.md.
+    // Leave (unmount) is deliberately NOT gated — see that hook's own
+    // comment (reagentx P1 on PR #3470): gating it too left a tooltip
+    // stuck open indefinitely whenever mouseleave fired mid-drag but the
+    // button was released elsewhere, since no further mouseenter/
+    // mouseleave would ever fire for an anchor the cursor had already left.
     const handleMouseEnter = () => {
-        if (forceOpen()) return;
+        if (forceOpen() || isPrimaryButtonDown()) return;
         setIsHovering(true);
     };
+
+    // The gate above drops the mouseenter that arrives mid-drag. If the drag
+    // then ends with the cursor still on this anchor, no further mouseenter
+    // ever fires for it and the tooltip stays shut until the user leaves and
+    // comes back. Re-check the real hover state when the button is released
+    // (reagentx P2 on PR #3470).
+    onCleanup(
+        onPrimaryButtonRelease(() => {
+            if (forceOpen()) return;
+            if (referenceEl?.matches(":hover")) setIsHovering(true);
+        }),
+    );
 
     const handleMouseLeave = () => {
         if (forceOpen()) return;
