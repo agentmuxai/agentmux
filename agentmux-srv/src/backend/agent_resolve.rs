@@ -163,14 +163,19 @@ mod tests {
         });
     }
 
-    // The §7 case the spec calls out as having no coverage anywhere. Built the
-    // way a real install builds one: `instance_create` copies its template's
-    // slug verbatim onto every launch, so launching one template twice is
-    // enough. Tier 1 fails closed (#3500), tier 2 misses because a slug is not
-    // an id, tier 3 finds nothing in the isolated registry — so the whole
-    // resolver refuses rather than naming an arbitrary winner.
+    // The §7 case the spec calls out as having no coverage anywhere.
+    //
+    // The duplicate is forced rather than launched: both write paths
+    // suffix-resolve since #3497 §4, so two `instance_create` calls no longer
+    // collide. Forcing it one row at a time keeps the assertion honest — the
+    // single-row case must RESOLVE, so the refusal below is caused by the
+    // second row and not by the slug matching nothing.
+    //
+    // Tier 1 fails closed (#3500), tier 2 misses because a slug is not an id,
+    // tier 3 finds nothing in the isolated registry — so the whole resolver
+    // refuses rather than naming an arbitrary winner.
     #[test]
-    fn refuses_a_slug_that_two_launches_of_one_template_share() {
+    fn refuses_a_slug_two_rows_share() {
         with_isolated_home(|| {
             let store = Store::open_in_memory().unwrap();
             let mut tmpl = test_agent_def("tmpl-1", "Shared Template", "claude", "agent", 1, "");
@@ -181,13 +186,20 @@ mod tests {
             store.instance_create(&instance("launch-a", "tmpl-1", "Launch A")).unwrap();
             store.instance_create(&instance("launch-b", "tmpl-1", "Launch B")).unwrap();
 
-            // Precondition: two real rows, or the refusal below is vacuous.
-            assert!(store.instance_get("launch-a").unwrap().is_some());
-            assert!(store.instance_get("launch-b").unwrap().is_some());
+            // Both write paths suffix-resolve now (§4), so force the duplicate.
+            // One row first: resolving it proves the fixture is live, so the
+            // refusal below is the second row's doing and not "nothing matched".
+            store.test_force_slug("launch-a", "collide-me").unwrap();
+            assert_eq!(
+                resolve_agent_id(&store, "collide-me").unwrap(),
+                "launch-a",
+                "one row with the slug must resolve — otherwise the check below is vacuous"
+            );
 
+            store.test_force_slug("launch-b", "collide-me").unwrap();
             assert!(
-                resolve_agent_id(&store, "shared-template").is_err(),
-                "an ambiguous slug must refuse, never resolve to an arbitrary winner"
+                resolve_agent_id(&store, "collide-me").is_err(),
+                "adding a second row with the same slug must flip resolve to refusal"
             );
         });
     }
