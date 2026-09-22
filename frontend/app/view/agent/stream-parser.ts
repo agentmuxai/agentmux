@@ -222,6 +222,24 @@ export class ClaudeCodeStreamParser {
     // original session. Defaults false for both live and replay parsers —
     // only ever set true by userMessageToNode itself.
     private hidingUntilNextUserMessage = false;
+    // MUST be cleared at every session boundary — reagentx P1, PR #3502,
+    // second review round: parseHistoryLines.ts reuses ONE parser instance
+    // across an entire concatenated multi-session lines array (it already
+    // has precedent for exactly this class of session-boundary reset:
+    // lastSessionStats = null on an agentmux_session_outcome "fresh"
+    // boundary). Without a matching reset here, a hidden reinjection turn
+    // landing as the LAST turn of a session before a process restart/
+    // resume leaves the flag above stuck true across the boundary,
+    // silently suppressing every event of the NEXT, unrelated session
+    // until some future real user_message eventually appears — dropping
+    // genuine conversation history, not just failing to hide something.
+    // clearHiddenReinjectionState() below is the one sanctioned way to
+    // clear it from outside this class, called from parseHistoryLines.ts
+    // at the same point the existing lastSessionStats reset already
+    // happens.
+    clearHiddenReinjectionState(): void {
+        this.hidingUntilNextUserMessage = false;
+    }
 
     /**
      * `skipIds` accepts either a static `ReadonlySet<string>` (for

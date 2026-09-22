@@ -27,23 +27,43 @@
  * here because both correct a claim this module's own original doc comment
  * used to make:**
  *
- * 1. **Busy-pane deferral.** The original version dispatched `TurnStart`
- *    unconditionally, on the (wrong) assumption that reusing `TurnStart`/
- *    `TurnEnd` alone was enough to "handle both the manual-compact and
- *    auto-compact timing cases with no new logic." It is not: for the
- *    common auto-compaction case, `compact_boundary` lands MID a real,
- *    still-streaming turn, and dispatching a fresh `TurnStart` on top of an
- *    active one regresses `turnPhase` from `Streaming` back to
- *    `Submitting` — exactly the flicker `agent-view.tsx`'s real
- *    `handleSendMessage` guards against via `if (!wasAlreadyWorking)`, a
- *    guard this module bypassed entirely by never calling
- *    `handleSendMessage` in the first place. Fixed: `trigger()` now checks
- *    `opts.isPaneWorking()` and DEFERS (via `deferredFrameTimestamp`)
- *    rather than firing immediately when the pane is busy; the deferred
- *    trigger fires once the in-flight turn's own `session_end` has been
- *    fully processed (`maybeFireDeferred()`, called by the
- *    `useAgentStream.ts` call site AFTER `finalizeTurn()` — turnPhase is
- *    then genuinely idle, so a fresh `TurnStart` is safe).
+ * 1. **Busy-pane deferral — TWO rounds.** Round 1: the original version
+ *    dispatched `TurnStart` unconditionally, on the (wrong) assumption
+ *    that reusing `TurnStart`/`TurnEnd` alone was enough to "handle both
+ *    the manual-compact and auto-compact timing cases with no new logic."
+ *    It is not: for the common auto-compaction case, `compact_boundary`
+ *    lands MID a real, still-streaming turn, and dispatching a fresh
+ *    `TurnStart` on top of an active one regresses `turnPhase` from
+ *    `Streaming` back to `Submitting` — exactly the flicker
+ *    `agent-view.tsx`'s real `handleSendMessage` guards against via
+ *    `if (!wasAlreadyWorking)`, a guard this module bypassed entirely by
+ *    never calling `handleSendMessage` in the first place. First fix:
+ *    check `opts.isPaneWorking()` once, before fetching, and DEFER (via
+ *    `deferredFrameTimestamp`) when busy.
+ *
+ *    **Round 2 (reagentx P1, same PR, next re-review): that single
+ *    check wasn't enough — it left a real, narrower race.**
+ *    `fetchEntries()` is a genuine async RPC round trip (widened further
+ *    by `memory-reinjection-fetch.ts` reading personal-memory files
+ *    sequentially, not in parallel); a real turn can start DURING that
+ *    await (a queued message auto-promoted, or a fresh user send into an
+ *    apparently-idle pane), and the original round-1 fix still dispatched
+ *    `TurnStart` unconditionally once the fetch resolved — reintroducing
+ *    the exact same corruption through a narrower window instead of
+ *    closing it. Fixed by moving the authoritative check to `doTrigger()`
+ *    itself, immediately before `dispatchTurnStart()` (after the fetch,
+ *    with no further `await` in between) — the ONE place close enough to
+ *    the actual dispatch to matter, rather than checked once at a call
+ *    site that can go stale. `trigger()`'s own pre-fetch check is now
+ *    explicitly just an optimization (skips a pointless fetch when
+ *    obviously busy already), not the correctness guarantee.
+ *    `maybeFireDeferred()` needs no check of its own for the same reason —
+ *    it calls the same `doTrigger()`, which re-verifies regardless of
+ *    caller. A deferred trigger fires once the in-flight turn's own
+ *    `session_end` has been fully processed (`maybeFireDeferred()`,
+ *    called by the `useAgentStream.ts` call site AFTER `finalizeTurn()`),
+ *    but if something else raced it busy again in that instant, it simply
+ *    re-defers rather than firing incorrectly.
  * 2. **No real content in `TurnStart.content`.** The original version
  *    passed the full composed message (real Global + Personal memory
  *    bodies) as `TurnStart.content`/`pendingContent` — visible to ANY
@@ -139,6 +159,27 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
 
         if (!shouldReinject(entries)) return; // §3.1 suppression rule
 
+        // Re-check busy-ness HERE, after the async fetchEntries() await —
+        // reagentx P1, second review round: checking isPaneWorking() only
+        // once at the top of trigger() (before this await) left a real
+        // race. fetchEntries() is a genuine RPC round trip
+        // (memory-reinjection-fetch.ts reads personal-memory files
+        // sequentially, not in parallel, widening the window further) — a
+        // real turn can start DURING it (a queued message auto-promoted,
+        // or the user sending into an apparently-idle pane), and firing
+        // TurnStart unconditionally after the fetch resolves reintroduces
+        // the exact turnPhase-corruption bug "fix 1" (doc comment above)
+        // was built to eliminate, just through a narrower window. Also why
+        // maybeFireDeferred() no longer needs its own isPaneWorking()
+        // check — it calls this same function, and this is the ONE place
+        // busy-ness is verified immediately before the dispatch that
+        // matters, not scattered across multiple call sites that could
+        // drift out of sync.
+        if (opts.isPaneWorking()) {
+            deferredFrameTimestamp = frameTimestamp;
+            return;
+        }
+
         const node = buildMemoryReinjectionNode(entries, {
             frameTimestamp,
             now: opts.now(),
@@ -151,8 +192,9 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // read "busy" before the RPC call, not after, so a real message
         // sent by the user in the gap between dispatch and RPC resolution
         // still correctly queues behind this turn instead of racing it.
-        // See doc comment fix 1 for why this is now only ever reached when
-        // the pane is confirmed idle (checked in trigger()/maybeFireDeferred()).
+        // Synchronous from the isPaneWorking() check immediately above
+        // (no further await in between), so this is as close to atomic as
+        // this async architecture allows.
         hiding = true;
         pendingNode = node;
         // Placeholder content, not `message` — see doc comment fix 2 and
@@ -176,10 +218,12 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         if (hiding) return; // re-entrancy guard — see doc comment
         if (deferredFrameTimestamp !== undefined) return; // already have one queued — first wins, arbitrary but simple
 
+        // Early-exit OPTIMIZATION only — skips an unnecessary fetchEntries()
+        // round trip when the pane is obviously already busy right now.
+        // NOT load-bearing for correctness: doTrigger() re-checks
+        // isPaneWorking() itself, immediately before dispatching, which is
+        // what actually closes the race a stale check here could reopen.
         if (opts.isPaneWorking()) {
-            // Doc comment fix 1: a real turn is still in flight. Wait for
-            // ITS session_end (maybeFireDeferred()) rather than dispatching
-            // TurnStart on top of it.
             deferredFrameTimestamp = frameTimestamp;
             return;
         }

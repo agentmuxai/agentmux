@@ -562,6 +562,57 @@ reviewed did:**
    pattern this scattered inspires confidence that grep-based auditing has
    found everything.
 
+4. **A busy-check race in `doTrigger()` — reagentx P1, THIRD review round.**
+   `isPaneWorking()` was checked exactly once, at the top of `trigger()`,
+   BEFORE the `await opts.fetchEntries()` call — a genuine async RPC round
+   trip, widened further by `memory-reinjection-fetch.ts` reading Personal
+   memory files sequentially rather than in parallel. A real turn could
+   start DURING that await (a queued message auto-promoted, or the user
+   sending into an apparently-idle pane), and `dispatchTurnStart()` still
+   fired unconditionally once the fetch resolved — reintroducing finding
+   1's exact corruption through a narrower window instead of closing it.
+   `maybeFireDeferred()` had no check of its own at all. **Fixed** by
+   moving the authoritative check into `doTrigger()` itself, immediately
+   before `dispatchTurnStart()` — the one place close enough to the actual
+   dispatch (no further `await` in between) to matter. If found busy there,
+   it re-defers rather than firing; `trigger()`'s own pre-fetch check is
+   now explicitly just an optimization (skip a pointless fetch), not the
+   correctness guarantee. 3 new tests simulate the pane becoming busy
+   mid-fetch and confirm the re-defer-and-eventually-fire behavior; 2
+   pre-existing tests had to be corrected alongside this fix — they used a
+   permanently-busy mock and asserted a fire that the new re-check now
+   correctly prevents until the mock is set back to idle.
+5. **`hidingUntilNextUserMessage` never reset across a resumed/fresh
+   session boundary — reagentx P1, same review round.** `parseHistoryLines.
+   ts` reuses ONE `ClaudeCodeStreamParser` instance across an entire
+   concatenated multi-session lines array, and already has precedent for
+   exactly this class of per-session reset (`lastSessionStats = null` on
+   an `agentmux_session_outcome` "fresh" boundary) — finding 3's fix added
+   new per-session state without hooking into it. If a hidden reinjection
+   turn happened to be the LAST turn of a session before a process
+   restart/resume, the flag stayed `true` across the boundary, silently
+   suppressing every event (text, tool calls, agent messages) of the
+   NEXT, unrelated session until some future real user turn happened to
+   appear — dropping genuine conversation history from the replayed
+   transcript, not merely failing to hide something. **Fixed**: a new
+   `clearHiddenReinjectionState()` method on the parser, called from
+   `parseHistoryLines.ts` at the same point the existing
+   `lastSessionStats` reset already happens — unconditional on the
+   session-outcome frame merely being seen (not gated on which outcome it
+   reports, unlike the narrower `lastSessionStats` reset it sits beside),
+   since a stuck suppression eating real history is a worse failure than
+   an occasional no-op reset. 3 new tests, including one confirming the
+   base within-session suppression still works unregressed.
+
+   **Running honest tally, not just the one from finding 3:** four review
+   rounds, five real bugs, by five distinct mechanisms (turnPhase
+   corruption twice, over two different race windows; three leak routes).
+   Every one was caught by ReAgent, not by this session's own testing —
+   the test suites in this PR are thorough for the behavior each fix
+   claims, but thoroughness at explaining a fix is not the same
+   property as completeness at finding what needed fixing. Stated
+   plainly rather than left implicit, for whoever reviews this next.
+
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 
 Added 2026-09-22, same session as the rest of this spec, per direct follow-up

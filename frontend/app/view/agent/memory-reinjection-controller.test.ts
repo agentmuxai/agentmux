@@ -193,7 +193,7 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
         expect(fetchEntries).not.toHaveBeenCalled();
     });
 
-    it("maybeFireDeferred fires the deferred trigger once called — fetch/dispatch/send now happen", async () => {
+    it("maybeFireDeferred fires the deferred trigger once called AND genuinely idle — fetch/dispatch/send now happen", async () => {
         const { controller, fetchEntries, dispatchTurnStart, sendRpc, isPaneWorking } = makeController({
             isPaneWorking: vi.fn().mockReturnValue(true),
         });
@@ -201,6 +201,10 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
         await controller.trigger("2026-09-22T10:00:00.000Z");
         expect(fetchEntries).not.toHaveBeenCalled();
 
+        // doTrigger() re-checks isPaneWorking() itself right before
+        // dispatching (P1 fix, second review round) — must actually be
+        // idle by the time maybeFireDeferred() is called, not just called.
+        isPaneWorking.mockReturnValue(false);
         controller.maybeFireDeferred();
         // doTrigger is async internally; flush microtasks.
         await Promise.resolve();
@@ -210,7 +214,6 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
         expect(dispatchTurnStart).toHaveBeenCalledWith(HIDDEN_TURN_PLACEHOLDER_CONTENT, true);
         expect(sendRpc).toHaveBeenCalledTimes(1);
         expect(controller.isHiding()).toBe(true);
-        void isPaneWorking; // referenced for clarity only — the mock's return value drove trigger()'s decision above
     });
 
     it("a second trigger() call while one is already deferred does not stack a second deferred entry", async () => {
@@ -239,6 +242,7 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
         await controller.trigger("2026-09-22T10:00:00.000Z");
         expect(controller.isHiding()).toBe(false); // still deferred, not yet hiding
 
+        isPaneWorking.mockReturnValue(false); // now genuinely idle
         controller.maybeFireDeferred();
         await Promise.resolve();
         await Promise.resolve();
@@ -248,5 +252,80 @@ describe("createMemoryReinjectionController — busy pane (defers)", () => {
         expect(node).not.toBeNull();
         expect(controller.isHiding()).toBe(false);
         void isPaneWorking;
+    });
+});
+
+/**
+ * reagentx P1, second review round on PR #3502: checking isPaneWorking()
+ * only once — before the async fetchEntries() call — left a real race. A
+ * real turn can start DURING that await; the original fix still dispatched
+ * TurnStart unconditionally once the fetch resolved. These tests simulate
+ * exactly that: isPaneWorking() flips to busy WHILE fetchEntries() is
+ * in-flight, not before trigger() is even called.
+ */
+describe("createMemoryReinjectionController — pane becomes busy DURING the fetch (race)", () => {
+    function makeRacingController() {
+        // isPaneWorking reads false on its FIRST call (trigger()'s own
+        // pre-fetch check — still idle at that instant) and true on every
+        // call after — simulating a real turn starting while
+        // fetchEntries() is in flight.
+        let calls = 0;
+        const isPaneWorking = vi.fn<() => boolean>(() => {
+            calls++;
+            return calls > 1;
+        });
+        return makeController({ isPaneWorking });
+    }
+
+    it("does NOT dispatch TurnStart when the pane became busy during fetchEntries()", async () => {
+        const { controller, dispatchTurnStart, sendRpc } = makeRacingController();
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+
+        expect(dispatchTurnStart).not.toHaveBeenCalled();
+        expect(sendRpc).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+    });
+
+    it("defers instead — a subsequent maybeFireDeferred() (once genuinely idle) fires it", async () => {
+        const { controller, fetchEntries, dispatchTurnStart, isPaneWorking } = makeRacingController();
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+        expect(dispatchTurnStart).not.toHaveBeenCalled();
+        expect(fetchEntries).toHaveBeenCalledTimes(1); // the fetch itself still happened — the race is caught AFTER it, not before
+
+        // Now genuinely idle for every subsequent isPaneWorking() call.
+        isPaneWorking.mockReturnValue(false);
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
+        expect(controller.isHiding()).toBe(true);
+    });
+
+    it("maybeFireDeferred() itself re-checks busy-ness — does not fire blindly just because it was called", async () => {
+        // Deferred once (busy). maybeFireDeferred() is called, but the pane
+        // is STILL busy at that exact moment too (e.g. the same still-
+        // running turn, or a new one) — must re-defer, not fire.
+        const { controller, dispatchTurnStart, isPaneWorking } = makeController({
+            isPaneWorking: vi.fn().mockReturnValue(true),
+        });
+
+        await controller.trigger("2026-09-22T10:00:00.000Z");
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(dispatchTurnStart).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+
+        // Now genuinely idle — a LATER maybeFireDeferred() (e.g. from the
+        // NEXT session_end) finally fires it.
+        isPaneWorking.mockReturnValue(false);
+        controller.maybeFireDeferred();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
     });
 });
