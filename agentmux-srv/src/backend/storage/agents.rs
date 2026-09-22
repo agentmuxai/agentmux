@@ -593,7 +593,7 @@ impl Store {
         // table surfaces definition slugs and template-instance projections
         // alike, so a collision against an instance-derived row is caught here
         // too. Shared with `instance_create` so the two cannot drift.
-        agent.slug = resolve_slug_collision(&conn, &base, None)?;
+        agent.slug = resolve_slug_collision(&conn, &base)?;
         let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
         let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
@@ -1634,7 +1634,7 @@ impl Store {
                 // only by handing `instance_create` a seeded template id
                 // directly — this closes the function's contract rather than an
                 // observed fault (§2.5.2).
-                let launch_slug = resolve_slug_collision(&conn, &def.slug, Some(&inst.id))?;
+                let launch_slug = resolve_slug_collision(&conn, &def.slug)?;
                 conn.execute(
                     "INSERT INTO db_agents (
                         id, name, icon, description,
@@ -2289,33 +2289,27 @@ const INSTANCE_COLUMNS: &str = "id, last_block_id, session_id, status, github_co
 /// the agreement between every path that inserts one. It held in only one of
 /// them until #3497 §4.
 ///
-/// `exclude_id` skips a row by id, for an upsert re-resolving its own slug:
-/// without it a retry would see the row it is about to replace and suffix a
-/// slug that was already unique.
-///
 /// Callers must already hold the connection lock — the scan and the INSERT
 /// have to be one critical section, or two concurrent inserts race to the
 /// same candidate.
-fn resolve_slug_collision(
-    conn: &rusqlite::Connection,
-    base: &str,
-    exclude_id: Option<&str>,
-) -> rusqlite::Result<String> {
+///
+/// There is deliberately no "exclude this row id" option. It looks necessary
+/// for `instance_create`'s `ON CONFLICT(id) DO UPDATE` path — a row
+/// re-resolving its own slug would otherwise collide with itself — but that
+/// clause does not assign `slug` at all, so on the conflict path the computed
+/// value is discarded and an exclusion could never be observed (ReAgent P2 on
+/// #3514). On the insert path the row does not exist yet, so there is nothing
+/// to exclude either. If `slug` is ever added to that `DO UPDATE SET`, this
+/// becomes real and needs revisiting.
+fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) -> rusqlite::Result<String> {
     let mut candidate = base.to_string();
     let mut n: u32 = 2;
     loop {
-        let count: i64 = match exclude_id {
-            Some(id) => conn.query_row(
-                "SELECT COUNT(*) FROM db_agents WHERE slug = ?1 AND id <> ?2",
-                params![candidate, id],
-                |row| row.get(0),
-            )?,
-            None => conn.query_row(
-                "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
-                params![candidate],
-                |row| row.get(0),
-            )?,
-        };
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
+            params![candidate],
+            |row| row.get(0),
+        )?;
         if count == 0 {
             return Ok(candidate);
         }
