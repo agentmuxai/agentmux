@@ -988,6 +988,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     let broker_resync = state.broker.clone();
     let event_bus_resync = state.event_bus.clone();
     let filestore_resync = state.filestore.clone();
+    let id_store_resync = state.id_store.clone();
+    let identity_store_resync = state.identity_store.clone();
     let boot_id_resync = state.boot_id.clone();
     let auth_key_resync = state.auth_key.clone();
     engine.register_handler(
@@ -997,6 +999,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let broker = broker_resync.clone();
             let event_bus = event_bus_resync.clone();
             let filestore = filestore_resync.clone();
+            let id_store = id_store_resync.clone();
+            let identity_store = identity_store_resync.clone();
             let boot_id = boot_id_resync.clone();
             let auth_key = auth_key_resync.clone();
             Box::pin(async move {
@@ -1027,6 +1031,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     Some(event_bus),
                     Some(mstore),
                     Some(filestore),
+                    Some(id_store),
+                    Some(identity_store),
                     registry,
                     boot_id,
                     &auth_key,
