@@ -65,17 +65,30 @@ export class AgentViewModel implements ViewModel {
      *  the exact redundant-RPC-plus-subscription pattern this file's own
      *  header comment (reagent P2 on PR #2488) already warns against. */
     agentDefinitions: () => AgentDefinition[];
-    endIconButtons: () => IconButtonDecl[];
+    endIconButtons: () => (IconButtonDecl | ToggleIconButtonDecl)[];
     nodejsError: string | null = null;
 
-    // Callback wired by AgentPresentationView on mount so the title-bar
-    // button can open the pane-scoped Stash modal without holding a
-    // SolidJS context in the model. Replaced the former separate
-    // _openIdentityModal / _openBundleModal pair (Phase 3 slice 1 — one
-    // "Stash" icon opens a unified tabbed modal). Named "Stash" (not
-    // "Armory") to distinguish it from the global Armory pane — see
+    // Callbacks wired by AgentPresentationView on mount so the title-bar
+    // button can open/close the pane-scoped Stash modal, and read whether
+    // it's currently open, without holding a SolidJS context in the model.
+    // Replaced the former separate _openIdentityModal / _openBundleModal
+    // pair (Phase 3 slice 1 — one "Stash" icon opens a unified tabbed
+    // modal). Named "Stash" (not "Armory") to distinguish it from the
+    // global Armory pane — see
     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
+    //
+    // _closeAgentStashModal / _isAgentStashOpen added so the button can be
+    // a real toggle (ToggleIconButtonDecl, elemtype: "toggleiconbutton")
+    // instead of a plain always-opens button: highlighted while the modal
+    // is open, and a second click closes it instead of re-opening/no-op'ing.
+    // _isAgentStashOpen is read from inside endIconButtons() below, which
+    // blockframe.tsx wraps in a createMemo — so a signal read here (via
+    // modalLayer.current()) is tracked and the button's highlighted state
+    // stays correct across EVERY close path (X button, Escape, backdrop
+    // click), not just this button's own click.
     _openAgentStashModal: (() => void) | null = null;
+    _closeAgentStashModal: (() => void) | null = null;
+    _isAgentStashOpen: (() => boolean) | null = null;
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -186,9 +199,28 @@ export class AgentViewModel implements ViewModel {
             // copied onto the history block's own meta) but silently do
             // nothing on click. codex P2 on PR #2539.
             if (!agentId || meta?.[HISTORY_TAB_FOR_META_KEY]) return [];
+            // SignalAtom-shaped per ToggleIconButton's contract (util.ts's
+            // SignalAtom<boolean>) but NOT a real Solid signal — mirrors
+            // MicButton.tsx's activeAtom: the accessor reads externally-owned
+            // state (_isAgentStashOpen, driven by the pane-scoped ModalLayer)
+            // and `_set` ignores the boolean ToggleIconButton passes,
+            // deciding open-vs-close itself from the SAME current state so
+            // it can never fire the wrong one under a stale read.
+            const stashActive = Object.assign(
+                () => this._isAgentStashOpen?.() ?? false,
+                {
+                    _set: (_next: boolean) => {
+                        if (this._isAgentStashOpen?.()) {
+                            this._closeAgentStashModal?.();
+                        } else {
+                            this._openAgentStashModal?.();
+                        }
+                    },
+                },
+            );
             return [
                 {
-                    elemtype: "iconbutton",
+                    elemtype: "toggleiconbutton",
                     // Deliberately NOT the "vault" icon the global Armory
                     // pane uses — this opens AgentStashModal, the per-agent
                     // analogue of Armory, and a distinct name/icon is the
@@ -198,7 +230,7 @@ export class AgentViewModel implements ViewModel {
                     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
                     icon: "backpack",
                     title: "Stash",
-                    click: () => { this._openAgentStashModal?.(); },
+                    active: stashActive,
                 },
             ];
         };
