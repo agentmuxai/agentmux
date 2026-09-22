@@ -9,10 +9,13 @@ name: CI — nightly cross-platform build + test
 # shipping platforms, nightly, so a Linux/macOS BUILD break is caught instead of
 # shipping unnoticed. NOT packaging — that's Phase B (artifacts).
 #
-# Windows is the REQUIRED leg (primary platform); ubuntu + macOS are NON-BLOCKING
-# (continue-on-error) until greened — same staged approach as before. Standard
-# GitHub-hosted runners only (free on public repos for any workload; only LARGER
-# runners are billed — invariant CI-1). Run on demand via the Actions tab.
+# Windows and ubuntu both BLOCK; macOS is non-blocking (continue-on-error).
+# Ubuntu was advisory "until greened" and is now greened — it also carries the
+# ubuntu-only `RPC bindings are current` gate, which enforced nothing while the
+# leg could not fail (see the `continue-on-error` note on `build-and-test`).
+# Standard GitHub-hosted runners only (free on public repos for any workload;
+# only LARGER runners are billed — invariant CI-1). Run on demand via the
+# Actions tab.
 #
 # --test-threads=1: accumulated test-isolation flakes (process-shared in-memory
 # FileStore, a focus-flag global) flake under parallel runs; serial is
