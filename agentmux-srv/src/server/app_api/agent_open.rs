@@ -304,7 +304,9 @@ pub(crate) async fn open_agent_impl(
                         let _ = blockcontroller::resync_controller(
                             &block_for_resync, &tab_id, None, true, true,
                             Some(broker.clone()), Some(event_bus.clone()), Some(mstore.clone()),
-                            Some(filestore.clone()), mstore.shared_agent_registry(),
+                            Some(filestore.clone()),
+                            Some(app_state.id_store.clone()), Some(app_state.identity_store.clone()),
+                            mstore.shared_agent_registry(),
                             app_state.boot_id.clone(), &app_state.auth_key,
                         );
                     }
@@ -771,6 +773,8 @@ pub(crate) async fn open_agent_impl(
                     Some(event_bus.clone()),
                     Some(mstore.clone()),
                     Some(filestore.clone()),
+                    Some(app_state.id_store.clone()),
+                    Some(app_state.identity_store.clone()),
                     mstore.shared_agent_registry(),
                     app_state.boot_id.clone(),
                     &app_state.auth_key,
