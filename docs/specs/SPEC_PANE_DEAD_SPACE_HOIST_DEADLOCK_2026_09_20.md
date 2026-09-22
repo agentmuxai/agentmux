@@ -64,7 +64,9 @@ the original §3.1 text.
 > >    failure mode here was subtler and worth naming separately: the test
 > >    existed, ran, and passed — it just silently answered a different
 > >    question than the one asked. A green test is not evidence until the
-> >    branch it takes has been checked. The live symptom itself (5+ panes permanently blank,
+> >    branch it takes has been checked.
+>
+> The live symptom itself (5+ panes permanently blank,
 > backend data intact) is not in question — only this proposed mechanism for
 > it. See `docs/specs/SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §8 for
 > the last time this codebase prematurely closed a theory about this exact
