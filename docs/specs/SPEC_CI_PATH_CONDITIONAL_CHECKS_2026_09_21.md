@@ -1,8 +1,8 @@
 # SPEC: skip the build on documentation-only PRs, safely
 
 **Date:** 2026-09-21
-**Status:** implemented — `scripts/ci-classify-changes.mjs` (+ its unit tests)
-and the `changes` job in `.github/workflows/ci-pr.yml`, both in this PR.
+**Status:** implemented — #3491 (`scripts/ci-classify-changes.mjs` + its unit
+tests, and the `changes` job in `.github/workflows/ci-pr.yml`).
 **Trigger:** Repo owner: *"can builds be conditional on files? if the PR only
 has md files, it should require no builds."*
 **Builds on:** `SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md` (what belongs
