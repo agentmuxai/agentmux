@@ -940,6 +940,52 @@ fn build_session_title_prompt(current_title: &str, user_message: Option<&str>, w
     )
 }
 
+/// Global registry of blocks currently inside a hidden-memory-reinjection
+/// window — authoritative and set at RPC-dispatch time
+/// (`COMMAND_AGENT_INPUT`'s handler, `agent_handlers/input.rs`), NOT
+/// reconstructed by scanning transcript bytes. reagentx P0, SEVENTH review
+/// round, PR #3502: `extract_digest_text`'s marker-text suppression can only
+/// see what's inside `read_recent_activity_digest`'s own 32 KB / ~30-line
+/// tail window. Personal memory content is expected to grow (§3.4) — the
+/// PR's own measurements record real bodies of 61,725 and 76,164 bytes on
+/// this machine, both already past that window on their own, before the
+/// model's reply is even appended. Once the reinjection marker line scrolls
+/// out of the window (which large memory content does routinely, not as an
+/// edge case), a LATER call — `next_prompt_suggestion` after the turn ends,
+/// or `activity_watcher.rs`'s independent periodic sweep during it — starts
+/// its own fresh `extract_digest_text` scan with `hiding = false` and no
+/// marker line in view, and forwards the model's suppressed-turn reply
+/// anyway. This registry closes that: it isn't reconstructed from a byte
+/// window at all, so it can't be scrolled past. `extract_digest_text`'s own
+/// marker-based suppression stays in place as defense-in-depth (e.g. a
+/// server restart mid-hidden-turn drops this in-memory registry, but a
+/// marker line still inside the window at that point is still caught).
+///
+/// SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md finding #8.
+static HIDDEN_REINJECTION_BLOCKS: std::sync::LazyLock<std::sync::RwLock<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashSet::new()));
+
+/// Called once, at the moment an `AgentInputCommand` is dispatched for a
+/// block — `hidden: true` starts (or extends) that block's suppression
+/// window; `hidden: false` (any ordinary user turn) ends it. The tool_result
+/// continuation frames a hidden turn's own tool-using reply produces never
+/// go through this path (they're the CLI's own stdout, not a fresh RPC), so
+/// they can't accidentally clear it either — the same class of bug finding
+/// #7 fixed for the byte-scanning heuristic doesn't exist here by
+/// construction.
+pub(crate) fn set_hidden_reinjection_active(block_id: &str, hidden: bool) {
+    let mut set = HIDDEN_REINJECTION_BLOCKS.write().unwrap();
+    if hidden {
+        set.insert(block_id.to_string());
+    } else {
+        set.remove(block_id);
+    }
+}
+
+fn is_hidden_reinjection_active(block_id: &str) -> bool {
+    HIDDEN_REINJECTION_BLOCKS.read().unwrap().contains(block_id)
+}
+
 /// Read the last 32 KB of a block's FileStore output, take the most recent
 /// ~30 non-empty lines, and extract digest text from them (`extract_digest_text`).
 /// Used directly by `next_prompt_suggestion`; `activity_summary` now only
@@ -957,6 +1003,13 @@ fn read_recent_activity_digest(
     filestore: &crate::backend::storage::filestore::FileStore,
     block_id: &str,
 ) -> Option<String> {
+    // Authoritative gate — checked before any byte is read. See
+    // HIDDEN_REINJECTION_BLOCKS's own doc comment for why this can't be
+    // reconstructed from the tail window below.
+    if is_hidden_reinjection_active(block_id) {
+        return None;
+    }
+
     const TAIL_BYTES: i64 = 32 * 1024;
     let all_lines: Vec<String> = match filestore.stat(block_id, "output") {
         Ok(Some(ref wf)) if wf.size > 0 => {
@@ -1597,6 +1650,82 @@ mod extract_digest_text_tests {
         assert!(!digest.contains("hidden reply 2"));
         assert!(digest.contains("real message"));
         assert!(digest.contains("real reply"));
+    }
+}
+
+/// reagentx P0, PR #3502, SEVENTH review round: `HIDDEN_REINJECTION_BLOCKS`
+/// is the authoritative, non-window-bounded suppression gate — see its own
+/// doc comment above `read_recent_activity_digest` for why the marker-text
+/// approach in `extract_digest_text_tests` alone isn't enough once memory
+/// content outgrows the 32 KB tail window. Uses distinct per-test block ids
+/// (this is a genuinely global, process-wide static) so parallel test
+/// execution can't cross-contaminate.
+#[cfg(test)]
+mod hidden_reinjection_registry_tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_block_is_not_active() {
+        assert!(!is_hidden_reinjection_active("block-never-seen-abc123"));
+    }
+
+    #[test]
+    fn setting_hidden_true_marks_the_block_active() {
+        let block_id = "block-set-true-def456";
+        set_hidden_reinjection_active(block_id, true);
+        assert!(is_hidden_reinjection_active(block_id));
+    }
+
+    #[test]
+    fn setting_hidden_false_clears_a_previously_active_block() {
+        let block_id = "block-clear-ghi789";
+        set_hidden_reinjection_active(block_id, true);
+        assert!(is_hidden_reinjection_active(block_id));
+        set_hidden_reinjection_active(block_id, false);
+        assert!(!is_hidden_reinjection_active(block_id));
+    }
+
+    #[test]
+    fn blocks_are_tracked_independently() {
+        let a = "block-independent-a-jkl012";
+        let b = "block-independent-b-mno345";
+        set_hidden_reinjection_active(a, true);
+        assert!(is_hidden_reinjection_active(a));
+        assert!(!is_hidden_reinjection_active(b));
+    }
+
+    #[test]
+    fn read_recent_activity_digest_is_suppressed_for_an_active_block_even_with_real_content() {
+        // A hidden block short-circuits before the tail-window read even
+        // happens — this is the actual behavior next_prompt_suggestion /
+        // activity_summary / activity_watcher all rely on. Writes real
+        // content to an in-memory FileStore first, proving the gate fires
+        // regardless of what's in the window (the whole point of finding
+        // #8: the window itself can't be trusted for this decision).
+        let filestore = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+        let block_id = "block-digest-suppressed-pqr678";
+        filestore
+            .make_file(
+                block_id,
+                "output",
+                crate::backend::storage::filestore::FileMeta::new(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            )
+            .unwrap();
+        let line = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "text", "text": "visible reply" }] }
+        })
+        .to_string();
+        filestore
+            .append_data(block_id, "output", format!("{line}\n").as_bytes())
+            .unwrap();
+
+        set_hidden_reinjection_active(block_id, true);
+        assert!(read_recent_activity_digest(&filestore, block_id).is_none());
+
+        set_hidden_reinjection_active(block_id, false);
+        assert!(read_recent_activity_digest(&filestore, block_id).is_some());
     }
 }
 

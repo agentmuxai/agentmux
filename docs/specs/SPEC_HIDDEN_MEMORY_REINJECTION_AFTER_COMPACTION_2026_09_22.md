@@ -707,24 +707,95 @@ reviewed did:**
    text present in the digest) before applying the fix. Full `session.rs`
    suite (43 tests) green after.
 
-   **Running honest tally:** six review rounds, seven real bugs, by seven
-   distinct mechanisms (turnPhase corruption twice, over two different
-   race windows; five leak routes, one of them a gap inside the fix for
-   another). Every one was caught by ReAgent, not by this session's own
-   testing — the test suites in this PR are thorough for the behavior
-   each fix claims, but thoroughness at explaining a fix is not the same
-   property as completeness at finding what needed fixing. The pattern
-   across all seven is consistent, and worth naming directly: every fix
-   that patched a symptom at an individual call site left a sibling call
-   site (or, in finding 6's case, an entire backend layer; in finding
-   7's case, a second shape of input the same call site could receive)
-   unpatched; every fix that instead found and patched the actual shared
-   mechanism, checked against its full input space rather than the one
-   shape a test happened to construct, closed the class of bug outright.
-   Stated plainly rather than left implicit, for whoever reviews this
-   next — and for whoever designs the next feature in this shape, since
-   "hidden from the user" turned out to have a lot more places to check
-   than it first looked like.
+8. **The window itself was the flaw — reagentx P0, SEVENTH review round:
+   `extract_digest_text`'s marker-based suppression (findings 6 and 7)
+   only works if the reinjection marker line is still inside
+   `read_recent_activity_digest`'s own tail window (32 KB / ~30 non-empty
+   lines) at read time.** It isn't, reliably — this PR's own §3.4.1
+   measurement records real Personal-memory bodies of 61,725 and 76,164
+   bytes on this machine, both already past the 32 KB window on their
+   own, before the model's reply is even appended to the same growing
+   output file. §3.4 exists specifically because Personal memory is
+   expected to keep growing. Once the marker line scrolls out of the
+   window — not an edge case, the routine outcome for the large-memory
+   scenario this feature is built around — a later call from
+   `next_prompt_suggestion` (after the turn ends) or
+   `activity_watcher.rs`'s independent 20-second sweep (during it) starts
+   its own fresh `extract_digest_text` scan with `hiding` reset to
+   `false` and no marker in view, and forwards the model's real reply to
+   the ambient Haiku call anyway. This defeated the exact suppression
+   findings 4 through 7 were built to guarantee, precisely for the case
+   the feature exists for.
+
+   Root cause: every fix so far detected "am I inside a hidden turn" by
+   pattern-matching bytes within a bounded window, and a window-bounded
+   detector can always be defeated by content bigger than the window —
+   no amount of refining the pattern-match (findings 6, 7) fixes that,
+   because the marker itself can scroll out before the content it's
+   protecting does.
+
+   **Fixed with a different kind of mechanism, not another window
+   refinement**: a small global registry
+   (`HIDDEN_REINJECTION_BLOCKS`, `agentmux-srv/src/server/app_api/session.rs`)
+   keyed by block id, set authoritatively at the moment the RPC is
+   dispatched rather than reconstructed from transcript bytes at read
+   time. `CommandAgentInputData` gained an optional `hidden: Option<bool>`
+   field; the `AgentInputCommand` handler
+   (`agent_handlers/input.rs`) calls
+   `session::set_hidden_reinjection_active(block_id, hidden)` on every
+   dispatch — `true` for the reinjection turn
+   (`useAgentStream.ts`'s `sendRpc` now passes it), `false` (the
+   default) for every ordinary turn, which ends the window exactly like
+   a genuine user message always has. `read_recent_activity_digest`
+   checks this registry FIRST, before touching the FileStore at all — a
+   hidden block returns `None` unconditionally, regardless of what is or
+   isn't inside the tail window. Since the registry is driven by RPC
+   intent rather than reconstructed from CLI stdout, the tool_result
+   continuation-frame class of bug finding 7 fixed for the byte-scanning
+   heuristic doesn't exist here by construction: those frames are the
+   CLI's own output, never a fresh `AgentInputCommand`, so they can't
+   touch the flag either way.
+
+   `extract_digest_text`'s marker-based suppression (findings 4/6/7)
+   stays in place as defense-in-depth — e.g. a server restart mid-hidden-
+   turn drops this in-memory registry, and the marker-text check is
+   still there to catch a marker line that happens to still be in view
+   at that point. It just isn't the ONLY mechanism suppression depends on
+   anymore.
+
+   5 new tests: 4 on the registry itself
+   (`hidden_reinjection_registry_tests` — unknown block defaults to not
+   active, set-true marks active, set-false clears it, two blocks tracked
+   independently) plus 1 proving `read_recent_activity_digest` is
+   suppressed for an active block even with real FileStore content
+   present and readable — confirmed it failed for the right reason (the
+   digest was returned, not suppressed) with the gate temporarily
+   stubbed out, before restoring it. Full `session.rs` suite (48 tests),
+   `check-rpc-bindings.sh`, `check-rpc-codegen-hygiene.mjs`, a full
+   TypeScript typecheck, and the memory-reinjection-related vitest
+   suites (117 tests across 7 files) all green after. TS bindings for
+   `CommandAgentInputData` regenerated via
+   `cargo test -p agentmux-srv export_bindings`.
+
+   **Running honest tally:** seven review rounds, eight real bugs, by
+   eight distinct mechanisms (turnPhase corruption twice, over two
+   different race windows; six leak routes, two of them gaps inside a
+   prior fix rather than wholly new call sites). Every one was caught by
+   ReAgent, not by this session's own testing. The pattern holds through
+   finding 8 too, in a sharper form than before: findings 6 and 7 each
+   patched the SAME kind of mechanism (window-bounded byte pattern-
+   matching) more carefully, and each time the review found another way
+   to defeat pattern-matching within a bounded window — because that
+   category of mechanism has a structural ceiling no amount of refining
+   can lift. The fix that actually held was the one that stopped trying
+   to reconstruct intent from bytes and instead recorded it directly, at
+   the one place it's genuinely known: the moment the RPC carrying that
+   intent is dispatched. Left here plainly for whoever reviews this
+   next, and for whoever designs the next "hidden from the user" feature
+   in this codebase: if a suppression mechanism's correctness depends on
+   finding a marker inside a bounded window of arbitrary-sized content,
+   that is the wrong architecture to keep patching, not a bug to keep
+   fixing.
 
 ### 3.4 Large-memory handling — sizing, a graduated warning, and a real offload suggestion
 

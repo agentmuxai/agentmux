@@ -297,11 +297,19 @@ export function useAgentStream({
         // strictly mid-session on an already-authenticated, already-running
         // process, not a cold user-initiated send where that preamble
         // matters. Flagged, not silently assumed.
+        // `hidden: true` — reagentx P0, PR #3502, seventh review round:
+        // extract_digest_text's marker-text suppression can only see inside
+        // its own 32 KB / ~30-line tail window, which large Personal memory
+        // content (measured up to 76 KB in this PR's own §3.4.1 numbers)
+        // routinely scrolls past. This flag is the authoritative gate
+        // (session::set_hidden_reinjection_active) — set here, not
+        // reconstructed from transcript bytes later.
         sendRpc: (message) =>
             RpcApi.AgentInputCommand(TabRpcClient, {
                 blockid: blockId,
                 message,
                 message_id: `memreinject_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                hidden: true,
             }).then(() => undefined),
         // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
