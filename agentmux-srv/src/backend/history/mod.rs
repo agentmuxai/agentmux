@@ -13,6 +13,26 @@ use adapter::*;
 use claude_adapter::ClaudeHistoryAdapter;
 use index::SessionIndex;
 
+/// The global named-agent registry record for `agent_id`, for agents that have
+/// no `db_agents` row — launching an agent does not create one, so a live agent
+/// commonly exists only here.
+///
+/// Fetched at most once per `sessions_for_agent` call and used for BOTH
+/// fallbacks the record can answer (definition id and working directory).
+/// It used to return just the working directory, which meant the record's
+/// `definition_id` — sitting right there — went unread, and identity-link
+/// resolution fell back to the raw slug instead (reagentx P1 on PR #3480,
+/// re-review).
+///
+/// The lookup itself comes from `backend::agent_registry_lookup`, which owns
+/// the only copy of the slug-matching and path-reconstruction rules; this
+/// function previously re-implemented both inline, which reagentx P2 on the
+/// same PR flagged against `native_memory_handlers`' copy, since a later fix
+/// to either one would silently miss the other.
+fn registry_record(agent_id: &str) -> Option<crate::registry::NamedAgentRecord> {
+    crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)
+}
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
@@ -95,12 +115,50 @@ impl HistoryService {
             self.index.refresh();
         }
 
+        // `agent_id` arrives as the SLUG (`AGENTMUX_AGENT_ID`) from every App
+        // API caller, but `db_agent_identity_links.agent_id` stores the
+        // DEFINITION id — so querying that table with the slug matched zero
+        // rows every time, and the early return on "no links" then reported a
+        // confident, empty history for agents whose transcripts were sitting
+        // on disk. A caller that already holds a definition id passes through
+        // unchanged. Same resolution `app_api::resolve_agent_definition_id`
+        // already documents ("listing links by slug always returns empty").
+        let instance = store.instance_get_by_slug(agent_id).ok().flatten();
+        let definition_from_db = instance.as_ref().map(|i| {
+            if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
+        });
+        let working_dir_from_db = instance
+            .as_ref()
+            .map(|i| i.working_directory.clone())
+            .filter(|w| !w.is_empty());
+
+        // One registry read, shared by both fallbacks below, and skipped
+        // entirely when the `db_agents` row already answered both questions.
+        let record = if definition_from_db.is_none() || working_dir_from_db.is_none() {
+            registry_record(agent_id)
+        } else {
+            None
+        };
+
+        // Without the registry step, a registry-only agent (no `db_agents`
+        // row — the common case) fell through to the raw slug here, and the
+        // link table is keyed by definition id, so the query below matched
+        // nothing and the agent's identity-bound sessions silently vanished.
+        // Same third fallback `app_api::resolve_agent_definition_id` already
+        // has, for the same reason. The raw slug remains the last resort: a
+        // caller that already holds a definition id passes through unchanged.
+        let definition_id = definition_from_db
+            .or_else(|| {
+                record
+                    .as_ref()
+                    .map(|r| r.data.definition_id.clone())
+                    .filter(|d| !d.is_empty())
+            })
+            .unwrap_or_else(|| agent_id.to_string());
+
         let links = store
-            .agent_identity_list_for_agent(agent_id)
+            .agent_identity_list_for_agent(&definition_id)
             .map_err(|e| format!("failed to resolve agent's linked identities: {e}"))?;
-        if links.is_empty() {
-            return Ok((Vec::new(), 0, false));
-        }
 
         let mut merged: Vec<SessionMeta> = Vec::new();
         for link in &links {
@@ -108,6 +166,28 @@ impl HistoryService {
                 self.index.list_for_identity(&link.account_id, 0, usize::MAX, sort_by, sort_dir);
             merged.extend(sessions);
         }
+
+        // An agent on ambient credentials has no link row at all — its
+        // registry record's `identity_id` reads "default" while its
+        // transcripts are written under a channel identity bundle nothing
+        // points at — so the identity lookup above finds nothing for the
+        // common case. The working directory is recorded inside the
+        // transcript (`cwd`) and on the agent's own row, so it resolves the
+        // sessions the identity bundle cannot.
+        let working_directory = working_dir_from_db.or_else(|| {
+            record
+                .as_ref()
+                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
+        });
+        if let Some(dir) = working_directory {
+            merged.extend(self.index.list_for_working_directory(&dir));
+        }
+
+        // The two sources legitimately overlap for an agent that is both
+        // identity-bound and running in its own directory.
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        merged.retain(|s| seen.insert(s.session_id.clone()));
+
         let mut refs: Vec<&SessionMeta> = merged.iter().collect();
         index::SessionIndex::sort_sessions(&mut refs, sort_by, sort_dir);
 
@@ -257,6 +337,26 @@ mod tests {
     struct MockAdapter {
         files: Vec<DiscoveredFile>,
         identity_id: String,
+        /// Defaults to "/proj" via [`MockAdapter::new`]; set explicitly by the
+        /// working-directory resolution tests.
+        working_directory: String,
+    }
+
+    impl MockAdapter {
+        fn new(files: Vec<DiscoveredFile>, identity_id: &str) -> Self {
+            MockAdapter {
+                files,
+                identity_id: identity_id.to_string(),
+                working_directory: "/proj".to_string(),
+            }
+        }
+        fn in_dir(files: Vec<DiscoveredFile>, identity_id: &str, working_directory: &str) -> Self {
+            MockAdapter {
+                files,
+                identity_id: identity_id.to_string(),
+                working_directory: working_directory.to_string(),
+            }
+        }
     }
     impl HistoryAdapter for MockAdapter {
         fn provider(&self) -> &str {
@@ -276,7 +376,7 @@ mod tests {
                 provider: "mock".to_string(),
                 model: String::new(),
                 slug: String::new(),
-                working_directory: "/proj".to_string(),
+                working_directory: self.working_directory.clone(),
                 created_at: 0,
                 modified_at: 0,
                 message_count: 0,
@@ -312,14 +412,14 @@ mod tests {
 
         let index = SessionIndex::with_isolated_roots(
             vec![
-                Box::new(MockAdapter {
-                    files: vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
-                    identity_id: "acct-mine".to_string(),
-                }),
-                Box::new(MockAdapter {
-                    files: vec![DiscoveredFile { file_path: someone_elses, mtime_ms: 1 }],
-                    identity_id: "acct-someone-else".to_string(),
-                }),
+                Box::new(MockAdapter::new(
+                    vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                    "acct-mine",
+                )),
+                Box::new(MockAdapter::new(
+                    vec![DiscoveredFile { file_path: someone_elses, mtime_ms: 1 }],
+                    "acct-someone-else",
+                )),
             ],
             vec![dir.clone()],
         );
@@ -383,12 +483,479 @@ mod tests {
     }
 
     #[test]
-    fn list_for_agent_returns_empty_for_an_agent_with_no_linked_identity() {
+    fn list_for_agent_returns_empty_when_nothing_on_disk_matches_the_agent() {
         let service = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]));
         let store = Store::open_in_memory().unwrap();
         let result = service.list_for_agent(&store, "agent-with-no-links", 0, 10, "created_at", "desc");
         assert_eq!(result["total"], 0);
         assert_eq!(result["sessions"].as_array().unwrap().len(), 0);
+    }
+
+    // ── Agent → session resolution
+    // (docs/specs/SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md) ──
+
+    /// Insert an agent whose slug differs from its id — i.e. every real
+    /// agent, since the id is a UUID and the slug is human-readable.
+    fn insert_agent(store: &Store, id: &str, name: &str, slug: &str, working_directory: &str) {
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: id.to_string(),
+            slug: slug.to_string(),
+            name: name.to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: working_directory.to_string(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+    }
+
+    /// The dominant real-world failure: an agent on ambient credentials has
+    /// NO `db_agent_identity_links` row (its registry record's `identity_id`
+    /// reads "default"), so identity-bundle resolution finds nothing — while
+    /// its transcripts sit on disk, recording the directory it ran in. Before
+    /// the working-directory index this returned a confident, empty history.
+    #[test]
+    fn sessions_resolve_by_working_directory_when_the_agent_has_no_identity_link() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-wd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "mine-wd");
+        let theirs = write_session(&dir, "theirs-wd");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter::in_dir(
+                    vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                    "",
+                    "/agents/agenty-0629j",
+                )),
+                Box::new(MockAdapter::in_dir(
+                    vec![DiscoveredFile { file_path: theirs, mtime_ms: 1 }],
+                    "",
+                    "/agents/somebody-else",
+                )),
+            ],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        insert_agent(&store, "def-uuid-agenty", "AgentY", "agenty", "/agents/agenty-0629j");
+        // Deliberately NO agent_identity_link: that is the whole point.
+
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(total, 1, "the agent's own session must be found without any identity link");
+        assert_eq!(sessions[0].session_id, "mine-wd");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Callers pass the SLUG (`AGENTMUX_AGENT_ID`), but
+    /// `db_agent_identity_links.agent_id` stores the DEFINITION id — so the
+    /// link lookup has to resolve the slug first or it matches zero rows.
+    #[test]
+    fn identity_links_resolve_from_the_slug_not_only_the_definition_id() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-slug-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let linked = write_session(&dir, "linked-session");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: linked, mtime_ms: 1 }],
+                "acct-mine",
+                // A directory the agent is NOT in, so only the identity link
+                // can account for this hit.
+                "/somewhere/else",
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        insert_agent(&store, "def-uuid-agenty", "AgentY", "agenty", "/agents/agenty-0629j");
+        store
+            .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                id: "acct-mine".to_string(),
+                name: "claude-acct-mine".to_string(),
+                provider: "claude".to_string(),
+                kind: "pat".to_string(),
+                display_name: String::new(),
+                secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                context: serde_json::json!({}),
+                status: "unknown".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        // The link is keyed by DEFINITION id, as production writes it.
+        store.agent_identity_link("def-uuid-agenty", "acct-mine", "claude").unwrap();
+
+        // The caller passes the slug, which is all an agent knows about itself.
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(total, 1, "the slug must resolve to the definition id the link is stored under");
+        assert_eq!(sessions[0].session_id, "linked-session");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `list`'s `project` filter matches on `contains`; working-directory
+    /// resolution must not, or an agent in `/agents/foo` silently claims
+    /// every session belonging to `/agents/foo-2`.
+    #[test]
+    fn working_directory_matching_is_exact_not_a_prefix() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-exact-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let neighbour = write_session(&dir, "neighbour-session");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: neighbour, mtime_ms: 1 }],
+                "",
+                "/agents/foo-2",
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        insert_agent(&store, "def-uuid-foo", "Foo", "foo", "/agents/foo");
+
+        let (_, total, _) = service
+            .sessions_for_agent(&store, "foo", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(total, 0, "/agents/foo must not claim /agents/foo-2's sessions");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A trailing separator or different slash style describes the same
+    /// directory and must resolve to the same sessions.
+    #[test]
+    fn working_directory_matching_normalizes_separators_and_trailing_slash() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-norm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "norm-session");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                "",
+                r"C:\work\agents\bar",
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        insert_agent(&store, "def-uuid-bar", "Bar", "bar", "C:/work/agents/bar/");
+
+        let (_, total, _) = service
+            .sessions_for_agent(&store, "bar", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(total, 1, "the same directory written differently must still match");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The registry fallback — `registry_record` plus
+    /// `agent_registry_lookup::working_dir_from_record` — is the path for a
+    /// live agent with NO `db_agents` row, which is the common case (launching
+    /// an agent does not create one). Every other test here inserts a real row,
+    /// so `instance_get_by_slug` always succeeds and this path never runs;
+    /// a regression in slug derivation or `source_agents_base` handling would
+    /// ship undetected. reagentx P2 on PR #3480.
+    #[test]
+    fn sessions_resolve_via_the_registry_when_the_agent_has_no_db_row() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        // The registry stores working_dir RELATIVE to source_agents_base.
+        let base = tmp.path().join("agentsbase");
+        let resolved_dir = base.join("agenty-0629j").to_string_lossy().to_string();
+
+        let registry = crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 3,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-agenty".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: "def-agenty".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: Some(base.to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let dir = std::env::temp_dir().join(format!("amux-hist-reg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "registry-session");
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                "",
+                &resolved_dir,
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        // Deliberately EMPTY store: no db_agents row, so resolution has to come
+        // from the registry record above or not at all.
+        let store = Store::open_in_memory().unwrap();
+
+        // The display name is "AgentY"; callers pass the derived slug.
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(total, 1, "registry fallback must resolve the working directory");
+        assert_eq!(sessions[0].session_id, "registry-session");
+
+        // An unrelated agent must not inherit it by coincidence.
+        let (_, other_total, _) = service
+            .sessions_for_agent(&store, "someone-else", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(other_total, 0, "an unrelated slug must not match");
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A registry-only agent that ALSO has a real identity link — the gap
+    /// reagentx P1 flagged on PR #3480 (re-review). The registry test above
+    /// proves the working-directory fallback, but its record has no identity,
+    /// so the identity-link half was never exercised without a `db_agents`
+    /// row.
+    ///
+    /// The failure it guards is quiet: with no instance row, `definition_id`
+    /// fell back to the raw SLUG, and `db_agent_identity_links.agent_id`
+    /// stores a DEFINITION id — so the link lookup matched zero rows and the
+    /// agent's identity-bound sessions vanished. That is Bug A, reproduced for
+    /// exactly the case the PR's own docs call the common one.
+    ///
+    /// The session here is deliberately in a directory the registry record
+    /// does NOT point at, so the working-directory fallback cannot mask a
+    /// regression by finding it a second way.
+    #[test]
+    fn registry_only_agent_still_resolves_its_identity_linked_sessions() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let base = tmp.path().join("agentsbase");
+        let registry =
+            crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 3,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-linked".to_string(),
+                    instance_name: "AgentY".to_string(),
+                    definition_id: "def-agenty".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "agenty-0629j".to_string(),
+                    source_agents_base: Some(base.to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let dir = std::env::temp_dir().join(format!("amux-hist-reglink-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "identity-linked-session");
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter::in_dir(
+                vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                "acct-mine",
+                "/somewhere/the/registry/does/not/point",
+            ))],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        // A definition + identity link, but NO `db_agents` instance row — so
+        // `instance_get_by_slug("agenty")` finds nothing and the definition id
+        // can only come from the registry record above.
+        let store = Store::open_in_memory().unwrap();
+        insert_test_agent_and_link(&store, "def-agenty", "acct-mine");
+
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(
+            total, 1,
+            "a registry-only agent's identity-linked sessions must resolve; \
+             the slug is not a definition id"
+        );
+        assert_eq!(sessions[0].session_id, "identity-linked-session");
+
+        // The registry record must not hand its definition id to a different
+        // agent — resolution stays scoped to the matching slug.
+        let (_, other_total, _) = service
+            .sessions_for_agent(&store, "someone-else", 0, 10, "created_at", "desc", true)
+            .unwrap();
+        assert_eq!(other_total, 0, "an unrelated slug must not inherit the link");
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Two live agents whose display names normalize to the SAME slug must not
+    /// be able to read each other's history. reagentx P1 on PR #3480
+    /// (third review).
+    ///
+    /// Registry records are keyed by `instance_id`, and nothing enforces a
+    /// unique `instance_name` across them — so `derive_slug("AgentY")` and
+    /// `derive_slug("AGENTY")` both yield `agenty`. The lookup used to take
+    /// the *first* match in whatever order the registry happened to list, then
+    /// hand that record's `definition_id` and `working_dir` to the caller. For
+    /// this path that means one agent's conversation history silently
+    /// resolving into another agent's `sessions_for_agent` call.
+    ///
+    /// `native_memory_handlers` already guards the same lookup with
+    /// `.filter(|r| r.data.definition_id == definition_id)`, but that guard is
+    /// unavailable here: `definition_id` is precisely what this path is trying
+    /// to resolve. So the lookup itself must refuse to guess.
+    ///
+    /// The assertion is deliberately "not the other agent's session" rather
+    /// than an exact count — failing closed (0 sessions) is the required
+    /// behaviour, but the bug being prevented is *leakage*, so that is what is
+    /// asserted.
+    #[test]
+    fn colliding_slugs_never_resolve_into_another_agents_history() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let base = tmp.path().join("agentsbase");
+        let registry =
+            crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+
+        let mut rec = |instance_id: &str, name: &str, def: &str, dir: &str| {
+            registry
+                .upsert(&crate::registry::NamedAgentRecord {
+                    schema_version: 3,
+                    data: crate::registry::NamedAgentRecordV1 {
+                        instance_id: instance_id.to_string(),
+                        instance_name: name.to_string(),
+                        definition_id: def.to_string(),
+                        identity_id: None,
+                        memory_id: None,
+                        session_id: None,
+                        working_dir: dir.to_string(),
+                        source_agents_base: Some(base.to_string_lossy().to_string()),
+                        created_at_ms: 1,
+                        last_launched_at_ms: 1,
+                        created_by_version: "test".to_string(),
+                        last_launched_by_version: "test".to_string(),
+                    },
+                })
+                .unwrap();
+        };
+        // Both normalize to the slug `agenty`.
+        rec("inst-a", "AgentY", "def-a", "dir-a");
+        rec("inst-b", "AGENTY", "def-b", "dir-b");
+
+        // A session under EACH colliding record, so the assertion does not
+        // depend on which one `list_active()` happens to return first. Whoever
+        // the caller really is, at most one of these is theirs — and the slug
+        // alone cannot say which — so resolving either one is a leak.
+        let dir = std::env::temp_dir().join(format!("amux-hist-collide-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sess_a = write_session(&dir, "agent-a-private-session");
+        let sess_b = write_session(&dir, "agent-b-private-session");
+        let index = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter::in_dir(
+                    vec![DiscoveredFile { file_path: sess_a, mtime_ms: 1 }],
+                    "acct-a",
+                    &base.join("dir-a").to_string_lossy().to_string(),
+                )),
+                Box::new(MockAdapter::in_dir(
+                    vec![DiscoveredFile { file_path: sess_b, mtime_ms: 1 }],
+                    "acct-b",
+                    &base.join("dir-b").to_string_lossy().to_string(),
+                )),
+            ],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        insert_test_agent_and_link(&store, "def-a", "acct-a");
+        insert_test_agent_and_link(&store, "def-b", "acct-b");
+
+        let (sessions, total, _) = service
+            .sessions_for_agent(&store, "agenty", 0, 10, "created_at", "desc", true)
+            .unwrap();
+
+        assert_eq!(
+            total,
+            0,
+            "an ambiguous slug must resolve to NO history rather than guessing \
+             an agent; got {:?}",
+            sessions.iter().map(|s| &s.session_id).collect::<Vec<_>>()
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn insert_test_agent_and_link(store: &Store, agent_id: &str, account_id: &str) {
