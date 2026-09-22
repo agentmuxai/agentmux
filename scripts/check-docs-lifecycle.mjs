@@ -180,6 +180,24 @@ if (!mb) { console.log("\n(no merge-base with main available; skipping the ratch
 const baseRef = mb.trim();
 const touched = (sh(`git diff --name-only ${baseRef}...HEAD -- ${DIR}`) || "")
     .split("\n").map((x) => x.trim()).filter((x) => x.endsWith(".md") && !EXCLUDED.test(x));
+
+// The file LIST comes from committed history; the CONTENT checked above comes
+// from the working tree. So a spec edited but not yet committed is invisible
+// here and this gate reports a confident pass that CI then contradicts — three
+// separate times on #3510, which cost four CI rounds before the cause was
+// spotted. Warn rather than fail: running the gate mid-edit is legitimate, it
+// just cannot tell you anything about uncommitted work.
+const uncommitted = (sh(`git status --porcelain -- ${DIR}`) || "")
+    .split("\n").map((x) => x.trim()).filter((x) => x.endsWith(".md"));
+if (uncommitted.length) {
+    console.log(
+        `\nWARNING: ${uncommitted.length} spec(s) have uncommitted changes. The ratchet ` +
+        `reads content from your working tree but takes its file list from committed\n` +
+        `history, so uncommitted edits are NOT evaluated and this result may not match CI. ` +
+        `Commit, then re-run.`
+    );
+}
+
 if (!touched.length) { console.log("\nRatchet: this branch touches no specs. ok"); process.exit(0); }
 
 const nowBad = offenders();

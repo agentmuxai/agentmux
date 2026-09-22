@@ -282,9 +282,10 @@ describe("parseHistoryLines", () => {
         const hiddenReinjectionLine = (): string =>
             line({
                 type: "user_message",
-                message: composeReinjectionMessage([
-                    { label: "g1", source: "global", body: "global body", sizeBytes: 11 },
-                ]),
+                message: composeReinjectionMessage(
+                    [{ label: "g1", source: "global", body: "global body", sizeBytes: 11 }],
+                    "compaction",
+                ),
             });
 
         it("a session boundary after a hidden turn does not swallow the NEXT session's real content", () => {

@@ -345,6 +345,7 @@ partial list.
 | [`SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22`](SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md) | SPEC: Pane tab strip — compact (shrink-to-fit) sizing + double-click rename |
 | [`SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12`](SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md) | SPEC: Frosted-glass backdrop for the agent pane tab strip's trailing space |
 | [`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) | SPEC: Switching in-pane tabs must not repaint the pane header or tab bar |
+| [`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20`](SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md) | SPEC — Eagerly resume a persistent agent controller that already has a session, instead of waiting for the next message |
 | [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md) | SPEC — Wire failure classification + auto-retry into the persistent controller (Claude 429/overloaded) |
 | [`SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09`](SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md) | SPEC — Persistent controller race cluster: gap audit + remaining fixes |
 | [`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30`](SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md) | SPEC — Require real explanation text before declaring a persistent-mode turn done |
@@ -452,6 +453,7 @@ partial list.
 | [`SPEC_ASK_USER_QUESTION_2026_06_15`](SPEC_ASK_USER_QUESTION_2026_06_15.md) | SPEC: AskUserQuestion — interactive agent questions in the agent pane |
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
+| [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
@@ -527,6 +529,7 @@ partial list.
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
 | [`SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) | SPEC: Agent pane shell drawer — replace the Session/History bar with a process & shell info panel |
+| [`SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22`](SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md) | Spec: Promote Agent Stash from a modal to its own pane |
 | [`SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19`](SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md) | SPEC: Agent Waiting Ambient Sound |
 | [`SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21`](SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md) | SPEC: Tool-call bursts restart the agent-pane "Working…" row's type-out reveal |
 | [`SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03`](SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md) | SPEC: `AgentWorkingRow` typography refresh — drop the accent-color text, match the thinking-text font, go bold |
@@ -540,7 +543,6 @@ partial list.
 | [`SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20`](SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md) | SPEC: Keyboard-driven pause for the AskUserQuestion auto-timeout countdown |
 | [`SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15`](SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md) | SPEC: Auth Check False Positive — "authenticated as max" on Load |
 | [`SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15`](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Browser Pane: Live Favicon + Page Title in Pane Header |
-| [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04`](SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) | CEF 148 — Linux Drag/Right-Click/Transparency Forward-Port |
 | [`SPEC_CEF_SANDBOX_2026_06_20`](SPEC_CEF_SANDBOX_2026_06_20.md) | SPEC: Enable CEF Renderer Sandbox |
 | [`SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20`](SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20.md) | SPEC: CEF Windows Renderer Sandbox — Phase 3 |
@@ -613,7 +615,6 @@ partial list.
 | [`SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29`](SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md) | SPEC: Patched macOS CEF Framework — Release Pipeline + CI Wiring |
 | [`SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03`](SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md) | SPEC — Peek overlay: track mouse Y while pinned to the right |
 | [`SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION`](SPEC_PERFORMANCE_INSTRUMENTATION_AND_OPTIMIZATION.md) | Performance instrumentation + optimization strategy |
-| [`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20`](SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md) | SPEC — Eagerly resume a persistent agent controller that already has a session, instead of waiting for the next message |
 | [`SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03`](SPEC_PER_NODE_TOKEN_ACCOUNTING_2026_08_03.md) | Spec: true per-node token accounting |
 | [`SPEC_PHASE_E_SAGAS_2026-04-30`](SPEC_PHASE_E_SAGAS_2026-04-30.md) | Phase E Sagas — Full Specification |
 | [`SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06`](SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md) | Pillar 1 Step 2 — Persist the Two Host-Only Topology Facts to srv |

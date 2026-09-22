@@ -4507,7 +4507,17 @@ mod s1_tests {
             a.instance_name = "Launch B".to_string();
             store.instance_create(&a).unwrap();
 
-            let err = check_s1_resolved(store, "shared-template", "tmpl-1").unwrap_err();
+            // Force the duplicate the §4 safety net now prevents, one row at a
+            // time: the first must AUTHORIZE, so the denial below is caused by
+            // the second row rather than by the slug matching nothing.
+            store.test_force_slug("launch-a", "collide-me").unwrap();
+            assert!(
+                check_s1_resolved(store, "collide-me", "launch-a").is_ok(),
+                "one row with the slug must authorize — otherwise the denial below is vacuous"
+            );
+
+            store.test_force_slug("launch-b", "collide-me").unwrap();
+            let err = check_s1_resolved(store, "collide-me", "launch-a").unwrap_err();
             assert!(err.contains("mismatch"), "got: {err}");
         });
     }
