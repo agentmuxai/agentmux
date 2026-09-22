@@ -143,13 +143,23 @@ slug** — which is exactly the row set `instance_get_by_slug`'s
 This is the concrete reproduction for the open defect, and it means the
 Phase 0 safety net's target is `instance_create`, not `agent_def_insert`.
 
-### 2.5.3 §7's "no test exists for the ambiguous case" is still true
+### 2.5.3 The registry guard was unverified — now covered
 
-Still accurate, for a new reason: `backend/agent_registry_lookup.rs` ships
-**zero tests** (no `mod tests`, no `#[test]`). #3480's fail-closed guard —
-which §2.5.1 recommends Phase 0 mirror, and which several callers now depend
-on — is itself unverified. Phase 0's test suite should cover it too, not just
-the new resolver.
+As first written this section recorded that `backend/agent_registry_lookup.rs`
+shipped **zero tests**, leaving #3480's fail-closed guard — the one §2.5.1
+recommends Phase 0 mirror, and which several callers now depend on — entirely
+unverified.
+
+Closed by the suite added alongside this spec revision: single-match
+resolution, `derive_slug`-on-both-sides matching (the #2428 bug class),
+not-found, the two-records-one-slug refusal, and
+`find_active_record_by_slug_and_definition` still resolving the collision the
+slug-only lookup declines. The refusal test was confirmed to fail when the
+guard is reverted to returning an arbitrary match, so it cannot pass
+vacuously.
+
+Phase 0's own resolver still needs its own equivalent coverage — this only
+settles the registry half.
 
 ### 2.5.4 Corrected counts and status
 
@@ -372,11 +382,10 @@ belt-and-suspenders — low-stakes either way, a judgment call for that PR).
 
 - **Phase 0:** unit tests for `resolve_agent_id` covering: unique slug hit,
   id-passthrough hit, not-found, and the new `Ambiguous` case (two
-  definitions sharing a slug) — this last case has no existing test
-  anywhere today (**still true on `059cc6e`; see §2.5.3, which also notes
-  `agent_registry_lookup.rs`'s own fail-closed guard is untested and should
-  be covered by the same suite**) despite the underlying ambiguity already
-  existing in `instance_get_by_slug`. Build the duplicate-slug fixture the
+  definitions sharing a slug) — the ambiguity already existed in
+  `instance_get_by_slug` long before any test covered it. **The registry
+  half of that gap is now closed (§2.5.3); Phase 0's own resolver still
+  needs the equivalent.** Build the duplicate-slug fixture the
   way §2.5.2 describes a real install producing one — two non-template rows
   sharing a slug — rather than by hand-writing a state the app cannot reach.
 - **Every subsequent phase:** a regression test asserting the specific bug
