@@ -47,7 +47,7 @@ fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 let skills = mstore.skill_list(&identity_store, &req.agent_id)
                     .map_err(|e| format!("skill.list: {e}"))?;
                 Ok(skills)
@@ -65,7 +65,7 @@ fn register_skill_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 if !mstore.skill_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("skill.get: {e}"))?
                 {
@@ -90,7 +90,7 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
 
                 let now = now_ms();
                 // created_at is preserved across updates so the response never
@@ -153,7 +153,7 @@ fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 if !mstore.skill_is_bound_to(&req.agent_id, &req.id)
                     .map_err(|e| format!("skill.delete: {e}"))?
                 {
@@ -191,7 +191,7 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 // Only global skills (or ones already bound) may be bound, so an
                 // agent can't bootstrap read access to another agent's private skill.
                 match identity_store.skill_get(&req.skill_id)
@@ -232,7 +232,7 @@ fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                check_s1(&ctx, &req.agent_id)?;
+                check_s1(&mstore, &ctx, &req.agent_id)?;
                 let unbound = mstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.unbind: {e}"))?;
                 if unbound {
