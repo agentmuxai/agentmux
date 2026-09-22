@@ -1,6 +1,7 @@
 # PLAN — Agent pane text selection drops/flickers when dragging left across collapsible header rows
 
-- **Status:** Implemented (PR pending)
+**Status:** implemented — #3470
+
 - **Date:** 2026-09-20
 - **Reported by:** user (this machine)
 - **Scope:** Originally agent-pane document rendering (`frontend/app/view/agent/**`); widened
