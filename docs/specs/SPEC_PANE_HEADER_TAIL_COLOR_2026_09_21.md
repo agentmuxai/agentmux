@@ -55,10 +55,8 @@ in the pane (§3.1 defines "effective"), in tab order.
 | Two or more tabs, all the same effective color | That shared color |
 | Two or more tabs, two or more distinct effective colors | **App default** — fixed, independent of which tab is active |
 
-The pills themselves are unaffected: each keeps its own color exactly as
-it renders today, and the active pill keeps its plain
-`var(--block-bg-color)` surface plus its own-color underline
-(`PaneTabStrip.scss`'s `&--active`). Only the tail changes.
+Every pill keeps its own color. The **active** pill needed one follow-up
+change to make that true — see §2.2.
 
 The "app default" is the same value an uncolored pane's header shows
 today, and the same value `computeBlockTabPillNeutralBg` already returns
@@ -77,6 +75,34 @@ so a tail that picks one is not information, it's noise that moves. The
 rule degrades to today's exact behavior for every single-tab pane, which
 is still the majority of panes, so nothing regresses for a user who
 doesn't mix widget types in a pane.
+
+### 2.2 The active pill must paint its own color
+
+This spec originally asserted the pills needed no change at all, and that
+the active pill would keep its plain `var(--block-bg-color)` surface
+(`PaneTabStrip.scss`'s `&--active`). **That was wrong**, and shipping it
+produced the exact inversion of the intended effect, reported as *"the
+selected tab is assuming the color of the tail"*:
+
+- Every **inactive** colored pill painted its own hue (`--pane-tab-bg`).
+- The **active** pill had its background overridden unconditionally to the
+  plain content surface — so the one tab you'd selected was the one tab
+  showing no color.
+
+That override was invisible before this spec only because the header row
+*behind* the strip was itself painted with the active tab's color, so the
+row still expressed it. Neutralizing the tail removed the thing that was
+compensating.
+
+So `&--active` now resolves `var(--pane-tab-bg, var(--block-bg-color))`:
+its own color when it has one, the plain surface when it doesn't. The
+original "the active tab shows the content surface, connecting to the
+pane body below" intent is still served — by the underline immediately
+below it, which was always the explicit signal for that connection.
+
+Every non-PaneChrome consumer (editor file tabs, the agent History strip)
+never sets `--pane-tab-bg` at all, so the fallback keeps their rendering
+byte-for-byte identical.
 
 ## 3. Implementation
 
@@ -141,16 +167,20 @@ untouched by construction.
 
 ### 3.3 What must NOT change
 
-- **The pills.** No change to `computeBlockTabPillBg`,
+- **Each pill's own color.** No change to `computeBlockTabPillBg`,
   `computeBlockTabPillNeutralBg`, `--pane-tab-bg`, `--pane-tab-underline`,
   or `--pane-tab-neutral-bg`. A neutral tail specifically does *not*
   neutralize the pills — the whole point is that the colors stay
-  visible on the tabs that own them.
+  visible on the tabs that own them. (Originally this clause also claimed
+  `&--active`'s background needed no change. It did — §2.2.)
 - **The active tab's underline.** `--pane-tab-underline` still carries
-  that block's vivid color; with a neutral tail it becomes the primary
-  signal for "which tab is active, and what color is it", which is
-  exactly what it's for.
+  that block's vivid color, and remains the signal that connects the
+  active tab to the content below it.
 - **Single-tab panes.** Byte-identical rendering to today.
+- **Every non-PaneChrome tab strip.** The editor's file tabs and the
+  agent History strip never set `--pane-tab-bg`, `--pane-tab-neutral-bg`
+  or `headerBgOverride`, so every fallback in this change resolves to
+  exactly what they render today.
 
 ## 4. Tests
 
@@ -199,6 +229,11 @@ passed straight through; that component adds no policy of its own.
 - `blockframe.tsx` — `headerStyle` takes the override first, keeping its
   existing `pickReadableTextColor(bg)` call, so header text and icons stay
   legible against the neutral tail with no second rule.
+- `PaneTabStrip.scss` — `&--active` resolves
+  `var(--pane-tab-bg, var(--block-bg-color))` (§2.2). Follow-up to the
+  above, not part of the original plan: neutralizing the tail exposed an
+  existing unconditional override that left the *selected* tab as the only
+  colorless one.
 
 ### Verification
 
@@ -219,6 +254,27 @@ Verified live against the running dev instance over CDP, on a light theme:
 - Swept all 4 open panes and asserted the rule directly — a 1-tab
   uncolored pane and a 2-tab two-color pane both render the default; the
   1-tab colored pane still renders its own color (`rgb(212, 133, 53)`).
+
+Re-verified after §2.2's active-pill fix, this time on a dark theme, with
+both rules asserted in the same sweep of the 5-tab / 4-color pane:
+
+| Selected | Its own color | Selected pill renders | Tail |
+|---|---|---|---|
+| Swarm | `hsl(180, 42%, 24%)` | `rgb(35, 87, 87)` | `rgb(36, 39, 46)` |
+| CPU | `hsl(30, 42%, 24%)` | `rgb(87, 61, 35)` | `rgb(36, 39, 46)` |
+| Terminal 1 | `hsl(300, 42%, 24%)` | `rgb(87, 35, 87)` | `rgb(36, 39, 46)` |
+| Terminal 2 | none | `rgba(4, 6, 14, 0.7)` | `rgb(36, 39, 46)` |
+| Help | none | `rgba(4, 6, 14, 0.7)` | `rgb(36, 39, 46)` |
+
+The selected pill now carries its own color on every switch, the tail
+never moves, and an uncolored selected tab still falls back to the plain
+content surface — distinct from the tail, so it still reads as selected.
+
+The JS-side precondition (the active tab keeps its inline
+`--pane-tab-bg` and `--colored` class, which the SCSS fallback depends
+on) is pinned by a unit test in `PaneTabStrip.test.tsx`; jsdom resolves
+no stylesheet, so the computed background itself can only be checked
+live.
 
 ## 7. Out of scope
 

@@ -223,18 +223,37 @@
     // LIGHTER version of that same color, not the generic white tint above
     // — `filter: brightness` on top of the resting --pane-tab-bg rather
     // than a separate lightened color value, so it's guaranteed to track
-    // whatever hue that pill actually has. `:not(&--active)` matters:
-    // without it this would beat --active's own `background:
-    // var(--block-bg-color)` (equal-or-higher specificity) on a colored
-    // tab that's ALSO the active one, breaking the "active tab always
-    // shows the plain surface, connects to content below" rule below.
+    // whatever hue that pill actually has. `:not(&--active)` is kept for a
+    // different reason than it was originally added for (it used to
+    // protect --active's plain surface, which no longer exists — see
+    // --active below): hover is an affordance for "you can select this",
+    // and the active tab is already selected, so brightening it is noise.
     &--colored:hover:not(&--active) {
         background: var(--pane-tab-bg);
         filter: brightness(1.4);
     }
 
     &--active {
-        background: var(--block-bg-color);
+        // The active tab shows its OWN pane color, same as every inactive
+        // colored pill — falling back to the plain content surface only
+        // when it has no color of its own.
+        //
+        // This used to be an unconditional `var(--block-bg-color)`, so the
+        // active tab always read as the content surface "connecting" to
+        // the pane body below. That worked only because the header row
+        // BEHIND the strip was itself painted with the active tab's color,
+        // so the row still expressed it. Once the header's tail went
+        // app-default for a multi-color pane
+        // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md), nothing carried the
+        // active tab's color anymore: every inactive pill showed its hue
+        // while the selected one went neutral — exactly backwards, and
+        // reported as "the selected tab is assuming the color of the tail".
+        //
+        // The connection to the content below is still drawn, by the
+        // underline immediately below. Every non-PaneChrome consumer
+        // (editor file tabs, the agent History strip) never sets
+        // --pane-tab-bg at all and so keeps the old value byte-for-byte.
+        background: var(--pane-tab-bg, var(--block-bg-color));
         color: var(--main-text-color);
         // Subtle bottom-border that visually connects the active tab to the
         // pane content below (the strip's own border-bottom is hidden under

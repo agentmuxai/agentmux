@@ -159,6 +159,32 @@ describe("PaneTabStrip", () => {
         expect(tabs[1].style.getPropertyValue("--pane-tab-underline")).toBe("");
     });
 
+    it("keeps --pane-tab-bg and --colored on the ACTIVE tab, so it can paint its own color rather than the plain surface", () => {
+        // The SCSS precondition for SPEC_PANE_HEADER_TAIL_COLOR's follow-up
+        // fix: `.pane-tab--active` resolves `var(--pane-tab-bg,
+        // var(--block-bg-color))`, which only works if the active tab still
+        // carries its own color inline. Reported as "the selected tab is
+        // assuming the color of the tail" — before that fix, `--active`
+        // overrode the background unconditionally, so every INACTIVE pill
+        // showed its hue while the selected one went neutral. jsdom
+        // resolves no stylesheet, so this pins the JS half; the computed
+        // background itself is verified live (see the spec's §6).
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                getColor={() => ({ background: "#112233", underline: "#445566", neutralBackground: "#101010" })}
+                onActivate={vi.fn()}
+            />
+        ));
+        const active = container.querySelectorAll<HTMLElement>(".pane-tab")[0];
+        expect(active.classList.contains("pane-tab--active")).toBe(true);
+        expect(active.style.getPropertyValue("--pane-tab-bg")).toBe("#112233");
+        expect(active.classList.contains("pane-tab--colored")).toBe(true);
+    });
+
     it("sets --pane-tab-neutral-bg for a tab with only a neutralBackground, without marking it colored", () => {
         const { container } = render(() => (
             <PaneTabStrip
