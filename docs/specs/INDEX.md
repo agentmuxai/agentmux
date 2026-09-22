@@ -264,6 +264,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) | SPEC — Browser pane: replace Chromium's native right-click menu with the app's own |
 | [`SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) | Spec: CEF proprietary codec support (H.264/AAC) across Windows/macOS/Linux |
 | [`SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md) | Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF) |
+| [`SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21`](SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md) | SPEC: CI check placement protocol — what runs on a PR, what runs nightly |
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21`](SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md) | SPEC: skip the build on documentation-only PRs, safely |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
@@ -538,7 +539,6 @@ partial list.
 | [`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04`](SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md) | CEF 148 — Linux Drag/Right-Click/Transparency Forward-Port |
 | [`SPEC_CEF_SANDBOX_2026_06_20`](SPEC_CEF_SANDBOX_2026_06_20.md) | SPEC: Enable CEF Renderer Sandbox |
 | [`SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20`](SPEC_CEF_SANDBOX_WIN_PHASE3_2026_06_20.md) | SPEC: CEF Windows Renderer Sandbox — Phase 3 |
-| [`SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21`](SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md) | SPEC: CI check placement protocol — what runs on a PR, what runs nightly |
 | [`SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12`](SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md) | SPEC — Balanced PR and nightly test lanes |
 | [`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18`](SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md) | SPEC: Port `CLAUDE.md` content to durable homes before deleting it |
 | [`SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12`](SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md) | Codex App Server as a First-Class AgentMux Provider |
