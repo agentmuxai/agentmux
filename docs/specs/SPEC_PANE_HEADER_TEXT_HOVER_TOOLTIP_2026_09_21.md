@@ -66,6 +66,17 @@ header via `floating-ui`, using the same visual style
 text-foreground shadow-xl z-50`) as the shared `Tooltip` component
 (`element/tooltip.tsx`).
 
+Positioning goes through `computeMenuPosition` (`util/menu-position.ts`),
+not a raw `computePosition` call — the repo-wide rule for any floating
+surface (`SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20`, enforced by
+`scripts/check-menu-positioning.sh`, which caught the first cut). It
+matters concretely here rather than being a formality: browser panes are
+native `CefBrowserView` child windows that paint *above* the webview's
+DOM, so a tooltip that merely fits the viewport can still be drawn behind
+one. `computeMenuPosition` treats those rects as boundaries; the bare
+`computePosition` call did not, and this tooltip anchors to a pane header
+that very often sits right beside a browser pane.
+
 A **new**, small `AnchoredTooltip` component (`blockframe.tsx`) does this,
 rather than reusing `Tooltip` directly: `Tooltip` always wraps its
 children in a brand-new `<div>` to own the hover listeners, but

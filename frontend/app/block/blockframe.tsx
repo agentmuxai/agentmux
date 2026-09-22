@@ -28,7 +28,8 @@ import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import clsx from "clsx";
-import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { autoUpdate } from "@floating-ui/dom";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -397,23 +398,37 @@ function EndIcons(props: {
  * root div carries several existing handlers/ref assignments
  * (onContextMenu, dragHandleRef, drag-region data attrs, …), and wrapping
  * it in another div just to reuse `Tooltip` would restructure a heavily-
- * tuned, comment-dense component for no real benefit. Reuses the exact
- * same floating-ui middleware/positioning and CSS classes as `Tooltip`
- * for visual consistency — see SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md.
+ * tuned, comment-dense component for no real benefit. Uses the same CSS
+ * classes as `Tooltip` for visual consistency —
+ * see SPEC_PANE_HEADER_TEXT_HOVER_TOOLTIP_2026_09_21.md.
+ *
+ * Positioning goes through `computeMenuPosition`
+ * (`util/menu-position.ts`), not a raw `computePosition` call. That is
+ * the repo-wide rule for any floating surface
+ * (SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20, enforced by
+ * `scripts/check-menu-positioning.sh`), and it matters concretely here:
+ * browser panes are native `CefBrowserView` child windows that paint
+ * ABOVE the webview's DOM, so a tooltip that merely fits the viewport can
+ * still be drawn behind one. `computeMenuPosition` treats those rects as
+ * boundaries; a bare `computePosition` does not, and this tooltip anchors
+ * to a pane header that very often sits right next to a browser pane.
  */
 function AnchoredTooltip(props: { anchor: () => HTMLElement | null; visible: boolean; content: JSX.Element }): JSX.Element {
-    const [floatingStyle, setFloatingStyle] = createSignal("position:absolute;left:0px;top:0px");
+    const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
+        position: "fixed",
+        left: "0px",
+        top: "0px",
+    });
     let floatingEl: HTMLElement | undefined;
     let cleanupAutoUpdate: (() => void) | null = null;
 
     const updatePosition = async () => {
         const anchorEl = props.anchor();
         if (!anchorEl || !floatingEl) return;
-        const pos = await computePosition(anchorEl, floatingEl, {
-            placement: "bottom",
-            middleware: [offset(6), flip(), shift({ padding: 12 })],
-        });
-        setFloatingStyle(`position:absolute;left:${pos.x}px;top:${pos.y}px`);
+        // gutter 6 preserves the original `offset(6)` spacing; flip/shift
+        // equivalents are built into computeMenuPosition.
+        const pos = await computeMenuPosition({ anchor: anchorEl, placement: "bottom", gutter: 6 }, floatingEl);
+        setFloatingStyle(pos.style);
     };
 
     createEffect(() => {
