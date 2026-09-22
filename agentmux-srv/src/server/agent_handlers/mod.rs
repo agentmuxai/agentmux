@@ -9,7 +9,7 @@ mod identity;
 mod instance;
 mod session;
 mod bundle;
-mod input;
+pub(crate) mod input;
 mod side_question;
 
 use std::sync::Arc;
