@@ -330,18 +330,52 @@ data for this node type. This is the actual hiding mechanism: not a CSS
 client and risk a future rendering bug exposing it), but the content simply
 never being present in the node the frontend stores or replays.
 
-**History replay:** `parseHistoryLines.ts` needs the same node
-reconstruction, mirroring how `compact-boundary.ts` was extracted into one
-shared module specifically because the live and replay paths previously
-drifted (§1.2, Codex P1 on PR #2378 round 2). New shared parsing lives
-alongside `parseCompactBoundaryFrame` for the same reason — this node's data
-(counts, token estimate) needs to be reconstructible from the persisted
-transcript on reopen, without needing the original full memory body (which
-was real message content and IS in the raw transcript file — a real,
-searchable, if verbose, correctness property: someone with direct filesystem
-access to `~/.claude/projects/.../*.jsonl` can still see exactly what was
-sent, which matters for auditability even though AgentMux's own UI never
-shows it).
+**History replay — implemented 2026-09-22, fifth pass, and it turned out to
+be a real, separate leak from the one §3.3 already fixed:** the live queue
+wrapper only covers the LIVE session. `parseHistoryLines.ts` re-derives
+nodes from the raw on-disk provider transcript independently — and that
+transcript genuinely contains the hidden turn's real content (delivery is a
+real message, per §3.3), so reopening a pane after this session ended would
+have rendered the full reinjection text as an ordinary visible message, with
+no live-only mechanism protecting it.
+
+Fixed at the actual right layer once traced: `parseHistoryLines.ts` and
+`useAgentStream.ts` both construct their `ClaudeCodeStreamParser` from the
+SAME shared class (`stream-parser.ts`, `isReplay: true` vs. default
+`false`), and that class already had exactly the right precedent for this
+shape of problem — `tryParseJekt`, which recognizes a special marker
+occupying a whole user-message payload and returns a different node type
+instead of the plain `UserMessageNode` it would otherwise become. Added the
+mirror, `tryParseMemoryReinjection`, plus one new stateful field
+(`hidingUntilNextUserMessage`) that suppresses every OTHER event type
+(text/thinking/tool_call/tool_result/agent_message/error_result) between a
+recognized reinjection's own user-message event and the next real one — the
+closest a stateless-per-line replay parse can get to mirroring the live
+queue wrapper's behavior, covering the assistant's reply on replay too, not
+just the outgoing side.
+
+Recognition/reconstruction itself lives in `memory-reinjection.ts`
+(`isMemoryReinjectionMessage`, `parseReinjectionMessage`,
+`buildMemoryReinjectionNodeFromReplay`) — shared with `stream-parser.ts`
+for the same "two consumers can't independently drift" reason
+`compact-boundary.ts` was originally extracted for. Two things are
+genuinely NOT recoverable from the replayed message text alone, and this
+degrades honestly rather than fabricating them: per-entry labels
+(`composeReinjectionMessage` never wrote them into the message, only raw
+bodies) become synthetic `"Entry N"` placeholders, and `sizeBytes` falls
+back to the recovered text chunk's own length rather than the original
+real on-disk size. `sizeBand` also falls back to `FALLBACK_CONTEXT_WINDOW`
+(shared with the live send path's own fallback) since the pane's actual
+context window isn't reliably known at a stateless replay-parse call site —
+the replayed band may not exactly match what was shown live. All flagged
+in code comments, not silently assumed.
+
+Also confirms the auditability property this section originally
+speculated about: the full content genuinely is in the raw transcript file
+on disk (`~/.claude/projects/.../*.jsonl`) — someone with direct filesystem
+access can still see exactly what was sent, which is real and intentional,
+not a leak this fix is trying to close. What this fix closes is AgentMux's
+own UI re-surfacing that content as an ordinary visible message on reopen.
 
 ### 3.3 Delivery — reusing the real send path, not inventing a raw-stdin bypass
 

@@ -4,9 +4,12 @@
 import { describe, expect, it } from "vitest";
 import {
     buildMemoryReinjectionNode,
+    buildMemoryReinjectionNodeFromReplay,
     composeReinjectionMessage,
+    isMemoryReinjectionMessage,
     memoryReinjectionNodeId,
     memorySizeBand,
+    parseReinjectionMessage,
     shouldReinject,
     type MemoryEntryInput,
 } from "./memory-reinjection";
@@ -207,5 +210,86 @@ describe("buildMemoryReinjectionNode", () => {
 
         const withoutFrame = buildMemoryReinjectionNode([globalEntry("g1", "x")], { ...opts, frameTimestamp: null });
         expect(withoutFrame.at).toBe(opts.now);
+    });
+});
+
+describe("isMemoryReinjectionMessage / parseReinjectionMessage — the replay-recognition half of §3.2", () => {
+    it("recognizes a real composeReinjectionMessage output", () => {
+        const msg = composeReinjectionMessage([globalEntry("g1", "body one"), personalEntry("p1", "body two")]);
+        expect(isMemoryReinjectionMessage(msg)).toBe(true);
+    });
+
+    it("does not recognize an ordinary user message, even one that happens to mention memory", () => {
+        expect(isMemoryReinjectionMessage("please check my memory files")).toBe(false);
+        expect(isMemoryReinjectionMessage("<system-reminder>unrelated content</system-reminder>")).toBe(false);
+    });
+
+    it("parseReinjectionMessage returns null for a non-matching message", () => {
+        expect(parseReinjectionMessage("just a normal message")).toBeNull();
+    });
+
+    it("recovers global/personal counts from a real composed message", () => {
+        const msg = composeReinjectionMessage([
+            globalEntry("g1", "gbody1"),
+            globalEntry("g2", "gbody2"),
+            personalEntry("p1", "pbody1"),
+        ]);
+        const parsed = parseReinjectionMessage(msg);
+        expect(parsed?.globalMemoryCount).toBe(2);
+        expect(parsed?.personalMemoryCount).toBe(1);
+        expect(parsed?.perEntryTokens).toHaveLength(3);
+    });
+
+    it("handles a message with only one source present (the other section omitted)", () => {
+        const msg = composeReinjectionMessage([globalEntry("g1", "gbody1")]);
+        const parsed = parseReinjectionMessage(msg);
+        expect(parsed?.globalMemoryCount).toBe(1);
+        expect(parsed?.personalMemoryCount).toBe(0);
+    });
+
+    it("recovered entries use synthetic labels and text-length sizeBytes — documented approximation, not the originals", () => {
+        const msg = composeReinjectionMessage([globalEntry("real-label", "xxxx")]);
+        const parsed = parseReinjectionMessage(msg);
+        expect(parsed?.perEntryTokens[0].label).toBe("Entry 1");
+        expect(parsed?.perEntryTokens[0].label).not.toBe("real-label");
+        expect(parsed?.perEntryTokens[0].sizeBytes).toBe(4); // "xxxx".length
+        expect(parsed?.perEntryTokens[0].tokens).toBe(1); // estimateTokenCount("xxxx")
+    });
+});
+
+describe("buildMemoryReinjectionNodeFromReplay", () => {
+    it("returns null for a non-matching message", () => {
+        expect(buildMemoryReinjectionNodeFromReplay("ordinary message", { eventTimestamp: 0 })).toBeNull();
+    });
+
+    it("builds a full node from a real composed message, keyed on the event's own timestamp", () => {
+        const msg = composeReinjectionMessage([globalEntry("g1", "gbody"), personalEntry("p1", "pbody")]);
+        const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 1_758_534_000_000 });
+        expect(node).not.toBeNull();
+        expect(node?.type).toBe("memory_reinjection");
+        expect(node?.globalMemoryCount).toBe(1);
+        expect(node?.personalMemoryCount).toBe(1);
+        expect(node?.at).toBe(1_758_534_000_000);
+        expect(node?.id).toContain("1758534000000");
+    });
+
+    it("uses FALLBACK_CONTEXT_WINDOW for sizeBand when the caller doesn't supply one", () => {
+        // "x".repeat(3800) -> 950 estimated tokens -> critical against the
+        // 200_000-token fallback at the default 0.10 fraction (threshold 20_000)?
+        // No — 950/20_000 is nowhere near critical at THAT threshold, so use a
+        // small personal body instead to confirm "low" against the large
+        // fallback window (the behavior actually being tested: it doesn't
+        // crash or default to some other number when contextWindow is omitted).
+        const msg = composeReinjectionMessage([personalEntry("p1", "short")]);
+        const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 0 });
+        expect(node?.sizeBand).toBe("low");
+    });
+
+    it("respects an explicit contextWindow override when supplied", () => {
+        const msg = composeReinjectionMessage([personalEntry("p1", "x".repeat(3800))]);
+        // 950 estimated tokens against a 10_000-token window at the default
+        // 0.10 fraction -> threshold 1000 -> 95% -> critical.
+        const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 0, contextWindow: 10_000 });
+        expect(node?.sizeBand).toBe("critical");
     });
 });

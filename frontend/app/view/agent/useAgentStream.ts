@@ -50,6 +50,7 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
+import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
 import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -267,14 +268,10 @@ export function useAgentStream({
     // choke point already.
     const rawQueue = createStreamFlushQueue(model);
 
-    // Fallback used only when no model id has been observed yet (before the
-    // first message_start of this session) — 200K matches Haiku's real
-    // context window, the smaller of the two values TokensIn's own comment
-    // cites for this provider ("Opus/Sonnet 1M, Haiku 200K"), so an unknown
-    // model under-estimates its budget rather than over-estimates it: the
-    // safer failure direction for a size-band warning (reads as more urgent
-    // than reality, never less).
-    const FALLBACK_CONTEXT_WINDOW = 200_000;
+    // FALLBACK_CONTEXT_WINDOW (used only before the first message_start of
+    // this session) is shared with memory-reinjection.ts's own replay-time
+    // reconstruction — see that constant's doc comment for why 200K —
+    // rather than each picking the number independently.
     let lastSeenModelId: string | undefined;
 
     const memoryReinjectionController = createMemoryReinjectionController({
