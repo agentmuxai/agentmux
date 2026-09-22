@@ -3,11 +3,13 @@
 **Date:** 2026-09-21
 **Status:** active — repo-owner-approved direction, scope confirmed by a
 full-codebase audit (this document). Shipping as sequential PRs, one per phase.
-Landed: the `instance_get_by_slug` fail-closed fix (#3500), registry-guard test
-coverage (#3503), Phase 0's shared resolver (#3504, which also subsumes Phase 1
-as §6 defines it), and Phase 4 (#3508).
-Remaining: Phase 0's §4 safety net (low priority, see §2.5.2), Phase 2,
-Phase 3 (blocked on #3501's per-agent identity design), Phase 5.
+Phase 0 and Phase 4 are complete. Landed: the `instance_get_by_slug`
+fail-closed fix (#3500), registry-guard test coverage (#3503), Phase 0's shared
+resolver (#3504, which also subsumes Phase 1 as §6 defines it), Phase 4
+(#3508), and Phase 0's §4 safety net (#3514).
+Remaining: Phase 2 (needs the rollout decision §6 flags), Phase 3 and Phase 5
+— both carry a recommendation NOT to proceed as written; see their §6 entries
+before picking either up.
 **§2.5 records a verification pass against `main` @ `059cc6e` (2026-09-22)
 correcting §2/§4/§7, plus two later self-corrections (§2.5.2, §2.5.5) where
 this document asserted system behaviour inferred from a single function
@@ -108,10 +110,10 @@ that, so this section re-verifies §2 against current `main` and corrects it.
 > **Status update.** As of the PR that adds `backend/agent_resolve.rs`, Phase 0's
 > shared resolver **now exists** and `resolve_agent_uuid` /
 > `resolve_agent_definition_id` both delegate to it. The remaining Phase 0 item
-> is the §4 safety net (`instance_create`, per §2.5.2 — **lower priority than
-> first written**; the data check §4 asked for has now been run and found no
-> existing collisions to clean up, so what remains is closing a contract gap,
-> not repairing data). `backend::history`'s inline
+> was the §4 safety net (`instance_create`, per §2.5.2), which landed in #3514
+> — the data check §4 asked for found no existing collisions to clean up, so it
+> closed a contract gap rather than repairing data. **Phase 0 is now complete.**
+> `backend::history`'s inline
 > fourth resolution path is Phase 1's, not Phase 0's — its extra raw-slug
 > fallback is load-bearing and needs its own change. The rest of this section
 > records the state before that, and why #3480 was not it.
@@ -454,6 +456,21 @@ deciding, not assumed here.
 **This phase is not the fix for §2.5.5's authorization gap** — that is a
 separate defect in the same files and should land on its own, ideally first.
 
+> **Recommendation, 2026-09-22: do not proceed as written yet.** §2.5.5's root
+> cause is now understood — the work queue has no per-agent identity to check
+> against because `AGENTMUX_AUTH_KEY` is instance-wide and inherited, which
+> `backend/pane_env.rs` and
+> `docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md`
+> (recommendation 4) already track as a redesign, not a bug fix. Tracked as
+> #3501.
+>
+> That changes this phase's cost/benefit. Canonicalizing these columns makes
+> the asserted identity unguessable but still unverified, so it buys hardening
+> rather than a fix — while carrying a migration for live unclaimed rows that
+> the per-invocation-handoff redesign may partly invalidate. The consistency
+> win is real; it is simply not worth doing *before* the identity decision,
+> and it risks reading as having closed #3501 when it has not.
+
 ### Phase 4 — S1 WS-RPC authorization (§2 #3)
 
 > **Implemented, but not the way this section proposed.** Resolution happens
@@ -518,6 +535,23 @@ confirmed against Phase 2's final wire contract; `bash_wrap.rs`'s
 `AGENTMUX_AGENT_ID` fallback path removed now that the primary
 `AGENTMUX_INSTANCE_SLUG` path is the only one needed (or left as
 belt-and-suspenders — low-stakes either way, a judgment call for that PR).
+
+> **Correction, 2026-09-22: the bashwrap cleanup is not low-stakes, and the
+> "only one needed" premise is wrong.** `AGENTMUX_INSTANCE_SLUG` is set in
+> exactly one place — `frontend/app/view/agent/agent-model.ts` — while
+> `AGENTMUX_AGENT_ID` is set in several, including the MCP server env written
+> by `backend/agent_config.rs`. So the fallback is load-bearing for every
+> launch path the frontend does not drive; removing it silently re-keys their
+> cwd-state onto the cwd-derived third fallback.
+>
+> That may well be fine — `cwd_state_path`'s own comment says the cwd is
+> "always the instance's fixed home directory either way" — but that is a
+> claim to verify per launch path, not to infer from a comment, and the
+> verification is the actual work rather than the deletion. Until it is done,
+> leaving the fallback in place is the safe option.
+>
+> The cron and frontend-registration halves of this phase remain blocked on
+> Phase 2 regardless.
 
 ---
 
