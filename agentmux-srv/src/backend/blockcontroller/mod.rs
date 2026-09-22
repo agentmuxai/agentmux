@@ -711,6 +711,24 @@ pub fn resync_controller(
     event_bus: Option<Arc<EventBus>>,
     mstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
+    // `id_store`/`identity_store`: the Layer 3 identity/credential spawn
+    // gate's dependencies (`identity::resolver::inject_identity_env`, per
+    // `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`). Only consulted
+    // by `PersistentSubprocessController::start()`'s eager-resume path
+    // (`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`)
+    // — every other controller type ignores them. `None` here does not
+    // disable the gate for a LIVE message send (that path, `agent_handlers::
+    // input`, has its own direct access to these stores) — it only means a
+    // controller CONSTRUCTED via this call can't eager-resume at all, and
+    // falls back to today's lazy "wait for the first message" behavior even
+    // when `agent:sessionid` is present. That fallback is the deliberately
+    // safe default: spawning an eager resume WITHOUT the gate would spawn a
+    // possibly-deauthed agent on whatever ambient credential is lying
+    // around, silently reintroducing the exact vulnerability class that gate
+    // was built to close. See `PersistentSubprocessController::start()`'s
+    // own doc comment.
+    id_store: Option<Arc<Store>>,
+    identity_store: Option<Arc<Store>>,
     registry: Option<Arc<crate::registry::Registry>>,
     boot_id: Arc<str>,
     auth_key: &str,
@@ -887,7 +905,8 @@ pub fn resync_controller(
                 event_bus,
                 mstore,
                 filestore,
-            );
+            )
+            .with_identity_stores(id_store, identity_store, auth_key.to_string());
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
@@ -1174,7 +1193,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, Arc::from("test-boot"), "test-key");
         assert!(result.is_ok(), "resync_controller failed: {result:?}");
 
         assert_eq!(
@@ -1312,7 +1331,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
         assert!(result.is_ok());
     }
 
@@ -1329,7 +1348,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }
