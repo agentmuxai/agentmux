@@ -3,11 +3,11 @@
 **Date:** 2026-09-21
 **Status:** active — repo-owner-approved direction, scope confirmed by a
 full-codebase audit (this document). Shipping as sequential PRs, one per phase.
-**Landed:** the `instance_get_by_slug` fail-closed fix (#3500), registry-guard
-test coverage (#3503), Phase 0's shared resolver (#3504, which also subsumes
-Phase 1 as §6 defines it), and Phase 4 (#3508). **Remaining:** Phase 0's §4
-safety net (low priority, see §2.5.2), Phase 2, Phase 3 (blocked on #3501's
-per-agent identity design), Phase 5.
+Landed: the `instance_get_by_slug` fail-closed fix (#3500), registry-guard test
+coverage (#3503), Phase 0's shared resolver (#3504, which also subsumes Phase 1
+as §6 defines it), and Phase 4 (#3508).
+Remaining: Phase 0's §4 safety net (low priority, see §2.5.2), Phase 2,
+Phase 3 (blocked on #3501's per-agent identity design), Phase 5.
 **§2.5 records a verification pass against `main` @ `059cc6e` (2026-09-22)
 correcting §2/§4/§7, plus two later self-corrections (§2.5.2, §2.5.5) where
 this document asserted system behaviour inferred from a single function
