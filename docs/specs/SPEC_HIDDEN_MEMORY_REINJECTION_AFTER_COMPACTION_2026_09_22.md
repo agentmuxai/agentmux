@@ -258,9 +258,10 @@ raw text (dev tools, a raw transcript dump) can still make sense of it:
 
 ```
 <system-reminder>
-Your memory was reinjected after a context compaction. Below is your
+Your memory was reinjected because your working context was just reset. Your
+recent conversation was just compacted into a summary. Below is your
 complete Global Memory and Personal Memory content — read all of it now,
-not just the index, since your recent working context was just summarized.
+not just the index.
 
 # Global Memory (N entries)
 <full body of entry 1>
@@ -274,6 +275,11 @@ not just the index, since your recent working context was just summarized.
 ...
 </system-reminder>
 ```
+
+The second sentence is reason-specific — the template above shows the
+`"compaction"` wording; §3.3a's `"fresh_session"` reason substitutes a
+different second sentence while keeping the same leading signature sentence
+(`REINJECTION_SIGNATURE`), which is what suppression detection keys on.
 
 The `<system-reminder>` wrapper matches Claude's own documented, trained
 convention for background-context-not-a-user-instruction content — the same

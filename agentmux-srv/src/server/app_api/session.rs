@@ -1308,9 +1308,9 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
     }
 }
 
-/// True for a `<system-reminder>...Your memory was reinjected after a
-/// context compaction...` message — a hidden memory-reinjection turn
-/// (`frontend/app/view/agent/memory-reinjection.ts`'s
+/// True for a `<system-reminder>...Your memory was reinjected because your
+/// working context was just reset...` message — a hidden memory-reinjection
+/// turn (`frontend/app/view/agent/memory-reinjection.ts`'s
 /// `composeReinjectionMessage`). Mirrors that module's
 /// `isMemoryReinjectionMessage` exactly, including the exact signature
 /// string — kept as a literal duplicate rather than a shared constant
@@ -1333,11 +1333,11 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
 /// whenever the output FileStore's size changes.
 /// The signature sentence is reason-independent by design — `fresh_session`
 /// triggers (a persistent identity whose prior session could not be
-/// resumed, `memory-reinjection-controller.ts`'s "fresh session" addendum (§3.3a),
-/// SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3) use
-/// the same leading sentence as a real compaction, only the second sentence
-/// differs (`memory-reinjection.ts`'s `REASON_CLAUSE`) — so this one match
-/// suppresses both without needing to track which reason fired.
+/// resumed; SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md
+/// §3.3a) use the same leading sentence as a real compaction, only the
+/// second sentence differs (`memory-reinjection.ts`'s `REASON_CLAUSE`) — so
+/// this one match suppresses both without needing to track which reason
+/// fired.
 fn is_hidden_reinjection_text(text: &str) -> bool {
     text.starts_with("<system-reminder>")
         && text.contains("Your memory was reinjected because your working context was just reset.")
