@@ -1,9 +1,12 @@
-# SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access
+# SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password
 
 **Date:** 2026-09-16
 **Status:** implemented — agentmux side in PR #3271; agentmux-cloud companion
 side in `agentmux-cloud` PR #75. Both merged 2026-09-16. **2026-09-18
-follow-up:** both notices' visual prominence was increased — see §5.
+follow-up:** both notices' visual prominence was increased — see §5. **2026-09-21
+follow-up:** added a parallel Linux notice (status bar panel only) — see §6;
+§1's original "Windows/Linux don't show an equivalent interactive OS dialog"
+claim was wrong for Linux, corrected there.
 **Repos touched:** `agentmuxai/agentmux` (desktop app) and `agentmuxai/agentmux-cloud`
 (hosted login-relay page). Cross-repo specs are kept in `agentmux`'s `docs/specs/`
 per existing precedent (see `SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`,
@@ -39,9 +42,19 @@ first `secret_store::put`/`get` for the `agentmux` service account triggers the
 OS's own access-consent UI — this happens once the browser hands control back
 to the desktop app and it persists the freshly-obtained token
 (`agentmux-srv/src/backend/storage/muxbus.rs`'s `muxbus_save` path, ultimately
-`secret_store::put(LEGACY_BLOB_KEYCHAIN_ID, &blob)`). Windows/Linux don't show
-an equivalent interactive OS dialog in the same way, so this notice is
-deliberately macOS-only.
+`secret_store::put(LEGACY_BLOB_KEYCHAIN_ID, &blob)`).
+
+**Correction, 2026-09-21:** this originally said "Windows/Linux don't show an
+equivalent interactive OS dialog in the same way, so this notice is
+deliberately macOS-only" — wrong for Linux, reported live by a user running
+this app: on a Linux desktop where the Secret Service backend (GNOME
+Keyring/KWallet) isn't already unlocked for the session, the same
+`keyring`-crate `put`/`get` call triggers an interactive password prompt from
+whichever Secret Service provider is running, same as Keychain does on macOS
+— it's the identical code path, just a different OS-level secret store on the
+other end. See §6 for the Linux notice this added. Windows Credential Manager
+genuinely doesn't prompt interactively (silent, tied to the logged-in Windows
+account), so the original claim stands for Windows specifically.
 
 ## 2. Two touchpoints
 
@@ -209,3 +222,38 @@ paragraph, echoing the same visual language (purple accent matching
 `agentmux`'s own `--info-color` default) so the two surfaces read as one
 feature despite being in separate repos with no shared CSS
 (`agentmux-cloud/muxbus/server/src/login-relay.ts`). Copy unchanged.
+
+## 6. 2026-09-21 follow-up: parallel Linux notice (status bar panel only)
+
+Scope: exactly the surface the user reported the issue on — the status bar
+panel's "MuxBus Cloud" row (`frontend/app/statusbar/HostPopover.tsx`). The
+login-relay page (§2.2, `agentmux-cloud` repo) and the two other
+`MuxBusController` surfaces flagged in §4 (Identity tab's
+`MuxBusConnectSection`, Armory Accounts gallery tile) are **not** touched by
+this follow-up — same open-question status as before, not expanded just
+because the macOS notice's sibling was added.
+
+Added a second `<Show>` block immediately after the existing macOS one, same
+`.status-bar-popover-info-notice` styling, gated on the pre-existing
+`isLinux()` helper (`frontend/util/platformutil.ts` — already existed as a
+sibling to `isMacOS()`, just unused in this file before now):
+
+```tsx
+<Show when={isLinux() && !(muxbus.status()?.connected && muxbus.status()?.valid)}>
+    <div class="status-bar-popover-info-notice" role="status">
+        <span class="status-bar-popover-info-notice-icon" aria-hidden="true">{"🔒"}</span>
+        <span>
+            Linux will ask for your keyring password after you sign in —
+            that's AgentMux securely storing your session.
+        </span>
+    </div>
+</Show>
+```
+
+Copy says "keyring password," not "Secret Service" or a specific backend
+name (GNOME Keyring vs. KWallet) — deliberately generic since which one is
+running, and what it literally labels its own dialog, varies by desktop
+environment; "keyring" is the term both present in some form and is close
+enough to what a Linux desktop user already associates with this class of
+prompt, matching the macOS notice's own "Keychain" specificity without
+inventing a claim about which exact program shows the dialog.

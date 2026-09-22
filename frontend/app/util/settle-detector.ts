@@ -23,9 +23,14 @@
  *
  * Returns a cancel function — call it if the caller unmounts/disposes
  * before settling (e.g. the pane closes mid-load).
+ *
+ * `onSettled` receives `hitCap: true` when `maxMs` elapsed before a real
+ * quiet window was found (including the no-`PerformanceObserver` fallback,
+ * which always waits the full budget) — callers that care whether a reveal
+ * was forced rather than genuinely settled should log or count this.
  */
 export function scheduleOnSettle(
-    onSettled: () => void,
+    onSettled: (info: { hitCap: boolean; elapsedMs: number }) => void,
     opts?: { settleMs?: number; maxMs?: number },
 ): () => void {
     const settleMs = opts?.settleMs ?? 80;
@@ -53,7 +58,7 @@ export function scheduleOnSettle(
         // longtask signal there's no way to detect the real settle moment.
         fallbackTimer = setTimeout(() => {
             fallbackTimer = null;
-            if (!cancelled) onSettled();
+            if (!cancelled) onSettled({ hitCap: true, elapsedMs: maxMs });
         }, maxMs);
     };
 
@@ -81,7 +86,7 @@ export function scheduleOnSettle(
         const hardCapHit = now - startedAt >= maxMs;
         if (settledSinceLastBusy || hardCapHit) {
             cancel();
-            onSettled();
+            onSettled({ hitCap: hardCapHit, elapsedMs: now - startedAt });
             return;
         }
         requestAnimationFrame(tick);

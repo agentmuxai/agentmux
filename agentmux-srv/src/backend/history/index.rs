@@ -226,10 +226,53 @@ fn default_isolated_roots() -> Vec<PathBuf> {
     }
 }
 
+/// Normalize a working directory for use as an index key.
+///
+/// Separators are unified and trailing ones dropped so the same directory
+/// written `C:\x\y`, `C:/x/y` and `C:/x/y/` all collide on one key. Case is
+/// folded on Windows only: its filesystem is case-insensitive, so `C:\Users`
+/// and `c:\users` are genuinely the same directory — but on Linux they are
+/// two different directories, and folding case there would merge the history
+/// of two unrelated agents.
+pub(crate) fn normalize_working_dir(dir: &str) -> String {
+    let unified = dir.replace('\\', "/");
+    let trimmed = unified.trim_end_matches('/');
+    if cfg!(windows) {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// In-memory index of discovered sessions.
 pub struct SessionIndex {
     /// session_id -> SessionMeta
     sessions: Mutex<HashMap<String, SessionMeta>>,
+    /// normalized working directory -> session_ids.
+    ///
+    /// The identity index below can only find sessions for an agent that has
+    /// a `db_agent_identity_links` row binding it to the identity bundle its
+    /// transcripts were written under. An agent running on ambient
+    /// credentials has no such row (and its registry record's `identity_id`
+    /// reads `"default"`), so for that — the common — case the identity index
+    /// resolves to nothing at all while the transcripts sit on disk perfectly
+    /// intact. The working directory is recorded both in the transcript
+    /// itself (`cwd`) and on the agent's own row, which makes it the join key
+    /// that actually holds for those agents. See
+    /// `docs/specs/SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION_2026_09_21.md`.
+    /// **LOCK ORDER — `sessions` is always acquired BEFORE this map, and
+    /// before `by_identity`.** Never the reverse, anywhere.
+    ///
+    /// `refresh()` holds the `sessions` guard while it swaps both index maps
+    /// in, so it takes `sessions -> by_working_dir`. A reader that took
+    /// `by_working_dir -> sessions` would be a textbook AB-BA deadlock the
+    /// moment a `refresh()` (triggered by any `list`/`sessions_for_agent`
+    /// call) overlapped it on the shared `Arc<SessionIndex>` — thread A
+    /// holding `sessions` and blocking on the map, thread B holding the map
+    /// and blocking on `sessions`. Both readers below therefore take
+    /// `sessions` first, even though reading the map first would read more
+    /// naturally. reagentx P1 on PR #3480.
+    by_working_dir: Mutex<HashMap<String, Vec<String>>>,
     /// identity_id -> session_ids (only non-empty `SessionMeta::identity_id`
     /// values are indexed here). Maintained alongside `sessions` so "this
     /// identity's sessions" is an O(k) HashMap lookup + small per-identity
@@ -256,6 +299,7 @@ impl SessionIndex {
     ) -> Self {
         SessionIndex {
             sessions: Mutex::new(HashMap::new()),
+            by_working_dir: Mutex::new(HashMap::new()),
             by_identity: Mutex::new(HashMap::new()),
             adapters,
             isolated_roots,
@@ -277,6 +321,7 @@ impl SessionIndex {
 
         let mut new_sessions: HashMap<String, SessionMeta> = HashMap::new();
         let mut new_by_identity: HashMap<String, Vec<String>> = HashMap::new();
+        let mut new_by_working_dir: HashMap<String, Vec<String>> = HashMap::new();
 
         for adapter in &self.adapters {
             let files = match adapter.discover_files() {
@@ -299,6 +344,12 @@ impl SessionIndex {
                         if !meta.identity_id.is_empty() {
                             new_by_identity
                                 .entry(meta.identity_id.clone())
+                                .or_default()
+                                .push(meta.session_id.clone());
+                        }
+                        if !meta.working_directory.is_empty() {
+                            new_by_working_dir
+                                .entry(normalize_working_dir(&meta.working_directory))
                                 .or_default()
                                 .push(meta.session_id.clone());
                         }
@@ -328,8 +379,29 @@ impl SessionIndex {
 
         *sessions = new_sessions;
         *self.by_identity.lock().unwrap() = new_by_identity;
+        *self.by_working_dir.lock().unwrap() = new_by_working_dir;
 
         (discovered, updated, new_count)
+    }
+
+    /// Every session recorded as having run in `working_directory`.
+    ///
+    /// Matching is on the normalized full path ([`normalize_working_dir`]),
+    /// never a substring: `list`'s `project` filter uses `contains`, which
+    /// would make an agent in `/agents/foo` also claim every session from
+    /// `/agents/foo-2`.
+    pub fn list_for_working_directory(&self, working_directory: &str) -> Vec<SessionMeta> {
+        if working_directory.is_empty() {
+            return Vec::new();
+        }
+        let key = normalize_working_dir(working_directory);
+        // `sessions` FIRST — see the lock-order invariant on `by_working_dir`.
+        let sessions = self.sessions.lock().unwrap();
+        let by_working_dir = self.by_working_dir.lock().unwrap();
+        let Some(session_ids) = by_working_dir.get(&key) else {
+            return Vec::new();
+        };
+        session_ids.iter().filter_map(|id| sessions.get(id)).cloned().collect()
     }
 
     /// This identity's sessions, sorted/paginated the same way `list` is —
@@ -348,11 +420,17 @@ impl SessionIndex {
         sort_by: &str,
         sort_dir: &str,
     ) -> (Vec<SessionMeta>, u32, bool) {
+        // `sessions` FIRST — see the lock-order invariant on `by_working_dir`.
+        // This ordering was inverted here BEFORE PR #3480 (`refresh()` has
+        // always held `sessions` while swapping `by_identity` in), so the same
+        // AB-BA deadlock was already latent on `main` for the identity index.
+        // Fixed alongside the `by_working_dir` one rather than leaving a known
+        // instance of the bug in place next to its fix.
+        let sessions = self.sessions.lock().unwrap();
         let by_identity = self.by_identity.lock().unwrap();
         let Some(session_ids) = by_identity.get(identity_id) else {
             return (Vec::new(), 0, false);
         };
-        let sessions = self.sessions.lock().unwrap();
         let mut filtered: Vec<&SessionMeta> =
             session_ids.iter().filter_map(|id| sessions.get(id)).collect();
         Self::sort_sessions(&mut filtered, sort_by, sort_dir);
@@ -853,6 +931,76 @@ mod tests {
         assert!(!has_more2);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    /// Hammers the two conflicting lock orders against each other on the same
+    /// `Arc<SessionIndex>` a real deployment shares between requests.
+    ///
+    /// A deadlock does not *fail* a test, it hangs it — and a hung test hangs
+    /// CI rather than reporting anything useful. So the workers signal a
+    /// channel and the assertion is a bounded `recv_timeout`: a deadlock
+    /// becomes a normal test failure with a readable message, and the threads
+    /// are deliberately not joined (joining a deadlocked thread would hang
+    /// exactly as badly as the bug).
+    ///
+    /// Against the pre-fix ordering — `refresh()` taking `sessions ->
+    /// by_working_dir` while `list_for_working_directory()` took
+    /// `by_working_dir -> sessions` — this wedges. reagentx P1 on PR #3480.
+    #[test]
+    fn concurrent_refresh_and_lookups_do_not_deadlock() {
+        use std::sync::mpsc;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let dir = std::env::temp_dir().join(format!("amux-hist-lockorder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = write_session(&dir, "lock-order-session");
+
+        let index = Arc::new(SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: f, mtime_ms: 1 }],
+                provider: "mock".into(),
+                working_directory: "/proj".into(),
+                identity_id: "acct-lock".into(),
+            })],
+            vec![dir.clone()],
+        ));
+
+        const ITERATIONS: usize = 300;
+        let (tx, rx) = mpsc::channel();
+
+        for worker in 0..3 {
+            let idx = Arc::clone(&index);
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                for _ in 0..ITERATIONS {
+                    match worker {
+                        0 => {
+                            idx.refresh();
+                        }
+                        1 => {
+                            idx.list_for_working_directory("/proj");
+                        }
+                        _ => {
+                            idx.list_for_identity("acct-lock", 0, 10, "created_at", "desc");
+                        }
+                    }
+                }
+                let _ = tx.send(worker);
+            });
+        }
+        drop(tx);
+
+        for _ in 0..3 {
+            rx.recv_timeout(Duration::from_secs(30)).expect(
+                "deadlock: a worker never finished. `refresh()` holds `sessions` while \
+                 swapping the index maps, so every reader must take `sessions` FIRST — \
+                 see the lock-order invariant on `SessionIndex::by_working_dir`",
+            );
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
