@@ -22,31 +22,53 @@ function personalEntry(label: string, body: string, sizeBytes = body.length): Me
 }
 
 describe("memorySizeBand", () => {
-    // Mirrors AgentComposerStrip.tsx's ctxBand() boundary values exactly —
-    // 0.5 / 0.75 / 0.9 of the threshold — per SPEC_HIDDEN_MEMORY_
-    // REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.4.2, which deliberately
-    // reuses ctxBand's own thresholds rather than inventing new ones.
-    const threshold = 1000;
+    // Revised 2026-09-22, second pass: bands Personal memory's ESTIMATED
+    // TOKEN total against a FRACTION OF THE PANE'S CONTEXT WINDOW, mirroring
+    // ctxBand()'s own denominator choice (AgentComposerStrip.tsx:550-556),
+    // not an arbitrary absolute byte number. Same 0.5/0.75/0.9 boundary
+    // fractions, applied to `contextWindow * fraction` instead of a flat
+    // "healthy byte count" — see SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_
+    // COMPACTION_2026_09_22.md §3.4.2 for the full rationale (a fixed byte
+    // number reads identically on a 32K-context pane and a 200K-context
+    // one; a window-relative fraction does not).
+    const contextWindow = 10_000;
+    const fraction = 0.1; // -> healthyThreshold = 1000 tokens, same numbers as the old byte-based test for easy comparison
 
-    it("is low from 0 up to (not including) 50%", () => {
-        expect(memorySizeBand(0, threshold)).toBe("low");
-        expect(memorySizeBand(499, threshold)).toBe("low");
+    it("is low from 0 up to (not including) 50% of the threshold", () => {
+        expect(memorySizeBand(0, contextWindow, fraction)).toBe("low");
+        expect(memorySizeBand(499, contextWindow, fraction)).toBe("low");
     });
 
     it("is mid from 50% up to (not including) 75%", () => {
-        expect(memorySizeBand(500, threshold)).toBe("mid");
-        expect(memorySizeBand(749, threshold)).toBe("mid");
+        expect(memorySizeBand(500, contextWindow, fraction)).toBe("mid");
+        expect(memorySizeBand(749, contextWindow, fraction)).toBe("mid");
     });
 
     it("is high from 75% up to (not including) 90%", () => {
-        expect(memorySizeBand(750, threshold)).toBe("high");
-        expect(memorySizeBand(899, threshold)).toBe("high");
+        expect(memorySizeBand(750, contextWindow, fraction)).toBe("high");
+        expect(memorySizeBand(899, contextWindow, fraction)).toBe("high");
     });
 
     it("is critical from 90% and beyond, including past 100%", () => {
-        expect(memorySizeBand(900, threshold)).toBe("critical");
-        expect(memorySizeBand(1000, threshold)).toBe("critical");
-        expect(memorySizeBand(5000, threshold)).toBe("critical");
+        expect(memorySizeBand(900, contextWindow, fraction)).toBe("critical");
+        expect(memorySizeBand(1000, contextWindow, fraction)).toBe("critical");
+        expect(memorySizeBand(5000, contextWindow, fraction)).toBe("critical");
+    });
+
+    it("defaults the fraction to 0.10 when not supplied — the spec's proposed default", () => {
+        // Same math as the explicit-fraction cases above, but relying on
+        // the default: 10% of a 10,000-token window is the same 1000-token
+        // threshold, so 900 tokens should read "critical" with no third arg.
+        expect(memorySizeBand(900, contextWindow)).toBe("critical");
+        expect(memorySizeBand(499, contextWindow)).toBe("low");
+    });
+
+    it("scales with a larger context window — the whole point of this design", () => {
+        // The SAME 900-token memory total that was "critical" against a
+        // 10,000-token window must read "low" against a 200,000-token one —
+        // this is the exact scaling behavior a fixed byte/token threshold
+        // could not produce, and the reason this spec revised away from one.
+        expect(memorySizeBand(900, 200_000, fraction)).toBe("low");
     });
 });
 
@@ -116,7 +138,8 @@ describe("memoryReinjectionNodeId", () => {
 });
 
 describe("buildMemoryReinjectionNode", () => {
-    const opts = { frameTimestamp: "2026-09-22T10:00:00.000Z", now: 1_758_534_000_000, healthyThreshold: 1000 };
+    // contextWindow: 10_000, default fraction 0.10 -> healthyThreshold = 1000 estimated tokens.
+    const opts = { frameTimestamp: "2026-09-22T10:00:00.000Z", now: 1_758_534_000_000, contextWindow: 10_000 };
 
     it("counts global and personal entries separately", () => {
         const node = buildMemoryReinjectionNode(
@@ -151,19 +174,23 @@ describe("buildMemoryReinjectionNode", () => {
         ]);
     });
 
-    it("bands sizeBand on PERSONAL bytes alone, never the combined total — §3.4.2", () => {
-        // Large GLOBAL total, tiny personal total — must stay "low", proving
-        // the band isn't silently computed from the combined sum.
+    it("bands sizeBand on PERSONAL estimated tokens alone, never the combined total — §3.4.2", () => {
+        // Large GLOBAL body (many estimated tokens), tiny personal body — must
+        // stay "low", proving the band isn't silently computed from the
+        // combined sum. estimateTokenCount("x".repeat(N)) = ceil(N/4).
         const node = buildMemoryReinjectionNode(
-            [globalEntry("big-global", "x", 999_999), personalEntry("tiny-personal", "x", 1)],
+            [globalEntry("big-global", "x".repeat(400_000)), personalEntry("tiny-personal", "x")],
             opts,
         );
         expect(node.sizeBand).toBe("low");
     });
 
-    it("bands 'critical' when personal bytes alone cross the threshold, regardless of global size", () => {
+    it("bands 'critical' when personal estimated tokens alone cross the threshold, regardless of global size", () => {
+        // "x".repeat(3800) -> estimateTokenCount = ceil(3800/4) = 950 tokens,
+        // which is 95% of the 1000-token threshold (contextWindow 10_000 *
+        // default fraction 0.10) -> "critical".
         const node = buildMemoryReinjectionNode(
-            [personalEntry("p1", "x", 950)],
+            [personalEntry("p1", "x".repeat(3800))],
             opts,
         );
         expect(node.sizeBand).toBe("critical");

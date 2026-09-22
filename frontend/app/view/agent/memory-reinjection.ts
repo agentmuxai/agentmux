@@ -35,16 +35,28 @@ export interface MemoryEntryInput {
 
 export type SizeBand = "low" | "mid" | "high" | "critical";
 
+/** Proposed starting default — see spec §3.4.2 for the real-data reasoning behind 0.10, and §3.4.4 for why it's tunable, not empirically settled. */
+export const DEFAULT_MEMORY_SIZE_FRACTION = 0.1;
+
 /**
- * Bands a byte count against a threshold — same four bands, same fractional
- * boundaries (0.5 / 0.75 / 0.9) as `AgentComposerStrip.tsx`'s `ctxBand()`,
- * deliberately reused rather than re-decided. See spec §3.4.2.
+ * Bands Personal memory's estimated token total against a FRACTION OF THE
+ * PANE'S CONTEXT WINDOW — same four bands, same fractional boundaries
+ * (0.5 / 0.75 / 0.9) as `AgentComposerStrip.tsx`'s `ctxBand()`, and
+ * (revised 2026-09-22, second pass) the same DENOMINATOR CHOICE: banding
+ * against a real per-pane reference point rather than an arbitrary absolute
+ * number. The same memory size reads differently on a 32K-context pane than
+ * a 200K-context one, by design — see spec §3.4.2.
  */
-export function memorySizeBand(bytes: number, healthyThreshold: number): SizeBand {
-    const fraction = bytes / healthyThreshold;
-    if (fraction >= 0.9) return "critical";
-    if (fraction >= 0.75) return "high";
-    if (fraction >= 0.5) return "mid";
+export function memorySizeBand(
+    personalEstimatedTokens: number,
+    contextWindow: number,
+    fraction: number = DEFAULT_MEMORY_SIZE_FRACTION,
+): SizeBand {
+    const healthyThreshold = contextWindow * fraction;
+    const f = personalEstimatedTokens / healthyThreshold;
+    if (f >= 0.9) return "critical";
+    if (f >= 0.75) return "high";
+    if (f >= 0.5) return "mid";
     return "low";
 }
 
@@ -105,8 +117,10 @@ export interface BuildMemoryReinjectionNodeOptions {
     frameTimestamp: string | null;
     /** Fallback `at` when frameTimestamp is absent/unparseable — caller's Date.now() at receipt. */
     now: number;
-    /** §3.4.2 — the denominator memorySizeBand bands Personal-memory bytes against. */
-    healthyThreshold: number;
+    /** §3.4.2 — the pane's own context window; memorySizeBand bands Personal-memory estimated tokens against `contextWindow * fraction`. */
+    contextWindow: number;
+    /** Overrides memorySizeBand's default fraction (§3.4.2/§3.4.4) — rarely needed, present for testability/tuning. */
+    sizeBandFraction?: number;
 }
 
 /**
@@ -137,10 +151,15 @@ export function buildMemoryReinjectionNode(
     };
 
     const estimatedTokens = perEntryTokens.reduce((sum, e) => sum + e.tokens, 0);
+    const personalEstimatedTokens = perEntryTokens
+        .filter((e) => e.source === "personal")
+        .reduce((sum, e) => sum + e.tokens, 0);
 
-    // Banded on Personal bytes ALONE — §3.4.2's explicit rule, not the
-    // combined total. See the "bands sizeBand on PERSONAL bytes alone" test.
-    const sizeBand = memorySizeBand(totalSizeBytes.personal, opts.healthyThreshold);
+    // Banded on Personal's estimated tokens ALONE, against the pane's own
+    // context window — §3.4.2's explicit rule, not the combined total and
+    // not an arbitrary absolute number. See the "bands sizeBand on PERSONAL
+    // estimated tokens alone" test.
+    const sizeBand = memorySizeBand(personalEstimatedTokens, opts.contextWindow, opts.sizeBandFraction);
 
     const parsedFrameAt = opts.frameTimestamp != null ? Date.parse(opts.frameTimestamp) : NaN;
     const at = Number.isNaN(parsedFrameAt) ? opts.now : parsedFrameAt;
