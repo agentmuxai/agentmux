@@ -50,6 +50,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
 import { PEEK_ENTER_DELAY_MS } from "./hover-anchor";
 import { useNodePeek } from "../hooks/useNodePeek";
+import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 import { PeekOverlay } from "./PeekOverlay";
 
 interface UserMessageBlockProps {
@@ -66,10 +67,32 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
 
+    // Gated exactly like `useNodePeek`'s sibling path below, and for the same
+    // reason. This component has TWO hover paths — collapsible (startup) rows
+    // use this private one, everything else uses the hook — and only the hook
+    // was gated. `onMouseEnter={collapsible() ? handleMouseEnter : ...}` meant
+    // a text-selection drag sweeping across a COLLAPSED STARTUP ROW still
+    // scheduled `setHovering(true)`, flipped `bodyMode()` to "overlay", and
+    // mounted the Portal-rendered body preview under the cursor mid-drag.
+    //
+    // That is the exact flicker this PR exists to remove, surviving in the
+    // precise scenario its own title names ("dragging left across collapsible
+    // header rows") — reagentx P1 on #3470.
     const handleMouseEnter = () => {
+        if (isPrimaryButtonDown()) return;
         clearTimeout(enterTimer);
-        enterTimer = setTimeout(() => setHovering(true), PEEK_ENTER_DELAY_MS);
+        // Re-checked when the delay elapses, not just at call time: the button
+        // can go down during the delay window (enter fired just before
+        // mousedown), and without this the timeout would still mount the
+        // overlay mid-drag.
+        enterTimer = setTimeout(() => {
+            if (isPrimaryButtonDown()) return;
+            setHovering(true);
+        }, PEEK_ENTER_DELAY_MS);
     };
+    // Leave is deliberately NOT gated — see tooltip.tsx's note: gating unmount
+    // too strands an overlay open forever when the leave fires mid-drag and
+    // the button is released elsewhere.
     const handleMouseLeave = () => {
         clearTimeout(enterTimer);
         setHovering(false);
@@ -110,6 +133,18 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // One element reference, owned by the hook.
     const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } =
         useNodePeek();
+
+    // The collapsible path's own drag-release resync. `useNodePeek` already
+    // does this for the non-collapsible path, but a collapsed startup row
+    // never routes through `handlePeekEnter`, so it needs its own — otherwise
+    // a drag that ENDS on a collapsed row leaves it stuck shut until the
+    // cursor leaves and returns, which is the mirror-image defect of the one
+    // above.
+    onCleanup(
+        onPrimaryButtonRelease(() => {
+            if (collapsible() && peekRowEl()?.matches(":hover")) handleMouseEnter();
+        }),
+    );
     const peekTimeText = createMemo(() => {
         if (collapsible() || !isPeeking()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
