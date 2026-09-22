@@ -38,9 +38,12 @@ name: CI (PR) — compile tests + run
 # which nightly now owns catching); agentmux-bashwrap and agentmux-mcp are
 # independent workspace members not pulled in transitively by the other
 # three, so they need their own explicit `-p` or they'd get no PR-lane gate
-# at all. Windows is the REQUIRED leg (primary platform); ubuntu is
-# non-blocking (continue-on-error) until greened. Standard GitHub-hosted
-# runners only (free on public repos).
+# at all. BOTH legs block as of SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md
+# R2 — ubuntu used to be `continue-on-error` "until greened", which meant it
+# spent ~6 min on every PR and could not fail one while Windows (the slowest
+# leg) was the only real gate. It is greened, and is now the test gate;
+# Windows is a compile-only gate. Standard GitHub-hosted runners only (free on
+# public repos).
 #
 # NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
 # "check --tests + test (windows-latest)" and "vitest" as required status checks
@@ -99,14 +102,96 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decide which of the jobs below this PR's changed files actually require.
+  # Spec: docs/specs/SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md.
+  #
+  # Read the spec before changing anything here. The short version: a job
+  # skipped by an `if:` reports "skipped", and GitHub counts skipped as
+  # PASSING for a required status check. So a wrong answer does not turn CI
+  # red — it puts a green check on code nobody compiled. Both this job and
+  # the `if:` expressions it feeds are written to fail toward RUNNING.
+  #
+  # Workflow-level `paths:`/`paths-ignore:` is the obvious alternative and is
+  # BANNED here: a workflow skipped that way reports nothing at all, stays
+  # Pending forever, and permanently blocks a PR on a required check.
+  # GitHub's own docs say not to use path filtering on required workflows.
+  changes:
+    name: classify changed files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+      frontend: ${{ steps.classify.outputs.frontend }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Only the classifier is needed. No history: the changed-file list
+          # comes from the API, not from diffing against a base, which
+          # sidesteps the whole `fetch-depth: 1 has no parent to diff` class
+          # of bug that makes this pattern silently wrong elsewhere.
+          sparse-checkout: scripts/ci-classify-changes.mjs
+          sparse-checkout-cone-mode: false
+
+      - id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Deliberately no `set -e`. Every failure path below writes
+        # "run everything" and exits 0. A FAILED changes job would leave its
+        # dependents skipped — i.e. green — which is the exact outcome this
+        # whole design exists to prevent.
+        run: |
+          run_everything() {
+            printf 'rust=true\nfrontend=true\ndocs_only=false\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::running all checks — $1"
+          }
+
+          # R4: only pull requests are eligible. Post-merge runs on main always
+          # do the full job — low volume, and the last gate before a release.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            run_everything "not a pull_request (R4)"
+            exit 0
+          fi
+
+          FILES="$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename' 2>/dev/null)" || FILES=""
+
+          if printf '%s\n' "$FILES" | node scripts/ci-classify-changes.mjs \
+               >/tmp/classify.out 2>/tmp/classify.err; then
+            cat /tmp/classify.out >> "$GITHUB_OUTPUT"
+            echo "::notice::$(cat /tmp/classify.err)"
+            cat /tmp/classify.out
+          else
+            # Writing outputs only on the success path keeps this from
+            # appending a second, conflicting value after a partial write.
+            run_everything "classifier did not run cleanly (R2)"
+          fi
+
   rust:
     name: check --tests + test (${{ matrix.os }})
+    needs: changes
+    # `!= 'false'` rather than `== 'true'`, and `!cancelled()` rather than the
+    # default implicit success(), are both load-bearing. If the `changes` job
+    # fails or is itself skipped, its outputs are the empty string: that is
+    # not 'false', so this job RUNS. Written the obvious way
+    # (`== 'true'`, no status function) a broken classifier would silently
+    # skip the build and report the PR green.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
+    # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
+    # could not fail one, while Windows (14-15 min, the slowest leg) was the
+    # only gate. Measured over 32 consecutive runs, Windows produced ZERO
+    # failures Ubuntu did not also produce; its only distinct contribution was
+    # three cancellations. Ubuntu is now the real test gate and Windows is a
+    # compile-only gate (see `cargo test`'s own `if:` below).
     # PR-lane budget: target under 10 min once caches are warm, generous
     # room for a cold one. This job no longer builds agentmux-cef (see the
     # workflow header comment), so the previous ~13-20 min CEF-inclusive
@@ -146,6 +231,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      # Kept byte-for-byte in sync with the identical step in
+      # ci-nightly-build.yml — the nightly has had this since it was added;
+      # these PR checks never did, while running the same cargo work on the
+      # same runner image. Defender scanning every intermediate .o/.rlib/.pdb
+      # as rustc writes it is the leading explanation for this leg taking
+      # ~2.5x Ubuntu on identical steps. Placed before rust-cache restore and
+      # any cargo invocation so the exclusions are live for all of them.
+      - name: Exclude build paths + toolchain processes from Windows Defender
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          function Add-ExclusionSafe {
+            param([scriptblock]$Body, [string]$Desc)
+            try {
+              & $Body
+            } catch {
+              Write-Warning "Defender exclusion failed ($Desc): $_"
+            }
+          }
+
+          foreach ($exe in @("node.exe", "cargo.exe", "rustc.exe")) {
+            $resolved = Get-Command $exe -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Add-ExclusionSafe { Add-MpPreference -ExclusionPath $resolved.Source -ErrorAction Stop } "$exe path ($($resolved.Source))"
+            } else {
+              Write-Warning "Defender exclusion: could not resolve a path for $exe via Get-Command"
+            }
+            Add-ExclusionSafe { Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop } "$exe process"
+          }
+
+          # link.exe (MSVC linker) isn't on PATH outside a Developer Command
+          # Prompt, so Get-Command can't resolve it here. Exclude the whole
+          # Visual Studio install root instead — this is an ephemeral,
+          # single-purpose CI runner, so a broad exclusion here carries no
+          # meaningful risk, unlike on a persistent/shared machine.
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "C:\Program Files\Microsoft Visual Studio" -ErrorAction Stop } "VS install root (Program Files)"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "C:\Program Files (x86)\Microsoft Visual Studio" -ErrorAction Stop } "VS install root (Program Files x86)"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "link.exe" -ErrorAction Stop } "link.exe process"
+
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE" -ErrorAction Stop } "workspace path"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP" -ErrorAction Stop } "runner temp path"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo" -ErrorAction Stop } "cargo home path"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:USERPROFILE\.rustup" -ErrorAction Stop } "rustup toolchains path"
 
       - name: Install build deps (Linux — launcher Wayland toolkit + agentmux-mcp's xcap)
         if: matrix.os == 'ubuntu-latest'
@@ -187,7 +316,23 @@ jobs:
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
       # in the same CEF-free scope.
+      #
+      # Ubuntu only, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R4:
+      # Windows keeps the `cargo check --tests` compile gate above (which is
+      # what catches platform-conditional code failing to BUILD — cfg'd
+      # branches, platform APIs, path types) but no longer executes the suite.
+      # Windows test EXECUTION is what made this job 14-15 min, and the
+      # nightly already runs `cargo test --workspace` on windows-latest.
+      #
+      # The trade, stated so it can be re-evaluated: a Windows-only RUNTIME
+      # regression now lands on main and surfaces at 07:00 UTC instead of
+      # pre-merge. That risk is real here — `normalize_working_dir` folds case
+      # on Windows only (NTFS is case-insensitive, Linux is not), so it
+      # compiles identically on both and is meaningfully exercised on one. If
+      # such regressions start reaching main, restore a TARGETED Windows
+      # subset (the path-sensitive crates), not this full invocation.
       - name: cargo test (CEF-free crates)
+        if: matrix.os != 'windows-latest'
         run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -- --test-threads=1
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
@@ -198,11 +343,20 @@ jobs:
       #
       # Lives in THIS job, not the docs job: it needs a Rust toolchain and a
       # built agentmux-srv, both of which the steps above already provide, so
-      # regenerating costs almost nothing here. Safe on the Windows leg
-      # because .gitattributes normalizes every text file to LF, so the
-      # generated files cannot differ by line ending between platforms.
+      # regenerating costs almost nothing here.
+      #
+      # Ubuntu only. The output is platform-independent (.gitattributes
+      # normalizes every text file to LF, so generated files cannot differ by
+      # line ending between platforms), so running it on both legs duplicated
+      # the work — and on Windows it was not almost-free: this script runs its
+      # OWN `cargo test -p agentmux-srv export_bindings`, a second relink of an
+      # already-large test binary, which this job's own timeout comment blames
+      # for pushing the first cold run past 15 minutes. Now that Windows no
+      # longer runs the suite, keeping this here would have reintroduced test
+      # execution on the leg we just removed it from.
       # See scripts/check-rpc-bindings.sh.
       - name: RPC bindings are current
+        if: matrix.os == 'ubuntu-latest'
         run: bash scripts/check-rpc-bindings.sh
 
       # Four checks the gate above CANNOT make: it verifies a generated file
@@ -211,11 +365,19 @@ jobs:
       # after the same defect got past review more than once. Pure node, no
       # extra toolchain, runs in under a second.
       # See scripts/check-rpc-codegen-hygiene.mjs.
+      # Ubuntu only — pure node over generated files, platform-independent, so
+      # a second run on Windows adds nothing but time.
       - name: RPC codegen hygiene
+        if: matrix.os == 'ubuntu-latest'
         run: node scripts/check-rpc-codegen-hygiene.mjs
 
   docs:
     name: doc status + grep gates
+    # Intentionally has NO `needs: changes` / `if:`. Its gates (status
+    # vocabulary, the lifecycle ratchet, spec citations, link resolution) are
+    # exactly what a documentation-only PR needs checked — making this one
+    # conditional on "did docs change" would invert the intent, and skipping
+    # it on a docs PR would leave that PR with no gate at all.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -342,6 +504,9 @@ jobs:
 
   frontend:
     name: vitest
+    needs: changes
+    # See the `rust` job's note — same inversion, same reason.
+    if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
