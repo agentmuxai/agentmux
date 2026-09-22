@@ -79,6 +79,17 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
     // mid-turn) shouldn't immediately fire; the next genuine submission will.
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind !== "Submitting") return;
+        // A hidden turn (memory-reinjection-controller.ts) must never
+        // reach an ambient LLM call whose result becomes the human-visible
+        // pane title — reagentx P0 on PR #3502: this effect was forwarding
+        // `pendingContent` unconditionally, regardless of source, which for
+        // a hidden reinjection turn meant the full Global+Personal memory
+        // bodies got sent to Haiku and could surface a summary of them in
+        // the header. See TurnStart's `hidden` field doc comment
+        // (agent-pane-state/types.ts) for why this is defense-in-depth on
+        // top of, not instead of, never putting real content in
+        // `pendingContent` for a hidden turn in the first place.
+        if (phase.hidden) return;
         activeTurnId++;
         const myTurnId = activeTurnId;
         const rootWidth = getRootWidth() ?? 400;

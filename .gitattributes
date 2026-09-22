@@ -1,2 +1,18 @@
 * text=auto eol=lf
 .githooks/* text eol=lf
+
+# ts-rs (frontend/types/rpc/*.ts, scripts/check-rpc-bindings.sh) emits
+# trailing whitespace after any struct field that isn't the file's last —
+# e.g. `message_id?: string, ` before the next field's doc comment. That's
+# the generator's own formatting, not something this repo controls or a
+# human introduced, and check-rpc-bindings.sh already enforces the real
+# invariant (committed content byte-matches a fresh regeneration). Without
+# this, `.githooks/pre-commit`'s `git diff --check` (whose actual job is
+# catching unresolved merge-conflict markers, using git's whitespace check
+# as the existing mechanism) blocks any commit that happens to move a
+# previously-last field to a middle position, since that's the only time a
+# trailing-whitespace line is "newly added" rather than pre-existing
+# unchanged context. Confirmed other generated types (e.g.
+# BackgroundTaskView.ts) already carry the same pattern undetected, simply
+# because no prior PR's diff touched one of those lines directly.
+frontend/types/rpc/*.ts -whitespace
