@@ -694,19 +694,13 @@ mod tests {
 
         let path = std::env::temp_dir()
             .join(format!("amux-stub-claude-{}.sh", uuid::Uuid::new_v4()));
-        {
-            let mut f = std::fs::File::create(&path).unwrap();
-            writeln!(f, "#!/bin/sh").unwrap();
-            writeln!(
-                f,
-                "echo 'API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited' >&2"
-            )
-            .unwrap();
-            writeln!(f, "exit 1").unwrap();
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
+        write_stub_script(
+            &path,
+            &[
+                "echo 'API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited' >&2",
+                "exit 1",
+            ],
+        );
 
         let (tx, _rx) = mpsc::unbounded_channel();
         let handle = run_agent_with_bin(
@@ -756,21 +750,15 @@ mod tests {
 
         let path = std::env::temp_dir()
             .join(format!("amux-stub-claude-big-{}.sh", uuid::Uuid::new_v4()));
-        {
-            let mut f = std::fs::File::create(&path).unwrap();
-            writeln!(f, "#!/bin/sh").unwrap();
-            // ~70 KiB of filler (> 64 KiB tail cap), THEN the real error.
-            writeln!(f, "head -c 70000 /dev/zero | tr '\\0' x >&2").unwrap();
-            writeln!(
-                f,
-                "printf '\\nAPI Error: Server is temporarily limiting requests (not your usage limit) Rate limited\\n' >&2"
-            )
-            .unwrap();
-            writeln!(f, "exit 1").unwrap();
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
+        write_stub_script(
+            &path,
+            &[
+                // ~70 KiB of filler (> 64 KiB tail cap), THEN the real error.
+                "head -c 70000 /dev/zero | tr '\\0' x >&2",
+                "printf '\\nAPI Error: Server is temporarily limiting requests (not your usage limit) Rate limited\\n' >&2",
+                "exit 1",
+            ],
+        );
 
         let (tx, _rx) = mpsc::unbounded_channel();
         let handle = run_agent_with_bin(
@@ -844,29 +832,54 @@ mod tests {
         );
     }
 
+    /// Write an executable `/bin/sh` stub at `path`, atomically.
+    ///
+    /// Built at a sibling temp name and renamed into place, rather than created
+    /// directly at `path`. Creating it at its final path races every other test
+    /// that spawns a subprocess: between `File::create` and the handle being
+    /// dropped, another thread's `fork()` inherits the still-writable fd, and
+    /// the child holds it open until it execs — so exec'ing that same path here
+    /// fails with `ETXTBSY` ("Text file busy"). `CLOEXEC`, which Rust sets by
+    /// default, does not help: it closes on *exec*, and the window is between
+    /// fork and exec.
+    ///
+    /// Observed ~1 run in 3 of the parallel suite (`spawn ok: Spawn("spawn
+    /// /tmp/amux-stub-claude-okerr-….sh: Text file busy (os error 26)")`). CI
+    /// runs `--test-threads=1`, which is why it never fired there and sat
+    /// unexplained locally.
+    ///
+    /// `rename(2)` is atomic and the final path is never open for writing, so
+    /// no forked child can hold a write fd to it.
+    #[cfg(unix)]
+    fn write_stub_script(path: &std::path::Path, lines: &[&str]) {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = path.with_extension("sh.partial");
+        {
+            let mut f = std::fs::File::create(&tmp).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            for l in lines {
+                writeln!(f, "{l}").unwrap();
+            }
+            f.flush().unwrap();
+        }
+        let mut perms = std::fs::metadata(&tmp).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&tmp, perms).unwrap();
+        std::fs::rename(&tmp, path).unwrap();
+    }
+
     /// End-to-end (Unix): claude can report an error on stdout and still
     /// exit 0; the runner must NOT treat that as success. codex P1 #1353.
     #[cfg(unix)]
     #[tokio::test]
     async fn stdout_error_result_with_exit_zero_is_a_failure() {
-        use std::io::Write as _;
-        use std::os::unix::fs::PermissionsExt as _;
-
         let path = std::env::temp_dir()
             .join(format!("amux-stub-claude-okerr-{}.sh", uuid::Uuid::new_v4()));
-        {
-            let mut f = std::fs::File::create(&path).unwrap();
-            writeln!(f, "#!/bin/sh").unwrap();
-            // Emit an error result frame on stdout, then exit 0. The JSON
-            // lives in a `let` so its braces are data, not writeln! format
-            // placeholders (no escaping, no print_literal lint).
-            let frame = r#"{"type":"result","is_error":true,"subtype":"error_during_execution","error":{"message":"overloaded_error: upstream busy"}}"#;
-            writeln!(f, "echo '{frame}'").unwrap();
-            writeln!(f, "exit 0").unwrap();
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
+        // Emit an error result frame on stdout, then exit 0. The JSON lives in
+        // a `let` so its braces are data, not format placeholders.
+        let frame = r#"{"type":"result","is_error":true,"subtype":"error_during_execution","error":{"message":"overloaded_error: upstream busy"}}"#;
+        write_stub_script(&path, &[&format!("echo '{frame}'"), "exit 0"]);
 
         let (tx, _rx) = mpsc::unbounded_channel();
         let handle = run_agent_with_bin(
