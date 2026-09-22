@@ -4,6 +4,7 @@
 
 pub mod agent_color;
 pub mod agent_config;
+pub mod agent_registry_lookup;
 pub mod agent_session;
 pub mod blockcontroller;
 pub mod bookmarks_store;
