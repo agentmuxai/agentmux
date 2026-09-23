@@ -535,20 +535,28 @@ impl PersistentSubprocessController {
     /// installs a new spawn, and `spawning_in_progress` covers the claim
     /// window before it — together they say whether anyone has moved on.
     ///
-    /// The side effects themselves (outcome frame, status publish, error
-    /// flush) do I/O and cannot run under `inner`'s lock — so the second
-    /// check also TAKES the spawn claim (reagent P1 on PR #3551, third
-    /// round): with `spawning_in_progress` held, a send arriving during
-    /// those side effects routes to `Queued` behind this settlement instead
-    /// of becoming a spawner, exactly as `decide_send_action` treats any
-    /// other claim holder. Releasing the claim afterwards hands off anything
-    /// that queued behind it — a spawn on the just-adopted session, the same
-    /// thing `BecomeSpawner` would have done — so nothing is stranded and no
-    /// generation can move on underneath the settlement.
+    /// The side effects (outcome frame, status publish, error flush) run
+    /// UNDER that same lock acquisition, not after it (reagent P1 and codex
+    /// P1 on PR #3551, rounds three and four). Every scheme that released
+    /// the lock first had a window: a check-then-act with nothing holding
+    /// the state still, or a spawn claim that either this settlement took
+    /// (fine) or someone else already held (the eager path's own unwinding
+    /// claim — whose owner could release it mid-effect and let a send
+    /// become a newer generation while the `Fresh` line was still being
+    /// written). Holding `inner` across the effects makes the window not
+    /// exist: a concurrent `decide_send_action` blocks on the lock and,
+    /// once it gets it, becomes a spawner on the already-adopted session.
+    /// This is safe because nothing below re-enters the controller — the
+    /// broker and event bus are `mpsc` channel sends, the block-file append
+    /// and failure persistence touch the file store and SQLite only — and
+    /// cheap enough for a path taken once per failed eager resume. It is
+    /// the one deliberate exception to the file's convention of dropping
+    /// `inner` before effects, which exists because most effect handlers
+    /// call back into methods that lock it; these three do not.
     pub(super) fn settle_empty_resume_retry(
         &self,
         retry_generation: u64,
-        mut config: PersistentSpawnConfig,
+        config: PersistentSpawnConfig,
         held_error_line: Option<String>,
         attempted_sid: String,
     ) {
@@ -575,64 +583,40 @@ impl PersistentSubprocessController {
             return;
         }
         let recovered = self.find_recovery_session_id(&config);
-        config.session_id = recovered.clone().unwrap_or_default();
-        // `took_claim`: whether THIS settlement now holds the spawn claim
-        // across its side effects. If someone already holds it (the eager
-        // path's own unwinding claim, or a spawner between its claim and
-        // its generation bump), their claim already excludes any third
-        // spawner and is theirs to release — this settlement must not touch
-        // it, and must not hand off on their behalf either.
-        let (still_owner, took_claim) = {
-            let mut inner = self.inner.lock().unwrap();
-            let still_owner = owns(&inner);
-            let mut took_claim = false;
-            if still_owner {
-                inner.session_id = recovered.clone();
-                Self::set_status(&mut inner, STATUS_DONE);
-                if !inner.spawning_in_progress {
-                    inner.spawning_in_progress = true;
-                    took_claim = true;
-                }
-            }
-            (still_owner, took_claim)
-        };
-        if !still_owner {
+        // Second check, mutation, and every side effect under ONE lock
+        // acquisition — see the doc comment for why nothing may sit
+        // between them.
+        let mut inner = self.inner.lock().unwrap();
+        if !owns(&inner) {
             return;
         }
+        inner.session_id = recovered.clone();
+        Self::set_status(&mut inner, STATUS_DONE);
         if recovered.is_none() {
             self.emit_session_outcome_now(persistent_resume::SessionOutcome::Fresh, attempted_sid, None);
         }
-        self.publish_status();
+        // `publish_status` would re-lock `inner`; build the same snapshot
+        // from the guard we already hold.
+        if let Some(ref broker) = self.broker {
+            let status = BlockControllerRuntimeStatus {
+                blockid: self.block_id.clone(),
+                version: inner.status_version,
+                shellprocstatus: inner.proc_status.clone(),
+                shellprocconnname: "local".to_string(),
+                shellprocexitcode: inner.proc_exit_code,
+                shellprocpid: None,
+                shellprocname: String::new(),
+                spawn_ts_ms: None,
+                is_agent_pane: true,
+                turn_active: self.health_monitor.is_active_turn(),
+            };
+            super::super::publish_controller_status(broker, &status);
+        }
         // Nothing was accepted from the user, but the CLI's own account of
         // why the resume failed still reaches them (codex P2 on PR #2371).
         if let Some(line) = held_error_line {
             self.flush_error_line_now(line);
         }
-        if !took_claim {
-            return;
-        }
-        // Release the claim under ONE acquisition with the leftover check
-        // (codex P2 on PR #3523's reasoning): a send that queued behind it
-        // needs a live process to go to, and this settlement is the only
-        // claim holder that knows it is there.
-        let queued_behind_claim = {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.pending_send_messages.is_empty() {
-                inner.spawning_in_progress = false;
-                false
-            } else {
-                true
-            }
-        };
-        if queued_behind_claim {
-            let retry_config = config.clone();
-            match self.spawn_process(config, None) {
-                Ok(()) => {
-                    self.mark_turn_active_and_publish();
-                    self.drain_queue_after_successful_spawn(retry_config, true);
-                }
-                Err(e) => self.settle_eager_spawn_failure(&e, retry_config),
-            }
-        }
+        drop(inner);
     }
 }
