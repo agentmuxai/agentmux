@@ -97,8 +97,9 @@ impl CronScheduler {
                 let job_id = job.id.clone();
                 let job_prompt = job.prompt.clone();
                 let job_target = job.target.clone();
+                let job_target_uid = job.target_uid.clone();
                 tokio::spawn(async move {
-                    sched.fire(&job_id, &job_prompt, &job_target).await;
+                    sched.fire(&job_id, &job_prompt, &job_target, &job_target_uid).await;
                 });
             }
 
@@ -131,6 +132,7 @@ impl CronScheduler {
         let job_id = job.id.clone();
         let job_prompt = job.prompt.clone();
         let job_target = job.target.clone();
+        let job_target_uid = job.target_uid.clone();
         let job_max_fires = job.max_fires;
         let job_created_at = job.created_at;
         let job_max_age_secs = job.max_age_secs;
@@ -177,7 +179,7 @@ impl CronScheduler {
                 }
                 let delay = (next - Utc::now()).to_std().unwrap_or_default();
                 tokio::time::sleep(delay).await;
-                sched.fire(&job_id, &job_prompt, &job_target).await;
+                sched.fire(&job_id, &job_prompt, &job_target, &job_target_uid).await;
                 fires += 1;
                 // Post-fire check: enforce max_fires. The top-of-loop guard
                 // handles the restart/seeded-at-cap case; this handles the
@@ -216,7 +218,12 @@ impl CronScheduler {
     }
 
     /// Fire a cron job: POST to reactive inject and record the fire in DB.
-    async fn fire(&self, id: &str, prompt: &str, target: &str) {
+    ///
+    /// Identity M3 (spec §5.4): a job that captured its target's UID at
+    /// creation fires BY UID — a job firing at 03:00 must never resolve a
+    /// name. A job with no UID (created before M1b, or whose name did not
+    /// resolve) fires by name as before, counted.
+    async fn fire(&self, id: &str, prompt: &str, target: &str, target_uid: &str) {
         if self.local_url.is_empty() || self.auth_key.is_empty() {
             tracing::warn!(id, "cron: no local_url/auth_key — skipping fire");
             return;
@@ -224,7 +231,7 @@ impl CronScheduler {
 
         let url = format!("{}/agentmux/reactive/inject", self.local_url.trim_end_matches('/'));
         let req = InjectRequest {
-            target_agent: target.to_string(),
+            target_agent: fire_target(target, target_uid).to_string(),
             message: prompt.to_string(),
             source_agent: Some("cron".to_string()),
             ..Default::default()
@@ -331,5 +338,30 @@ mod tests {
         let max_age_secs = Some(3_600);
         let next_fire_far_in_the_future = created_at + 86_400; // 24h away
         assert!(is_expired_by_age(created_at, max_age_secs, next_fire_far_in_the_future));
+    }
+}
+
+/// What a cron fire addresses: the UID when one was captured at creation,
+/// else the name (counted, spec §9.2 — `cron.fire_by_name` reaching zero is
+/// part of M5's exit criterion).
+fn fire_target<'a>(target: &'a str, target_uid: &'a str) -> &'a str {
+    let uid = target_uid.trim();
+    if uid.is_empty() {
+        crate::backend::agent_resolve::record_uid_fallback("cron.fire_by_name");
+        target
+    } else {
+        uid
+    }
+}
+
+#[cfg(test)]
+mod identity_m3_tests {
+    use super::fire_target;
+
+    #[test]
+    fn fires_by_uid_when_captured_and_by_name_otherwise() {
+        assert_eq!(fire_target("AgentY", "4f3c-a91"), "4f3c-a91");
+        assert_eq!(fire_target("AgentY", ""), "AgentY");
+        assert_eq!(fire_target("AgentY", "   "), "AgentY");
     }
 }

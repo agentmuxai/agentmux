@@ -113,9 +113,10 @@ pub struct ClaimFilter {
     /// The claiming agent's own id. Items targeted at a DIFFERENT agent are
     /// excluded; untargeted items stay eligible.
     pub agent_id: String,
-    /// The claiming agent's UID (identity M1b). Written to `claimed_by_uid`
-    /// on a successful claim; NOT part of the eligibility predicate, which
-    /// still matches on `agent_id` — no reader changes in this phase.
+    /// The claiming agent's UID (identity M1b/M3). Written to
+    /// `claimed_by_uid` on a successful claim, and since M3 also matched
+    /// against `target_agent_uid` for UID-addressed items (alongside the
+    /// name match, which stays until M5).
     pub agent_uid: String,
     /// Group ids this agent belongs to. An item with a `target_group` is
     /// eligible only if its group is in this list. Resolved by the caller.
@@ -226,7 +227,12 @@ impl Store {
                        -- an infinite claim/release loop.
                        AND attempts < max_attempts
                        AND (not_before IS NULL OR not_before <= ?3)
-                       AND (target_agent = '' OR target_agent = ?1)
+                       -- Identity M3: an item may be addressed by UID (M1b
+                       -- dual-write, M3 boundary resolution). The name path
+                       -- stays until M5 so a claimer with no UID (PTY pane,
+                       -- quick-launch) is not locked out of name-targeted work.
+                       AND (target_agent = '' OR target_agent = ?1
+                            OR (target_agent_uid <> '' AND target_agent_uid = ?5))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
                      ORDER BY priority DESC, created_at ASC
@@ -241,7 +247,7 @@ impl Store {
 
         let mut stmt = conn.prepare(&sql)?;
         // Positional binds: ?1 agent_id, ?2 lease expiry, ?3 now, ?4 kind,
-        // ?5 agent_uid (SET only — never in the WHERE, see ClaimFilter),
+        // ?5 agent_uid (SET, and since M3 the uid-target match in WHERE),
         // ?6.. group ids. ?1 and ?3 are each referenced twice in the SQL above
         // (SET + WHERE); numbered parameters make that reuse safe.
         let expires = now_ms + lease_ms;
@@ -515,6 +521,39 @@ mod tests {
         assert_eq!(claimed.claimed_by, "agenty-2");
         assert_eq!(claimed.claimed_by_uid, "4f3c-a91");
         assert_eq!(claimed.target_agent_uid, "4f3c-a91");
+    }
+
+    /// Identity M3: an item addressed by UID is claimable by the agent with
+    /// that UID even if its name differs from `target_agent` (a rename), and
+    /// NOT by a different agent that happens to carry the same name.
+    #[test]
+    fn a_uid_targeted_item_is_claimable_by_uid_and_not_by_a_same_named_other() {
+        let (s, _d) = store();
+        let mut w = item("w-by-uid", "for agenty-3 specifically");
+        w.target_agent = "AgentY".into();
+        w.target_agent_uid = "4f3c-a91".into();
+        s.work_queue_enqueue(&w).unwrap();
+
+        // Same display name, different identity: not eligible by uid, and
+        // its name "AGENTY" does not equal the stored "AgentY" either.
+        let impostor = ClaimFilter {
+            kind: None,
+            agent_id: "AGENTY".into(),
+            agent_uid: "9b2e-7d4".into(),
+            groups: vec![],
+        };
+        assert!(s.work_queue_claim(&impostor, 2000, 60_000).unwrap().is_none());
+
+        // The right identity under a NEW display name still claims it.
+        let renamed = ClaimFilter {
+            kind: None,
+            agent_id: "Renamed".into(),
+            agent_uid: "4f3c-a91".into(),
+            groups: vec![],
+        };
+        let got = s.work_queue_claim(&renamed, 2000, 60_000).unwrap().unwrap();
+        assert_eq!(got.id, "w-by-uid");
+        assert_eq!(got.claimed_by_uid, "4f3c-a91");
     }
 
     /// No reader changes (spec §9.1 M1): a claimer that carries no UID — a

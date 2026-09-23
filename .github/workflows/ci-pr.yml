@@ -390,6 +390,8 @@ jobs:
 
       - name: Doc Status vocabulary (changed docs only)
         run: bash scripts/check-doc-status.sh
+      - name: Name-resolver callers (identity M3, spec §9.3)
+        run: bash scripts/check-name-resolver-callers.sh
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the

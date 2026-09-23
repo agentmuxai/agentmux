@@ -69,6 +69,11 @@ pub(super) struct EnqueueRequest {
     pub kind: String,
     #[serde(default)]
     pub target_agent: String,
+    /// Identity M3: the target's UID, resolved at the MCP boundary (spec
+    /// §5) and CARRIED here. When present it is stored as-is; when absent
+    /// the server resolves `target_agent` itself as a counted fallback.
+    #[serde(default)]
+    pub target_agent_uid: String,
     #[serde(default)]
     pub target_group: String,
     #[serde(default)]
@@ -109,11 +114,16 @@ pub(super) async fn handle_work_enqueue(
     // the miss is counted (spec §9.2). Resolution reads the per-channel
     // object store, so a target that lives in another channel stays empty
     // here — recorded, not guessed.
-    let target_agent_uid = crate::backend::agent_resolve::resolve_uid_for_dual_write(
-        &state.mstore,
-        &req.target_agent,
-        "work_enqueue.target_agent",
-    );
+    let target_agent_uid = if !req.target_agent_uid.trim().is_empty() {
+        crate::backend::agent_resolve::record_uid_fallback("work_enqueue.uid_carried");
+        req.target_agent_uid.trim().to_string()
+    } else {
+        crate::backend::agent_resolve::resolve_uid_for_dual_write(
+            &state.mstore,
+            &req.target_agent,
+            "work_enqueue.target_agent",
+        )
+    };
 
     let now = now_ms();
     let item = WorkItem {
