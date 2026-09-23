@@ -1098,9 +1098,9 @@ Each step independently revertible (§9):
   template-based continuations **bind** the block to the row they fold into
   before resync (no row creation, no respawn — respawning a live agent loses
   its turn). Agents already running without a token are attributed by block,
-  as `claimer_uid` already does. `agent.open` records its launch. Terminal
-  panes, quick-launch panes, `/btw` and drones are declared outside the
-  identity system. **Gate:** agent-path
+  as `claimer_uid` already does. `agent.open` records and stamps every
+  launch, a template's included. Terminal panes, quick-launch panes, `/btw`
+  and drones are declared outside the identity system. **Gate:** agent-path
   `spawn.no_token` counters at zero **and a drain of live agents**, both
   sampled on every channel's srv and sustained over a release cycle (the
   gauges are per srv and restart at zero, so one reading proves nothing): an agent
@@ -1131,10 +1131,11 @@ Each step independently revertible (§9):
 #### 6.5.8 M4b design — closing the tokenless paths
 
 Measured against main after M4a (#3571–#3575) and the stale-fallback fix
-(#3576: a block whose `agentId` names no agent row falls back only to a row
-launched from what it names — directly, or one hop through a clone the
-template-promotion migration repointed launches to — and, when
-`agentInstanceId` is stamped, only to that row). An adversarial pass on the first draft found
+(#3576: for a block whose `agentId` names no agent row, a stamped block
+(`agentInstanceId`) resolves exactly its stamped row while that row is still
+the block's latest launch, never a fork; an unstamped legacy block falls back
+by lineage — a non-fork row launched from what it names, directly or one hop
+through a clone the template-promotion migration repointed launches to). An adversarial pass on the first draft found
 one P1 (below, M4b-3) and five P2s, folded in.
 
 Only `build_persistent_spawn_env` (`input.rs`) carries `AGENTMUX_AGENT_UID`
@@ -1145,7 +1146,7 @@ delivery, and user-agent eager resume already carry. The paths:
 | Path | Today | M4b |
 |---|---|---|
 | App API `agent.send` (`app_api/agent_io.rs`) | a hand copy of `run_agent_turn`'s env: `cmd:env` + `inject_identity_env_async` only | **M4b-1**: env from `build_persistent_spawn_env`, as `agentinput`. Same spawn gate (its only error is `inject_identity_env_async`, which `agent.send` already calls). **Also changes, recorded:** the process gains `AGENTMUX_AUTH_KEY`, `AGENTMUX_BLOCKID`, PATH, `MUXBUS_TOKEN` and the server-authoritative slug and display name, and git authorship becomes `<slug>` / `<slug>@agentmux.local` — what `agentinput` gives today. Containers keep PATH off (denylist). Internal respawns reuse the triggering send's config, so they carry too. |
-| `agent.open` (`app_api/agent_open.rs`) | writes `agentId` and spawns, but never calls `instance_create`: a user agent with a local row resolves; a cross-channel agent with no local row, or a template, does not | **M4b-4**: `agent.open` of a user agent records the launch through `instance_create` (which backfills a cross-channel definition, as a picker launch does), so its block resolves — **on both of its branches, before either resyncs**: the new-block flow, and the reuse path that finds an existing block for the agent and resyncs it (`open_agent_impl`, the `existing` branch). A cross-channel block created before M4b has no local row; reopened after a restart through the reuse path, it would otherwise spawn tokenless as `spawn.no_row` / `live.unidentified`, which the gate excludes (Codex P1 on #3578). `agent.open` of a **template** creates no row today and stays row-less — declared outside until `agent.open` creates agents the way the picker does (a separate change). |
+| `agent.open` (`app_api/agent_open.rs`) | writes `agentId` and spawns, but never calls `instance_create`: a user agent with a local row resolves; a cross-channel agent with no local row, or a template, does not | **M4b-4**: `agent.open` records **every** launch through `instance_create` and stamps the block with the returned row (`agentInstanceId`): a user agent folds into its row (backfilling a cross-channel definition, as a picker launch does); a **template** gets a new row, exactly as a picker launch of a template does — `instance_create` already creates one for a fresh template launch — so a template opened this way is a real, row-backed agent, inside the gate (Codex P1 on #3578: excluding it let the gate clear with live tokenless template agents, which M5 would then strand without signing or UI automation). The block resolves through #3576's stamped rule. On **both** of `agent.open`'s branches, before either resyncs: the new-block flow, and the reuse path that finds an existing block and resyncs it (`open_agent_impl`, the `existing` branch) — a cross-channel block created before M4b has no local row and, reopened after a restart through that path, would otherwise spawn tokenless where the gate cannot see it (Codex P1 on #3578). |
 | Template-based continuation (reattach of a record whose `definition_id` is a template) | `SetMeta{agentId: template}` → resync (eager resume) → `CreateAgentInstanceCommand` → `SetMeta{agentInstanceId}`. At the eager resume the block's stamp is **the previous launch's** (`backToPicker` clears `agentId`, not `agentInstanceId`), and a same-template sibling's stale `running` row still sits on the block: the resume can bind to **the sibling** — its UID, token, slug and credentials, invisible to every counter because it carries a token | **M4b-3 (P1)**: `CreateAgentInstanceCommand` first; then **one** `SetMeta` carrying both `agentId` and the returned `agentInstanceId`; then resync. Setting `agentId` mounts the agent view, whose own launch flow resyncs — so the stamp must land in the same `SetMeta`, never after. `backToPicker` clears `agentInstanceId`. Tests: a store test with a stale stamp and a same-template sibling on the block; a frontend test that the create and the stamp precede any resync. **Recorded:** if the resync then fails, the row is left folded onto a block that never ran it (status `running`) — as for a launch that crashes. In practice this path is rare: local rows reattach as themselves; only legacy registry records naming a template reach it. |
 | App Server (codex) controller | env from `cmd:env` only | **M4b-2**: UID + token carried where the command is built (`persisted_agent_identity` + `carry_agent_uid_env`, under `block_in_place`, as eager resume does — incident #1782). **Buys no attribution, recorded:** no provider maps to App Server today (codex is `Subprocess`), and neither codex nor ACP agents are given `agentmux-mcp` — only Claude reads `.mcp.json`. It makes the counters true, nothing more. Attribution for codex needs its MCP configuration and env allowlist, a separate spec. |
 | ACP controller | reads `cmd:args`/`cmd:env` as strings (`meta_get_string`), so an `agent.open` launch, which stores them as an array and an object, gets neither — broken today | **M4b-2**: same as App Server, **and fixes that bug in the same PR**: `AcpController::start` reads `cmd:args` as an array or a JSON string and `cmd:env` as an object or a JSON string, as the other controllers do — the identity carry is layered onto that env, so it cannot land on a launch that loses its env. Test: an ACP command built from array/object meta keeps its args, its env overlay, and the carried UID + token. |
@@ -1159,13 +1160,12 @@ delivery, and user-agent eager resume already carry. The paths:
 a release cycle: every `spawn.no_token.<path>` is zero, and
 `live.tokenless_or_unknown` is zero. `spawn.no_row.*` and `live.unidentified`
 gate nothing: they are the declared-outside set (terminals, `/btw`,
-`agent.open` of a template, quick-launch, a continuation whose create
-failed).
+quick-launch, a continuation whose create failed).
 
 **Rollout, each step its own PR:** M4b-1 `agent.send` through the builder;
 M4b-2 App Server and ACP carry (and ACP reads array/object meta); M4b-3 continuation create → stamp → resync
 (frontend) and `backToPicker` clearing the stamp; M4b-4 `agent.open` records
-the launch. Tests per step as above, plus: `agent.send`'s env assembly
+and stamps every launch, a template's included. Tests per step as above, plus: `agent.send`'s env assembly
 factored so a test can assert UID + token for a row-backed block and their
 absence for a row-less one.
 
