@@ -1,7 +1,7 @@
 # Spec: Claude Code Version Management
 
 **Status:** Active  
-**Current pinned version:** `2.1.247`  
+**Current pinned version:** `2.1.280`  
 **Previous default:** `latest` (floating)
 
 ## Problem
@@ -15,12 +15,12 @@ versions, breaking reproducibility and making regressions harder to bisect.
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `docker/Dockerfile.agent-agentmux` line 36 | `ARG CLAUDE_VERSION=2.1.247` | Fallback for local `docker build` without passing the arg |
-| `.github/workflows/container-image.yml` line 16 | `default: '2.1.247'` | Default used when CI is triggered via `workflow_dispatch` without an explicit version input |
-| `agentmux-srv/src/backend/providers.rs` | `pinned_version: "2.1.247"` (CLAUDE static) | Version the backend sidecar installs |
-| `agentmux-cef/src/commands/providers.rs` | `const CLAUDE_VERSION: &str = "2.1.247"` | Version the host installer installs |
-| `frontend/app/view/agent/providers/catalog.ts` (re-exported via `./index`) | `pinnedVersion: "2.1.247"` (PROVIDERS.claude) | Version surfaced in the UI. Corrected 2026-08-27 — this file used to be a single `providers/index.ts`, split into `types.ts`/`catalog.ts`/`model-overlay.ts` for readability; the pin moved with it but this doc wasn't updated at the time. |
-| `frontend/app/view/agent/providers/catalog.ts` (same object) | `models: [{ value: "opus", label: "Opus 5", ... }]` | The curated UI label for the `opus` family alias — **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
+| `docker/Dockerfile.agent-agentmux` line 36 | `ARG CLAUDE_VERSION=2.1.280` | Fallback for local `docker build` without passing the arg |
+| `.github/workflows/container-image.yml` line 16 | `default: '2.1.280'` | Default used when CI is triggered via `workflow_dispatch` without an explicit version input |
+| `agentmux-srv/src/backend/providers.rs` | `pinned_version: "2.1.280"` (CLAUDE static) | Version the backend sidecar installs |
+| `agentmux-cef/src/commands/providers.rs` | `const CLAUDE_VERSION: &str = "2.1.280"` | Version the host installer installs |
+| `frontend/app/view/agent/providers/catalog.ts` (re-exported via `./index`) | `pinnedVersion: "2.1.280"` (PROVIDERS.claude) | Version surfaced in the UI. Corrected 2026-08-27 — this file used to be a single `providers/index.ts`, split into `types.ts`/`catalog.ts`/`model-overlay.ts` for readability; the pin moved with it but this doc wasn't updated at the time. |
+| `frontend/app/view/agent/providers/catalog.ts` (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias — **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
 
 The CI workflow's "Resolve Claude Code version" step (`id: claude_ver`) has a special case:
 - Input non-empty and not `"latest"` → use the input value verbatim (shell injection safe via `env:`)
@@ -71,6 +71,7 @@ introducing a version of the same imprecision.)
 | `2.1.197` | 2026-06-30 | First explicit pin; replaced floating `latest` default |
 | `2.1.198` | 2026-07-02 | Bump; initially missed the cef host installer and workflow default (see `pin-consistency.test.ts` history note) |
 | `2.1.247` | 2026-08-27 | Bump (verified via `npm view @anthropic-ai/claude-code version` against the real registry); paired with relabeling the `opus` alias from "Opus 4.8" to "Opus 5" in the UI catalog. First bump done against a written checklist (this doc) rather than tribal knowledge — found this doc's own frontend file path had drifted (`index.ts` → `catalog.ts`) and that the Dockerfile `ARG` (the 5th matching-version-string pin, distinct from the model label's separate, non-string check below) wasn't covered by `pin-consistency.test.ts`; both corrected here, and the test extended to cover the Dockerfile going forward. This paragraph and the "all N locations" prose above it took three separate review-flagged edits in this same cycle to get precise — see the retro's addendum for the honest accounting. Full retro: `docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`. Forward-looking process: `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`. |
+| `2.1.280` | 2026-09-22 | Bump (verified via `npm view @anthropic-ai/claude-code version` against the real registry); paired with relabeling the `opus` alias from "Opus 5" to "Opus 5.5" following Anthropic's same-day release of Claude Opus 5.5. Considered adding Opus 5.5 as a second, independently-selectable entry alongside Opus 5 instead, but `model-overlay.ts`'s family-grouping (`familyKey()` strips digits, so `opus`/`claude-opus-5`/`claude-opus-5-5` are all one family) always collapses a family's curated row(s) to whichever the live API reports as newest — the same one-row-per-family behavior already enforced for Fable by `model-overlay.test.ts`. Keeping both rows independently selectable long-term would need a real change to that grouping logic (no precedent in this repo); relabeling in place instead matches the established pattern exactly and required no code beyond this bump. |
 
 ## Escape hatch
 

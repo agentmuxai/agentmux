@@ -119,7 +119,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
         // .github/workflows/container-image.yml `claude_version` default — enforced by
         // ./pin-consistency.test.ts.
-        pinnedVersion: "2.1.274",
+        pinnedVersion: "2.1.280",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -170,7 +170,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // exactly what users saw — a row reading "Fable 5.1" above the text
         // "Claude Fable 5". Keep version numbers in `label` only.
         models: [
-            { value: "opus", label: "Opus 5", description: "Highest quality", aliases: ["claude-opus"] },
+            { value: "opus", label: "Opus 5.5", description: "Highest quality", aliases: ["claude-opus"] },
             { value: "sonnet", label: "Sonnet 5", default: true, description: "Balanced speed and quality", aliases: ["claude-sonnet"] },
             { value: "haiku", label: "Haiku 4.5", description: "Fastest", aliases: ["claude-haiku"] },
             // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above) —
