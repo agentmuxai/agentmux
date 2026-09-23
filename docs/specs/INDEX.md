@@ -319,6 +319,7 @@ partial list.
 | [`SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03`](SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md) | Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool |
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
 | [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
+| [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
 | [`SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22`](SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md) | SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict |
 | [`SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22`](SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md) | SPEC: `muxspect find` — cross-instance block/agent lookup |
 | [`SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06`](SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md) | SPEC — `muxspect dock`: diagnose and clear stuck Activity Dock entries |
