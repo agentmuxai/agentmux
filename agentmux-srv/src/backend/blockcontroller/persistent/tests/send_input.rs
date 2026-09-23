@@ -3061,3 +3061,58 @@ async fn a_failed_flush_leaves_the_queue_intact_for_teardown() {
         "a failed write must not drop the message"
     );
 }
+
+/// The idle→active transition race (ReAgent P1 on #3562). Senders racing an
+/// *idle* controller must produce exactly one live write: whoever wins flips
+/// `turn_active` inside the same critical section that wrote, so everyone
+/// else observes a busy turn and queues.
+///
+/// The earlier concurrency test only raced against an already-busy turn, so
+/// it could not catch this: the bug was that the flip happened after the
+/// lock was released, leaving a window in which a second caller saw "idle,
+/// empty queue" and wrote a second message with no turn boundary between them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_senders_against_an_idle_turn_produce_exactly_one_write() {
+    use std::sync::Arc as StdArc;
+
+    // The winning sender re-arms the status heartbeat, which needs a reactor;
+    // plain threads have none, so hand each one this runtime's handle.
+    let rt = tokio::runtime::Handle::current();
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(64);
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    // Deliberately idle — this is the transition under test.
+    assert!(!c.health_monitor.is_active_turn());
+    let c = StdArc::new(c);
+
+    let handles: Vec<_> = (0..16)
+        .map(|i| {
+            let c = StdArc::clone(&c);
+            let rt = rt.clone();
+            std::thread::spawn(move || {
+                let _guard = rt.enter();
+                c.send_user_message(format!("msg-{i}")).is_ok()
+            })
+        })
+        .collect();
+    let accepted = handles
+        .into_iter()
+        .map(|h| h.join().expect("sender thread panicked"))
+        .filter(|accepted| *accepted)
+        .count();
+    assert_eq!(accepted, 16);
+
+    let mut written = 0;
+    while rx.try_recv().is_ok() {
+        written += 1;
+    }
+    assert_eq!(
+        written, 1,
+        "exactly one message may reach stdin; the other 15 must wait for a turn boundary"
+    );
+    assert_eq!(
+        c.inner.lock().unwrap().deferred_deliveries.len(),
+        15,
+        "every message that did not win the race must be queued, not dropped"
+    );
+}
