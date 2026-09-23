@@ -4,7 +4,13 @@
 
     // Active = recording. Red is the universal "live mic" convention, so the
     // indicator deliberately diverges from the accent color used elsewhere.
-    &.mic-active .wave-iconbutton {
+    // Selector is `.wave-iconbutton.toggle.active` (not just
+    // `.wave-iconbutton`) to out-specificity iconbutton.scss's own
+    // `.toggle.active { color: var(--accent-color) }` — this button also
+    // carries `.active` (it's a ToggleIconButton), and without the extra
+    // specificity here the generic accent tint would silently win over this
+    // deliberately-different red.
+    &.mic-active .wave-iconbutton.toggle.active {
         color: var(--error-color, var(--color-error, #e5484d));
         position: relative;
 
