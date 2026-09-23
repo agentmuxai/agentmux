@@ -201,7 +201,27 @@ This measures the parse-cost ceiling of the fix, not its correctness — see the
 bench's own note on reference definitions, loose lists, and setext headings,
 which constrain what is safe to freeze without changing the cost shape.
 
-### 6.4 Still unverified — §4's pane multiplier
+### 6.4 §4's pane multiplier — confirmed and fixed
+
+Confirmed at the component level rather than in-app: streaming 20 updates into a
+`MarkdownBlock` whose pane is dormant parsed **4,900 characters across 21
+commits** — full cost, for output nobody could see. With four busy agents that
+is four panes' worth of parsing competing for the one thread the foreground
+pane needs.
+
+Fixed by gating the markdown *render* on `isBlockDormant` (see §7.2). After the
+gate: **0 characters parsed while dormant**, the visible-pane control still
+renders, and content that arrived while hidden appears on becoming visible
+without needing a further update.
+
+Worth noting how close this came to passing vacuously: the first version of the
+test asserted only "dormant does no work," and passed **before** the fix — both
+arms parsed 0, because `MarkdownBlock`'s 90ms throttle means synchronous updates
+never commit at all. The visible-pane control is what exposed it. A
+one-sided performance assertion can be satisfied by the work simply not
+happening.
+
+### 6.4a Still unverified — the in-app multi-pane measurement
 
 The bench covers one pane. §4's claim that N backgrounded-but-mounted panes
 multiply this is still code-reading only. Confirm in-app: stream in one pane
@@ -228,13 +248,25 @@ pane — and does not depend on the larger fix landing.
    O(n) to O(size of the last block) and the total from O(n²) to O(n). This is the
    "incremental main-thread markdown" half of Phase 1 that was never built, and it
    is the only change here that fixes the complexity rather than the constant.
-2. **Gate rendering — not data — on pane visibility (§4).** A backgrounded pane
-   should keep *receiving* stream events (so nothing is lost and switching to it is
-   instant) but should not re-parse or re-render until shown. The `StreamFlushQueue`
-   is already the single mandatory choke point, so the gate has one correct home,
-   and `createHidingStreamFlushQueue` is a working precedent for wrapping it.
-   This is the smallest change with the largest immediate win for the reported
-   multi-pane case.
+2. **Gate rendering — not data — on pane visibility (§4). SHIPPED.** A
+   backgrounded pane keeps *receiving* stream events (nothing is lost, switching
+   to it is instant) but no longer re-parses or re-renders until shown.
+
+   Implemented at `MarkdownBlock`, via an `AgentDormancyProvider` context
+   carrying the existing `isBlockDormant(blockId)` signal — which
+   `pane-leaf-chrome.tsx` already sets and `AgentQuestionPanel`/`useAgentFailure`
+   already consume. The render path simply never asked it.
+
+   **Not** implemented at `StreamFlushQueue`, despite that being the tidier
+   single choke point and this doc's original suggestion. Gating the flush stops
+   the document store updating, and off-pane consumers (activity indicators, the
+   dock) read that store — so it would have traded a perf win for a visible
+   regression in exactly the panes the user is not looking at. Gating the render
+   confines the change to work whose output nobody can currently see.
+
+   Scope: `MarkdownBlock` only, which is the measured dominant cost. `ToolBlock`
+   and other transcript blocks still render while dormant — the next candidates
+   if multi-pane load is still felt.
 3. **Move Shiki to a worker (§3).** The other half of Phase 1. Biggest effect on
    the settle frame specifically. Larger change; do it after 1 and 2, and only if
    the profile still shows highlighting on the critical path.

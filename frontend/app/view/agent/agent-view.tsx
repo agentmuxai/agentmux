@@ -20,6 +20,7 @@ import {
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
 import { isBlockDormant } from "@/app/store/block-component-registry";
+import { AgentDormancyProvider } from "./agent-dormancy";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
@@ -2186,10 +2187,17 @@ const AgentPresentationView = ({
     };
 
     return (
-        // Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
-        // component's own parent) so it covers BOTH this presentation view
-        // AND the picker fallback. Anything in this subtree that calls
-        // `useModalLayer()` resolves to that pane-scope layer.
+        // Dormancy is provided at the SUBTREE root, not threaded as a prop:
+        // the expensive consumer (MarkdownBlock) sits four layers down, behind
+        // virtualization code that is performance-critical and deliberately
+        // tuned, and should not grow another prop it would only forward.
+        // See `agent-dormancy.tsx` for why rendering (not data) is what gets
+        // gated.
+        <AgentDormancyProvider dormant={dormant}>
+            {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
+                component's own parent) so it covers BOTH this presentation view
+                AND the picker fallback. Anything in this subtree that calls
+                `useModalLayer()` resolves to that pane-scope layer. */}
         <div
             ref={rootRef}
             class="agent-view agent-view--presentation"
@@ -2698,6 +2706,7 @@ const AgentPresentationView = ({
                     </div>
             </Show>
         </div>
+        </AgentDormancyProvider>
     );
 };
 
