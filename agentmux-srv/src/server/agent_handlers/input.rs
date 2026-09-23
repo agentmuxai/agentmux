@@ -1794,10 +1794,6 @@ mod tests {
         assert_eq!(a_again.token.as_deref(), Some(tok_a.as_str()));
     }
 
-    /// A quick-launch pane carries a provider key as `agentId` and has no
-    /// `db_agents` row; a block that does not exist has nothing either.
-    /// Both are "no identity", never an error and never a derived value —
-    /// and, load-bearing for the token: no row means no token is minted.
     /// Identity M4b-2: the helper App Server and ACP use carries the
     /// block's row UID and token into their own env, overwriting a stale
     /// token, and strips both for a block with no row — outside a runtime
@@ -1853,6 +1849,10 @@ mod tests {
         );
     }
 
+    /// A quick-launch pane carries a provider key as `agentId` and has no
+    /// `db_agents` row; a block that does not exist has nothing either.
+    /// Both are "no identity", never an error and never a derived value —
+    /// and, load-bearing for the token: no row means no token is minted.
     #[test]
     fn persisted_identity_is_none_for_quick_launch_panes_and_missing_blocks() {
         let store = Store::open_in_memory().unwrap();

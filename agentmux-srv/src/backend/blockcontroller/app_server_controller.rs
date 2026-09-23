@@ -559,6 +559,51 @@ impl Controller for AppServerController {
 
 #[cfg(test)]
 mod tests {
+
+    /// Identity M4b-2 wiring (spec §6.5.8): with a store, the App Server
+    /// command for a row-backed block carries the row's UID + token.
+    #[test]
+    fn an_app_server_command_carries_the_rows_identity() {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let mut def = test_agent_def("uid-appsrv", "AppSrv", "codex", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("uid-appsrv"));
+        let mut block = crate::backend::obj::Block {
+            oid: "block-appsrv".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: meta.clone(),
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        let ctrl = AppServerController::new(
+            "tab".to_string(),
+            "block-appsrv".to_string(),
+            None,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let command = ctrl.command_from_meta(&meta).unwrap();
+        let env: std::collections::HashMap<String, String> = command
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_UID").map(String::as_str),
+            Some("uid-appsrv")
+        );
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_TOKEN"),
+            store.agent_token_load("uid-appsrv").unwrap().as_ref()
+        );
+    }
+
     use super::*;
     use crate::backend::obj::MetaMapType;
 
