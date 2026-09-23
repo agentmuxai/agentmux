@@ -1092,25 +1092,6 @@ impl PersistentSubprocessController {
             return EagerResumeOutcome::DeclinedTo("no mstore configured for this controller");
         };
 
-        // codex P1 on PR #3513 (third re-review): an `AgentInstance` row
-        // must actually exist for this block before eager resume runs —
-        // NOT merely "the identity gate ran and didn't object". The
-        // continuation/reattach launch flow
-        // (`agent-model.ts`'s `ControllerResync` call, ~line 742) sets
-        // `agent:sessionid` and calls `ControllerResync` BEFORE creating the
-        // instance row and linking the user's selected account (that
-        // happens after, via `CreateAgentInstanceCommand`) — the resync's
-        // own comment there still says "no-op start — waits for first
-        // message", which was true until this PR and is exactly the
-        // invariant this check restores for this specific case.
-        // `inject_identity_env`'s own Step 1 treats "no instance row" as
-        // `Ok(())` — deliberately, for quick-launch panes that were never
-        // meant to go through managed credentials at all (see its own doc
-        // comment) — so relying on the gate ALONE to catch this would let
-        // it silently pass, spawning on whatever ambient/static environment
-        // is around rather than the account the user is about to select in
-        // the very same launch flow. A cheap, synchronous check, done
-        // before the (slow) identity gate work rather than after it.
         // `cli_command`/`cli_args`/`working_dir` — same meta keys a live
         // message's spawn config reads. Deliberately NOT
         // `agent_handlers::input`'s own print-mode fallback default for a
@@ -8972,15 +8953,19 @@ mod eager_resume_tests {
         store.instance_create(&inst).unwrap();
     }
 
-    /// A block with an `AgentInstance` row but NO `AgentDefinition` —
-    /// satisfies the "an instance must actually exist" check
-    /// (codex P1 on PR #3513, third re-review; see `try_eager_resume`'s own
-    /// comment) while keeping the identity gate itself trivially passing:
-    /// `inject_identity_env`'s Step 5 reads a missing definition row as
-    /// "flag=false / no expected provider" (its own doc comment), so the
-    /// oauth-required check never fires. Simpler than `wire_ungated_agent`'s
-    /// full definition+account+link setup for tests that need the gate to
-    /// pass, not fail.
+    /// A block plus a minimal `AgentDefinition` + `AgentInstance`, for tests
+    /// that need the identity gate to PASS rather than fail — the definition's
+    /// empty `provider` classifies as neither oauth- nor api-key-class
+    /// (`provider_class`'s catch-all), so the gate's oauth-required check
+    /// never fires. Simpler than `wire_ungated_agent`'s full
+    /// definition+account+link setup.
+    ///
+    /// Originally written to satisfy a launch-specific instance-existence
+    /// check in `try_eager_resume`. That check was reverted in PR #3523 (see
+    /// issue #3525 — `db_agents` has no per-block launch record, so the check
+    /// could not be made correct), so the instance row is no longer load-
+    /// bearing for the gate; the fixture is kept because several tests below
+    /// still want a block that looks like a real launch.
     fn wire_bare_instance(store: &Store, block_id: &str) {
         let mut block = crate::backend::obj::Block {
             oid: block_id.to_string(),
@@ -9318,7 +9303,7 @@ setInterval(() => {}, 1000);
             return;
         }
         let store = make_store();
-        wire_bare_instance(&store, "blk-eager"); // codex P1 (3rd re-review): an instance row must exist
+        wire_bare_instance(&store, "blk-eager");
         let stub = write_stub();
         let c = controller("blk-eager").with_identity_stores(
             Some(store.clone()),
