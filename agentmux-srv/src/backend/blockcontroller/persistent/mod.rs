@@ -368,6 +368,12 @@ struct PersistentInner {
     /// which a message enqueued just as a flush observes the queue empty has
     /// no future trigger.
     deferred_deliveries: VecDeque<String>,
+    /// Whether a deferred-delivery watchdog task is running for this
+    /// controller — see `ensure_deferred_watchdog`. Set and cleared only
+    /// under this lock, and cleared only by the watchdog itself when it
+    /// finds the queue empty, so an enqueue can never observe "armed" from a
+    /// watchdog that has already decided to exit.
+    deferred_watchdog_armed: bool,
     /// Exclusive claim held by a stale-resume retry batch flush (issue
     /// #2367; spec §4 option 2 of
     /// SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09).
@@ -831,6 +837,37 @@ const ANSWER_RESUME_FALLBACK_MS: u64 = 4000;
 /// is per-block.
 pub(super) const MAX_DEFERRED_DELIVERIES: usize = 64;
 
+/// How often the deferred-delivery watchdog re-checks a non-empty queue.
+/// It is the safety net, not the primary path: the `result`-frame flush in
+/// `spawn.rs` releases a message the instant a turn ends, so this only sets
+/// the latency of the cases that have no turn boundary to wait for.
+pub(super) const DEFERRED_WATCHDOG_TICK: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Consecutive watchdog ticks with no process and no spawn in flight before
+/// the queue is declared stranded and reported (spec §4.5). Long enough to
+/// ride out the gap between a process exit and the respawn that follows it
+/// (a stale-`--resume` retry, a fallback respawn); short enough that a dead
+/// agent's backlog is surfaced rather than held forever.
+pub(super) const DEFERRED_ORPHAN_GRACE_TICKS: u32 = 20;
+
+/// Outcome of [`PersistentSubprocessController::flush_one_deferred_locked`].
+/// `Empty` and `Failed` both write nothing, but they are not the same:
+/// `Empty` lets the turn go idle, `Failed` still has an accepted message
+/// waiting and needs a retry (codex P1 on #3562).
+#[derive(Debug, PartialEq)]
+pub(super) enum DeferredFlush {
+    Empty,
+    Released(String),
+    Failed,
+}
+
+/// Whether the deferred-delivery watchdog keeps running after a tick.
+#[derive(Debug, PartialEq)]
+pub(super) enum WatchdogStep {
+    Continue,
+    Exit,
+}
+
 /// Compose the directive follow-up message used by the AskUserQuestion dead-air
 /// fallback. `answers` maps each question's text to the selected label(s) or free
 /// text (the same object delivered in the control_response). The message is
@@ -1008,6 +1045,7 @@ impl PersistentSubprocessController {
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
                 deferred_deliveries: VecDeque::new(),
+                deferred_watchdog_armed: false,
                 drain_claim: false,
                 next_message_seq: 0,
                 drain_send_in_flight: false,

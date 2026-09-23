@@ -648,6 +648,14 @@ impl PersistentSubprocessController {
                 // `PersistentInner::pending_error_result_line`. `false` for
                 // every other line, matching today's behavior exactly.
                 let mut hold_back_for_resume_retry = false;
+                // A deferred message released at this line's turn boundary.
+                // Its stdin write happens at the boundary (atomically with the
+                // idle decision), but its blockfile append waits until THIS
+                // line — the `result` that ended the previous turn — has been
+                // appended, so the transcript and live consumers see
+                // `result(N)` before `user(N+1)`, never the reverse (codex P1
+                // on #3562).
+                let mut released_deferred_line: Option<String> = None;
 
                 // Parse JSON for control-frame handling, turn-active tracking,
                 // and session ID capture
@@ -707,8 +715,11 @@ impl PersistentSubprocessController {
                                 &block_id_read,
                             );
 
-                            // Only go idle if nothing was released.
-                            if flushed.is_none() {
+                            // Only go idle if nothing was released. A FAILED
+                            // write also goes idle — no turn started — but it
+                            // still has an accepted message waiting, which the
+                            // watchdog armed below retries.
+                            if !matches!(flushed, DeferredFlush::Released(_)) {
                                 health_read.set_active_turn(false);
                             }
 
@@ -720,7 +731,9 @@ impl PersistentSubprocessController {
                             // loss `restart_when_idle` itself was introduced to
                             // fix (see its doc comment). It stays pending and
                             // applies at the boundary after the queue drains.
-                            let deferred = if flushed.is_none() {
+                            // Not on a failed flush either: that entry is still
+                            // queued, and killing the process would strand it.
+                            let deferred = if flushed == DeferredFlush::Empty {
                                 std::mem::replace(&mut locked.restart_when_idle, false)
                             } else {
                                 false
@@ -734,15 +747,21 @@ impl PersistentSubprocessController {
                         // Whether a deferred message was released decides the
                         // `turn_active` this tick publishes, below — releasing
                         // one keeps the turn alive.
-                        let released_deferred = flushed.is_some();
-                        if let Some(line) = flushed {
-                            tracing::info!(
-                                block_id = %block_id_read,
-                                "turn ended — released one deferred message"
-                            );
-                            if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
-                                ctrl.append_delivered_message(&line);
+                        let released_deferred = matches!(flushed, DeferredFlush::Released(_));
+                        match flushed {
+                            DeferredFlush::Released(line) => {
+                                tracing::info!(
+                                    block_id = %block_id_read,
+                                    "turn ended — released one deferred message"
+                                );
+                                released_deferred_line = Some(line);
                             }
+                            DeferredFlush::Failed => {
+                                if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                                    ctrl.ensure_deferred_watchdog();
+                                }
+                            }
+                            DeferredFlush::Empty => {}
                         }
                         if deferred_restart {
                             tracing::info!(
@@ -1125,6 +1144,13 @@ impl PersistentSubprocessController {
                 }
 
                 if hold_back_for_resume_retry {
+                    // This `result` is held back, not persisted — but the
+                    // message already went to stdin, so it must still render.
+                    if let Some(released) = released_deferred_line.take() {
+                        if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                            ctrl.append_delivered_message(&released);
+                        }
+                    }
                     continue;
                 }
 
@@ -1154,6 +1180,11 @@ impl PersistentSubprocessController {
                     );
                 } else {
                     tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");
+                }
+                if let Some(released) = released_deferred_line.take() {
+                    if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                        ctrl.append_delivered_message(&released);
+                    }
                 }
             }
 
