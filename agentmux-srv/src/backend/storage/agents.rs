@@ -2366,6 +2366,11 @@ impl Store {
             // launched from the same template; resolving to it handed the
             // pane that agent's UID, token, slug and provider credentials.
             // A stamped row that no longer exists resolves to nothing.
+            // "Launched from" reaches one hop: the template-promotion
+            // migration repointed launch rows' `parent_template_id` from the
+            // seeded template to its promoted clone (itself launched from
+            // the template), while pre-migration blocks still name the
+            // template (Codex P1 on #3576).
             let stamped = block
                 .meta
                 .get("agentInstanceId")
@@ -2376,7 +2381,10 @@ impl Store {
             let mut stmt = conn.prepare(&format!(
                 "SELECT {INSTANCE_COLUMNS} FROM db_agents
                  WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
-                   AND parent_template_id = ?2 AND (?3 = '' OR id = ?3)
+                   AND (parent_template_id = ?2
+                        OR parent_template_id IN (
+                            SELECT id FROM db_agents WHERE parent_template_id = ?2 AND is_template = 0))
+                   AND (?3 = '' OR id = ?3)
                  ORDER BY updated_at DESC
                  LIMIT 1"
             ))?;

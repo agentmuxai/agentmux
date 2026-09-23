@@ -2013,6 +2013,31 @@
         }
     }
 
+    /// Codex P1 on #3576: `migrate_promote_template_sessions_v1` promotes a
+    /// clone of the seeded template (itself launched from it) and repoints
+    /// the surviving launch rows' `parent_template_id` to the clone
+    /// (`instance_repoint_definition`), while pre-migration blocks still
+    /// name the template. Such a row is the template's launch one hop
+    /// removed, and must still resolve, stamped or not.
+    #[test]
+    fn a_block_naming_a_template_resolves_a_launch_repointed_to_its_promoted_clone() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-promo", "tpl-promo");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let launched =
+            launch_from_template_on(&store, &agents_root, "tpl-promo", "inst-promo", "block-promo");
+        let clone = launch_from_template_on(&store, &agents_root, "tpl-promo", "inst-clone", "block-elsewhere");
+        assert_eq!(store.instance_repoint_definition("tpl-promo", &clone).unwrap(), 1);
+        for stamped in [None, Some(launched.as_str())] {
+            block_showing_stamped(&store, "block-promo", Some("tpl-promo"), stamped);
+            let got = store.instance_get_active_for_block("block-promo").unwrap();
+            assert_eq!(got.map(|r| r.id), Some(launched.clone()), "stamped={stamped:?}");
+            store.delete::<crate::backend::obj::Block>("block-promo").ok();
+        }
+    }
+
     /// A block whose meta names no agent at all keeps today's fallback: the
     /// agent whose latest launch is on it (a block from before `agentId`).
     #[test]
