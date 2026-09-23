@@ -173,6 +173,19 @@ describe("failureToRow", () => {
         expect(exitRow.meta).toBe("unknown_non_zero · exit 1 · retryable");
     });
 
+    // #3577: a pane whose agent was deleted is refused at every respawn, so a
+    // Retry would be a dead end — only Details and Dismiss are offered.
+    it("agent_deleted offers no Retry, only Details and Dismiss", () => {
+        const row = failureToRow(
+            mkFailure({ code: "agent_deleted", title: "Agent was deleted", retryable: false }),
+            mkView(),
+            mkActions()
+        );
+        expect(action(row, "Retry")).toBeUndefined();
+        expect(action(row, "Details")).toBeDefined();
+        expect(action(row, "×")).toBeDefined();
+    });
+
     it("falls back to a generic Retry for unclassified non-zero exits", () => {
         const on = mkActions();
         const row = failureToRow(mkFailure({ code: "unknown_non_zero" }), mkView(), on);

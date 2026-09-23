@@ -92,6 +92,7 @@ const ICON: Record<AgentFailure["code"], string> = {
     spawn_failure: "🧩",
     no_output: "❔",
     unknown_non_zero: "⚠",
+    agent_deleted: "🗑",
 };
 
 /** Classes whose retry is safe to fire **automatically** (transient throttling). */
@@ -217,6 +218,10 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                 glyph: "🆕", label: "New session", title: "Start a fresh session — the current one's context window is full",
                 primary: true, onClick: on.newSession,
             });
+            break;
+        case "agent_deleted":
+            // The pane's agent is gone (#3577): no Retry — every respawn is
+            // refused the same way. Details + Dismiss only.
             break;
         default: // killed, no_output, unknown_non_zero
             actions.push({ ...retry, label: "Retry" });
