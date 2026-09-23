@@ -1200,15 +1200,60 @@ impl PersistentSubprocessController {
                     "eager-resume declined: identity/credential spawn gate did not pass — \
                      falling back to lazy (spawns on next message, gated the same way then)"
                 );
-                // Release the claim taken above. Safe even if a message
-                // queued during the gate's wait (`decide_send_action` sees
-                // `spawning_in_progress: true` and routes to `Queued`
-                // rather than becoming its own spawner concurrently with
-                // us) — that entry is not stranded: whichever call next
-                // successfully claims and spawns for this block drains the
-                // WHOLE queue (`drain_queue_after_successful_spawn` doesn't
-                // clear it first), so it rides along on the next attempt.
-                self.inner.lock().unwrap().spawning_in_progress = false;
+                // Release the claim taken above, and — if anything queued
+                // behind it while the gate ran — tell the operator, because
+                // those prompts are NOT about to run.
+                //
+                // codex P1 + reagent P1 on PR #3538, found independently.
+                // Both proposed handing off to
+                // `respawn_once_for_leftover_queue`, as every other
+                // claim-release site does. That is not available here, for
+                // two reasons, and the second is the important one:
+                //
+                //   1. There is no spawn config yet — `env_vars` is what the
+                //      gate failed to produce, and `config` is built below.
+                //   2. More fundamentally, the gate declining means this
+                //      agent's credentials were REFUSED (deleted/revoked
+                //      account — `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`
+                //      layer 3). Respawning would spawn the process the gate
+                //      just denied, on whatever ambient credential happens to
+                //      be around. That is the exact vulnerability this whole
+                //      gate exists to close, so "deliver the queued prompt"
+                //      must lose to "do not spawn a deauthed agent".
+                //
+                // So the queue is deliberately left in place rather than
+                // drained or dropped: a later send re-runs the gate and, once
+                // credentials are fixed, drains the WHOLE backlog including
+                // these (`drain_queue_after_successful_spawn` doesn't clear
+                // it first). Still gated, never bypassed.
+                //
+                // What WAS wrong is that this was silent. `send_message`
+                // already returned success and may have emitted
+                // `agent-message-accepted`, so without this the operator sees
+                // an accepted prompt that simply never runs, with no reason
+                // given. `flush_error_line_now` gives it the same
+                // classify/persist/publish treatment every other terminal
+                // failure gets, so it surfaces in the pane's failure-recovery
+                // UI instead of vanishing.
+                let stranded = {
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.spawning_in_progress = false;
+                    inner.pending_send_messages.len()
+                };
+                if stranded > 0 {
+                    let frame = serde_json::json!({
+                        "type": "result",
+                        "is_error": true,
+                        "subtype": "error_during_execution",
+                        "error": {
+                            "message": format!(
+                                "[AgentMux] {stranded} queued prompt(s) are waiting: this agent's \
+                                 credentials were refused, so it was not resumed. {gate_err}"
+                            )
+                        }
+                    });
+                    self.flush_error_line_now(format!("{frame}\n"));
+                }
                 return EagerResumeOutcome::DeclinedTo("identity/credential spawn gate did not pass");
             }
         };
@@ -1273,7 +1318,33 @@ impl PersistentSubprocessController {
                 };
                 if has_queued_work {
                     self.mark_turn_active_and_publish();
-                    self.drain_queue_after_successful_spawn(retry_config, false);
+                    // `true`, not `false` — reagent P2 on PR #3538. The spawn
+                    // can succeed at the OS level and the process still exit
+                    // before this drain ever obtains `stdin_tx`; a stale
+                    // `--resume` that dies immediately is exactly that shape,
+                    // and is the case eager resume is most likely to hit. The
+                    // drain's stalled branch then only publishes status and
+                    // releases the claim unless fallback is allowed, leaving
+                    // messages that queued during the identity-gate wait —
+                    // already reported accepted — waiting on an unrelated
+                    // future send.
+                    //
+                    // `false` exists for `respawn_once_for_leftover_queue`'s
+                    // own recursive call, where it bounds the retry to one
+                    // hop so a second stall cannot cascade. Every ordinary
+                    // entry point passes `true` (see
+                    // `release_spawn_claim_and_drain_queue`); this is an
+                    // ordinary entry point and was the odd one out.
+                    //
+                    // Safe because `respawn_once_for_leftover_queue` clears
+                    // `session_id` before respawning, so the fallback starts
+                    // a fresh process rather than re-attempting the
+                    // `--resume` that just died. It also re-enters
+                    // `spawn_process`, which re-runs nothing credential-
+                    // related — the env was already resolved through the
+                    // identity gate for THIS spawn, so the fallback cannot
+                    // bypass it.
+                    self.drain_queue_after_successful_spawn(retry_config, true);
                 }
                 EagerResumeOutcome::Spawned
             }
@@ -9229,6 +9300,85 @@ setInterval(() => {{}}, 1000);
         assert!(
             c.inner.lock().unwrap().current_pid.is_none(),
             "must not spawn at all while another spawn's claim is already held"
+        );
+    }
+
+    // codex P1 + reagent P1 on PR #3538, found independently by both. A
+    // message arriving while the identity gate runs is routed to `Queued`
+    // (the claim is held) and its caller told "accepted". If the gate then
+    // DECLINES, the prompt is not about to run — and this used to be
+    // completely silent.
+    //
+    // Both reviewers proposed handing off to
+    // `respawn_once_for_leftover_queue`. That is deliberately not done: the
+    // gate declining means the credentials were refused, so respawning would
+    // launch the process the gate just denied. The queue is therefore left in
+    // place (a later send re-runs the gate and drains the whole backlog once
+    // credentials are fixed) and the operator is told why nothing is running.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_gate_decline_with_queued_work_surfaces_a_failure_and_keeps_the_queue() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        wire_ungated_agent(&store, "blk-gate-strand"); // bindings that can never resolve
+        let stub = write_stub();
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        let c = controller("blk-gate-strand").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController {
+            mstore: Some(store),
+            broker: Some(broker.clone()),
+            ..c
+        };
+        let _kill_on_drop = KillOnDrop(&c);
+
+        // A prompt accepted while the claim was held, exactly as
+        // `decide_send_action`'s `Queued` branch would leave it.
+        {
+            let mut inner = c.inner.lock().unwrap();
+            let seq = inner.take_next_message_seq();
+            inner
+                .pending_send_messages
+                .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+        }
+
+        let meta = meta_with_session("sid-gate-strand", &[stub.to_string_lossy().as_ref()]);
+        let result = Controller::start(&c, meta, None, false);
+        assert!(result.is_ok(), "declining must not fail the resync: {result:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // The security property first: the gate refused, so nothing spawned.
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "a refused credential gate must never spawn, queued work or not"
+        );
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "the spawn claim must still be released"
+        );
+
+        // The queue survives — not dropped, and not delivered by bypassing
+        // the gate. A later send re-runs the gate and drains it.
+        assert_eq!(
+            c.inner.lock().unwrap().pending_send_messages.len(),
+            1,
+            "the accepted prompt must stay queued for a properly-gated later spawn"
+        );
+
+        // And it is no longer silent.
+        let failures = broker.read_event_history(
+            crate::backend::mps::EVENT_AGENT_FAILURE,
+            &format!("block:{}", "blk-gate-strand"),
+            10,
+        );
+        assert!(
+            !failures.is_empty(),
+            "the operator must be told why an accepted prompt is not running"
         );
     }
 
