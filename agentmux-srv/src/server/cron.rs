@@ -167,8 +167,15 @@ fn publish_cron_changed(state: &AppState) {
 
 pub(super) async fn handle_cron_create(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<CronCreateRequest>,
 ) -> (StatusCode, Json<Value>) {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::CronCreate,
+        Some(&req.created_by),
+    );
     // Validate expression.
     let full_expr = format!("0 {}", req.expression);
     if Schedule::from_str(&full_expr).is_err() {
