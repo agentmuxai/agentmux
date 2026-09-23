@@ -2444,12 +2444,46 @@ impl PersistentSubprocessController {
                 // batch there is nothing to send, so spawning now would
                 // burn a process to sit idle. The next prompt resumes it
                 // through the ordinary path.
-                core::persist_session_id(
-                    &self.block_id,
-                    recovered_sid,
-                    &self.mstore,
-                    &self.event_bus,
-                );
+                // ...but only while this retry is still the current
+                // generation — codex P1 on PR #3523, an interaction between
+                // two fixes in this same PR. Enabling the stalled-drain
+                // fallback means a fresh generation can be spawned while
+                // this (older) waiter has already taken its empty
+                // `FireRetry` payload and is still doing its recovery scan.
+                // Writing unconditionally then stamps an unrelated
+                // recovered id over the LIVE generation's session metadata:
+                // the prompt runs in one conversation and the next restart
+                // resumes a different one.
+                //
+                // `decide_retry_batch_action` below takes `retry_generation`
+                // for exactly this reason, and the stdout reader's own
+                // session adoption is gated the same way
+                // (`is_current_generation`). This branch returns before
+                // reaching either, so it has to make the check itself.
+                //
+                // The status resolve is NOT gated: the "retrying" ping was
+                // published unconditionally at the top of this call, so
+                // resolving it is this call's own bookkeeping either way —
+                // and skipping it is what leaves the pane stuck on
+                // "Reconnecting…", the bug the empty-batch handling exists
+                // to fix.
+                let still_current =
+                    self.inner.lock().unwrap().spawn_generation == retry_generation;
+                if still_current {
+                    core::persist_session_id(
+                        &self.block_id,
+                        recovered_sid,
+                        &self.mstore,
+                        &self.event_bus,
+                    );
+                } else {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        retry_generation,
+                        "a newer spawn superseded this empty-batch retry — \
+                         dropping its recovered session rather than overwriting the live one"
+                    );
+                }
                 publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
             }
             // A no-op, not a launch, so any held error line must still
@@ -7633,6 +7667,9 @@ mod send_input_tests {
             session_id: "d019e2e4-stale".to_string(),
             message_id: None,
         };
+        // Generation 1 is the live one: this retry has NOT been superseded,
+        // so its recovered session is the right one to keep.
+        c.inner.lock().unwrap().spawn_generation = 1;
         c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
 
         let updated: crate::backend::obj::Block = store.get(&block_id).unwrap().unwrap();
@@ -7645,6 +7682,75 @@ mod send_input_tests {
             !persisted.is_empty() && persisted != "d019e2e4-stale",
             "the recovered session must be written back so the next prompt resumes it \
              instead of starting fresh — got {persisted:?}"
+        );
+    }
+
+    /// codex P1 on PR #3523 — an interaction between two fixes in that PR.
+    /// Enabling the stalled-drain fallback lets a FRESH generation spawn
+    /// while this older waiter is still doing its recovery scan with an
+    /// empty batch. Persisting unconditionally then stamps an unrelated
+    /// recovered id over the live generation's session metadata: the prompt
+    /// runs in one conversation and the next restart resumes another.
+    #[test]
+    fn retry_after_resume_failure_does_not_persist_recovery_for_a_superseded_generation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let block_id = "77777777-7777-7777-7777-777777777777".to_string();
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                // What the LIVE generation already captured.
+                m.insert(core::META_SESSION_ID.to_string(), serde_json::json!("live-sid"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            Some(store.clone()),
+            Some(filestore),
+        );
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+        // A NEWER spawn is live: generation 2, while this retry belongs to 1.
+        c.inner.lock().unwrap().spawn_generation = 2;
+        c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+        let updated: crate::backend::obj::Block = store.get(&block_id).unwrap().unwrap();
+        assert_eq!(
+            updated.meta.get(core::META_SESSION_ID).and_then(|v| v.as_str()),
+            Some("live-sid"),
+            "a superseded retry must not stamp its recovered id over the live generation's session"
         );
     }
 
