@@ -139,7 +139,7 @@ describe("evaluateCodexGate", () => {
 // Codex for a docs-only diff after an OK, so the gate must carry that OK.
 describe("isDocsOnlyPath", () => {
     it("accepts the docs tree, changesets and README/CHANGELOG/LICENSE", () => {
-        for (const p of ["docs/specs/SPEC_X.md", ".changesets/1-fix.md", "README.md", "src/README.md",
+        for (const p of ["docs/specs/SPEC_X.md", ".changesets/1-fix.md", ".changeset/brave-fox.md", "README.md", "src/README.md",
             "CHANGELOG.md", "LICENSE", "NOTICE"]) {
             expect(isDocsOnlyPath(p)).toBe(true);
         }

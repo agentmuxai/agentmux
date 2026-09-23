@@ -36,7 +36,8 @@ const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
 // and prompt files are markdown that agents act on, so changing them is a
 // behavior change Codex should see.
 const NEVER_DOCS_PREFIXES = [".github/", "scripts/", "tools/", "prompts/"];
-const DOCS_PREFIXES = ["docs/", ".changesets/"];
+// Both changeset spellings, matching reagent: plural here, singular upstream.
+const DOCS_PREFIXES = ["docs/", ".changesets/", ".changeset/"];
 const DOCS_NAMES = /^(README|CHANGELOG)(\.[a-z]+)?$|^(LICENSE|NOTICE)$/i;
 
 export function isDocsOnlyPath(rawPath) {
