@@ -2626,9 +2626,17 @@ async fn call_tool(
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set — cannot claim work without an agent identity"))?;
 
+            // Identity M1b: carry this agent's UID (AGENTMUX_AGENT_UID, set by
+            // srv at spawn since M1a) so the claim records WHO claimed by a
+            // key that cannot collide, beside the slug it still matches on.
+            // Empty when absent (pre-M1a spawn, quick-launch pane) — the
+            // server counts that as a fallback rather than guessing.
+            let self_uid = std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+
             let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "agent_id": self_id,
+                "agent_uid": self_uid,
                 "kind": arguments.get("kind").and_then(|v| v.as_str()),
                 "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
                 // Group membership is resolved server-side-of-this-call by the
