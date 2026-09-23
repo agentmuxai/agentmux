@@ -3,8 +3,8 @@
 **Date:** 2026-09-23
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
-work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3–M5 not
-started.
+work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
+M4–M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -985,6 +985,30 @@ changes two things at once.
   unchanged" was false for the frontend presence path.
 - **M3 — Work queue and cron.** Columns hold UIDs; one-time backfill of live
   rows. Resolution moves to the MCP boundary so tool arguments stay readable.
+
+  **Shipped in #3563.** §5.1's entry point exists
+  (`backend/name_resolution.rs::resolve_name_to_uid`), reachable only
+  through `POST /agentmux/agents/resolve`, with
+  `scripts/check-name-resolver-callers.sh` as §9.3's grep gate. `agentmux-mcp`
+  resolves `WorkEnqueue.target_agent` and `CronCreate.to` at the boundary,
+  carries the UID, and hands an ambiguous name back to the model with the
+  candidates (§5.2). A cron job with a captured UID fires by UID; a
+  UID-addressed work item is claimable by that identity under any display
+  name. `m0035` backfills the two UID columns where a name resolves to
+  exactly one row in the channel. Decisions and deviations, recorded:
+  - **Rewrite, not drain** (§12's open question): a rewritten row keeps
+    working under both keys; a drained one is work a human loses.
+    Ambiguous and unknown names are left empty and counted.
+  - **A fourth variant, `Unidentified`.** A live block with no `db_agents`
+    row exists and is reachable by name; returning `None` would say it does
+    not. The spec's three-variant enum did not account for M0's finding.
+  - **The resolver lists, it does not pick** — which is why it *can* match
+    display names case-insensitively where §1.1 showed a picking resolver
+    must not: one match resolves, a collision is refused with candidates,
+    nothing is misrouted.
+  - **Name paths stay** in the claim predicate and the cron fire until M5,
+    counted (`cron.fire_by_name`), so a claimer or target with no UID is
+    not locked out.
 - **M4 — Proven identity.** Per-agent token; authz reads connection identity;
   body `agent_id` demoted to untrusted. Closes #3501.
 - **M5 — Remove the scaffolding.** Delete slug fallbacks, delete
