@@ -24,8 +24,10 @@
 # Usage: bash scripts/cef-build/fetch-patched-cef-windows.sh <target-dir>
 #   <target-dir> is normally $HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64
 #   (Taskfile.yml's $cefBuildDefault).
-# Exit: 0 = target-dir now has a valid libcef.dll + icudtl.dat (already did,
-#           or just fetched them)
+# Exit: 0 = target-dir now has RELEASE_TAG's libcef.dll + icudtl.dat (already
+#           did, or just fetched them), or is a local CEF build left untouched.
+#           A fetched runtime from any other release is moved aside to
+#           <target-dir>.stale-<timestamp> and replaced.
 #       1 = could not ensure it (see stderr) -- caller should fall back
 set -uo pipefail
 
@@ -43,9 +45,29 @@ ASSET_PATTERN="cef-windows-x86_64-152.0.7977.83-r2.zip"
 
 target_dir="${1:?usage: fetch-patched-cef-windows.sh <target-dir>}"
 
+# Which release a fetched runtime came from. "libcef.dll exists" is not
+# enough: bumping RELEASE_TAG used to change nothing on a machine that had
+# already fetched an older runtime, so the tracer-off r2 pin (#3561) never
+# reached local builds. A local 0.56.13 package shipped the 2026-09-15
+# tracer-on libcef.dll and its UI thread deadlocked on InstanceTracer's mutex
+# (INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md §3a,
+# same lock at libcef+0x11656b38, 2026-09-23).
+stamp_path="$target_dir/.agentmux-cef-release"
+replace_stale=0
 if [ -f "$target_dir/libcef.dll" ] && [ -f "$target_dir/icudtl.dat" ]; then
-  echo "fetch-patched-cef-windows: already present at $target_dir" >&2
-  exit 0
+  if [ "$(cat "$stamp_path" 2>/dev/null)" = "$RELEASE_TAG" ]; then
+    echo "fetch-patched-cef-windows: $RELEASE_TAG already present at $target_dir" >&2
+    exit 0
+  fi
+  if [ -f "$target_dir/build.ninja" ] || [ -f "$target_dir/args.gn" ]; then
+    # A local Chromium compile, not a fetched runtime: never replace it.
+    echo "fetch-patched-cef-windows: $target_dir is a local CEF build; leaving it." >&2
+    echo "  It must be built with scripts/cef-build/args-windows.gn (raw_ptr instance tracer off)." >&2
+    exit 0
+  fi
+  echo "fetch-patched-cef-windows: runtime at $target_dir is not $RELEASE_TAG" \
+       "(stamp: $(cat "$stamp_path" 2>/dev/null || echo none)) -- replacing it" >&2
+  replace_stale=1
 fi
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -53,13 +75,10 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! gh auth status >/dev/null 2>&1; then
-  echo "fetch-patched-cef-windows: gh is not authenticated -- cannot auto-fetch" >&2
-  echo "  run 'gh auth login', or set up $target_dir manually per" >&2
-  echo "  docs/cef-build/build-patched-cef-windows.md" >&2
-  exit 1
-fi
-
+# No `gh auth status` pre-check: it exits 1 whenever ANY stored login is
+# invalid, even with a working GH_TOKEN it reports as logged in, so it
+# refused downloads that would have succeeded (2026-09-23). The download's
+# own failure is the real test.
 work_dir="$(mktemp -d)"
 cleanup() { rm -rf "$work_dir"; }
 trap cleanup EXIT
@@ -67,7 +86,8 @@ trap cleanup EXIT
 echo "fetch-patched-cef-windows: downloading $ASSET_PATTERN from $RELEASE_REPO@$RELEASE_TAG ..." >&2
 if ! gh release download "$RELEASE_TAG" --repo "$RELEASE_REPO" \
     --pattern "$ASSET_PATTERN" --dir "$work_dir" >&2; then
-  echo "fetch-patched-cef-windows: download failed" >&2
+  echo "fetch-patched-cef-windows: download failed -- is gh authenticated ('gh auth login' or GH_TOKEN)?" >&2
+  echo "  Or set up $target_dir manually per docs/cef-build/build-patched-cef-windows.md" >&2
   exit 1
 fi
 
@@ -104,11 +124,27 @@ if [ -z "$libcef_found" ]; then
 fi
 src_dir="$(dirname "$libcef_found")"
 
+# Swap only now that the new runtime is in hand: every failure above leaves
+# the old runtime in place, which the caller would use anyway (falling back
+# to stock CEF instead would be no safer -- it carries the same tracer).
+# Moved aside rather than deleted, and into a fresh directory rather than
+# copied over, so no file from the old runtime survives into the new one.
+if [ "$replace_stale" = 1 ]; then
+  stale_dir="$target_dir.stale-$(date +%Y%m%d%H%M%S)"
+  if ! mv "$target_dir" "$stale_dir"; then
+    echo "fetch-patched-cef-windows: could not move the old runtime aside (is a running AgentMux dev build using it?)." >&2
+    echo "  Close it and re-run, or delete $target_dir by hand. The OLD runtime is still in place." >&2
+    exit 1
+  fi
+  echo "fetch-patched-cef-windows: old runtime kept at $stale_dir" >&2
+fi
+
 mkdir -p "$target_dir"
 cp -rf "$src_dir/." "$target_dir/"
 
 if [ -f "$target_dir/libcef.dll" ] && [ -f "$target_dir/icudtl.dat" ]; then
-  echo "fetch-patched-cef-windows: ✓ installed to $target_dir" >&2
+  printf '%s\n' "$RELEASE_TAG" > "$stamp_path"
+  echo "fetch-patched-cef-windows: ✓ installed $RELEASE_TAG to $target_dir" >&2
   exit 0
 fi
 
