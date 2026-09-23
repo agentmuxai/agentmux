@@ -44,6 +44,13 @@ SCOPE=(
   frontend/app/view/term/*.ts
   frontend/app/view/term/*.tsx
   frontend/app/view/agent/components/AgentFooter.tsx
+  # The agent pane's scroll/pin path runs on every stream flush of every
+  # visible pane. Every layout read in it must be in a ResizeObserver callback
+  # (layout already clean) or on a user-initiated path, and say which with the
+  # escape hatch below — a new unannotated read is the regression Phase 1 of
+  # docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md
+  # removed (0.5–3.4 s of forced layout per 10 s with three panes streaming).
+  frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 )
 
 # Filter to existing files only (the glob would otherwise include
