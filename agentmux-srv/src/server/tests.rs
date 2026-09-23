@@ -3613,6 +3613,37 @@ async fn agent_open_unknown_agent_is_a_400_not_a_500() {
     );
 }
 
+/// `agent.open` opens My Agents agents only (identity spec §6.5.8): a
+/// template is the caller's fault — a 400 — and nothing is spawned.
+#[tokio::test]
+async fn agent_open_of_a_template_is_a_400() {
+    let state = test_state();
+    let mut tpl = crate::backend::storage::agents::test_agent_def(
+        "tpl-open-test", "Template Open Test", "claude", "agent", 1, "",
+    );
+    tpl.is_seeded = 1;
+    state.mstore.agent_def_insert(&mut tpl).expect("insert template");
+    let app = build_router(state);
+    for wanted in ["tpl-open-test", "template open test"] {
+        let req = Request::builder()
+            .uri("/api/v1/agent/open")
+            .method("POST")
+            .header("X-AuthKey", "test-secret-key")
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({ "agent_id": wanted }).to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{wanted}");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            json["error"].as_str().unwrap_or("").starts_with("TEMPLATE_NOT_OPENABLE"),
+            "{wanted}: {}",
+            json["error"]
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PTY shell handlers (docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)
 // ---------------------------------------------------------------------------

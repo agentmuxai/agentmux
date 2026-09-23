@@ -2077,10 +2077,12 @@ async fn handle_agent_open(
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => {
             // The impl's own error vocabulary: AGENT_NOT_FOUND /
-            // INVALID_PROVIDER / CLI_NOT_AVAILABLE are the caller's problem
-            // (bad target or an uninstalled CLI they must remedy first);
-            // anything else is a server-side failure.
+            // TEMPLATE_NOT_OPENABLE / INVALID_PROVIDER / CLI_NOT_AVAILABLE
+            // are the caller's problem (bad target or an uninstalled CLI
+            // they must remedy first); anything else is a server-side
+            // failure.
             let status = if e.starts_with("AGENT_NOT_FOUND")
+                || e.starts_with("TEMPLATE_NOT_OPENABLE")
                 || e.starts_with("INVALID_PROVIDER")
                 || e.starts_with("CLI_NOT_AVAILABLE")
             {
