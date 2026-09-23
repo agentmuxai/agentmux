@@ -43,7 +43,11 @@ pub(super) async fn handle_resolve_agent_name(
     })
     .await
     {
-        Ok(resolution) => (
+        // The store could not be read: refuse (503), so the MCP fails the
+        // tool call instead of sending a bare name that a same-named live
+        // agent could take (Codex P1 on #3563).
+        Ok(Err(e)) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))),
+        Ok(Ok(resolution)) => (
             StatusCode::OK,
             Json(
                 serde_json::to_value(&resolution)
