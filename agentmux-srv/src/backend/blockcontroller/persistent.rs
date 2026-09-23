@@ -2428,7 +2428,7 @@ impl PersistentSubprocessController {
             // completes when there is no spawn to confirm it. (Caught by
             // this fix's own test, which failed with
             // `[resolved, resolved]` when the publish was unconditional.)
-            if let Some(recovered_sid) = &recovered {
+            if recovered.is_some() {
                 // Keep the recovery candidate — codex P2 on PR #3523. The
                 // failed sid has already been cleared from block meta by
                 // the stderr path's `persist_session_id("")`, and the
@@ -2444,46 +2444,37 @@ impl PersistentSubprocessController {
                 // batch there is nothing to send, so spawning now would
                 // burn a process to sit idle. The next prompt resumes it
                 // through the ordinary path.
-                // ...but only while this retry is still the current
-                // generation — codex P1 on PR #3523, an interaction between
-                // two fixes in this same PR. Enabling the stalled-drain
-                // fallback means a fresh generation can be spawned while
-                // this (older) waiter has already taken its empty
-                // `FireRetry` payload and is still doing its recovery scan.
-                // Writing unconditionally then stamps an unrelated
-                // recovered id over the LIVE generation's session metadata:
-                // the prompt runs in one conversation and the next restart
-                // resumes a different one.
+                // NOT persisted. An earlier cut of this branch wrote the
+                // recovered id back so the next prompt would resume it
+                // (codex P2 on PR #3523 — otherwise the recovery scan's
+                // result is simply discarded and the next prompt starts a
+                // fresh conversation). That write then produced two P1s in
+                // consecutive rounds, both the same shape: nothing here can
+                // establish that this retry still owns the block's session
+                // metadata by the time it writes.
                 //
-                // `decide_retry_batch_action` below takes `retry_generation`
-                // for exactly this reason, and the stdout reader's own
-                // session adoption is gated the same way
-                // (`is_current_generation`). This branch returns before
-                // reaching either, so it has to make the check itself.
+                // A `spawn_generation` check fixes only the intra-controller
+                // case. `spawn_generation` is controller-LOCAL and
+                // `stop_for_replace` does not advance it, so a forced resync
+                // that REPLACES this controller leaves the check passing
+                // while the replacement is already capturing and persisting
+                // its own live session — and this write lands on top of it.
+                // The prompt then runs in one conversation while the next
+                // restart resumes another.
                 //
-                // The status resolve is NOT gated: the "retrying" ping was
-                // published unconditionally at the top of this call, so
-                // resolving it is this call's own bookkeeping either way —
-                // and skipping it is what leaves the pane stuck on
-                // "Reconnecting…", the bug the empty-batch handling exists
-                // to fix.
-                let still_current =
-                    self.inner.lock().unwrap().spawn_generation == retry_generation;
-                if still_current {
-                    core::persist_session_id(
-                        &self.block_id,
-                        recovered_sid,
-                        &self.mstore,
-                        &self.event_bus,
-                    );
-                } else {
-                    tracing::info!(
-                        block_id = %self.block_id,
-                        retry_generation,
-                        "a newer spawn superseded this empty-batch retry — \
-                         dropping its recovered session rather than overwriting the live one"
-                    );
-                }
+                // That is the same "an evicted controller cannot tell it was
+                // evicted" problem that got the registry replace check and
+                // the launch-specific instance gate dropped from this PR;
+                // see issue #3525. Trading a discarded recovery (P2) for
+                // corrupted session metadata (P1) is the wrong direction, so
+                // the recovery is dropped here until that invalidation
+                // actually exists.
+                //
+                // Resolving the status is still correct and carries no such
+                // risk — it writes no shared state, and the "retrying" ping
+                // was published unconditionally at the top of this call, so
+                // resolving it is this call's own bookkeeping. Skipping it is
+                // what strands the pane on "Reconnecting…".
                 publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
             }
             // A no-op, not a launch, so any held error line must still
@@ -7607,150 +7598,6 @@ mod send_input_tests {
             statuses,
             vec![Some("retrying"), Some("resolved")],
             "an empty batch must still resolve 'Reconnecting...', not strand the pane in it — got: {statuses:?}"
-        );
-    }
-
-    /// codex P2 on PR #3523, the other half of the empty-batch path. The
-    /// recovery search runs before the empty check and can find a real
-    /// on-disk session — but the failed sid has already been cleared from
-    /// block meta by the stderr path's `persist_session_id("")`, and the
-    /// recovered one lives only in the local `config`. Resolving without
-    /// writing it back silently discards the recovery, so the next prompt
-    /// reads an empty `agent:sessionid` and starts a fresh conversation —
-    /// the exact continuity loss the recovery search exists to prevent.
-    #[test]
-    fn retry_after_resume_failure_persists_a_recovered_session_for_an_empty_batch() {
-        let tmp = tempfile::tempdir().unwrap();
-        let config_dir = tmp.path().to_string_lossy().to_string();
-        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
-        let dir = tmp.path().join("projects").join(&slug);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
-
-        let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
-        let block_id = "66666666-6666-6666-6666-666666666666".to_string();
-        let mut block = crate::backend::obj::Block {
-            oid: block_id.clone(),
-            parentoref: String::new(),
-            version: 1,
-            runtimeopts: None,
-            stickers: None,
-            meta: {
-                let mut m = crate::backend::obj::MetaMapType::new();
-                m.insert("view".to_string(), serde_json::json!("agent"));
-                m
-            },
-            subblockids: None,
-        };
-        store.insert(&mut block).unwrap();
-
-        let broker = Arc::new(crate::backend::mps::Broker::new());
-        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
-        let c = PersistentSubprocessController::new(
-            "tab".to_string(),
-            block_id.clone(),
-            Some(broker),
-            None,
-            Some(store.clone()),
-            Some(filestore),
-        );
-        let mut env_vars = HashMap::new();
-        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
-        let config = PersistentSpawnConfig {
-            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
-            cli_args: vec![],
-            working_dir,
-            env_vars,
-            session_id_field: "session_id".to_string(),
-            resume_flag: "--resume".to_string(),
-            session_id: "d019e2e4-stale".to_string(),
-            message_id: None,
-        };
-        // Generation 1 is the live one: this retry has NOT been superseded,
-        // so its recovered session is the right one to keep.
-        c.inner.lock().unwrap().spawn_generation = 1;
-        c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
-
-        let updated: crate::backend::obj::Block = store.get(&block_id).unwrap().unwrap();
-        let persisted = updated
-            .meta
-            .get(core::META_SESSION_ID)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        assert!(
-            !persisted.is_empty() && persisted != "d019e2e4-stale",
-            "the recovered session must be written back so the next prompt resumes it \
-             instead of starting fresh — got {persisted:?}"
-        );
-    }
-
-    /// codex P1 on PR #3523 — an interaction between two fixes in that PR.
-    /// Enabling the stalled-drain fallback lets a FRESH generation spawn
-    /// while this older waiter is still doing its recovery scan with an
-    /// empty batch. Persisting unconditionally then stamps an unrelated
-    /// recovered id over the live generation's session metadata: the prompt
-    /// runs in one conversation and the next restart resumes another.
-    #[test]
-    fn retry_after_resume_failure_does_not_persist_recovery_for_a_superseded_generation() {
-        let tmp = tempfile::tempdir().unwrap();
-        let config_dir = tmp.path().to_string_lossy().to_string();
-        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
-        let dir = tmp.path().join("projects").join(&slug);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
-
-        let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
-        let block_id = "77777777-7777-7777-7777-777777777777".to_string();
-        let mut block = crate::backend::obj::Block {
-            oid: block_id.clone(),
-            parentoref: String::new(),
-            version: 1,
-            runtimeopts: None,
-            stickers: None,
-            meta: {
-                let mut m = crate::backend::obj::MetaMapType::new();
-                m.insert("view".to_string(), serde_json::json!("agent"));
-                // What the LIVE generation already captured.
-                m.insert(core::META_SESSION_ID.to_string(), serde_json::json!("live-sid"));
-                m
-            },
-            subblockids: None,
-        };
-        store.insert(&mut block).unwrap();
-
-        let broker = Arc::new(crate::backend::mps::Broker::new());
-        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
-        let c = PersistentSubprocessController::new(
-            "tab".to_string(),
-            block_id.clone(),
-            Some(broker),
-            None,
-            Some(store.clone()),
-            Some(filestore),
-        );
-        let mut env_vars = HashMap::new();
-        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
-        let config = PersistentSpawnConfig {
-            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
-            cli_args: vec![],
-            working_dir,
-            env_vars,
-            session_id_field: "session_id".to_string(),
-            resume_flag: "--resume".to_string(),
-            session_id: "d019e2e4-stale".to_string(),
-            message_id: None,
-        };
-        // A NEWER spawn is live: generation 2, while this retry belongs to 1.
-        c.inner.lock().unwrap().spawn_generation = 2;
-        c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
-
-        let updated: crate::backend::obj::Block = store.get(&block_id).unwrap().unwrap();
-        assert_eq!(
-            updated.meta.get(core::META_SESSION_ID).and_then(|v| v.as_str()),
-            Some("live-sid"),
-            "a superseded retry must not stamp its recovered id over the live generation's session"
         );
     }
 
