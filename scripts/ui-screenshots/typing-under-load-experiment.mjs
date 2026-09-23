@@ -112,6 +112,15 @@ const READ = `(()=>{const P=window.__exp;P.raf=false;P.poCb({getEntries:()=>P.po
 // focused, keystrokes would land wherever focus happens to be and the window
 // would measure the wrong workload — so that aborts the run instead.
 const kc = ch.toUpperCase().charCodeAt(0), interval = 1000 / kps;
+// Restores the composer exactly; used by runWindow's finally and by signals.
+const RESTORE = `(()=>{const d=window.__expDraft;if(d&&d.el){d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}))}delete window.__expDraft;return true})()`;
+// The restore's input event runs AgentFooter.handleInput, which schedules a
+// scroll via requestAnimationFrame — let that land before the next window arms,
+// or its work is measured in (and credited to) the wrong condition.
+const SETTLE = `new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(r,50))))`;
+const restoreAndExit = async (code) => { try { await evalIn(RESTORE); } catch {} process.exit(code); };
+process.once("SIGINT", () => restoreAndExit(130));
+process.once("SIGTERM", () => restoreAndExit(143));
 async function runWindow(typed) {
   if (typed) {
     if (!(await focusComposerAt(typeIdx))) throw new Error(`could not focus composer ${typeIdx}`);
@@ -120,18 +129,23 @@ async function runWindow(typed) {
   }
   await evalIn(ARM);
   const t0 = Date.now();
-  if (typed) {
-    for (let i = 0; i < secs * kps; i++) {
-      const w = t0 + i * interval - Date.now(); if (w > 0) await sleep(w);
-      send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 }).catch((e) => console.error(String(e)));
-      send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc }).catch((e) => console.error(String(e)));
+  try {
+    if (typed) {
+      for (let i = 0; i < secs * kps; i++) {
+        const w = t0 + i * interval - Date.now(); if (w > 0) await sleep(w);
+        send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 }).catch((e) => console.error(String(e)));
+        send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc }).catch((e) => console.error(String(e)));
+      }
+    }
+    const remaining = t0 + secs * 1000 - Date.now();
+    if (remaining > 0) await sleep(remaining);
+    return await evalIn(READ);
+  } finally {
+    if (typed) {
+      await evalIn(RESTORE).catch(() => {});
+      await evalIn(SETTLE).catch(() => {});
     }
   }
-  const remaining = t0 + secs * 1000 - Date.now();
-  if (remaining > 0) await sleep(remaining);
-  const r = await evalIn(READ);
-  if (typed) await evalIn(`(()=>{const d=window.__expDraft;if(d&&d.el){d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}))}delete window.__expDraft;return true})()`);
-  return r;
 }
 
 // Pool a condition's windows: totals summed, percentiles over the pooled samples.

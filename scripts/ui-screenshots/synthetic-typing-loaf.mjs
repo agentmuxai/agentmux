@@ -57,6 +57,16 @@ await evalIn(`(()=>{const a=document.activeElement;const P=window.__synProbe={t0
   P.gaps=[]; let last=performance.now(); P.raf=true; (function f(t){P.gaps.push(t-last); last=t; if(P.raf) requestAnimationFrame(f)})(last);
   return true})()`);
 
+// Put the composer back exactly as it was — on normal completion, on a thrown
+// error, and on Ctrl-C / SIGTERM — so an interrupted capture never leaves
+// synthetic characters in (or over) a real draft.
+const RESTORE = `(()=>{const P=window.__synProbe;if(!P||P.restored)return false;const d=P.draft;d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}));P.restored=true;return true})()`;
+const restoreAndExit = async (code) => { try { await evalIn(RESTORE); } catch {} process.exit(code); };
+process.once("SIGINT", () => restoreAndExit(130));
+process.once("SIGTERM", () => restoreAndExit(143));
+
+let out;
+try {
 // 3. Type: keydown + char + keyup at kps, like OS key-repeat.
 const n = Math.round(Number(secs) * Number(kps));
 const interval = 1000 / Number(kps);
@@ -71,9 +81,9 @@ for (let i = 0; i < n; i++) {
 }
 await new Promise((r) => setTimeout(r, 800)); // let the tail settle
 
-// 4. Read out + disarm + restore the original draft.
-const out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);
-  const d=P.draft; const removed=d.el.value.length-d.value.length; d.el.value=d.value; d.el.setSelectionRange(d.start,d.end); d.el.dispatchEvent(new Event("input",{bubbles:true}));
+// 4. Read out + disarm (the finally below restores the draft).
+  out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);
+  const d=P.draft; const removed=d.el.value.length-d.value.length;
   const L=P.loafs; const scr=l=>l.scripts.reduce((a,s)=>a+s.dur,0); const sum=f=>+L.reduce((a,l)=>a+f(l),0).toFixed(0);
   const q=(arr,p)=>{if(!arr.length)return null;const s=[...arr].sort((x,y)=>x-y);return +s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1)};
   const byInv=new Map(); for(const l of L) for(const s of l.scripts){const k=s.inv+" | "+s.fn+" @ "+s.url+":"+s.line; const v=byInv.get(k)||{n:0,dur:0,fl:0}; v.n++; v.dur+=s.dur; v.fl+=s.fl; byInv.set(k,v)}
@@ -82,5 +92,8 @@ const out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.poCb({ge
     loaf:{count:L.length,totalMs:sum(l=>l.dur),blockingMs:sum(l=>l.blocking),scriptMs:sum(scr),forcedLayoutInScriptsMs:sum(l=>l.scripts.reduce((a,s)=>a+s.fl,0)),renderPhaseMs:sum(l=>l.render),ofWhichStyleLayoutMs:sum(l=>l.styleLayout),maxMs:L.length?Math.max(...L.map(l=>l.dur)):0},
     topScripts:[...byInv].map(([k,v])=>({k,n:v.n,ms:+v.dur.toFixed(0),forcedLayoutMs:+v.fl.toFixed(0)})).sort((a,b)=>b.ms-a.ms).slice(0,14),
     worst4:[...L].sort((a,b)=>b.dur-a.dur).slice(0,4).map(l=>({dur:l.dur,blocking:l.blocking,scriptMs:+scr(l).toFixed(0),renderMs:l.render,styleLayoutMs:l.styleLayout,top:[...l.scripts].sort((a,b)=>b.dur-a.dur).slice(0,3).map(s=>s.inv.slice(0,32)+"|"+s.fn+"@"+s.url.slice(-26)+" "+s.dur+"ms fl="+s.fl)}))}})()`);
+} finally {
+  await evalIn(RESTORE).catch(() => {});
+}
 ws.close();
 console.log(JSON.stringify(out, null, 1));
