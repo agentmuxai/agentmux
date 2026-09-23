@@ -137,6 +137,26 @@ describe("typing target", () => {
     });
 });
 
+describe("discover", () => {
+    it("lists each block once even when several elements carry its data-blockid", async () => {
+        const { frame } = pane("b1");
+        const inner = document.createElement("div");
+        inner.setAttribute("data-blockid", "b1");
+        inner.appendChild(document.createElement("textarea")).className = "agent-input";
+        frame.appendChild(inner);
+        pane("b2");
+        for (const el of document.querySelectorAll("[data-blockid]")) el.checkVisibility = () => true;
+        // Stand-in for the live modules: every block has a model and no nodes.
+        const model = { dispatchDoc: () => {} };
+        window.__fcbTestModules = {
+            "/frontend/app/store/agent-pane-registration.ts": { getPaneModel: () => model },
+            "/frontend/app/store/agent-document-store.ts": { snapshot: () => ({ nodes: [] }) },
+        };
+        const found = await window.__fcb.discover();
+        expect(found.map((p) => p.blockId)).toEqual(["b1", "b2"]);
+    });
+});
+
 describe("visibility", () => {
     it("a window cannot start while the page is hidden", () => {
         vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");

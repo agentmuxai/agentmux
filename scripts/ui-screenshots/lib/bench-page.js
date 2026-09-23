@@ -71,6 +71,8 @@
      * instance for a module never hot-updated.
      */
     async function liveModule(path) {
+        // Test seam (jsdom has no Vite server to import from).
+        if (window.__fcbTestModules?.[path]) return window.__fcbTestModules[path];
         const re = new RegExp(path.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "(\\?|$)");
         const urls = performance
             .getEntriesByType("resource")
@@ -86,8 +88,14 @@
         const reg = await registration();
         const docs = await documentStore();
         const out = [];
+        // A block renders several elements carrying its data-blockid (the frame
+        // and parts of its header/body), so visit each block once — otherwise
+        // every pane is injected into, streamed into and counted twice.
+        const seen = new Set();
         for (const frame of document.querySelectorAll("[data-blockid]")) {
             const blockId = frame.getAttribute("data-blockid");
+            if (seen.has(blockId)) continue;
+            seen.add(blockId);
             const composer = frame.querySelector("textarea.agent-input");
             if (!composer || !frame.checkVisibility?.()) continue;
             const model = reg.getPaneModel(blockId);
