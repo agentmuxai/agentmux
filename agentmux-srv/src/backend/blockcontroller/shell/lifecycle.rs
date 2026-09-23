@@ -832,8 +832,18 @@ impl Controller for ShellController {
         // This maps agent_id → block_id in the ReactiveHandler so jekt can deliver
         // messages directly to this PTY without a separate /agentmux/reactive/register call.
         if let Some(ref agent_id) = agent_id_for_jekt {
+            // Identity M2: a PTY pane has no `db_agents` row, so no UID —
+            // registered by name only, counted (spec §4.4.1 row 4).
             match crate::backend::reactive::get_global_handler()
-                .register_agent(agent_id, &self.block_id, Some(&self.tab_id))
+                .register_agent_full(
+                    agent_id,
+                    &self.block_id,
+                    Some(&self.tab_id),
+                    0,
+                    None,
+                    None,
+                    "registration.no_uid.shell_pane",
+                )
             {
                 Ok(()) => {
                     tracing::info!(

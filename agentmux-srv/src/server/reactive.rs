@@ -1492,10 +1492,31 @@ pub(super) async fn handle_reactive_register(
         block_id = %req.block_id,
         "reactive register request"
     );
-    match state
-        .reactive_handler
-        .register_agent(&req.agent_id, &req.block_id, req.tab_id.as_deref())
-    {
+    // Identity M2 (spec §4.4.1 row 3): this is a presence signal keyed by
+    // block. The name the frontend sends becomes the display binding, but
+    // identity is NOT taken from it — it may be a stale meta value or an
+    // id the agent process itself emitted over OSC. The UID comes from the
+    // row the server created for this block, read on `spawn_blocking` like
+    // every other store read in an async handler (incident #1782).
+    let uid = {
+        let mstore = state.mstore.clone();
+        let block_id = req.block_id.clone();
+        tokio::task::spawn_blocking(move || crate::backend::agent_resolve::uid_for_block(&mstore, &block_id))
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "reactive register: uid lookup task failed — registering by name");
+                None
+            })
+    };
+    match state.reactive_handler.register_agent_full(
+        &req.agent_id,
+        &req.block_id,
+        req.tab_id.as_deref(),
+        0,
+        None,
+        uid.as_deref(),
+        "registration.no_uid.http_register",
+    ) {
         Ok(()) => {
             // Refresh the block's OWN captured identity too (reagentx P1 on
             // #2697): this HTTP path can (re-)register an existing block_id
@@ -1520,7 +1541,11 @@ pub(super) async fn handle_reactive_register(
             // running in OTHER channels on this host can reach this agent
             // too — closes issue #1916 (Tier 2 previously only ever reached
             // the caller's own channel).
-            agent_registry::write_shared_from_env(&req.agent_id, &state.local_web_url, &req.block_id);
+            agent_registry::write_shared_from_env(
+                &req.agent_id,
+                &state.local_web_url,
+                &req.block_id,
+            );
 
             // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
             // Pass block_id so subagent events are stamped with the owning pane,
@@ -1698,30 +1723,77 @@ pub(super) async fn handle_reactive_ensure_signing_key(
 #[derive(serde::Deserialize)]
 pub(super) struct UnregisterRequest {
     agent_id: String,
+    /// Identity M2 (spec §4.4.4 Q7): optional, but both frontend callers
+    /// send it. With it, teardown is by block. Without it, a name held by
+    /// several live blocks is refused with HTTP 409 and the candidates —
+    /// never a `success: true` that tore down nothing (§10 constraint 3).
+    #[serde(default)]
+    block_id: String,
 }
 
 pub(super) async fn handle_reactive_unregister(
     State(state): State<AppState>,
     Json(req): Json<UnregisterRequest>,
-) -> Json<serde_json::Value> {
-    // Capture block_id before unregistering so we can emit the Swarm refresh event.
-    let block_id = state.reactive_handler.get_agent(&req.agent_id)
-        .map(|r| r.block_id.clone());
+) -> Response {
+    use crate::backend::reactive::handler::UnregisterOutcome;
 
-    state.reactive_handler.unregister_agent(&req.agent_id);
-    // Also remove from cross-instance file registry.
+    let (block_id, names): (Option<String>, Vec<String>) = if !req.block_id.trim().is_empty() {
+        let names = state.reactive_handler.unregister_block(req.block_id.trim());
+        (Some(req.block_id.trim().to_string()), names)
+    } else {
+        match state.reactive_handler.unregister_agent(&req.agent_id) {
+            UnregisterOutcome::Removed { block_id, names } => (Some(block_id), names),
+            UnregisterOutcome::NotFound => (None, Vec::new()),
+            UnregisterOutcome::Ambiguous(candidates) => {
+                let candidates: Vec<serde_json::Value> = candidates
+                    .iter()
+                    .map(
+                        |c| json!({ "uid": c.uid, "block_id": c.block_id, "agent_id": c.agent_id }),
+                    )
+                    .collect();
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "success": false,
+                        "error": format!(
+                            "ambiguous agent name: '{}' is held by {} live agents; pass block_id",
+                            req.agent_id,
+                            candidates.len()
+                        ),
+                        "candidates": candidates,
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    // Name-keyed side state is torn down for EVERY name the block held
+    // (display and stable). The name the caller asked by is used only when
+    // no block was found at all (the pre-M2 behaviour for an unknown name):
+    // when a block WAS torn down, its own bindings are authoritative — the
+    // caller's name may be a stale display value that another live block
+    // now legitimately holds, and removing that block's file entry and cloud
+    // subscription would knock it off cross-instance routing.
+    let mut all_names = names.clone();
+    if block_id.is_none() {
+        all_names.push(req.agent_id.clone());
+    }
     let data_dir = base::get_mux_data_dir();
-    agent_registry::remove(&data_dir, &req.agent_id);
-    // And from the host-global shared registry (Tier 2b).
-    agent_registry::remove_shared_from_env(&req.agent_id);
-    // Drop the subagent filesystem watcher (handle + channel + task) — the
-    // symmetric teardown for the watch_agent() call in the register handler.
-    // Passes block_id (captured above) so a shared-agent-id watcher with
-    // another still-open dependent block survives this one's teardown.
-    state.subagent_watcher.unwatch_agent(&req.agent_id, block_id.as_deref());
-    // Notify cloud subscriber so it stops subscribing for this agent
-    if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-        sub.remove_agent(&req.agent_id);
+    for name in &all_names {
+        // Also remove from cross-instance file registry.
+        agent_registry::remove(&data_dir, name);
+        // And from the host-global shared registry (Tier 2b).
+        agent_registry::remove_shared_from_env(name);
+        // Drop the subagent filesystem watcher (handle + channel + task) — the
+        // symmetric teardown for the watch_agent() call in the register handler.
+        // Passes block_id so a shared-agent-id watcher with another still-open
+        // dependent block survives this one's teardown.
+        state.subagent_watcher.unwatch_agent(name, block_id.as_deref());
+        // Notify cloud subscriber so it stops subscribing for this agent
+        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+            sub.remove_agent(name);
+        }
     }
 
     // Symmetric refresh: tell the Swarm view this pane is gone.
@@ -1735,7 +1807,7 @@ pub(super) async fn handle_reactive_unregister(
         });
     }
 
-    Json(json!({"success": true}))
+    Json(json!({"success": true})).into_response()
 }
 
 pub(super) async fn handle_reactive_poller_stats(
@@ -1824,19 +1896,43 @@ pub(super) async fn handle_reactive_transcript(
             .into_response();
     }
 
-    let Some(reg) = state.reactive_handler.get_agent(&params.agent) else {
-        if params.forwarded {
-            // Already one hop in — see TranscriptQuery::forwarded's doc
-            // comment. The owning instance's own host-tier lookup just
-            // missed too, so this agent genuinely isn't registered
-            // anywhere reachable; 404, do not attempt a second forward.
+    let reg = match state.reactive_handler.lookup_by_name(&params.agent) {
+        crate::backend::reactive::handler::LookupOutcome::One(reg) => reg,
+        // Identity M2 (spec §4.4.3): a name several live blocks hold is a
+        // purely LOCAL collision — refuse it with the candidates, never
+        // fall through to cross-channel forwarding as if it were unknown.
+        crate::backend::reactive::handler::LookupOutcome::Ambiguous(candidates) => {
+            let candidates: Vec<serde_json::Value> = candidates
+                .iter()
+                .map(|c| json!({ "uid": c.uid, "block_id": c.block_id, "agent_id": c.agent_id }))
+                .collect();
             return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "agent not found"})),
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": format!(
+                        "ambiguous agent name: '{}' is held by {} live agents; address one by uid",
+                        params.agent,
+                        candidates.len()
+                    ),
+                    "candidates": candidates,
+                })),
             )
                 .into_response();
         }
-        return handle_reactive_transcript_cross_channel(&state, &params).await;
+        crate::backend::reactive::handler::LookupOutcome::NotFound => {
+            if params.forwarded {
+                // Already one hop in — see TranscriptQuery::forwarded's doc
+                // comment. The owning instance's own host-tier lookup just
+                // missed too, so this agent genuinely isn't registered
+                // anywhere reachable; 404, do not attempt a second forward.
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "agent not found"})),
+                )
+                    .into_response();
+            }
+            return handle_reactive_transcript_cross_channel(&state, &params).await;
+        }
     };
     let block_id = reg.block_id.clone();
 

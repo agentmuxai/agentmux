@@ -3,10 +3,8 @@
 **Date:** 2026-09-23
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
-work queue and cron, dual-written) in #3550. M2 designed in §4.4 (revision 4.1:
-revision 4.0 plus the thirteen findings of its own adversarial pass), not yet
-implemented. M3–M5
-not started.
+work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3–M5 not
+started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -945,7 +943,39 @@ changes two things at once.
   disagreeing, which is strictly worse than either state. Atomic here means
   smaller, not larger.
 
-  **Design: §4.4 (revision 4).** Written after M1 landed, measured against
+  **Shipped in #3560**, implemented from §4.4 revision 4.1 with no
+  deviations from it: identity-keyed registry, typed name bindings,
+  eviction by identity, ambiguity refused with candidates, liveness sweep
+  at resolution, sticky UID, a separate UID confirmer whose `None` is
+  unverifiable, HTTP 409 on ambiguous unregister, per-site counters. Three
+  of the mutation checks §4.4.5 names were run: eviction-by-name (both
+  guards removed) fails six fixture tests, UID-confirmer-None-as-mismatch
+  and non-sticky-UID each fail exactly one. Left name-keyed as §4.4.4 Q8
+  says: the Tier-2 file registry (M4), the cloud subscriber (§8), the
+  subagent watcher.
+
+  The implementation had its own adversarial pass (one P1 — a block
+  re-registered under a *different* UID kept its old `uid_to_block` entry,
+  which ReAgent found independently — and eight P2s, six fixed in the same
+  PR). Two were measured, accepted and are recorded here rather than fixed:
+  - **A persistent pane whose process exited but is still open counts as
+    live** (`get_controller` still returns it; its registration survives
+    because the exit-time `unregister_block_if_nonce` never matches once the
+    Register-tail has zeroed the nonce). Relaunching the same template while
+    that pane is open creates a second identified agent with the same
+    display name, and by-name delivery is refused until the old pane is
+    closed. Before M2 the relaunch silently evicted the old pane. This is
+    §5.2 working as designed — a respawnable pane *is* addressable
+    (start-on-delivery, §4.4.3) — but it is a user-visible change, and Q9's
+    "ambiguous with its own corpse" wording overstated what the sweep
+    covers: it covers blocks with **no controller**, not exited processes.
+  - **A fifth spawn site §4.4.1 missed:** the App API `agent.send` path
+    (`server/app_api/agent_io.rs`) builds its spawn env without
+    `build_persistent_spawn_env`, so it carries no `AGENTMUX_AGENT_UID`
+    and registers name-only under `registration.no_uid.spawn`. An M1a gap,
+    not an M2 one; fixed as its own follow-up.
+
+  **Design: §4.4 (revision 4.1).** Written after M1 landed, measured against
   the four real registration sites and every delivery input. Names become
   bindings, identity becomes the key, eviction is by identity, ambiguity is
   refused with candidates, and the no-UID paths keep today's semantics and
