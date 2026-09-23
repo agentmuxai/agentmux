@@ -4,7 +4,8 @@
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
-M4 designed in §6.5 (revision 2.3); M4a-1 in #3571. M5 not started.
+M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
+(actor counters) implemented. M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -1061,7 +1062,11 @@ Each step independently revertible (§9):
   /agentmux/identity/fallbacks`, which reports `boot_id`: every counter is
   in memory since boot, and one that has not fired is absent — read it as
   zero). **M4a-2:** the actor counters of §6.5.3 at each actor site
-  (§6.5.2 item 4). No behaviour change in either. **M4a-3:** purge deletes
+  (§6.5.2 item 4): `m4.actor_{mismatch,ambiguous,absent,unchecked}.<site>`,
+  plus `m4.actor_uid_mismatch.work_claim` for a claim whose carried
+  `agent_uid` is not the token's. UI automation is checked inside
+  `verified_block_id`, so every route that verifies a signer counts under
+  `ui_auth`. The check runs detached (§7). No behaviour change in either. **M4a-3:** purge deletes
   the dead agent's name-keyed key rows (§6.5.4) — a behaviour change,
   alone in its PR.
 - **M4b — close the tokenless paths.** `agent.send`, App Server agents and
@@ -1113,7 +1118,9 @@ lose. The honest claim is narrower and sufficient.
 
 **The design adds no read to any hot path.** It removes the one #3520
 introduced, which is a regression this spec must not repeat rather than a win
-it can claim. The remaining registration read pre-exists and is out of scope —
+it can claim. M4a-2's actor check does read the caller's row, so it runs
+detached on the blocking pool and no response waits on it; attributing the
+request itself stays one in-memory map hit. The remaining registration read pre-exists and is out of scope —
 noted so a future reader does not mistake it for something this design caused.
 
 ## 8. Cross-machine
@@ -1361,8 +1368,9 @@ changes two things at once.
   recorded as not closable at the same-user boundary (§6.5.1).
 
   **Design: §6.5** (revision 2.3, attribution not enforcement) — staged as
-  M4a Caller + counters (M4a-1 #3571: token index, `Caller`, spawn counters
-  and live gauges, name tombstones; M4a-2 actor counters; M4a-3 purge of the
+  M4a Caller + counters (M4a-1, shipped in #3571: token index, `Caller`,
+  spawn counters and live gauges decided by the block's row, name
+  tombstones; M4a-2 actor counters; M4a-3 purge of the
   dead agent's name-keyed keys), M4b close the tokenless paths, M4c
   attribution by UID, M4d signing keys by ownership evidence, registry UID
   and the v2 signature over `source_uid`. #3501 is recorded as not closable at

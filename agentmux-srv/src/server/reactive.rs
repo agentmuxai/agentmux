@@ -984,8 +984,15 @@ mod transcript_request_tier_resolution_tests {
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Extension(auth_via): Extension<super::ReactiveAuthVia>,
+    caller: Option<Extension<super::caller::Caller>>,
     Json(mut req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::Inject,
+        req.source_agent.as_deref(),
+    );
     tracing::info!(
         target_agent = %req.target_agent,
         source_agent = ?req.source_agent,
@@ -2238,8 +2245,15 @@ pub(super) struct HistorySearchQuery {
 /// confidently and wrongly, with nothing marking the boundary.
 pub(super) async fn handle_reactive_history_search(
     State(state): State<AppState>,
+    caller: Option<Extension<super::caller::Caller>>,
     Query(params): Query<HistorySearchQuery>,
 ) -> Response {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::HistorySearch,
+        Some(&params.agent),
+    );
     if params.agent.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -2316,8 +2330,15 @@ pub(super) async fn handle_reactive_history_search(
 /// instead of retrying.
 pub(super) async fn handle_reactive_supervisor_decision(
     State(state): State<AppState>,
+    caller: Option<Extension<super::caller::Caller>>,
     Json(req): Json<SupervisorDecisionRequest>,
 ) -> Response {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::SupervisorDecision,
+        req.source_agent.as_deref(),
+    );
     if req.target_agent.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

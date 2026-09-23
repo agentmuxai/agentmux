@@ -4858,3 +4858,324 @@ async fn m4a_a_token_on_a_lan_key_request_is_not_attributed() {
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(count() > before);
 }
+
+// ---- identity M4a-2: actor-name mismatches, end to end through the router ----
+
+/// Every actor site: `(site, method, uri, body)` naming `actor`. Bodies fail
+/// validation *after* the check where they can (bad filename, empty title,
+/// bad cron expression, stale UI signature), so no test writes anything
+/// real.
+fn m4a2_actor_requests(actor: &str) -> Vec<(&'static str, Method, String, serde_json::Value)> {
+    use serde_json::json;
+    let q = |path: &str, rest: &str| format!("{path}?agent_id={actor}{rest}");
+    let ui_auth = json!({"agent_id": actor, "ts_secs": 0, "sig": "", "selector": "body"});
+    vec![
+        (
+            "memory_list",
+            Method::GET,
+            q("/api/v1/agent/memory/list", ""),
+            json!(null),
+        ),
+        (
+            "memory_read",
+            Method::GET,
+            q("/api/v1/agent/memory/read", "&filename=..%2Fm4a2"),
+            json!(null),
+        ),
+        (
+            "memory_write",
+            Method::POST,
+            "/api/v1/agent/memory/write".into(),
+            json!({"agent_id": actor, "filename": "../m4a2", "content": ""}),
+        ),
+        (
+            "memory_history",
+            Method::GET,
+            q("/api/v1/agent/memory/history", "&filename=..%2Fm4a2"),
+            json!(null),
+        ),
+        (
+            "memory_diff",
+            Method::GET,
+            q(
+                "/api/v1/agent/memory/diff",
+                "&from_version_id=m4a2-a&to_version_id=m4a2-b",
+            ),
+            json!(null),
+        ),
+        (
+            "memory_revert",
+            Method::POST,
+            "/api/v1/agent/memory/revert".into(),
+            json!({"agent_id": actor, "filename": "../m4a2", "target_version_id": "m4a2"}),
+        ),
+        (
+            "globalmemory_write",
+            Method::POST,
+            "/api/v1/agent/globalmemory/write".into(),
+            json!({"agent_id": actor, "name": "", "content": ""}),
+        ),
+        (
+            "globalmemory_revert",
+            Method::POST,
+            "/api/v1/agent/globalmemory/revert".into(),
+            json!({"agent_id": actor, "id": "m4a2-none", "version_id": "m4a2-none"}),
+        ),
+        (
+            "identity_accounts",
+            Method::GET,
+            q("/api/v1/agent/identity/accounts", ""),
+            json!(null),
+        ),
+        (
+            "identity_validate",
+            Method::POST,
+            "/api/v1/agent/identity/validate".into(),
+            json!({"agent_id": actor, "account_id": "m4a2-none"}),
+        ),
+        (
+            "history_search",
+            Method::GET,
+            format!("/agentmux/reactive/history/search?agent={actor}&query="),
+            json!(null),
+        ),
+        (
+            "work_enqueue",
+            Method::POST,
+            "/agentmux/work".into(),
+            json!({"title": "", "payload": "", "created_by": actor}),
+        ),
+        (
+            "work_claim",
+            Method::POST,
+            "/agentmux/work/claim".into(),
+            json!({"agent_id": actor, "kind": "m4a2-no-such-kind"}),
+        ),
+        (
+            "work_heartbeat",
+            Method::POST,
+            "/agentmux/work/m4a2-none/heartbeat".into(),
+            json!({"agent_id": actor, "attempt": 1}),
+        ),
+        (
+            "work_complete",
+            Method::POST,
+            "/agentmux/work/m4a2-none/complete".into(),
+            json!({"agent_id": actor, "attempt": 1}),
+        ),
+        (
+            "work_release",
+            Method::POST,
+            "/agentmux/work/m4a2-none/release".into(),
+            json!({"agent_id": actor, "attempt": 1}),
+        ),
+        (
+            "cron_create",
+            Method::POST,
+            "/agentmux/cron".into(),
+            json!({"name": "m4a2", "expression": "not cron", "prompt": "", "target": "m4a2-nobody",
+                   "created_by": actor, "max_fires": null}),
+        ),
+        (
+            "inject",
+            Method::POST,
+            "/agentmux/reactive/inject".into(),
+            json!({"target_agent": "m4a2-nobody", "message": "hi", "source_agent": actor}),
+        ),
+        (
+            "supervisor_decision",
+            Method::POST,
+            "/agentmux/reactive/supervisor-decision".into(),
+            json!({"target_agent": "", "action": "decline", "source_agent": actor}),
+        ),
+        (
+            "bus_send",
+            Method::POST,
+            "/api/bus/send".into(),
+            json!({"from": actor, "to": "m4a2-nobody", "payload": "hi"}),
+        ),
+        (
+            "bus_inject",
+            Method::POST,
+            "/api/bus/inject".into(),
+            json!({"from": actor, "target": "m4a2-nobody", "message": "hi"}),
+        ),
+        (
+            "bus_broadcast",
+            Method::POST,
+            "/api/bus/broadcast".into(),
+            json!({"from": actor, "payload": "hi"}),
+        ),
+        ("ui_auth", Method::POST, "/api/v1/ui/query".into(), ui_auth),
+    ]
+}
+
+fn m4a2_count(counter: &str) -> u64 {
+    crate::backend::agent_resolve::uid_fallback_counts()
+        .into_iter()
+        .find(|(s, _)| *s == counter)
+        .map_or(0, |(_, n)| n)
+}
+
+/// Every M4a-2 outcome counter for `site`, so a test can assert that exactly
+/// one moved.
+fn m4a2_site_counts(site: &str) -> [u64; 4] {
+    ["mismatch", "ambiguous", "absent", "unchecked"]
+        .map(|outcome| m4a2_count(&format!("m4.actor_{outcome}.{site}")))
+}
+
+async fn m4a2_send(
+    state: &AppState,
+    token: Option<&str>,
+    method: Method,
+    uri: &str,
+    body: &serde_json::Value,
+) -> StatusCode {
+    let mut req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json");
+    if let Some(t) = token {
+        req = req.header("X-Agent-Token", t);
+    }
+    let body = if body.is_null() {
+        Body::empty()
+    } else {
+        Body::from(body.to_string())
+    };
+    build_router(state.clone())
+        .oneshot(req.body(body).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+/// The colliding-names fixture ("AgentY" agenty, "AGENTY" agenty-2) plus a
+/// third agent, "AgentZ"; the caller is the second agent. At every actor
+/// site: naming AgentZ is a mismatch; naming `agenty` or `AGENTY` — which
+/// select the caller's row by display name but also the first agent's — is
+/// ambiguous; naming its own slug counts nothing. An unattributed request is
+/// never checked, and nothing is refused on account of any of it: the same
+/// request is served the same with or without the token.
+#[tokio::test]
+async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    for (id, name, slug) in [
+        ("uid-m4a2-y", "AgentY", "agenty"),
+        ("uid-m4a2-y2", "AGENTY", "agenty-2"),
+        ("uid-m4a2-z", "AgentZ", "agentz"),
+    ] {
+        let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+        def.slug = slug.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+    }
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4a2-y2").unwrap();
+
+    for (actor, outcome) in [("agentz", 0), ("agenty", 1), ("AGENTY", 1)] {
+        for (site, method, uri, body) in m4a2_actor_requests(actor) {
+            let mut expected = m4a2_site_counts(site);
+            expected[outcome] += 1;
+            let with = m4a2_send(&state, Some(&token), method.clone(), &uri, &body).await;
+            assert_eq!(m4a2_site_counts(site), expected, "{site}: {actor}");
+            let without = m4a2_send(&state, None, method, &uri, &body).await;
+            assert_eq!(
+                m4a2_site_counts(site),
+                expected,
+                "{site}: unattributed is not checked"
+            );
+            assert_eq!(
+                with, without,
+                "{site}: counting changes nothing about the response"
+            );
+        }
+    }
+    for (site, method, uri, body) in m4a2_actor_requests("agenty-2") {
+        let before = m4a2_site_counts(site);
+        m4a2_send(&state, Some(&token), method, &uri, &body).await;
+        assert_eq!(m4a2_site_counts(site), before, "{site}: its own slug");
+    }
+}
+
+/// An attributed request that names no actor is counted as absent; a token
+/// whose row is gone is counted as unchecked, never as a mismatch.
+#[tokio::test]
+async fn m4a2_an_absent_actor_and_an_unreadable_row_are_counted_apart() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4a2-norow").unwrap();
+    let inject = serde_json::json!({"target_agent": "m4a2-nobody", "message": "hi"});
+    let before = m4a2_site_counts("inject");
+    m4a2_send(
+        &state,
+        Some(&token),
+        Method::POST,
+        "/agentmux/reactive/inject",
+        &inject,
+    )
+    .await;
+    assert_eq!(m4a2_site_counts("inject")[2], before[2] + 1, "absent");
+
+    let named =
+        serde_json::json!({"target_agent": "m4a2-nobody", "message": "hi", "source_agent": "x"});
+    let before = m4a2_site_counts("inject");
+    m4a2_send(
+        &state,
+        Some(&token),
+        Method::POST,
+        "/agentmux/reactive/inject",
+        &named,
+    )
+    .await;
+    let after = m4a2_site_counts("inject");
+    assert_eq!(
+        after[3],
+        before[3] + 1,
+        "no row for the token's UID: unchecked"
+    );
+    assert_eq!(after[0], before[0], "not a mismatch");
+}
+
+/// A work claim's carried `agent_uid` is compared with the token's UID —
+/// through the real handler, so dropping the call fails this test.
+#[tokio::test]
+async fn m4a2_a_claims_carried_uid_that_is_not_the_tokens_is_counted() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let mut def = test_agent_def("uid-m4a2-claim", "Claimer", "claude", "agent", 1, "");
+    def.slug = "claimer".to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4a2-claim").unwrap();
+    let claim = |uid: &str| serde_json::json!({"agent_id": "claimer", "agent_uid": uid, "kind": "m4a2-no-such-kind"});
+    let counter = "m4.actor_uid_mismatch.work_claim";
+    let before = m4a2_count(counter);
+    m4a2_send(
+        &state,
+        Some(&token),
+        Method::POST,
+        "/agentmux/work/claim",
+        &claim("uid-m4a2-claim"),
+    )
+    .await;
+    m4a2_send(
+        &state,
+        None,
+        Method::POST,
+        "/agentmux/work/claim",
+        &claim("uid-other"),
+    )
+    .await;
+    assert_eq!(m4a2_count(counter), before, "its own UID, or unattributed");
+    m4a2_send(
+        &state,
+        Some(&token),
+        Method::POST,
+        "/agentmux/work/claim",
+        &claim("uid-other"),
+    )
+    .await;
+    assert_eq!(m4a2_count(counter), before + 1);
+}

@@ -89,8 +89,15 @@ pub(super) struct EnqueueRequest {
 
 pub(super) async fn handle_work_enqueue(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<EnqueueRequest>,
 ) -> (StatusCode, Json<Value>) {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::WorkEnqueue,
+        Some(&req.created_by),
+    );
     if req.title.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "title is required");
     }
@@ -205,8 +212,16 @@ async fn claimer_uid(state: &AppState, req: &ClaimRequest) -> String {
 
 pub(super) async fn handle_work_claim(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<ClaimRequest>,
 ) -> (StatusCode, Json<Value>) {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::WorkClaim,
+        Some(&req.agent_id),
+    );
+    super::actor::check_carried_uid(caller.as_deref(), &req.agent_uid);
     if req.agent_id.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "agent_id is required");
     }
@@ -295,8 +310,15 @@ fn holder_result(ok: bool, state: &AppState) -> (StatusCode, Json<Value>) {
 pub(super) async fn handle_work_heartbeat(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<HolderRequest>,
 ) -> (StatusCode, Json<Value>) {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::WorkHeartbeat,
+        Some(&req.agent_id),
+    );
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
     match state
         .identity_store
@@ -310,8 +332,15 @@ pub(super) async fn handle_work_heartbeat(
 pub(super) async fn handle_work_complete(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<HolderRequest>,
 ) -> (StatusCode, Json<Value>) {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::WorkComplete,
+        Some(&req.agent_id),
+    );
     match state
         .identity_store
         .work_queue_complete(&id, &req.agent_id, req.attempt, &req.result, now_ms())
@@ -328,8 +357,15 @@ pub(super) async fn handle_work_complete(
 pub(super) async fn handle_work_release(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<HolderRequest>,
 ) -> (StatusCode, Json<Value>) {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::WorkRelease,
+        Some(&req.agent_id),
+    );
     match state
         .identity_store
         .work_queue_release(&id, &req.agent_id, req.attempt, &req.result, now_ms())

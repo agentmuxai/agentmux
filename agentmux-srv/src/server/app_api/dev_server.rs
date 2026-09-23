@@ -27,13 +27,16 @@ use super::AppState;
 
 pub(crate) async fn handle_register_dev_server(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<RegisterDevServerRequest>,
 ) -> impl IntoResponse {
     // Verifies `req.auth`'s signature against the claimed agent_id's own
     // key on file. We don't need the returned block_id — the signature
     // check succeeding is itself the proof that `req.auth.agent_id` is who
     // it claims to be. See this module's doc comment.
-    if let Err(e) = crate::server::ui_handlers::verified_block_id(&state, &req.auth) {
+    if let Err(e) =
+        crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth)
+    {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
     let agent_id = req.auth.agent_id.clone();
