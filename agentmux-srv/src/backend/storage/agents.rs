@@ -2394,8 +2394,10 @@ impl Store {
                 // the older row. Never a fork: a fork is launched under its
                 // own row id, so a fork reached here is a stale stamp. And
                 // the row must still relate to what the block names —
-                // launched from it, one hop from it, or orphaned (its
-                // ancestor since deleted, as a promoted clone can be) — so a
+                // launched from it, one hop from it, or orphaned: it *had*
+                // an ancestor, since deleted (as a promoted clone can be). A
+                // row with no ancestor at all (`parent_template_id` empty, a
+                // plain agent) is not orphaned (ReAgent P0 on #3576) — so a
                 // stale stamp naming an unrelated agent cannot select it.
                 // Recorded: a legacy continuation stamp naming an id that
                 // never had a row (m0025 keyed chains to their root) resolves
@@ -2409,7 +2411,9 @@ impl Store {
                             OR a.parent_template_id IN (
                                 SELECT id FROM db_agents
                                 WHERE parent_template_id = ?3 AND is_template = 0 AND branch_label = '')
-                            OR NOT EXISTS (SELECT 1 FROM db_agents p WHERE p.id = a.parent_template_id))
+                            OR (a.parent_template_id != ''
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM db_agents p WHERE p.id = a.parent_template_id)))
                        AND NOT EXISTS (
                            SELECT 1 FROM db_agents b
                            WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
