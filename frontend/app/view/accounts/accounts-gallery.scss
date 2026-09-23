@@ -4,25 +4,33 @@
 // Armory Accounts gallery — brand tiles + per-tile connected count +
 // the OAuth/Key chooser. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
 
+// Density: tiles are horizontal chips (logo | name/status | count), not
+// poster tiles. Before this pass a tile was ~130px tall and two-up in a
+// narrow pane, which pushed the connected-accounts list below the fold on
+// the very screen whose job is to show what's connected. Scale follows the
+// composer's measured density (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md
+// §3.2a): --space-1/--space-1-5 internal padding, 9-11px text.
 .accounts-gallery {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3, 12px);
-    padding: var(--space-2);
+    gap: var(--space-2, 8px);
+    padding: var(--space-1-5, 6px) var(--space-2, 8px) 0;
 
     .accounts-gallery-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
-        gap: var(--space-2, 8px);
+        grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+        gap: var(--space-1, 4px);
     }
 
     .account-tile {
         position: relative;
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         align-items: center;
-        gap: 6px;
-        padding: var(--space-3, 12px) var(--space-2, 8px);
+        gap: var(--space-1-5, 6px);
+        padding: var(--space-1, 4px) var(--space-1-5, 6px);
+        min-width: 0;
+        text-align: left;
         background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.08));
         border: 1px solid var(--border-color);
         border-radius: 0;
@@ -46,19 +54,21 @@
         }
     }
 
+    // In-flow at the chip's trailing edge (DOM order puts it first; `order`
+    // moves it last without changing the markup the tests key on).
     .account-tile-count {
-        position: absolute;
-        top: 6px;
-        right: 6px;
-        min-width: 16px;
-        height: 16px;
+        order: 3;
+        flex: none;
+        margin-left: auto;
+        min-width: 14px;
+        height: 14px;
         padding: 0 4px;
-        border-radius: 8px;
+        border-radius: 7px;
         background: var(--accent-color);
         color: var(--button-text-color, #fff);
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 700;
-        line-height: 16px;
+        line-height: 14px;
         text-align: center;
     }
 
@@ -66,32 +76,98 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 38px;
-        height: 38px;
+        flex: none;
+        width: 20px;
+        height: 20px;
+    }
+
+    .account-tile-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        line-height: 1.2;
     }
 
     .account-tile-name {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
         color: var(--main-text-color);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .account-tile-status {
-        font-size: 10px;
+        font-size: 9px;
         color: var(--secondary-text-color);
-        text-align: center;
-        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 
 .accounts-connected-heading {
-    margin-top: var(--space-4, 16px);
-    margin-bottom: var(--space-2, 8px);
-    font-size: 11px;
+    margin-top: var(--space-2, 8px);
+    margin-bottom: var(--space-1, 4px);
+    padding: 0 var(--space-2, 8px);
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--secondary-text-color);
+}
+
+// ── Armory-only row/header density ────────────────────────────────────────────
+// `.identity-account-row`, `.identity-group-header` and `.identity-header` are
+// shared with the agent pane's Identity tab (identity/styles/_accounts.scss,
+// _header.scss). Overrides are scoped to `.accounts-manager` so only the
+// Armory page tightens; consecutive rows share a border instead of each
+// carrying its own 1px gap + 1px border.
+.identity-view.accounts-manager {
+    .identity-header {
+        padding: var(--space-1, 4px) var(--space-2, 8px);
+    }
+
+    .identity-header-title {
+        font-size: 12px;
+    }
+
+    .identity-add-btn {
+        padding: 1px 8px;
+        font-size: 11px;
+    }
+
+    .identity-accounts-list {
+        padding: 0 var(--space-2, 8px) var(--space-1, 4px);
+    }
+
+    .identity-group {
+        margin-bottom: var(--space-1, 4px);
+    }
+
+    .identity-group-header {
+        padding: var(--space-0-5, 2px) 0;
+        font-size: 9px;
+    }
+
+    .identity-account-row {
+        gap: var(--space-1-5, 6px);
+        padding: var(--space-0-5, 2px) var(--space-1-5, 6px);
+        margin-bottom: 0;
+
+        & + .identity-account-row {
+            border-top: none;
+        }
+    }
+
+    .identity-account-name {
+        font-size: 12px;
+    }
+
+    .identity-display-name,
+    .identity-account-email {
+        font-size: 10px;
+    }
 }
 
 // ── AccountsManager layout (gallery + connected accounts, one scroll) ─────────

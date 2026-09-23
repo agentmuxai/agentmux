@@ -58,7 +58,10 @@ export function AccountsManager(): JSX.Element {
     };
 
     return (
-        <div class="identity-view">
+        // `accounts-manager` scopes the Armory-only density overrides in
+        // accounts-gallery.scss; the agent pane's Identity tab shares the
+        // `.identity-*` row/header classes and keeps its own spacing.
+        <div class="identity-view accounts-manager">
             <div class="identity-header">
                 <span class="identity-header-title">Accounts</span>
                 <button
