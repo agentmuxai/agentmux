@@ -85,13 +85,25 @@ export function handleAgentIdChange(blockId: string, newAgentId: string | undefi
         return;
     }
 
+    // Bookkeeping is synchronous; the HTTP calls are ONE sequenced task.
+    // Since identity M2 the unregister is block-scoped, so the two calls no
+    // longer commute: if a rename's register were processed before its
+    // unregister, `unregister_block` would wipe the registration just
+    // created for this pane (ReAgent P1 on PR #3560). Awaiting the
+    // unregister before registering removes the race; a failed unregister
+    // must not block the (re-)registration, so it is caught, not chained.
     if (previousAgentId) {
-        fireAndForget(() => unregisterAgent(previousAgentId, blockId));
         registeredAgentsByBlock.delete(blockId);
     }
-
     if (newAgentId) {
         registeredAgentsByBlock.set(blockId, newAgentId);
-        fireAndForget(() => registerAgent(newAgentId, blockId, tabId));
     }
+    fireAndForget(async () => {
+        if (previousAgentId) {
+            await unregisterAgent(previousAgentId, blockId).catch(() => {});
+        }
+        if (newAgentId) {
+            await registerAgent(newAgentId, blockId, tabId);
+        }
+    });
 }
