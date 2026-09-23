@@ -1170,8 +1170,13 @@ tokenless on the shared login today, and no path creates one after M4b. A
 pane whose agent was **deleted** is no longer in that set: the identity
 spawn gate refuses it (`SpawnGateError::AgentDeleted`, #3577) when the shared
 definition registry holds only a retired record for the agent its block
-names — which also closes the window in which an agent deleted mid-spawn
-would start with no identity. A continuation whose create fails aborts (M4b-3), so it
+names — re-checked at the spawn builder's last store read, so an agent
+deleted after the gate's lookup is refused too. That **narrows, not closes**,
+the mid-spawn window: a delete between that read and the process start is
+a delete of a running agent, and the window between the row's DELETE and
+the registry retire (and a failed, best-effort retire) still reads as
+not-deleted. The refusal is its own failure class (`agent_deleted`) with no
+Retry. A continuation whose create fails aborts (M4b-3), so it
 is not in that set.
 
 **Rollout, each step its own PR:** M4b-1 `agent.send` through the builder;

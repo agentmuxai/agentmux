@@ -419,7 +419,7 @@ pub fn resolve_bound_oauth_config_dir(
 }
 
 /// The agent a block names (`agentId`, or legacy `agent:id`), if any.
-fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
+pub(crate) fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
     let block: crate::backend::obj::Block = mstore.get(block_id).ok().flatten()?;
     block
         .meta

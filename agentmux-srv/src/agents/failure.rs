@@ -45,6 +45,10 @@ pub enum FailureClass {
     SpawnFailure,
     /// Non-zero exit with no recognized cause.
     UnknownNonZero,
+    /// The identity spawn gate refused: the pane's agent was deleted
+    /// (`SpawnGateError::AgentDeleted`, #3577). No process ran, and a retry
+    /// is refused identically — the pane is done.
+    AgentDeleted,
 }
 
 /// A classified agent failure: the class, a user-facing title + detail,
@@ -209,6 +213,22 @@ pub fn classify(
                 "{provider_phrase} is bound to this agent — the spawn was refused before it could run. \
                  Sign in to link one."
             ),
+            false,
+            exit_code,
+            signal,
+            &tail,
+        );
+    }
+    // The identity spawn gate's deleted-agent refusal (identity/resolver/
+    // errors.rs's `SpawnGateError::AgentDeleted` Display — our own wording).
+    // Its own class, never Retry: the gate refuses every respawn the same
+    // way, so a Retry would be the dead end retro-agentu-0.54.9 describes.
+    if hay.contains("was deleted, so this pane cannot start") {
+        return build(
+            FailureClass::AgentDeleted,
+            "Agent was deleted",
+            "This pane's agent was deleted, so it cannot start. Close the pane, \
+             or go back to the picker and launch another agent in it.",
             false,
             exit_code,
             signal,
@@ -687,6 +707,20 @@ mod tests {
         // "API Error: 401" lowercased → "api error: 401" → matches "error: 401".
         let f = classify(Some(0), None, "api error: 401 invalid authentication credentials", None);
         assert_eq!(f.code, FailureClass::Auth);
+    }
+
+    /// #3577: the gate's deleted-agent refusal gets its own class and no
+    /// Retry — a retry is refused identically, the dead end
+    /// retro-agentu-0.54.9 describes.
+    #[test]
+    fn spawn_gate_agent_deleted_is_its_own_class_and_not_retryable() {
+        let msg = crate::identity::resolver::SpawnGateError::AgentDeleted {
+            agent_id: "uid-x".to_string(),
+        }
+        .to_string();
+        let f = classify(None, None, &msg, None);
+        assert_eq!(f.code, FailureClass::AgentDeleted);
+        assert!(!f.retryable);
     }
 
     #[test]
