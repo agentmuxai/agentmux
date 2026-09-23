@@ -1283,6 +1283,7 @@ impl Store {
             let scope = Self::scope_for_row(&conn, id);
             // Identity M4a: also read before the DELETE.
             tombstone_key_names(&conn, id)?;
+            purge_name_keyed_keys(&conn, id)?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed
@@ -2264,6 +2265,7 @@ impl Store {
             }
             // Identity M4a: read the names before the row goes.
             tombstone_key_names(&conn, id)?;
+            purge_name_keyed_keys(&conn, id)?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and
@@ -2528,12 +2530,7 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         // another agent holds as its slug is that agent's key, not this
         // one's: deleting the second "AgentY" must not tombstone the first
         // one's `agenty` (adversarial review of #3571).
-        let held: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id != ?1 AND is_template = 0 AND lower(slug) = ?2)",
-            params![id, n],
-            |r| r.get(0),
-        )?;
-        if held {
+        if slug_held_by_another(conn, id, &n)? {
             continue;
         }
         conn.execute(
@@ -2542,6 +2539,91 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         )?;
     }
     Ok(())
+}
+
+/// Whether any row other than `id` holds `folded` as its slug, folded as the
+/// key tables fold their names (`to_lowercase`).
+///
+/// - **Templates count.** `agent.open` of a template, and template-based
+///   continuations, sign under the template's slug, and the old
+///   consolidation copied a template's slug verbatim onto ordinary rows —
+///   so deleting the last such row must not purge keys the template's live
+///   launches use (adversarial review of #3575).
+/// - **Folded in Rust**, not with SQLite's `lower()`, which folds ASCII only:
+///   slugs `Ä` and `ä` share the key filed under `ä` (Codex P2 on #3575).
+fn slug_held_by_another(
+    conn: &rusqlite::Connection,
+    id: &str,
+    folded: &str,
+) -> Result<bool, StoreError> {
+    let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE id != ?1")?;
+    let slugs = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+    for slug in slugs {
+        if slug?.to_lowercase() == folded {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Delete the signing keys filed under `id`'s slug — its jekt HMAC key and
+/// its LAN and WAN keypairs, which are keyed by name, not UID (identity
+/// M4a-3, spec §6.5.4). Without this a later agent that takes the name is
+/// handed the dead agent's keys by `ensure`'s `INSERT OR IGNORE`, and signs
+/// as it. Read before the row is deleted; a name another row holds as its
+/// slug is that agent's key and is left alone. The slug only: it is the
+/// name the MCP signs as (`AGENTMUX_AGENT_ID`). Folded as the key tables
+/// fold (`to_lowercase`). A template row is skipped, as in
+/// [`tombstone_key_names`]. Idempotent.
+fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
+    let slug: Option<String> = conn
+        .query_row(
+            "SELECT slug FROM db_agents WHERE id = ?1 AND is_template = 0",
+            params![id],
+            |r| r.get(0),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            e => Err(e),
+        })?;
+    // Not trimmed: the key tables file the name exactly as sent, folded.
+    let Some(name) = slug
+        .map(|s| s.to_lowercase())
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return Ok(0);
+    };
+    if slug_held_by_another(conn, id, &name)? {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for table in [
+        "db_agent_jekt_keys",
+        "db_agent_lan_keys",
+        "db_agent_wan_keys",
+    ] {
+        let present: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            params![table],
+            |r| r.get(0),
+        )?;
+        if present {
+            // Table names are the constants above, never caller input.
+            removed += conn.execute(
+                &format!("DELETE FROM {table} WHERE agent_id = ?1"),
+                params![name],
+            )?;
+        }
+    }
+    if removed > 0 {
+        tracing::info!(
+            agent = id,
+            removed,
+            "identity M4a-3: deleted the dead agent's name-keyed signing keys"
+        );
+    }
+    Ok(removed)
 }
 
 /// Tombstoned names, for tests (M4d is the production reader).
