@@ -3116,3 +3116,54 @@ async fn concurrent_senders_against_an_idle_turn_produce_exactly_one_write() {
         "every message that did not win the race must be queued, not dropped"
     );
 }
+
+/// Rebase of #3562 onto #3551: `main` taught the injection path to track
+/// every stdin write into the current generation's resume retry batch
+/// (codex + reagent P1 on #3523). Deferral adds a second write site — the
+/// turn-boundary flush — which must track too. The case that matters is
+/// eager resume: an unconfirmed `--resume` with NO seed message, so the
+/// batch starts empty. A deferred message flushed there and not tracked
+/// would be gone if the resume then turned out to be stale, despite having
+/// been accepted and rendered.
+#[tokio::test]
+async fn a_flushed_deferred_message_is_tracked_into_an_unconfirmed_resume_retry_batch() {
+    let (c, mut rx) = busy_controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        let generation = inner.spawn_generation;
+        inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
+            generation,
+            attempted_sid: "sid".to_string(),
+            retry: persistent_resume::RetryPayload {
+                config: PersistentSpawnConfig {
+                    cli_command: "unused".to_string(),
+                    cli_args: vec![],
+                    working_dir: String::new(),
+                    env_vars: HashMap::new(),
+                    session_id_field: "session_id".to_string(),
+                    resume_flag: "--resume".to_string(),
+                    session_id: String::new(),
+                    message_id: None,
+                },
+                messages: vec![],
+            },
+        });
+    }
+    c.send_user_message("deferred".to_string()).unwrap();
+
+    let flushed = {
+        let mut inner = c.inner.lock().unwrap();
+        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+    }
+    .expect("the boundary releases it");
+    assert_eq!(rx.try_recv().unwrap(), flushed);
+
+    let inner = c.inner.lock().unwrap();
+    match &inner.resume {
+        persistent_resume::ResumeState::AwaitingOutcome { retry, .. } => {
+            assert_eq!(retry.messages.len(), 1, "the flushed message must be in the retry batch");
+            assert_eq!(retry.messages[0].json, flushed);
+        }
+        other => panic!("expected AwaitingOutcome, got {other:?}"),
+    }
+}
