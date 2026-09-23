@@ -69,6 +69,24 @@ exists to do it (`tools/tests/pane-load.mjs`, merged 09-17 as #3286).
 | Phase 0.3 — `backdrop-filter: blur` audit: only one always-mounted blur exists over a typed-into pane (`.block-mask`, 0.1px — layer-promotion only, not real blur cost); everything else is `<Show>`-gated or gesture-transient. Verdict: cleared, no code change warranted | analysis-only, no PR |
 | **Predictive local echo** — paints a just-typed printable character in the keydown frame, reconciles byte-exact against the authoritative PTY echo; observational arming means it never predicts without a confirmed echo first (no password-prompt flash). **Un-shelves and explicitly supersedes** the 2026-05-30 "rejected" call in §2.2 below, one day later, once armed-observation + reconcile/rollback answered the security objection. On by default (`term:predictiveecho=false` to opt out). Verified: only 2 commits ever, last 2026-06-06, unmodified since | `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`, #1223 (merged 06-01), stall-cooldown fix #1242 (06-06) |
 
+### 2.1a Agent pane — a different problem from the terminal, measured 2026-09-22/23
+
+None of §2.1 applies to the agent-pane composer (uncontrolled `<textarea>`, no
+WS/PTY round-trip). Its lag is main-thread starvation by the stream render path.
+Three layers found and fixed in three days, each measured before and after:
+
+| | | |
+|---|---|---|
+| Streaming markdown re-parsed the whole message every commit (O(n²)) | #3521 — incremental parse | `ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md` §2 |
+| Backgrounded keep-alive panes kept rendering markdown on the same thread | #3536 — dormancy gate | same doc, §4 |
+| **Every finished tool result in the streaming buffer was rebuilt on every flush** (new `dispatchMatches` Map identity read through an inline prop getter; `.md` previews re-parsed + rebuilt an OverlayScrollbars each time). 4 visible streaming panes: 2.3 fps → 55 fps, forced layout 5.9 s → 48 ms per 15 s | this PR — equality-gated memo in `DocumentRow`, `scrollable={false}` on the previews | `ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md` |
+
+Still open, with numbers, in that last doc's §6: the streaming message's DOM is
+rebuilt per commit (parse is incremental, DOM is not), and pin-to-bottom forces
+layout up to 3× per flush. Re-measure with
+`scripts/ui-screenshots/typing-under-load-experiment.mjs` — it needs no human at
+the keyboard.
+
 ### 2.2 Decided but never built
 
 | Item | Status | Notes |
