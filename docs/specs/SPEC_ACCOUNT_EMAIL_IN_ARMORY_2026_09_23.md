@@ -1,7 +1,11 @@
 # SPEC: show the provider account's email in the Armory
 
 **Date:** 2026-09-23
-**Status:** proposed
+**Status:** active — the capture-and-render path shipped in #3541: the login
+email is recorded on the account and rendered on its Armory row.
+Not yet built: §4's backfill for accounts that authenticated before that PR,
+which keep an empty `context` until they re-authenticate. That is the majority
+of existing accounts, so it is the remaining work rather than a nicety.
 **Trigger:** Repo owner: *"for provider logins (like anthropic) we need the
 email address on the account to show on its entry in the armory."*
 **Scope:** OAuth provider accounts (`kind = "oauth"`). Static key/token
