@@ -54,11 +54,22 @@ pub enum SpawnGateError {
     /// fix exists to close. See
     /// `docs/specs/SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md`.
     ClaudeMdSeedFailed { provider: String, dir: String, error: String },
+    /// The block names an agent that was deleted (its row is gone and the
+    /// shared definition registry holds only a retired record for it). The
+    /// pane survived the delete — deleted from another window, or mid-spawn
+    /// — and used to spawn on the shared login with no identity at all; it
+    /// is refused instead (#3577).
+    AgentDeleted { agent_id: String },
 }
 
 impl std::fmt::Display for SpawnGateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SpawnGateError::AgentDeleted { agent_id } => write!(
+                f,
+                "this pane's agent ({agent_id}) was deleted, so it cannot start. \
+                 Close the pane, or launch another agent in it.",
+            ),
             // "Bind an account in the Armory" is now the ONLY path — the
             // ambient/"use global CLI login" opt-in this used to also
             // suggest was retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_

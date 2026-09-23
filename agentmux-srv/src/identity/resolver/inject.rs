@@ -429,6 +429,19 @@ pub fn resolve_bound_oauth_config_dir(
 /// and it was never restored — today's gate only chooses between "block"
 /// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
 /// isolated-auto-provision option that used to exist implicitly.
+/// The agent a block names (`agentId`, or legacy `agent:id`), if any.
+fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
+    let block: crate::backend::obj::Block = mstore.get(block_id).ok().flatten()?;
+    block
+        .meta
+        .get("agentId")
+        .and_then(|v| v.as_str())
+        .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 pub fn inject_identity_env_with_broker(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -441,9 +454,19 @@ pub fn inject_identity_env_with_broker(
     let instance = match mstore.instance_get_active_for_block(block_id) {
         Ok(Some(i)) => i,
         Ok(None) => {
-            // Block has no agent instance row — nothing to inject, and no
-            // gating either: quick-launch panes that never went through the
-            // launch modal are outside the managed-credentials contract.
+            // #3577: a block that names an agent which was DELETED — its pane
+            // survived the delete (another window, or mid-spawn) — is refused,
+            // not spawned on the shared login with no identity. Only a
+            // positive "deleted" signal refuses; every other row-less block
+            // keeps today's behaviour.
+            if let Some(agent_id) = block_agent_id(&mstore, block_id) {
+                if mstore.agent_was_deleted(&agent_id) {
+                    return Err(SpawnGateError::AgentDeleted { agent_id });
+                }
+            }
+            // Otherwise the block has no agent instance row — nothing to
+            // inject, and no gating either: template sessions and quick-launch
+            // panes are outside the managed-credentials contract.
             return Ok(());
         }
         Err(e) => {
@@ -920,6 +943,123 @@ mod tests {
 
     fn make_store() -> Arc<Store> {
         Arc::new(Store::open_in_memory().unwrap())
+    }
+
+    /// A store with a shared definition registry (in `tmp`) — the thing that
+    /// remembers a deleted agent as a retired record.
+    fn store_with_def_registry(tmp: &tempfile::TempDir) -> Arc<Store> {
+        let store = make_store();
+        let defs = crate::registry::DefinitionStore::open(tmp.path().join("definitions")).unwrap();
+        store.set_def_registry(Arc::new(defs));
+        store
+    }
+
+    /// #3577: a pane whose agent was deleted (row gone, registry record
+    /// retired) is refused at the gate instead of spawning on the shared
+    /// login with no identity.
+    #[test]
+    fn a_block_naming_a_deleted_agent_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store_with_def_registry(&tmp);
+        let mut def = crate::backend::storage::agents::test_agent_def(
+            "agent-deleted-3577",
+            "Gone",
+            "claude",
+            "agent",
+            1,
+            "",
+        );
+        store.agent_def_insert(&mut def).unwrap();
+        assert!(
+            store
+                .shared_def_registry()
+                .unwrap()
+                .exists("agent-deleted-3577"),
+            "precondition: mirrored"
+        );
+        assert!(store.agent_def_delete("agent-deleted-3577").unwrap());
+        insert_block_for_agent(&store, "block-deleted-3577", "agent-deleted-3577");
+
+        let mut env = HashMap::new();
+        let res = inject_identity_env_with_broker(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            None,
+            "block-deleted-3577",
+            &mut env,
+        );
+        assert_eq!(
+            res,
+            Err(SpawnGateError::AgentDeleted {
+                agent_id: "agent-deleted-3577".to_string()
+            })
+        );
+    }
+
+    /// Only a positive "deleted" signal refuses. A block naming a template
+    /// id (a template session, a quick-launch provider key), a live
+    /// cross-channel agent (active registry record, no local row), or
+    /// anything at all when there is no registry to ask, keeps today's
+    /// ungated behaviour.
+    #[test]
+    fn a_row_less_block_not_naming_a_deleted_agent_is_not_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store_with_def_registry(&tmp);
+        let mut tpl = crate::backend::storage::agents::test_agent_def(
+            "claude", "Claude", "claude", "agent", 1, "",
+        );
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        store
+            .shared_def_registry()
+            .unwrap()
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "agent-elsewhere-3577".to_string(),
+                    name: "Elsewhere".to_string(),
+                    provider: "claude".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        insert_block_for_agent(&store, "block-template-3577", "claude");
+        insert_block_for_agent(&store, "block-cross-3577", "agent-elsewhere-3577");
+        insert_block_for_agent(&store, "block-unknown-3577", "never-existed");
+        for block in [
+            "block-template-3577",
+            "block-cross-3577",
+            "block-unknown-3577",
+        ] {
+            let mut env = HashMap::new();
+            let res = inject_identity_env_with_broker(
+                store.clone(),
+                store.clone(),
+                store.clone(),
+                None,
+                block,
+                &mut env,
+            );
+            assert_eq!(res, Ok(()), "{block}");
+        }
+
+        // No registry at all: a deleted agent cannot be told apart, so the
+        // gate stays open rather than guessing.
+        let bare = make_store();
+        insert_block_for_agent(&bare, "block-bare-3577", "agent-deleted-anywhere");
+        let mut env = HashMap::new();
+        assert_eq!(
+            inject_identity_env_with_broker(
+                bare.clone(),
+                bare.clone(),
+                bare.clone(),
+                None,
+                "block-bare-3577",
+                &mut env
+            ),
+            Ok(())
+        );
     }
 
     fn make_account(
