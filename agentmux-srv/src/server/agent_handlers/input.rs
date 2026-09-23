@@ -744,6 +744,14 @@ pub async fn run_agent_turn(
             return Err(format!("identity spawn gate: {gate}"));
         }
     };
+    // Identity M2: the UID this turn's spawn env carries (M1a), kept for the
+    // Register-tail below so registration is keyed by identity without a
+    // second store read (spec §4.4.1 row 2). `None` when the block has no
+    // row yet — the tail then registers by name, counted.
+    let turn_uid: Option<String> = env_vars
+        .get("AGENTMUX_AGENT_UID")
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
 
     let session_id_field =
         crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
@@ -1022,8 +1030,20 @@ pub async fn run_agent_turn(
         // subscribed; register_agent replaces any stale mapping from a prior session.
         let agent_name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
         if !agent_name.is_empty() {
+            // Identity M2: the display binding is `agentName`, the key is
+            // the UID carried in this turn's spawn env. A block that spawned
+            // before its row existed (continuation eager-resume, spec §4.4.4
+            // Q1) is upgraded in place here on its first turn.
             let registered = crate::backend::reactive::handler::get_global_handler()
-                .register_agent(&agent_name, &block_id, None);
+                .register_agent_full(
+                    &agent_name,
+                    &block_id,
+                    None,
+                    0,
+                    None,
+                    turn_uid.as_deref(),
+                    "registration.no_uid.register_tail",
+                );
             if registered.is_ok() {
                 // Refresh the block's OWN captured identity too
                 // (reagentx P1, round 2 on #2697): this call runs on
@@ -1198,20 +1218,22 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         // block_to_agent maps; remove_agent then removes the cloud poll entry
                         // using the logical agent_id recovered from block_to_agent.
                         let handler = crate::backend::reactive::handler::get_global_handler();
-                        let agent_name = handler.agent_id_for_block(&cmd.blockid);
-                        handler.unregister_block(&cmd.blockid);
-                        if let Some(ref name) = agent_name {
+                        // Identity M2: a block can be bound under two names
+                        // (display + stable); tear down the name-keyed side
+                        // state for EACH, not just the display name — the
+                        // stable name's file entry was written at spawn and
+                        // its cloud subscription would otherwise leak.
+                        let names = handler.unregister_block(&cmd.blockid);
+                        let data_dir = crate::backend::base::get_mux_data_dir();
+                        let sub = crate::muxbus::cloud_subscriber::get_global_subscriber();
+                        for name in &names {
                             // Symmetric teardown for the registry writes added
                             // alongside SubprocessSpawn's register_agent call.
-                            let data_dir = crate::backend::base::get_mux_data_dir();
                             crate::backend::reactive::registry::remove(&data_dir, name);
                             crate::backend::reactive::registry::remove_shared_from_env(name);
-                        }
-                        if let (Some(sub), Some(name)) = (
-                            crate::muxbus::cloud_subscriber::get_global_subscriber(),
-                            agent_name,
-                        ) {
-                            sub.remove_agent(&name);
+                            if let Some(sub) = sub {
+                                sub.remove_agent(name);
+                            }
                         }
                         Ok(())
                     }

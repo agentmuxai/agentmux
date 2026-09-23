@@ -49,13 +49,17 @@ export async function registerAgent(agentId: string, blockId: string, tabId?: st
     }
 }
 
-export async function unregisterAgent(agentId: string): Promise<void> {
+// `blockId` is optional on the wire but always sent from here: since identity
+// M2 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §4.4.4 Q7) a name
+// can be held by several live panes, and the server refuses to tear down an
+// ambiguous name without a block id (HTTP 409) rather than guess.
+export async function unregisterAgent(agentId: string, blockId?: string): Promise<void> {
     try {
         const url = getWebServerEndpoint() + "/agentmux/reactive/unregister";
         const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify({ agent_id: agentId }),
+            body: JSON.stringify({ agent_id: agentId, block_id: blockId ?? "" }),
         });
         if (!response.ok) {
             let errorMsg = `HTTP ${response.status}`;
@@ -82,7 +86,7 @@ export function handleAgentIdChange(blockId: string, newAgentId: string | undefi
     }
 
     if (previousAgentId) {
-        fireAndForget(() => unregisterAgent(previousAgentId));
+        fireAndForget(() => unregisterAgent(previousAgentId, blockId));
         registeredAgentsByBlock.delete(blockId);
     }
 

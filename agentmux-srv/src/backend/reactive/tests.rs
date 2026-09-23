@@ -283,11 +283,21 @@ fn test_handler_alias_survives_primary_key_change() {
     assert_eq!(
         handler.get_agent("claude").unwrap().block_id,
         "block1",
-        "the live-name primary registration should have taken over"
+        "the live-name display binding should have taken over"
     );
-    assert!(
-        handler.get_agent("agentg").is_none(),
-        "the OLD primary registration is correctly evicted"
+    // Identity M2 (spec §4.4.2): the stable name is a typed binding of the
+    // same block, not a separate registry — so it now resolves through
+    // `get_agent` too, to the same block. Before M2 this asserted `None`,
+    // because the alias lived in a map `get_agent` never consulted.
+    assert_eq!(
+        handler.get_agent("agentg").unwrap().block_id,
+        "block1",
+        "the stable binding is kept and resolves to the same block"
+    );
+    assert_eq!(
+        handler.get_agent_by_block("block1").unwrap().agent_id,
+        "claude",
+        "the record's agent_id is the display binding"
     );
 
     let resp = handler.inject_message(InjectionRequest {
@@ -3297,4 +3307,304 @@ fn non_reentrant_try_get_agent_by_block_finds_the_registration() {
         .try_get_agent_by_block("block1")
         .expect("an uncontended call must find the registration");
     assert_eq!(found.registration_nonce, 42);
+}
+
+// ---- Identity M2: the registry is keyed by UID, names are typed bindings
+// (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §4.4, fixture §4.4.5).
+//
+// Every test uses the same pair: two agents whose names collide under
+// `derive_slug` — "AgentY" and "AGENTY" — with distinct UIDs on two blocks.
+// Positive cases first (retro §5): prove both are registered before proving
+// anything about what is refused.
+mod identity_m2 {
+    use super::*;
+    use crate::backend::reactive::handler::UnregisterOutcome;
+
+    const UID_Y: &str = "4f3c0000-0000-4000-8000-000000000a91";
+    const UID_UP: &str = "9b2e0000-0000-4000-8000-0000000007d4";
+
+    fn reg(h: &mut Handler, display: &str, block: &str, uid: Option<&str>) {
+        h.register_agent_full(display, block, None, 0, None, uid, "test.m2.no_uid")
+            .unwrap();
+    }
+
+    fn inject(h: &mut Handler, target: &str) -> InjectionResponse {
+        h.inject_message(InjectionRequest {
+            target_agent: target.to_string(),
+            message: "hello".to_string(),
+            request_id: Some(format!("req-m2-{target}")),
+            ..Default::default()
+        })
+    }
+
+    fn colliding_pair() -> Handler {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-y", Some(UID_Y));
+        reg(&mut h, "AGENTY", "block-up", Some(UID_UP));
+        h
+    }
+
+    #[test]
+    fn two_colliding_names_with_distinct_uids_both_stay_registered() {
+        let h = colliding_pair();
+        assert_eq!(
+            h.get_agent_by_block("block-y").unwrap().uid.as_deref(),
+            Some(UID_Y)
+        );
+        assert_eq!(
+            h.get_agent_by_block("block-up").unwrap().uid.as_deref(),
+            Some(UID_UP)
+        );
+        assert_eq!(
+            h.list_agents().len(),
+            2,
+            "today the second would evict the first"
+        );
+    }
+
+    #[test]
+    fn delivery_by_a_colliding_name_is_refused_with_both_candidates() {
+        let mut h = colliding_pair();
+        let resp = inject(&mut h, "agenty");
+        assert!(!resp.success);
+        let err = resp.error.expect("an error");
+        assert!(err.starts_with("ambiguous agent name:"), "{err}");
+        // Must NOT look like "agent not found": that prefix is what the HTTP
+        // layer forwards to other instances (spec §4.4.3).
+        assert!(!err.starts_with("agent not found"));
+        for needle in [UID_Y, UID_UP, "block-y", "block-up"] {
+            assert!(err.contains(needle), "candidates must name {needle}: {err}");
+        }
+    }
+
+    // `#[tokio::test]`: PTY delivery spawns the delayed-Enter task.
+    #[tokio::test]
+    async fn delivery_by_uid_reaches_each_own_block_and_passes_the_uid_confirmer() {
+        let mut h = colliding_pair();
+        let sent = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sent2 = sent.clone();
+        h.set_input_sender(Arc::new(move |b: &str, _: &[u8]| {
+            sent2.lock().unwrap().push(b.to_string());
+            Ok(())
+        }));
+        h.set_uid_identity_confirmer(Arc::new(|b: &str| match b {
+            "block-y" => Some(UID_Y.to_string()),
+            "block-up" => Some(UID_UP.to_string()),
+            _ => None,
+        }));
+        // A name confirmer that would contradict every UID target — it must
+        // not be consulted for targets that resolved by UID.
+        h.set_agent_identity_confirmer(Arc::new(|_: &str| Some("SomethingElse".to_string())));
+
+        let r1 = inject(&mut h, UID_Y);
+        assert!(r1.success, "{:?}", r1.error);
+        assert_eq!(r1.block_id.as_deref(), Some("block-y"));
+        let r2 = inject(&mut h, UID_UP);
+        assert!(r2.success, "{:?}", r2.error);
+        assert_eq!(r2.block_id.as_deref(), Some("block-up"));
+        // The recorder also sees the delayed Enter keystrokes, so compare the
+        // SET of blocks reached, not the sequence of writes.
+        let reached: std::collections::BTreeSet<String> =
+            sent.lock().unwrap().iter().cloned().collect();
+        assert_eq!(
+            reached,
+            ["block-y", "block-up"]
+                .into_iter()
+                .map(String::from)
+                .collect()
+        );
+    }
+
+    /// Revision 4.0's P0: registered but not yet spawned — the controller
+    /// has a live NAME (`set_agent_id` without a spawn) and no UID yet. A
+    /// UID target must be "unverifiable", not a mismatch, or the
+    /// start-on-delivery fall-through can never run.
+    // `#[tokio::test]`: PTY delivery spawns the delayed-Enter task.
+    #[tokio::test]
+    async fn uid_target_with_no_uid_on_the_controller_is_unverifiable_and_delivers() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-y", Some(UID_Y));
+        h.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+        h.set_agent_identity_confirmer(Arc::new(|_: &str| Some("AgentY".to_string())));
+        h.set_uid_identity_confirmer(Arc::new(|_: &str| None));
+        let r = inject(&mut h, UID_Y);
+        assert!(r.success, "{:?}", r.error);
+    }
+
+    #[test]
+    fn uid_target_whose_controller_reports_another_uid_is_a_mismatch() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-y", Some(UID_Y));
+        h.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+        h.set_uid_identity_confirmer(Arc::new(|_: &str| Some(UID_UP.to_string())));
+        let r = inject(&mut h, UID_Y);
+        assert!(!r.success);
+        assert!(r.error.unwrap().starts_with("identity mismatch"));
+    }
+
+    #[test]
+    fn respawn_of_a_uid_on_a_new_block_evicts_only_its_own_old_block() {
+        let mut h = colliding_pair();
+        reg(&mut h, "AgentY", "block-y2", Some(UID_Y));
+        assert!(
+            h.get_agent_by_block("block-y").is_none(),
+            "the old block of that UID is gone"
+        );
+        assert_eq!(
+            h.get_agent_by_block("block-up").unwrap().uid.as_deref(),
+            Some(UID_UP),
+            "the OTHER agent is untouched"
+        );
+        assert_eq!(h.get_agent(UID_Y).unwrap().block_id, "block-y2");
+    }
+
+    #[test]
+    fn rename_replaces_the_display_binding_and_keeps_the_stable_one() {
+        let mut h = Handler::new();
+        h.register_agent_full(
+            "agentg",
+            "block1",
+            None,
+            7,
+            Some("agentg"),
+            Some(UID_Y),
+            "test.m2.no_uid",
+        )
+        .unwrap();
+        // The Register-tail: new display name, no stable, no uid supplied.
+        h.register_agent_full("Renamed", "block1", None, 0, None, None, "test.m2.no_uid")
+            .unwrap();
+        assert_eq!(h.get_agent("renamed").unwrap().block_id, "block1");
+        assert_eq!(h.get_agent("agentg").unwrap().block_id, "block1", "stable name kept");
+        assert_eq!(h.get_agent_by_block("block1").unwrap().agent_id, "Renamed");
+        // A second rename retires the previous display name entirely — it
+        // must not linger and make a later agent ambiguous.
+        h.register_agent_full("Third", "block1", None, 0, None, None, "test.m2.no_uid")
+            .unwrap();
+        assert!(h.get_agent("renamed").is_none());
+        assert_eq!(h.get_agent("agentg").unwrap().block_id, "block1");
+        assert_eq!(h.get_agent("third").unwrap().block_id, "block1");
+    }
+
+    #[test]
+    fn blocks_without_a_uid_keep_todays_name_eviction() {
+        let mut h = Handler::new();
+        reg(&mut h, "agent1", "block1", None);
+        reg(&mut h, "agent1", "block2", None);
+        assert!(h.get_agent_by_block("block1").is_none());
+        assert_eq!(h.get_agent("agent1").unwrap().block_id, "block2");
+    }
+
+    #[test]
+    fn a_no_uid_registration_is_upgraded_in_place_and_the_uid_is_sticky() {
+        let mut h = Handler::new();
+        // Spawn before the row exists (continuation eager-resume, §4.4.4 Q1).
+        h.register_agent_full(
+            "agentg",
+            "block1",
+            None,
+            3,
+            Some("agentg"),
+            None,
+            "test.m2.no_uid",
+        )
+        .unwrap();
+        assert!(h.get_agent_by_block("block1").unwrap().uid.is_none());
+        // First turn's Register-tail supplies the UID.
+        reg(&mut h, "AgentY", "block1", Some(UID_Y));
+        assert_eq!(
+            h.get_agent_by_block("block1").unwrap().uid.as_deref(),
+            Some(UID_Y)
+        );
+        assert_eq!(
+            h.get_agent("agentg").unwrap().block_id,
+            "block1",
+            "stable kept across the upgrade"
+        );
+        assert_eq!(h.get_agent(UID_Y).unwrap().block_id, "block1");
+        // Sticky: a later registration without a UID (presence path whose
+        // store read failed) keeps it.
+        reg(&mut h, "AgentY", "block1", None);
+        assert_eq!(
+            h.get_agent_by_block("block1").unwrap().uid.as_deref(),
+            Some(UID_Y)
+        );
+        assert_eq!(h.get_agent(UID_Y).unwrap().block_id, "block1");
+    }
+
+    // `#[tokio::test]`: PTY delivery spawns the delayed-Enter task.
+    #[tokio::test]
+    async fn a_dead_block_is_swept_and_the_live_one_wins_the_name() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-dead", Some(UID_Y));
+        reg(&mut h, "AgentY", "block-live", Some(UID_UP));
+        h.set_block_liveness(Arc::new(|b: &str| b == "block-live"));
+        h.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+        let r = inject(&mut h, "agenty");
+        assert!(r.success, "{:?}", r.error);
+        assert_eq!(r.block_id.as_deref(), Some("block-live"));
+        assert!(
+            h.get_agent_by_block("block-dead").is_none(),
+            "the dead registration was swept"
+        );
+        assert!(h.get_agent(UID_Y).is_none());
+        assert_eq!(h.list_agents().len(), 1);
+    }
+
+    #[test]
+    fn unregister_by_an_ambiguous_name_without_a_block_removes_nothing() {
+        let mut h = colliding_pair();
+        match h.unregister_agent("agenty") {
+            UnregisterOutcome::Ambiguous(c) => assert_eq!(c.len(), 2),
+            other => panic!("expected Ambiguous, got {other:?}"),
+        }
+        assert_eq!(h.list_agents().len(), 2, "nothing was torn down");
+        // With the block: exact.
+        assert_eq!(h.unregister_block("block-y"), vec!["AgentY".to_string()]);
+        // Now unambiguous by name.
+        match h.unregister_agent("agenty") {
+            UnregisterOutcome::Removed { block_id, .. } => assert_eq!(block_id, "block-up"),
+            other => panic!("expected Removed, got {other:?}"),
+        }
+        assert!(h.list_agents().is_empty());
+        assert!(matches!(
+            h.unregister_agent("agenty"),
+            UnregisterOutcome::NotFound
+        ));
+    }
+
+    #[test]
+    fn unregister_block_returns_every_name_it_held() {
+        let mut h = Handler::new();
+        h.register_agent_full(
+            "Claude",
+            "block1",
+            None,
+            0,
+            Some("agentg"),
+            Some(UID_Y),
+            "test.m2.no_uid",
+        )
+        .unwrap();
+        assert_eq!(
+            h.names_for_block("block1"),
+            vec!["Claude".to_string(), "agentg".to_string()]
+        );
+        let names = h.unregister_block("block1");
+        assert_eq!(names, vec!["Claude".to_string(), "agentg".to_string()]);
+        assert!(h.get_agent("agentg").is_none());
+        assert!(h.get_agent(UID_Y).is_none());
+        assert!(h.names_for_block("block1").is_empty());
+    }
+
+    #[test]
+    fn get_agent_by_an_ambiguous_name_is_none_but_by_uid_is_exact() {
+        let h = colliding_pair();
+        assert!(
+            h.get_agent("agenty").is_none(),
+            "authz on an ambiguous name must fail closed"
+        );
+        assert_eq!(h.get_agent(UID_Y).unwrap().block_id, "block-y");
+        assert_eq!(h.get_agent(UID_UP).unwrap().block_id, "block-up");
+    }
 }

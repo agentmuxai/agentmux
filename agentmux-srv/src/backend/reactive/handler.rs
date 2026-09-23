@@ -95,23 +95,25 @@ pub(super) const NUDGE_MESSAGE: &str = "Continue the task you were already doing
 /// Manages agent registrations, rate limiting, message injection,
 /// and audit logging.
 pub struct Handler {
-    agent_to_block: HashMap<String, String>,
-    block_to_agent: HashMap<String, String>,
+    // ---- Identity M2 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    // §4.4): identity is the key, names are typed bindings. ----
+    //
+    /// The key, when known: the agent's UID (`db_agents.id`) → its block.
+    /// One-to-one — a UID registering on a new block evicts its old one
+    /// (a respawn). Empty for blocks the server has no row for (quick-launch
+    /// panes, PTY shells), which are then reachable by name only.
+    uid_to_block: HashMap<String, String>,
+    block_to_uid: HashMap<String, String>,
+    /// Lowercased name → every block bound to it. A name may hold several
+    /// blocks for the first time: two agents whose names collide both stay
+    /// registered (today one silently evicts the other), and delivery to
+    /// that name is refused with the candidates instead of guessed (§5.2).
+    name_to_blocks: HashMap<String, Vec<String>>,
+    /// A block's own names, typed — see [`NameBindings`].
+    block_names: HashMap<String, NameBindings>,
+    /// Keyed by block id (was: by lowercased name). `agent_id` in the record
+    /// is the block's *display* binding.
     agent_info: HashMap<String, AgentRegistration>,
-    /// Secondary, alias lookup for a block — checked by `inject_message_inner`
-    /// only after `agent_to_block` misses. Exists because `agent_to_block`
-    /// (via `block_to_agent`) only ever holds ONE key per block: `input.rs`'s
-    /// Register-tail re-keys the primary registration to the live,
-    /// renameable display name every turn, which would otherwise evict a
-    /// spawn-time registration under the STABLE `AGENTMUX_AGENT_ID` — the
-    /// identity GitHub PR-body tags embed, specifically because it doesn't
-    /// change on rename. See `PersistentSubprocessController::spawn_process`'s
-    /// `try_register_agent_with_nonce` call and
-    /// `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
-    alias_to_block: HashMap<String, String>,
-    /// Inverse of `alias_to_block`, for O(1) cleanup on unregister and to
-    /// evict a block's own stale prior alias before writing a new one.
-    block_to_alias: HashMap<String, String>,
     input_sender: Option<InputSender>,
     /// Controller-aware delivery for non-PTY agents (persistent stream-json / ACP).
     /// When set, it is tried before the PTY keystroke path so messages reach (and
@@ -126,11 +128,25 @@ pub struct Handler {
     /// `Controller::stable_agent_id()` (the frozen `AGENTMUX_AGENT_ID`)
     /// instead of `Controller::agent_id()` (the live, renameable display
     /// name). Checked as an alternative match in `inject_message_inner`'s
-    /// #2695 identity check — a jekt resolved via `alias_to_block` targets
-    /// the stable ID, which `agent_identity_confirmer` alone would always
-    /// report as a mismatch once the primary key has moved on to a
-    /// post-rename display name. See `alias_to_block`'s doc comment.
+    /// #2695 identity check — a jekt addressed to the stable name would
+    /// otherwise always fail once the display binding has moved on
+    /// post-rename. See `NameBindings::stable`.
     stable_agent_identity_confirmer: Option<AgentIdentityConfirmer>,
+    /// Identity M2: backed by `Controller::stable_agent_uid()`. Consulted
+    /// ONLY when the target resolved by UID, and `None` is "unverifiable"
+    /// (delivery proceeds) — never combined with the two name confirmers
+    /// above. A registered-but-unspawned persistent agent has a live name
+    /// (`set_agent_id` is called without a spawn) but no UID yet; running a
+    /// UID target through the name check would reject it as a mismatch
+    /// before the start-on-delivery fall-through could run (spec §4.4.3,
+    /// revision 4.0's P0).
+    uid_identity_confirmer: Option<AgentIdentityConfirmer>,
+    /// Identity M2: is this block still alive (has a controller)? The
+    /// garbage collector that replaces name eviction (spec §4.4.4 Q9):
+    /// when a name resolves to several blocks, the dead ones are swept
+    /// before ambiguity is decided. `None` (tests) treats every block as
+    /// live.
+    block_liveness: Option<BlockLivenessProbe>,
     audit_log: Vec<AuditLogEntry>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
@@ -140,20 +156,91 @@ pub struct Handler {
     nudge_counters: HashMap<String, NudgeCounterState>,
 }
 
+/// A block's names, typed (identity M2, spec §4.4.2).
+///
+/// `display` is the name the block was most recently registered under —
+/// the Register-tail and the HTTP presence path supply it every time — and
+/// is **replaced** on re-registration, so a retired name does not linger and
+/// make a later agent ambiguous. `stable` is the `AGENTMUX_AGENT_ID` parked
+/// at spawn (what the alias map used to hold) and is **kept** across display
+/// changes: it is the value GitHub PR-body tags embed precisely because it
+/// does not change on rename (`INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameBindings {
+    pub display: String,
+    pub stable: Option<String>,
+}
+
+impl NameBindings {
+    /// Every lowercased key this block is bound under.
+    fn keys(&self) -> Vec<String> {
+        let mut keys = vec![self.display.to_lowercase()];
+        if let Some(s) = &self.stable {
+            let k = s.to_lowercase();
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+        keys
+    }
+}
+
+/// What a by-name unregister did (identity M2, spec §4.4.4 Q7). A name held
+/// by several live blocks is refused, never silently no-op'd as success.
+#[derive(Debug, Clone)]
+pub enum UnregisterOutcome {
+    Removed {
+        block_id: String,
+        /// Every name the block was bound under, so the caller can tear
+        /// down name-keyed side state (file registry, cloud subscription)
+        /// for each of them, not just the display name.
+        names: Vec<String>,
+    },
+    NotFound,
+    Ambiguous(Vec<AgentRegistration>),
+}
+
+/// How `inject_message_inner` resolved its target (spec §4.4.3).
+enum TargetResolution {
+    Uid(String),
+    Name(String),
+    Ambiguous(Vec<AgentRegistration>),
+    NotFound,
+}
+
+/// Human-readable candidate list for an ambiguity refusal — the §5.2 shape:
+/// enough for a model to retry by UID and for a human to act on.
+fn describe_candidates(candidates: &[AgentRegistration]) -> String {
+    candidates
+        .iter()
+        .map(|c| {
+            format!(
+                "uid={} block={} name={}",
+                c.uid.as_deref().unwrap_or("none"),
+                c.block_id,
+                c.agent_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 impl Handler {
     /// Create a new handler without an input sender.
     /// Call `set_input_sender` before injecting messages.
     pub fn new() -> Self {
         Self {
-            agent_to_block: HashMap::new(),
-            block_to_agent: HashMap::new(),
+            uid_to_block: HashMap::new(),
+            block_to_uid: HashMap::new(),
+            name_to_blocks: HashMap::new(),
+            block_names: HashMap::new(),
             agent_info: HashMap::new(),
-            alias_to_block: HashMap::new(),
-            block_to_alias: HashMap::new(),
             input_sender: None,
             message_sender: None,
             agent_identity_confirmer: None,
             stable_agent_identity_confirmer: None,
+            uid_identity_confirmer: None,
+            block_liveness: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
@@ -187,6 +274,16 @@ impl Handler {
         self.stable_agent_identity_confirmer = Some(confirmer);
     }
 
+    /// See `uid_identity_confirmer`'s field doc comment (identity M2).
+    pub fn set_uid_identity_confirmer(&mut self, confirmer: AgentIdentityConfirmer) {
+        self.uid_identity_confirmer = Some(confirmer);
+    }
+
+    /// See `block_liveness`'s field doc comment (identity M2).
+    pub fn set_block_liveness(&mut self, probe: BlockLivenessProbe) {
+        self.block_liveness = Some(probe);
+    }
+
     /// Set whether to include source agent prefix in injected messages.
     #[allow(dead_code)]
     pub fn set_include_source(&mut self, include: bool) {
@@ -194,13 +291,25 @@ impl Handler {
     }
 
     /// Register an agent with a block.
+    /// Name-only registration. Every production site now goes through
+    /// [`register_agent_full`] with its UID and counter site; this is the
+    /// test-facing form (and the shape the pre-M2 API had).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn register_agent(
         &mut self,
         agent_id: &str,
         block_id: &str,
         tab_id: Option<&str>,
     ) -> Result<(), String> {
-        self.register_agent_with_nonce(agent_id, block_id, tab_id, 0, None)
+        self.register_agent_full(
+            agent_id,
+            block_id,
+            tab_id,
+            0,
+            None,
+            None,
+            "registration.no_uid.unspecified",
+        )
     }
 
     /// [`register_agent`], recording the registering persistent-controller
@@ -210,15 +319,11 @@ impl Handler {
     /// instead of blindly wiping a fallback respawn's fresh registration
     /// (issue #2363).
     ///
-    /// `alias`, if given, is ALSO registered for `block_id` in the separate
-    /// `alias_to_block` map — see that field's doc comment for why this
-    /// exists (a jekt addressed to `AGENTMUX_AGENT_ID` must still resolve
-    /// after the primary key has moved on to the live display name).
-    /// Independent of the primary registration above: written even when it
-    /// duplicates the primary key's value at this exact call (that's the
-    /// common case, at spawn — the point is for it to KEEP pointing at
-    /// `block_id` after a later call changes the primary key to something
-    /// else).
+    /// `alias`, if given, becomes the block's *stable* name binding
+    /// ([`NameBindings::stable`]): kept when a later call replaces the
+    /// display binding, so a jekt addressed to `AGENTMUX_AGENT_ID` still
+    /// resolves after the display name has moved on post-rename.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn register_agent_with_nonce(
         &mut self,
         agent_id: &str,
@@ -227,123 +332,314 @@ impl Handler {
         registration_nonce: u64,
         alias: Option<&str>,
     ) -> Result<(), String> {
-        if !validate_agent_id(agent_id) {
-            return Err(format!("invalid agent ID: {}", agent_id));
+        self.register_agent_full(
+            agent_id,
+            block_id,
+            tab_id,
+            registration_nonce,
+            alias,
+            None,
+            "registration.no_uid.unspecified",
+        )
+    }
+
+    /// The full registration (identity M2, spec §4.4.2): `display` is the
+    /// block's display binding, `stable` its stable binding (set or kept),
+    /// `uid` its identity when the caller knows it, and `no_uid_counter` the
+    /// §9.2 counter to bump when it does not.
+    ///
+    /// **Eviction is by identity, never by name:**
+    /// - `uid` already registered on another block → that block is evicted
+    ///   entirely (a respawn).
+    /// - a name already held by another block is left alone **unless**
+    ///   neither block has a UID — that case keeps today's name eviction
+    ///   exactly, and is counted.
+    /// - a block that has a UID keeps it when re-registered without one
+    ///   (sticky — a transient row miss on the presence path must not drop a
+    ///   live block out of `uid_to_block`); a block without one is upgraded
+    ///   in place when a later registration supplies one.
+    // Eight parameters because the three identity facets (display, stable,
+    // uid) plus the counter site are each optional independently; bundling
+    // them would move the same eight names into a struct literal at every
+    // call site without making any of them clearer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_agent_full(
+        &mut self,
+        display: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        registration_nonce: u64,
+        stable: Option<&str>,
+        uid: Option<&str>,
+        no_uid_counter: &'static str,
+    ) -> Result<(), String> {
+        if !validate_agent_id(display) {
+            return Err(format!("invalid agent ID: {}", display));
+        }
+        let stable = stable.filter(|s| validate_agent_id(s));
+        let uid = uid
+            .map(str::trim)
+            .filter(|u| !u.is_empty() && validate_agent_id(u));
+
+        let mut evicted_block: Option<String> = None;
+        let mut evicted_agent: Option<String> = None;
+
+        // 1. Identity eviction: this UID on a different block is a respawn.
+        if let Some(uid) = uid {
+            if let Some(old) = self.uid_to_block.get(uid).cloned() {
+                if old != block_id {
+                    evicted_agent = self.block_names.get(&old).map(|n| n.display.clone());
+                    self.remove_block_bindings(&old);
+                    evicted_block = Some(old);
+                }
+            }
         }
 
-        let agent_key = agent_id.to_lowercase();
-
-        // Remove existing registration for this agent
-        let evicted_block = self.agent_to_block.remove(&agent_key);
-        if let Some(ref old_block) = evicted_block {
-            self.block_to_agent.remove(old_block);
+        // 2. This block's effective UID: supplied, else whatever it already
+        //    had (sticky).
+        let effective_uid: Option<String> = uid
+            .map(str::to_string)
+            .or_else(|| self.block_to_uid.get(block_id).cloned());
+        if effective_uid.is_none() {
+            crate::backend::agent_resolve::record_uid_fallback(no_uid_counter);
         }
 
-        // Remove existing registration for this block
-        let evicted_agent = self.block_to_agent.remove(block_id);
-        if let Some(ref old_agent) = evicted_agent {
-            self.agent_to_block.remove(old_agent);
-            self.agent_info.remove(old_agent);
+        // 3. Name eviction — only when neither side has a UID (today's
+        //    semantics, counted). Two identified agents sharing a name both
+        //    stay; delivery to that name is then refused with candidates.
+        let prev = self.block_names.get(block_id).cloned();
+        let new_keys: Vec<String> = {
+            let mut k = vec![display.to_lowercase()];
+            if let Some(s) = stable {
+                let s = s.to_lowercase();
+                if !k.contains(&s) {
+                    k.push(s);
+                }
+            }
+            k
+        };
+        if effective_uid.is_none() {
+            for key in &new_keys {
+                let others: Vec<String> = self
+                    .name_to_blocks
+                    .get(key)
+                    .map(|v| v.iter().filter(|b| b.as_str() != block_id).cloned().collect())
+                    .unwrap_or_default();
+                for other in others {
+                    if self.block_to_uid.contains_key(&other) {
+                        continue;
+                    }
+                    if evicted_agent.is_none() {
+                        evicted_agent = self.block_names.get(&other).map(|n| n.display.clone());
+                    }
+                    self.remove_block_bindings(&other);
+                    if evicted_block.is_none() {
+                        evicted_block = Some(other);
+                    }
+                    crate::backend::agent_resolve::record_uid_fallback("registration.name_evicted_no_uid");
+                }
+            }
+        }
+
+        // 4. Replace the display binding; set or keep the stable one.
+        let stable_final: Option<String> = stable
+            .map(str::to_string)
+            .or_else(|| prev.as_ref().and_then(|p| p.stable.clone()));
+        if let Some(prev) = &prev {
+            for key in prev.keys() {
+                self.unbind_name(&key, block_id);
+            }
+            if prev.display.to_lowercase() != display.to_lowercase() && evicted_agent.is_none() {
+                evicted_agent = Some(prev.display.clone());
+            }
+        }
+        let bindings = NameBindings {
+            display: display.to_string(),
+            stable: stable_final,
+        };
+        for key in bindings.keys() {
+            self.bind_name(&key, block_id);
+        }
+        self.block_names.insert(block_id.to_string(), bindings);
+        if let Some(u) = &effective_uid {
+            self.uid_to_block.insert(u.clone(), block_id.to_string());
+            self.block_to_uid.insert(block_id.to_string(), u.clone());
         }
 
         let now = now_unix_millis();
-        self.agent_to_block
-            .insert(agent_key.clone(), block_id.to_string());
-        self.block_to_agent
-            .insert(block_id.to_string(), agent_key.clone());
         self.agent_info.insert(
-            agent_key.clone(),
+            block_id.to_string(),
             AgentRegistration {
-                agent_id: agent_id.to_string(),
+                agent_id: display.to_string(),
                 block_id: block_id.to_string(),
                 tab_id: tab_id.map(|s| s.to_string()),
                 registered_at: now,
                 last_seen: now,
                 registration_nonce,
+                uid: effective_uid,
             },
         );
 
         self.log_audit_registration(
             "register",
-            agent_id,
+            display,
             block_id,
             evicted_block.as_deref(),
             evicted_agent.as_deref(),
         );
 
-        if let Some(alias) = alias {
-            if validate_agent_id(alias) {
-                self.register_alias(alias, block_id);
-            }
-        }
-
         Ok(())
     }
 
-    /// Point `alias` (case-insensitively) at `block_id` in `alias_to_block`,
-    /// independent of and never evicted by the primary `agent_to_block`
-    /// registration above. Evicts any OTHER block previously holding this
-    /// alias, and this block's own prior alias if it differs — the same
-    /// one-key-per-{alias,block} bijection `agent_to_block`/`block_to_agent`
-    /// maintain, kept separately so the two registries can't evict each
-    /// other. See `alias_to_block`'s field doc comment.
-    fn register_alias(&mut self, alias: &str, block_id: &str) {
-        let alias_key = alias.to_lowercase();
-
-        if let Some(old_block) = self.alias_to_block.remove(&alias_key) {
-            if old_block != block_id {
-                self.block_to_alias.remove(&old_block);
-            }
+    fn bind_name(&mut self, key: &str, block_id: &str) {
+        let blocks = self.name_to_blocks.entry(key.to_string()).or_default();
+        if !blocks.iter().any(|b| b == block_id) {
+            blocks.push(block_id.to_string());
         }
-        if let Some(old_alias) = self.block_to_alias.remove(block_id) {
-            if old_alias != alias_key {
-                self.alias_to_block.remove(&old_alias);
-            }
-        }
-
-        self.alias_to_block
-            .insert(alias_key.clone(), block_id.to_string());
-        self.block_to_alias.insert(block_id.to_string(), alias_key);
     }
 
-    /// Unregister an agent.
-    pub fn unregister_agent(&mut self, agent_id: &str) {
-        let agent_key = agent_id.to_lowercase();
-        if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
-            self.block_to_agent.remove(&block_id);
-            self.log_audit_registration("unregister", agent_id, &block_id, None, None);
-            // See `unregister_block`'s matching cleanup for why (reagent P1 /
-            // codex P2 on this PR): without this, the HTTP `/agentmux/reactive/
-            // unregister` teardown path — the normal graceful agent-close path
-            // — leaves a dangling alias that outlives the block it pointed to.
-            // Safe for the ordinary rename case too: a rename never calls
-            // `unregister_agent` (it re-registers the SAME block_id under a
-            // new primary key via `register_agent_with_nonce`, which does
-            // NOT touch the alias maps — see that method's doc comment), so
-            // this only ever fires on a genuine teardown.
-            if let Some(alias) = self.block_to_alias.remove(&block_id) {
-                self.alias_to_block.remove(&alias);
+    fn unbind_name(&mut self, key: &str, block_id: &str) {
+        if let Some(blocks) = self.name_to_blocks.get_mut(key) {
+            blocks.retain(|b| b != block_id);
+            if blocks.is_empty() {
+                self.name_to_blocks.remove(key);
             }
         }
-        self.agent_info.remove(&agent_key);
     }
 
-    /// Unregister by block ID.
-    pub fn unregister_block(&mut self, block_id: &str) {
-        if let Some(agent_id) = self.block_to_agent.remove(block_id) {
-            self.agent_to_block.remove(&agent_id);
-            self.agent_info.remove(&agent_id);
-            self.log_audit_registration("unregister", &agent_id, block_id, None, None);
+    /// Drop every trace of `block_id` — names, UID, record. No audit entry;
+    /// callers log with the context they have.
+    fn remove_block_bindings(&mut self, block_id: &str) {
+        if let Some(names) = self.block_names.remove(block_id) {
+            for key in names.keys() {
+                self.unbind_name(&key, block_id);
+            }
         }
-        // Also drop this block's alias, if any — otherwise a dead block's
-        // stable-ID alias would keep resolving after the block itself is
-        // gone (e.g. a block reused by a later, unrelated spawn would
-        // silently inherit the OLD block's alias instead of getting its
-        // own, since `register_alias` is only called when a NEW alias is
-        // actually supplied).
-        if let Some(alias) = self.block_to_alias.remove(block_id) {
-            self.alias_to_block.remove(&alias);
+        if let Some(uid) = self.block_to_uid.remove(block_id) {
+            if self.uid_to_block.get(&uid).is_some_and(|b| b == block_id) {
+                self.uid_to_block.remove(&uid);
+            }
         }
+        self.agent_info.remove(block_id);
+    }
+
+    /// Blocks bound to `key` (lowercased name) that are still alive, per the
+    /// liveness probe. Read-only: does not sweep. `None` probe = all live.
+    fn live_blocks_for_key(&self, key: &str) -> Vec<String> {
+        let Some(blocks) = self.name_to_blocks.get(key) else {
+            return Vec::new();
+        };
+        match &self.block_liveness {
+            Some(probe) => blocks.iter().filter(|b| probe(b)).cloned().collect(),
+            None => blocks.clone(),
+        }
+    }
+
+    /// Resolve a delivery target (spec §4.4.3): UID first, then name among
+    /// live blocks — sweeping dead ones on the way (§4.4.4 Q9) — refusing an
+    /// ambiguous name with its candidates rather than guessing.
+    fn resolve_target(&mut self, target: &str) -> TargetResolution {
+        if let Some(block) = self
+            .uid_to_block
+            .get(target)
+            .or_else(|| self.uid_to_block.get(&target.to_lowercase()))
+        {
+            return TargetResolution::Uid(block.clone());
+        }
+        let key = target.to_lowercase();
+        let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
+        if blocks.is_empty() {
+            return TargetResolution::NotFound;
+        }
+        let mut live = Vec::with_capacity(blocks.len());
+        for block in blocks {
+            let alive = self
+                .block_liveness
+                .as_ref()
+                .is_none_or(|probe| probe(&block));
+            if alive {
+                live.push(block);
+            } else {
+                let display_name = self
+                    .block_names
+                    .get(&block)
+                    .map(|n| n.display.clone())
+                    .unwrap_or_default();
+                tracing::info!(
+                    block_id = %block,
+                    name = %display_name,
+                    "reactive: sweeping dead registration while resolving a name (identity M2)"
+                );
+                self.remove_block_bindings(&block);
+                self.log_audit_registration("swept", &display_name, &block, None, None);
+                crate::backend::agent_resolve::record_uid_fallback("registry.swept_dead");
+            }
+        }
+        match live.len() {
+            0 => TargetResolution::NotFound,
+            1 => {
+                crate::backend::agent_resolve::record_uid_fallback("delivery.resolved_by_name");
+                TargetResolution::Name(live.remove(0))
+            }
+            _ => {
+                crate::backend::agent_resolve::record_uid_fallback("delivery.ambiguous");
+                let candidates = live
+                    .iter()
+                    .filter_map(|b| self.agent_info.get(b).cloned())
+                    .collect();
+                TargetResolution::Ambiguous(candidates)
+            }
+        }
+    }
+
+    /// Unregister by name (identity M2, spec §4.4.4 Q7). One live block →
+    /// removed. Several → nothing is removed and the candidates are
+    /// returned; the caller must not report success. None → `NotFound`.
+    pub fn unregister_agent(&mut self, agent_id: &str) -> UnregisterOutcome {
+        let key = agent_id.to_lowercase();
+        let live = self.live_blocks_for_key(&key);
+        match live.len() {
+            0 => UnregisterOutcome::NotFound,
+            1 => {
+                let block_id = live[0].clone();
+                let names = self.unregister_block(&block_id);
+                UnregisterOutcome::Removed { block_id, names }
+            }
+            _ => {
+                crate::backend::agent_resolve::record_uid_fallback(
+                    "unregister.ambiguous_without_block",
+                );
+                let candidates = live
+                    .iter()
+                    .filter_map(|b| self.agent_info.get(b).cloned())
+                    .collect::<Vec<_>>();
+                tracing::warn!(
+                    name = %agent_id,
+                    candidates = %describe_candidates(&candidates),
+                    "reactive: refusing to unregister an ambiguous name without a block id"
+                );
+                UnregisterOutcome::Ambiguous(candidates)
+            }
+        }
+    }
+
+    /// Unregister by block ID. Returns every name the block was bound under
+    /// (empty if it was not registered) so name-keyed side state can be
+    /// torn down for each.
+    pub fn unregister_block(&mut self, block_id: &str) -> Vec<String> {
+        let Some(names) = self.block_names.get(block_id).cloned() else {
+            return Vec::new();
+        };
+        let display = names.display.clone();
+        self.remove_block_bindings(block_id);
+        self.log_audit_registration("unregister", &display, block_id, None, None);
+        let mut out = vec![display];
+        if let Some(s) = names.stable {
+            if !out.iter().any(|n| n.eq_ignore_ascii_case(&s)) {
+                out.push(s);
+            }
+        }
+        out
     }
 
     /// Unregister by block ID **only if** the current registration was
@@ -364,13 +660,10 @@ impl Handler {
     ///
     /// Returns true if the registration was ours and was removed.
     pub fn unregister_block_if_nonce(&mut self, block_id: &str, expected_nonce: u64) -> bool {
-        let Some(agent_id) = self.block_to_agent.get(block_id) else {
+        let Some(info) = self.agent_info.get(block_id) else {
             return false;
         };
-        let matches = self
-            .agent_info
-            .get(agent_id)
-            .is_some_and(|info| expected_nonce != 0 && info.registration_nonce == expected_nonce);
+        let matches = expected_nonce != 0 && info.registration_nonce == expected_nonce;
         if !matches {
             tracing::info!(
                 block_id = %block_id,
@@ -386,22 +679,58 @@ impl Handler {
     /// Update the last_seen timestamp for an agent.
     #[allow(dead_code)]
     pub fn update_last_seen(&mut self, agent_id: &str) {
-        if let Some(info) = self.agent_info.get_mut(&agent_id.to_lowercase()) {
-            info.last_seen = now_unix_millis();
+        let now = now_unix_millis();
+        for block in self.live_blocks_for_key(&agent_id.to_lowercase()) {
+            if let Some(info) = self.agent_info.get_mut(&block) {
+                info.last_seen = now;
+            }
         }
     }
 
-    /// Get agent registration by agent ID.
+    /// Get agent registration by agent ID — a UID, or a name held by
+    /// exactly one live block. A name held by several is `None`, counted
+    /// (`lookup.ambiguous_name`): callers that authorize on it fail closed,
+    /// and callers that display on it show nothing rather than the wrong one.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        self.agent_info.get(&agent_id.to_lowercase())
+        if let Some(block) = self
+            .uid_to_block
+            .get(agent_id)
+            .or_else(|| self.uid_to_block.get(&agent_id.to_lowercase()))
+        {
+            return self.agent_info.get(block);
+        }
+        let live = self.live_blocks_for_key(&agent_id.to_lowercase());
+        match live.len() {
+            1 => self.agent_info.get(&live[0]),
+            0 => None,
+            _ => {
+                crate::backend::agent_resolve::record_uid_fallback("lookup.ambiguous_name");
+                None
+            }
+        }
     }
 
     /// Get agent registration by block ID.
     #[allow(dead_code)]
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<&AgentRegistration> {
-        self.block_to_agent
-            .get(block_id)
-            .and_then(|agent_id| self.agent_info.get(agent_id))
+        self.agent_info.get(block_id)
+    }
+
+    /// Every name `block_id` is bound under (display first, then stable).
+    /// Production teardown gets the same list back from [`unregister_block`];
+    /// this read-only form is for tests and diagnostics.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
+        let Some(names) = self.block_names.get(block_id) else {
+            return Vec::new();
+        };
+        let mut out = vec![names.display.clone()];
+        if let Some(s) = &names.stable {
+            if !out.iter().any(|n| n.eq_ignore_ascii_case(s)) {
+                out.push(s.clone());
+            }
+        }
+        out
     }
 
     /// List all registered agents.
@@ -475,18 +804,46 @@ impl Handler {
         // Sanitize message
         let sanitized = sanitize_message(&req.message);
 
-        // Look up block ID — primary registry first, then the alias
-        // registry (see `alias_to_block`'s doc comment: a jekt addressed to
-        // the stable AGENTMUX_AGENT_ID resolves here once the primary key
-        // has moved on to the live display name).
-        let target_key = req.target_agent.to_lowercase();
-        let block_id = match self
-            .agent_to_block
-            .get(&target_key)
-            .or_else(|| self.alias_to_block.get(&target_key))
-        {
-            Some(id) => id.clone(),
-            None => {
+        // Resolve the target (identity M2, spec §4.4.3): UID first, then a
+        // name held by exactly one live block. A name held by several is
+        // refused WITH the candidates — the only place a collision is
+        // visible is the only place it can be resolved (§5.2). The error
+        // string deliberately does not begin with "agent not found": that
+        // prefix is what `handle_reactive_inject` forwards to other
+        // instances, and a local collision must not be forwarded.
+        let (block_id, resolved_by_uid) = match self.resolve_target(&req.target_agent) {
+            TargetResolution::Uid(b) => (b, true),
+            TargetResolution::Name(b) => (b, false),
+            TargetResolution::Ambiguous(candidates) => {
+                let err = format!(
+                    "ambiguous agent name: '{}' is held by {} live agents — address one by uid: {}",
+                    req.target_agent,
+                    candidates.len(),
+                    describe_candidates(&candidates)
+                );
+                self.log_audit(
+                    req.source_agent.as_deref(),
+                    &req.target_agent,
+                    "",
+                    &sanitized,
+                    false,
+                    Some(&err),
+                    &request_id,
+                    outcome_on_failure,
+                    reason,
+                );
+                return InjectionResponse {
+                    success: false,
+                    request_id,
+                    block_id: None,
+                    error: Some(err),
+                    timestamp: now,
+                    effective_tier: None,
+                    requires_stop: None,
+                    channel_verified: None,
+                };
+            }
+            TargetResolution::NotFound => {
                 let err = format!("agent not found: {}", req.target_agent);
                 self.log_audit(
                     req.source_agent.as_deref(),
@@ -511,6 +868,53 @@ impl Handler {
                 };
             }
         };
+
+        // Identity M2: a target that resolved by UID is confirmed by UID
+        // only (`uid_identity_confirmer`); `None` is unverifiable and
+        // delivery proceeds — see that field's doc comment for the
+        // registered-but-unspawned case this protects. The name checks
+        // below apply only to targets that resolved by name.
+        if resolved_by_uid {
+            let own_uid = self
+                .uid_identity_confirmer
+                .as_ref()
+                .and_then(|c| c(&block_id));
+            if let Some(own_uid) = own_uid {
+                if !own_uid.eq_ignore_ascii_case(&req.target_agent) {
+                    let err = format!(
+                        "identity mismatch: block {} resolved for uid '{}' but its own uid is '{}'",
+                        block_id, req.target_agent, own_uid
+                    );
+                    tracing::error!(
+                        target = %req.target_agent,
+                        block_id = %block_id,
+                        own_uid = %own_uid,
+                        "reactive inject: recipient uid mismatch — rejecting delivery"
+                    );
+                    self.log_audit(
+                        req.source_agent.as_deref(),
+                        &req.target_agent,
+                        &block_id,
+                        &sanitized,
+                        false,
+                        Some(&err),
+                        &request_id,
+                        Some("identity-mismatch"),
+                        reason,
+                    );
+                    return InjectionResponse {
+                        success: false,
+                        request_id,
+                        block_id: Some(block_id),
+                        error: Some(err),
+                        timestamp: now,
+                        effective_tier: None,
+                        requires_stop: None,
+                        channel_verified: None,
+                    };
+                }
+            }
+        }
 
         // Recipient-identity check (issue #2695): before delivering, compare
         // the resolved block's own live, spawn-time-captured identity
@@ -537,7 +941,10 @@ impl Handler {
         // once the primary key has moved on post-rename. Either source
         // reporting a match is sufficient; both reporting `None` is
         // "unverifiable" exactly as before.
-        if self.agent_identity_confirmer.is_some() || self.stable_agent_identity_confirmer.is_some() {
+        if !resolved_by_uid
+            && (self.agent_identity_confirmer.is_some()
+                || self.stable_agent_identity_confirmer.is_some())
+        {
             let live_agent_id = self
                 .agent_identity_confirmer
                 .as_ref()
@@ -988,11 +1395,14 @@ impl Handler {
     ) -> Result<InjectionResponse, String> {
         let now = now_unix_millis();
         let target_key = target_agent.to_lowercase();
-        let block_id = self
-            .agent_to_block
-            .get(&target_key)
-            .cloned()
-            .unwrap_or_default();
+        // Same resolution as delivery (identity M2, §10 constraint 4 — this
+        // is the site #3520 converted the others around and missed). An
+        // ambiguous or unknown target leaves `block_id` empty exactly as an
+        // unknown one did before.
+        let block_id = match self.resolve_target(target_agent) {
+            TargetResolution::Uid(b) | TargetResolution::Name(b) => b,
+            TargetResolution::Ambiguous(_) | TargetResolution::NotFound => String::new(),
+        };
 
         match action {
             SupervisorAction::Decline => {
@@ -1029,7 +1439,7 @@ impl Handler {
 
                 let current_nonce = self
                     .agent_info
-                    .get(&target_key)
+                    .get(&block_id)
                     .map(|info| info.registration_nonce)
                     .unwrap_or(0);
 
@@ -1257,11 +1667,109 @@ impl ReactiveHandler {
             .set_stable_agent_identity_confirmer(confirmer);
     }
 
+    /// See the inner [`Handler::set_uid_identity_confirmer`] (identity M2).
+    pub fn set_uid_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_uid_identity_confirmer(confirmer);
+    }
+
+    /// See the inner [`Handler::set_block_liveness`] (identity M2).
+    pub fn set_block_liveness(&self, probe: BlockLivenessProbe) {
+        self.inner.lock().unwrap().set_block_liveness(probe);
+    }
+
+    /// See the inner [`Handler::register_agent_full`] (identity M2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_agent_full(
+        &self,
+        display: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        registration_nonce: u64,
+        stable: Option<&str>,
+        uid: Option<&str>,
+        no_uid_counter: &'static str,
+    ) -> Result<(), String> {
+        self.inner.lock().unwrap().register_agent_full(
+            display,
+            block_id,
+            tab_id,
+            registration_nonce,
+            stable,
+            uid,
+            no_uid_counter,
+        )
+    }
+
+    /// [`try_register_agent_with_nonce`]'s full-identity form — same
+    /// non-blocking, bounded-retry lock discipline, for the spawn path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_register_agent_full(
+        &self,
+        display: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        registration_nonce: u64,
+        stable: Option<&str>,
+        uid: Option<&str>,
+        no_uid_counter: &'static str,
+    ) -> Result<(), String> {
+        let mut guard = self.try_lock_bounded()?;
+        guard.register_agent_full(
+            display,
+            block_id,
+            tab_id,
+            registration_nonce,
+            stable,
+            uid,
+            no_uid_counter,
+        )
+    }
+
+    /// Every name `block_id` is bound under — see [`Handler::names_for_block`].
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn names_for_block(&self, block_id: &str) -> Vec<String> {
+        self.inner.lock().unwrap().names_for_block(block_id)
+    }
+
+    /// Bounded `try_lock`, shared by the spawn-path entry points — see
+    /// [`try_register_agent_with_nonce`]'s doc comment for the reasoning.
+    fn try_lock_bounded(&self) -> Result<std::sync::MutexGuard<'_, Handler>, String> {
+        const MAX_ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.inner.try_lock() {
+                Ok(guard) => return Ok(guard),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return Err(
+                            "reactive handler lock busy after retrying — skipping \
+                             registration (either a same-thread reentrant call, \
+                             redundant by construction on that path, or contention \
+                             that outlasted the retry budget; see \
+                             INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md)"
+                                .to_string(),
+                        );
+                    }
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    return Err(format!("reactive handler mutex poisoned: {e}"));
+                }
+            }
+        }
+        unreachable!("loop always returns on its final attempt");
+    }
+
     #[allow(dead_code)]
     pub fn set_include_source(&self, include: bool) {
         self.inner.lock().unwrap().set_include_source(include);
     }
 
+    /// Test-facing name-only form — see [`Handler::register_agent`].
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn register_agent(
         &self,
         agent_id: &str,
@@ -1275,6 +1783,7 @@ impl ReactiveHandler {
     }
 
     /// See the inner [`Handler::register_agent_with_nonce`].
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn register_agent_with_nonce(
         &self,
         agent_id: &str,
@@ -1332,6 +1841,7 @@ impl ReactiveHandler {
     /// skip left in place (if any) still belongs to whichever nonce is
     /// actually on record, not to this spawn's own unwritten one. See
     /// `spawn_process`'s handling of this method's `Err` arm.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn try_register_agent_with_nonce(
         &self,
         agent_id: &str,
@@ -1359,40 +1869,20 @@ impl ReactiveHandler {
         // where the next attempt lands after the brief holder is done —
         // "bounded stalling beats silent loss", the same tradeoff
         // `bootstrap.rs`'s `block_in_place` fallback already makes.
-        const MAX_ATTEMPTS: u32 = 5;
-        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
-        for attempt in 1..=MAX_ATTEMPTS {
-            match self.inner.try_lock() {
-                Ok(mut guard) => {
-                    return guard.register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias);
-                }
-                Err(std::sync::TryLockError::WouldBlock) => {
-                    if attempt == MAX_ATTEMPTS {
-                        return Err(
-                            "reactive handler lock busy after retrying — skipping \
-                             registration (either a same-thread reentrant call, \
-                             redundant by construction on that path, or contention \
-                             that outlasted the retry budget; see \
-                             INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md)"
-                                .to_string(),
-                        );
-                    }
-                    std::thread::sleep(RETRY_DELAY);
-                }
-                Err(std::sync::TryLockError::Poisoned(e)) => {
-                    return Err(format!("reactive handler mutex poisoned: {e}"));
-                }
-            }
-        }
-        unreachable!("loop always returns on its final attempt");
+        let mut guard = self.try_lock_bounded()?;
+        guard.register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias)
     }
 
-    pub fn unregister_agent(&self, agent_id: &str) {
-        self.inner.lock().unwrap().unregister_agent(agent_id);
+    /// See the inner [`Handler::unregister_agent`] — by name, refusing an
+    /// ambiguous one (identity M2).
+    pub fn unregister_agent(&self, agent_id: &str) -> UnregisterOutcome {
+        self.inner.lock().unwrap().unregister_agent(agent_id)
     }
 
-    pub fn unregister_block(&self, block_id: &str) {
-        self.inner.lock().unwrap().unregister_block(block_id);
+    /// See the inner [`Handler::unregister_block`]. Returns the names the
+    /// block was bound under.
+    pub fn unregister_block(&self, block_id: &str) -> Vec<String> {
+        self.inner.lock().unwrap().unregister_block(block_id)
     }
 
     /// See the inner [`Handler::unregister_block_if_nonce`] — atomic
@@ -1402,16 +1892,6 @@ impl ReactiveHandler {
             .lock()
             .unwrap()
             .unregister_block_if_nonce(block_id, expected_nonce)
-    }
-
-    /// Return the logical agent_id currently mapped to this block, if any.
-    pub fn agent_id_for_block(&self, block_id: &str) -> Option<String> {
-        self.inner
-            .lock()
-            .unwrap()
-            .block_to_agent
-            .get(block_id)
-            .cloned()
     }
 
     #[allow(dead_code)]
