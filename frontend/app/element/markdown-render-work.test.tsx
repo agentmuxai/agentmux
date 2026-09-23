@@ -111,6 +111,41 @@ describe("Markdown streaming-render work invariants", () => {
     });
 
     /**
+     * The DOM half of incremental rendering
+     * (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.1).
+     *
+     * #3521 made the PARSE incremental but the render still handed
+     * `toJsxRuntime` the whole frozen+tail hast every commit and swapped the
+     * entire element tree, so every paragraph, heading, code block and table
+     * of the streaming message was destroyed and re-created ~11×/s — measured
+     * as ~950 elements re-created per 10 s in a pane with zero rows added.
+     * The frozen prefix's DOM must survive commits; only the trailing open
+     * block may be rebuilt.
+     */
+    it("keeps the frozen prefix's DOM nodes across commits — only the trailing block is rebuilt", () => {
+        __resetMarkdownRenderStats();
+        const [content, setContent] = createSignal("");
+        const { container } = render(() => <Markdown text={content()} scrollable={false} />);
+        const step = Math.ceil(SAMPLE.length / 25);
+
+        // Stream far enough that the first heading is inside the frozen prefix.
+        setContent(SAMPLE.slice(0, step * 12));
+        const firstHeading = container.querySelector(".heading");
+        expect(firstHeading).not.toBeNull();
+        const headingCountBefore = container.querySelectorAll(".heading").length;
+
+        for (let i = 13; i <= 25; i++) {
+            setContent(SAMPLE.slice(0, Math.min(i * step, SAMPLE.length)));
+        }
+
+        // Same element object, still attached, and the document grew rather
+        // than being rebuilt from scratch.
+        expect(container.querySelector(".heading")).toBe(firstHeading);
+        expect(container.contains(firstHeading)).toBe(true);
+        expect(container.querySelectorAll(".heading").length).toBeGreaterThan(headingCountBefore);
+    });
+
+    /**
      * Regression, ReAgent P1 round 2 on PR #3521.
      *
      * Heading ids must be unique across the WHOLE document, not per parsed
