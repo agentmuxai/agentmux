@@ -1,6 +1,9 @@
 # REPORT: Can a jekt interrupt an agent mid-turn today?
 
 **Date:** 2026-09-23
+**Status:** analysis — a point-in-time audit of `f32aec9a5`, not a plan. The plan it produced is
+`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`; this document is kept as the evidence behind it and is
+not maintained as the code changes.
 **Repo state:** `main` @ `f32aec9a5` (2026-09-23 01:12 -0700)
 **Question asked:** do jekt messages ever cut into an agent's text blob or train of thought?
 **Answer: yes — on every provider except Codex, unconditionally, by design.**

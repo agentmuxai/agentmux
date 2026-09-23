@@ -1,8 +1,10 @@
 # SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation
 
 **Date:** 2026-09-10
-**Status:** **SUPERSEDED** by `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` — go there for
-current policy, design and implementation status. This document was never implemented; it is
+**Status:** superseded — go to the successor for current policy, design and implementation status.
+**Superseded-by:** `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+
+This document was never implemented; it is
 retained for its §2 root-cause analysis and the §4.2 ReAgent review history (four soundness gaps
 found and fixed in review), both of which the successor carries forward. Its Appendix line
 references are stale: `persistent.rs` became a directory module in #3542, so
