@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     INPUT_WINDOW_MS,
+    MAX_PANES_PER_FRAME_WHILE_INTERACTING,
     STARVATION_MS,
     __markInputForTests,
     __resetStreamSchedulerForTests,
@@ -80,15 +81,52 @@ describe("stream scheduler", () => {
         expect(order).toEqual(["a", "b", "a"]);
     });
 
-    it("the starvation guard flushes any pane that has waited STARVATION_MS, even while interacting", () => {
+    it("once the oldest has waited STARVATION_MS, two panes flush per frame — never more", () => {
         const order: string[] = [];
         for (const id of ["a", "b", "c", "d"]) requestStreamFlush(id, () => order.push(id));
         __markInputForTests();
         frame(); // a
-        clock += STARVATION_MS; // b, c, d have now waited the full window
+        clock += STARVATION_MS; // b, c, d have all now waited the full window
         __markInputForTests();
         frame();
+        expect(order).toEqual(["a", "b", "c"]); // two, oldest first, not all three
+        clock += 16;
+        frame();
         expect(order).toEqual(["a", "b", "c", "d"]);
+    });
+
+    it(`sustained typing with 8 panes streaming: at most ${MAX_PANES_PER_FRAME_WHILE_INTERACTING} per frame, every pane served within the starvation delay + ceil(8/2) frames`, () => {
+        const panes = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7"];
+        const lastServed = new Map<string, number>();
+        let frameNo = 0;
+        const request = (id: string) =>
+            requestStreamFlush(id, () => {
+                perFrame++;
+                lastServed.set(id, frameNo);
+                request(id); // every pane is streaming continuously
+            });
+        let perFrame = 0;
+        for (const id of panes) request(id);
+        let maxPerFrame = 0;
+        let maxGap = 0;
+        const prev = new Map<string, number>();
+        for (frameNo = 1; frameNo <= 200; frameNo++) {
+            __markInputForTests(); // the user never stops typing
+            perFrame = 0;
+            frame();
+            maxPerFrame = Math.max(maxPerFrame, perFrame);
+            for (const [id, f] of lastServed) {
+                if (f === frameNo && prev.has(id)) maxGap = Math.max(maxGap, f - prev.get(id)!);
+                if (f === frameNo) prev.set(id, f);
+            }
+            clock += 33; // ~30 fps under load
+        }
+        expect(maxPerFrame).toBeLessThanOrEqual(MAX_PANES_PER_FRAME_WHILE_INTERACTING);
+        // The budget rises to 2 only once the oldest has waited STARVATION_MS
+        // (ceil(100 / 33) = 4 frames here), then the queue drains 2 a frame.
+        const frameMs = 33;
+        expect(maxGap).toBeLessThanOrEqual(Math.ceil(STARVATION_MS / frameMs) + Math.ceil(panes.length / 2));
+        expect(new Set(lastServed.keys()).size).toBe(panes.length);
     });
 
     it("interaction mode ends INPUT_WINDOW_MS after the last input", () => {

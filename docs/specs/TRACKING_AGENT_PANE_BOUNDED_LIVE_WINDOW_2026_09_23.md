@@ -73,7 +73,8 @@ one rendering step per frame, which input waits behind. Blocking time in long
 frames went up 10–20×.
 
 That is exactly what Phase 2's scheduler addresses — while the user is typing,
-at most one pane flushes per frame — and together they are the §2.1 result.
+one pane flushes per frame (two once the oldest has waited 100 ms, never more)
+— and together they are the §2.1 result.
 The spec's per-frame *script* budget was replaced by a *panes-per-frame* cap
 for the same reason: the cost is layout in the rendering step, which a script
 budget cannot see.

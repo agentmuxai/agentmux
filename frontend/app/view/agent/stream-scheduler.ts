@@ -19,13 +19,16 @@
  *  - No recent user input: every pane with pending work flushes in the next
  *    frame — exactly the behaviour before this module.
  *  - User input within INPUT_WINDOW_MS (a key, pointer, wheel or text input
- *    anywhere in the page): at most ONE pane flushes per frame, oldest request
- *    first, so each frame's work is one pane's worth and input is handled
- *    between them. Nothing is dropped: a pane that waits simply accumulates
- *    more tokens into its next flush.
- *  - Starvation guard: a pane whose request has waited STARVATION_MS flushes
- *    in the next frame regardless, so no visible pane goes stale under
- *    continuous typing.
+ *    anywhere in the page): ONE pane flushes per frame, oldest request first,
+ *    so each frame's work is one pane's worth and input is handled between
+ *    them. Nothing is dropped: a pane that waits simply accumulates more
+ *    tokens into its next flush.
+ *  - Starvation: while the oldest request has waited STARVATION_MS, the
+ *    budget is MAX_PANES_PER_FRAME_WHILE_INTERACTING (2) instead of one, so a
+ *    long queue catches up without ever flushing more than two panes in a
+ *    frame while the user is interacting. With N panes streaming, a pane
+ *    waits at most about STARVATION_MS (for the budget to rise) plus
+ *    ceil(N / 2) frames.
  *
  * Each flush is isolated: one pane's exception is reported (rethrown on a
  * microtask, so window.onerror and the render trail still see it) without
@@ -34,8 +37,11 @@
 
 /** A user input within this long means "the user is interacting now". */
 export const INPUT_WINDOW_MS = 150;
-/** A pane never waits longer than this for its flush. */
+/** Once the oldest waiting pane has waited this long, the per-frame budget
+ *  rises from one pane to MAX_PANES_PER_FRAME_WHILE_INTERACTING. */
 export const STARVATION_MS = 100;
+/** Hard cap on panes flushed in one frame while the user is interacting. */
+export const MAX_PANES_PER_FRAME_WHILE_INTERACTING = 2;
 
 interface Request {
     flush: () => void;
@@ -87,9 +93,15 @@ function runFrame(): void {
     if (!interacting) {
         for (const [id, req] of entries) runOne(id, req);
     } else {
-        const starving = entries.filter(([, req]) => t - req.requestedAt >= STARVATION_MS);
-        const chosen = starving.length > 0 ? starving : entries.slice(0, 1);
-        for (const [id, req] of chosen) runOne(id, req);
+        // Oldest first (Map insertion order). One pane per frame normally; two
+        // while the oldest has waited STARVATION_MS, so a long queue catches up
+        // without ever putting more than MAX_PANES_PER_FRAME_WHILE_INTERACTING
+        // panes' layout into one frame (ReAgent P1, #3599: flushing every
+        // starving pane at once recreated the multi-pane frame this exists to
+        // avoid).
+        const oldestWait = entries.length > 0 ? t - entries[0][1].requestedAt : 0;
+        const budget = oldestWait >= STARVATION_MS ? MAX_PANES_PER_FRAME_WHILE_INTERACTING : 1;
+        for (const [id, req] of entries.slice(0, budget)) runOne(id, req);
     }
     if (pending.size > 0) arm();
 }

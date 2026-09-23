@@ -602,8 +602,9 @@ with one app-wide scheduler that owns *when* stream work runs:
 - **As built (Phase 2): a panes-per-frame cap, not a script budget.** With no
   user input in the last 150 ms, every pending pane flushes in the next frame
   (unchanged behaviour). While the user is interacting (key, pointer, wheel,
-  text input, IME composition), at most one pane flushes per frame, oldest
-  request first. The originally proposed per-frame *script* budget (8 ms,
+  text input, IME composition), one pane flushes per frame, oldest request
+  first — two once the oldest has waited 100 ms, never more, so a long queue
+  catches up without recreating a multi-pane frame. The originally proposed per-frame *script* budget (8 ms,
   `scheduler.yield()` between chunks) was dropped on measurement: the cost is
   layout in the frame's rendering step, roughly constant per pane per flush,
   which a script budget cannot see
