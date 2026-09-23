@@ -30,6 +30,7 @@
 // scope here; each will trip the same gate when its file is next touched.
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
+import type { EditorView } from "codemirror";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
@@ -117,6 +118,11 @@ export class EditorViewModel implements ViewModel {
     noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
     blockId: string;
     nodeModel: BlockNodeModel;
+
+    // Populated by editor-view.tsx whenever it (re)builds the CodeMirror
+    // instance — mirrors AgentViewModel.focusTargetRef / TermViewModel.termRef.
+    // giveFocus() below is a no-op until the first build completes.
+    cmViewRef: { current: EditorView | null } = { current: null };
 
     viewIcon: Accessor<string | IconButtonDecl>;
     viewName: Accessor<string>;
@@ -1256,7 +1262,10 @@ export class EditorViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
-        return false;
+        const cm = this.cmViewRef.current;
+        if (cm == null) return false;
+        cm.focus();
+        return true;
     }
 
     dispose(): void {

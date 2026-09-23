@@ -13,6 +13,7 @@
 
 import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
+import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
 import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
 import { activeTabId, workspace } from "./window-identity";
@@ -136,6 +137,17 @@ export async function setActiveTab(tabId: string): Promise<void> {
                 if (mySeq === tabSwitchSeq) {
                     markEnd("tab-switch");
                     tabSwitchInFlight = false;
+                    // SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §2a/§3 —
+                    // switching tabs never moved the caret at all before
+                    // this: setActiveTab() had no focus call anywhere in it.
+                    // Fires after the same settle window the perf mark
+                    // itself waits for, so the destination tab's panes have
+                    // had a chance to mount. Guarded against interruption:
+                    // if a newer switch started before this rAF pair landed,
+                    // `mySeq` is stale and this whole block is skipped, so a
+                    // rapid Ctrl+Tab burst only ever focuses the FINAL
+                    // destination, not each intermediate one.
+                    focusManager.refocusNode();
                 }
             })
         );
