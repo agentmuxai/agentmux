@@ -893,13 +893,15 @@ fn is_held_elsewhere_error_recognises_both_refusals_and_nothing_else() {
     assert!(!is_held_elsewhere_error("failed to spawn: No such file or directory"));
 }
 
-/// Codex P1 on PR #3551: an eager resume refused by the duplicate-session
-/// guard must NOT fall back to a fresh spawn for the prompt that queued
-/// during the attempt — that hands it to a blank conversation while the
-/// real one is open next door. Release the claim, keep the queue, keep the
-/// session id (the next send goes through the guard again), report why.
+/// Codex P1 on PR #3551 (rounds one and three): an eager resume refused by
+/// the duplicate-session guard must NOT fall back to a fresh spawn for the
+/// prompt that queued during the attempt — that hands it to a blank
+/// conversation while the real one is open next door — and must not
+/// retain it either, since the next send's generic failed-spawn fallback
+/// would do the same thing later. Release the claim, discard the queue,
+/// keep the session id, report what was discarded and why.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_ownership_refusal_with_queued_work_reports_and_keeps_the_queue_instead_of_spawning_fresh() {
+async fn an_ownership_refusal_with_queued_work_reports_and_discards_the_queue_instead_of_spawning_fresh() {
     let store = make_store();
     let broker = Arc::new(crate::backend::mps::Broker::new());
     let filestore = Arc::new(FileStore::open_in_memory().unwrap());
