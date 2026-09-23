@@ -3,7 +3,7 @@
 
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { createContentBlockPlugin } from "@/app/element/markdown-contentblock-plugin";
-import { transformBlocks } from "@/app/element/markdown-util";
+import { transformBlocks, type MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { findSafeSplitPoint } from "@/app/element/markdown-incremental";
 
 /**
@@ -113,6 +113,19 @@ type MarkdownProps = {
     fontSizeOverride?: number;
     fixedFontSizeOverride?: number;
 };
+
+/**
+ * What a rendered `<waveblock>` depends on, as a comparable string: each
+ * block's key, id and content length — exactly what MuxBlock displays. Empty
+ * for the overwhelmingly common no-blocks document, so it costs nothing on the
+ * streaming fast path.
+ */
+function blocksSignature(blocks: Map<string, MarkdownContentBlockType>): string {
+    if (blocks.size === 0) return "";
+    let sig = "";
+    for (const [key, b] of blocks) sig += `${key}\u0000${b.id}\u0000${b.content.length}\u0001`;
+    return sig;
+}
 
 const Markdown = (props: MarkdownProps) => {
     // `text` is read via props.text inside the resolvedText memo so
@@ -292,6 +305,8 @@ const Markdown = (props: MarkdownProps) => {
         end: number;
         source: string;
         highlight: boolean;
+        /** `blocksSignature` of the content-block map the frozen DOM was rendered with. */
+        blocks: string;
         toc: TocItem[];
         elements: JSX.Element[];
         disposers: (() => void)[];
@@ -433,6 +448,7 @@ const Markdown = (props: MarkdownProps) => {
         for (const [k, v] of contentBlocksMap()) blocksRef.set(k, v);
 
         const highlight = highlightOn();
+        const blocks = blocksSignature(contentBlocksMap());
 
         /**
          * Parse ONE independent segment. `tocRef` is cleared per call, not per
@@ -471,7 +487,12 @@ const Markdown = (props: MarkdownProps) => {
                 // growing. A non-append edit (history restore, switching
                 // messages) or a highlight flip invalidates it — the frozen
                 // DOM was produced by a different processor in that case.
-                if (frozen && (frozen.highlight !== highlight || !txt.startsWith(frozen.source))) {
+                // Content-block data is a third input: an `@@@start … @@@end`
+                // block becomes a `<waveblock>` placeholder whose text doesn't
+                // change when the block's body does, and MuxBlock reads its
+                // `blockmap` once at creation — so a frozen placeholder would
+                // keep showing the old block. (Codex P2 on #3559.)
+                if (frozen && (frozen.highlight !== highlight || frozen.blocks !== blocks || !txt.startsWith(frozen.source))) {
                     disposeFrozen();
                 }
                 if (!frozen || splitAt > frozen.end) {
@@ -482,6 +503,7 @@ const Markdown = (props: MarkdownProps) => {
                         end: splitAt,
                         source: txt.slice(0, splitAt),
                         highlight,
+                        blocks,
                         toc: frozen ? frozen.toc.concat(seg.toc) : seg.toc,
                         elements: frozen ? frozen.elements.concat(flatNodes(rendered.element)) : flatNodes(rendered.element),
                         disposers: frozen ? frozen.disposers.concat(rendered.dispose) : [rendered.dispose],

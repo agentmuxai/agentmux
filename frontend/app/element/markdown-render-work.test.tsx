@@ -106,6 +106,25 @@ describe("Markdown streaming-render work invariants", () => {
         expect(__markdownRenderStats.processorBuilds).toBe(2);
     });
 
+    /**
+     * Codex P2 on #3559. A completed `@@@start … @@@end` block renders as a
+     * `<waveblock>` placeholder whose markdown text is identical no matter
+     * what the block body holds, and MuxBlock reads its `blockmap` once at
+     * creation. Once that placeholder is inside the frozen prefix, editing
+     * ONLY the block body must still update it — the frozen DOM may not
+     * outlive the block data it was rendered from.
+     */
+    it("re-renders a frozen content-block placeholder when only its block body changes", () => {
+        const doc = (body: string) =>
+            `${LONG_FILLER}@@@start file "notes.txt"\n${body}\n@@@end file "notes.txt"\n\n${LONG_FILLER}## Tail\n\nstill streaming`;
+        const [content, setContent] = createSignal(doc("x".repeat(100)));
+        const { container } = render(() => <Markdown text={content()} scrollable={false} />);
+        expect(container.querySelector(".wave-block-size")?.textContent).toBe("0.1 KB");
+
+        setContent(doc("x".repeat(5 * 1024)));
+        expect(container.querySelector(".wave-block-size")?.textContent).toBe("5 KB");
+    });
+
     it("does not rebuild the processor when only the text changes", () => {
         __resetMarkdownRenderStats();
         const [content, setContent] = createSignal("first");
