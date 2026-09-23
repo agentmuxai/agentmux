@@ -4,7 +4,7 @@
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
-M4 designed in §6.5 (revision 2.1, not yet implemented). M5 not started.
+M4 designed in §6.5 (revision 2.2, not yet implemented). M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -813,7 +813,7 @@ Two things follow, neither optional:
   directory**, rewritten every launch. A token must not go there; that file is
   in a worktree a human may commit.
 
-### 6.5 M4 design — revision 2.1: attribution, not enforcement
+### 6.5 M4 design — revision 2.2: attribution, not enforcement
 
 Revision 1 (proven identity with an Operator/UI key and refusals) was attacked
 against the code before anything was built and found to have three P0s, the
@@ -821,8 +821,10 @@ central one being that **at the same-user boundary this design sets, a request
 that omits its token cannot be told apart from the UI, and no credential can
 be kept from a same-user agent.** Revision 2 is what survives that; the repo
 owner chose it over "harden the host first, then enforce" (2026-09-23). A
-second adversarial pass on revision 2 found no P0 and seven P1s, all folded in
-here (2.1). Where §6.1–§6.4 disagree with the code, this section wins.
+second adversarial pass on revision 2 found no P0 and seven P1s, folded in
+as 2.1; Codex's three P1s on 2.1 (name reuse after deletion, the UID lost
+at forwarding hops, agents already running without a token) are folded in
+as 2.2. Where §6.1–§6.4 disagree with the code, this section wins.
 
 #### 6.5.1 What M4 can and cannot buy
 
@@ -920,8 +922,18 @@ here (2.1). Where §6.1–§6.4 disagree with the code, this section wins.
   process can read buys nothing (this answers §12's open question).
 - **One UID, several channels.** Definitions are shared, so one UID can be
   live in several channels, each srv minting its own token; purge revokes
-  only in the deleting channel. Cross-channel hops are srv→srv with no agent
-  token; their identity stays per-message signatures.
+  only in the deleting channel.
+- **The UID survives forwarding hops.** A cross-channel or LAN hop is
+  srv→srv with no agent token, so the receiving srv's `Caller` is
+  Unattributed — and the name it does see collides. The sender's UID
+  therefore travels in the request (`source_uid`), set by the MCP from its
+  own `AGENTMUX_AGENT_UID` and by a forwarding srv from its `Caller`. The
+  receiver dual-writes it as attribution **only when a signature covers
+  it**: from M4d the MCP includes `source_uid` in the signed material (a
+  new signature version; old signers keep verifying under the old one), and
+  the verifying key is the one published for that UID. An uncovered
+  `source_uid` is recorded as claimed, counted, and not written as
+  attribution — the same rule the name follows today.
 
 #### 6.5.4 Signing keys
 
@@ -933,6 +945,16 @@ here (2.1). Where §6.1–§6.4 disagree with the code, this section wins.
   holds is not carried (counted), and an ambiguous
   `/reactive/agent?id=<name>` returns no key. Name-keyed rows stay until M5,
   so reverting M4d loses nothing.
+- **Deletion tombstones the name, so reuse never inherits.** Being the only
+  live holder of a name does not prove being its owner: agent A is deleted,
+  agent B later takes the name, and a lazy copy would hand B A's key —
+  exactly the inheritance M4 revokes. So purge records the deleted agent's
+  key names (its slug and display name, lowercased) in a tombstone table
+  **from M4a on** — before any copy can happen — and a tombstoned name's
+  legacy row is never copied: its next holder gets a fresh keypair. Where no
+  other live row holds the name, purge also deletes the name-keyed key
+  rows outright. A name first tombstoned *after* a legitimate holder already
+  copied its key does not affect that holder (the copy is UID-keyed).
 - **Publication carries the UID.** Registry entries and `/reactive/agent`
   gain the UID beside the name in the same step, so new peers can pin
   `(peer, uid)`; the name pin stays as the legacy fallback.
@@ -976,9 +998,10 @@ Each step independently revertible (§9):
   **spawn-site counters** `spawn.no_token.<path>` (`build_persistent_spawn_env`,
   `agent_io.rs`, `shell/lifecycle.rs`, the App Server controller) —
   request-side counters cannot gate anything, because they cannot tell an
-  Unattributed UI write from a tokenless agent (revision 1's P0). Plus a
-  reader for every §9.2 counter (`GET /agentmux/identity/fallbacks`). No
-  behaviour change.
+  Unattributed UI write from a tokenless agent (revision 1's P0). Plus the
+  `live.tokenless_or_unknown` gauge, the purge-time name tombstones
+  (§6.5.4), and a reader for every §9.2 counter and gauge
+  (`GET /agentmux/identity/fallbacks`). No behaviour change.
 - **M4b — close the tokenless paths.** `agent.send`, App Server agents and
   terminal-pane agent CLIs carry UID + token when their block has a row;
   template-based continuations **bind** the block to the row they fold into
@@ -986,10 +1009,20 @@ Each step independently revertible (§9):
   its turn). Agents already running without a token are attributed by block,
   as `claimer_uid` already does. Quick-launch panes are declared outside the
   identity system, counted under their own label. **Gate:** agent-path
-  `spawn.no_token` counters at zero.
+  `spawn.no_token` counters at zero **and a drain of live agents**: an agent
+  spawned before its path carried a token can outlive an srv upgrade and
+  never pass a spawn site again, and most of its actor requests carry no
+  block id to attribute it by. So srv records, per block, whether the
+  process it spawned there carried a token (in memory, set at spawn; a block
+  whose process predates this srv is *unknown*), and M4a exposes the count
+  of live registered agent blocks that are not known to carry one
+  (`live.tokenless_or_unknown`). M4d, and M5's removal of any name-keyed
+  fallback, wait for that gauge to read zero — not for a counter that stops
+  moving.
 - **M4c — attribution by UID**: dual-write `*_uid` beside every actor field
   in §6.5.2 item 4, then switch readers; cron per §6.5.5.
-- **M4d — signing keys and registry UID** (§6.5.4), gated on M4b's counters.
+- **M4d — signing keys, registry UID and signed `source_uid`** (§6.5.4,
+  §6.5.3), gated on M4b's counters and the live drain.
 - **M5** removes the name-keyed rows, the tokenless HMAC path and `.mcp.json`
   key injection once the §9.2 counters read zero.
 
@@ -1263,7 +1296,7 @@ changes two things at once.
   attributes by its UID; nothing is refused. Does **not** close #3501 —
   recorded as not closable at the same-user boundary (§6.5.1).
 
-  **Design: §6.5** (revision 2.1, attribution not enforcement) — staged as
+  **Design: §6.5** (revision 2.2, attribution not enforcement) — staged as
   M4a Caller + counters, M4b close the tokenless paths, M4c attribution by
   UID, M4d signing keys and registry UID. #3501 is recorded as not closable at
   the same-user boundary (§6.5.1).
