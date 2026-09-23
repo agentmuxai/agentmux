@@ -360,6 +360,23 @@ impl AuthSessionManager {
         refs.pty_pids.remove(session_id);
     }
 
+    /// The account email scraped from this session's login transcript, if the
+    /// provider printed one.
+    ///
+    /// Read *before* `finish_success`, which consumes the session — the
+    /// account is persisted first (`identity_auth_spawn`) and needs the email
+    /// at that point to record it on the account
+    /// (`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md`). `None` when the
+    /// provider reported no email, which is not an error: providers whose CLI
+    /// does not surface one simply have no email to show.
+    pub fn captured_email(&self, session_id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .and_then(|s| s.captured_email.clone())
+    }
+
     /// Read the full transcript of captured stdout/stderr lines.
     /// Used by integration tests; exposed for completeness even
     /// though no production caller currently reads it.
