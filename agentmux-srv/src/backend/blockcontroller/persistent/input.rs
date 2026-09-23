@@ -218,20 +218,29 @@ impl PersistentSubprocessController {
     }
 
     /// Whether a deferred message must keep waiting rather than be written
-    /// now. The ONE definition shared by the idle fast path and the watchdog,
-    /// so the two can never disagree about what "idle" means.
-    ///
-    /// - a turn is running — writing now is the interrupt this exists to stop;
-    /// - a spawn is in flight — its own seed message and drain go first, and
-    ///   `try_write_stdin_locked` would refuse anyway;
-    /// - a stale-resume retry batch is being replayed (`drain_claim`) — those
-    ///   messages were accepted earlier and must not be overtaken;
-    /// - human messages are queued behind a spawn — same ordering reason.
+    /// now: a turn is running (writing now is the interrupt this exists to
+    /// stop), or another writer owns stdin — see
+    /// [`Self::stdin_owned_by_another_writer`]. Shared by the idle fast path
+    /// and the watchdog, so the two can never disagree about what "idle" means.
     pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
-        self.health_monitor.is_active_turn()
-            || inner.spawning_in_progress
-            || inner.drain_claim
-            || !inner.pending_send_messages.is_empty()
+        self.health_monitor.is_active_turn() || Self::stdin_owned_by_another_writer(inner)
+    }
+
+    /// Another writer is feeding stdin, and messages it carries were accepted
+    /// earlier than anything in the deferred queue, so they must not be
+    /// overtaken:
+    ///
+    /// - a spawn is in flight — its seed message and drain go first;
+    /// - a stale-resume retry batch is being replayed (`drain_claim`), possibly
+    ///   into this same live process by a background task writing to the same
+    ///   channel;
+    /// - human messages are queued behind a spawn.
+    ///
+    /// Checked inside [`Self::flush_one_deferred_locked`] itself, so EVERY
+    /// release path honours it, the turn-boundary flush included (reagent P1
+    /// on #3562: the boundary flush used to skip it).
+    fn stdin_owned_by_another_writer(inner: &PersistentInner) -> bool {
+        inner.spawning_in_progress || inner.drain_claim || !inner.pending_send_messages.is_empty()
     }
 
     /// Release at most ONE deferred message.
@@ -246,7 +255,9 @@ impl PersistentSubprocessController {
     /// on [`DeferredFlush::Released`] — the released message just started a
     /// turn. A failed write leaves the queue intact; it is reported as
     /// [`DeferredFlush::Failed`], distinct from an empty queue, because the
-    /// caller must arrange a retry for it rather than treat it as idle.
+    /// caller must arrange a retry for it rather than treat it as idle. The
+    /// same holds for [`DeferredFlush::Held`], returned without writing when
+    /// another writer owns stdin.
     pub(super) fn flush_one_deferred_locked(
         inner: &mut PersistentInner,
         block_id: &str,
@@ -254,6 +265,9 @@ impl PersistentSubprocessController {
         let Some(head) = inner.deferred_deliveries.front().cloned() else {
             return DeferredFlush::Empty;
         };
+        if Self::stdin_owned_by_another_writer(inner) {
+            return DeferredFlush::Held;
+        }
         match Self::try_write_stdin_locked(inner, &head) {
             Ok(()) => {
                 inner.deferred_deliveries.pop_front();
@@ -350,8 +364,10 @@ impl PersistentSubprocessController {
                 match Self::flush_one_deferred_locked(&mut inner, &self.block_id) {
                     // Flip inside the lock, exactly as the idle fast path does.
                     DeferredFlush::Released(line) => (Some((line, self.mark_turn_active_locked())), Vec::new()),
-                    // Transient; the next tick tries again.
-                    DeferredFlush::Failed => return WatchdogStep::Continue,
+                    // Transient; the next tick tries again. (`Held` can't
+                    // happen here — `deferred_must_wait_locked` above already
+                    // returned — but it means the same thing if it did.)
+                    DeferredFlush::Failed | DeferredFlush::Held => return WatchdogStep::Continue,
                     DeferredFlush::Empty => unreachable!("checked non-empty under this same lock"),
                 }
             }

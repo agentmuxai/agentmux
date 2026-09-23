@@ -851,13 +851,15 @@ pub(super) const DEFERRED_WATCHDOG_TICK: std::time::Duration = std::time::Durati
 pub(super) const DEFERRED_ORPHAN_GRACE_TICKS: u32 = 20;
 
 /// Outcome of [`PersistentSubprocessController::flush_one_deferred_locked`].
-/// `Empty` and `Failed` both write nothing, but they are not the same:
-/// `Empty` lets the turn go idle, `Failed` still has an accepted message
-/// waiting and needs a retry (codex P1 on #3562).
+/// `Empty`, `Held` and `Failed` all write nothing, but they are not the same:
+/// `Empty` lets the turn go idle, while `Held` (another writer owns stdin) and
+/// `Failed` (the write itself failed) still have an accepted message waiting
+/// and need the watchdog to finish it (codex + reagent P1s on #3562).
 #[derive(Debug, PartialEq)]
 pub(super) enum DeferredFlush {
     Empty,
     Released(String),
+    Held,
     Failed,
 }
 
