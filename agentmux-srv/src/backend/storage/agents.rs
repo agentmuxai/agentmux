@@ -2320,9 +2320,11 @@ impl Store {
     /// whose latest launch is on this block and still active, which is what
     /// a block from before the block meta carried `agentId` needs.
     ///
-    /// We deliberately do NOT consult `block.meta.agentInstanceId`: codex
-    /// P1 on PR #1114 round 3 surfaced that pane reuse can leave a stale
-    /// one behind.
+    /// `block.meta.agentInstanceId` never *selects* a row: codex P1 on PR
+    /// #1114 round 3 surfaced that pane reuse can leave a stale one behind.
+    /// It only *narrows* the fallback for a block whose `agentId` names no
+    /// agent row, so a deleted launch is not replaced by a sibling's stale
+    /// row (see the fallback below).
     pub fn instance_get_active_for_block(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let block: crate::backend::obj::Block = match self.get(block_id)? {
             Some(b) => b,
@@ -2350,32 +2352,35 @@ impl Store {
                 Err(rusqlite::Error::QueryReturnedNoRows) => {}
                 Err(e) => return Err(e.into()),
             }
-            // The block names something that is not an agent row. Only a
-            // template may fall back — a template launch or continuation
-            // finds the row it created or folded into — and only to a row
-            // launched from that template. A block naming a deleted agent
-            // (its pane survived the delete) or a provider key resolves to
-            // nothing: row status is never corrected when a pane is
-            // switched or a process exits, so the latest launch on the block
-            // can be another agent's stale `running` row, and resolving to
-            // it handed the pane that agent's UID, token, slug and provider
-            // credentials.
-            let is_template: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1 AND is_template = 1)",
-                params![agent_id],
-                |r| r.get(0),
-            )?;
-            if !is_template {
-                return Ok(None);
-            }
+            // The block names something that is not an agent row: a
+            // template (a template launch or continuation finds the row it
+            // created or folded into this way), a template since removed
+            // from the manifest (its launched agents are kept, and their
+            // blocks still name it), a deleted agent whose pane survived, or
+            // a provider key. Fall back only to a row *launched from* what
+            // the block names (`parent_template_id`), and — when the frontend
+            // has stamped the launched row (`agentInstanceId`) — only to that
+            // row. Row status is never corrected when a pane is switched or
+            // a process exits, so the latest launch on the block can be
+            // another agent's stale `running` row, including a sibling
+            // launched from the same template; resolving to it handed the
+            // pane that agent's UID, token, slug and provider credentials.
+            // A stamped row that no longer exists resolves to nothing.
+            let stamped = block
+                .meta
+                .get("agentInstanceId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string();
             let mut stmt = conn.prepare(&format!(
                 "SELECT {INSTANCE_COLUMNS} FROM db_agents
                  WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
-                   AND parent_template_id = ?2
+                   AND parent_template_id = ?2 AND (?3 = '' OR id = ?3)
                  ORDER BY updated_at DESC
                  LIMIT 1"
             ))?;
-            return match stmt.query_row(params![block_id, agent_id], map_instance_row) {
+            return match stmt.query_row(params![block_id, agent_id, stamped], map_instance_row) {
                 Ok(a) => Ok(Some(a)),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(e.into()),
