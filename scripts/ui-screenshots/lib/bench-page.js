@@ -209,6 +209,42 @@
 
     // ── Measurement window ───────────────────────────────────────────────────
 
+    /** One long animation frame, with its scripts attributed (the spec's
+     *  Phase 0 "LoAF with script attribution"). */
+    const shortUrl = (u) =>
+        String(u || "")
+            .replace(/^.*\/(node_modules\/\.vite\/deps|frontend)\//, "$1/")
+            .split("?")[0]
+            .slice(-60);
+    const loafEntry = (e) => ({
+        dur: e.duration,
+        blocking: e.blockingDuration,
+        forcedLayout: (e.scripts || []).reduce((a, s) => a + s.forcedStyleAndLayoutDuration, 0),
+        render: e.renderStart ? e.startTime + e.duration - e.renderStart : 0,
+        styleLayout: e.styleAndLayoutStart ? e.startTime + e.duration - e.styleAndLayoutStart : 0,
+        scripts: (e.scripts || []).map((sc) => ({
+            key: `${sc.invokerType || "?"}:${String(sc.invoker || "").slice(0, 50)} | ${String(sc.sourceFunctionName || "").slice(0, 40)} @ ${shortUrl(sc.sourceURL)}`,
+            dur: sc.duration,
+            fl: sc.forcedStyleAndLayoutDuration,
+        })),
+    });
+    /** Scripts ranked by their total time inside long frames. */
+    const topScripts = (loafs, n = 12) => {
+        const by = new Map();
+        for (const l of loafs)
+            for (const sc of l.scripts) {
+                const v = by.get(sc.key) || { key: sc.key, count: 0, ms: 0, forcedLayoutMs: 0 };
+                v.count++;
+                v.ms += sc.dur;
+                v.forcedLayoutMs += sc.fl;
+                by.set(sc.key, v);
+            }
+        return [...by.values()]
+            .sort((a, b) => b.ms - a.ms)
+            .slice(0, n)
+            .map((v) => ({ ...v, ms: +v.ms.toFixed(1), forcedLayoutMs: +v.forcedLayoutMs.toFixed(1) }));
+    };
+
     F.startWindow = ({ streamKb, secs }) => {
         if (document.visibilityState !== "visible")
             throw new Error(`page is ${document.visibilityState} at window start`);
@@ -224,12 +260,7 @@
         F.visibility.hiddenDuring = false;
         W.po = new PerformanceObserver((l) => {
             for (const e of l.getEntries()) {
-                W.loafs.push({
-                    dur: e.duration,
-                    blocking: e.blockingDuration,
-                    forcedLayout: (e.scripts || []).reduce((a, s) => a + s.forcedStyleAndLayoutDuration, 0),
-                    render: e.renderStart ? e.startTime + e.duration - e.renderStart : 0,
-                });
+                W.loafs.push(loafEntry(e));
             }
         });
         W.po.observe({ type: "long-animation-frame" });
@@ -296,13 +327,7 @@
         await W.done;
         await nextFrames(3);
         W.raf = false;
-        for (const e of W.po.takeRecords())
-            W.loafs.push({
-                dur: e.duration,
-                blocking: e.blockingDuration,
-                forcedLayout: (e.scripts || []).reduce((a, s) => a + s.forcedStyleAndLayoutDuration, 0),
-                render: e.renderStart ? e.startTime + e.duration - e.renderStart : 0,
-            });
+        for (const e of W.po.takeRecords()) W.loafs.push(loafEntry(e));
         for (const e of W.eo.takeRecords()) if (e.name === "keydown") W.events.push(e.duration);
         W.po.disconnect();
         W.eo.disconnect();
@@ -331,6 +356,9 @@
                 blockingMs: sum(W.loafs.map((l) => l.blocking)),
                 forcedLayoutMs: sum(W.loafs.map((l) => l.forcedLayout)),
                 renderMs: sum(W.loafs.map((l) => l.render)),
+                styleLayoutMs: sum(W.loafs.map((l) => l.styleLayout)),
+                scriptMs: sum(W.loafs.map((l) => l.scripts.reduce((a, sc) => a + sc.dur, 0))),
+                topScripts: topScripts(W.loafs),
                 maxMs: W.loafs.length ? +Math.max(...W.loafs.map((l) => l.dur)).toFixed(1) : 0,
             },
             keyToPaintMs: W.keydowns
