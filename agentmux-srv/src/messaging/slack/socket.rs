@@ -516,7 +516,6 @@ fn route_event(
         source_agent: Some("slack".to_string()),
         request_id: event.ts.clone(),
         priority: None,
-        wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,

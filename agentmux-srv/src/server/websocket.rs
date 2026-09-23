@@ -585,7 +585,6 @@ async fn handle_incoming_text(
                         source_agent: Some(from.to_string()),
                         request_id: None,
                         priority: incoming.priority.clone(),
-                        wait_for_idle: false,
                         jekt_tier: None,   // auto-detected from keywords
                         delivery_tier: Some("host".to_string()),
                         forward_hops: 0,
