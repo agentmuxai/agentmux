@@ -994,11 +994,26 @@ changes two things at once.
   carries the UID, and hands an ambiguous name back to the model with the
   candidates (§5.2). A cron job with a captured UID fires by UID; a
   UID-addressed work item is claimable by that identity under any display
-  name. `m0035` backfills the two UID columns where a name resolves to
-  exactly one row in the channel. Decisions and deviations, recorded:
-  - **Rewrite, not drain** (§12's open question): a rewritten row keeps
-    working under both keys; a drained one is work a human loses.
-    Ambiguous and unknown names are left empty and counted.
+  name. Decisions and deviations, recorded:
+  - **No backfill — neither rewrite nor drain** (§12's open question,
+    answered a third way). The queue and cron tables are global and carry
+    no channel column, while a name can only be resolved against one
+    channel's `db_agents`; a channel-scoped backfill would bind a row to
+    whichever channel happened to run first and had a same-named agent —
+    and once bound, the UID path delivers there even after a rename
+    (ReAgent P1 on #3563; the first cut of this phase shipped exactly that
+    migration and was reviewed out). Pre-M3 rows keep resolving by name
+    through the name paths that stay until M5, counted, and age out as
+    they complete; new rows carry a UID from the boundary. Nothing is
+    guessed and nothing is lost.
+  - **A UID-addressed item is claimable by that identity only** — the name
+    branch of the claim predicate applies to rows with no UID, never as a
+    second way into a UID-addressed one (ReAgent P1 on #3563: the first
+    cut let an exact same-name claimer through, and its test had dodged
+    that case with a different-case name). A claimer that registered
+    name-only before its row existed is therefore locked out of its own
+    UID-targeted work until it carries the UID; recorded, and the first
+    Register-tail after its row exists resolves it.
   - **A fourth variant, `Unidentified`.** A live block with no `db_agents`
     row exists and is reachable by name; returning `None` would say it does
     not. The spec's three-variant enum did not account for M0's finding.
@@ -1006,9 +1021,9 @@ changes two things at once.
     display names case-insensitively where §1.1 showed a picking resolver
     must not: one match resolves, a collision is refused with candidates,
     nothing is misrouted.
-  - **Name paths stay** in the claim predicate and the cron fire until M5,
-    counted (`cron.fire_by_name`), so a claimer or target with no UID is
-    not locked out.
+  - **Name paths stay** for rows with no UID in the claim predicate and in
+    the cron fire until M5, counted (`cron.fire_by_name`), so a name-only
+    row or target still works.
 - **M4 — Proven identity.** Per-agent token; authz reads connection identity;
   body `agent_id` demoted to untrusted. Closes #3501.
 - **M5 — Remove the scaffolding.** Delete slug fallbacks, delete

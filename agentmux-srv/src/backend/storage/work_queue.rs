@@ -227,12 +227,16 @@ impl Store {
                        -- an infinite claim/release loop.
                        AND attempts < max_attempts
                        AND (not_before IS NULL OR not_before <= ?3)
-                       -- Identity M3: an item may be addressed by UID (M1b
-                       -- dual-write, M3 boundary resolution). The name path
-                       -- stays until M5 so a claimer with no UID (PTY pane,
-                       -- quick-launch) is not locked out of name-targeted work.
-                       AND (target_agent = '' OR target_agent = ?1
-                            OR (target_agent_uid <> '' AND target_agent_uid = ?5))
+                       -- Identity M3: an item that carries a target UID is
+                       -- claimable by that identity ONLY — never by a
+                       -- same-named other (ReAgent P1 on PR #3563: the name
+                       -- branch must not short-circuit a UID-addressed item).
+                       -- Items with no UID (pre-M1b rows, names that did not
+                       -- resolve) keep the name path until M5, so a claimer
+                       -- with no UID is not locked out of name-targeted work.
+                       AND ((target_agent_uid <> '' AND target_agent_uid = ?5)
+                            OR (target_agent_uid = ''
+                                AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
                      ORDER BY priority DESC, created_at ASC
@@ -534,15 +538,28 @@ mod tests {
         w.target_agent_uid = "4f3c-a91".into();
         s.work_queue_enqueue(&w).unwrap();
 
-        // Same display name, different identity: not eligible by uid, and
-        // its name "AGENTY" does not equal the stored "AgentY" either.
+        // The EXACT same display name, different identity: not eligible.
+        // The name branch must not short-circuit a UID-addressed item
+        // (ReAgent P1 on #3563 — an earlier version of this test used a
+        // different-case name, which dodged the case-sensitive `=`).
         let impostor = ClaimFilter {
             kind: None,
-            agent_id: "AGENTY".into(),
+            agent_id: "AgentY".into(),
             agent_uid: "9b2e-7d4".into(),
             groups: vec![],
         };
         assert!(s.work_queue_claim(&impostor, 2000, 60_000).unwrap().is_none());
+        // The exact name with NO uid at all is not enough either: a
+        // UID-addressed item is claimable by identity only. (A claimer that
+        // registered name-only before its row existed is locked out of its
+        // own UID-targeted work until it carries the UID — recorded.)
+        let nameless = ClaimFilter {
+            kind: None,
+            agent_id: "AgentY".into(),
+            agent_uid: String::new(),
+            groups: vec![],
+        };
+        assert!(s.work_queue_claim(&nameless, 2000, 60_000).unwrap().is_none());
 
         // The right identity under a NEW display name still claims it.
         let renamed = ClaimFilter {

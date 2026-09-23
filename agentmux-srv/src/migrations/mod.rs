@@ -79,7 +79,6 @@ mod m0031_carry_skills_and_mcp_servers_to_identity_store;
 mod m0032_drop_catalog_fk_from_ref_tables;
 mod m0033_narrow_skill_global_uniqueness_index;
 mod m0034_identity_history_backfill;
-mod m0035_backfill_uid_columns_from_names;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;
@@ -251,5 +250,4 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0032_drop_catalog_fk_from_ref_tables::M0032DropCatalogFkFromRefTables,
     &m0033_narrow_skill_global_uniqueness_index::M0033NarrowSkillGlobalUniquenessIndex,
     &m0034_identity_history_backfill::M0034IdentityHistoryBackfill,
-    &m0035_backfill_uid_columns_from_names::M0035BackfillUidColumnsFromNames,
 ];
