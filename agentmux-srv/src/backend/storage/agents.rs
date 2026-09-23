@@ -2370,7 +2370,11 @@ impl Store {
             // migration repointed launch rows' `parent_template_id` from the
             // seeded template to its promoted clone (itself launched from
             // the template), while pre-migration blocks still name the
-            // template (Codex P1 on #3576).
+            // template (Codex P1 on #3576). Neither the row nor the hop may
+            // be a fork: `forkagentdefinition` also stores its source in
+            // `parent_template_id`, and `branch_label` (always set on a
+            // fork, never on a template launch) is what tells them apart
+            // (`template.rs`; Codex P1 on #3576).
             let stamped = block
                 .meta
                 .get("agentInstanceId")
@@ -2381,9 +2385,11 @@ impl Store {
             let mut stmt = conn.prepare(&format!(
                 "SELECT {INSTANCE_COLUMNS} FROM db_agents
                  WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
+                   AND branch_label = ''
                    AND (parent_template_id = ?2
                         OR parent_template_id IN (
-                            SELECT id FROM db_agents WHERE parent_template_id = ?2 AND is_template = 0))
+                            SELECT id FROM db_agents
+                            WHERE parent_template_id = ?2 AND is_template = 0 AND branch_label = ''))
                    AND (?3 = '' OR id = ?3)
                  ORDER BY updated_at DESC
                  LIMIT 1"
