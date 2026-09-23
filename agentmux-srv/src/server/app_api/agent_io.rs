@@ -117,6 +117,41 @@ fn register_agent_kill_tree(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+/// The environment an `agent.send` spawn is given: `cmd:env` through
+/// `build_persistent_spawn_env`, exactly as the `agentinput` path builds it
+/// — identity gate, MuxBus token, wrapper auth, agent identity (UID + token
+/// for a row-backed block, `AGENTMUX_AGENT_ID` from `agentName` when
+/// `cmd:env` lacks it), git identity, tools PATH. Identity M4b-1 (spec
+/// §6.5.8); factored out so the carriage is testable.
+pub(crate) async fn agent_send_spawn_env(
+    mstore: Arc<crate::backend::storage::store::Store>,
+    id_store: Arc<crate::backend::storage::store::Store>,
+    identity_store: Arc<crate::backend::storage::store::Store>,
+    broker: Option<Arc<crate::backend::mps::Broker>>,
+    block: &Block,
+    block_id: &str,
+    auth_key: &str,
+) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
+    let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
+        Some(serde_json::Value::Object(obj)) => obj
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    };
+    crate::server::agent_handlers::input::build_persistent_spawn_env(
+        mstore,
+        id_store,
+        identity_store,
+        broker,
+        &block.meta,
+        block_id,
+        auth_key,
+        env_vars,
+    )
+    .await
+}
+
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
@@ -128,6 +163,9 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // EVENT_AGENT_FAILURE for a pre-spawn identity gate refusal — see the
     // same fix in agent_handlers/input.rs's agentinput handler.
     let event_bus = state.event_bus.clone();
+    // Identity M4b-1: `build_persistent_spawn_env` re-injects the wrapper's
+    // auth key, as `agentinput` does.
+    let auth_key = state.auth_key.clone();
 
     engine.register_handler(
         COMMAND_AGENT_SEND,
@@ -139,6 +177,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let container_manager = container_manager.clone();
             let filestore = filestore.clone();
             let event_bus = event_bus.clone();
+            let auth_key = auth_key.clone();
             Box::pin(async move {
                 let cmd: CommandAgentSendData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.send: {e}"))?;
@@ -163,31 +202,19 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     _ => vec![],
                 };
                 let working_dir = obj::meta_get_string(&block.meta, "cmd:cwd", "");
-                let mut env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
-                    Some(serde_json::Value::Object(obj)) => obj
-                        .iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect(),
-                    _ => std::collections::HashMap::new(),
-                };
-                // Identity injection — same path as the `agentinput`
-                // handler. See identity/resolver.rs. Passes
-                // the broker so the OAuth-class branch can publish a
-                // `identitybundlebindings:changed:<bundle_id>` event
-                // when the expiry probe updates an account's status
-                // (PR D — spec §4.4). Oauth-class resolution failures are
-                // BLOCKING unless the agent opted into ambient login
-                // (layer-3 spawn gate, SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4
-                // _2026_07_14.md §2.2): surface the error in the agent pane
-                // via the `error_during_execution` frame (rendered as an
-                // agent_error node) and abort before the CLI is created.
-                env_vars = match crate::identity::resolver::inject_identity_env_async(
+                // Identity M4b-1 (spec §6.5.8): the same env builder as
+                // `agentinput`, so a row-backed block's process carries its
+                // UID + token — and the wrapper auth, MuxBus, identity and
+                // PATH vars `agentinput` gives — instead of a hand copy that
+                // had only the identity gate. Same gate error, same arm below.
+                let mut env_vars = match agent_send_spawn_env(
                     mstore.clone(),
                     id_store.clone(),
                     identity_store.clone(),
                     Some(broker.clone()),
-                    cmd.block_id.clone(),
-                    env_vars,
+                    &block,
+                    &cmd.block_id,
+                    &auth_key,
                 )
                 .await
                 {
@@ -629,4 +656,104 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::agents::test_agent_def;
+    use crate::backend::storage::store::Store;
+
+    fn block_with(store: &Store, block_id: &str, agent_id: &str) -> Block {
+        let mut block = Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(agent_id));
+                m.insert("agentName".to_string(), serde_json::json!("AgentY"));
+                m.insert("cmd:env".to_string(), serde_json::json!({"KEEP_ME": "1"}));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        block
+    }
+
+    async fn env_for(
+        store: &Arc<Store>,
+        block: &Block,
+    ) -> std::collections::HashMap<String, String> {
+        agent_send_spawn_env(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            None,
+            block,
+            &block.oid,
+            "test-key",
+        )
+        .await
+        .expect("no spawn gate for a provider without credentials")
+    }
+
+    /// Identity M4b-1 (spec §6.5.8): an `agent.send` spawn on a row-backed
+    /// block carries that row's UID and its own token — the env
+    /// `agentinput` builds — plus the block's `cmd:env` and the wrapper
+    /// auth key. Before M4b-1 it got `cmd:env` + identity injection only.
+    #[tokio::test]
+    async fn an_agent_send_spawn_carries_the_rows_uid_and_token() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store.apply_identity_schema_for_tests().unwrap();
+        // A provider with no credential class, so the spawn gate (which
+        // refuses an OAuth-class agent with no bound account) stays out of
+        // a test about identity carriage.
+        let mut def = test_agent_def(
+            "uid-send-y",
+            "AgentY",
+            "test-no-credentials",
+            "agent",
+            1,
+            "",
+        );
+        def.slug = "agenty".to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        let block = block_with(&store, "block-send-y", "uid-send-y");
+
+        let env = env_for(&store, &block).await;
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_UID").map(String::as_str),
+            Some("uid-send-y")
+        );
+        let token = store
+            .agent_token_load("uid-send-y")
+            .unwrap()
+            .expect("minted");
+        assert_eq!(env.get("AGENTMUX_AGENT_TOKEN"), Some(&token));
+        assert_eq!(
+            env.get("KEEP_ME").map(String::as_str),
+            Some("1"),
+            "cmd:env kept"
+        );
+        assert_eq!(
+            env.get("AGENTMUX_AUTH_KEY").map(String::as_str),
+            Some("test-key")
+        );
+    }
+
+    /// A block with no row (a provider-key pane) gets neither.
+    #[tokio::test]
+    async fn an_agent_send_spawn_without_a_row_carries_no_uid_or_token() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store.apply_identity_schema_for_tests().unwrap();
+        let block = block_with(&store, "block-send-none", "claude");
+        let env = env_for(&store, &block).await;
+        assert!(!env.contains_key("AGENTMUX_AGENT_UID"));
+        assert!(!env.contains_key("AGENTMUX_AGENT_TOKEN"));
+    }
 }
