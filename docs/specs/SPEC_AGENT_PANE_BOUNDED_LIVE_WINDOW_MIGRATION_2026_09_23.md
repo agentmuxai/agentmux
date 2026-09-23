@@ -255,8 +255,8 @@ applicable) a CI guardrail.
 7. **Input first.** No stream-driven task runs longer than the scheduler's
    slice while input is pending.
 8. **Stable identity.** A node's id is a function of its source position and
-   file generation only; any parser instance, from any clean boundary, gives
-   the same content the same id (§6.3.1).
+   file generation only; any parser instance, restored from any checkpoint,
+   gives the same content the same id and turn ordinal (§6.3.1).
 9. **No resurrection.** A source line outside the pane's accepted ranges and at
    or below its high-water mark never re-enters the live pane, whatever replays
    it; ranges are per generation (§6.3.3).
@@ -394,10 +394,35 @@ reusing one, and a reparse of everything is O(history).
   (count of turn-starting `user_message` records before it in this
   generation), assigned by the parser from source position, so it is the same
   in every parser instance.
-- The parser exposes `atBoundary()`: true when no text, thinking or tool
-  accumulator is open. Lines where it is true are **clean boundaries**; parsing
-  may start at any clean boundary and produce the same ids and nodes as a parse
-  from line 0.
+- **Parser checkpoints, not "clean boundaries"** (Codex review, fourth round).
+  A boundary guessed from a few accumulators is not safe: the parser also holds
+  pending tool calls and their timestamps, the current agent id, the replay
+  flag and `hidingUntilNextUserMessage` (set after a hidden memory-reinjection
+  message, `stream-parser.ts:224`), and the per-provider translator in front
+  of it (`createTranslator(outputFormat)`) can hold state too. A parser started
+  fresh mid-transcript loses all of that, and cannot know the turn ordinal.
+  So the whole line-to-node pipeline (translator + parser) gets
+  `checkpoint()` → a versioned, serializable snapshot of **every** field that
+  affects output, including the turn ordinal, and `restore(checkpoint)`.
+  - The live pane records a checkpoint at every turn start
+    (`{ gen, line, turn, state }`) as it consumes the transcript, and persists
+    them per block (`parser-checkpoints.jsonl`, written through a new
+    append-only block-file RPC).
+  - Any range parse — an older page, the History tab's tail recovery, a range
+    read into the detached window — restores the nearest checkpoint at or
+    before its first line and parses forward from there: identical ids, nodes
+    and turn ordinals to a parse from line 0, at a cost of at most one turn of
+    extra parsing.
+  - A transcript with no checkpoints (written before this ships, or the file
+    lost) gets its index rebuilt once by a full parse in housekeeping slices
+    (§6.5), then cached; until it exists, range reads fall back to today's
+    reparse-from-start behaviour, correct but slower.
+  - Completeness is enforced by tests, not by care: the parser keeps all
+    output-affecting state in one object whose keys a test compares with the
+    checkpoint schema (adding a field without serializing it fails CI), and a
+    property test parses real and synthetic transcripts (including hidden
+    reinjection, tools spanning a turn edge and every provider format) from
+    line 0 and from every checkpoint, requiring identical output.
 - `skipIds` is removed once ids are positional: two parsers can no longer mint
   the same id for different content.
 - **Migration:** node ids are keys in the layout store (heights, expansion),
@@ -558,10 +583,11 @@ transcript file. What's missing is the History tab showing **new** output.
 - **Hidden or dormant tab:** record only that the doorbell rang. On reveal, one
   range read from the last known count to the current one, through the same
   tail parser.
-- **Tail parser lost** (tab remounted, parser error): restart it at the most
-  recent clean boundary (§6.3.1) at or before the last line read — at most one
+- **Tail parser lost** (tab remounted, parser error): restore the most recent
+  parser checkpoint (§6.3.1) at or before the last line read — at most one
   turn of reparse — and upsert. Positional ids make the overlap idempotent.
-- **Older pages** use their own parser started at a clean boundary; with
+- **Older pages** use their own parser restored from the nearest checkpoint;
+  with
   positional ids, pages loaded in any order no longer collide, which retires
   the "reparse all loaded lines per page" workaround.
 - **Closed tab:** nothing; it loads fresh on open.
@@ -692,7 +718,7 @@ Every phase:
 | **2 — Scheduler (E)** | §6.5 | key→paint targets met at N=0 with 4 panes streaming; starvation guard verified; no stream content lost (byte-for-byte transcript vs rendered comparison) |
 | **3 — Turn-scoped tail (B)** | §6.2 | Tail DOM independent of N; replaceChild crash repro suite and streaming-buffer tests green; zero invariant-1/3 assertions in soak; frame-by-frame screen recording shows no movement at turn end |
 | **4 — O(log n) stores (D)** | §6.6 | Property tests: 100k random sequences per run in CI, 10M locally, 0 divergences; reducer bench flat from 1k to 100k nodes |
-| **5 — Node identity and durability (C prerequisites)** | §6.3.1–§6.3.3: positional ids with file generation, `src`, `atBoundary()`, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range from any clean boundary, in any page order, yields the same ids and nodes as a parse from line 0 (100k random splits per CI run); replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
+| **5 — Node identity and durability (C prerequisites)** | §6.3.1–§6.3.3: positional ids with file generation, `src`/`endLine`/`turn`, full-pipeline parser checkpoints + `parser-checkpoints.jsonl` + one-time index rebuild, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range restored from any checkpoint, in any page order, yields the same ids, nodes and turn ordinals as a parse from line 0 (100k random splits per CI run, every provider format, hidden reinjection included); the checkpoint-schema key test is in CI; replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
 | **6 — Bounded live document (C)** | §6.3.4–§6.3.5 | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
 | **7 — History tab follows (C)** | §6.4 | Visible tab shows new turns ≤ 1 s after turn end; appends cost O(new lines) (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
 | **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
@@ -735,7 +761,8 @@ provenance either loses data or resurrects it.
 - Shells and optimistic messages: never evicted before their journal (or echo)
   line is durable; visible in the History tab afterwards.
 - History tab's tail parser discarded mid-run (remount, injected error):
-  recovery from the last clean boundary, no duplicates, no split runs.
+  recovery from the last checkpoint, no duplicates, no split runs, and no
+  hidden reinjection reply shown.
 - A multi-record node (long text run; shell with many chunks) completed live
   while its later records are not yet on disk: not evicted until `endLine` /
   `journalEnd` is covered; afterwards the History tab shows all of it.
