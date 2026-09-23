@@ -2382,6 +2382,33 @@ impl Store {
                 .map(str::trim)
                 .unwrap_or("")
                 .to_string();
+            if !stamped.is_empty() {
+                // The stamp is the frontend's own record of the row it
+                // launched on this block — stronger evidence than lineage,
+                // which migrations and deletions rewrite (a removed
+                // template, a promoted clone deleted after the repoint).
+                // Accepted only while it is still the block's latest launch
+                // (by `started_at`, which only a launch or fold moves): a
+                // stale stamp left by pane reuse, with a newer launch since
+                // folded onto the block, resolves to nothing rather than to
+                // the older row. Never a fork: a fork is launched under its
+                // own row id, so a fork reached here is a stale stamp.
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {INSTANCE_COLUMNS} FROM db_agents a
+                     WHERE a.id = ?2 AND a.last_block_id = ?1 AND a.is_template = 0
+                       AND a.status IN ('running', 'paused') AND a.branch_label = ''
+                       AND NOT EXISTS (
+                           SELECT 1 FROM db_agents b
+                           WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
+                             AND b.status IN ('running', 'paused') AND b.started_at > a.started_at)"
+                ))?;
+                return match stmt.query_row(params![block_id, stamped], map_instance_row) {
+                    Ok(a) => Ok(Some(a)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e.into()),
+                };
+            }
+            // Unstamped (a block from before `agentInstanceId`): lineage.
             let mut stmt = conn.prepare(&format!(
                 "SELECT {INSTANCE_COLUMNS} FROM db_agents
                  WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
@@ -2390,11 +2417,10 @@ impl Store {
                         OR parent_template_id IN (
                             SELECT id FROM db_agents
                             WHERE parent_template_id = ?2 AND is_template = 0 AND branch_label = ''))
-                   AND (?3 = '' OR id = ?3)
                  ORDER BY updated_at DESC
                  LIMIT 1"
             ))?;
-            return match stmt.query_row(params![block_id, agent_id, stamped], map_instance_row) {
+            return match stmt.query_row(params![block_id, agent_id], map_instance_row) {
                 Ok(a) => Ok(Some(a)),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(e.into()),
