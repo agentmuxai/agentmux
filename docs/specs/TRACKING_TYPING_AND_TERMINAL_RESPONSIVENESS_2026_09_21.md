@@ -1,6 +1,6 @@
 # TRACKING — Typing & terminal input responsiveness
 
-**Date:** 2026-09-21
+**Date:** 2026-09-21 (reviewed 2026-09-22 — no drift found; two Phase-0 audits folded in, see §2.1/§3)
 **Type:** Tracking doc — canonical location for this problem family. Not a design spec.
 **Status:** Living — a continuously maintained tracking reference with no terminal state. Update it when anything below changes.
 **Owner prompt (paraphrased, 2026-09-21):** silky-smooth typing in the agent pane and terminal, under heavy DOM/output processing, was achieved once — has it reverted? What's the current state?
@@ -27,7 +27,11 @@ one continuous regression from the outside:
 
 1. The **agent-pane composer + streaming-markdown** path (the original
    "silky typing" win, April–May) is solid and unregressed — verified in code,
-   not just docs, this session.
+   not just docs, this session. So is **predictive local echo** (#1223,
+   2026-06-01) — a separate shipped win this doc's 09-21 draft omitted entirely,
+   added 2026-09-22 (§2.1). It's easy to miss because the same Discussion
+   #1161 thread that shipped it one day later still reads, out of context, like
+   it *rejected* predictive echo — see the correction in §2.2.
 2. A **terminal fix that was designed and formally decided** ("Decision:
    proceed with flow control" — Discussion #1161, 2026-05-30) **was never
    implemented.** `SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md` is still
@@ -61,12 +65,15 @@ exists to do it (`tools/tests/pane-load.mjs`, merged 09-17 as #3286).
 | Per-pane fair egress dequeue (`fair_drain_priority`/`priority_pane_key`) — the 09-04 cross-pane fix | #2973 — confirmed intact, no commit touching `websocket.rs` since has changed this machinery (diffed all 8) |
 | `pane-load.mjs` — on-demand realistic PTY load repro (bulk text / escape-heavy repaint / many-tiny-writes), the tool item 3 below depends on | #3286 |
 | In-memory `agent_lock` registry, replacing a blocking `Store` (SQLite) read on the `controllerinput`/`PtyShellInput` path | #3249 (09-15 report, at corrected scope — see §2.3) |
+| Phase 0.2 — keydown-path synchronous-IPC audit: baseline was already clean (no `await` IPC/async handlers on the keystroke path); CI guard added to keep it that way | `tools/lint/check-input-handler-sync-ipc.sh` + `.github/workflows/input-handler-sync-ipc.yml` |
+| Phase 0.3 — `backdrop-filter: blur` audit: only one always-mounted blur exists over a typed-into pane (`.block-mask`, 0.1px — layer-promotion only, not real blur cost); everything else is `<Show>`-gated or gesture-transient. Verdict: cleared, no code change warranted | analysis-only, no PR |
+| **Predictive local echo** — paints a just-typed printable character in the keydown frame, reconciles byte-exact against the authoritative PTY echo; observational arming means it never predicts without a confirmed echo first (no password-prompt flash). **Un-shelves and explicitly supersedes** the 2026-05-30 "rejected" call in §2.2 below, one day later, once armed-observation + reconcile/rollback answered the security objection. On by default (`term:predictiveecho=false` to opt out). Verified: only 2 commits ever, last 2026-06-06, unmodified since | `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`, #1223 (merged 06-01), stall-cooldown fix #1242 (06-06) |
 
 ### 2.2 Decided but never built
 
 | Item | Status | Notes |
 |---|---|---|
-| **ACK-based PTY flow control** (`SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md`) | Draft, pre-implementation, unchanged since 2026-05-30 | Discussion #1161 made the explicit call to proceed over predictive/local echo (rejected: optimizes a round-trip that doesn't exist locally, and is a security hazard over password prompts). Gated on a profiling step (PLAN §7: "promote to an issue only if P95 keystroke echo > 100ms under sustained output") that was never run — until #3286 existed, nothing could drive the load needed to run it. |
+| **ACK-based PTY flow control** (`SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md`) | Draft, pre-implementation, unchanged since 2026-05-30 | Discussion #1161's 2026-05-30 update rejected predictive/local echo *at that point* (optimizes a round-trip that doesn't exist locally, security hazard over password prompts) in favor of flow control. **Correction (added 2026-09-22): predictive echo was un-shelved the very next day** — see the shipped row below; this flow-control item is the one that's still undelivered, not both. Gated on a profiling step (PLAN §7: "promote to an issue only if P95 keystroke echo > 100ms under sustained output") that was never run — until #3286 existed, nothing could drive the load needed to run it. |
 | Virtualization Phase 4 (hardening) | No PR | Issue #782 still open on this alone. |
 | `term.type` agent App API (issue #950 Phases 2–4) | Only Phase 1 equivalent (#951, seq-reorder-buffer) shipped | Different surface (terminal transport reliability / agent-side typing API), same umbrella. |
 | Terminal `targetFps` coalescer for non-input writes (PLAN §6) | Not promoted | Profiling-gated on a ≥10°C thermal delta; profiling never run. Lower priority than item 7 above. |
@@ -105,6 +112,9 @@ Nothing is deleted. Nothing below needed a status change beyond one file (§3.3)
 | `docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md` | the egress-fairness diagnosis + fix, intact |
 | `docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md` | the corrected re-diagnosis — read §2a before §1 |
 | `docs/analysis/ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md` | the streaming-markdown O(n²) root cause + the shipped (different-shaped) fix, #1213 |
+| `docs/analysis/ANALYSIS_KEYDOWN_IPC_AUDIT_2026_05_29.md` | Phase 0.2 — keydown dispatch sync-IPC audit (clean baseline, CI guard shipped) |
+| `docs/analysis/ANALYSIS_BLUR_AUDIT_INPUT_FIRST_2026_05_30.md` | Phase 0.3 — `backdrop-filter` audit over typed-into panes (cleared, no fix needed) |
+| `docs/specs/SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md` | the un-shelving design (its own §2 title: "Why this was shelved, and why we are un-shelving it") — shipped as #1223, still live |
 
 ### Superseded — banner + `Superseded-by:` added alongside this file
 | Doc | What's dead |

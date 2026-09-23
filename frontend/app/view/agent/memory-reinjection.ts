@@ -69,14 +69,38 @@ export function shouldReinject(entries: MemoryEntryInput[]): boolean {
 }
 
 /**
+ * Why this particular reinjection turn is firing — both are the same
+ * underlying situation from the model's perspective ("what I had in context
+ * is gone"), but the specifics differ enough to be worth telling the model:
+ * a compaction leaves a summary behind, a fresh session leaves nothing at
+ * all. See `composeReinjectionMessage`'s doc comment and
+ * SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3's
+ * "fresh session" addendum (§3.3a).
+ */
+export type ReinjectionReason = "compaction" | "fresh_session";
+
+const REASON_CLAUSE: Record<ReinjectionReason, string> = {
+    compaction: "Your recent conversation was just compacted into a summary.",
+    fresh_session:
+        "AgentMux could not resume this agent's prior session, so a fresh one was started — you have none of your prior conversation history, only what is below.",
+};
+
+/**
  * Builds the hidden message actually sent to the model — §3.1's template.
  * Every entry's FULL body is included verbatim; this function must never
  * truncate or summarize (the "has to read it all" requirement is the
  * entire point of this feature — a truncating implementation would silently
  * defeat it). A source section is omitted entirely when that source has
  * zero entries, rather than printing an empty "(0 entries)" header.
+ *
+ * `reason` only changes the second sentence (`REASON_CLAUSE`) — the leading
+ * `REINJECTION_SIGNATURE` sentence is identical regardless, since it is what
+ * both `isMemoryReinjectionMessage` (TypeScript) and `is_hidden_reinjection_
+ * text` (Rust, `agentmux-srv/src/server/app_api/session.rs`) key detection
+ * on; a per-reason signature would mean two strings to keep in sync on both
+ * sides instead of one.
  */
-export function composeReinjectionMessage(entries: MemoryEntryInput[]): string {
+export function composeReinjectionMessage(entries: MemoryEntryInput[], reason: ReinjectionReason): string {
     const globalEntries = entries.filter((e) => e.source === "global");
     const personalEntries = entries.filter((e) => e.source === "personal");
 
@@ -93,16 +117,16 @@ export function composeReinjectionMessage(entries: MemoryEntryInput[]): string {
 
     return (
         "<system-reminder>\n" +
-        "Your memory was reinjected after a context compaction. Below is your\n" +
+        `${REINJECTION_SIGNATURE} ${REASON_CLAUSE[reason]} Below is your\n` +
         "complete Global Memory and Personal Memory content — read all of it now,\n" +
-        "not just the index, since your recent working context was just summarized.\n\n" +
+        "not just the index.\n\n" +
         sections +
         "</system-reminder>\n"
     );
 }
 
-/** The literal intro line `composeReinjectionMessage` always emits — the recognition signature `isMemoryReinjectionMessage`/`parseReinjectionMessage` key on. */
-const REINJECTION_SIGNATURE = "Your memory was reinjected after a context compaction.";
+/** The literal sentence `composeReinjectionMessage` always emits regardless of `reason` — the recognition signature `isMemoryReinjectionMessage`/`parseReinjectionMessage`/Rust's `is_hidden_reinjection_text` key on. */
+const REINJECTION_SIGNATURE = "Your memory was reinjected because your working context was just reset.";
 
 /**
  * True if `text` is a message `composeReinjectionMessage` produced —

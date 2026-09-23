@@ -32,6 +32,33 @@ describe("evaluateRequiredJobs — the case #3506 exists to fix", () => {
         });
         expect(result.ok).toBe(true);
     });
+
+    // A docs-only PR skips rust and frontend, so `docs` is the ONLY gate left
+    // running — and it is not itself a branch-protection context. Until it was
+    // added to this job's `needs:`, nothing consumed its result and a red doc
+    // gate merged anyway. Observed live on #3510: a malformed spec Status
+    // header — precisely the content error that gate exists to catch — with
+    // `CI required` green and the PR approved twice.
+    it("fails a docs-only PR whose doc gate failed", () => {
+        const result = evaluateRequiredJobs({
+            changes: { result: "success" },
+            docs: { result: "failure" },
+            rust: { result: "skipped" },
+            frontend: { result: "skipped" },
+        });
+        expect(result.ok).toBe(false);
+        expect(result.failing).toEqual(["docs"]);
+    });
+
+    it("passes a docs-only PR whose doc gate succeeded", () => {
+        const result = evaluateRequiredJobs({
+            changes: { result: "success" },
+            docs: { result: "success" },
+            rust: { result: "skipped" },
+            frontend: { result: "skipped" },
+        });
+        expect(result.ok).toBe(true);
+    });
 });
 
 describe("evaluateRequiredJobs — real failures must still block", () => {

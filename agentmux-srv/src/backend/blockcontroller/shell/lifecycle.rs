@@ -28,7 +28,7 @@ use super::file_ops::handle_append_block_file;
 use super::pty::{
     detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_DRAIN_TIMEOUT,
     FLUSHER_EOF_GRACE, PTY_CHANNEL_CAPACITY,
-    PTY_COALESCE_MAX_BYTES, PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
+    PTY_COALESCE_MAX_BYTES, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
@@ -53,7 +53,7 @@ struct PtyReadChunk {
     /// `FLUSHER_DRAIN_TIMEOUT` (see its doc comment) even though the flusher
     /// itself had been idle for most of that second. A barrier asks the
     /// question actually being asked — "is prior output committed yet?" —
-    /// and is answered in about one `PTY_COALESCE_WINDOW`.
+    /// and is answered as soon as the batch it lands in commits.
     ack: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -99,10 +99,10 @@ fn flush_pty_batch(
     }
 }
 
-/// Drain `rx`, coalescing chunks into batches — waiting up to
-/// `PTY_COALESCE_WINDOW` after the first chunk of a new batch for more to
-/// arrive, or until `PTY_COALESCE_MAX_BYTES`, whichever comes first — and
-/// flushing each batch through [`flush_pty_batch`]. Runs until `rx` closes
+/// Drain `rx`, coalescing into batches whatever is already queued at the
+/// moment each batch is assembled — never waiting on output that has not
+/// arrived, and bounded by `PTY_COALESCE_MAX_BYTES` — then flushing each
+/// batch through [`flush_pty_batch`]. Runs until `rx` closes
 /// (the PTY read loop's sender dropped, i.e. the PTY hit EOF or an error),
 /// flushing any final partial batch before returning.
 ///
@@ -156,20 +156,34 @@ async fn run_pty_output_flusher(
         if let Some(ack) = first.ack {
             batch_acks.push(ack);
         }
-        let deadline = tokio::time::Instant::now() + PTY_COALESCE_WINDOW;
-
-        // Opportunistically drain more already-queued (or about-to-arrive)
-        // chunks into the same batch, bounded by whichever limit hits first.
+        // Drain what is ALREADY queued into this batch, and nothing more —
+        // never wait for output that has not arrived yet.
+        //
+        // This previously waited up to a fixed 20ms window for more chunks.
+        // That is application-layer Nagle, and it sat directly on the
+        // keystroke echo path: typing one character into an otherwise idle
+        // pane produces exactly one chunk, so the window could never be
+        // satisfied early and the echo paid the full 20ms — longer than a
+        // 60Hz frame — before it was ever broadcast. It is the same mistake
+        // SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30 removed from the frontend
+        // (a second frame gate on the echo path, symptom: "not silky"
+        // hiccups); that spec's own prescription for a backend version was a
+        // ~2-4ms merge of consecutive reads, not a 20ms wait.
+        //
+        // Dropping the wait costs no batching, because batching here is
+        // self-tuning without it: a flush takes real time (SQLite write +
+        // broadcast, on spawn_blocking), and everything the producer writes
+        // while that flush is in flight queues up behind it. So the busier
+        // the pane the bigger the next batch — which is exactly the burst
+        // case REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md
+        // measured — while an idle pane, where there is nothing to coalesce
+        // in the first place, now pays nothing to find that out.
         let closed_mid_batch = loop {
             if batch.len() >= PTY_COALESCE_MAX_BYTES {
                 break false;
             }
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                break false;
-            }
-            match tokio::time::timeout(remaining, rx.recv()).await {
-                Ok(Some(next)) => {
+            match rx.try_recv() {
+                Ok(next) => {
                     batch.extend_from_slice(&next.data);
                     batch_osc.extend(next.osc_events);
                     if let Some(ack) = next.ack {
@@ -177,8 +191,10 @@ async fn run_pty_output_flusher(
                         break false; // flush now; someone is waiting on it
                     }
                 }
-                Ok(None) => break true, // channel closed mid-accumulation
-                Err(_elapsed) => break false, // coalescing window elapsed
+                // Nothing more queued — flush immediately rather than
+                // waiting to see whether something shows up.
+                Err(mpsc::error::TryRecvError::Empty) => break false,
+                Err(mpsc::error::TryRecvError::Disconnected) => break true,
             }
         };
 
@@ -1058,9 +1074,9 @@ impl Controller for ShellController {
             // weak — see its own comment above.)
         });
 
-        // Coalescing flusher: batches chunks the read loop above sends,
-        // waiting up to PTY_COALESCE_WINDOW for more to arrive (or until
-        // PTY_COALESCE_MAX_BYTES, whichever comes first) before doing the
+        // Coalescing flusher: batches whatever chunks the read loop above
+        // has already queued (bounded by PTY_COALESCE_MAX_BYTES, and never
+        // waiting for more to arrive) before doing the
         // actual file write + broadcast + translation — once per batch
         // instead of once per (up to 4KB) PTY read. A standalone fn (not
         // inlined into the spawn) so it can be driven directly in tests
@@ -1131,7 +1147,7 @@ impl Controller for ShellController {
         // read loop only drops the channel sender on EOF; the flusher (its
         // `JoinHandle` above) still has to notice the closed channel,
         // drain its accumulation loop, and complete an async
-        // `spawn_blocking` flush — up to `PTY_COALESCE_WINDOW` plus
+        // `spawn_blocking` flush — plus
         // queueing behind other panes' flushes — with nothing previously
         // synchronizing that completion against this task. A fast-exiting
         // command's trailing output could be missing from FileStore / not
@@ -2316,9 +2332,10 @@ pub(super) mod pty_output_flusher_tests {
     /// Deterministic, not timing-dependent: every chunk is sent to the
     /// channel BEFORE the flusher is ever polled, so its first "opportunistic
     /// drain" pass finds them all already queued and drains them without
-    /// actually waiting out any real wall-clock delay — this isn't racing
-    /// the 20ms window, it's exercising the "channel closed mid-accumulation"
-    /// exit path (see `run_pty_output_flusher`'s `closed_mid_batch`).
+    /// actually waiting out any real wall-clock delay — it's exercising the
+    /// "channel closed mid-accumulation" exit path (see
+    /// `run_pty_output_flusher`'s `closed_mid_batch`). The drain never waits
+    /// on unarrived output at all now, so there is no window to race.
     #[tokio::test]
     async fn rapid_chunks_coalesce_into_far_fewer_broadcasts_with_no_data_loss() {
         let (broker, events) = broker_recording_block_file_events();
