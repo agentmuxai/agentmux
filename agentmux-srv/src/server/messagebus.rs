@@ -136,7 +136,6 @@ pub(super) async fn handle_inject(
         source_agent: Some(req.from.clone()),
         request_id: None,
         priority: req.priority.clone(),
-        wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: Some("host".to_string()),
         forward_hops: 0,

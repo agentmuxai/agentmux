@@ -43,8 +43,6 @@ pub struct InjectionRequest {
     pub request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
-    #[serde(default)]
-    pub wait_for_idle: bool,
     /// Sensitivity tier declared by the sender. When absent, defaults to `Coord`.
     /// The handler may escalate to `Sensitive` based on keyword scanning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
