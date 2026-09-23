@@ -12,6 +12,7 @@ import {
     isDocsOnlyPath,
     latestCodexOutput,
     reviewedCommit,
+    TRIGGER_AUTHOR,
 } from "./ci-codex-review-gate.mjs";
 
 const HEAD = "4dba2e3755aa00000000000000000000000000bb";
@@ -132,6 +133,101 @@ describe("evaluateCodexGate", () => {
     it("tells the agent how to get a review when waiting", () => {
         const r = evaluateCodexGate({ headSha: HEAD });
         expect(r.description).toMatch(/codex re-review/);
+    });
+});
+
+// #3562: ReAgent asked for 259331cc79 and Codex answered with its quota
+// notice, which names no commit; the gate sat pending.
+const trigger = (sha, at, login = TRIGGER_AUTHOR) => ({
+    user: { login },
+    created_at: at,
+    body: `@codex review\n\n<!-- reagent:codex-trigger head=${sha} -->`,
+});
+const quotaComment = (at) => ({
+    user: { login: CODEX_LOGIN },
+    created_at: at,
+    body:
+        "You have reached your Codex usage limits for code reviews. You can see your limits in the " +
+        "[Codex usage dashboard](https://chatgpt.com/codex/cloud/settings/usage).",
+});
+
+describe("Codex out of review quota", () => {
+    it("passes the head the quota notice answered", () => {
+        // #3562's real sequence: Codex answered the OLD trigger (14:36)
+        // before ReAgent asked about HEAD.
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:46:38Z"),
+            quotaComment("2026-09-23T14:46:48Z"),
+        ];
+        const reviews = [findingsReview(OLD, "2026-09-23T14:36:45Z")];
+        const r = evaluateCodexGate({ headSha: HEAD, comments, reviews });
+        expect(r.state).toBe("success");
+        expect(r.description).toMatch(/quota/);
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("stays pending when two requests are outstanding (Codex P1 on #3589)", () => {
+        // A late reply to the OLD request must not pass the unreviewed HEAD.
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:46:38Z"),
+            quotaComment("2026-09-23T14:46:48Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
+    it("lets an answer close only its own request (Codex P1 on #3589, second)", () => {
+        // findings(OLD) answers only OLD, so the quota notice answers HEAD alone.
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:32:00Z"),
+            quotaComment("2026-09-23T14:40:00Z"),
+        ];
+        const reviews = [findingsReview(OLD, "2026-09-23T14:36:45Z")];
+        expect(evaluateCodexGate({ headSha: HEAD, comments, reviews }).state).toBe("success");
+    });
+
+    it("resolves once the next request is answered alone", () => {
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:46:38Z"),
+            quotaComment("2026-09-23T14:46:48Z"),
+            trigger(HEAD, "2026-09-23T15:00:00Z"),
+            quotaComment("2026-09-23T15:00:09Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("success");
+    });
+
+    it("does not pass a head pushed after the notice", () => {
+        const comments = [trigger(OLD, "2026-09-23T14:31:42Z"), quotaComment("2026-09-23T14:31:50Z")];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
+    it("ignores a trigger posted after the notice", () => {
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            quotaComment("2026-09-23T14:31:50Z"),
+            trigger(HEAD, "2026-09-23T14:46:38Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
+    it("ignores a trigger marker from anyone but ReAgent's a5af", () => {
+        const comments = [trigger(HEAD, "2026-09-23T14:46:38Z", "someone"), quotaComment("2026-09-23T14:46:48Z")];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
+    it("ignores a quota notice posted by anyone but Codex", () => {
+        const fake = { ...quotaComment("2026-09-23T14:46:48Z"), user: { login: "someone" } };
+        const comments = [trigger(HEAD, "2026-09-23T14:46:38Z"), fake];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
+    it("lets a later real review of the same head win", () => {
+        const comments = [trigger(HEAD, "2026-09-23T14:46:38Z"), quotaComment("2026-09-23T14:46:48Z")];
+        const reviews = [findingsReview(HEAD, "2026-09-23T16:00:00Z")];
+        expect(evaluateCodexGate({ headSha: HEAD, comments, reviews }).state).toBe("failure");
     });
 });
 

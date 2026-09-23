@@ -2,7 +2,8 @@ name: Codex review gate
 
 # Sets the `Codex review` commit status on a PR's head commit: success only
 # once Codex has said "Didn't find any major issues" about that commit, or
-# about an earlier one with only docs changed since.
+# about an earlier one with only docs changed since, or answered the request
+# for that commit with its out-of-quota notice.
 # Make it a required check on main to stop merges ahead of Codex (#3513 merged
 # while Codex was still finding bugs; three fixes were orphaned into #3538).
 # Logic and rationale: scripts/ci-codex-review-gate.mjs.
@@ -13,7 +14,7 @@ name: Codex review gate
 #
 # Triggers:
 #   pull_request_target  a push resets the new head to pending
-#   issue_comment        Codex's "no major issues" comment
+#   issue_comment        Codex's "no major issues" or out-of-quota comment
 #   pull_request_review  Codex's findings review
 #   workflow_dispatch    re-evaluate one PR by hand (e.g. PRs opened before
 #                        this workflow existed)
