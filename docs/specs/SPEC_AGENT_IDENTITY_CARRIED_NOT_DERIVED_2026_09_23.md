@@ -4,7 +4,7 @@
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
-M4–M5 not started.
+M4 designed in §6.5 (revision 2.3); M4a-1 in #3571. M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -701,7 +701,10 @@ cron job or a queued task. Today it silently does.
 
 ## 6. Identity is proven, not asserted
 
-Closes #3501 and the env-inheritance retro's recommendation 4 together.
+Written to close #3501 and the env-inheritance retro's recommendation 4
+together. **Superseded in part by §6.5 revision 2:** at the same-user
+boundary #3501 is not closable, and M4 attributes rather than enforces. §6.1–
+§6.4 are kept for the reasoning; where they disagree with §6.5, §6.5 wins.
 
 `AGENTMUX_AUTH_KEY` is instance-wide and inherited by every pane
 (`pane_env.rs`'s own keep-set comment says so). It authenticates *"some caller
@@ -719,7 +722,8 @@ The token here is a local secret the server generates when it creates the
 `db_agents` row, stored server-side against the UID and injected at spawn. No
 network, no login, no fallback. If it is missing the request is refused, which
 is the entire point: a fallback to a shared credential is the property being
-removed.
+removed. *(Superseded by §6.5: a missing token means an unattributed request, not a
+refused one.)*
 
 ### 6.2 What it fixes
 
@@ -808,6 +812,291 @@ Two things follow, neither optional:
   `mcpServers.agentmux.env` into a `.mcp.json` **inside the agent's working
   directory**, rewritten every launch. A token must not go there; that file is
   in a worktree a human may commit.
+
+### 6.5 M4 design — revision 2.3: attribution, not enforcement
+
+Revision 1 (proven identity with an Operator/UI key and refusals) was attacked
+against the code before anything was built and found to have three P0s, the
+central one being that **at the same-user boundary this design sets, a request
+that omits its token cannot be told apart from the UI, and no credential can
+be kept from a same-user agent.** Revision 2 is what survives that; the repo
+owner chose it over "harden the host first, then enforce" (2026-09-23). A
+second adversarial pass on revision 2 found no P0 and seven P1s, folded in
+as 2.1; Codex's three P1s on 2.1 (name reuse after deletion, the UID lost
+at forwarding hops, agents already running without a token) are folded in
+as 2.2. With Codex rate-limited, a third adversarial pass on 2.2 and on the
+M4a-1 code found four P1s — the M4b gate passing trivially, key copy by a
+deny-list, inheritance in the window before M4d, and a signature flag day —
+folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
+
+#### 6.5.1 What M4 can and cannot buy
+
+- **Cannot: stop one agent from acting as another.** Every agent runs as the
+  same OS user, and the instance key, the UI's powers and any per-agent token
+  are reachable from a pane by several same-user routes (process
+  environments, files under the data dir, the shared registry), plus one
+  host-level exposure reported privately as GHSA-6726-q276-g6f6. On Windows a
+  same-user process can read another's memory outright. **#3501 is recorded
+  as not closable at the same-user boundary**; closing it needs per-agent OS
+  users or a hardened host — a separate spec, for which peer-credential
+  attribution (a Unix socket with `SO_PEERCRED`, srv walking the caller's
+  parent chain to a process it spawned) is the right basis: it needs no
+  secret. (Measured: under Yama `ptrace_scope=1`, `/proc/<pid>/mem` of srv
+  and CEF is not readable by a sibling; the environment is.)
+- **Not the prompt-injection defence revision 1 claimed.** Every actor field
+  `agentmux-mcp` sends is stamped from its own environment; no MCP tool lets
+  the model name the actor.
+- **Can: attribution that survives name collisions.** Today the actor is a
+  *name*, and names collide (§1.1). M4 records, beside every actor name, the
+  UID whose token the request carried.
+- **Can: fix the name-keyed credential defects** (§6.5.2 items 1–3), which
+  are bugs regardless of threat model.
+
+#### 6.5.2 Defects (measured)
+
+1. **Credentials and grants keyed by name, revoked by UID — so never
+   revoked.** `db_agent_{jekt,lan,wan}_keys` and
+   `db_conversation_trust_grants` key on the name;
+   `purge_agent_dependents` deletes `WHERE agent_id = <UID>`, so deleting an
+   agent revokes nothing, and a later agent reusing the name inherits its
+   keys (and signs as it) and its transcript grants. `db_agent_wan_keys` is
+   not in the purge list at all.
+2. **`WriteAgentConfig` (and `agent.open`, `app_api/agent_open.rs`) mint keys
+   for whatever name they are handed** — the owner is the
+   `AGENTMUX_AGENT_ID` inside caller-supplied `.mcp.json` content — and
+   trigger `agent_jekt_key_ensure`'s 24-hour rotation, so any caller can have
+   srv return any agent's keys or knock a running agent onto a stale one.
+3. **The host-tier HMAC is looked up by claimed name**
+   (`verify_jekt_signature`; `verified_block_id`, which backs UI automation,
+   pane close and dev-server registration). Only `agentmux-mcp` signs it.
+4. **Actor attribution is a name.** Actor fields vs target fields — M4
+   touches only the first column:
+
+   | Actor (who did it) | Target / owner-by-design (not M4's) |
+   |---|---|
+   | memory tools' `agent_id` (owner = actor) | `GetAgentTranscript.agent` |
+   | global memory `written_by` | `OpenAgent.agent_id` |
+   | work `claimed_by` + heartbeat/complete/release | inject `target_agent` |
+   | inject `source_agent` (audit and display only) | supervisor auto-continue ceiling — keyed by **target**; only its audit `source_agent` is actor |
+   | work / cron `created_by` | |
+   | `bus:send` / `bus:inject` `from` (WebSocket; always Unattributed) | |
+   | `/api/bus/{send,inject,broadcast}` `from` (HTTP) | |
+   | UI automation `auth.agent_id` (`verified_block_id`: `ui/*`, pane close, dev-server register) | |
+   | identity `accounts` / `validate` `agent_id`, history search `agent` (owner = actor) | |
+
+5. **Cron launders its sender** (`source_agent:"cron"`), and stores only a
+   `created_by` name.
+6. **Tokenless spawn paths**: App API `agent.send`, App Server (codex)
+   agents, **interactive agent CLIs in a terminal pane** (they read
+   `.mcp.json` but are spawned by `shell/lifecycle.rs` with no token),
+   quick-launch panes, **template-based continuation launches** — the block's
+   `agentId` is the template, while the row the launch folds into
+   (`parent_instance_id`) already exists but is not yet bound to the block —
+   and every agent spawned before #3548 until its next spawn. (User-agent
+   continuations are *not* a gap: their row exists before resync and
+   eager-resume already carries the token.)
+
+#### 6.5.3 Mechanism
+
+- **`Caller`, derived, never refused.** A middleware maps `X-Agent-Token` to
+  `Caller::Agent(uid)` through a `TokenIndex` **attached to `mstore` only**
+  (built from its `db_agent_tokens` at boot; the shared, identity and
+  migration-time stores never get one). It is mutated under the same lock as
+  the token-row statement itself (ensure's insert, purge's token delete), not
+  on an operation's overall result, because purge is a sequence of
+  autocommit statements, not a transaction. Anything else is
+  `Caller::Unattributed`. **An unknown or foreign-channel token is counted
+  and treated as absent — never a 401.** `Caller` is derived only when the
+  request authenticated with the full key (`ReactiveAuthVia::FullAuthKey`):
+  a token on a LAN-key request must not lift it to host trust. It covers
+  `authed_routes` and `lan_forward_routes` (inject lives there). **WebSocket
+  RPC is always Unattributed**, and no token is ever put in a query string.
+- **Dual-write, never rewrite.** The caller's UID goes into a new `*_uid`
+  field or column beside each actor name (as M1b did for targets); readers
+  switch in a later step. **Names on the wire and in display are never
+  replaced**: every signature is computed over the `source_agent` name, and
+  recipients read names (§2 rule 3). Nothing that works today stops working.
+- **Mismatch is defined against the caller's row**: a body actor name that is
+  none of the row's {slug, display name, `instance_name`} — matched as the M3
+  resolver matches, slug exactly, the others ASCII case-insensitively — is
+  counted (`m4.actor_mismatch.<site>`) — logged, never refused. Two more
+  outcomes are counted apart, because the mismatch test cannot see them: a
+  name that selects the caller's row but is not its slug **and also selects
+  another row** (`m4.actor_ambiguous.<site>` — the colliding-name case, where
+  a slug-keyed consumer such as memory resolves to the *other* agent), and an
+  attributed request that names no actor (`m4.actor_absent.<site>`).
+  **Expected noise, recorded:** a template-created stub is launched with a
+  frontend-derived slug that the backend's collision suffixing can make
+  differ from the row's (`AgentPicker.tsx` → `agent-config-builder.ts`), so
+  such an agent mismatches on every call until relaunched; that is a real
+  defect the counter correctly reports, fixed separately, and these counters
+  gate nothing until it is.
+- **The MCP sends `X-Agent-Token`** from the inherited
+  `AGENTMUX_AGENT_TOKEN` (inheritance only — never `.mcp.json`).
+  `agentmux-mcp` is configured only through `.mcp.json`, which only Claude
+  reads, and Claude passes its environment to stdio MCP servers (measured).
+- **Token at rest stays plaintext** in the srv-only store (respawn
+  re-injects it, §6.3). **No rotation**: rotating a secret every same-user
+  process can read buys nothing (this answers §12's open question).
+- **One UID, several channels.** Definitions are shared, so one UID can be
+  live in several channels, each srv minting its own token; purge revokes
+  only in the deleting channel.
+- **The UID survives forwarding hops.** A cross-channel or LAN hop is
+  srv→srv with no agent token, so the receiving srv's `Caller` is
+  Unattributed — and the name it does see collides. The sender's UID
+  therefore travels in the request (`source_uid`). **One writer:** the MCP
+  sets it from its own `AGENTMUX_AGENT_UID` and signs it; a forwarding srv
+  never sets or changes it — it compares it with its own `Caller` and counts
+  a disagreement (`m4.source_uid_mismatch`), passing the request on
+  unchanged, since rewriting a signed field breaks the signature and an
+  unsigned one can never become attribution. The receiver dual-writes it as
+  attribution **only when a signature covers it**. **No flag day:** the v1
+  signature stays in its existing field, over its existing material, and
+  the v2 signature (covering `source_uid`) goes in a new field that
+  pre-M4d receivers ignore — a receiver that verified only one field would
+  treat every M4d jekt as forged (`reactive.rs`, `Some(false)` → forced
+  `TIER=sensitive`). Attribution comes only from a verified v2. An uncovered
+  `source_uid` is recorded as claimed, counted, and not written as
+  attribution — the same rule the name follows today.
+- **A LAN peer is a different principal.** Its key is the one *that
+  authenticated peer* publishes, and a peer can publish any UID, including a
+  local agent's. So a UID arriving over LAN is attributed as `(peer, uid)`,
+  never matched against or written as a local row's UID. WAN has no
+  signature verification wiring today (`jekt_sign.rs`), so a `source_uid`
+  over WAN is never attribution until it does.
+
+#### 6.5.4 Signing keys
+
+- **LAN/WAN Ed25519 keypairs are copied to the UID, never moved or
+  re-minted**, because a remote peer pins an agent's public key by name
+  forever (`lan_peer_pubkey_pins`; that is why LAN keys never rotate). The
+  copy happens **lazily at every registration by block**, and **only on
+  positive evidence of ownership** — never merely because the registering
+  row is the name's only live holder, since agents deleted before M4a, by
+  an older build, or renamed, and keys `WriteAgentConfig` minted for
+  arbitrary names (§6.5.2 item 2) all left name-keyed rows with no
+  tombstone. A LAN/WAN key row is copied to the block's row UID only when
+  its name is **the registering row's persisted slug** (the name the MCP
+  signs as) **and** it was created no earlier than that row (these keys
+  never rotate, so `created_at` is the mint time: a key older than its
+  holder belongs to someone before it). Anything else gets a fresh keypair.
+  Jekt HMAC keys are not copied: they rotate anyway, and token callers stop
+  using them (below). Check and copy run under the store's connection lock,
+  which purge holds across tombstone, delete and revoke, so a copy cannot
+  race a purge. An ambiguous `/reactive/agent?id=<name>` returns no key.
+  Name-keyed rows stay until M5, so reverting M4d loses nothing.
+- **Deletion tombstones the name** (from M4a-1): purge records the deleted
+  agent's slug, display name and `instance_name` — the frontend keys its
+  fallback names by `slug || instanceName || name` — folded with
+  `to_lowercase` as the key tables fold theirs (M4d compares in Rust, never
+  with SQLite's ASCII-only `lower()`), skipping a name another row holds as
+  its slug, which is that agent's key and not the deleted one's. The
+  ownership rule above is what keeps a reuser from inheriting; the tombstone
+  is its record for names deleted since M4a (a tombstoned name is copied
+  only to a row created after the deletion).
+- **Purge deletes the dead agent's name-keyed key rows** (M4a-3, the one
+  behaviour change before M4d): the jekt, LAN and WAN rows under the deleted
+  agent's slug, where no other row holds that slug. Without it, in the window
+  before M4d a new agent reusing the name is handed the dead agent's key by
+  `ensure`'s `INSERT OR IGNORE` and signs as it, and peers accept it.
+- **Publication carries the UID.** Registry entries and `/reactive/agent`
+  gain the UID beside the name in the same step, so new peers can pin
+  `(peer, uid)`; the name pin stays as the legacy fallback.
+- **Accepted cost, recorded:** a *new* agent that reuses a deleted agent's
+  name, or the second of two same-named agents, gets a fresh keypair, and a
+  peer that pinned the name by the old key raises a forgery alarm for it.
+  That alarm is correct — it is a different agent — and is the price of
+  revocation. Old peers keep alarming until they upgrade to UID pins.
+- **Purge revokes** keys and trust grants by UID, WAN included.
+- **The host-tier HMAC goes for token callers.** `verify_jekt_signature`'s
+  host tier and `verified_block_id` read `Caller`; a request without a token
+  keeps today's name-keyed HMAC until M5, counted. The cross-channel
+  "same-instance" guard, which today tests "an HMAC key exists for this
+  name", is replaced by a registration check in the same step.
+- **Key injection into `.mcp.json` stops only for rows that carry a token.**
+  For them the MCP fetches its keys from srv with its token
+  (`GET /agentmux/agents/self/keys`, `Agent(uid)` only), lazily and with
+  retry. Tokenless rows keep today's injection until M5, so no agent loses UI
+  automation or signing. Both injection sites are covered (`WriteAgentConfig`
+  and `agent.open`); `AGENTMUX_CHANNEL` and `AGENTMUX_HOST_LABEL` stay.
+  Existing `.mcp.json` files already hold plaintext LAN private keys, and
+  copying keeps those keys alive — recorded; rotation is ruled out by the
+  pins above.
+
+#### 6.5.5 Cron
+
+`created_by_uid` is captured from `Caller` at create time. The job fires
+through the **same delivery cascade** as HTTP inject (a shared
+`deliver(state, req, attribution)` factored out of the handler — firing via
+in-process `inject_message` alone would drop the cross-channel and LAN tiers,
+and the queue and cron tables are global). Recipients see the creator's
+*name*; the UID is attribution. A job with no captured UID fires as
+`"cron"`, counted.
+
+#### 6.5.6 Rollout
+
+Each step independently revertible (§9):
+
+- **M4a — Caller + counters**, in two PRs. **M4a-1:** `TokenIndex`, the
+  `Caller` middleware, the MCP sending `X-Agent-Token`, the purge-time name
+  tombstones, and **spawn-site counters** `spawn.no_token.<path>` (a row but
+  no token — the gap) and `spawn.no_row.<path>` (no row at all), recorded
+  where a process is actually started, never where an environment is merely
+  built (the persistent, subprocess, ACP and App Server controllers' spawn
+  points; a turn delivered to a running process rebuilds its environment
+  without spawning anything) —
+  request-side counters cannot gate anything, because they cannot tell an
+  Unattributed UI write from a tokenless agent (revision 1's P0). **"Has a
+  row" is the block's row in the store, never what the environment or a
+  registration carried**: the gap paths (`agent.send`, App Server,
+  template-based continuations) are exactly the ones spawned without
+  `AGENTMUX_AGENT_UID` although their block has a row (a continuation's
+  block resolves to the row it folded into), and deciding from the
+  environment made the gate read zero from day one. A store fault counts
+  as row-backed, so a gate never reads clear because a read failed.
+  Container turns (`docker exec`) are a spawn path too.
+  `spawn.no_row.<path>` is then row-less panes only (quick-launch) and gates
+  nothing. Plus the `live.tokenless_or_unknown` gauge over live blocks, and
+  a reader for every §9.2 counter and gauge (`GET
+  /agentmux/identity/fallbacks`, which reports `boot_id`: every counter is
+  in memory since boot, and one that has not fired is absent — read it as
+  zero). **M4a-2:** the actor counters of §6.5.3 at each actor site
+  (§6.5.2 item 4). No behaviour change in either. **M4a-3:** purge deletes
+  the dead agent's name-keyed key rows (§6.5.4) — a behaviour change,
+  alone in its PR.
+- **M4b — close the tokenless paths.** `agent.send`, App Server agents and
+  terminal-pane agent CLIs carry UID + token when their block has a row;
+  template-based continuations **bind** the block to the row they fold into
+  before resync (no row creation, no respawn — respawning a live agent loses
+  its turn). Agents already running without a token are attributed by block,
+  as `claimer_uid` already does. Quick-launch panes are declared outside the
+  identity system, counted under their own label. **Gate:** agent-path
+  `spawn.no_token` counters at zero **and a drain of live agents**, both
+  sampled on every channel's srv and sustained over a release cycle (the
+  gauges are per srv and restart at zero, so one reading proves nothing): an agent
+  spawned before its path carried a token can outlive an srv upgrade and
+  never pass a spawn site again, and most of its actor requests carry no
+  block id to attribute it by. So srv records, per block, whether the
+  process it spawned there carried a token (in memory, set at spawn; a block
+  whose process predates this srv is *unknown*), and M4a exposes the count
+  of live registered agent blocks that are not known to carry one
+  (`live.tokenless_or_unknown`). M4d, and M5's removal of any name-keyed
+  fallback, wait for that gauge to read zero — not for a counter that stops
+  moving.
+- **M4c — attribution by UID**: dual-write `*_uid` beside every actor field
+  in §6.5.2 item 4, then switch readers; cron per §6.5.5.
+- **M4d — signing keys, registry UID and signed `source_uid`** (§6.5.4,
+  §6.5.3), gated on M4b's counters and the live drain.
+- **M5** removes the name-keyed rows, the tokenless HMAC path and `.mcp.json`
+  key injection once the §9.2 counters read zero.
+
+#### 6.5.7 Out of scope, recorded
+
+- **Enforcement** (refusing unattributed callers, an Operator key) — needs a
+  hardened host first; separate spec.
+- **`bus:register` / `check_s1`** — no in-repo client sends `bus:register`;
+  `check_s1` stays as is. `/api/bus/*` has no in-repo caller and is a
+  deletion candidate, separately.
 
 ## 7. Performance
 
@@ -1066,8 +1355,18 @@ changes two things at once.
   - **Name paths stay** for rows with no UID in the claim predicate and in
     the cron fire until M5, counted (`cron.fire_by_name`), so a name-only
     row or target still works.
-- **M4 — Proven identity.** Per-agent token; authz reads connection identity;
-  body `agent_id` demoted to untrusted. Closes #3501.
+- **M4 — Attributed identity** (was "Proven identity"; rescoped by §6.5
+  revision 2). The per-agent token identifies the caller and the server
+  attributes by its UID; nothing is refused. Does **not** close #3501 —
+  recorded as not closable at the same-user boundary (§6.5.1).
+
+  **Design: §6.5** (revision 2.3, attribution not enforcement) — staged as
+  M4a Caller + counters (M4a-1 #3571: token index, `Caller`, spawn counters
+  and live gauges, name tombstones; M4a-2 actor counters; M4a-3 purge of the
+  dead agent's name-keyed keys), M4b close the tokenless paths, M4c
+  attribution by UID, M4d signing keys by ownership evidence, registry UID
+  and the v2 signature over `source_uid`. #3501 is recorded as not closable at
+  the same-user boundary (§6.5.1).
 - **M5 — Remove the scaffolding.** Delete slug fallbacks, delete
   `agent_def_insert`'s suffix-resolution, demote `AGENTMUX_AGENT_ID` to
   `AGENTMUX_AGENT_NAME`. Only after §9.2 shows the fallbacks are cold.
@@ -1075,7 +1374,9 @@ changes two things at once.
 ### 9.2 The exit criterion is measured, not assumed
 
 Each fallback increments a counter tagged with its call site. M5 proceeds only
-when they read zero across a full release cycle.
+when they read zero across a full release cycle — and, since M4, when the
+§6.5.6 live gauges read zero too, sampled on every channel's srv (counters
+and gauges are in memory per srv, since its boot).
 
 This is the mechanism the predecessor lacked: it had no way to know whether a
 phase had actually taken effect, which is precisely how Phase 2 could be
@@ -1183,7 +1484,7 @@ unverified.
 - **High:** that carrying beats deriving. It is the only option left once §1.1
   shows deriving is impossible.
 - **Medium, deliberately unresolved here:** the per-agent token's lifetime and
-  rotation (§6); whether M3's backfill should rewrite live work-queue rows or
+  rotation (§6; answered in §6.5.3: process lifetime, no rotation); whether M3's backfill should rewrite live work-queue rows or
   drain them (answered in M3: neither — no backfill, §9.1); whether `AGENTMUX_AGENT_ID` should be repurposed in place or
   retired alongside a new name. Each is a decision for its own phase, flagged
   rather than guessed — the predecessor's habit of resolving such questions in
