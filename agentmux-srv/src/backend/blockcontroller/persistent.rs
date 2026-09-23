@@ -1160,11 +1160,28 @@ impl PersistentSubprocessController {
         // is around rather than the account the user is about to select in
         // the very same launch flow. A cheap, synchronous check, done
         // before the (slow) identity gate work rather than after it.
-        match mstore.instance_get_active_for_block(&self.block_id) {
+        // `instance_get_by_block_id`, NOT `instance_get_active_for_block` —
+        // codex P1 + reagent P1 on PR #3523, found independently by both.
+        // The latter resolves by the block's `agentId` meta
+        // (`SELECT ... FROM db_agents WHERE id = ?1 AND is_template = 0`)
+        // and then OVERWRITES the row's `block_id` with the one it was
+        // asked about, so it answers "does this agent have a launch row
+        // anywhere?" — not "has THIS block's launch been recorded?". For
+        // the continuation flow this check exists for, those differ in
+        // exactly the way that matters: `agent-model.ts` writes `agentId`
+        // into block meta BEFORE `ControllerResyncCommand`, and records the
+        // newly selected account only afterwards, so continuing an existing
+        // named agent would match its PREVIOUS launch's row — carrying the
+        // PREVIOUS account's bindings — and sail through a check whose
+        // entire purpose is to stop exactly that spawn.
+        // `instance_get_by_block_id` keys on `last_block_id = ?1`, which is
+        // launch-specific and only set once `CreateAgentInstanceCommand`
+        // has run for THIS block.
+        match mstore.instance_get_by_block_id(&self.block_id) {
             Ok(Some(_)) => {}
             Ok(None) => {
                 return EagerResumeOutcome::DeclinedTo(
-                    "no AgentInstance row yet for this block — its account/identity setup may still be in flight",
+                    "no AgentInstance row yet for THIS block — its account/identity setup may still be in flight",
                 );
             }
             Err(e) => {
@@ -1304,12 +1321,88 @@ impl PersistentSubprocessController {
         // while the gate was resolving. See
         // `still_registered_for_replace_check`'s own doc comment.
         if !self.still_registered_for_replace_check() {
-            tracing::warn!(
-                block_id = %self.block_id,
-                "eager-resume declined: this controller was replaced in the registry while \
-                 resolving the identity gate — aborting to avoid an orphaned/duplicate spawn"
-            );
-            self.inner.lock().unwrap().spawning_in_progress = false;
+            // Hand off anything we accepted on the way here before letting
+            // go — codex P1 + reagent P1 on PR #3523, found independently
+            // by both. While the gate ran we owned `spawning_in_progress`,
+            // so every concurrent `send_message` was routed to `Queued`
+            // and told the caller "accepted". Those prompts live in THIS
+            // controller's queue, and this controller has just been evicted
+            // from the registry: no future send will ever reach the object
+            // holding them, so simply releasing the claim and returning —
+            // which is what this path used to do — loses an accepted user
+            // prompt silently and permanently. That is a worse failure than
+            // the orphaned process this check exists to prevent, and it is
+            // one this check itself introduced.
+            //
+            // Unlike every OTHER decline path here, which leaves the queue
+            // with a controller that is still registered and whose next
+            // spawner drains the whole backlog, eviction means there is no
+            // "next spawner" for this object at all.
+            let orphaned: Vec<QueuedMessage> = {
+                let mut inner = self.inner.lock().unwrap();
+                inner.spawning_in_progress = false;
+                inner.pending_send_messages.drain(..).collect()
+            };
+            // Our own lock is released before the replacement's is taken —
+            // never both at once, so two controllers for the same block
+            // handing off in opposite directions cannot deadlock.
+            let mut handed_off = false;
+            if !orphaned.is_empty() {
+                if let Some(replacement) = get_controller(&self.block_id) {
+                    if let Some(p) = replacement
+                        .as_any()
+                        .downcast_ref::<PersistentSubprocessController>()
+                    {
+                        let mut r = p.inner.lock().unwrap();
+                        for m in &orphaned {
+                            // Re-seq against the REPLACEMENT's counter
+                            // rather than carrying ours over: `seq` is
+                            // queue identity scoped to one controller
+                            // (dedup, seed matching, retry-batch identity),
+                            // and both counters start at 0, so a carried-
+                            // over seq can collide with one the replacement
+                            // has already minted for a message of its own.
+                            // `already_persisted` IS carried over — these
+                            // were persisted (or not) on acceptance, and
+                            // re-persisting would double-write the
+                            // blockfile transcript.
+                            let seq = r.take_next_message_seq();
+                            r.pending_send_messages.push_back(QueuedMessage {
+                                seq,
+                                json_str: m.json_str.clone(),
+                                already_persisted: m.already_persisted,
+                            });
+                        }
+                        handed_off = true;
+                    }
+                }
+            }
+            if handed_off {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    handed_off = orphaned.len(),
+                    "eager-resume declined: this controller was replaced in the registry while \
+                     resolving the identity gate — aborted to avoid an orphaned/duplicate spawn, \
+                     and handed the prompts accepted during the gate to the replacement"
+                );
+            } else if !orphaned.is_empty() {
+                // Nothing registered for this block any more, or the
+                // replacement is a different controller type. Loud, because
+                // an accepted prompt is being dropped and the user will
+                // otherwise just see a prompt that never runs.
+                tracing::error!(
+                    block_id = %self.block_id,
+                    dropped = orphaned.len(),
+                    "eager-resume declined after replacement, but no persistent replacement \
+                     controller is registered to hand accepted prompts to — they are lost"
+                );
+            } else {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    "eager-resume declined: this controller was replaced in the registry while \
+                     resolving the identity gate — aborting to avoid an orphaned/duplicate spawn"
+                );
+            }
             return EagerResumeOutcome::DeclinedTo("controller was replaced during eager resume");
         }
 
@@ -9156,6 +9249,136 @@ setInterval(() => {}, 1000);
             !c.inner.lock().unwrap().spawning_in_progress,
             "the spawn claim must still be released on this decline path"
         );
+    }
+
+    // codex P1 + reagent P1 on PR #3523, found independently by both: the
+    // instance check has to be launch-specific. This is the continuation
+    // flow it exists for — an EXISTING named agent, with a launch row from
+    // a PREVIOUS block carrying the PREVIOUS account's bindings, whose
+    // `agentId` is already in this block's meta (agent-model.ts writes it
+    // before ControllerResync) but whose own launch row has not been
+    // created yet. `instance_get_active_for_block` resolves by `agentId`
+    // and would hand back that stale row, passing a check whose whole
+    // purpose is to stop this exact spawn.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn declines_when_only_a_previous_launchs_instance_row_exists() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        // The agent's PREVIOUS launch, on a different block.
+        wire_bare_instance(&store, "blk-previous-launch");
+        let prev_def_id = format!("def-for-{}", "blk-previous-launch");
+
+        // This launch's block: same agent (so the by-agentId lookup finds
+        // the stale row), but no instance row of its own yet.
+        let mut block = crate::backend::obj::Block {
+            oid: "blk-continuation".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(prev_def_id));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        // Precondition: the OLD lookup really would have been satisfied
+        // here — otherwise this test would pass for the wrong reason.
+        assert!(
+            store.instance_get_active_for_block("blk-continuation").unwrap().is_some(),
+            "precondition: the by-agentId lookup must find the stale row, or this proves nothing"
+        );
+
+        let stub = write_stub();
+        let c = controller("blk-continuation").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController { mstore: Some(store), ..c };
+        let meta = meta_with_session("sid-continuation", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
+
+        let result = Controller::start(&c, meta, None, false);
+        assert!(result.is_ok(), "declining must not fail the resync: {result:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "must not eagerly spawn on a previous launch's account bindings"
+        );
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "the spawn claim must still be released on this decline path"
+        );
+    }
+
+    // codex P1 + reagent P1 on PR #3523, again found independently by both.
+    // While the gate runs, this controller owns `spawning_in_progress`, so
+    // concurrent sends are routed to `Queued` and their callers are told
+    // "accepted". If the controller is then evicted, those accepted prompts
+    // are attached to an object no future send can reach — the replace
+    // check introduced a silent, permanent prompt loss.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_replace_decline_hands_accepted_prompts_to_the_replacement() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let block_id = "blk-handoff-on-replace";
+        let store = make_store();
+        wire_bare_instance(&store, block_id);
+        let stub = write_stub();
+        let c = controller(block_id).with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = Arc::new(PersistentSubprocessController { mstore: Some(store), ..c });
+        c.set_self_ref();
+        register_controller(block_id, c.clone());
+
+        // A prompt accepted while we held the claim.
+        {
+            let mut inner = c.inner.lock().unwrap();
+            let seq = inner.take_next_message_seq();
+            inner
+                .pending_send_messages
+                .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+        }
+
+        // The replacement lands before our post-gate check runs.
+        remove_controller_entry_only(block_id);
+        let replacement = Arc::new(controller(block_id));
+        replacement.set_self_ref();
+        register_controller(block_id, replacement.clone());
+
+        let meta = meta_with_session("sid-handoff", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(c.as_ref());
+
+        let result = Controller::start(c.as_ref(), meta, None, false);
+        assert!(result.is_ok(), "declining must not fail the resync: {result:?}");
+        assert!(
+            c.inner.lock().unwrap().current_pid.is_none(),
+            "must not spawn once replaced"
+        );
+
+        // The accepted prompt must have moved, not evaporated.
+        assert!(
+            c.inner.lock().unwrap().pending_send_messages.is_empty(),
+            "the evicted controller must not keep holding prompts nothing can reach"
+        );
+        let moved = replacement.inner.lock().unwrap().pending_send_messages.clone();
+        assert_eq!(moved.len(), 1, "the accepted prompt must be handed to the replacement");
+        assert_eq!(moved[0].json_str, "{\"accepted\":\"prompt\"}");
+
+        delete_controller(block_id);
     }
 
     // reagent P1 on PR #3523. The success path used to check "is anything
