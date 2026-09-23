@@ -71,8 +71,15 @@ const results = {};
 log(`A) ${secs}s streaming, NO typing`);
 await evalIn(ARM); await sleep(secs * 1000); results.A_streaming_only = await evalIn(READ);
 
-// B: synthetic typing into the chosen composer
-if (!(await focusComposer(typeInto))) { log("could not focus composer", typeInto); }
+// B: synthetic typing into the chosen composer. If that composer can't be
+// focused, keystrokes would land wherever focus happens to be, and phase B would
+// silently measure the wrong workload — report A and stop instead.
+if (!(await focusComposer(typeInto))) {
+  log(`could not focus composer ${typeInto} — skipping phase B`);
+  ws.close();
+  console.log(JSON.stringify(results, null, 1));
+  process.exit(3);
+}
 log(`B) ${secs}s streaming + synthetic typing into ${typeInto} at ${kps}/s`);
 await evalIn(ARM);
 const n = secs * kps, interval = 1000 / kps, kc = ch.toUpperCase().charCodeAt(0), t0 = Date.now();
@@ -81,7 +88,10 @@ for (let i = 0; i < n; i++) {
   send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 });
   send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc });
 }
-await sleep(800);
+// Close B's window at exactly `secs`, like A's: the reported values are totals,
+// not rates, so a longer B window would inflate every one of them.
+const remaining = t0 + secs * 1000 - Date.now();
+if (remaining > 0) await sleep(remaining);
 results.B_streaming_plus_typing = await evalIn(READ);
 // clean up typed text
 await evalIn(`(()=>{const a=document.activeElement;if(a&&a.tagName==="TEXTAREA"){const m=a.value.match(/${ch}+$/);if(m){a.value=a.value.slice(0,-m[0].length);a.dispatchEvent(new Event("input",{bubbles:true}))}}return true})()`);
