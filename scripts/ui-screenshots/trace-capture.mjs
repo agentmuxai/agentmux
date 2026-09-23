@@ -26,7 +26,13 @@ ws.on("message", (m) => {
   if (j.method === "Tracing.dataCollected") chunks.push(...j.params.value);
   if (j.method === "Tracing.tracingComplete") done();
 });
-const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
+const send = (method, params = {}) => new Promise((res, rej) => {
+  // A send after the socket closed would never get a response (and failAll
+  // has already run), so refuse it outright; a failed write rejects too.
+  if (ws.readyState !== WebSocket.OPEN) return rej(new Error(`${method}: CDP socket is not open`));
+  const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j)));
+  ws.send(JSON.stringify({ id: i, method, params }), (err) => { if (err) { pending.delete(i); rej(new Error(`${method}: ${err.message}`)); } });
+});
 // A dropped CDP connection (target reload/close) sends no responses; reject
 // everything still waiting instead of hanging forever.
 const failAll = (why) => { fail?.(new Error(why)); for (const f of pending.values()) f({ error: { message: why } }); pending.clear(); };

@@ -19,7 +19,13 @@ const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false }
 await new Promise((r, e) => { ws.once("open", r); ws.once("error", e); });
 let id = 0; const pending = new Map();
 ws.on("message", (m) => { const j = JSON.parse(m); if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); } });
-const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
+const send = (method, params = {}) => new Promise((res, rej) => {
+  // A send after the socket closed would never get a response (and failAll
+  // has already run), so refuse it outright; a failed write rejects too.
+  if (ws.readyState !== WebSocket.OPEN) return rej(new Error(`${method}: CDP socket is not open`));
+  const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j)));
+  ws.send(JSON.stringify({ id: i, method, params }), (err) => { if (err) { pending.delete(i); rej(new Error(`${method}: ${err.message}`)); } });
+});
 // A dropped CDP connection (target reload/close) sends no responses; reject
 // everything still waiting instead of hanging forever.
 const failAll = (why) => { for (const f of pending.values()) f({ error: { message: why } }); pending.clear(); };
