@@ -186,7 +186,22 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         const termTransparency = model.termTransparencyAtom();
         const [termTheme] = computeTheme(fullConfig, termThemeName, termTransparency);
         const ts = termSettings();
-        const wasFocused = model.termRef.current != null && model.nodeModel.isFocused();
+        // Give focus whenever the LAYOUT already considers this pane the
+        // focused one — true both on a remount that preserves an existing
+        // focus (the original reason this existed) AND on first creation:
+        // `createBlock()` inserts a new layout node with `focused: true`,
+        // so a just-opened terminal pane already satisfies this the moment
+        // onMount runs. The old `model.termRef.current != null` guard
+        // accidentally excluded exactly that first-construction case —
+        // nothing else in the app ever calls giveFocus() on pane creation
+        // (SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16.md §2d: "the creation
+        // path never reaches the contract at all"), so a freshly opened
+        // terminal pane looked selected but silently dropped every
+        // keystroke until the user clicked into it. Confirmed live: calling
+        // `terminal.focus()` directly on an already-broken pane fixed
+        // typing immediately — the terminal's own focus mechanism was
+        // never broken, it just was never invoked here.
+        const shouldTakeFocus = model.nodeModel.isFocused();
         const termWrap = new TermWrap(
             blockId,
             connectElemRef,
@@ -219,7 +234,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             if (searchProps.resultsCount) searchProps.resultsCount._set(results.resultCount);
         };
         fireAndForget(() => termWrap.init());
-        if (wasFocused) {
+        if (shouldTakeFocus) {
             setTimeout(() => model.giveFocus(), 10);
         }
         onCleanup(() => {
