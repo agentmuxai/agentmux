@@ -207,6 +207,42 @@ mod resolve_cli_args_tests {
     }
 }
 
+/// Identity M4b-4 (spec §6.5.8): record `agent.open`'s launch of user agent
+/// `agent_id` on `block_id` — a lifecycle-only update, never
+/// `instance_create` with a fresh record (whose fold would blank the agent's
+/// account, bundle and workspace) — and stamp the block with the row id.
+/// Best-effort: a failure is logged, never fails the open; for a user agent
+/// the block's `agentId` already names its row.
+fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    match mstore.instance_record_launch(agent_id, block_id, now) {
+        Ok(true) => {
+            let mut stamp = obj::MetaMapType::new();
+            stamp.insert("agentInstanceId".to_string(), json!(agent_id));
+            if let Err(e) = crate::server::service::update_object_meta(
+                mstore,
+                &format!("block:{block_id}"),
+                &stamp,
+            ) {
+                tracing::warn!(agent_id, block_id, error = %e, "agent.open: stamping the block failed");
+            }
+        }
+        Ok(false) => {
+            tracing::warn!(
+                agent_id,
+                block_id,
+                "agent.open: no local row to record the launch on"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(agent_id, block_id, error = %e, "agent.open: recording the launch failed");
+        }
+    }
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_open(engine, state);
 }
@@ -273,6 +309,17 @@ pub(crate) async fn open_agent_impl(
                 let open_lock = agent_open_lock(&agent.id);
                 let _open_guard = open_lock.lock().await;
 
+                // Identity M4b-4 (spec §6.5.8): a user agent known only from
+                // the shared registry (another channel's) gets its local row
+                // before any spawn, so its block resolves to it. A template
+                // is a template session and has no row.
+                let is_user_agent = agent.is_seeded == 0;
+                if is_user_agent {
+                    if let Err(e) = mstore.agent_row_ensure_local(&agent.id) {
+                        tracing::warn!(agent_id = %agent.id, error = %e, "agent.open: local row backfill failed");
+                    }
+                }
+
                 // 2. Resolve provider
                 let provider = providers::get_provider(&agent.provider)
                     .ok_or_else(|| format!("INVALID_PROVIDER: unknown provider '{}'", agent.provider))?;
@@ -301,7 +348,7 @@ pub(crate) async fn open_agent_impl(
                         // Register controller
                         let block_for_resync = mstore.must_get::<Block>(&existing.oid)
                             .map_err(|e| format!("agent.open: reload block: {e}"))?;
-                        let _ = blockcontroller::resync_controller(
+                        let resynced = blockcontroller::resync_controller(
                             &block_for_resync, &tab_id, None, true, true,
                             Some(broker.clone()), Some(event_bus.clone()), Some(mstore.clone()),
                             Some(filestore.clone()),
@@ -309,6 +356,11 @@ pub(crate) async fn open_agent_impl(
                             mstore.shared_agent_registry(),
                             app_state.boot_id.clone(), &app_state.auth_key,
                         );
+                        // Identity M4b-4: only a reopen that actually resynced
+                        // records a launch — never a pane that is already live.
+                        if resynced.is_ok() && is_user_agent {
+                            record_agent_open_launch(&mstore, &agent.id, &existing.oid);
+                        }
                     }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
                         .map(|s| s.shellprocstatus)
@@ -779,6 +831,11 @@ pub(crate) async fn open_agent_impl(
                     app_state.boot_id.clone(),
                     &app_state.auth_key,
                 )?;
+
+                // Identity M4b-4: record the launch and stamp the block.
+                if is_user_agent {
+                    record_agent_open_launch(&mstore, &agent.id, &block_id);
+                }
 
                 // 10. Broadcast block + tab + layout updates to frontend
                 {
@@ -1381,5 +1438,53 @@ mod write_agent_config_files_tests {
             parsed["mcpServers"].get("bundle-server").is_some(),
             "the bundle-referenced server must still be included, just not treated as agent-authoritative: {mcp_json}"
         );
+    }
+}
+
+#[cfg(test)]
+mod record_agent_open_launch_tests {
+    use super::*;
+    use crate::backend::storage::agents::test_agent_def;
+
+    /// Identity M4b-4 (spec §6.5.8): an `agent.open` of a user agent records
+    /// the launch on its row (lifecycle only) and stamps the block, so the
+    /// block resolves to that row — the row's UID and token at its spawn.
+    #[test]
+    fn an_agent_open_launch_is_recorded_stamped_and_resolves() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = test_agent_def("agent-open-x", "OpenX", "claude", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        // ORef::parse, behind update_object_meta, needs a UUID-shaped oid.
+        let block_id = uuid::Uuid::new_v4().to_string();
+        let mut block = Block {
+            oid: block_id.clone(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = obj::MetaMapType::new();
+                m.insert("agentId".to_string(), json!("agent-open-x"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        record_agent_open_launch(&store, "agent-open-x", &block_id);
+
+        let stamped: Block = store.must_get(&block_id).unwrap();
+        assert_eq!(
+            stamped.meta.get("agentInstanceId"),
+            Some(&json!("agent-open-x"))
+        );
+        let row = store.instance_get("agent-open-x").unwrap().unwrap();
+        assert_eq!(row.block_id, block_id);
+        assert_eq!(row.status, "running");
+        let resolved = store
+            .instance_get_active_for_block(&block_id)
+            .unwrap()
+            .map(|r| r.id);
+        assert_eq!(resolved.as_deref(), Some("agent-open-x"));
     }
 }
