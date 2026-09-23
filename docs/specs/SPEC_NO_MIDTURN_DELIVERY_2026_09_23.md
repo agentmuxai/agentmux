@@ -204,11 +204,24 @@ depending on unverified third-party behavior.
 
 | Phase | Content | PR |
 |---|---|---|
-| 1 | This spec; supersede the two predecessors; delete the dead `wait_for_idle` field and its ~15 call sites | _(this PR)_ |
-| 2 | `DeliverPolicy` + the `inner`-guarded queue for the persistent path (§4.2–4.5), with tests | _pending_ |
-| 3 | ACP (§4.6); backfill the interleaving tests of §7 | _pending_ |
+| 1 | This spec; supersede the two predecessors; delete the dead `wait_for_idle` field and its 48 call sites | #3557 |
+| 2 | `DeliverPolicy` + the `inner`-guarded queue for the persistent path (§4.2–4.5), with tests | #3558 |
+| 3 | ACP (§4.6); sender-addressed failure reporting; the interleaving tests of §7 | _pending_ |
 
 Phase 2 is the behavior change. Phases 1 and 3 are safe to land independently.
+
+### 5.1 Known gaps after Phase 2
+
+- **Teardown reporting is a log, not a reply to the sender.** §4.5 asks for stranded messages to
+  be reported through the reactive handler's failure channel. The queue stores encoded stdin lines
+  with no sender identity attached, so there is nothing to address a reply to; carrying that
+  identity through is Phase 3. Until then a stranded message is loud in the logs rather than
+  visible to whoever sent it.
+- **ACP and Codex are unchanged.** Only the persistent path is gated. ACP still sends immediately
+  (§4.6); Codex still relies on its accidental `TurnAlreadyActive` requeue (§6.2).
+- **A queued message is not yet visible in the transcript.** The blockfile append happens at
+  delivery, so the operator sees the message where the agent actually received it. That is the
+  honest rendering, but it means a deferred message is invisible while it waits — §8 Q3.
 
 ## 6. What does not change
 

@@ -7,118 +7,277 @@
 use super::*;
 
 impl PersistentSubprocessController {
-    /// Deliver a user message to the **already-running** persistent process,
-    /// without a spawn config. Unlike `send_message`, this never spawns — it errors
-    /// if the process is not running. Used for controller-aware muxbus/reactive
-    /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
-    /// and we have no `PersistentSpawnConfig` to hand. Writing on the live stdin lets
-    /// the message land mid-turn (steering) instead of waiting for idle.
-    /// Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
-    pub fn send_user_message(&self, message: String) -> Result<(), String> {
-        // Whether the process was busy or idle, delivering this message
-        // (re)starts an active turn — see the comment in `send_message`,
-        // including the heartbeat re-arm-only-if-was-idle rationale and why
-        // this must be the atomic read-and-set (send_message and
-        // send_user_message can race on the same block).
-        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
-        if !was_active {
-            self.spawn_status_heartbeat();
-        }
-        self.publish_status();
-
-        let json_msg = serde_json::json!({
+    /// Encode a message as the stream-json stdin line the CLI expects.
+    pub(super) fn encode_user_message(message: &str) -> String {
+        serde_json::json!({
             "type": "user",
             "message": {
                 "role": "user",
                 "content": message
             }
+        })
+        .to_string()
+    }
+
+    /// Write an already-encoded stdin line, given a held `inner` guard.
+    ///
+    /// Callers must hold the lock across the turn-state check and this write —
+    /// that is the whole point of `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+    /// §4.2's single-mutex requirement.
+    ///
+    /// On success the line is also tracked into the current generation's
+    /// resume retry batch, so every write site (immediate, idle fast path and
+    /// turn-boundary flush) gets it without having to remember to.
+    pub(super) fn try_write_stdin_locked(
+        inner: &mut PersistentInner,
+        line: &str,
+    ) -> Result<(), String> {
+        // reagentx P1 on PR #2360 (sixth review pass, round 7):
+        // `spawn_process` sets `stdin_tx` synchronously, well before the
+        // queued message that triggered the spawn is actually delivered by
+        // the background drain task (`drain_queue_after_successful_spawn`).
+        // Gating purely on `stdin_tx.is_some()` let a message land in that
+        // window and `try_send` straight to the live channel, jumping ahead
+        // of whatever was still queued. Checked in the SAME acquisition as
+        // `stdin_tx`, so nothing slips between two checks.
+        if inner.spawning_in_progress {
+            return Err("persistent process is still starting up — try again shortly".to_string());
+        }
+        let tx = inner
+            .stdin_tx
+            .as_ref()
+            .ok_or("persistent process not running")?;
+        tx.try_send(line.to_string())
+            .map_err(|e| format!("stdin send failed: {e}"))?;
+        // codex P1 + reagent P1 on PR #3523, found independently by both:
+        // track this into the CURRENT generation's retry batch, exactly as
+        // `send_message`'s `DeliverDirect` branch does. That fix covered the
+        // typed-in-the-UI path and missed this one — the MuxBus/reactive
+        // injection path (`deliver_agent_message`).
+        //
+        // The gap matters most for eager resume, which spawns with an
+        // unconfirmed `--resume` and NO seed message, so the retry batch
+        // starts empty. An injected prompt written straight to stdin and never
+        // appended leaves it empty, so when the resumed sid turns out to be
+        // stale the retry fires with nothing to redeliver — and the prompt is
+        // gone, even though the caller was told it was delivered and the live
+        // blockfile append already rendered it to the operator.
+        //
+        // Read the generation and apply under the caller's SAME lock
+        // acquisition (already held for `try_send`) — a separate one risks a
+        // concurrent respawn bumping `spawn_generation` in between, making the
+        // event carry a stale generation that `update()`'s catch-all silently
+        // ignores. A no-op when no unconfirmed resume is in flight.
+        let generation = inner.spawn_generation;
+        let seq = inner.take_next_message_seq();
+        inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
+            generation,
+            entry: persistent_resume::QueuedRetryEntry { seq, json: line.to_string() },
         });
-        let json_str = json_msg.to_string();
-
-        {
-            let mut inner = self.inner.lock().unwrap();
-            // reagentx P1 on PR #2360 (sixth review pass, round 7):
-            // `spawn_process` sets `stdin_tx` synchronously, well before
-            // the queued message that triggered the spawn is actually
-            // delivered by the background drain task
-            // (`drain_queue_after_successful_spawn`). Gating purely on
-            // `stdin_tx.is_some()` (as `decide_send_action` used to,
-            // before round 4) let a message land in that exact window and
-            // `try_send` straight to the live channel, jumping ahead of
-            // whatever's still queued — the same reordering bug fixed for
-            // `send_message`'s own delivery path. Unlike `send_message`,
-            // this function has no spawn config and its persistence is a
-            // LIVE, visible append (see below), not the silent persist
-            // the generic queue drain performs — there's no safe way to
-            // queue behind that drain without either bypassing its
-            // ordering guarantee or losing the visibility requirement, so
-            // this errors instead of reordering; the caller (muxbus/jekt
-            // delivery) can retry shortly. Checked in the SAME lock
-            // acquisition as `stdin_tx` below, not a separate one, so
-            // nothing can slip through the gap between two checks.
-            if inner.spawning_in_progress {
-                return Err(
-                    "persistent process is still starting up — try again shortly".to_string(),
-                );
-            }
-            let tx = inner
-                .stdin_tx
-                .as_ref()
-                .ok_or("persistent process not running")?;
-            tx.try_send(json_str.clone())
-                .map_err(|e| format!("stdin send failed: {e}"))?;
-            // codex P1 + reagent P1 on PR #3523, found independently by
-            // both: track this into the CURRENT generation's retry batch,
-            // exactly as `send_message`'s `DeliverDirect` branch does. That
-            // fix covered the typed-in-the-UI path and missed this one — the
-            // MuxBus/reactive injection path (`deliver_agent_message`).
-            //
-            // The gap matters most for eager resume, which spawns with an
-            // unconfirmed `--resume` and NO seed message, so the retry batch
-            // starts empty. An injected prompt written straight to stdin and
-            // never appended leaves it empty, so when the resumed sid turns
-            // out to be stale the retry fires with nothing to redeliver —
-            // and the prompt is gone, even though the caller was returned
-            // `AgentDelivery::Structured` and the live blockfile append
-            // below already rendered it to the operator. Silent loss of a
-            // message we acknowledged.
-            //
-            // Read the generation and apply in this SAME lock acquisition
-            // (already held for `try_send`) — a separate one risks a
-            // concurrent respawn bumping `spawn_generation` in between,
-            // making the event carry a stale generation that `update()`'s
-            // catch-all silently ignores.
-            //
-            // A no-op when no unconfirmed resume is in flight, so it costs
-            // nothing on the ordinary path.
-            let generation = inner.spawn_generation;
-            let seq = inner.take_next_message_seq();
-            inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
-                generation,
-                entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
-            });
-        }
-
-        // Persist the injected message to the blockfile WITH a live event —
-        // unlike `send_message`, there is no `agent-message-accepted` pending
-        // echo to pair with (nothing was typed in the UI), so without this the
-        // injection is invisible to the human operator: a silent injection,
-        // which SPEC_JEKT_SECURITY_AND_VISIBILITY §3.1/G1 forbids. The live
-        // blockfile append renders it in the open pane; the persisted line lets
-        // `parseHistoryLines` rebuild the node on reopen.
-        if let Some(ref broker) = self.broker {
-            let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
-            let line_with_newline = format!("{json_str}\n");
-            super::super::shell::handle_append_block_file(
-                broker,
-                &self.block_id,
-                crate::backend::agent_session::OUTPUT_FILE,
-                line_with_newline.as_bytes(),
-                self.filestore.as_ref(),
-                global_zone.as_deref(),
-            );
-        }
         Ok(())
+    }
+
+    /// Deliver a user message to the **already-running** persistent process,
+    /// without a spawn config. Unlike `send_message`, this never spawns — it errors
+    /// if the process is not running. Used for controller-aware muxbus/reactive
+    /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
+    /// and we have no `PersistentSpawnConfig` to hand.
+    ///
+    /// Defaults to [`DeliverPolicy::NextIdle`]: if a turn is in flight the
+    /// message is queued and delivered at the next turn boundary, so an
+    /// automated sender never cuts the agent's explanation in half.
+    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`.
+    pub fn send_user_message(&self, message: String) -> Result<(), String> {
+        self.send_user_message_with_policy(message, DeliverPolicy::NextIdle)
+    }
+
+    /// [`send_user_message`] with an explicit delivery policy.
+    ///
+    /// `Immediate` preserves the pre-2026-09-23 behavior (write to live stdin
+    /// regardless of turn state, steering the agent). It exists for the human
+    /// operator's own deliberate interruption and should not be used for
+    /// automated traffic — see [`DeliverPolicy`].
+    pub fn send_user_message_with_policy(
+        &self,
+        message: String,
+        policy: DeliverPolicy,
+    ) -> Result<(), String> {
+        let json_str = Self::encode_user_message(&message);
+
+        // ONE lock acquisition covers the turn-state read, the enqueue and the
+        // idle fast-path send (§4.2/§4.3). Because the turn-end flush in
+        // `spawn.rs` takes this same lock, there is no window in which a
+        // message is enqueued against a queue a concurrent flush has already
+        // finished draining.
+        //
+        // `publish_status`/`spawn_status_heartbeat` must NOT be called while
+        // this guard is held — `publish_status` takes `inner` itself and would
+        // deadlock. They run after the guard drops, below.
+        let delivered = {
+            let mut inner = self.inner.lock().unwrap();
+
+            if policy == DeliverPolicy::Immediate {
+                Self::try_write_stdin_locked(&mut inner, &json_str)?;
+                Some(json_str.clone())
+            } else {
+                if inner.deferred_deliveries.len() >= MAX_DEFERRED_DELIVERIES {
+                    // §4.5: an explicit error, never a false success. The
+                    // caller treats this like any other transient delivery
+                    // failure and retries.
+                    return Err(format!(
+                        "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
+                         waiting on this agent's current turn) — retry shortly"
+                    ));
+                }
+                // Always enqueue first, then decide whether to drain the head
+                // immediately. Sending directly while a backlog exists would
+                // reorder this message ahead of older ones — FIFO is what
+                // makes "one message per turn boundary" produce the order the
+                // senders actually sent in.
+                inner.deferred_deliveries.push_back(json_str);
+
+                // `spawning_in_progress` counts as busy rather than as an
+                // error. This is the startup race that used to drop jekts
+                // outright (spec §3.2.1): a spawn always ends in either a turn
+                // (whose `result` frame flushes this queue) or a teardown
+                // (whose drain reports it), so deferring here strands nothing.
+                let busy = self.health_monitor.is_active_turn() || inner.spawning_in_progress;
+                if busy {
+                    None
+                } else {
+                    let head = inner
+                        .deferred_deliveries
+                        .front()
+                        .expect("just pushed")
+                        .clone();
+                    match Self::try_write_stdin_locked(&mut inner, &head) {
+                        Ok(()) => {
+                            inner.deferred_deliveries.pop_front();
+                            Some(head)
+                        }
+                        Err(e) => {
+                            // Drop the entry we just added — this call is
+                            // reporting failure, so the caller owns the retry.
+                            // Anything already queued stays put.
+                            inner.deferred_deliveries.pop_back();
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        };
+
+        let Some(sent_line) = delivered else {
+            tracing::info!(
+                block_id = %self.block_id,
+                "delivery deferred — a turn is in flight; will flush at the next turn boundary"
+            );
+            return Ok(());
+        };
+
+        // Whether the process was busy or idle, delivering this message
+        // (re)starts an active turn. The heartbeat is re-armed only when
+        // resuming from idle, or a mid-turn steering send would leak a
+        // duplicate heartbeat task.
+        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+        if !was_active {
+            self.spawn_status_heartbeat();
+        }
+        self.publish_status();
+        self.append_delivered_message(&sent_line);
+        Ok(())
+    }
+
+    /// Release at most ONE deferred message at a turn boundary, returning the
+    /// line written (`None` if the queue was empty or the write failed).
+    ///
+    /// Exactly one, never the whole queue: writing to stdin starts a new turn,
+    /// so a burst drain would write message #2 while #1's turn was already
+    /// running — the mid-turn write this whole mechanism exists to prevent
+    /// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.4). The next queued message
+    /// goes out on that new turn's own boundary.
+    ///
+    /// The caller holds `inner` across this, and must leave `turn_active` set
+    /// when this returns `Some` — the released message just started a turn.
+    /// A failed write leaves the queue intact for teardown to report rather
+    /// than dropping it.
+    pub(super) fn flush_one_deferred_locked(
+        inner: &mut PersistentInner,
+        block_id: &str,
+    ) -> Option<String> {
+        let head = inner.deferred_deliveries.front()?.clone();
+        match Self::try_write_stdin_locked(inner, &head) {
+            Ok(()) => {
+                inner.deferred_deliveries.pop_front();
+                Some(head)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    error = %e,
+                    queued = inner.deferred_deliveries.len(),
+                    "turn-boundary flush failed; leaving the queue for teardown to report"
+                );
+                None
+            }
+        }
+    }
+
+    /// Drain the deferred-delivery queue during teardown and report every
+    /// stranded entry, so a message this controller accepted is never quietly
+    /// discarded (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5).
+    ///
+    /// **Known gap:** reporting is currently a loud structured log, not a
+    /// failure routed back to the original sender. The queue stores encoded
+    /// stdin lines with no sender identity attached, so there is nothing to
+    /// address a reply to; carrying that identity through is Phase 3. Until
+    /// then a stranded message is visible in the logs rather than in the
+    /// sender's response — better than silence, short of the spec's intent.
+    pub(super) fn report_stranded_deferred_deliveries(&self, reason: &str) {
+        let stranded: Vec<String> = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.deferred_deliveries.drain(..).collect()
+        };
+        if stranded.is_empty() {
+            return;
+        }
+        tracing::warn!(
+            block_id = %self.block_id,
+            reason = %reason,
+            stranded = stranded.len(),
+            "deferred messages were accepted but never delivered"
+        );
+        for line in &stranded {
+            tracing::warn!(block_id = %self.block_id, message = %line, "stranded deferred message");
+        }
+    }
+
+    /// Persist a delivered injection to the blockfile WITH a live event.
+    ///
+    /// Unlike `send_message` there is no `agent-message-accepted` pending echo
+    /// to pair with (nothing was typed in the UI), so without this the
+    /// injection is invisible to the human operator: a silent injection, which
+    /// SPEC_JEKT_SECURITY_AND_VISIBILITY §3.1/G1 forbids. The live append
+    /// renders it in the open pane; the persisted line lets `parseHistoryLines`
+    /// rebuild the node on reopen.
+    ///
+    /// Called at *delivery* time, not enqueue time, so the transcript shows the
+    /// message where the agent actually received it. A queued message is
+    /// therefore not yet visible — surfacing "N waiting" is a UI question
+    /// tracked as spec §8 Q3.
+    pub(super) fn append_delivered_message(&self, json_str: &str) {
+        let Some(ref broker) = self.broker else { return };
+        let global_zone =
+            super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let line_with_newline = format!("{json_str}\n");
+        super::super::shell::handle_append_block_file(
+            broker,
+            &self.block_id,
+            crate::backend::agent_session::OUTPUT_FILE,
+            line_with_newline.as_bytes(),
+            self.filestore.as_ref(),
+            global_zone.as_deref(),
+        );
     }
 
     /// Answer a parked AskUserQuestion via the Agent SDK **control protocol**.
