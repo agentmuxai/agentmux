@@ -207,22 +207,24 @@ mod resolve_cli_args_tests {
     }
 }
 
-/// The agent `agent.open` opens: a **My Agents** agent (`is_seeded == 0`),
-/// named by definition id or by display name (ASCII case-insensitive). An
-/// exact id wins over a name; among names, a user agent wins over a template
-/// of the same name. A template is refused with `TEMPLATE_NOT_OPENABLE` —
-/// opening one would launch a session that is no agent's (spec §6.5.8,
-/// template sessions); an agent is created from a template in the picker.
+/// The agent `agent.open` opens: a user agent (`is_seeded == 0`), named by
+/// definition id or by display name (ASCII case-insensitive) — its id first,
+/// then its name. Only when no user agent answers is a template consulted,
+/// and then only to refuse it with `TEMPLATE_NOT_OPENABLE`: opening one would
+/// launch a session that is no agent's (spec §6.5.8, template sessions); an
+/// agent is created from a template in the picker. A template's id is its
+/// lowercase name (`claude`), which a user agent created from it shares
+/// case-insensitively, so templates must never be matched first.
 fn select_openable_agent<'a>(
     agents: &'a [AgentDefinition],
     wanted: &str,
 ) -> Result<&'a AgentDefinition, String> {
-    let by_name = |a: &&AgentDefinition| a.name.eq_ignore_ascii_case(wanted);
-    let found = agents
-        .iter()
+    let names = |a: &&AgentDefinition| a.id == wanted || a.name.eq_ignore_ascii_case(wanted);
+    let users = || agents.iter().filter(|a| a.is_seeded == 0);
+    let found = users()
         .find(|a| a.id == wanted)
-        .or_else(|| agents.iter().filter(|a| a.is_seeded == 0).find(by_name))
-        .or_else(|| agents.iter().find(by_name))
+        .or_else(|| users().find(|a| a.name.eq_ignore_ascii_case(wanted)))
+        .or_else(|| agents.iter().find(names))
         .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{wanted}'"))?;
     if found.is_seeded != 0 {
         return Err(format!(
@@ -1565,21 +1567,24 @@ mod record_agent_open_launch_tests {
         d
     }
 
-    /// `agent.open` opens My Agents agents only: a template is refused by id
-    /// or by name, and a user agent sharing a template's name is the one
-    /// opened, whatever the list order.
+    /// `agent.open` opens user agents only: a template is refused by id or by
+    /// name, and a user agent is preferred over a template it shares a name
+    /// with — including the template's id, which is its lowercase name
+    /// (adversarial review of #3600) — whatever the list order.
     #[test]
     fn agent_open_selects_my_agents_and_refuses_templates() {
         let agents = vec![
-            def("tpl-claude", "Claude", 1),
-            def("agent-mine", "claude", 0),
-            def("tpl-codex", "Codex", 1),
+            def("claude", "Claude", 1),
+            def("agent-mine", "Claude", 0),
+            def("codex", "Codex", 1),
+            def("agent-other", "agent-mine", 0),
         ];
         let pick = |wanted| select_openable_agent(&agents, wanted).map(|a| a.id.as_str());
 
-        assert_eq!(pick("agent-mine"), Ok("agent-mine"));
+        assert_eq!(pick("agent-mine"), Ok("agent-mine"), "an id wins over a name");
+        assert_eq!(pick("claude"), Ok("agent-mine"), "not the template's id");
         assert_eq!(pick("CLAUDE"), Ok("agent-mine"));
-        for wanted in ["tpl-claude", "tpl-codex", "codex"] {
+        for wanted in ["codex", "Codex"] {
             let err = pick(wanted).unwrap_err();
             assert!(err.starts_with("TEMPLATE_NOT_OPENABLE"), "{wanted}: {err}");
         }
