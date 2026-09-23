@@ -360,10 +360,6 @@ impl AuthSessionManager {
         refs.pty_pids.remove(session_id);
     }
 
-    /// Read the full transcript of captured stdout/stderr lines.
-    /// Used by integration tests; exposed for completeness even
-    /// though no production caller currently reads it.
-    #[allow(dead_code)]
     /// The account email scraped from this session's login transcript, if the
     /// provider printed one.
     ///
@@ -381,6 +377,10 @@ impl AuthSessionManager {
             .and_then(|s| s.captured_email.clone())
     }
 
+    /// Read the full transcript of captured stdout/stderr lines.
+    /// Used by integration tests; exposed for completeness even
+    /// though no production caller currently reads it.
+    #[allow(dead_code)]
     pub fn transcript(&self, session_id: &str) -> Option<Vec<String>> {
         self.sessions
             .lock()
