@@ -243,9 +243,10 @@ applicable) a CI guardrail.
    preserves the first visible node and its offset (§6.3.5).
 3. **No jump.** Nothing visible moves when content is added, migrated or
    evicted.
-4. **No loss.** Only a node whose provenance is durable is evicted: its
-   transcript line (or `out-of-band.jsonl` line) is covered by that file's
-   line count, so the History tab can show it (§6.3.2).
+4. **No loss.** Only a finished node whose provenance is durable is evicted:
+   its **last** contributing transcript line (`src.endLine`) or journal line
+   (`journalEnd`) is covered by that file's line count, so the History tab can
+   show all of it (§6.3.1–§6.3.2).
 5. **Layout consistency.** The layout store's `totalSize` equals the sum of
    effective heights of its rows; every mounted virtualized row's measured
    height equals its stored height within 1 px after the measure RO fires.
@@ -330,7 +331,9 @@ can exceed it on its own and stay fully mounted. Such a node is windowed
   height yet falls back to its per-kind estimate and is corrected on first
   measure.
 - **Ordering:** migration is a scheduler task (§6.5) at "housekeeping"
-  priority — it never runs in a frame with pending input.
+  priority — it does not run in a frame with pending input **until its
+  deadline passes**; after that it runs in bounded slices even with input
+  pending (§6.5, "Housekeeping deadline").
 
 **Why this is safe now when it was not in June:** the June crashes came from
 the tail array **growing** past the cap in a render and from `<Index>`
@@ -380,9 +383,17 @@ reusing one, and a reparse of everything is O(history).
   where truncation happens today and adds the generation to the line-count and
   range-read responses.) The same line always yields the same ids in every
   parser instance — live pane, reconnect replay, History tab, any page order.
-- Every such node carries `src: { line }` (new field). Nodes produced from
-  several lines (a text run) take the line that **started** them, so a node's
-  id never changes as it grows.
+- Every such node carries `src: { line, endLine }` (new fields). `line` is
+  the record that **started** it, so a node's id never changes as it grows;
+  `endLine` is the **last** record that contributed to it, and moves forward
+  as a text run, thinking run or tool result accumulates. Durability (§6.3.2)
+  is judged on `endLine`, never on `line` (Codex review, third round): a
+  completed node whose later records were received live but not yet written
+  is not durable.
+- Every such node also carries `turn`, the ordinal of the turn it belongs to
+  (count of turn-starting `user_message` records before it in this
+  generation), assigned by the parser from source position, so it is the same
+  in every parser instance.
 - The parser exposes `atBoundary()`: true when no text, thinking or tool
   accumulator is open. Lines where it is true are **clean boundaries**; parsing
   may start at any clean boundary and produce the same ids and nodes as a parse
@@ -407,13 +418,14 @@ Two producers create nodes outside the transcript parser:
 Rule: **every node kind declares its provenance**, and only a node with a
 **durable** provenance is evictable.
 
-- `transcript` (parser-produced): durable once the block's line count covers
-  `src.line`.
+- `transcript` (parser-produced): durable once the node is finished **and**
+  the block's line count covers `src.endLine`.
 - `journal`: the backend appends every out-of-band node event (shell create,
   chunk, exit; optimistic user message accepted) to a new per-block durable
   journal file, `out-of-band.jsonl`, with its own line numbers. A journal node
-  carries `src: { journal: <line> }` and is durable once the journal's line
-  count covers it. The History tab reads the journal alongside the transcript
+  carries `src: { journal, journalEnd }` — its first and last journal records
+  (a shell's create, then its last chunk or exit) — and is durable once it is
+  finished **and** the journal's line count covers `journalEnd`. The History tab reads the journal alongside the transcript
   and merges by timestamp, so shells appear in history too (today they don't).
 - Optimistic `user_message`: Phase 5 first establishes, per provider, whether
   the transcript carries an echo of a sent message and how (if at all) it is
@@ -445,8 +457,10 @@ generation**:
 
 - **Accepted ranges.** Per source (transcript, `out-of-band.jsonl`), the pane
   keeps `{ gen, ranges, high }`: `ranges` is the sorted, merged set of line
-  intervals whose nodes the pane currently holds, and `high` is the highest
-  line it has ever consumed in that generation. At most three intervals exist
+  intervals whose nodes the pane currently holds, each with the first and last
+  turn ordinal it contains (`{ from, to, firstTurn, lastTurn }`, for the gap
+  row, §6.3.5), and `high` is the highest line it has ever consumed in that
+  generation. At most three intervals exist
   at once (reading window, present, and the in-flight tail when it is not
   contiguous with the present), so the state stays small.
 - **Replay filter.** Before parsing, a line is kept if it is in `ranges` or
@@ -501,9 +515,12 @@ pattern chat apps use.
 - Turns completed while reading are added to the present; when the present
   exceeds its budget, its oldest turns are dropped from memory (durable, so
   nothing is lost). If the present and the reading window no longer touch, a
-  **gap row** between them says "N newer turns — jump to latest" and reports
-  the count from the gap between the two accepted ranges (§6.3.3), which is
-  exactly the evicted middle.
+  **gap row** between them says "N newer turns — jump to latest". N comes from
+  turn ordinals, not line counts (turns span arbitrary numbers of lines, in
+  both sources): the accepted-range state (§6.3.3) records the first and last
+  `turn` of each retained range, so N = the present's first turn − the reading
+  window's last turn − 1, with no reparse of the gap (Codex review, third
+  round).
 - Scrolling down into the gap loads the next turns by range read (clean
   boundaries, positional ids), and drops turns from the top of the reading
   window to stay within budget — anchor-preserving: the first visible node and
@@ -567,7 +584,9 @@ with one app-wide scheduler that owns *when* stream work runs:
   changes under load. The pinned view still ends at the latest content.
 - **Priorities:** input handlers > stream flush of focused pane > other
   visible panes > housekeeping (migration, eviction, History-tab catch-up).
-  Housekeeping never runs in a frame with pending input.
+  Housekeeping does not run in a frame with pending input **except** under its
+  deadline (next bullets): that exception is the only one, and it applies
+  everywhere this rule is referenced (§6.2, §6.3.4).
 - **Starvation guard:** every visible pane gets a flush at least every
   100 ms, even under continuous typing.
 - **Housekeeping deadline** (Codex review, second round): "never with pending
@@ -717,6 +736,9 @@ provenance either loses data or resurrects it.
   line is durable; visible in the History tab afterwards.
 - History tab's tail parser discarded mid-run (remount, injected error):
   recovery from the last clean boundary, no duplicates, no split runs.
+- A multi-record node (long text run; shell with many chunks) completed live
+  while its later records are not yet on disk: not evicted until `endLine` /
+  `journalEnd` is covered; afterwards the History tab shows all of it.
 - Backend killed mid-eviction, mid-journal-write and mid-History-tab read
   (invariant 4).
 - 8 panes streaming at once; 4 panes streaming while the History tab of each
