@@ -48,21 +48,37 @@ for (const e of chunks) {
   if (e.ph === "M" && e.name === "thread_name") threadName.set(`${e.pid}:${e.tid}`, e.args.name);
 }
 const byThread = new Map(), byName = new Map(), longTasks = [];
-// Only count complete events ('X') at depth 0-ish: approximate by summing dur of
-// events whose name is a known top-level runner, plus all events by name for ranking.
+// Busy time = OUTERMOST task-runner events per thread. One task is typically
+// emitted as several nested aliases (ThreadControllerImpl::RunTask wrapping a
+// devtools.timeline RunTask, ...); summing every alias double-counts it, can
+// push a thread past 100%, and inflates the long-task count. So group by
+// thread, sort by start, and keep only events not contained in a kept one.
+const TASK_NAMES = new Set(["MessageLoop::RunTask", "ThreadControllerImpl::RunTask", "RunTask"]);
+const tasksByThread = new Map();
 for (const e of chunks) {
   if (e.ph !== "X" || !e.dur) continue;
   const tkey = `${procName.get(e.pid) || e.pid} / ${threadName.get(`${e.pid}:${e.tid}`) || e.tid}`;
-  if (e.name === "MessageLoop::RunTask" || e.name === "ThreadControllerImpl::RunTask" || e.name === "RunTask") {
-    byThread.set(tkey, (byThread.get(tkey) || 0) + e.dur);
-    if (e.dur > 50000) longTasks.push({ tkey, dur: e.dur, ts: e.ts });
+  if (TASK_NAMES.has(e.name)) {
+    if (!tasksByThread.has(tkey)) tasksByThread.set(tkey, []);
+    tasksByThread.get(tkey).push(e);
   }
   const nkey = `${e.name}  [${tkey}]`;
   byName.set(nkey, (byName.get(nkey) || 0) + e.dur);
 }
+for (const [tkey, evs] of tasksByThread) {
+  // Longest first at equal start, so the outer alias is the one kept.
+  evs.sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+  let keptEnd = -Infinity;
+  for (const e of evs) {
+    if (e.ts + e.dur <= keptEnd) continue; // nested inside the last kept task
+    keptEnd = e.ts + e.dur;
+    byThread.set(tkey, (byThread.get(tkey) || 0) + e.dur);
+    if (e.dur > 50000) longTasks.push({ tkey, dur: e.dur, ts: e.ts });
+  }
+}
 const top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
 const ms = (us) => (us / 1000).toFixed(0).padStart(7);
-console.log(`\nBUSY TIME PER THREAD (RunTask sum over ${secs}s):`);
+console.log(`\nBUSY TIME PER THREAD (outermost RunTask sum over ${secs}s):`);
 for (const [k, v] of top(byThread, 14)) console.log(`  ${ms(v)} ms  ${(100 * v / (Number(secs) * 1e6)).toFixed(0).padStart(3)}%  ${k}`);
 console.log(`\nLONG TASKS >50ms: ${longTasks.length}  (max ${ms(Math.max(0, ...longTasks.map((l) => l.dur)))} ms)`);
 const ltBy = new Map(); for (const l of longTasks) ltBy.set(l.tkey, (ltBy.get(l.tkey) || 0) + 1);

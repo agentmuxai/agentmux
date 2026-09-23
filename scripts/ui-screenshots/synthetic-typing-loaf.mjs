@@ -25,9 +25,11 @@ const evalIn = async (expression) => {
 };
 
 // 1. Which textarea is focused? Refuse to type into nothing.
-const focus = await evalIn(`(()=>{const a=document.activeElement;return {tag:a&&a.tagName,placeholder:a&&a.placeholder,len:a&&a.value?a.value.length:0,vis:document.visibilityState}})()`);
+const focus = await evalIn(`(()=>{const a=document.activeElement;return {tag:a&&a.tagName,composer:!!(a&&a.matches&&a.matches("textarea.agent-input")),placeholder:a&&a.placeholder,len:a&&a.value?a.value.length:0,vis:document.visibilityState}})()`);
 console.error("focused:", JSON.stringify(focus));
-if (focus.tag !== "TEXTAREA") { console.error("no textarea focused — click into the composer first"); process.exit(2); }
+// Must be an agent composer: decision/question panels and modals have their own
+// textareas with different event paths, which would mislabel the measurement.
+if (!focus.composer) { console.error(`focused element is ${focus.tag ?? "nothing"}, not an agent composer (textarea.agent-input) — click into the composer first`); process.exit(2); }
 // A minimized/backgrounded page throttles rAF and timers: the capture would
 // measure visibility throttling, not typing responsiveness.
 if (focus.vis !== "visible") { console.error(`page is ${focus.vis} — restore the window first`); process.exit(2); }
