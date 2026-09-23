@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Sets the `Codex review` commit status on a PR's head: success only once
-// Codex has said "Didn't find any major issues" about that exact commit.
+// Codex has said "Didn't find any major issues" about that exact commit, or
+// answered the request for it with its out-of-quota notice.
 // Run by .github/workflows/codex-review-gate.yml.
 //
 // Why a status keyed to the head commit: #3513 merged at 18:07 while Codex
@@ -11,11 +12,18 @@
 // matched on the "Reviewed commit" Codex prints, never on "Codex said OK
 // somewhere in this PR".
 //
-// What Codex posts (observed on #3513/#3523/#3538):
+// What Codex posts (observed on #3513/#3523/#3538/#3562):
 //   - no findings: an ISSUE COMMENT "Codex Review: Didn't find any major
 //     issues. ..." with "**Reviewed commit:** `<10-char sha>`"
 //   - findings:    a PR REVIEW (state COMMENTED) with the same
 //     "Reviewed commit" line and inline comments.
+//   - out of quota: an ISSUE COMMENT "You have reached your Codex usage
+//     limits for code reviews. ..." naming no commit. When it answers the
+//     only outstanding ReAgent trigger ("@codex review" by a5af with
+//     `<!-- reagent:codex-trigger head=<sha> -->`), it counts for that
+//     head and passes it: Codex being unavailable must not block merges
+//     (#3562 sat pending). See quotaAttribution for overlapping requests.
+//     A later real verdict on the head still wins.
 //
 // Codex only reviews when asked by a5af, not a bot. ReAgent decides when
 // to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
@@ -27,9 +35,15 @@
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
 
+// Only ReAgent's trigger names the head it asked about; reagent's
+// codex_policy.py reads the same marker from the same author.
+export const TRIGGER_AUTHOR = "a5af";
+
 const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 // Straight or curly apostrophe.
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
+const USAGE_LIMIT = /reached your Codex usage limits/i;
+const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
 
 // Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
 // Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
@@ -53,16 +67,67 @@ export function reviewedCommit(body) {
     return m ? m[1].toLowerCase() : null;
 }
 
+/**
+ * The head each quota notice answered (Map: notice -> sha), from the
+ * timeline of ReAgent triggers and Codex answers. The notice carries no
+ * request id, so the requests still outstanding when it arrives decide:
+ *   - an answer naming a commit closes only the requests for that commit
+ *     (Codex P1 on #3589: a blanket "since Codex last spoke" cutoff also
+ *     dropped a newer request, leaving its head pending forever);
+ *   - a notice with exactly one request outstanding answers that head;
+ *   - with several outstanding it is ambiguous (Codex P1 on #3589: crediting
+ *     the latest would pass an unreviewed head). It credits no head, closes
+ *     them all, and the next request is then answered alone.
+ */
+function quotaAttribution({ comments, reviews }) {
+    const events = [];
+    for (const c of comments) {
+        const at = String(c.created_at);
+        if (c.user?.login === TRIGGER_AUTHOR) {
+            const m = TRIGGER_HEAD.exec(c.body ?? "");
+            if (m) events.push({ at, order: 0, request: m[1].toLowerCase() });
+        } else if (c.user?.login === CODEX_LOGIN) {
+            const body = c.body ?? "";
+            if (USAGE_LIMIT.test(body)) events.push({ at, order: 1, quota: c });
+            else if (reviewedCommit(body)) events.push({ at, order: 1, names: reviewedCommit(body) });
+        }
+    }
+    for (const r of reviews) {
+        if (r.user?.login === CODEX_LOGIN && reviewedCommit(r.body)) {
+            events.push({ at: String(r.submitted_at), order: 1, names: reviewedCommit(r.body) });
+        }
+    }
+    // Requests sort before answers posted in the same second.
+    events.sort((a, b) => a.at.localeCompare(b.at) || a.order - b.order);
+
+    const attributed = new Map();
+    let outstanding = [];
+    for (const e of events) {
+        if (e.request) outstanding.push(e.request);
+        else if (e.names) outstanding = outstanding.filter((head) => !head.startsWith(e.names));
+        else if (e.quota) {
+            if (outstanding.length === 1) attributed.set(e.quota, outstanding[0]);
+            outstanding = [];
+        }
+    }
+    return attributed;
+}
+
 /** Every Codex verdict that names a commit, oldest first. */
 function codexOutputs({ comments = [], reviews = [] }) {
+    const quotaHeads = quotaAttribution({ comments, reviews });
     return [
         ...comments
             .filter((c) => c.user?.login === CODEX_LOGIN)
-            .map((c) => ({
-                kind: NO_MAJOR_ISSUES.test(c.body ?? "") ? "ok" : "other",
-                at: c.created_at,
-                sha: reviewedCommit(c.body),
-            })),
+            .map((c) =>
+                USAGE_LIMIT.test(c.body ?? "")
+                    ? { kind: "quota", at: c.created_at, sha: quotaHeads.get(c) ?? null }
+                    : {
+                          kind: NO_MAJOR_ISSUES.test(c.body ?? "") ? "ok" : "other",
+                          at: c.created_at,
+                          sha: reviewedCommit(c.body),
+                      },
+            ),
         // A dismissed findings review no longer counts against a commit. It
         // does not count for it either: only a Codex OK passes.
         ...reviews
@@ -95,6 +160,9 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [], filesS
 
     if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
+    }
+    if (onHead?.kind === "quota") {
+        return { state: "success", description: `Codex is out of review quota; ${short} passes without it` };
     }
     if (onHead?.kind === "findings") {
         return {
