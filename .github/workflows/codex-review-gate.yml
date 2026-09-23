@@ -1,13 +1,15 @@
 name: Codex review gate
 
 # Sets the `Codex review` commit status on a PR's head commit: success only
-# once Codex has said "Didn't find any major issues" about that exact commit.
+# once Codex has said "Didn't find any major issues" about that commit, or
+# about an earlier one with only docs changed since.
 # Make it a required check on main to stop merges ahead of Codex (#3513 merged
 # while Codex was still finding bugs; three fixes were orphaned into #3538).
 # Logic and rationale: scripts/ci-codex-review-gate.mjs.
 #
-# Codex only reviews when a5af asks. reagent posts that request once per head
-# commit (a5af/reagent#241); this workflow only reads and sets a status.
+# Codex only reviews when a5af asks. ReAgent decides when (after it approves,
+# then only for changes Codex would care about; see the script header); this
+# workflow only reads and sets a status.
 #
 # Triggers:
 #   pull_request_target  a push resets the new head to pending
@@ -40,11 +42,6 @@ permissions:
   pull-requests: read
   issues: read
 
-concurrency:
-  # Every run re-reads the PR's current state, so only the latest matters.
-  group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-  cancel-in-progress: true
-
 jobs:
   evaluate:
     if: >-
@@ -56,6 +53,14 @@ jobs:
         github.event.review.user.login == 'chatgpt-codex-connector[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Job-level, not workflow-level: a run whose `if:` skips this job (every
+    # non-Codex review or comment) must not join the group. At workflow level
+    # it did, and cancelled the push's evaluation a second earlier -- the new
+    # head got no status and the PR showed a failed `evaluate` (#3556).
+    # Every run re-reads the PR's current state, so only the latest matters.
+    concurrency:
+      group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
