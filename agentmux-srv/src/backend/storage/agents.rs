@@ -2320,11 +2320,11 @@ impl Store {
     /// whose latest launch is on this block and still active, which is what
     /// a block from before the block meta carried `agentId` needs.
     ///
-    /// `block.meta.agentInstanceId` never *selects* a row: codex P1 on PR
-    /// #1114 round 3 surfaced that pane reuse can leave a stale one behind.
-    /// It only *narrows* the fallback for a block whose `agentId` names no
-    /// agent row, so a deleted launch is not replaced by a sibling's stale
-    /// row (see the fallback below).
+    /// `block.meta.agentInstanceId` never overrides `agentId`: codex P1 on
+    /// PR #1114 round 3 surfaced that pane reuse can leave a stale one
+    /// behind. It is consulted only for a block whose `agentId` names no
+    /// agent row, and only within what that block names, while it is still
+    /// the block's latest launch (see the fallback below).
     pub fn instance_get_active_for_block(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let block: crate::backend::obj::Block = match self.get(block_id)? {
             Some(b) => b,
@@ -2392,17 +2392,30 @@ impl Store {
                 // stale stamp left by pane reuse, with a newer launch since
                 // folded onto the block, resolves to nothing rather than to
                 // the older row. Never a fork: a fork is launched under its
-                // own row id, so a fork reached here is a stale stamp.
+                // own row id, so a fork reached here is a stale stamp. And
+                // the row must still relate to what the block names —
+                // launched from it, one hop from it, or orphaned (its
+                // ancestor since deleted, as a promoted clone can be) — so a
+                // stale stamp naming an unrelated agent cannot select it.
+                // Recorded: a legacy continuation stamp naming an id that
+                // never had a row (m0025 keyed chains to their root) resolves
+                // to nothing, not to the root — nothing distinguishes it from
+                // a deleted launch, and no identity is safer than a wrong one.
                 let mut stmt = conn.prepare(&format!(
                     "SELECT {INSTANCE_COLUMNS} FROM db_agents a
                      WHERE a.id = ?2 AND a.last_block_id = ?1 AND a.is_template = 0
                        AND a.status IN ('running', 'paused') AND a.branch_label = ''
+                       AND (a.parent_template_id = ?3
+                            OR a.parent_template_id IN (
+                                SELECT id FROM db_agents
+                                WHERE parent_template_id = ?3 AND is_template = 0 AND branch_label = '')
+                            OR NOT EXISTS (SELECT 1 FROM db_agents p WHERE p.id = a.parent_template_id))
                        AND NOT EXISTS (
                            SELECT 1 FROM db_agents b
                            WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
                              AND b.status IN ('running', 'paused') AND b.started_at > a.started_at)"
                 ))?;
-                return match stmt.query_row(params![block_id, stamped], map_instance_row) {
+                return match stmt.query_row(params![block_id, stamped, agent_id], map_instance_row) {
                     Ok(a) => Ok(Some(a)),
                     Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                     Err(e) => Err(e.into()),
@@ -2417,7 +2430,7 @@ impl Store {
                         OR parent_template_id IN (
                             SELECT id FROM db_agents
                             WHERE parent_template_id = ?2 AND is_template = 0 AND branch_label = ''))
-                 ORDER BY updated_at DESC
+                 ORDER BY started_at DESC, updated_at DESC, id DESC
                  LIMIT 1"
             ))?;
             return match stmt.query_row(params![block_id, agent_id], map_instance_row) {
@@ -2427,12 +2440,13 @@ impl Store {
             };
         }
         // A block whose meta names no agent (from before `agentId`): the
-        // agent whose latest launch is on it.
+        // agent whose latest launch is on it — by launch time, which a
+        // rename or lifecycle write does not move (Codex P1 on #3576).
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(
             "SELECT {INSTANCE_COLUMNS} FROM db_agents
              WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
-             ORDER BY updated_at DESC
+             ORDER BY started_at DESC, updated_at DESC, id DESC
              LIMIT 1"
         ))?;
         match stmt.query_row(params![block_id], map_instance_row) {
