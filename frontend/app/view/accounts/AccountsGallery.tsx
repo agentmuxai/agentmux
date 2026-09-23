@@ -79,11 +79,16 @@ export function AccountsGallery(props: {
                                     <span class="account-tile-count" title={`${n()} connected`}>{n()}</span>
                                 </Show>
                                 <span class="account-tile-logo">
-                                    <ProviderLogo provider={tile.id} size={32} />
+                                    <ProviderLogo provider={tile.id} size={20} />
                                 </span>
-                                <span class="account-tile-name">{tile.displayName}</span>
-                                <span class="account-tile-status">
-                                    {n() > 0 ? `${n()} connected` : (tile.blurb ?? "Connect")}
+                                {/* Name + status stack beside the logo (chip
+                                    layout) rather than under it — see the
+                                    density note in accounts-gallery.scss. */}
+                                <span class="account-tile-text">
+                                    <span class="account-tile-name">{tile.displayName}</span>
+                                    <span class="account-tile-status">
+                                        {n() > 0 ? `${n()} connected` : (tile.blurb ?? "Connect")}
+                                    </span>
                                 </span>
                             </button>
                         );
