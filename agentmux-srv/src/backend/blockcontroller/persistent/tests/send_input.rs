@@ -1009,37 +1009,40 @@ fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_
 /// conversation.
 #[test]
 fn retry_after_resume_failure_with_no_entries_leaves_a_newer_generation_alone() {
-    let tmp = tempfile::tempdir().unwrap();
-    let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
-    let dir = tmp.path().join("projects").join(&slug);
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
-
-    let c = controller();
+    // Codex's exact scenario (second round): NO recovery candidate, so the
+    // old code would have appended a `Fresh` disclosure — to the history of
+    // a generation that may be resuming a different conversation entirely.
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+    let block_id = "block-superseded-empty-retry".to_string();
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.clone(),
+        Some(broker),
+        None,
+        None,
+        Some(filestore.clone()),
+    );
     {
         let mut inner = c.inner.lock().unwrap();
         // Generation 2 has taken over and installed its own session.
         inner.spawn_generation = 2;
         inner.session_id = Some("newer-live".to_string());
-        Self_set_running(&mut inner);
+        PersistentSubprocessController::set_status(&mut inner, STATUS_RUNNING);
     }
-    let mut env_vars = HashMap::new();
-    env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
     let config = PersistentSpawnConfig {
         cli_command: "definitely-not-a-real-binary-xyz".to_string(),
         cli_args: vec![],
-        working_dir,
-        env_vars,
+        working_dir: String::new(),
+        env_vars: HashMap::new(), // no CLAUDE_CONFIG_DIR: nothing to recover
         session_id_field: "session_id".to_string(),
         resume_flag: "--resume".to_string(),
         session_id: "d019e2e4-stale".to_string(),
         message_id: None,
     };
 
-    // Generation 1's settlement arrives late.
-    c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+    // Generation 1's settlement arrives late, with the CLI's error line.
+    c.retry_after_resume_failure(1, config, vec![], Some("stale-resume-error\n".to_string()), "d019e2e4-stale".to_string());
 
     let inner = c.inner.lock().unwrap();
     assert_eq!(
@@ -1048,11 +1051,14 @@ fn retry_after_resume_failure_with_no_entries_leaves_a_newer_generation_alone() 
         "a recovery result for a superseded generation must not overwrite the live session"
     );
     assert_eq!(inner.proc_status, STATUS_RUNNING, "and must not stamp `done` over a running generation");
-}
-
-/// Stand-in for the running-generation bookkeeping `spawn_process` does.
-fn Self_set_running(inner: &mut PersistentInner) {
-    PersistentSubprocessController::set_status(inner, STATUS_RUNNING);
+    drop(inner);
+    let appended = filestore.read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT).unwrap();
+    assert!(
+        appended.is_none(),
+        "and must append nothing — no `Fresh` disclosure, no stale error line — to the newer \
+         generation's history; got: {:?}",
+        appended.map(|b| String::from_utf8_lossy(&b).to_string())
+    );
 }
 
 #[test]
