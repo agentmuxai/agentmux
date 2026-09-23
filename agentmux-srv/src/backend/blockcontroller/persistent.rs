@@ -2429,23 +2429,9 @@ impl PersistentSubprocessController {
             // this fix's own test, which failed with
             // `[resolved, resolved]` when the publish was unconditional.)
             if recovered.is_some() {
-                // Keep the recovery candidate — codex P2 on PR #3523. The
-                // failed sid has already been cleared from block meta by
-                // the stderr path's `persist_session_id("")`, and the
-                // recovered one lives only in this call's local `config`.
-                // Resolving without writing it back throws the recovery
-                // away: the next prompt reads `agent:sessionid`, finds it
-                // empty, and starts a genuinely fresh conversation — the
-                // exact continuity loss this whole recovery search exists
-                // to prevent, just reached via the one path that has no
-                // spawn to carry the id forward for it.
-                //
-                // Persisted rather than eagerly spawned: with an empty
-                // batch there is nothing to send, so spawning now would
-                // burn a process to sit idle. The next prompt resumes it
-                // through the ordinary path.
-                // NOT persisted. An earlier cut of this branch wrote the
-                // recovered id back so the next prompt would resume it
+                // The recovery candidate found above is deliberately NOT
+                // persisted here. An earlier cut of this branch wrote it
+                // back so the next prompt would resume it
                 // (codex P2 on PR #3523 — otherwise the recovery scan's
                 // result is simply discarded and the next prompt starts a
                 // fresh conversation). That write then produced two P1s in
