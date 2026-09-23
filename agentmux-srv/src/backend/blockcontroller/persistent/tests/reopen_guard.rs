@@ -171,7 +171,7 @@ async fn a_candidate_respawn_refused_by_the_guard_discards_and_reports_the_queue
     let c = PersistentSubprocessController::new(
         "tab".to_string(),
         block_id.clone(),
-        Some(broker),
+        Some(broker.clone()),
         None,
         None,
         Some(filestore.clone()),
@@ -207,4 +207,13 @@ async fn a_candidate_respawn_refused_by_the_guard_discards_and_reports_the_queue
         output.contains("were not delivered and have been discarded") && output.contains("already open in another pane"),
         "the operator must be told what was discarded and why; got: {output}"
     );
+    // codex P2 on PR #3554: the doomed eager process's exit suppressed
+    // `PublishDone`, so this arm must broadcast the status itself or the
+    // pane stays "Working" until the heartbeat.
+    let statuses = broker.read_event_history(
+        crate::backend::mps::EVENT_CONTROLLER_STATUS,
+        &format!("block:{block_id}"),
+        5,
+    );
+    assert!(!statuses.is_empty(), "a controller status must be published after the refusal");
 }
