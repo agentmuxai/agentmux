@@ -3567,3 +3567,38 @@ async fn unregister_works_for_an_agent_whose_slug_is_ambiguous() {
     assert!(reused.success, "a reused slug must not inherit the old collision: {:?}", reused.error);
     assert_eq!(reused.block_id.as_deref(), Some("block-d"));
 }
+
+/// ReAgent P1 (third round) on #3520. `record_supervisor_decision` keyed by
+/// `target_agent.to_lowercase()` while the registries are canonical-id keyed,
+/// so for any resolvable agent every lookup missed: `block_id` defaulted to
+/// "", `current_nonce` to 0, both respawn-staleness checks became meaningless,
+/// audit entries recorded an empty block, and `nudge_counters` was keyed by the
+/// slug — so two agents sharing one would have shared a nudge ceiling.
+///
+/// Delivery masked it, because `inject_message_inner` resolves separately. Only
+/// the ceiling, audit and staleness logic was wrong, and no test installed a
+/// resolver, so nothing caught it.
+#[tokio::test]
+async fn supervisor_decision_resolves_the_target_like_every_other_entry_point() {
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(test_resolver(&[("AgentY", "def-a"), ("def-a", "def-a")]));
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+
+    let resp = handler
+        .record_supervisor_decision(
+            "AgentY",
+            SupervisorAction::Decline,
+            "busy",
+            "req-sup",
+            Some("supervisor"),
+        )
+        .expect("decision recorded");
+
+    // The whole point: it found the REAL block. Keyed by the raw slug this was
+    // None, because the entry lives under "def-a".
+    assert_eq!(
+        resp.block_id.as_deref(),
+        Some("block-a"),
+        "supervisor decision must resolve the target's real block"
+    );
+}
