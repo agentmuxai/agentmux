@@ -1,7 +1,9 @@
 # SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought
 
 **Date:** 2026-09-23
-**Status:** in progress — §5 is the implementation plan; each phase links its PR as it lands.
+**Status:** active — Phase 1 (this doc, supersessions, dead-field removal) in #3557; Phase 2 (the
+`DeliverPolicy` queue, the actual behavior change) in #3562; Phase 3 (ACP, sender-addressed failure
+reporting, frontend interleaving tests) not started. See §5.
 **Author:** Maricon
 **Scope:** all non-human-initiated delivery into a running agent's live input —
 `agentmux-srv/src/backend/reactive/**`, `backend/blockcontroller/mod.rs::deliver_agent_message`,
