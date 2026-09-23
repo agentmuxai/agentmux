@@ -241,6 +241,7 @@ const makeMockModel = () => ({
     blockId: "blk-1",
     blockAtom: () => ({ meta: {} }),
     nodejsError: null as string | null,
+    launchError: null as string | null,
     launchAgentDefinition: vi.fn().mockResolvedValue(undefined),
 });
 
@@ -419,6 +420,32 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.instanceName).toBe("Mary");
         expect(overrides.continueOfInstanceId).toBeUndefined();
         expect(overrides.model).toBe("opus");
+    });
+
+    // Identity M4b-3 follow-up (ReAgent on #3585): an aborted launch shows the
+    // "Launch aborted" notice, and a later launch that did not abort clears
+    // it instead of leaving it up.
+    it("shows the launch-aborted notice, and clears it after a later launch that did not abort", async () => {
+        const model = makeMockModel();
+        model.launchAgentDefinition
+            .mockImplementationOnce(async () => {
+                model.launchError = "Could not record this launch, so it was not started: db locked";
+                return false;
+            })
+            .mockImplementationOnce(async () => true);
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
+        const req = modalLayerOpen.mock.calls[0][0];
+
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus");
+        expect(await screen.findByText("Launch aborted")).toBeTruthy();
+        expect(screen.getByText(/db locked/)).toBeTruthy();
+        expect(model.launchError).toBeNull();
+
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus");
+        await waitFor(() => expect(screen.queryByText("Launch aborted")).toBeNull());
     });
 
     it("modal onCreatedAndLaunch omits the model override when the modal supplied none (harness has no models list)", async () => {
