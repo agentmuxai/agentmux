@@ -914,6 +914,85 @@ fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_sessi
 /// reader hasn't cleared `inner.session_id` yet, this fallback would
 /// reattach `--resume` to the same dead sid and reproduce the
 /// identical failure, with nothing left to catch the repeat.
+/// Codex P1 on PR #3538: an eager resume (issue #3463) attempts `--resume`
+/// with NOTHING queued, so a stale id reaches `retry_after_resume_failure`
+/// with an empty batch. That is a terminal idle-resume failure, not a
+/// retry: no launch — but the recovery decision must still complete. The
+/// recovered id is adopted for the next message, and the controller
+/// reports `done` rather than sitting in "Reconnecting…" with no status
+/// ever published (the process-waiter hands this path `FireRetry`, not
+/// `PublishDone`, on the assumption a launch follows).
+#[test]
+fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_without_launching() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_dir = tmp.path().to_string_lossy().to_string();
+    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let dir = tmp.path().join("projects").join(&slug);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+    let c = controller();
+    c.inner.lock().unwrap().session_id = Some("d019e2e4-stale".to_string());
+    let mut env_vars = HashMap::new();
+    env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir,
+        env_vars,
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.session_id,
+        Some("972a6a4f-live".to_string()),
+        "the recovered session is adopted so the NEXT message resumes it"
+    );
+    assert!(
+        inner.stdin_tx.is_none() && !inner.spawning_in_progress,
+        "nothing to send, so nothing is launched"
+    );
+    drop(inner);
+    assert_eq!(
+        c.get_status_snapshot().shellprocstatus,
+        STATUS_DONE,
+        "terminal status, not a silent return that strands the pane"
+    );
+}
+
+/// The no-candidate half of the case above: nothing on disk to recover, so
+/// the next message starts fresh — and the controller still settles `done`.
+#[test]
+fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_fresh_and_done() {
+    let c = controller();
+    c.inner.lock().unwrap().session_id = Some("dead-sid".to_string());
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "dead-sid".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "dead-sid".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id, None, "no candidate: the next message starts fresh");
+    assert!(inner.stdin_tx.is_none(), "nothing launched");
+    drop(inner);
+    assert_eq!(c.get_status_snapshot().shellprocstatus, STATUS_DONE);
+}
+
 #[test]
 fn respawn_once_for_leftover_queue_clears_inner_session_id_even_when_poison_resume_has_not_run_yet() {
     let c = controller();

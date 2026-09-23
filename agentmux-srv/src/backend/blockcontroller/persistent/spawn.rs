@@ -188,7 +188,34 @@ impl PersistentSubprocessController {
                         retry: persistent_resume::RetryPayload { config: config.clone(), messages: vec![retry_json] },
                     })
                 }
-                _ => inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation }),
+                // `--resume <sid>` WAS attempted, just with no message of
+                // our own to seed the retry batch with — the eager-resume
+                // path (issue #3463), which revives a session with nothing
+                // queued rather than in response to a message. codex P1 on
+                // PR #3513: routing this to `SpawnedFresh` below (the
+                // catch-all's original behavior) discarded `attempted_sid`
+                // entirely, leaving `NotTracking` in place for a spawn that
+                // in fact has an unconfirmed `--resume` in flight. If that
+                // resume turns out to be stale and a direct message arrives
+                // before the failure is detected, `MessageAppendedToRetryBatch`
+                // below has nothing to append it to and no retry ever fires
+                // when the doomed process exits — the message is silently
+                // lost. An empty `messages` starts the SAME `AwaitingOutcome`
+                // tracking a seeded resume gets; `MessageAppendedToRetryBatch`
+                // (`DeliverDirect`, below) is what fills it in as messages
+                // actually arrive. Never reachable before eager resume
+                // existed — every other caller either omits `--resume`
+                // entirely (`respawn_once_for_leftover_queue` clears
+                // `session_id` first) or always has a real payload
+                // (`BecomeSpawner`, `retry_after_resume_failure`).
+                (Some(sid), None) => {
+                    inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedWithResume {
+                        generation,
+                        attempted_sid: sid,
+                        retry: persistent_resume::RetryPayload { config: config.clone(), messages: vec![] },
+                    })
+                }
+                (None, _) => inner.apply_resume_event(persistent_resume::ResumeEvent::SpawnedFresh { generation }),
             };
             (generation, effects)
         };

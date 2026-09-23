@@ -36,7 +36,7 @@ impl PersistentSubprocessController {
         let json_str = json_msg.to_string();
 
         {
-            let inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock().unwrap();
             // reagentx P1 on PR #2360 (sixth review pass, round 7):
             // `spawn_process` sets `stdin_tx` synchronously, well before
             // the queued message that triggered the spawn is actually
@@ -67,6 +67,36 @@ impl PersistentSubprocessController {
                 .ok_or("persistent process not running")?;
             tx.try_send(json_str.clone())
                 .map_err(|e| format!("stdin send failed: {e}"))?;
+            // codex P1 + reagent P1 on PR #3523, found independently by
+            // both: track this into the CURRENT generation's retry batch,
+            // exactly as `send_message`'s `DeliverDirect` branch does. That
+            // fix covered the typed-in-the-UI path and missed this one — the
+            // MuxBus/reactive injection path (`deliver_agent_message`).
+            //
+            // The gap matters most for eager resume, which spawns with an
+            // unconfirmed `--resume` and NO seed message, so the retry batch
+            // starts empty. An injected prompt written straight to stdin and
+            // never appended leaves it empty, so when the resumed sid turns
+            // out to be stale the retry fires with nothing to redeliver —
+            // and the prompt is gone, even though the caller was returned
+            // `AgentDelivery::Structured` and the live blockfile append
+            // below already rendered it to the operator. Silent loss of a
+            // message we acknowledged.
+            //
+            // Read the generation and apply in this SAME lock acquisition
+            // (already held for `try_send`) — a separate one risks a
+            // concurrent respawn bumping `spawn_generation` in between,
+            // making the event carry a stale generation that `update()`'s
+            // catch-all silently ignores.
+            //
+            // A no-op when no unconfirmed resume is in flight, so it costs
+            // nothing on the ordinary path.
+            let generation = inner.spawn_generation;
+            let seq = inner.take_next_message_seq();
+            inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
+                generation,
+                entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
+            });
         }
 
         // Persist the injected message to the blockfile WITH a live event —

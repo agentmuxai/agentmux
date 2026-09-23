@@ -603,7 +603,7 @@ impl PersistentSubprocessController {
                 // since the persistent process never exits between turns.
                 // Without this, `turn_active` would go stale after turn 1.
                 self.mark_turn_active_and_publish();
-                let inner = self.inner.lock().unwrap();
+                let mut inner = self.inner.lock().unwrap();
                 let tx = inner.stdin_tx.as_ref()
                     .ok_or("persistent process not running after spawn")?;
                 // Persist only AFTER a successful send — reagentx P1 on PR
@@ -617,6 +617,34 @@ impl PersistentSubprocessController {
                 // `send_user_message`'s existing (correct) ordering.
                 tx.try_send(json_str.clone())
                     .map_err(|e| format!("stdin send failed: {e}"))?;
+                // codex P1 on PR #3513: track this message into the CURRENT
+                // generation's retry batch, same as the drain loop already
+                // does for queued deliveries (see that call site's own doc
+                // comment on why every message beyond the seed needs this,
+                // not just the one that triggered the spawn). `DeliverDirect`
+                // itself never did this — harmless for a spawn that never
+                // attempted `--resume` (`MessageAppendedToRetryBatch` is a
+                // no-op on `NotTracking`, see `persistent_resume::update`'s
+                // catch-all) or one whose resume already confirmed success,
+                // but a real gap for a still-unconfirmed one: eager resume
+                // (issue #3463) can reach `DeliverDirect` with its `--resume`
+                // attempt not yet confirmed and NO seed message already
+                // tracked (unlike every other resume-respawn, which always
+                // has one) — this is what actually closes that gap, not just
+                // the `SpawnedWithResume` routing fix above. Read the
+                // generation and apply in this SAME lock acquisition
+                // (already held for `try_send`) — reagentx P1 on PR #2373
+                // via the drain loop's identical concern: a separate
+                // acquisition risks a concurrent respawn bumping
+                // `spawn_generation` in between, making this event carry a
+                // stale generation that `update()`'s catch-all silently
+                // ignores.
+                let generation = inner.spawn_generation;
+                let seq = inner.take_next_message_seq();
+                inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
+                    generation,
+                    entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
+                });
                 drop(inner);
                 self.persist_message_to_blockfile(&json_str);
                 self.emit_message_accepted(config.message_id.as_deref());
