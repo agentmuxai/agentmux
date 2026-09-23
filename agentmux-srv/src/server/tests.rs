@@ -5207,4 +5207,291 @@ async fn m4a2_a_claims_carried_uid_that_is_not_the_tokens_is_counted() {
     )
     .await;
     assert_eq!(m4a2_count(counter), before + 1);
+
+    // Identity M4c-1 (review of #3597): with a token AND a different carried
+    // `agent_uid`, the token's UID wins — it takes the item addressed to the
+    // token's UID and is what `claimed_by_uid` records. (In this test so the
+    // mismatch counter above is not raced by a parallel test.)
+    let item = crate::backend::storage::work_queue::WorkItem {
+        id: "w-m4c1-precedence".into(),
+        title: "precedence".into(),
+        payload: "do it".into(),
+        kind: "m4c1-precedence".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: crate::backend::storage::work_queue::work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: "uid-m4a2-claim".into(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    state.identity_store.work_queue_enqueue(&item).unwrap();
+    let body = serde_json::json!({
+        "agent_id": "claimer",
+        "agent_uid": "uid-other",
+        "kind": "m4c1-precedence"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/agentmux/work/claim")
+        .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &token)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let stored = state
+        .identity_store
+        .work_queue_get("w-m4c1-precedence")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.claimed_by_uid, "uid-m4a2-claim",
+        "the token's UID, not the carried one"
+    );
+}
+
+// ---- identity M4c-1: the actor's UID is dual-written from the Caller ----
+
+/// Sends `body` as JSON, with the instance key and, when given, `token` as
+/// `X-Agent-Token`; returns the status and the JSON response body.
+async fn m4c1_send(
+    state: &AppState,
+    token: Option<&str>,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut req = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json");
+    if let Some(t) = token {
+        req = req.header("X-Agent-Token", t);
+    }
+    let resp = build_router(state.clone())
+        .oneshot(req.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// A state with one agent, `uid-m4c1` (slug `m4c1-agent`), whose token the
+/// index knows; returns the token. Every body below names that agent's own
+/// slug, so M4a-2's actor check counts nothing — the `m4.actor_*` counters
+/// are global, and a parallel M4a-2 test asserts them exactly.
+fn m4c1_state() -> (AppState, String) {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let mut def = test_agent_def("uid-m4c1", "M4c1 Agent", "claude", "agent", 1, "");
+    def.slug = "m4c1-agent".to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4c1").unwrap();
+    (state, token)
+}
+
+/// An attributed enqueue records the token's UID as `created_by_uid`; an
+/// Unattributed one records `""`. A UID in the body is never read — the
+/// field does not exist on the request, and a forged one changes nothing.
+#[tokio::test]
+async fn m4c1_work_enqueue_records_the_callers_uid_as_created_by_uid() {
+    let (state, token) = m4c1_state();
+    let body = serde_json::json!({
+        "title": "m4c1", "payload": "do it", "created_by": "m4c1-agent",
+        "created_by_uid": "uid-forged",
+    });
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/work", body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let item = state
+        .identity_store
+        .work_queue_get(v["id"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(item.created_by_uid, "uid-m4c1");
+    assert_eq!(item.created_by, "m4c1-agent", "the name is never rewritten");
+
+    let (status, v) = m4c1_send(&state, None, "/agentmux/work", body).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let item = state
+        .identity_store
+        .work_queue_get(v["id"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        item.created_by_uid, "",
+        "Unattributed: unknown, never guessed"
+    );
+}
+
+/// An attributed claim writes the token's UID as `claimed_by_uid` even when
+/// the body carries no `agent_uid` — and, since that one UID is also M3's
+/// eligibility match, it can claim an item addressed to its UID. The same
+/// claim Unattributed, with no carried UID and no block, has no UID: it
+/// cannot reach the UID-addressed item, and an untargeted one records `""`.
+#[tokio::test]
+async fn m4c1_an_attributed_claim_records_the_tokens_uid_without_a_carried_one() {
+    use crate::backend::storage::work_queue::{work_state, WorkItem};
+    let (state, token) = m4c1_state();
+    let item = |id: &str, target_uid: &str, created_at: i64| WorkItem {
+        id: id.into(),
+        title: id.into(),
+        payload: "do it".into(),
+        kind: "m4c1-claim".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: target_uid.into(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at,
+        updated_at: created_at,
+        not_before: None,
+        result: String::new(),
+    };
+    state
+        .identity_store
+        .work_queue_enqueue(&item("w-m4c1-uid", "uid-m4c1", 1000))
+        .unwrap();
+    let claim =
+        serde_json::json!({"agent_id": "m4c1-agent", "agent_uid": "", "kind": "m4c1-claim"});
+
+    let (status, v) = m4c1_send(&state, None, "/agentmux/work/claim", claim.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(
+        v["claimed"], false,
+        "Unattributed, no UID: not eligible — {v}"
+    );
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/work/claim", claim.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["claimed"], true, "{v}");
+    assert_eq!(v["item"]["id"], "w-m4c1-uid");
+    assert_eq!(v["item"]["claimed_by_uid"], "uid-m4c1");
+    let stored = state
+        .identity_store
+        .work_queue_get("w-m4c1-uid")
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.claimed_by_uid, "uid-m4c1");
+    assert_eq!(
+        stored.claimed_by, "m4c1-agent",
+        "the name is never rewritten"
+    );
+
+    state
+        .identity_store
+        .work_queue_enqueue(&item("w-m4c1-open", "", 2000))
+        .unwrap();
+    let (_, v) = m4c1_send(&state, None, "/agentmux/work/claim", claim).await;
+    assert_eq!(v["item"]["id"], "w-m4c1-open", "{v}");
+    assert_eq!(
+        v["item"]["claimed_by_uid"], "",
+        "Unattributed, nothing carried"
+    );
+}
+
+/// An attributed cron create records the token's UID as `created_by_uid`;
+/// an Unattributed one records `""`.
+#[tokio::test]
+async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
+    let (mut state, token) = m4c1_state();
+    // The cron handlers use the shared store; the test store carries the
+    // identity schema, which has its own `db_cron_jobs`.
+    state.shared_store = Some(state.mstore.clone());
+    let body = serde_json::json!({
+        "name": "m4c1", "expression": "0 0 1 1 *", "prompt": "hi",
+        "target": "m4c1-nobody", "created_by": "m4c1-agent",
+        "created_by_uid": "uid-forged",
+    });
+    let shared = state.shared_store.clone().unwrap();
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/cron", body.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    let job = shared.cron_get(&id).unwrap().unwrap();
+    assert_eq!(job.created_by_uid, "uid-m4c1");
+    assert_eq!(job.created_by, "m4c1-agent", "the name is never rewritten");
+
+    let (status, v) = m4c1_send(&state, None, "/agentmux/cron", body).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    assert_eq!(shared.cron_get(&id).unwrap().unwrap().created_by_uid, "");
+}
+
+/// A Global Memory write and a revert record the token's UID as the
+/// version's `written_by_uid`, beside the `written_by` name; Unattributed,
+/// both record `""`.
+#[tokio::test]
+async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
+    let (state, token) = m4c1_state();
+    let write = |id: Option<&str>, content: &str| serde_json::json!({"agent_id": "m4c1-agent", "id": id, "name": "M4c1", "content": content});
+    let latest = |id: &str| {
+        let v = state.id_store.bundle_version_list(id).unwrap();
+        (
+            v[0].id.clone(),
+            v[0].written_by.clone(),
+            v[0].written_by_uid.clone(),
+        )
+    };
+
+    let (status, v) = m4c1_send(
+        &state,
+        Some(&token),
+        "/api/v1/agent/globalmemory/write",
+        write(None, "one"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (first, by, uid) = latest(&id);
+    assert_eq!((by.as_str(), uid.as_str()), ("m4c1-agent", "uid-m4c1"));
+
+    let (status, v) = m4c1_send(
+        &state,
+        None,
+        "/api/v1/agent/globalmemory/write",
+        write(Some(&id), "two"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(latest(&id).2, "", "Unattributed write");
+
+    let revert = serde_json::json!({"agent_id": "m4c1-agent", "id": id, "version_id": first});
+    let (status, v) = m4c1_send(
+        &state,
+        Some(&token),
+        "/api/v1/agent/globalmemory/revert",
+        revert.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(latest(&id).2, "uid-m4c1", "attributed revert");
+
+    let (status, v) = m4c1_send(&state, None, "/api/v1/agent/globalmemory/revert", revert).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(latest(&id).2, "", "Unattributed revert");
 }

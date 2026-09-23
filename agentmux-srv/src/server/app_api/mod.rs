@@ -1240,6 +1240,7 @@ pub(crate) struct GlobalMemoryWriteProvenance<'a> {
 pub(crate) fn global_memory_write_impl(
     state: &AppState,
     agent_id: &str,
+    written_by_uid: &str,
     id: Option<&str>,
     name: &str,
     content: &str,
@@ -1330,14 +1331,16 @@ pub(crate) fn global_memory_write_impl(
     // annotation. bundle_upsert_with_version records both, atomically with
     // the bundle write itself (codex P2, PR #3237 — see that method's own
     // doc comment for why two separate calls here would have been unsafe
-    // under concurrent writers).
+    // under concurrent writers). `written_by_uid` is the writer's UID from
+    // the request's `Caller` (identity M4c-1, spec §6.5.9) — its token,
+    // never a body field; `""` when Unattributed.
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
         None => ("agent_inferred", "{}"),
     };
     let source_detail = if detail.is_empty() { "{}" } else { detail };
     state.id_store
-        .bundle_upsert_with_version(&bundle, agent_id, source, source_detail)
+        .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, source, source_detail)
         .map_err(|e| format!("globalmemory.write: {e}"))?;
 
     // New entries sort LAST, matching the Armory UI's own "+ New section"
@@ -1556,11 +1559,14 @@ pub(crate) fn global_memory_diff_impl(
 /// method's own doc comment requires (codex P2, PR #3237). `agent_id` is the
 /// TRUSTED caller identity (an agent's real `AGENTMUX_AGENT_ID`, resolved by
 /// `agentmux-mcp` from its own env, never caller-suppliable) recorded as
-/// `written_by` — never inferred from anything in the request body. Backs
-/// the `GlobalMemoryRevert` MCP tool.
+/// `written_by` — never inferred from anything in the request body.
+/// `written_by_uid` is recorded beside it: the request's `Caller` UID
+/// (identity M4c-1), `""` when Unattributed. Backs the `GlobalMemoryRevert`
+/// MCP tool.
 pub(crate) fn global_memory_revert_impl(
     state: &AppState,
     agent_id: &str,
+    written_by_uid: &str,
     id: &str,
     version_id: &str,
 ) -> Result<serde_json::Value, String> {
@@ -1578,7 +1584,7 @@ pub(crate) fn global_memory_revert_impl(
 
     let detail = json!({ "reverted_to": version_id }).to_string();
     let new_version = state.id_store
-        .bundle_upsert_with_version(&bundle, agent_id, "revert", &detail)
+        .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, "revert", &detail)
         .map_err(|e| format!("globalmemory.revert: {e}"))?
         // `bundle.is_global` is guaranteed true by `load_ordinary_global_bundle`
         // above, and `bundle_upsert_with_version` only ever returns `None` when
@@ -1634,7 +1640,7 @@ mod global_memory_impl_tests {
     #[tokio::test]
     async fn write_new_entry_creates_an_ordinary_global_bundle() {
         let state = crate::server::tests::test_state();
-        let result = global_memory_write_impl(&state, "agent-1", None, "New Entry", "hello", None).unwrap();
+        let result = global_memory_write_impl(&state, "agent-1", "", None, "New Entry", "hello", None).unwrap();
         let id = result.get("id").and_then(|v| v.as_str()).unwrap();
         let saved = state.id_store.bundle_get(id).unwrap().unwrap();
         assert!(saved.is_global);
@@ -1652,7 +1658,7 @@ mod global_memory_impl_tests {
         let state = crate::server::tests::test_state();
         state.id_store.bundle_upsert(&ordinary_bundle("blank", false)).unwrap();
 
-        let err = global_memory_write_impl(&state, "agent-1", Some("blank"), "evil", "evil content", None)
+        let err = global_memory_write_impl(&state, "agent-1", "", Some("blank"), "evil", "evil content", None)
             .unwrap_err();
         assert!(err.contains("blank"), "error should mention the blank singleton: {err}");
 
@@ -1674,6 +1680,7 @@ mod global_memory_impl_tests {
         let err = global_memory_write_impl(
             &state,
             "agent-1",
+            "",
             Some("someone-elses-preset"),
             "hijacked",
             "hijacked content",
@@ -1693,7 +1700,7 @@ mod global_memory_impl_tests {
         let state = crate::server::tests::test_state();
         state.id_store.bundle_upsert(&ordinary_bundle("already-global", true)).unwrap();
 
-        global_memory_write_impl(&state, "agent-1", Some("already-global"), "Renamed", "new content", None)
+        global_memory_write_impl(&state, "agent-1", "", Some("already-global"), "Renamed", "new content", None)
             .unwrap();
 
         let updated = state.id_store.bundle_get("already-global").unwrap().unwrap();
@@ -1709,7 +1716,7 @@ mod global_memory_impl_tests {
         sys.is_system = true;
         state.id_store.bundle_upsert_system(&sys).unwrap();
 
-        let err = global_memory_write_impl(&state, "agent-1", Some("sys-1"), "hijacked", "x", None).unwrap_err();
+        let err = global_memory_write_impl(&state, "agent-1", "", Some("sys-1"), "hijacked", "x", None).unwrap_err();
         assert!(err.contains("system"), "unexpected error: {err}");
     }
 
@@ -1723,6 +1730,7 @@ mod global_memory_impl_tests {
         let result = global_memory_write_impl(
             &state,
             "the-real-writer",
+            "",
             None,
             "Versioned",
             "v1",
@@ -1743,10 +1751,10 @@ mod global_memory_impl_tests {
     #[tokio::test]
     async fn editing_an_existing_entry_chains_a_second_version() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "content-1", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "content-1", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
 
-        global_memory_write_impl(&state, "agent-2", Some(&id), "V1", "content-2", None).unwrap();
+        global_memory_write_impl(&state, "agent-2", "", Some(&id), "V1", "content-2", None).unwrap();
 
         let history = state.id_store.bundle_version_list(&id).unwrap();
         assert_eq!(history.len(), 2);
@@ -1851,9 +1859,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn history_lists_versions_newest_first() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "content-1", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "content-1", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-2", Some(&id), "V1", "content-2", None).unwrap();
+        global_memory_write_impl(&state, "agent-2", "", Some(&id), "V1", "content-2", None).unwrap();
 
         let history = global_memory_history_impl(&state, &id).unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -1894,9 +1902,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn diff_shows_line_changes_between_two_versions() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "line one\nline two", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "line one\nline two", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-1", Some(&id), "V1", "line one\nline three", None).unwrap();
+        global_memory_write_impl(&state, "agent-1", "", Some(&id), "V1", "line one\nline three", None).unwrap();
 
         let history = global_memory_history_impl(&state, &id).unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -1915,9 +1923,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn diff_surfaces_a_name_only_change() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "Old Name", "same body", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "Old Name", "same body", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-1", Some(&id), "New Name", "same body", None).unwrap();
+        global_memory_write_impl(&state, "agent-1", "", Some(&id), "New Name", "same body", None).unwrap();
 
         let history = global_memory_history_impl(&state, &id).unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -1937,9 +1945,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn diff_refuses_versions_from_different_bundles() {
         let state = crate::server::tests::test_state();
-        let a = global_memory_write_impl(&state, "agent-1", None, "A", "content-a", None).unwrap();
+        let a = global_memory_write_impl(&state, "agent-1", "", None, "A", "content-a", None).unwrap();
         let a_id = a.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        let b = global_memory_write_impl(&state, "agent-1", None, "B", "content-b", None).unwrap();
+        let b = global_memory_write_impl(&state, "agent-1", "", None, "B", "content-b", None).unwrap();
         let b_id = b.get("id").and_then(|v| v.as_str()).unwrap().to_string();
 
         let a_version = global_memory_history_impl(&state, &a_id).unwrap();
@@ -1964,14 +1972,14 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn revert_restores_content_and_records_a_new_version() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "original", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "original", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-1", Some(&id), "V1", "overwritten", None).unwrap();
+        global_memory_write_impl(&state, "agent-1", "", Some(&id), "V1", "overwritten", None).unwrap();
 
         let history_before = global_memory_history_impl(&state, &id).unwrap();
         let good_version_id = history_before["versions"][1]["id"].as_str().unwrap().to_string();
 
-        let result = global_memory_revert_impl(&state, "agent-revert", &id, &good_version_id).unwrap();
+        let result = global_memory_revert_impl(&state, "agent-revert", "", &id, &good_version_id).unwrap();
         assert_eq!(result["version"]["source"].as_str(), Some("revert"));
         assert_eq!(result["version"]["written_by"].as_str(), Some("agent-revert"));
 
@@ -1992,7 +2000,7 @@ mod global_memory_version_impl_tests {
         state.id_store.bundle_upsert_system(&system_bundle("sys-revert")).unwrap();
         let v = state.id_store.bundle_version_insert("sys-revert", "System (sys-revert)", "system content", "human", "{}", "armory-ui").unwrap();
 
-        let err = global_memory_revert_impl(&state, "agent-1", "sys-revert", &v.id).unwrap_err();
+        let err = global_memory_revert_impl(&state, "agent-1", "", "sys-revert", &v.id).unwrap_err();
         assert!(err.contains("system"), "unexpected error: {err}");
 
         let unchanged = state.id_store.bundle_get("sys-revert").unwrap().unwrap();
@@ -2002,13 +2010,13 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn revert_refuses_a_version_from_a_different_bundle() {
         let state = crate::server::tests::test_state();
-        let a = global_memory_write_impl(&state, "agent-1", None, "A", "content-a", None).unwrap();
+        let a = global_memory_write_impl(&state, "agent-1", "", None, "A", "content-a", None).unwrap();
         let a_id = a.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        let b = global_memory_write_impl(&state, "agent-1", None, "B", "content-b", None).unwrap();
+        let b = global_memory_write_impl(&state, "agent-1", "", None, "B", "content-b", None).unwrap();
         let b_id = b.get("id").and_then(|v| v.as_str()).unwrap().to_string();
         let b_version_id = global_memory_history_impl(&state, &b_id).unwrap()["versions"][0]["id"].as_str().unwrap().to_string();
 
-        let err = global_memory_revert_impl(&state, "agent-1", &a_id, &b_version_id).unwrap_err();
+        let err = global_memory_revert_impl(&state, "agent-1", "", &a_id, &b_version_id).unwrap_err();
         assert!(err.contains("does not belong to"), "unexpected error: {err}");
 
         let unchanged = state.id_store.bundle_get(&a_id).unwrap().unwrap();
