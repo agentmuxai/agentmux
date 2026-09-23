@@ -3307,6 +3307,47 @@ async fn a_message_deferred_behind_a_failed_spawn_is_reported_after_the_grace_wi
     assert!(!inner.deferred_watchdog_armed);
 }
 
+/// The drain's "second stall": it releases its claim with leftovers still in
+/// `pending_send_messages` and no process (`queue.rs`,
+/// `drain_queue_with_claim`). Nothing owns that backlog.
+fn orphaned_backlog(c: &PersistentSubprocessController) {
+    let mut inner = c.inner.lock().unwrap();
+    inner.stdin_tx = None;
+    inner.spawning_in_progress = false;
+    inner.drain_claim = false;
+    inner.pending_send_messages.push_back(QueuedMessage::fresh(1, "leftover".to_string()));
+}
+
+/// Codex P1 on #3562: an orphaned backlog is not an active writer. A send
+/// must fail like any other no-process send, so the caller's fallback runs,
+/// rather than be accepted into a queue nothing will ever drain.
+#[tokio::test]
+async fn a_send_against_an_orphaned_backlog_fails_rather_than_deferring() {
+    let c = controller();
+    orphaned_backlog(&c);
+
+    let err = c.send_user_message("automated".to_string()).unwrap_err();
+
+    assert!(err.contains("not running"), "{err}");
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty(), "not accepted");
+}
+
+/// Codex P1 on #3562: the watchdog must count an orphaned backlog toward the
+/// grace window, not reset it every tick and hold the message forever.
+#[tokio::test]
+async fn the_watchdog_reports_a_message_stuck_behind_an_orphaned_backlog() {
+    let c = controller();
+    enqueue_deferred(&c, "stuck");
+    orphaned_backlog(&c);
+
+    let mut orphaned = 0;
+    for _ in 1..DEFERRED_ORPHAN_GRACE_TICKS {
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    }
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Exit);
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty(), "reported, not held forever");
+}
+
 /// A respawn inside the grace window resets it: the message is delivered,
 /// not reported.
 #[tokio::test]

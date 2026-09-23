@@ -252,11 +252,20 @@ impl PersistentSubprocessController {
     ///   channel;
     /// - human messages are queued behind a spawn.
     ///
+    /// Queued messages count only while a process exists to drain them. A
+    /// drain's "second stall" (`drain_queue_with_claim`) releases its claim
+    /// with leftovers queued and no process. Nothing owns that backlog, and
+    /// treating it as a writer made a send defer instead of failing into
+    /// the no-process fallback, and kept the watchdog resetting its orphan
+    /// timer forever (codex P1 on #3562).
+    ///
     /// Checked inside [`Self::flush_one_deferred_locked`] itself, so EVERY
     /// release path honours it, the turn-boundary flush included (reagent P1
     /// on #3562: the boundary flush used to skip it).
     fn stdin_owned_by_another_writer(inner: &PersistentInner) -> bool {
-        inner.spawning_in_progress || inner.drain_claim || !inner.pending_send_messages.is_empty()
+        inner.spawning_in_progress
+            || inner.drain_claim
+            || (!inner.pending_send_messages.is_empty() && inner.stdin_tx.is_some())
     }
 
     /// Release at most ONE deferred message.
