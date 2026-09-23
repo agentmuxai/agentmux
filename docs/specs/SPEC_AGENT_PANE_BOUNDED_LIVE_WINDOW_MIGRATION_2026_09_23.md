@@ -51,7 +51,7 @@ The changes are:
 | C | The live document keeps a bounded window; the History tab is the archive and follows the live pane | new subsystem boundary |
 | D | Per-flush and per-layout work becomes O(batch + log n), not O(n) | data-structure replacement in two stores |
 | E | One cross-pane stream scheduler with a frame budget that yields to input | **new architectural layer** |
-| F | Off-main-thread markdown parsing and highlighting | new architectural layer, decided by §7 Phase 7's criterion |
+| F | Off-main-thread markdown parsing and highlighting | new architectural layer, decided by §7 Phase 8's criterion |
 
 A–D remove costs that grow with history. E removes the remaining contention
 between streaming and typing regardless of history. F is the next lever if
@@ -206,7 +206,9 @@ Where we differ:
   store already does what they do; this spec changes its data structure and
   what feeds it.
 - Changing the History tab's reading UX, the session-scope clamp semantics,
-  or backend transcript storage.
+  or the transcript's format. (Two backend additions are in scope because
+  eviction depends on them: a file generation for the output file, and a
+  durable journal for nodes that never reach the transcript — §6.3.1, §6.3.2.)
 
 **Acceptance targets** — measured with the Phase 0 bench, 4 visible panes
 streaming heavy markdown + tool output, user typing continuously, at every
@@ -224,7 +226,7 @@ Linux:
 | Forced synchronous layouts from agent-pane code | 0 per flush (trace-verified) |
 | Crashes / error-boundary trips in soak and fault suites | 0 |
 
-These are the definition of done. If A–E don't meet them, Phase 7 (F) is
+These are the definition of done. If A–E don't meet them, Phase 8 (F) is
 triggered, and further levers are specified before closing this spec.
 
 ## 5. Invariants
@@ -237,12 +239,13 @@ applicable) a CI guardrail.
    streaming buffer in the same reactive tick. Frontier moves happen only
    inside the partition memo.
 2. **No fight.** A user scrolled away from the bottom is never moved by the
-   pin, migration or eviction (`stickToBottom` gates all three).
+   pin (`stickToBottom` gates it), and migration or eviction while they read
+   preserves the first visible node and its offset (§6.3.5).
 3. **No jump.** Nothing visible moves when content is added, migrated or
-   evicted above the viewport while pinned.
-4. **No loss.** Evicting a node from the live pane never loses data; it is in
-   the block's transcript file the History tab reads. Eviction happens only
-   after the transcript's line count covers the evicted nodes.
+   evicted.
+4. **No loss.** Only a node whose provenance is durable is evicted: its
+   transcript line (or `out-of-band.jsonl` line) is covered by that file's
+   line count, so the History tab can show it (§6.3.2).
 5. **Layout consistency.** The layout store's `totalSize` equals the sum of
    effective heights of its rows; every mounted virtualized row's measured
    height equals its stored height within 1 px after the measure RO fires.
@@ -250,6 +253,13 @@ applicable) a CI guardrail.
    render or layout work.
 7. **Input first.** No stream-driven task runs longer than the scheduler's
    slice while input is pending.
+8. **Stable identity.** A node's id is a function of its source position and
+   file generation only; any parser instance, from any clean boundary, gives
+   the same content the same id (§6.3.1).
+9. **No resurrection.** Content at or below an eviction watermark never
+   re-enters the live pane, whatever replays it (§6.3.3).
+10. **Bounded while reading.** Live-pane memory is bounded whether pinned or
+    not (§6.3.5).
 
 ## 6. Target design
 
@@ -320,29 +330,151 @@ removed from the document store, layout store and stream-hook dedup set.
 - **Budget:** `LIVE_WINDOW_TURNS` (proposed 30) and `LIVE_WINDOW_BYTES`
   (proposed 2 MB), whichever binds first, never smaller than the in-flight
   turn. Values set from the Phase 0 curve; both enforced.
-- **When:** on turn end (housekeeping priority), only while pinned. If the user
-  is scrolled up, eviction waits until they return to the bottom, and the
-  budget may be exceeded meanwhile (bounded by how far they can scroll, which
-  is itself bounded by the budget + one turn).
-- **Precondition (invariant 4):** eviction proceeds only once
-  `BlockfileLineCountCommand` for the block covers the evicted nodes' source
-  lines. Nodes don't record their source line today (`types.ts` has no such
-  field); the stream parser and `parseHistoryLines` gain one (`srcLine`) in
-  this phase.
-- **How:** reducer command `EvictBefore { nodeId }` at a turn boundary,
-  producing the new state in one pass (same shape as `clampToSessionScope`).
-  The layout store prunes ids no longer present
-  (`agent-pane-layout/reducer.ts:118`). `useAgentStream`'s `nodeIdSet` drops
-  evicted ids. Evicted rows are virtualized and above the viewport; only
-  `totalSize` changes and the pin holds the bottom.
 - **Top of the live pane:** the `history_link` row shows whenever anything was
   evicted or clamped.
-- **Loading older in the live pane:** on mount the pane loads up to the budget
-  (not a fixed 200 lines). Scrolling up pages within the budget; beyond it,
-  the history link is the way back. Paging and eviction share one budget, so
-  they can't fight.
-- **Find in page** covers the live window only; the History tab covers the
+- **Find in page** covers what the live pane holds; the History tab covers the
   rest. Release-noted.
+
+Eviction is only safe if every evicted node can be found again, and can never
+come back as a duplicate. Today neither holds (Codex review of this spec,
+2026-09-23): parser ids are per-instance counters, some nodes never reach the
+transcript, and replay dedup relies on ids that eviction would remove. §6.3.1–
+§6.3.3 make both hold. §6.3.4–§6.3.5 are the eviction rules.
+
+#### 6.3.1 Stable node identity from transcript position
+
+`ClaudeCodeStreamParser` ids are counters (`node_0`, `user_0`, …) that restart
+for every parser instance. The live pane avoids collisions with a `skipIds`
+callback over the reducer's live id set (`useAgentStream.ts:390`–`:414`); the
+History tab avoids them by reparsing everything it has loaded in one parser
+on every page (`AgentHistoryView.tsx:98`–`:107`). Neither works once nodes are
+evicted: a skip set without the evicted ids can't stop a replayed line
+reusing one, and a reparse of everything is O(history).
+
+- Every parser-produced node gets an id derived from its **source position**:
+  `G<gen>L<line>` for the first node a transcript line produces,
+  `G<gen>L<line>.<k>` for the k-th after it. `line` is the 0-based line index
+  in the block's output file; `gen` is the file's **generation**, which the
+  backend bumps whenever it truncates or replaces that file, so line numbers
+  that restart never reuse an id for different content. (Phase 5 establishes
+  where truncation happens today and adds the generation to the line-count and
+  range-read responses.) The same line always yields the same ids in every
+  parser instance — live pane, reconnect replay, History tab, any page order.
+- Every such node carries `src: { line }` (new field). Nodes produced from
+  several lines (a text run) take the line that **started** them, so a node's
+  id never changes as it grows.
+- The parser exposes `atBoundary()`: true when no text, thinking or tool
+  accumulator is open. Lines where it is true are **clean boundaries**; parsing
+  may start at any clean boundary and produce the same ids and nodes as a parse
+  from line 0.
+- `skipIds` is removed once ids are positional: two parsers can no longer mint
+  the same id for different content.
+- **Migration:** node ids are keys in the layout store (heights, expansion),
+  pins, held-open tools and the dispatch-match map. Phase 5 inventories every
+  consumer that **persists** a node id across reloads; each gets either a
+  one-time mapping from old ids (built by reparsing the loaded range with both
+  schemes) or an explicit, release-noted reset of that UI state.
+
+#### 6.3.2 Durability for nodes that never reach the transcript
+
+Two producers create nodes outside the transcript parser:
+
+| Producer | Node | Where it is durable today |
+|---|---|---|
+| `usePendingMessageAcceptance.ts:118`–`:128` | optimistic `user_message` (id = pending id) | nowhere until the provider echoes the message into the transcript |
+| `useShellNodeStream.ts:180`–`:201` | `shell` (id = shell id) and its output chunks | a backend replay ring of 64 events plus a per-shell chunk ring — **bounded, so old shells are not recoverable** |
+
+Rule: **every node kind declares its provenance**, and only a node with a
+**durable** provenance is evictable.
+
+- `transcript` (parser-produced): durable once the block's line count covers
+  `src.line`.
+- `journal`: the backend appends every out-of-band node event (shell create,
+  chunk, exit; optimistic user message accepted) to a new per-block durable
+  journal file, `out-of-band.jsonl`, with its own line numbers. A journal node
+  carries `src: { journal: <line> }` and is durable once the journal's line
+  count covers it. The History tab reads the journal alongside the transcript
+  and merges by timestamp, so shells appear in history too (today they don't).
+- Optimistic `user_message`: Phase 5 first establishes, per provider, whether
+  the transcript carries an echo of a sent message and how (if at all) it is
+  matched to the optimistic node today — not verified while writing this. If
+  there is a reliable echo, the optimistic node is re-keyed to the echo's
+  positional id and `src.line` when it arrives and becomes `transcript`.
+  Otherwise the accepted message is written to `out-of-band.jsonl` at
+  acceptance and is `journal`.
+- Anything else is `ephemeral` (working indicators, synthetic rows such as
+  `history_link` and `day_divider`): never evicted as content; regenerated
+  from state.
+
+A node whose provenance is not yet durable is **pinned in the live window**
+and counts against the budget. If more than a hard cap (proposed 64 nodes) of
+non-durable nodes accumulate, that is a bug surfaced in the dev HUD and the
+render trail, not something eviction papers over.
+
+#### 6.3.3 No resurrection after eviction
+
+Codex review: the live pane seeds its dedup from the reducer's id set, so
+dropping evicted ids lets a reconnect replay re-add them — duplicated, and in
+the wrong place.
+
+- **Transcript watermark.** The pane keeps `evictedThroughLine`: every
+  transcript line at or below it belongs to an evicted turn. It only moves
+  forward, and survives eviction (it is pane state, not a node). On replay the
+  stream consumer drops lines at or below it **before parsing**. Because ids are
+  positional (§6.3.1), lines above it that are still in the window dedup by id
+  exactly.
+- **Journal watermark.** The same for `out-of-band.jsonl`
+  (`evictedThroughJournalLine`).
+- **Ring replays.** A `shell_node_create` replayed from the backend's 64-event
+  ring for an evicted shell carries its journal position (added to the event),
+  so the journal watermark drops it. Until that field ships, a bounded
+  tombstone set of the last 256 evicted out-of-band ids (4× the ring) drops
+  them.
+- Both watermarks are part of the pane's persisted state, so a pane remount
+  doesn't reset them.
+
+#### 6.3.4 Eviction while pinned
+
+- **When:** at turn end (housekeeping priority, §6.5) while pinned.
+- **What:** whole turns from the front, oldest first, whose nodes are all
+  durable (§6.3.2), until within budget.
+- **How:** reducer command `EvictThrough { line, journalLine }` removes the
+  turns in one pass (the same shape as `clampToSessionScope`) and advances both
+  watermarks in the same reduction, so there is no window where a node is gone
+  but its replay is still accepted. The layout store prunes ids no longer
+  present (`agent-pane-layout/reducer.ts:118`). Evicted rows are virtualized
+  and above the viewport; only `totalSize` changes and the pin holds the
+  bottom.
+
+#### 6.3.5 Reading far from the bottom: a detached window
+
+Codex review: suspending eviction while the user is scrolled up lets the live
+pane grow without bound, one turn per completed turn, for as long as they read.
+Instead, a scrolled-up reader keeps a bounded **reading window** and the pane
+stops holding everything between it and the present — the "jump to present"
+pattern chat apps use.
+
+- While unpinned, the pane holds at most two ranges: the **reading window**
+  (the turns around the viewport, budgeted like the live window) and the
+  **present** (the in-flight turn plus the newest turns, up to a small budget,
+  default 5 turns).
+- Turns completed while reading are added to the present; when the present
+  exceeds its budget, its oldest turns are dropped from memory (durable, so
+  nothing is lost). If the present and the reading window no longer touch, a
+  **gap row** between them says "N newer turns — jump to latest" and reports
+  the count from the watermarks.
+- Scrolling down into the gap loads the next turns by range read (clean
+  boundaries, positional ids), and drops turns from the top of the reading
+  window to stay within budget — anchor-preserving: the first visible node and
+  its offset are kept, as the existing `headAnchor` does for prepends.
+- "Jump to latest" (or the keystroke `jumpToBottom`) discards the reading
+  window and re-pins on the present. Nothing needs reloading: the present is
+  already there.
+- Scrolling up past the reading window's top loads older turns by range read
+  the same way. Paging and eviction share the reading window's budget, so they
+  can't fight.
+- Memory bound while unpinned: reading-window budget + present budget + the
+  in-flight turn, independent of how long the user reads.
 
 ### 6.4 (C) History tab follows the live pane
 
@@ -351,13 +483,29 @@ transcript file. What's missing is the History tab showing **new** output.
 
 - **Doorbell, not polling:** the History tab subscribes to the source block's
   output file subject (the same `getFileSubject(sourceBlockId, …)` the live
-  pane uses) purely as a change notification. It never parses the stream.
+  pane uses) and to `out-of-band.jsonl` purely as change notifications. It
+  never parses the live stream events.
+- **An incremental parser, not a reparse** (Codex review: a range parsed on its
+  own collides on ids and splits runs that span the boundary; reparsing
+  everything is O(history)). The tab keeps one **tail parser** positioned at
+  the end of what it has read. New lines go through that same instance, so
+  open text/thinking runs continue and ids are positional (§6.3.1) — appending
+  costs O(new lines).
 - **Visible tab:** on a doorbell, coalesced to at most once per second and
   deferred to housekeeping priority, read the new line range
-  (`BlockfileReadRangeCommand` from the last known count) and append. If the
-  reader is at its bottom, follow; otherwise show "new messages below".
-- **Hidden or dormant tab:** record only that the doorbell rang. On reveal,
-  one range read from the last known count to the current one.
+  (`BlockfileReadRangeCommand` from the last known count), feed it to the tail
+  parser, and upsert the resulting nodes by id (a node still growing at the
+  boundary is updated in place, not duplicated). If the reader is at its
+  bottom, follow; otherwise show "new messages below".
+- **Hidden or dormant tab:** record only that the doorbell rang. On reveal, one
+  range read from the last known count to the current one, through the same
+  tail parser.
+- **Tail parser lost** (tab remounted, parser error): restart it at the most
+  recent clean boundary (§6.3.1) at or before the last line read — at most one
+  turn of reparse — and upsert. Positional ids make the overlap idempotent.
+- **Older pages** use their own parser started at a clean boundary; with
+  positional ids, pages loaded in any order no longer collide, which retires
+  the "reparse all loaded lines per page" workaround.
 - **Closed tab:** nothing; it loads fresh on open.
 - The History tab gets the same A/B/D treatment as the live pane (it reuses
   `AgentDocumentView`), so a very long history read is equally cheap.
@@ -430,7 +578,7 @@ main thread. #3521/#3559 made them incremental. Moving them to a Worker
 removes them from the main thread, at the cost of serializing the tree across
 the boundary and a new ordering/failure surface.
 
-- **Decision criterion (Phase 7):** after Phases 1–6, if parse + highlight is
+- **Decision criterion (Phase 8):** after Phases 1–7, if parse + highlight is
   > 15 % of main-thread time during the 4-pane streaming bench, or any §4
   target is still missed with parse/highlight on the critical path, build it.
 - **Design if built:** one worker per app (not per pane); requests carry
@@ -474,16 +622,19 @@ Every phase:
 | **2 — Scheduler (E)** | §6.5 | key→paint targets met at N=0 with 4 panes streaming; starvation guard verified; no stream content lost (byte-for-byte transcript vs rendered comparison) |
 | **3 — Turn-scoped tail (B)** | §6.2 | Tail DOM independent of N; replaceChild crash repro suite and streaming-buffer tests green; zero invariant-1/3 assertions in soak; frame-by-frame screen recording shows no movement at turn end |
 | **4 — O(log n) stores (D)** | §6.6 | Property tests: 100k random sequences per run in CI, 10M locally, 0 divergences; reducer bench flat from 1k to 100k nodes |
-| **5 — Bounded live document (C)** | §6.3 | Memory and per-flush cost flat in N; invariant 4 verified by killing the backend mid-eviction; paging/eviction budget never exceeded except while scrolled up |
-| **6 — History tab follows (C)** | §6.4 | Visible tab shows new turns ≤ 1 s after turn end; hidden tab does zero work (profile) and catches up on reveal; long-history read meets the same targets |
-| **7 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
-| **8 — Default on** | Remove flags once each phase has soaked; update `SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` Status to point here | 8 h soak and fault suite green on all three OSes; user sign-off after daily use |
-| **9 — `content-visibility` (§6.8)** | flagged experiment | memory flat over 8 h on all three OSes *and* measurable frame win; otherwise documented as rejected |
+| **5 — Node identity and durability (C prerequisites)** | §6.3.1–§6.3.3: positional ids with file generation, `src`, `atBoundary()`, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), both watermarks, ring-replay handling | Property test: parsing any line range from any clean boundary, in any page order, yields the same ids and nodes as a parse from line 0 (100k random splits per CI run); replay-after-eviction suite produces zero duplicates; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
+| **6 — Bounded live document (C)** | §6.3.4–§6.3.5 | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
+| **7 — History tab follows (C)** | §6.4 | Visible tab shows new turns ≤ 1 s after turn end; appends cost O(new lines) (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
+| **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
+| **9 — Default on** | Remove flags once each phase has soaked; update `SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` Status to point here | 8 h soak and fault suite green on all three OSes; user sign-off after daily use |
+| **10 — `content-visibility` (§6.8)** | flagged experiment | memory flat over 8 h on all three OSes *and* measurable frame win; otherwise documented as rejected |
 
 Order rationale: A and E are independent of history and fix the most for
 the least risk, so they land first and make every later measurement cleaner.
 B precedes D and C because it removes the dominant DOM cost; D precedes C so
 eviction lands on the final data structures rather than being written twice.
+Phase 5 precedes eviction because eviction without stable identity and durable
+provenance either loses data or resurrects it.
 
 ## 8. Verification
 
@@ -497,7 +648,20 @@ eviction lands on the final data structures rather than being written twice.
   reconnect with replayed (duplicate) nodes — each mid-migration.
 - User scrolls up during streaming for 10 minutes, then returns: no fight,
   eviction catches up, no jump.
-- Backend killed mid-eviction and mid-History-tab read (invariant 4).
+- User reads far from the bottom for 1 hour while 4 panes stream: memory stays
+  within the reading-window + present budgets; the gap row's count is right;
+  "jump to latest" re-pins with no reload.
+- Stream reconnect and pane remount **after** eviction, replaying the whole
+  transcript and the 64-event shell ring: zero duplicates, nothing evicted
+  reappears (invariant 9).
+- Output file truncated or replaced mid-session (generation bump): no id
+  reuse across generations (invariant 8).
+- Shells and optimistic messages: never evicted before their journal (or echo)
+  line is durable; visible in the History tab afterwards.
+- History tab's tail parser discarded mid-run (remount, injected error):
+  recovery from the last clean boundary, no duplicates, no split runs.
+- Backend killed mid-eviction, mid-journal-write and mid-History-tab read
+  (invariant 4).
 - 8 panes streaming at once; 4 panes streaming while the History tab of each
   is open and visible.
 - Expand/collapse of a tool in the tail, then migration, then scroll back to
@@ -519,13 +683,18 @@ regression.
 
 1. **Budgets** are set from the Phase 0 curve, but both a turn count and a
    byte limit are always enforced; never one without the other.
-2. **Live-pane paging** stays within the live-window budget only; beyond it the
-   History tab is the single path. One budget for paging and eviction avoids
-   two mechanisms fighting.
-3. **History-tab updates** use the output-file subscription as a doorbell, not
-   polling (§6.4).
+2. **Live-pane paging** pages within a budget in both directions: the live
+   window while pinned, the reading window while reading (§6.3.5). Paging and
+   eviction share that budget, so they can't fight. The History tab remains the
+   place for reading the whole conversation.
+3. **History-tab updates** use the output-file and journal subscriptions as a
+   doorbell, not polling, and an incremental tail parser, not a reparse
+   (§6.4).
 4. **The user's last message** is the first node of the in-flight turn and
    migrates with the rest at turn end. No special-casing.
+5. **Eviction requires durable provenance.** Content that exists only in memory
+   or in a bounded replay ring is never evicted; out-of-band nodes get a
+   durable journal first (§6.3.2).
 
 ## 10. Risks
 
@@ -537,6 +706,12 @@ regression.
 | Scheduler starves a pane or delays IME | starvation guard; IME in the fault suite; HUD backlog counter |
 | New store structures diverge from current behaviour | old implementations kept as oracles; property tests at scale |
 | Eviction before the transcript has the data | line-count precondition (invariant 4); kill-backend test |
+| Evicted content replayed back in as duplicates | positional ids + eviction watermarks + ring tombstones (invariants 8–9); replay-after-eviction suite |
+| Positional ids break UI state keyed by today's ids | Phase 5 inventory of every persisted id consumer; mapping or explicit reset per consumer |
+| Line numbers restart after a truncate/replace | file generation in every id (§6.3.1); truncate test |
+| Out-of-band node lost (shells, optimistic messages) | provenance rule; `out-of-band.jsonl` before eviction; non-durable nodes pinned and capped (§6.3.2) |
+| Live pane grows while the user reads | detached reading window + bounded present (§6.3.5, invariant 10) |
+| History tab append corrupts runs or ids | one tail parser, clean-boundary restart, upsert by positional id (§6.4) |
 | `content-visibility` memory growth | experiment only, 8 h soak on all OSes |
 | Worker adds a failure surface | built only on the §6.7 criterion; restart + fallback |
 | Find-in-page loses old messages | History tab; release note |
