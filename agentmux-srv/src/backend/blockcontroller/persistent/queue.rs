@@ -540,6 +540,24 @@ impl PersistentSubprocessController {
                     error = %e,
                     "fallback respawn for a leftover queue failed"
                 );
+                // A candidate respawn can be refused by the duplicate-session
+                // guard (codex P1 on PR #3551, sixth round). Taking the
+                // candidate above consumed the only marker, so leaving the
+                // prompts queued would let the NEXT send's generic failed-
+                // spawn handling call this function again — candidate-less,
+                // clearing to fresh — and deliver them to a blank
+                // conversation after all. Same answer as the eager path's
+                // refusal: release, discard, report which prompts and why.
+                if is_held_elsewhere_error(e) {
+                    self.settle_eager_spawn_failure(e, retry_config);
+                    // Same broadcast as the generic arm below (codex P2 on PR
+                    // #3554): the doomed eager process's exit path hands off
+                    // `FireRetry` and deliberately suppresses `PublishDone`,
+                    // so nothing else tells the pane it is no longer working
+                    // until the 20-second heartbeat does.
+                    self.publish_status();
+                    return;
+                }
                 self.inner.lock().unwrap().spawning_in_progress = false;
                 self.publish_status();
             }

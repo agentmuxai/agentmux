@@ -325,7 +325,10 @@ impl PersistentSubprocessController {
 
 impl PersistentSubprocessController {
     /// `try_eager_resume`'s spawn-failure settlement, split out so the
-    /// decision is unit-testable without a real child process.
+    /// decision is unit-testable without a real child process. Also the
+    /// settlement for a refused *candidate* respawn in
+    /// `respawn_once_for_leftover_queue` (codex P1 on PR #3551, sixth
+    /// round), which fails the same way for the same reason.
     ///
     /// Mirrors `release_spawn_claim_and_drain_queue`'s `!spawn_succeeded`
     /// branch: if something queued during the attempt it needs a live

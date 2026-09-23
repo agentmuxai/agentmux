@@ -145,3 +145,75 @@ async fn concurrent_reopens_of_one_session_start_exactly_one_process() {
         "the others are refused by the guard: {results:?}"
     );
 }
+
+/// Codex P1 on PR #3551 (sixth round): a leftover respawn that resumes an
+/// adopted recovery candidate (`leftover_resume_candidate`) can be refused
+/// by this guard when that candidate is open in another pane. Taking the
+/// candidate consumed the only marker, so the queued prompts must be
+/// discarded and reported right here — retained, the next send's generic
+/// failed-spawn handling would call the respawn again, candidate-less,
+/// clearing to fresh, and deliver them to a blank conversation after all.
+#[tokio::test]
+async fn a_candidate_respawn_refused_by_the_guard_discards_and_reports_the_queue() {
+    let sid = format!("sid-{}", uuid::Uuid::new_v4());
+    let live_block = format!("live-{}", uuid::Uuid::new_v4());
+    let live = controller(&live_block, None);
+    {
+        let mut g = live.inner.lock().unwrap();
+        g.session_id = Some(sid.clone());
+        g.current_pid = Some(4242);
+    }
+    crate::backend::blockcontroller::register_controller(&live_block, live.clone());
+
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+    let block_id = format!("leftover-{}", uuid::Uuid::new_v4());
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.clone(),
+        Some(broker.clone()),
+        None,
+        None,
+        Some(filestore.clone()),
+    );
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawning_in_progress = true; // the drain's stalled claim
+        inner.session_id = Some(sid.clone());
+        inner.leftover_resume_candidate = Some(sid.clone());
+        let seq = inner.take_next_message_seq();
+        inner.pending_send_messages.push_back(QueuedMessage::fresh(seq, MSG.to_string()));
+    }
+
+    c.respawn_once_for_leftover_queue(resume_config(&sid));
+    crate::backend::blockcontroller::delete_controller(&live_block);
+
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.current_pid.is_none(), "refused: no second process on the live session");
+    assert!(!inner.spawning_in_progress, "the claim is released");
+    assert!(
+        inner.pending_send_messages.is_empty(),
+        "discarded — nothing left for a later, candidate-less respawn to deliver fresh"
+    );
+    assert_eq!(inner.session_id.as_deref(), Some(sid.as_str()), "the session id survives the refusal");
+    assert_eq!(inner.leftover_resume_candidate, None, "the candidate was consumed by the attempt");
+    drop(inner);
+    let output = filestore
+        .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default();
+    assert!(
+        output.contains("were not delivered and have been discarded") && output.contains("already open in another pane"),
+        "the operator must be told what was discarded and why; got: {output}"
+    );
+    // codex P2 on PR #3554: the doomed eager process's exit suppressed
+    // `PublishDone`, so this arm must broadcast the status itself or the
+    // pane stays "Working" until the heartbeat.
+    let statuses = broker.read_event_history(
+        crate::backend::mps::EVENT_CONTROLLER_STATUS,
+        &format!("block:{block_id}"),
+        5,
+    );
+    assert!(!statuses.is_empty(), "a controller status must be published after the refusal");
+}
