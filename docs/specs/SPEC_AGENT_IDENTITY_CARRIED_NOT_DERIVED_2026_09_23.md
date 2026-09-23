@@ -907,7 +907,7 @@ changes two things at once.
   (shared store v11, mirrored in the identity store), dual-written and
   read by nothing. Two mechanisms, deliberately: the target is *resolved*
   once at enqueue/create through `agent_resolve::resolve_uid_for_dual_write`
-  (§5.4 — authoring time, never fire time), and the claimer's UID is
+  (§5.4 — authoring time, never fire time; removed in M3, below), and the claimer's UID is
   *carried* — `agentmux-mcp` sends `AGENTMUX_AGENT_UID` on `WorkClaim`,
   with resolution of `agent_id` only as a counted fallback. Measured and
   recorded rather than hidden:
@@ -983,8 +983,9 @@ changes two things at once.
   particular that a persistent controller can legally register *before* its
   row exists and be upgraded in place, and that §7's "registration
   unchanged" was false for the frontend presence path.
-- **M3 — Work queue and cron.** Columns hold UIDs; one-time backfill of live
-  rows. Resolution moves to the MCP boundary so tool arguments stay readable.
+- **M3 — Work queue and cron.** Columns hold UIDs. Resolution moves to the
+  MCP boundary so tool arguments stay readable. (The one-time backfill this
+  bullet originally named was reviewed out; see below.)
 
   **Shipped in #3563.** §5.1's entry point exists
   (`backend/name_resolution.rs::resolve_name_to_uid`), reachable only
@@ -1012,8 +1013,41 @@ changes two things at once.
     cut let an exact same-name claimer through, and its test had dodged
     that case with a different-case name). A claimer that registered
     name-only before its row existed is therefore locked out of its own
-    UID-targeted work until it carries the UID; recorded, and the first
-    Register-tail after its row exists resolves it.
+    UID-targeted work unless srv can find its UID another way — see the
+    next item.
+  - **The server never turns a name into an identity** (§2 rule 1, made
+    load-bearing here). M1b's `resolve_uid_for_dual_write` — tiers that
+    reach the host-wide slug registry and pass template ids through — was
+    harmless while nothing read its output; once the claim predicate and
+    the cron fire read the UID columns, a server-side guess would bind a
+    row to whatever agent the guess found, in any channel (adversarial
+    review on #3563). It is deleted. `handle_work_enqueue` and
+    `handle_cron_create` store a UID only if the caller carried one (the
+    MCP, from the resolve endpoint), counting `*.uid_not_carried`;
+    `handle_work_claim` takes the claimer's UID from its carried env, else
+    from the row on its own `block_id` (`uid_for_block`, the presence
+    path's resolution — identity by block, never by name), counting
+    `work_claim.uid_not_carried`. That covers the launch paths that spawn
+    without `AGENTMUX_AGENT_UID` (continuation resume, App Server agents,
+    `agent.send`) whenever their block has a row.
+  - **A live registration with no UID takes its block's row UID** in the
+    resolver, so an agent registered before its row existed is one
+    candidate with that row, not ambiguous with itself.
+  - **Only outcomes that leave a row on the name path are counted**
+    (`resolve.unidentified`, `resolve.store_error`, `*.uid_not_carried`,
+    `cron.fire_by_name`); `One`, `None` and `Ambiguous` are answers, not
+    fallbacks. A cron fire that reaches nobody (inject's `success:false`)
+    is logged at `warn`.
+  - **Accepted, recorded:** (a) M1b rows authored by the deleted resolver
+    keep their UIDs; no release carries M1b (v0.56.9 predates it), so this
+    touches only dev builds from the day M1b and M3 were both on main.
+    (b) A carried UID is stored unvalidated; until M4 it is an assertion
+    like `agent_id`, and a stale one leaves the item unclaimable rather
+    than misrouted. (c) Heartbeat, complete and release still match
+    `claimed_by` by name — M4's scope. (d) §5.2's candidate format omits
+    "started"; the registry records no start time yet. (e) The §9.2
+    counters have no production reader; one must exist before M5 can read
+    its exit criterion.
   - **A fourth variant, `Unidentified`.** A live block with no `db_agents`
     row exists and is reachable by name; returning `None` would say it does
     not. The spec's three-variant enum did not account for M0's finding.
@@ -1142,7 +1176,7 @@ unverified.
   shows deriving is impossible.
 - **Medium, deliberately unresolved here:** the per-agent token's lifetime and
   rotation (§6); whether M3's backfill should rewrite live work-queue rows or
-  drain them; whether `AGENTMUX_AGENT_ID` should be repurposed in place or
+  drain them (answered in M3: neither — no backfill, §9.1); whether `AGENTMUX_AGENT_ID` should be repurposed in place or
   retired alongside a new name. Each is a decision for its own phase, flagged
   rather than guessed — the predecessor's habit of resolving such questions in
   prose and discovering the answer in production is what this document exists

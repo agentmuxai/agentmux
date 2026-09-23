@@ -2692,17 +2692,20 @@ async fn call_tool(
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set — cannot claim work without an agent identity"))?;
 
-            // Identity M1b: carry this agent's UID (AGENTMUX_AGENT_UID, set by
-            // srv at spawn since M1a) so the claim records WHO claimed by a
-            // key that cannot collide, beside the slug it still matches on.
-            // Empty when absent (pre-M1a spawn, quick-launch pane) — the
-            // server counts that as a fallback rather than guessing.
+            // Identity M1b/M3: carry this agent's UID (AGENTMUX_AGENT_UID, set
+            // by srv at spawn since M1a). It is the only way into a
+            // UID-addressed item. Empty when absent (pre-M1a spawn,
+            // continuation resume, quick-launch pane) — srv then takes the
+            // UID from this block's row, and counts the fallback.
             let self_uid = std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
 
             let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "agent_id": self_id,
                 "agent_uid": self_uid,
+                // Identity M3: when no UID is carried, srv takes it from the
+                // row on this block rather than deriving one from the name.
+                "block_id": block_id,
                 "kind": arguments.get("kind").and_then(|v| v.as_str()),
                 "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
                 // Group membership is resolved server-side-of-this-call by the

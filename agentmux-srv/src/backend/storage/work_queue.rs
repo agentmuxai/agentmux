@@ -74,15 +74,17 @@ pub struct WorkItem {
     pub state: String,
     #[serde(default)]
     pub claimed_by: String,
-    /// Identity M1b (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// Identity M1b/M3 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
     /// §9.1): the UID (`db_agents.id`) of `target_agent`, resolved once at
-    /// enqueue — spec §5.4, resolution happens at authoring time, never at
-    /// claim time. Empty = unknown (untargeted, or the name did not
-    /// resolve). Dual-written beside the slug; **not read by anything yet**.
+    /// the authoring boundary and carried in — spec §5.4, never at claim
+    /// time. Since M3, an item with a `target_agent_uid` is claimable by that
+    /// identity only. Empty = untargeted, or no UID was carried: the name
+    /// path applies.
     #[serde(default)]
     pub target_agent_uid: String,
-    /// The claimer's UID, carried from its own `AGENTMUX_AGENT_UID`. Same
-    /// phase, same rules: dual-written, empty when unknown, not yet read.
+    /// The claimer's UID — carried from its own `AGENTMUX_AGENT_UID`, else
+    /// its block's row. Recorded, empty when unknown; not read for
+    /// eligibility (holder transitions still match `claimed_by` until M4).
     #[serde(default)]
     pub claimed_by_uid: String,
     /// ms epoch; `None` unless `state == claimed`.
@@ -114,9 +116,9 @@ pub struct ClaimFilter {
     /// excluded; untargeted items stay eligible.
     pub agent_id: String,
     /// The claiming agent's UID (identity M1b/M3). Written to
-    /// `claimed_by_uid` on a successful claim, and since M3 also matched
-    /// against `target_agent_uid` for UID-addressed items (alongside the
-    /// name match, which stays until M5).
+    /// `claimed_by_uid` on a successful claim. Since M3 it is the ONLY way
+    /// into an item that carries a `target_agent_uid`; the `agent_id` name
+    /// match applies to items with no UID, until M5.
     pub agent_uid: String,
     /// Group ids this agent belongs to. An item with a `target_group` is
     /// eligible only if its group is in this list. Resolved by the caller.
@@ -497,12 +499,11 @@ mod tests {
         }
     }
 
-    // ---- identity M1b: the UID columns are dual-written, never read ------
+    // ---- identity M1b: the UID columns are written and round-trip --------
 
     /// Positive case first: both UID columns round-trip. `target_agent_uid`
-    /// is what the enqueuer resolved; `claimed_by_uid` is what the claimer
-    /// carried. The claim predicate is unchanged — it still matches on
-    /// `agent_id` — so a claimer with NO uid still claims.
+    /// is what the enqueuer carried; `claimed_by_uid` is what the claimer
+    /// carried.
     #[test]
     fn uid_columns_are_written_at_enqueue_and_claim_and_round_trip() {
         let (s, _d) = store();

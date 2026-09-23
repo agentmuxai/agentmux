@@ -221,8 +221,8 @@ impl CronScheduler {
     ///
     /// Identity M3 (spec §5.4): a job that captured its target's UID at
     /// creation fires BY UID — a job firing at 03:00 must never resolve a
-    /// name. A job with no UID (created before M1b, or whose name did not
-    /// resolve) fires by name as before, counted.
+    /// name. A job with no UID (created before M3, or by a caller that did
+    /// not carry one) fires by name as before, counted.
     async fn fire(&self, id: &str, prompt: &str, target: &str, target_uid: &str) {
         if self.local_url.is_empty() || self.auth_key.is_empty() {
             tracing::warn!(id, "cron: no local_url/auth_key — skipping fire");
@@ -239,7 +239,22 @@ impl CronScheduler {
 
         match self.http_client.post(&url).header("X-AuthKey", &self.auth_key).json(&req).send().await {
             Ok(r) if r.status().is_success() => {
-                tracing::debug!(id, target, "cron: fired");
+                // Inject answers 200 with `success: false` when the target is
+                // not reachable — since M3 that includes a UID nobody is
+                // registered under. A fire that reached no one is a failure,
+                // and a firing job has nobody to tell but the log (§5.4).
+                let body: serde_json::Value = r.json().await.unwrap_or_default();
+                if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
+                    tracing::warn!(
+                        id,
+                        target,
+                        target_uid,
+                        error = body.get("error").and_then(|v| v.as_str()).unwrap_or(""),
+                        "cron: fire was not delivered"
+                    );
+                } else {
+                    tracing::debug!(id, target, "cron: fired");
+                }
             }
             Ok(r) => {
                 tracing::warn!(id, status = %r.status(), "cron: inject returned non-2xx");

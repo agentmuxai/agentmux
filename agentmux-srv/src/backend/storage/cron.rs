@@ -19,11 +19,11 @@ pub struct CronJob {
     pub prompt: String,
     /// Target agent id for injection.
     pub target: String,
-    /// Identity M1b (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
-    /// §9.1): the UID (`db_agents.id`) of `target`, resolved once at create
-    /// time — spec §5.4, a job firing at 03:00 must never resolve a name.
-    /// Empty = the name did not resolve. Dual-written beside `target`;
-    /// **not read by anything yet** — a job still fires by `target`.
+    /// Identity M1b/M3 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §9.1): the UID (`db_agents.id`) of `target`, resolved once at the
+    /// authoring boundary and carried in — spec §5.4, a job firing at 03:00
+    /// must never resolve a name. Since M3 a job with a `target_uid` fires
+    /// by it; empty = none was carried, and the job fires by `target`.
     #[serde(default)]
     pub target_uid: String,
     pub created_by: String,

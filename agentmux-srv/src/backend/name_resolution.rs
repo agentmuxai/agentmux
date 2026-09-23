@@ -104,7 +104,6 @@ pub(crate) fn resolve_name_to_uid(
                 block_id: registry.get_agent(typed).map(|r| r.block_id),
                 live: registry.get_agent(typed).is_some(),
             };
-            record("resolve.one");
             return NameResolution::One {
                 uid: def.id,
                 candidate,
@@ -122,8 +121,16 @@ pub(crate) fn resolve_name_to_uid(
             LookupOutcome::NotFound => Vec::new(),
         };
     for reg in live {
+        // A registration made before its row existed carries no UID (spec
+        // Q1); take the one on its block's row, so the agent and its own row
+        // are one candidate — not an ambiguity with itself (review on #3563).
+        // Identity by block, not by name.
+        let uid = reg
+            .uid
+            .clone()
+            .or_else(|| crate::backend::agent_resolve::uid_for_block(store, &reg.block_id));
         candidates.push(AgentCandidate {
-            uid: reg.uid.clone(),
+            uid,
             name: reg.agent_id.clone(),
             slug: String::new(),
             block_id: Some(reg.block_id.clone()),
@@ -159,8 +166,9 @@ pub(crate) fn resolve_name_to_uid(
             }
         }
         Err(e) => {
-            // A store fault must not turn into a confident "no such agent":
-            // refuse to resolve rather than answer from half the evidence.
+            // A store fault must not turn into a confident UID from half the
+            // evidence: answer `None`, so the caller stores no UID and the
+            // row keeps the name path (counted) — degraded, never misrouted.
             tracing::warn!(name = %typed, error = %e, "resolve_name_to_uid: store read failed — not resolving");
             record("resolve.store_error");
             return NameResolution::None;
@@ -168,27 +176,21 @@ pub(crate) fn resolve_name_to_uid(
     }
 
     match candidates.len() {
-        0 => {
-            record("resolve.none");
-            NameResolution::None
-        }
+        // Only the outcomes that leave a row on the name path are counted
+        // (§9.2 reads these as "must reach zero"); `One`, `None` and
+        // `Ambiguous` are answers, not fallbacks.
+        0 => NameResolution::None,
         1 => {
             let candidate = candidates.remove(0);
             match candidate.uid.clone() {
-                Some(uid) => {
-                    record("resolve.one");
-                    NameResolution::One { uid, candidate }
-                }
+                Some(uid) => NameResolution::One { uid, candidate },
                 None => {
                     record("resolve.unidentified");
                     NameResolution::Unidentified { candidate }
                 }
             }
         }
-        _ => {
-            record("resolve.ambiguous");
-            NameResolution::Ambiguous { candidates }
-        }
+        _ => NameResolution::Ambiguous { candidates },
     }
 }
 
@@ -280,6 +282,60 @@ mod tests {
         assert!(candidate.live);
         assert_eq!(candidate.block_id.as_deref(), Some("block-y"));
         assert_eq!(candidate.slug, "agenty");
+    }
+
+    fn bind_block(store: &Store, block_id: &str, agent_uid: &str) {
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(agent_uid));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+    }
+
+    /// An agent that registered before its row existed carries no UID (spec
+    /// Q1). It must still be ONE candidate with its own row — its UID taken
+    /// from the row on its block — not ambiguous with itself (review on
+    /// #3563: an agent scheduling cron to itself by name was refused).
+    #[test]
+    fn a_live_agent_registered_without_a_uid_merges_with_its_own_row_by_block() {
+        let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
+        bind_block(&store, "block-y", UID_Y);
+        let reg = registry();
+        reg.register_agent_full("AgentY", "block-y", None, 0, None, None, "test.m3")
+            .unwrap();
+        let r = resolve_name_to_uid(&store, &reg, "AgentY");
+        let NameResolution::One { uid, candidate } = r else {
+            panic!("expected One, got {r:?}");
+        };
+        assert_eq!(uid, UID_Y);
+        assert!(candidate.live);
+        assert_eq!(candidate.block_id.as_deref(), Some("block-y"));
+    }
+
+    /// …but a uid-less live block that is NOT that row's block (a
+    /// quick-launch pane that happens to share the name) stays a separate
+    /// candidate: the merge is by block identity, never by name.
+    #[test]
+    fn a_same_named_pane_on_another_block_is_still_ambiguous_with_the_row() {
+        let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
+        let reg = registry();
+        reg.register_agent_full("AgentY", "block-pane", None, 0, None, None, "test.m3")
+            .unwrap();
+        let r = resolve_name_to_uid(&store, &reg, "AgentY");
+        let NameResolution::Ambiguous { candidates } = r else {
+            panic!("expected Ambiguous, got {r:?}");
+        };
+        assert_eq!(candidates.len(), 2, "{candidates:?}");
     }
 
     /// A live block with no row (quick-launch pane) is `Unidentified`: it
