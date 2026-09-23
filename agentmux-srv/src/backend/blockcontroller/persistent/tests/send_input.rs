@@ -2975,6 +2975,30 @@ async fn stop_drains_the_queue_with_the_kill_so_a_late_result_writes_nothing() {
     assert!(rx.try_recv().is_err(), "nothing written into the process being killed");
 }
 
+/// The same race on the Stop button (SIGINT → `stop_process`), which keeps
+/// the queue for the next process rather than draining it: a `result` already
+/// in the pipe when the kill is requested must not flush a deferred message
+/// into the process being killed. It stays queued, and neither the boundary
+/// nor the watchdog writes it while that process is still going down.
+#[tokio::test]
+async fn a_stop_request_gates_deferred_writes_into_the_dying_process() {
+    let (c, mut rx) = busy_controller();
+    let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel();
+    c.inner.lock().unwrap().kill_tx = Some(kill_tx);
+    c.send_user_message("deferred".to_string()).unwrap();
+    let generation = c.inner.lock().unwrap().spawn_generation;
+
+    c.stop_process(true).unwrap();
+    assert!(kill_rx.try_recv().is_ok(), "the kill was requested");
+
+    let late = boundary(&c, generation).expect("same generation");
+    assert_eq!(late.flushed, DeferredFlush::Failed, "refused, and the watchdog is armed for it");
+    let mut orphaned = 0;
+    c.sweep_deferred_once(&mut orphaned);
+    assert!(rx.try_recv().is_err(), "nothing written into the process being killed");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept for the next process");
+}
+
 /// The §4.2 race, with real threads: concurrent senders hitting a busy
 /// controller must all be accounted for — none written through, none lost
 /// between the turn-state check and the enqueue.

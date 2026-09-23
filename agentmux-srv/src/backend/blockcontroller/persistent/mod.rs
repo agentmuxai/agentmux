@@ -304,6 +304,17 @@ struct PersistentInner {
     /// Set under the same lock that consumes `restart_when_idle`, cleared when
     /// the replacement process spawns.
     restart_pending: bool,
+    /// A kill has been requested for the current process (`request_stop_on`).
+    /// `stdin_tx` stays live until it actually exits, and a `result` already
+    /// in the pipe still reaches the turn-boundary flush. Writing a deferred
+    /// message then would put it into the dying process and lose it (codex
+    /// P2 on #3562 for `stop`, and the same window on the Stop button).
+    /// `try_write_stdin_locked` refuses while this is set, so the message
+    /// stays queued for the next process.
+    ///
+    /// Set under the same lock as the kill request, cleared when the
+    /// replacement process spawns, exactly like `restart_pending`.
+    stop_pending: bool,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -1059,6 +1070,7 @@ impl PersistentSubprocessController {
                 resume_poisoned: None,
                 restart_when_idle: false,
                 restart_pending: false,
+                stop_pending: false,
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),

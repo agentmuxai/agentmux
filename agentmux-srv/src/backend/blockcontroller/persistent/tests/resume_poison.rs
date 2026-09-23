@@ -24,6 +24,7 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         resume_poisoned: None,
         restart_when_idle: false,
         restart_pending: false,
+        stop_pending: false,
         resume: persistent_resume::ResumeState::default(),
         spawning_in_progress: false,
         pending_send_messages: VecDeque::new(),
