@@ -1769,13 +1769,14 @@ pub(super) async fn handle_reactive_unregister(
     };
 
     // Name-keyed side state is torn down for EVERY name the block held
-    // (display and stable), plus the name the caller asked by — a caller
-    // that knew only the stable name still expects it gone.
+    // (display and stable). The name the caller asked by is used only when
+    // no block was found at all (the pre-M2 behaviour for an unknown name):
+    // when a block WAS torn down, its own bindings are authoritative — the
+    // caller's name may be a stale display value that another live block
+    // now legitimately holds, and removing that block's file entry and cloud
+    // subscription would knock it off cross-instance routing.
     let mut all_names = names.clone();
-    if !all_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case(&req.agent_id))
-    {
+    if block_id.is_none() {
         all_names.push(req.agent_id.clone());
     }
     let data_dir = base::get_mux_data_dir();
@@ -1895,19 +1896,43 @@ pub(super) async fn handle_reactive_transcript(
             .into_response();
     }
 
-    let Some(reg) = state.reactive_handler.get_agent(&params.agent) else {
-        if params.forwarded {
-            // Already one hop in — see TranscriptQuery::forwarded's doc
-            // comment. The owning instance's own host-tier lookup just
-            // missed too, so this agent genuinely isn't registered
-            // anywhere reachable; 404, do not attempt a second forward.
+    let reg = match state.reactive_handler.lookup_by_name(&params.agent) {
+        crate::backend::reactive::handler::LookupOutcome::One(reg) => reg,
+        // Identity M2 (spec §4.4.3): a name several live blocks hold is a
+        // purely LOCAL collision — refuse it with the candidates, never
+        // fall through to cross-channel forwarding as if it were unknown.
+        crate::backend::reactive::handler::LookupOutcome::Ambiguous(candidates) => {
+            let candidates: Vec<serde_json::Value> = candidates
+                .iter()
+                .map(|c| json!({ "uid": c.uid, "block_id": c.block_id, "agent_id": c.agent_id }))
+                .collect();
             return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "agent not found"})),
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": format!(
+                        "ambiguous agent name: '{}' is held by {} live agents; address one by uid",
+                        params.agent,
+                        candidates.len()
+                    ),
+                    "candidates": candidates,
+                })),
             )
                 .into_response();
         }
-        return handle_reactive_transcript_cross_channel(&state, &params).await;
+        crate::backend::reactive::handler::LookupOutcome::NotFound => {
+            if params.forwarded {
+                // Already one hop in — see TranscriptQuery::forwarded's doc
+                // comment. The owning instance's own host-tier lookup just
+                // missed too, so this agent genuinely isn't registered
+                // anywhere reachable; 404, do not attempt a second forward.
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "agent not found"})),
+                )
+                    .into_response();
+            }
+            return handle_reactive_transcript_cross_channel(&state, &params).await;
+        }
     };
     let block_id = reg.block_id.clone();
 

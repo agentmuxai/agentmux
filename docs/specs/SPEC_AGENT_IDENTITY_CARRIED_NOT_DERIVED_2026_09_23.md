@@ -954,6 +954,27 @@ changes two things at once.
   says: the Tier-2 file registry (M4), the cloud subscriber (§8), the
   subagent watcher.
 
+  The implementation had its own adversarial pass (one P1 — a block
+  re-registered under a *different* UID kept its old `uid_to_block` entry,
+  which ReAgent found independently — and eight P2s, six fixed in the same
+  PR). Two were measured, accepted and are recorded here rather than fixed:
+  - **A persistent pane whose process exited but is still open counts as
+    live** (`get_controller` still returns it; its registration survives
+    because the exit-time `unregister_block_if_nonce` never matches once the
+    Register-tail has zeroed the nonce). Relaunching the same template while
+    that pane is open creates a second identified agent with the same
+    display name, and by-name delivery is refused until the old pane is
+    closed. Before M2 the relaunch silently evicted the old pane. This is
+    §5.2 working as designed — a respawnable pane *is* addressable
+    (start-on-delivery, §4.4.3) — but it is a user-visible change, and Q9's
+    "ambiguous with its own corpse" wording overstated what the sweep
+    covers: it covers blocks with **no controller**, not exited processes.
+  - **A fifth spawn site §4.4.1 missed:** the App API `agent.send` path
+    (`server/app_api/agent_io.rs`) builds its spawn env without
+    `build_persistent_spawn_env`, so it carries no `AGENTMUX_AGENT_UID`
+    and registers name-only under `registration.no_uid.spawn`. An M1a gap,
+    not an M2 one; fixed as its own follow-up.
+
   **Design: §4.4 (revision 4.1).** Written after M1 landed, measured against
   the four real registration sites and every delivery input. Names become
   bindings, identity becomes the key, eviction is by identity, ambiguity is

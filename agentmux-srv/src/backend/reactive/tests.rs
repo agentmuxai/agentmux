@@ -3541,11 +3541,20 @@ mod identity_m2 {
         let mut h = Handler::new();
         reg(&mut h, "AgentY", "block1", Some(UID_Y));
         reg(&mut h, "AgentY", "block1", Some(UID_UP));
-        assert_eq!(h.get_agent_by_block("block1").unwrap().uid.as_deref(), Some(UID_UP));
+        assert_eq!(
+            h.get_agent_by_block("block1").unwrap().uid.as_deref(),
+            Some(UID_UP)
+        );
         assert_eq!(h.get_agent(UID_UP).unwrap().block_id, "block1");
-        assert!(h.get_agent(UID_Y).is_none(), "the old uid must not resolve to the block");
+        assert!(
+            h.get_agent(UID_Y).is_none(),
+            "the old uid must not resolve to the block"
+        );
         let r = inject(&mut h, UID_Y);
-        assert_eq!(r.error.as_deref(), Some(&format!("agent not found: {UID_Y}")[..]));
+        assert_eq!(
+            r.error.as_deref(),
+            Some(&format!("agent not found: {UID_Y}")[..])
+        );
         assert_eq!(h.list_agents().len(), 1);
     }
 
@@ -3612,6 +3621,83 @@ mod identity_m2 {
         assert!(h.get_agent("agentg").is_none());
         assert!(h.get_agent(UID_Y).is_none());
         assert!(h.names_for_block("block1").is_empty());
+    }
+
+    /// The mixed cases of §4.4.2's rule: a name held by one identified and
+    /// one unidentified block is left ambiguous in BOTH orders — only
+    /// "neither has a UID" evicts.
+    #[test]
+    fn mixed_uid_and_no_uid_blocks_sharing_a_name_both_stay() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-uid", Some(UID_Y));
+        reg(&mut h, "AgentY", "block-pty", None);
+        assert_eq!(
+            h.list_agents().len(),
+            2,
+            "a no-uid newcomer must not evict an identified block"
+        );
+
+        let mut h2 = Handler::new();
+        reg(&mut h2, "AgentY", "block-pty", None);
+        reg(&mut h2, "AgentY", "block-uid", Some(UID_Y));
+        assert_eq!(
+            h2.list_agents().len(),
+            2,
+            "an identified newcomer must not evict a no-uid block"
+        );
+        assert!(
+            h2.get_agent("agenty").is_none(),
+            "…and the name is ambiguous"
+        );
+    }
+
+    /// Read-only lookups never sweep; delivery does. A dead block under a
+    /// contested name is still listed after `get_agent`, gone after `inject`.
+    #[tokio::test]
+    async fn get_agent_does_not_sweep_but_delivery_does() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-dead", Some(UID_Y));
+        reg(&mut h, "AgentY", "block-live", Some(UID_UP));
+        h.set_block_liveness(Arc::new(|b: &str| b == "block-live"));
+        h.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+        assert_eq!(h.get_agent("agenty").unwrap().block_id, "block-live");
+        assert_eq!(h.list_agents().len(), 2, "get_agent must not sweep");
+        assert!(inject(&mut h, "agenty").success);
+        assert_eq!(h.list_agents().len(), 1, "delivery sweeps the dead candidate");
+    }
+
+    /// Spec §4.4.4 Q9: liveness is consulted only when a name is contested.
+    /// A single registration momentarily without a controller (a resync
+    /// replace, a frontend register that beats the resync) is neither swept
+    /// nor answered as "agent not found" — which would be forwarded.
+    #[tokio::test]
+    async fn an_uncontested_registration_is_never_swept_even_if_the_probe_says_dead() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block-y", Some(UID_Y));
+        h.set_block_liveness(Arc::new(|_: &str| false));
+        h.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+        let r = inject(&mut h, "agenty");
+        assert!(r.success, "{:?}", r.error);
+        assert_eq!(h.list_agents().len(), 1);
+        assert!(h.get_agent("agenty").is_some());
+    }
+
+    /// `lookup_by_name` tells an ambiguous name apart from an unknown one,
+    /// so `GetAgentTranscript` can refuse locally instead of forwarding.
+    #[test]
+    fn lookup_by_name_distinguishes_ambiguous_from_not_found() {
+        use crate::backend::reactive::handler::LookupOutcome;
+        let h = colliding_pair();
+        assert!(
+            matches!(h.lookup_by_name("agenty"), LookupOutcome::Ambiguous(ref c) if c.len() == 2)
+        );
+        assert!(matches!(
+            h.lookup_by_name("nobody"),
+            LookupOutcome::NotFound
+        ));
+        assert!(
+            matches!(h.lookup_by_name(UID_Y), LookupOutcome::One(ref r) if r.block_id == "block-y")
+        );
     }
 
     #[test]

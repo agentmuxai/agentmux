@@ -200,6 +200,15 @@ pub enum UnregisterOutcome {
     Ambiguous(Vec<AgentRegistration>),
 }
 
+/// What a read-only name lookup found (identity M2) — see
+/// [`Handler::lookup_by_name`].
+#[derive(Debug, Clone)]
+pub enum LookupOutcome {
+    One(AgentRegistration),
+    Ambiguous(Vec<AgentRegistration>),
+    NotFound,
+}
+
 /// How `inject_message_inner` resolved its target (spec §4.4.3).
 enum TargetResolution {
     Uid(String),
@@ -414,7 +423,11 @@ impl Handler {
                     new_uid = %new_uid,
                     "reactive: block re-registered under a different uid — dropping the old uid mapping (identity M2)"
                 );
-                if self.uid_to_block.get(&old_uid).is_some_and(|b| b == block_id) {
+                if self
+                    .uid_to_block
+                    .get(&old_uid)
+                    .is_some_and(|b| b == block_id)
+                {
                     self.uid_to_block.remove(&old_uid);
                 }
             }
@@ -554,9 +567,67 @@ impl Handler {
         }
     }
 
-    /// Resolve a delivery target (spec §4.4.3): UID first, then name among
-    /// live blocks — sweeping dead ones on the way (§4.4.4 Q9) — refusing an
-    /// ambiguous name with its candidates rather than guessing.
+    /// Is `block_id` alive per the liveness probe? `None` probe = live.
+    fn is_live(&self, block_id: &str) -> bool {
+        self.block_liveness
+            .as_ref()
+            .is_none_or(|probe| probe(block_id))
+    }
+
+    /// Drop a registration whose block has no controller (spec §4.4.4 Q9).
+    fn sweep_dead(&mut self, block_id: &str) {
+        let display_name = self
+            .block_names
+            .get(block_id)
+            .map(|n| n.display.clone())
+            .unwrap_or_default();
+        tracing::info!(
+            block_id = %block_id,
+            name = %display_name,
+            "reactive: sweeping dead registration while resolving a contested name (identity M2)"
+        );
+        self.remove_block_bindings(block_id);
+        self.log_audit_registration("swept", &display_name, block_id, None, None);
+        crate::backend::agent_resolve::record_uid_fallback("registry.swept_dead");
+    }
+
+    /// Read-only name resolution shared by [`get_agent`], [`lookup_by_name`]
+    /// and [`peek_target`]: `Ok(Some(block))` for a UID hit or a name held
+    /// by exactly one live block, `Ok(None)` for nothing, `Err(blocks)` for
+    /// a name several live blocks hold. Liveness is consulted **only when
+    /// the name is contested** (spec §4.4.4 Q9): an uncontested registration
+    /// is never second-guessed, so a block that is momentarily between
+    /// controllers (a `resync_controller` replace, or a frontend register
+    /// that beats the resync) is not answered as "not found" — which would
+    /// forward a purely local miss to other instances.
+    fn read_resolve(&self, target: &str) -> Result<Option<String>, Vec<String>> {
+        if let Some(block) = self
+            .uid_to_block
+            .get(target)
+            .or_else(|| self.uid_to_block.get(&target.to_lowercase()))
+        {
+            return Ok(Some(block.clone()));
+        }
+        let key = target.to_lowercase();
+        let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
+        match blocks.len() {
+            0 => Ok(None),
+            1 => Ok(Some(blocks[0].clone())),
+            _ => {
+                let live: Vec<String> = blocks.into_iter().filter(|b| self.is_live(b)).collect();
+                match live.len() {
+                    0 => Ok(None),
+                    1 => Ok(Some(live[0].clone())),
+                    _ => Err(live),
+                }
+            }
+        }
+    }
+
+    /// Resolve a delivery target (spec §4.4.3): UID first, then a name held
+    /// by exactly one live block — sweeping dead candidates only when the
+    /// name is contested (§4.4.4 Q9) — refusing an ambiguous name with its
+    /// candidates rather than guessing. Counts what it did (§9.2).
     fn resolve_target(&mut self, target: &str) -> TargetResolution {
         if let Some(block) = self
             .uid_to_block
@@ -570,35 +641,24 @@ impl Handler {
         if blocks.is_empty() {
             return TargetResolution::NotFound;
         }
-        let mut live = Vec::with_capacity(blocks.len());
-        for block in blocks {
-            let alive = self
-                .block_liveness
-                .as_ref()
-                .is_none_or(|probe| probe(&block));
-            if alive {
-                live.push(block);
-            } else {
-                let display_name = self
-                    .block_names
-                    .get(&block)
-                    .map(|n| n.display.clone())
-                    .unwrap_or_default();
-                tracing::info!(
-                    block_id = %block,
-                    name = %display_name,
-                    "reactive: sweeping dead registration while resolving a name (identity M2)"
-                );
-                self.remove_block_bindings(&block);
-                self.log_audit_registration("swept", &display_name, &block, None, None);
-                crate::backend::agent_resolve::record_uid_fallback("registry.swept_dead");
+        let live: Vec<String> = if blocks.len() == 1 {
+            blocks
+        } else {
+            let mut live = Vec::with_capacity(blocks.len());
+            for block in blocks {
+                if self.is_live(&block) {
+                    live.push(block);
+                } else {
+                    self.sweep_dead(&block);
+                }
             }
-        }
+            live
+        };
         match live.len() {
             0 => TargetResolution::NotFound,
             1 => {
                 crate::backend::agent_resolve::record_uid_fallback("delivery.resolved_by_name");
-                TargetResolution::Name(live.remove(0))
+                TargetResolution::Name(live.into_iter().next().unwrap())
             }
             _ => {
                 crate::backend::agent_resolve::record_uid_fallback("delivery.ambiguous");
@@ -607,6 +667,35 @@ impl Handler {
                     .filter_map(|b| self.agent_info.get(b).cloned())
                     .collect();
                 TargetResolution::Ambiguous(candidates)
+            }
+        }
+    }
+
+    /// The block a target would resolve to, without counting or sweeping —
+    /// for callers that resolve *before* handing off to `inject_message_inner`,
+    /// which resolves (and counts) for real. `None` for unknown or ambiguous.
+    fn peek_target(&self, target: &str) -> Option<String> {
+        self.read_resolve(target).ok().flatten()
+    }
+
+    /// Name lookup that tells an ambiguous name apart from an unknown one
+    /// (identity M2) — for callers that must refuse with candidates rather
+    /// than fall through to cross-instance forwarding (`GetAgentTranscript`).
+    pub fn lookup_by_name(&self, name: &str) -> LookupOutcome {
+        match self.read_resolve(name) {
+            Ok(Some(block)) => match self.agent_info.get(&block) {
+                Some(reg) => LookupOutcome::One(reg.clone()),
+                None => LookupOutcome::NotFound,
+            },
+            Ok(None) => LookupOutcome::NotFound,
+            Err(blocks) => {
+                crate::backend::agent_resolve::record_uid_fallback("lookup.ambiguous_name");
+                LookupOutcome::Ambiguous(
+                    blocks
+                        .iter()
+                        .filter_map(|b| self.agent_info.get(b).cloned())
+                        .collect(),
+                )
             }
         }
     }
@@ -711,18 +800,10 @@ impl Handler {
     /// (`lookup.ambiguous_name`): callers that authorize on it fail closed,
     /// and callers that display on it show nothing rather than the wrong one.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        if let Some(block) = self
-            .uid_to_block
-            .get(agent_id)
-            .or_else(|| self.uid_to_block.get(&agent_id.to_lowercase()))
-        {
-            return self.agent_info.get(block);
-        }
-        let live = self.live_blocks_for_key(&agent_id.to_lowercase());
-        match live.len() {
-            1 => self.agent_info.get(&live[0]),
-            0 => None,
-            _ => {
+        match self.read_resolve(agent_id) {
+            Ok(Some(block)) => self.agent_info.get(&block),
+            Ok(None) => None,
+            Err(_) => {
                 crate::backend::agent_resolve::record_uid_fallback("lookup.ambiguous_name");
                 None
             }
@@ -1418,10 +1499,11 @@ impl Handler {
         // is the site #3520 converted the others around and missed). An
         // ambiguous or unknown target leaves `block_id` empty exactly as an
         // unknown one did before.
-        let block_id = match self.resolve_target(target_agent) {
-            TargetResolution::Uid(b) | TargetResolution::Name(b) => b,
-            TargetResolution::Ambiguous(_) | TargetResolution::NotFound => String::new(),
-        };
+        // Peek, don't resolve: `inject_message_inner` below resolves (and
+        // counts, and sweeps) for real on the Nudge path; resolving here too
+        // would double-bump the §9.2 counters. An ambiguous or unknown target
+        // leaves `block_id` empty exactly as an unknown one did before.
+        let block_id = self.peek_target(target_agent).unwrap_or_default();
 
         match action {
             SupervisorAction::Decline => {
@@ -1920,6 +2002,11 @@ impl ReactiveHandler {
 
     pub fn get_agent(&self, agent_id: &str) -> Option<AgentRegistration> {
         self.inner.lock().unwrap().get_agent(agent_id).cloned()
+    }
+
+    /// See the inner [`Handler::lookup_by_name`] (identity M2).
+    pub fn lookup_by_name(&self, name: &str) -> LookupOutcome {
+        self.inner.lock().unwrap().lookup_by_name(name)
     }
 
     /// Used by `server/app_api/fleet.rs`'s ordinary (non-reentrant) request
