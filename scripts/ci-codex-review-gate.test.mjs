@@ -177,6 +177,17 @@ describe("Codex out of review quota", () => {
         expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
     });
 
+    it("lets an answer close only its own request (Codex P1 on #3589, second)", () => {
+        // findings(OLD) answers only OLD, so the quota notice answers HEAD alone.
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:32:00Z"),
+            quotaComment("2026-09-23T14:40:00Z"),
+        ];
+        const reviews = [findingsReview(OLD, "2026-09-23T14:36:45Z")];
+        expect(evaluateCodexGate({ headSha: HEAD, comments, reviews }).state).toBe("success");
+    });
+
     it("resolves once the next request is answered alone", () => {
         const comments = [
             trigger(OLD, "2026-09-23T14:31:42Z"),
