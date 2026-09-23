@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) — implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) implemented. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -1227,6 +1227,11 @@ UIDs (a mismatch is the existing "not the current holder" 409); otherwise it
 keeps the name comparison, counted (`m4c.holder_by_name`). This is not a new
 refusal — the check exists today; it only stops matching on a name two
 agents share. A tokenless holder keeps working by name, as M4 promises.
+*(Implemented in M4c-2a: each transition is two conditional UPDATEs, by UID
+then by name, the second running only when the first matched nothing — each
+a complete authorization on its own, so no read-then-write race; the store
+reports which matched, `HolderMatch`. A name match is counted whether the
+row or the caller lacked the UID.)*
 UIDs are global (a backfill keeps the id), so the same agent has the same
 UID in every channel. **Recorded, one path:** a continuation reattached
 from a legacy registry record whose `definition_id` is a template gets a
