@@ -2378,9 +2378,13 @@ async fn handle_agent_globalmemory_write(
     } else {
         None
     };
+    // Identity M4c-1 (§6.5.9): the writer's UID is the request's `Caller` —
+    // its token — never a body field; `""` when Unattributed.
+    let written_by_uid = caller::attributed_uid(caller.as_deref());
     app_api_response(app_api::global_memory_write_impl(
         &state,
         &req.agent_id,
+        &written_by_uid,
         req.id.as_deref(),
         &req.name,
         &req.content,
@@ -2484,7 +2488,15 @@ async fn handle_agent_globalmemory_revert(
         actor::ActorSite::GlobalMemoryRevert,
         Some(&req.agent_id),
     );
-    app_api_response(app_api::global_memory_revert_impl(&state, &req.agent_id, &req.id, &req.version_id))
+    // Identity M4c-1: as for write, the writer's UID is the `Caller`'s.
+    let written_by_uid = caller::attributed_uid(caller.as_deref());
+    app_api_response(app_api::global_memory_revert_impl(
+        &state,
+        &req.agent_id,
+        &written_by_uid,
+        &req.id,
+        &req.version_id,
+    ))
 }
 
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary

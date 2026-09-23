@@ -27,6 +27,13 @@ pub struct CronJob {
     #[serde(default)]
     pub target_uid: String,
     pub created_by: String,
+    /// Identity M4c-1 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): the creator's UID, taken from the create request's `Caller`
+    /// — its `X-Agent-Token` — never from a body field. Empty = the create
+    /// was Unattributed; never guessed. Dual-written beside `created_by`;
+    /// not read yet (M4c-3 carries it as the fire's attribution).
+    #[serde(default)]
+    pub created_by_uid: String,
     pub enabled: bool,
     pub last_fired: Option<i64>,
     pub fire_count: i64,
@@ -47,8 +54,8 @@ impl Store {
             "INSERT INTO db_cron_jobs
                 (id, name, expression, prompt, target, created_by, enabled,
                  last_fired, fire_count, max_fires, created_at, max_age_secs,
-                 target_uid)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 target_uid, created_by_uid)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 job.id,
                 job.name,
@@ -63,6 +70,7 @@ impl Store {
                 job.created_at,
                 job.max_age_secs,
                 job.target_uid,
+                job.created_by_uid,
             ],
         )?;
         Ok(())
@@ -73,7 +81,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid
+                    target_uid, created_by_uid
              FROM db_cron_jobs ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -85,7 +93,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid
+                    target_uid, created_by_uid
              FROM db_cron_jobs WHERE enabled = 1 ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -97,7 +105,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid
+                    target_uid, created_by_uid
              FROM db_cron_jobs WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_row)?;
@@ -154,5 +162,6 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         created_at:    row.get(10)?,
         max_age_secs:  row.get(11)?,
         target_uid:    row.get(12)?,
+        created_by_uid: row.get(13)?,
     })
 }

@@ -51,6 +51,16 @@ impl Caller {
     }
 }
 
+/// The UID to persist beside an actor name (identity M4c-1, spec §6.5.9):
+/// the request's attributed UID, or `""` — unknown, never guessed — when the
+/// request is Unattributed or carries no `Caller` at all.
+pub(crate) fn attributed_uid(caller: Option<&Caller>) -> String {
+    caller
+        .and_then(Caller::uid)
+        .map(str::to_string)
+        .unwrap_or_default()
+}
+
 /// Resolve the request's [`Caller`]. Pure, so the rules are testable without
 /// a router: `token` is the header value, `full_key` whether the request
 /// authenticated with the full instance key, `lookup` the token index.
