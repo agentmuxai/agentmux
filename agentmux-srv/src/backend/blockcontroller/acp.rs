@@ -206,6 +206,12 @@ impl AcpController {
         cmd.args(&cli_args);
 
         core::apply_working_dir(&mut cmd, &self.block_id, &working_dir, &env_vars);
+        // Identity M4a: record what this process is actually given.
+        crate::backend::identity_spawn::record_process_spawn(
+            &self.block_id,
+            crate::backend::identity_spawn::SpawnPath::Acp,
+            &env_vars,
+        );
         // On Windows: suppress console-window allocation. Without CREATE_NO_WINDOW,
         // node.exe spawned from a windowless sidecar may try to create/attach to a
         // console, causing stdout to go to that console rather than the pipe.

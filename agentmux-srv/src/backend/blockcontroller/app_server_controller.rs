@@ -139,11 +139,11 @@ impl AppServerController {
                 .collect::<HashMap<_, _>>(),
             _ => HashMap::new(),
         };
-        // Identity M4a: App Server agents carry no token yet (M4b).
-        crate::backend::identity_spawn::record_spawn(
+        // Identity M4a: record what this process is actually given.
+        crate::backend::identity_spawn::record_process_spawn(
             &self.block_id,
-            env_vars.contains_key("AGENTMUX_AGENT_TOKEN"),
-            Some("spawn.no_token.app_server"),
+            crate::backend::identity_spawn::SpawnPath::AppServer,
+            &env_vars,
         );
         let mut command = crate::server::cli_handlers::make_cli_cmd(&executable);
         command.args(args);

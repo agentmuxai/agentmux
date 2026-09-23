@@ -54,10 +54,18 @@ impl Caller {
 /// Resolve the request's [`Caller`]. Pure, so the rules are testable without
 /// a router: `token` is the header value, `full_key` whether the request
 /// authenticated with the full instance key, `lookup` the token index.
+/// What the token index said about a token.
+pub(crate) enum Lookup {
+    Index(Option<String>),
+    /// No index attached (it failed to build at boot) — counted apart from an
+    /// unknown token, so the two are not confused.
+    NoIndex,
+}
+
 pub(crate) fn derive_caller(
     token: Option<&str>,
     full_key: bool,
-    lookup: impl FnOnce(&str) -> Option<String>,
+    lookup: impl FnOnce(&str) -> Lookup,
 ) -> Caller {
     let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else {
         return Caller::Unattributed;
@@ -67,36 +75,41 @@ pub(crate) fn derive_caller(
         return Caller::Unattributed;
     }
     match lookup(token) {
-        Some(uid) => Caller::Agent { uid },
-        None => {
+        Lookup::Index(Some(uid)) => Caller::Agent { uid },
+        Lookup::Index(None) => {
             crate::backend::agent_resolve::record_uid_fallback("m4.token_unknown");
+            Caller::Unattributed
+        }
+        Lookup::NoIndex => {
+            crate::backend::agent_resolve::record_uid_fallback("m4.token_index_unavailable");
             Caller::Unattributed
         }
     }
 }
 
 /// Inserts [`Caller`]. Layered *inside* `auth_middleware` /
-/// `lan_or_full_auth_middleware`, so it only ever sees authenticated
-/// requests. On the LAN-forward routes `ReactiveAuthVia` says which key
-/// authenticated; on the authed routes only the full key can have.
+/// `lan_or_full_auth_middleware`; both mark which key authenticated the
+/// request (`ReactiveAuthVia`), and a `Caller` is derived only when that mark
+/// says the full key — a request that reached here unmarked is Unattributed,
+/// never assumed full-key (review on #3571). The WebSocket upgrade is always
+/// Unattributed (§6.5.3): WebSocket RPC is the UI's channel, and a token
+/// must never ride on it.
 pub(crate) async fn caller_middleware(
     State(state): State<AppState>,
     mut req: Request<Body>,
     next: Next,
 ) -> Response {
-    let full_key = req
-        .extensions()
-        .get::<ReactiveAuthVia>()
-        .is_none_or(|via| *via == ReactiveAuthVia::FullAuthKey);
-    let token = req
-        .headers()
-        .get(AGENT_TOKEN_HEADER)
-        .and_then(|v| v.to_str().ok());
-    let caller = derive_caller(token, full_key, |t| {
-        state
-            .mstore
-            .token_index()
-            .and_then(|index| index.uid_for(t))
+    let full_key = req.extensions().get::<ReactiveAuthVia>() == Some(&ReactiveAuthVia::FullAuthKey);
+    let token = if req.uri().path() == "/ws" {
+        None
+    } else {
+        req.headers()
+            .get(AGENT_TOKEN_HEADER)
+            .and_then(|v| v.to_str().ok())
+    };
+    let caller = derive_caller(token, full_key, |t| match state.mstore.token_index() {
+        Some(index) => Lookup::Index(index.uid_for(t)),
+        None => Lookup::NoIndex,
     });
     req.extensions_mut().insert(caller);
     next.run(req).await
@@ -118,8 +131,10 @@ pub(crate) async fn handle_identity_fallbacks(
             .into_iter()
             .map(|(site, n)| (site.to_string(), serde_json::json!(n)))
             .collect();
-    let (tokenless_or_unknown, unidentified) =
-        crate::backend::identity_spawn::live_gauges(&state.reactive_handler.list_agents());
+    let (tokenless_or_unknown, unidentified) = crate::backend::identity_spawn::live_gauges(
+        &state.reactive_handler.list_agents(),
+        |block| crate::backend::blockcontroller::get_controller(block).is_some(),
+    );
     let caller_uid = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string));
     axum::Json(serde_json::json!({
         "caller": caller_uid,
@@ -135,8 +150,8 @@ pub(crate) async fn handle_identity_fallbacks(
 mod tests {
     use super::*;
 
-    fn index(token: &str) -> Option<String> {
-        (token == "tok-y").then(|| "uid-y".to_string())
+    fn index(token: &str) -> Lookup {
+        Lookup::Index((token == "tok-y").then(|| "uid-y".to_string()))
     }
 
     #[test]
@@ -161,6 +176,14 @@ mod tests {
     fn an_unknown_token_is_unattributed_not_refused() {
         assert_eq!(
             derive_caller(Some("tok-gone"), true, index),
+            Caller::Unattributed
+        );
+    }
+
+    #[test]
+    fn a_missing_index_is_unattributed() {
+        assert_eq!(
+            derive_caller(Some("tok-y"), true, |_| Lookup::NoIndex),
             Caller::Unattributed
         );
     }

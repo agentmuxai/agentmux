@@ -281,4 +281,43 @@ mod tests {
         assert_eq!(index.uid_for(&token), None);
         assert_eq!(store.agent_token_load("uid-a").unwrap(), None);
     }
+
+    /// Through the real deletion paths: deleting an agent revokes its token
+    /// from the index and tombstones every name its legacy signing keys may
+    /// sit under (spec §6.5.4) — for both names one deletion arrives by.
+    #[test]
+    fn deleting_an_agent_revokes_its_token_and_tombstones_its_names() {
+        use crate::backend::storage::agents::test_agent_def;
+        for via_instance_delete in [false, true] {
+            let store = object_store();
+            let index = store.attach_token_index().unwrap();
+            let mut def = test_agent_def("uid-agenty", "AgentY", "claude", "agent", 1, "");
+            def.slug = "agenty-2".to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            let token = store.agent_token_ensure("uid-agenty").unwrap();
+            assert_eq!(index.uid_for(&token).as_deref(), Some("uid-agenty"));
+
+            let deleted = if via_instance_delete {
+                store.instance_delete("uid-agenty").unwrap()
+            } else {
+                store.agent_def_delete("uid-agenty").unwrap()
+            };
+            assert!(deleted, "instance_delete={via_instance_delete}");
+            assert_eq!(
+                index.uid_for(&token),
+                None,
+                "instance_delete={via_instance_delete}"
+            );
+            let tombstones = {
+                let conn = store.conn.lock().unwrap();
+                super::super::agents::key_tombstones_for_tests(&conn)
+            };
+            let names: Vec<&str> = tombstones.iter().map(|(n, _)| n.as_str()).collect();
+            assert!(
+                names.contains(&"agenty") && names.contains(&"agenty-2"),
+                "{tombstones:?}"
+            );
+            assert!(tombstones.iter().all(|(_, uid)| uid == "uid-agenty"));
+        }
+    }
 }
