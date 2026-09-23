@@ -1165,9 +1165,13 @@ gate nothing: they are the declared-outside set (terminals, `/btw` pending
 #3579, quick-launch, template sessions) **and two legacy populations that
 drain only when their panes close**: a cross-channel agent opened through
 `agent.open` before M4b-4 (its block names an id with no local row, and
-nothing backfills it afterwards — a UI remount never creates), and a pane
-whose agent was deleted (#3577). Both run tokenless on the shared login
-today; neither is created by any path after M4b. A continuation whose create fails aborts (M4b-3), so it
+nothing backfills it afterwards — a UI remount never creates); it runs
+tokenless on the shared login today, and no path creates one after M4b. A
+pane whose agent was **deleted** is no longer in that set: the identity
+spawn gate refuses it (`SpawnGateError::AgentDeleted`, #3577) when the shared
+definition registry holds only a retired record for the agent its block
+names — which also closes the window in which an agent deleted mid-spawn
+would start with no identity. A continuation whose create fails aborts (M4b-3), so it
 is not in that set.
 
 **Rollout, each step its own PR:** M4b-1 `agent.send` through the builder;

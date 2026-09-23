@@ -2135,6 +2135,29 @@ impl Store {
         }
     }
 
+    /// Whether `id` names an agent that was **deleted**: no local row (template
+    /// or not), and the shared definition registry holds a record for it that
+    /// is retired rather than active — deleting a user agent retires its
+    /// global record (`registry_def_retire`). A template, a removed template
+    /// and a live cross-channel agent all read false: templates are never
+    /// mirrored, and a cross-channel agent's record is active. With no shared
+    /// registry this cannot be told and reads false. For the identity spawn
+    /// gate (#3577).
+    pub fn agent_was_deleted(&self, id: &str) -> bool {
+        let id = id.trim();
+        if id.is_empty() {
+            return false;
+        }
+        match self.agent_row_get(id) {
+            Ok(None) => {}
+            Ok(Some(_)) | Err(_) => return false,
+        }
+        match self.shared_def_registry() {
+            Some(reg) => reg.exists_anywhere(id) && !reg.exists(id),
+            None => false,
+        }
+    }
+
     /// Ensure a user agent `id` has a local `db_agents` row, backfilling it
     /// from the shared definition registry when it exists only there (a
     /// cross-channel agent) — the same backfill `instance_create` runs, without
