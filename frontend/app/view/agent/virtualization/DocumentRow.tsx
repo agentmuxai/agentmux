@@ -201,6 +201,24 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
     const peekTick = useTick(1000);
     const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
 
+    // This row's dispatch match, equality-gated. `dispatchMatches` is a memo
+    // over the WHOLE document array (AgentDocumentView.tsx), so it produces a
+    // new Map identity on every stream flush. Passing `.get(id)` as an inline
+    // prop getter subscribed every consumer down the chain (ToolBlock →
+    // ToolBlockOverlay → ToolOverlayLog → ToolOverlayResult's `<Show>`
+    // children memo) to that Map identity — so `renderToolResultBody` re-ran
+    // and rebuilt the entire result subtree for EVERY finished tool in the
+    // streaming buffer, EVERY flush, while the value it read was unchanged
+    // (`undefined` for anything but Agent/Task/Workflow). For `.md` Read
+    // previews that meant a full markdown parse plus an OverlayScrollbars
+    // construction — 46% + 38% of `flushPendingNodes` under 4-pane load.
+    // A memo compares the resolved value (`===`), so identity churn on the
+    // Map stops here. See ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2.
+    const dispatchMatch = createMemo<AgentDispatch | undefined>(() => {
+        const n = props.node();
+        return n ? props.dispatchMatches?.().get(n.id) : undefined;
+    });
+
     return (
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
@@ -213,7 +231,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     heldOpen={props.documentState().expandedTools.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                     onHoldOpen={() => props.onHoldToolOpen?.(props.node().id)}
-                    dispatchMatch={props.dispatchMatches?.().get(props.node().id)}
+                    dispatchMatch={dispatchMatch()}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "agent_message"}>
