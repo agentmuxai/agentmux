@@ -205,7 +205,7 @@ depending on unverified third-party behavior.
 | Phase | Content | PR |
 |---|---|---|
 | 1 | This spec; supersede the two predecessors; delete the dead `wait_for_idle` field and its 48 call sites | #3557 |
-| 2 | `DeliverPolicy` + the `inner`-guarded queue for the persistent path (§4.2–4.5), with tests | #3558 |
+| 2 | `DeliverPolicy` + the `inner`-guarded queue for the persistent path (§4.2–4.5), with tests | #3562 |
 | 3 | ACP (§4.6); sender-addressed failure reporting; the interleaving tests of §7 | _pending_ |
 
 Phase 2 is the behavior change. Phases 1 and 3 are safe to land independently.
