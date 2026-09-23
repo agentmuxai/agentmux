@@ -1001,6 +1001,81 @@ fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_
     assert_eq!(c.get_status_snapshot().shellprocstatus, STATUS_DONE);
 }
 
+/// Codex P1 on PR #3551 (third round): the eagerly resumed CLI can reject
+/// a stale id fast enough for its waiter to fire while `try_eager_resume`
+/// still holds its own spawn claim. That claim is THIS generation's, not a
+/// newer one's — the settlement must run, and must leave the claim alone
+/// (it is the eager path's to release).
+#[test]
+fn retry_after_resume_failure_with_no_entries_runs_under_this_generations_own_unwinding_eager_claim() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("dead-sid".to_string());
+        inner.spawn_generation = 1;
+        inner.spawning_in_progress = true; // try_eager_resume has not released yet
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "dead-sid".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "dead-sid".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id, None, "the settlement ran: no candidate, so the next message starts fresh");
+    assert_eq!(inner.proc_status, STATUS_DONE, "and published the terminal status the waiter suppressed");
+    assert!(
+        inner.spawning_in_progress,
+        "the eager claim is not this settlement's to release — releasing it would let a send \
+         become a spawner while try_eager_resume is still unwinding"
+    );
+}
+
+/// reagent P1 on PR #3551 (third round): the settlement's side effects run
+/// outside `inner`'s lock, so it holds the SPAWN CLAIM across them — a send
+/// arriving then queues behind it rather than becoming a spawner. On
+/// release, anything that queued is handed off (a spawn on the adopted
+/// session), and the claim never leaks: here the hand-off spawn fails (no
+/// such binary) and the failure settlement releases it.
+#[test]
+fn retry_after_resume_failure_with_no_entries_hands_off_a_send_that_queued_behind_its_claim() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("dead-sid".to_string());
+        inner.spawn_generation = 1;
+        // A send that reached `decide_send_action` while the claim was held.
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"behind\"}".to_string()));
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "dead-sid".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "dead-sid".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.spawning_in_progress, "the claim taken for the side effects must be released");
+    assert_eq!(inner.pending_send_messages.len(), 1, "the queued send is handed off, never dropped");
+    assert!(inner.stdin_tx.is_none(), "the hand-off spawn could not launch here (no such binary)");
+}
+
 /// Codex P1 on PR #3551: a message that arrived after the doomed process
 /// cleared `stdin_tx` but before the empty-batch settlement ran may already
 /// have spawned a NEWER generation with its own live session id. The

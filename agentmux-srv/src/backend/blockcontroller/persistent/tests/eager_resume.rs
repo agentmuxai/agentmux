@@ -924,10 +924,10 @@ async fn an_ownership_refusal_with_queued_work_reports_and_keeps_the_queue_inste
     let inner = c.inner.lock().unwrap();
     assert!(inner.current_pid.is_none(), "must not spawn anything");
     assert!(!inner.spawning_in_progress, "the claim must be released");
-    assert_eq!(
-        inner.pending_send_messages.len(),
-        1,
-        "the accepted prompt stays queued for the next, guarded attempt"
+    assert!(
+        inner.pending_send_messages.is_empty(),
+        "the prompt is discarded, not retained: a retained leftover is exactly what the next \
+         send's generic failed-spawn fallback would hand to a fresh conversation"
     );
     assert_eq!(
         inner.session_id.as_deref(),
@@ -939,12 +939,16 @@ async fn an_ownership_refusal_with_queued_work_reports_and_keeps_the_queue_inste
     // credential/config phrases, and this is neither), so the report is the
     // error-result frame appended to the pane's output — the same channel
     // the CLI's own errors arrive on.
-    let reported = filestore
+    let output = filestore
         .read_file("blk-owned-elsewhere", PERSISTENT_OUTPUT_SUBJECT)
         .unwrap()
-        .map(|bytes| String::from_utf8_lossy(&bytes).contains("already open in another pane"))
-        .unwrap_or(false);
-    assert!(reported, "the operator must be told why the prompt is not running");
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .unwrap_or_default();
+    assert!(
+        output.contains("1 queued prompt(s) were not delivered and have been discarded")
+            && output.contains("already open in another pane"),
+        "the operator must be told what was discarded and why; got: {output}"
+    );
 }
 
 /// The other failure class keeps its fallback: a generic spawn failure with
