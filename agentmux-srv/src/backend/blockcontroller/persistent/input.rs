@@ -118,7 +118,7 @@ impl PersistentSubprocessController {
 
             if policy == DeliverPolicy::Immediate {
                 Self::try_write_stdin_locked(&mut inner, &json_str)?;
-                Some(json_str.clone())
+                Some((json_str.clone(), self.mark_turn_active_locked()))
             } else {
                 if inner.deferred_deliveries.len() >= MAX_DEFERRED_DELIVERIES {
                     // §4.5: an explicit error, never a false success. The
@@ -153,7 +153,13 @@ impl PersistentSubprocessController {
                     match Self::try_write_stdin_locked(&mut inner, &head) {
                         Ok(()) => {
                             inner.deferred_deliveries.pop_front();
-                            Some(head)
+                            // The flip MUST happen before this guard drops.
+                            // Deferred to after the lock, a second caller
+                            // arriving in the gap would still read "idle" and
+                            // an empty queue, take this same fast path, and
+                            // write a second message with no turn boundary
+                            // between them — the exact thing this PR forbids.
+                            Some((head, self.mark_turn_active_locked()))
                         }
                         Err(e) => {
                             // Drop the entry we just added — this call is
@@ -167,7 +173,7 @@ impl PersistentSubprocessController {
             }
         };
 
-        let Some(sent_line) = delivered else {
+        let Some((sent_line, was_active)) = delivered else {
             tracing::info!(
                 block_id = %self.block_id,
                 "delivery deferred — a turn is in flight; will flush at the next turn boundary"
@@ -175,17 +181,33 @@ impl PersistentSubprocessController {
             return Ok(());
         };
 
-        // Whether the process was busy or idle, delivering this message
-        // (re)starts an active turn. The heartbeat is re-armed only when
-        // resuming from idle, or a mid-turn steering send would leak a
-        // duplicate heartbeat task.
-        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+        // Everything below needs the `inner` lock released: `publish_status`
+        // takes it, and `spawn_status_heartbeat`'s task does too. The turn was
+        // already marked active inside the critical section above; these are
+        // only the observable side effects of that.
+        //
+        // The heartbeat is re-armed only when resuming from idle — a mid-turn
+        // steering send already has one running, and re-spawning per call would
+        // leak duplicate heartbeat tasks.
         if !was_active {
             self.spawn_status_heartbeat();
         }
         self.publish_status();
         self.append_delivered_message(&sent_line);
         Ok(())
+    }
+
+    /// Mark the turn active while the caller already holds `inner`.
+    ///
+    /// Exists to make the lock discipline explicit at the call sites: the flip
+    /// belongs *inside* the critical section that decided to send, so no
+    /// concurrent caller can observe "idle with an empty queue" between the
+    /// write and the flip and take the idle fast path a second time. Lock
+    /// order is `inner` → `health_monitor`, matching the turn-end handler in
+    /// `spawn.rs`; `health_monitor` never takes `inner`, so this cannot
+    /// deadlock. Returns the pre-call value.
+    fn mark_turn_active_locked(&self) -> bool {
+        self.health_monitor.mark_turn_active_returning_was_active()
     }
 
     /// Release at most ONE deferred message at a turn boundary, returning the

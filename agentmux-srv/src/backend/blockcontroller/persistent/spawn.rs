@@ -731,6 +731,10 @@ impl PersistentSubprocessController {
                             (deferred, flushed)
                         };
 
+                        // Whether a deferred message was released decides the
+                        // `turn_active` this tick publishes, below — releasing
+                        // one keeps the turn alive.
+                        let released_deferred = flushed.is_some();
                         if let Some(line) = flushed {
                             tracing::info!(
                                 block_id = %block_id_read,
@@ -768,7 +772,13 @@ impl PersistentSubprocessController {
                                     shellprocname: String::new(),
                                     spawn_ts_ms: None,
                                     is_agent_pane: true,
-                                    turn_active: false,
+                                    // NOT unconditionally false: if a deferred
+                                    // message was just released, the turn is
+                                    // still running and publishing "idle" here
+                                    // would hand subscribers (the Swarm badge,
+                                    // `trackTurnJustEnded`) a bogus end-of-turn
+                                    // for a turn that is actively in flight.
+                                    turn_active: released_deferred,
                                 }
                             };
                             super::super::publish_controller_status(broker, &status);
