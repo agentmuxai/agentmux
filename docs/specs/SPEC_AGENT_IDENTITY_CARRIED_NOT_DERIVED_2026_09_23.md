@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -897,6 +897,9 @@ folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
    and every agent spawned before #3548 until its next spawn. (User-agent
    continuations are *not* a gap: their row exists before resync and
    eager-resume already carries the token.)
+   *(§6.5.8 measures these against the code: App Server and ACP carry but
+   gain no attribution; terminal panes, quick-launch and `/btw` are declared
+   outside; `agent.open` joins the list.)*
 
 #### 6.5.3 Mechanism
 
@@ -1090,13 +1093,14 @@ Each step independently revertible (§9):
   `ui_auth`. The check runs detached (§7). No behaviour change in either. **M4a-3:** purge deletes
   the dead agent's name-keyed key rows (§6.5.4) — a behaviour change,
   alone in its PR.
-- **M4b — close the tokenless paths.** `agent.send`, App Server agents and
-  terminal-pane agent CLIs carry UID + token when their block has a row;
+- **M4b — close the tokenless paths** (designed in §6.5.8). `agent.send`,
+  App Server and ACP agents carry UID + token when their block has a row;
   template-based continuations **bind** the block to the row they fold into
   before resync (no row creation, no respawn — respawning a live agent loses
   its turn). Agents already running without a token are attributed by block,
-  as `claimer_uid` already does. Quick-launch panes are declared outside the
-  identity system, counted under their own label. **Gate:** agent-path
+  as `claimer_uid` already does. `agent.open` records its launch. Terminal
+  panes, quick-launch panes, `/btw` and drones are declared outside the
+  identity system. **Gate:** agent-path
   `spawn.no_token` counters at zero **and a drain of live agents**, both
   sampled on every channel's srv and sustained over a release cycle (the
   gauges are per srv and restart at zero, so one reading proves nothing): an agent
@@ -1123,6 +1127,47 @@ Each step independently revertible (§9):
 - **`bus:register` / `check_s1`** — no in-repo client sends `bus:register`;
   `check_s1` stays as is. `/api/bus/*` has no in-repo caller and is a
   deletion candidate, separately.
+
+#### 6.5.8 M4b design — closing the tokenless paths
+
+Measured against main after M4a (#3571–#3575) and the stale-fallback fix
+(#3576: a block whose `agentId` names no agent row falls back only to a row
+launched from what it names — directly, or one hop through a clone the
+template-promotion migration repointed launches to — and, when
+`agentInstanceId` is stamped, only to that row). An adversarial pass on the first draft found
+one P1 (below, M4b-3) and five P2s, folded in.
+
+Only `build_persistent_spawn_env` (`input.rs`) carries `AGENTMUX_AGENT_UID`
+and `AGENTMUX_AGENT_TOKEN`. `run_agent_turn` uses it for persistent,
+host-subprocess and container turns, so `agentinput`, reactive and cron
+delivery, and user-agent eager resume already carry. The paths:
+
+| Path | Today | M4b |
+|---|---|---|
+| App API `agent.send` (`app_api/agent_io.rs`) | a hand copy of `run_agent_turn`'s env: `cmd:env` + `inject_identity_env_async` only | **M4b-1**: env from `build_persistent_spawn_env`, as `agentinput`. Same spawn gate (its only error is `inject_identity_env_async`, which `agent.send` already calls). **Also changes, recorded:** the process gains `AGENTMUX_AUTH_KEY`, `AGENTMUX_BLOCKID`, PATH, `MUXBUS_TOKEN` and the server-authoritative slug and display name, and git authorship becomes `<slug>` / `<slug>@agentmux.local` — what `agentinput` gives today. Containers keep PATH off (denylist). Internal respawns reuse the triggering send's config, so they carry too. |
+| `agent.open` (`app_api/agent_open.rs`) | writes `agentId` and spawns, but never calls `instance_create`: a user agent with a local row resolves; a cross-channel agent with no local row, or a template, does not | **M4b-4**: `agent.open` of a user agent records the launch through `instance_create` (which backfills a cross-channel definition, as a picker launch does), so its block resolves. `agent.open` of a **template** creates no row today and stays row-less — declared outside until `agent.open` creates agents the way the picker does (a separate change). |
+| Template-based continuation (reattach of a record whose `definition_id` is a template) | `SetMeta{agentId: template}` → resync (eager resume) → `CreateAgentInstanceCommand` → `SetMeta{agentInstanceId}`. At the eager resume the block's stamp is **the previous launch's** (`backToPicker` clears `agentId`, not `agentInstanceId`), and a same-template sibling's stale `running` row still sits on the block: the resume can bind to **the sibling** — its UID, token, slug and credentials, invisible to every counter because it carries a token | **M4b-3 (P1)**: `CreateAgentInstanceCommand` first; then **one** `SetMeta` carrying both `agentId` and the returned `agentInstanceId`; then resync. Setting `agentId` mounts the agent view, whose own launch flow resyncs — so the stamp must land in the same `SetMeta`, never after. `backToPicker` clears `agentInstanceId`. Tests: a store test with a stale stamp and a same-template sibling on the block; a frontend test that the create and the stamp precede any resync. **Recorded:** if the resync then fails, the row is left folded onto a block that never ran it (status `running`) — as for a launch that crashes. In practice this path is rare: local rows reattach as themselves; only legacy registry records naming a template reach it. |
+| App Server (codex) controller | env from `cmd:env` only | **M4b-2**: UID + token carried where the command is built (`persisted_agent_identity` + `carry_agent_uid_env`, under `block_in_place`, as eager resume does — incident #1782). **Buys no attribution, recorded:** no provider maps to App Server today (codex is `Subprocess`), and neither codex nor ACP agents are given `agentmux-mcp` — only Claude reads `.mcp.json`. It makes the counters true, nothing more. Attribution for codex needs its MCP configuration and env allowlist, a separate spec. |
+| ACP controller | reads `cmd:args`/`cmd:env` as strings, so an `agent.open` launch (array/object) gets neither — broken today | **M4b-2**: same as App Server. The string-vs-array bug is recorded, not fixed here. |
+| `/btw` side question (`side_question.rs`) | a throwaway block with no `agentId`: no row | outside — a side question is not an agent identity. `spawn.no_row.subprocess`. |
+| `subprocessspawn` RPC (`input.rs`) | spawns with no UID/token; no in-repo caller | outside, recorded; a deletion candidate. |
+| Terminal panes (`shell/lifecycle.rs`) | no identity | **outside the identity system.** A terminal block has no `agentId`, so it has no row; an agent's drawer sub-shell must not inherit the agent's token (it would attribute a human's commands to the agent). A terminal registers only through OSC 16162 or `cmd:env`, with no UID: `live.unidentified`. **Recorded:** `/terminal` opens at the agent's `cmd:cwd`, so `claude` typed there reads the agent's `.mcp.json` and acts *as* that agent — its injected keys, no token. Until M4d it signs on the counted tokenless-HMAC path; M4d stops injecting keys for token rows, after which such a CLI is unsigned and unattributed, like the UI — it does not hold §9.2 open. |
+| Quick-launch (`launchAgent`) | no callers (dead code) | outside; `spawn.no_row` if revived. |
+| Drones (`agents/runner.rs`) | no block, no row | outside. |
+
+**Gate, restated.** M4b is done when, on every channel's srv, sustained over
+a release cycle: every `spawn.no_token.<path>` is zero, and
+`live.tokenless_or_unknown` is zero. `spawn.no_row.*` and `live.unidentified`
+gate nothing: they are the declared-outside set (terminals, `/btw`,
+`agent.open` of a template, quick-launch, a continuation whose create
+failed).
+
+**Rollout, each step its own PR:** M4b-1 `agent.send` through the builder;
+M4b-2 App Server and ACP carry; M4b-3 continuation create → stamp → resync
+(frontend) and `backToPicker` clearing the stamp; M4b-4 `agent.open` records
+the launch. Tests per step as above, plus: `agent.send`'s env assembly
+factored so a test can assert UID + token for a row-backed block and their
+absence for a row-less one.
 
 ## 7. Performance
 
