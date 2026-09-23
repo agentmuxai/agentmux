@@ -388,17 +388,36 @@ impl Store {
         }
         // Not in local SQLite — check the global cross-channel registry.
         // agent_def_list() already overlays this; keep agent_def_get consistent.
-        let Some(reg) = self.shared_def_registry() else {
-            return Ok(None);
-        };
-        match reg.get(id) {
-            Ok(Some(record)) => Ok(Some(super::def_registry_mirror::record_to_agent_definition(&record))),
-            Ok(None) => Ok(None),
+        match self.shared_def_get(id) {
+            Ok(def) => Ok(def),
             Err(e) => {
                 tracing::warn!(agent_id = %id, error = %e, "agent_def_get: global registry lookup failed; returning not-found");
                 Ok(None)
             }
         }
+    }
+
+    /// `agent_def_get`, but a failed read of the global definition registry
+    /// is an error rather than "not found". For callers that must refuse
+    /// instead of acting on a partial answer — the name resolver treats "no
+    /// such UID" as "send the bare name", which a hidden fault must not
+    /// trigger (Codex P2 on #3568).
+    pub(crate) fn agent_def_get_strict(&self, id: &str) -> Result<Option<AgentDefinition>, String> {
+        if let Some(local) = self.agent_row_get(id).map_err(|e| e.to_string())? {
+            return Ok(Some(local));
+        }
+        self.shared_def_get(id)
+            .map_err(|e| format!("global definition registry: {e}"))
+    }
+
+    /// The global cross-channel definition for `id`, errors preserved.
+    fn shared_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, crate::registry::DefStoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(None);
+        };
+        Ok(reg
+            .get(id)?
+            .map(|record| super::def_registry_mirror::record_to_agent_definition(&record)))
     }
 
     /// List all agent definitions, **most-recently-used first**.
@@ -1963,6 +1982,15 @@ impl Store {
     /// backs the column, so a future writer, a migration, or hand-edited data
     /// can produce it. Defence in depth: prevent it on write, refuse it on
     /// read, and test both.
+    /// Make every `db_agents` read fail, to test how a caller treats a store
+    /// fault (as opposed to an empty answer).
+    #[cfg(test)]
+    pub(crate) fn test_break_agents_table(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("DROP TABLE db_agents")?;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn test_force_slug(&self, id: &str, slug: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();

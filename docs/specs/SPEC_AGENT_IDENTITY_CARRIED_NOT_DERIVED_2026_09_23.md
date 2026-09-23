@@ -1033,6 +1033,14 @@ changes two things at once.
   - **A live registration with no UID takes its block's row UID** in the
     resolver, so an agent registered before its row existed is one
     candidate with that row, not ambiguous with itself.
+  - **A resolver that cannot answer refuses** (Codex P1/P2 on #3563,
+    follow-up PR). A store fault — the channel's `db_agents` or the global
+    definition registry a typed UID is looked up in — is an `Err` (503
+    from the endpoint), not `None`; the MCP falls back to sending a bare name only when the
+    endpoint is missing (404/405, an older srv) and fails the tool call on
+    any other status, an unreadable body, or an unknown resolution. Sending
+    the name on would skip the ambiguity check, and a same-named live agent
+    could take work or a cron fire meant for the agent the fault hid.
   - **Only outcomes that leave a row on the name path are counted**
     (`resolve.unidentified`, `resolve.store_error`, `*.uid_not_carried`,
     `cron.fire_by_name`); `One`, `None` and `Ambiguous` are answers, not

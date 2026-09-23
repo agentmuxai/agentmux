@@ -323,10 +323,13 @@ pub(crate) fn agent_slug() -> Result<String> {
 /// Identity M3 (spec §5): resolve a typed agent name at the boundary — the
 /// only place a name is turned into a UID — before a tool stores it.
 /// `Ok(Some(uid))` when exactly one identified agent matches; `Ok(None)` when
-/// none does or the match has no UID (the tool then sends the name and the
-/// server records the miss); `Err` with the candidates when the name is
-/// ambiguous, so the model can retry by uid instead of enqueueing something
-/// that can never be delivered unambiguously (§5.2).
+/// none does, the match has no UID, or the srv predates the endpoint (the
+/// tool then sends the name and the server records the miss). `Err` in two
+/// cases, both of which fail the tool call: the name is ambiguous — the
+/// error lists the candidates so the model can retry by uid (§5.2) — or the
+/// resolver could not answer (a store fault, any other non-2xx, an
+/// unreadable or unexpected response), where sending the bare name would
+/// skip the ambiguity check. See `interpret_resolve_response`.
 async fn resolve_agent_name_at_boundary(
     client: &reqwest::Client,
     local_url: &str,
@@ -343,13 +346,42 @@ async fn resolve_agent_name_at_boundary(
         .map_err(|e| anyhow::anyhow!("agent name resolve request failed: {e}"))?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        // An older srv without the endpoint: fall back to sending the name.
+    interpret_resolve_response(status, &text, name)
+}
+
+/// The response half of `resolve_agent_name_at_boundary`, separated so the
+/// status handling is testable without a server.
+fn interpret_resolve_response(
+    status: reqwest::StatusCode,
+    text: &str,
+    name: &str,
+) -> Result<Option<String>> {
+    // Only an srv that predates the endpoint (404/405) gets the
+    // compatibility fallback of sending the bare name. Any other failure —
+    // a store fault (503), a panicked handler (500) — fails the tool call:
+    // proceeding by name would skip the ambiguity check and could hand the
+    // item to an exact-same-name other (Codex P2 on #3563).
+    if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    {
         return Ok(None);
     }
-    let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-    match v.get("resolution").and_then(|r| r.as_str()).unwrap_or("none") {
-        "one" => Ok(v.get("uid").and_then(|u| u.as_str()).map(|u| u.to_string())),
+    if !status.is_success() {
+        anyhow::bail!("could not resolve agent \"{name}\": HTTP {status} — {text}");
+    }
+    let v: Value = serde_json::from_str(text).map_err(|e| {
+        anyhow::anyhow!("could not resolve agent \"{name}\": unreadable response ({e})")
+    })?;
+    match v.get("resolution").and_then(|r| r.as_str()).unwrap_or("") {
+        "one" => match v
+            .get("uid")
+            .and_then(|u| u.as_str())
+            .filter(|u| !u.is_empty())
+        {
+            Some(uid) => Ok(Some(uid.to_string())),
+            None => anyhow::bail!(
+                "could not resolve agent \"{name}\": a single match came back without a uid"
+            ),
+        },
         "ambiguous" => {
             let listed: Vec<String> = v
                 .get("candidates")
@@ -373,7 +405,10 @@ async fn resolve_agent_name_at_boundary(
                 listed.join("\n")
             )
         }
-        _ => Ok(None),
+        "none" | "unidentified" => Ok(None),
+        other => {
+            anyhow::bail!("could not resolve agent \"{name}\": unexpected resolution {other:?}")
+        }
     }
 }
 
@@ -4226,5 +4261,83 @@ mod tests {
     fn build_block_to_agent_map_handles_missing_sections() {
         let map = build_block_to_agent_map(&serde_json::json!({}));
         assert!(map.is_empty());
+    }
+
+    // ---- identity M3: how the boundary treats a resolve response ---------
+
+    use reqwest::StatusCode as S;
+
+    #[test]
+    fn a_single_identified_match_yields_its_uid() {
+        let r = interpret_resolve_response(
+            S::OK,
+            r#"{"resolution":"one","uid":"4f3c-a91","candidate":{}}"#,
+            "AgentY",
+        );
+        assert_eq!(r.unwrap().as_deref(), Some("4f3c-a91"));
+    }
+
+    #[test]
+    fn no_match_or_no_uid_sends_the_name() {
+        for body in [
+            r#"{"resolution":"none"}"#,
+            r#"{"resolution":"unidentified","candidate":{}}"#,
+        ] {
+            assert_eq!(
+                interpret_resolve_response(S::OK, body, "Scratch").unwrap(),
+                None,
+                "{body}"
+            );
+        }
+    }
+
+    /// Only an srv that predates the endpoint gets the bare-name fallback.
+    #[test]
+    fn a_missing_endpoint_falls_back_to_the_name() {
+        for status in [S::NOT_FOUND, S::METHOD_NOT_ALLOWED] {
+            assert_eq!(
+                interpret_resolve_response(status, "", "AgentY").unwrap(),
+                None,
+                "{status}"
+            );
+        }
+    }
+
+    /// Any other failure refuses: proceeding by name would skip the
+    /// ambiguity check (Codex P1/P2 on #3563).
+    #[test]
+    fn a_server_fault_or_garbled_answer_fails_the_tool_call() {
+        for (status, body) in [
+            (
+                S::SERVICE_UNAVAILABLE,
+                r#"{"error":"agent store unavailable"}"#,
+            ),
+            (
+                S::INTERNAL_SERVER_ERROR,
+                r#"{"error":"resolve task failed"}"#,
+            ),
+            (S::OK, "not json"),
+            (S::OK, r#"{"resolution":"something-new"}"#),
+            (S::OK, r#"{"resolution":"one"}"#),
+        ] {
+            assert!(
+                interpret_resolve_response(status, body, "AgentY").is_err(),
+                "{status} {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ambiguous_name_is_refused_with_its_candidates() {
+        let body = r#"{"resolution":"ambiguous","candidates":[
+            {"uid":"4f3c-a91","name":"AgentY","live":true,"block_id":"b1"},
+            {"uid":"9b2e-7d4","name":"AgentY","live":false}]}"#;
+        let err = interpret_resolve_response(S::OK, body, "AgentY")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("4f3c-a91") && err.contains("9b2e-7d4"),
+            "{err}"
+        );
     }
 }

@@ -80,18 +80,26 @@ pub enum NameResolution {
 /// `registry` is the live in-memory registry (`get_global_handler()` in
 /// production; a fresh `ReactiveHandler` in tests). `store` is the
 /// per-channel object store that holds `db_agents`.
+///
+/// `Err` means the store could not be read, and the caller must refuse
+/// rather than proceed: `None` would send the bare name on, and a
+/// same-named live agent could then take work or a cron fire meant for a
+/// stored agent the fault hid (Codex P1 on #3563).
 pub(crate) fn resolve_name_to_uid(
     store: &Store,
     registry: &ReactiveHandler,
     typed: &str,
-) -> NameResolution {
+) -> Result<NameResolution, String> {
     let typed = typed.trim();
     if typed.is_empty() {
-        return NameResolution::None;
+        return Ok(NameResolution::None);
     }
 
     // (1) The typed value is itself a UID.
-    if let Ok(Some(def)) = store.agent_def_get(typed) {
+    let as_uid = store
+        .agent_def_get_strict(typed)
+        .map_err(|e| store_fault(typed, e))?;
+    if let Some(def) = as_uid {
         if def.is_seeded == 0 {
             let candidate = AgentCandidate {
                 uid: Some(def.id.clone()),
@@ -104,10 +112,10 @@ pub(crate) fn resolve_name_to_uid(
                 block_id: registry.get_agent(typed).map(|r| r.block_id),
                 live: registry.get_agent(typed).is_some(),
             };
-            return NameResolution::One {
+            return Ok(NameResolution::One {
                 uid: def.id,
                 candidate,
-            };
+            });
         }
     }
 
@@ -139,59 +147,56 @@ pub(crate) fn resolve_name_to_uid(
     }
 
     // (3) The store, by slug and by display name.
-    match store.agents_matching_name(typed) {
-        Ok(rows) => {
-            for row in rows {
-                if let Some(existing) = candidates
-                    .iter_mut()
-                    .find(|c| c.uid.as_deref() == Some(row.id.as_str()))
-                {
-                    // Same agent, seen live already: enrich, don't duplicate.
-                    if existing.slug.is_empty() {
-                        existing.slug = row.slug.clone();
-                    }
-                    continue;
-                }
-                candidates.push(AgentCandidate {
-                    uid: Some(row.id),
-                    name: if row.instance_name.is_empty() {
-                        row.name
-                    } else {
-                        row.instance_name
-                    },
-                    slug: row.slug,
-                    block_id: None,
-                    live: false,
-                });
+    let rows = store
+        .agents_matching_name(typed)
+        .map_err(|e| store_fault(typed, e))?;
+    for row in rows {
+        if let Some(existing) = candidates
+            .iter_mut()
+            .find(|c| c.uid.as_deref() == Some(row.id.as_str()))
+        {
+            // Same agent, seen live already: enrich, don't duplicate.
+            if existing.slug.is_empty() {
+                existing.slug = row.slug.clone();
             }
+            continue;
         }
-        Err(e) => {
-            // A store fault must not turn into a confident UID from half the
-            // evidence: answer `None`, so the caller stores no UID and the
-            // row keeps the name path (counted) — degraded, never misrouted.
-            tracing::warn!(name = %typed, error = %e, "resolve_name_to_uid: store read failed — not resolving");
-            record("resolve.store_error");
-            return NameResolution::None;
-        }
+        candidates.push(AgentCandidate {
+            uid: Some(row.id),
+            name: if row.instance_name.is_empty() {
+                row.name
+            } else {
+                row.instance_name
+            },
+            slug: row.slug,
+            block_id: None,
+            live: false,
+        });
     }
 
     match candidates.len() {
         // Only the outcomes that leave a row on the name path are counted
         // (§9.2 reads these as "must reach zero"); `One`, `None` and
         // `Ambiguous` are answers, not fallbacks.
-        0 => NameResolution::None,
+        0 => Ok(NameResolution::None),
         1 => {
             let candidate = candidates.remove(0);
             match candidate.uid.clone() {
-                Some(uid) => NameResolution::One { uid, candidate },
+                Some(uid) => Ok(NameResolution::One { uid, candidate }),
                 None => {
                     record("resolve.unidentified");
-                    NameResolution::Unidentified { candidate }
+                    Ok(NameResolution::Unidentified { candidate })
                 }
             }
         }
-        _ => NameResolution::Ambiguous { candidates },
+        _ => Ok(NameResolution::Ambiguous { candidates }),
     }
+}
+
+fn store_fault(typed: &str, e: impl std::fmt::Display) -> String {
+    tracing::warn!(name = %typed, error = %e, "resolve_name_to_uid: store read failed — refusing to resolve");
+    record("resolve.store_error");
+    format!("agent store unavailable: {e}")
 }
 
 fn record(site: &'static str) {
@@ -223,7 +228,7 @@ mod tests {
     #[test]
     fn a_uid_resolves_to_itself() {
         let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
-        let r = resolve_name_to_uid(&store, &registry(), UID_Y);
+        let r = resolve_name_to_uid(&store, &registry(), UID_Y).unwrap();
         assert!(
             matches!(r, NameResolution::One { ref uid, .. } if uid == UID_Y),
             "{r:?}"
@@ -237,7 +242,7 @@ mod tests {
     fn a_unique_display_name_resolves_to_the_rows_uid() {
         let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
         for typed in ["AgentY", "agenty", "AGENTY"] {
-            let r = resolve_name_to_uid(&store, &registry(), typed);
+            let r = resolve_name_to_uid(&store, &registry(), typed).unwrap();
             assert!(
                 matches!(r, NameResolution::One { ref uid, .. } if uid == UID_Y),
                 "{typed}: {r:?}"
@@ -249,7 +254,7 @@ mod tests {
     #[test]
     fn colliding_names_are_ambiguous_with_both_candidates_listed() {
         let store = store_with(&[(UID_Y, "AgentY", "agenty"), (UID_UP, "AGENTY", "agenty-2")]);
-        let r = resolve_name_to_uid(&store, &registry(), "agenty");
+        let r = resolve_name_to_uid(&store, &registry(), "agenty").unwrap();
         let NameResolution::Ambiguous { candidates } = r else {
             panic!("expected Ambiguous, got {r:?}");
         };
@@ -259,7 +264,7 @@ mod tests {
             "{candidates:?}"
         );
         // …while the collision-resolved slug alone is exact.
-        let r = resolve_name_to_uid(&store, &registry(), "agenty-2");
+        let r = resolve_name_to_uid(&store, &registry(), "agenty-2").unwrap();
         assert!(
             matches!(r, NameResolution::One { ref uid, .. } if uid == UID_UP),
             "{r:?}"
@@ -274,7 +279,7 @@ mod tests {
         let reg = registry();
         reg.register_agent_full("AgentY", "block-y", None, 0, None, Some(UID_Y), "test.m3")
             .unwrap();
-        let r = resolve_name_to_uid(&store, &reg, "AgentY");
+        let r = resolve_name_to_uid(&store, &reg, "AgentY").unwrap();
         let NameResolution::One { uid, candidate } = r else {
             panic!("expected One, got {r:?}");
         };
@@ -313,7 +318,7 @@ mod tests {
         let reg = registry();
         reg.register_agent_full("AgentY", "block-y", None, 0, None, None, "test.m3")
             .unwrap();
-        let r = resolve_name_to_uid(&store, &reg, "AgentY");
+        let r = resolve_name_to_uid(&store, &reg, "AgentY").unwrap();
         let NameResolution::One { uid, candidate } = r else {
             panic!("expected One, got {r:?}");
         };
@@ -331,7 +336,7 @@ mod tests {
         let reg = registry();
         reg.register_agent_full("AgentY", "block-pane", None, 0, None, None, "test.m3")
             .unwrap();
-        let r = resolve_name_to_uid(&store, &reg, "AgentY");
+        let r = resolve_name_to_uid(&store, &reg, "AgentY").unwrap();
         let NameResolution::Ambiguous { candidates } = r else {
             panic!("expected Ambiguous, got {r:?}");
         };
@@ -346,7 +351,7 @@ mod tests {
         let reg = registry();
         reg.register_agent_full("Scratch", "block-s", None, 0, None, None, "test.m3")
             .unwrap();
-        let r = resolve_name_to_uid(&store, &reg, "scratch");
+        let r = resolve_name_to_uid(&store, &reg, "scratch").unwrap();
         assert!(
             matches!(r, NameResolution::Unidentified { ref candidate } if candidate.block_id.as_deref() == Some("block-s")),
             "{r:?}"
@@ -357,13 +362,43 @@ mod tests {
     fn unknown_and_empty_names_are_none() {
         let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
         assert_eq!(
-            resolve_name_to_uid(&store, &registry(), "nobody"),
+            resolve_name_to_uid(&store, &registry(), "nobody").unwrap(),
             NameResolution::None
         );
         assert_eq!(
-            resolve_name_to_uid(&store, &registry(), "   "),
+            resolve_name_to_uid(&store, &registry(), "   ").unwrap(),
             NameResolution::None
         );
+    }
+
+    /// A store fault is an error, never `None`: `None` would send the bare
+    /// name on, and a same-named live agent could take what was meant for
+    /// the stored agent the fault hid (Codex P1 on #3563).
+    #[test]
+    fn a_store_fault_is_refused_not_answered_as_none() {
+        let store = store_with(&[(UID_Y, "AgentY", "agenty")]);
+        let reg = registry();
+        reg.register_agent_full("AgentY", "block-other", None, 0, None, None, "test.m3")
+            .unwrap();
+        store.test_break_agents_table().unwrap();
+        for typed in ["AgentY", UID_Y] {
+            let r = resolve_name_to_uid(&store, &reg, typed);
+            assert!(r.is_err(), "{typed}: {r:?}");
+        }
+    }
+
+    /// A typed UID whose cross-channel definition cannot be read is refused
+    /// too — "not found" there would send the UID string on as a name, and
+    /// the work could never be claimed (Codex P2 on #3568).
+    #[test]
+    fn an_unreadable_global_definition_is_refused_not_answered_as_none() {
+        let store = store_with(&[]);
+        let tmp = tempfile::tempdir().unwrap();
+        let defs = crate::registry::DefinitionStore::open(tmp.path().to_path_buf()).unwrap();
+        std::fs::write(tmp.path().join(format!("{UID_UP}.json")), b"{ not json").unwrap();
+        store.set_def_registry(std::sync::Arc::new(defs));
+        let r = resolve_name_to_uid(&store, &registry(), UID_UP);
+        assert!(r.is_err(), "{r:?}");
     }
 
     /// Templates are prototypes, never targets (spec §1.2): a provider key
@@ -375,7 +410,7 @@ mod tests {
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
         assert_eq!(
-            resolve_name_to_uid(&store, &registry(), "claude"),
+            resolve_name_to_uid(&store, &registry(), "claude").unwrap(),
             NameResolution::None
         );
     }
