@@ -123,6 +123,16 @@
     color: var(--secondary-text-color);
 }
 
+.identity-account-email {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    // Long addresses must not push the status dot out of the row.
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .identity-agent-count {
     font-size: 11px;
     color: var(--secondary-text-color);
