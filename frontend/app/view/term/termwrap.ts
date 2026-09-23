@@ -530,7 +530,11 @@ export class TermWrap {
         }
         const agentId = registeredAgentsByBlock.get(this.blockId);
         if (agentId) {
-            fireAndForget(() => unregisterAgent(agentId));
+            // block_id alongside the name (identity M2): a name can be held
+            // by several live panes, and the server refuses (409) to tear
+            // down an ambiguous name without the block — this pane-close
+            // path must land on exactly this pane's registration.
+            fireAndForget(() => unregisterAgent(agentId, this.blockId));
             registeredAgentsByBlock.delete(this.blockId);
         }
         this.toDispose.forEach((d) => {

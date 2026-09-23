@@ -1148,6 +1148,18 @@ pub fn spawn_background_subsystems(
     reactive_handler.set_stable_agent_identity_confirmer(Arc::new(|block_id: &str| {
         backend::blockcontroller::get_controller(block_id).and_then(|c| c.stable_agent_id())
     }));
+    // Identity M2: the UID confirmer, consulted only for targets that
+    // resolved by UID — see `Handler::uid_identity_confirmer` for why it is
+    // a separate check and why `None` must mean "unverifiable".
+    reactive_handler.set_uid_identity_confirmer(Arc::new(|block_id: &str| {
+        backend::blockcontroller::get_controller(block_id).and_then(|c| c.stable_agent_uid())
+    }));
+    // Identity M2: liveness — the garbage collector that replaces
+    // eviction-by-name (spec §4.4.4 Q9). A block with no controller is dead
+    // and is swept when a name it held is resolved.
+    reactive_handler.set_block_liveness(Arc::new(|block_id: &str| {
+        backend::blockcontroller::get_controller(block_id).is_some()
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             muxbus_url: None,

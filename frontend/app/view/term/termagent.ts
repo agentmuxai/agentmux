@@ -49,13 +49,17 @@ export async function registerAgent(agentId: string, blockId: string, tabId?: st
     }
 }
 
-export async function unregisterAgent(agentId: string): Promise<void> {
+// `blockId` is optional on the wire but always sent from here: since identity
+// M2 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §4.4.4 Q7) a name
+// can be held by several live panes, and the server refuses to tear down an
+// ambiguous name without a block id (HTTP 409) rather than guess.
+export async function unregisterAgent(agentId: string, blockId?: string): Promise<void> {
     try {
         const url = getWebServerEndpoint() + "/agentmux/reactive/unregister";
         const response = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify({ agent_id: agentId }),
+            body: JSON.stringify({ agent_id: agentId, block_id: blockId ?? "" }),
         });
         if (!response.ok) {
             let errorMsg = `HTTP ${response.status}`;
@@ -81,13 +85,25 @@ export function handleAgentIdChange(blockId: string, newAgentId: string | undefi
         return;
     }
 
+    // Bookkeeping is synchronous; the HTTP calls are ONE sequenced task.
+    // Since identity M2 the unregister is block-scoped, so the two calls no
+    // longer commute: if a rename's register were processed before its
+    // unregister, `unregister_block` would wipe the registration just
+    // created for this pane (ReAgent P1 on PR #3560). Awaiting the
+    // unregister before registering removes the race; a failed unregister
+    // must not block the (re-)registration, so it is caught, not chained.
     if (previousAgentId) {
-        fireAndForget(() => unregisterAgent(previousAgentId));
         registeredAgentsByBlock.delete(blockId);
     }
-
     if (newAgentId) {
         registeredAgentsByBlock.set(blockId, newAgentId);
-        fireAndForget(() => registerAgent(newAgentId, blockId, tabId));
     }
+    fireAndForget(async () => {
+        if (previousAgentId) {
+            await unregisterAgent(previousAgentId, blockId).catch(() => {});
+        }
+        if (newAgentId) {
+            await registerAgent(newAgentId, blockId, tabId);
+        }
+    });
 }

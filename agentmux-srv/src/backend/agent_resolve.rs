@@ -130,7 +130,27 @@ static UID_FALLBACK_COUNTS: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<&'static str, u64>>,
 > = std::sync::OnceLock::new();
 
-fn record_uid_fallback(site: &'static str) {
+/// The agent UID (`db_agents.id`) for the agent shown on `block_id`, if it
+/// has a row — the same block → row resolution `build_persistent_spawn_env`
+/// uses, without minting a token. For the frontend presence path
+/// (`handle_reactive_register`), which does not trust the name it is sent
+/// (spec §0.1) and resolves identity by block instead. A synchronous store
+/// read: call it on `spawn_blocking` from async handlers.
+pub(crate) fn uid_for_block(store: &Store, block_id: &str) -> Option<String> {
+    match store.instance_get_active_for_block(block_id) {
+        Ok(Some(instance)) if !instance.id.trim().is_empty() => Some(instance.id),
+        Ok(_) => None,
+        Err(e) => {
+            tracing::warn!(block_id, error = %e, "uid_for_block: store read failed — registering without a uid");
+            None
+        }
+    }
+}
+
+/// Bump the counter for `site` (spec §9.2). Shared by the resolver's
+/// dual-write misses and, since identity M2, the registry's own
+/// registration/delivery/lookup counters — one snapshot for all of them.
+pub(crate) fn record_uid_fallback(site: &'static str) {
     let counts = UID_FALLBACK_COUNTS.get_or_init(Default::default);
     let mut guard = counts.lock().unwrap_or_else(|e| e.into_inner());
     *guard.entry(site).or_insert(0) += 1;

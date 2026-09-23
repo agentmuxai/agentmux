@@ -417,6 +417,19 @@ impl PersistentSubprocessController {
         // different env (rare, config change) correctly updates the alias
         // to match, same as the primary registration already does.
         *self.stable_agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
+        // Identity M2: the UID carried in the spawn env (M1a). Captured with
+        // the same write-once discipline as `stable_agent_id`; `None` when
+        // the env carried none (no `db_agents` row at spawn — a continuation
+        // launch eager-resumes before the frontend creates the row, spec
+        // §4.4.4 Q1 — or a quick-launch pane), in which case this spawn
+        // registers name-only and the first turn's Register-tail upgrades
+        // the block in place.
+        let agent_uid_for_registry = config
+            .env_vars
+            .get("AGENTMUX_AGENT_UID")
+            .map(|u| u.trim().to_string())
+            .filter(|u| !u.is_empty());
+        *self.stable_agent_uid.lock().unwrap() = agent_uid_for_registry.clone();
         // Defaults to this spawn's own nonce; overridden below if
         // registration is skipped (reagent P1 on PR #3084 — see the `Err`
         // arm just below for why `my_registration_nonce` alone is wrong
@@ -439,20 +452,24 @@ impl PersistentSubprocessController {
             // `ReactiveHandler::try_register_agent_with_nonce`'s doc comment
             // and `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
             match crate::backend::reactive::get_global_handler()
-                .try_register_agent_with_nonce(
+                .try_register_agent_full(
                     agent_id,
                     &self.block_id,
                     Some(&self.tab_id),
                     my_registration_nonce,
-                    // Also park `agent_id` (== AGENTMUX_AGENT_ID here) as a
-                    // permanent alias for this block, independent of the
-                    // primary registration key — `input.rs`'s Register-tail
-                    // will re-key the primary registration to the live
-                    // display name on this agent's very first turn, which
-                    // would otherwise evict this exact string with nothing
-                    // left to answer a jekt tagged with the stable ID. See
+                    // Also park `agent_id` (== AGENTMUX_AGENT_ID here) as the
+                    // block's STABLE name binding, kept when `input.rs`'s
+                    // Register-tail replaces the display binding with the
+                    // live display name on this agent's very first turn —
+                    // otherwise nothing would be left to answer a jekt
+                    // tagged with the stable ID. See
                     // `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
                     Some(agent_id.as_str()),
+                    // Identity M2: the key. Carried from the env, never
+                    // looked up here — nothing new is read under the
+                    // handler's lock (spec §4.4.4 Q5).
+                    agent_uid_for_registry.as_deref(),
+                    "registration.no_uid.spawn",
                 )
             {
                 Ok(()) => {

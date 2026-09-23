@@ -49,13 +49,17 @@ async function fetchHostAgents(): Promise<HostAgent[]> {
  *
  * Hard kill (PTY termination) lives outside Warden — see future PR.
  */
-async function deregisterAgent(agentId: string): Promise<void> {
+async function deregisterAgent(agentId: string, blockId: string): Promise<void> {
+    // `block_id` alongside the name: since identity M2 a name can be held
+    // by several live panes, and the server refuses (HTTP 409) to tear down
+    // an ambiguous name without the block — an operator's enforcement
+    // action must land on exactly the row they clicked, never a guess.
     const resp = await fetch(
         getWebServerEndpoint() + "/agentmux/reactive/unregister",
         {
             method: "POST",
             headers: { ...authedHeaders(), "Content-Type": "application/json" },
-            body: JSON.stringify({ agent_id: agentId }),
+            body: JSON.stringify({ agent_id: agentId, block_id: blockId }),
         },
     );
     if (!resp.ok) {
@@ -86,13 +90,13 @@ export const WardenHostManager = (): JSX.Element => {
         }
     };
 
-    const handleDeregister = async (agentId: string) => {
+    const handleDeregister = async (agentId: string, blockId: string) => {
         const confirmed = globalThis.window?.confirm(
             `Deregister agent "${agentId}"?\n\nThis removes its routing entry so future jekts return "agent not found". The underlying process keeps running and may re-register on its next heartbeat.`,
         );
         if (!confirmed) return;
         try {
-            await deregisterAgent(agentId);
+            await deregisterAgent(agentId, blockId);
             void refresh();
         } catch (e) {
             setError(String(e));
@@ -149,7 +153,7 @@ export const WardenHostManager = (): JSX.Element => {
                                             <button
                                                 class="warden-host-deregister"
                                                 title="Deregister (soft kill — removes from jekt routing, leaves process running)"
-                                                onClick={() => void handleDeregister(a.agent_id)}
+                                                onClick={() => void handleDeregister(a.agent_id, a.block_id)}
                                             >
                                                 ×
                                             </button>

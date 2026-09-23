@@ -343,6 +343,16 @@ pub trait Controller: Send + Sync {
     fn stable_agent_id(&self) -> Option<String> {
         None
     }
+    /// Identity M2: this block's UID (`db_agents.id`) as carried in its
+    /// spawn env (`AGENTMUX_AGENT_UID`, set by `build_persistent_spawn_env`
+    /// since M1a), captured once at spawn like [`stable_agent_id`]. Backs the
+    /// registry's UID confirmer: consulted only for targets that resolved by
+    /// UID, and `None` — a registered-but-not-yet-spawned controller, or a
+    /// block with no row — is "unverifiable", not a mismatch. Default
+    /// `None`; only `PersistentSubprocessController` overrides this.
+    fn stable_agent_uid(&self) -> Option<String> {
+        None
+    }
 
     /// Downcast support for concrete controller types.
     fn as_any(&self) -> &dyn Any;

@@ -789,6 +789,11 @@ pub struct PersistentSubprocessController {
     /// after `agent_id` has moved on to a post-rename value. See
     /// `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
     stable_agent_id: Mutex<Option<String>>,
+    /// Identity M2: `AGENTMUX_AGENT_UID` from the spawn env, captured at
+    /// spawn exactly like `stable_agent_id`. `None` until spawned, or when
+    /// the spawn env carried no UID (no `db_agents` row yet). See
+    /// `Controller::stable_agent_uid`.
+    stable_agent_uid: Mutex<Option<String>>,
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -997,6 +1002,7 @@ impl PersistentSubprocessController {
             self_ref: Mutex::new(None),
             agent_id: Mutex::new(None),
             stable_agent_id: Mutex::new(None),
+            stable_agent_uid: Mutex::new(None),
         }
     }
 
@@ -1259,6 +1265,10 @@ impl Controller for PersistentSubprocessController {
 
     fn stable_agent_id(&self) -> Option<String> {
         self.stable_agent_id.lock().unwrap().clone()
+    }
+
+    fn stable_agent_uid(&self) -> Option<String> {
+        self.stable_agent_uid.lock().unwrap().clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

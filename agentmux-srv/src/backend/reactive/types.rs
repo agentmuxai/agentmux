@@ -390,6 +390,13 @@ pub struct AgentRegistration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tab_id: Option<String>,
+    /// Identity M2: the agent's UID (`db_agents.id`) when the server knew it
+    /// at registration — the key the registry is now organised by. Absent
+    /// for blocks with no row (quick-launch panes, PTY shells), which are
+    /// reachable by name only. Same present-or-omitted treatment as `tab_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub uid: Option<String>,
     #[ts(type = "number")]
     pub registered_at: u64,
     #[ts(type = "number")]
@@ -583,6 +590,11 @@ pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<bool, String> + Send +
 /// `None` is treated as "unverifiable," not "confirmed absent," so delivery
 /// proceeds unaffected when no positive check is possible.
 pub type AgentIdentityConfirmer = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// Identity M2: is `block_id` still alive (does it have a controller)?
+/// Backs the registry's lazy sweep of dead registrations when a name
+/// resolves to more than one block — see `Handler::block_liveness`.
+pub type BlockLivenessProbe = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 #[cfg(test)]
 mod app_api_manifest_contract_tests {

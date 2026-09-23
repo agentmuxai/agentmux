@@ -8,7 +8,14 @@
  * break every consumer that treats these as JS millisecond timestamps. See
  * the same annotation on `BrowserBookmark::created_at` (PR #3293).
  */
-export type AgentRegistration = { agent_id: string, block_id: string, tab_id?: string, registered_at: number, last_seen: number, 
+export type AgentRegistration = { agent_id: string, block_id: string, tab_id?: string, 
+/**
+ * Identity M2: the agent's UID (`db_agents.id`) when the server knew it
+ * at registration — the key the registry is now organised by. Absent
+ * for blocks with no row (quick-launch panes, PTY shells), which are
+ * reachable by name only. Same present-or-omitted treatment as `tab_id`.
+ */
+uid?: string, registered_at: number, last_seen: number, 
 /**
  * Process-wide unique nonce of the persistent-controller spawn this
  * registration belongs to; 0 = not recorded (HTTP register handler,
