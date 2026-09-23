@@ -1854,6 +1854,568 @@
         assert_eq!(got.identity_id, "id-legacy-tpl");
     }
 
+    fn block_showing(store: &Store, block_id: &str, agent_id: Option<&str>) {
+        block_showing_stamped(store, block_id, agent_id, None);
+    }
+
+    fn block_showing_stamped(
+        store: &Store,
+        block_id: &str,
+        agent_id: Option<&str>,
+        instance_id: Option<&str>,
+    ) {
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                if let Some(id) = agent_id {
+                    m.insert("agentId".to_string(), serde_json::json!(id));
+                }
+                if let Some(id) = instance_id {
+                    m.insert("agentInstanceId".to_string(), serde_json::json!(id));
+                }
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+    }
+
+    /// A user agent launched on `block_id` — its row stays `running` with
+    /// `last_block_id` on the block until it is launched elsewhere or the
+    /// pane's close saga stops it; switching the pane to another agent
+    /// changes neither.
+    fn launch_user_agent_on(store: &Store, agents_root: &Path, id: &str, block_id: &str) {
+        store.agent_def_insert(&mut sample_agent(id, id)).unwrap();
+        let mut inst = make_named_inst(&format!("inst-{id}"), id, agents_root);
+        inst.definition_id = id.to_string();
+        inst.block_id = block_id.to_string();
+        store.instance_create(&inst).unwrap();
+    }
+
+    /// A pane that showed agent A, went back to the picker and launched B,
+    /// whose row was then deleted from another window (the pane survives:
+    /// `MyAgentsList.tsx`'s known limitation), must resolve to nothing — not
+    /// fall back to A's still-`running` row and hand the pane A's UID, token,
+    /// slug and provider credentials. Likewise a block naming something that
+    /// is no row at all. (In production the seeded template ids are the
+    /// provider keys, `claude` among them; that case takes the template
+    /// branch and is covered by `a_stamped_template_block_resolves_only_to_its_own_launch`.)
+    #[test]
+    fn a_block_naming_a_missing_agent_does_not_fall_back_to_a_stale_row() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        launch_user_agent_on(&store, &agents_root, "agent-stale-a", "block-stale");
+        for named in ["agent-deleted-b", "claude"] {
+            block_showing(&store, "block-stale", Some(named));
+            assert!(
+                store
+                    .instance_get_active_for_block("block-stale")
+                    .unwrap()
+                    .is_none(),
+                "agentId={named} must not resolve to agent-stale-a"
+            );
+            store
+                .delete::<crate::backend::obj::Block>("block-stale")
+                .ok();
+        }
+    }
+
+    /// A block naming a template still falls back — that is how a
+    /// template launch or continuation finds its row — but only to a row
+    /// launched from *that* template, never to another agent's stale row on
+    /// the same block, however recently updated.
+    #[test]
+    fn a_template_block_falls_back_only_to_a_row_launched_from_that_template() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-scoped", "tpl-scoped");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut launched = make_named_inst("inst-from-tpl", "FromTpl", &agents_root);
+        launched.definition_id = "tpl-scoped".to_string();
+        launched.block_id = "block-tpl-scoped".to_string();
+        let from_tpl = store.instance_create(&launched).unwrap();
+        // Another agent's row on the same block, updated after it.
+        launch_user_agent_on(&store, &agents_root, "agent-other", "block-tpl-scoped");
+
+        block_showing(&store, "block-tpl-scoped", Some("tpl-scoped"));
+        let got = store
+            .instance_get_active_for_block("block-tpl-scoped")
+            .unwrap();
+        assert_eq!(got.map(|a| a.id), Some(from_tpl.id));
+    }
+
+    fn launch_from_template_on(
+        store: &Store,
+        agents_root: &Path,
+        tpl: &str,
+        inst_id: &str,
+        block_id: &str,
+    ) -> String {
+        let mut inst = make_named_inst(inst_id, inst_id, agents_root);
+        inst.definition_id = tpl.to_string();
+        inst.block_id = block_id.to_string();
+        store.instance_create(&inst).unwrap().id
+    }
+
+    /// Codex P1 on #3576: two launches from the same template on one pane —
+    /// A, then B (both rows name the template, both sit on the block). With
+    /// the launched row stamped, the block resolves to B, not the fresher
+    /// A; and once B is deleted, to nothing — never to A, its sibling.
+    #[test]
+    fn a_stamped_template_block_resolves_only_to_its_own_launch() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-sib", "tpl-sib");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let a = launch_from_template_on(&store, &agents_root, "tpl-sib", "inst-sib-a", "block-sib");
+        let mut later = make_named_inst("inst-sib-b", "inst-sib-b", &agents_root);
+        later.definition_id = "tpl-sib".to_string();
+        later.block_id = "block-sib".to_string();
+        later.started_at = 5_000;
+        let b = store.instance_create(&later).unwrap().id;
+        // A's row is touched after B's launch, so it is the latest.
+        store.instance_rename(&a, "sib-a-renamed").unwrap();
+
+        block_showing_stamped(&store, "block-sib", Some("tpl-sib"), Some(&b));
+        let got = store.instance_get_active_for_block("block-sib").unwrap();
+        assert_eq!(got.map(|r| r.id), Some(b.clone()));
+
+        assert!(store.agent_def_delete(&b).unwrap());
+        assert!(
+            store
+                .instance_get_active_for_block("block-sib")
+                .unwrap()
+                .is_none(),
+            "B deleted: must not resolve to its sibling A"
+        );
+    }
+
+    /// Codex P1 on #3576: a template removed from the manifest keeps the
+    /// agents launched from it, and their blocks still name it. They must
+    /// keep resolving to their rows.
+    #[test]
+    fn a_block_naming_a_removed_template_still_resolves_its_launch() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-gone", "tpl-gone");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let launched =
+            launch_from_template_on(&store, &agents_root, "tpl-gone", "inst-gone", "block-gone");
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM db_agents WHERE id = 'tpl-gone'", [])
+                .unwrap();
+        }
+        for stamped in [None, Some(launched.as_str())] {
+            block_showing_stamped(&store, "block-gone", Some("tpl-gone"), stamped);
+            let got = store.instance_get_active_for_block("block-gone").unwrap();
+            assert_eq!(
+                got.map(|r| r.id),
+                Some(launched.clone()),
+                "stamped={stamped:?}"
+            );
+            store
+                .delete::<crate::backend::obj::Block>("block-gone")
+                .ok();
+        }
+    }
+
+    /// Codex P1 on #3576: `migrate_promote_template_sessions_v1` promotes a
+    /// clone of the seeded template (itself launched from it) and repoints
+    /// the surviving launch rows' `parent_template_id` to the clone
+    /// (`instance_repoint_definition`), while pre-migration blocks still
+    /// name the template. Such a row is the template's launch one hop
+    /// removed, and must still resolve, stamped or not.
+    #[test]
+    fn a_block_naming_a_template_resolves_a_launch_repointed_to_its_promoted_clone() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-promo", "tpl-promo");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let launched = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-promo",
+            "inst-promo",
+            "block-promo",
+        );
+        let clone = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-promo",
+            "inst-clone",
+            "block-elsewhere",
+        );
+        assert_eq!(
+            store
+                .instance_repoint_definition("tpl-promo", &clone)
+                .unwrap(),
+            1
+        );
+        for stamped in [None, Some(launched.as_str())] {
+            block_showing_stamped(&store, "block-promo", Some("tpl-promo"), stamped);
+            let got = store.instance_get_active_for_block("block-promo").unwrap();
+            assert_eq!(
+                got.map(|r| r.id),
+                Some(launched.clone()),
+                "stamped={stamped:?}"
+            );
+            store
+                .delete::<crate::backend::obj::Block>("block-promo")
+                .ok();
+        }
+    }
+
+    /// A fork of `source`, launched on `block_id`: `forkagentdefinition`
+    /// stores the source in `parent_template_id` and always sets a
+    /// non-empty `branch_label` — the discriminator from a template launch.
+    fn fork_launched_on(store: &Store, agents_root: &Path, source: &str, id: &str, block_id: &str) {
+        let mut fork = sample_agent(id, id);
+        fork.parent_id = source.to_string();
+        fork.branch_label = "fork".to_string();
+        store.agent_def_insert(&mut fork).unwrap();
+        let mut inst = make_named_inst(&format!("inst-{id}"), id, agents_root);
+        inst.definition_id = id.to_string();
+        inst.block_id = block_id.to_string();
+        store.instance_create(&inst).unwrap();
+    }
+
+    /// Codex P1 on #3576: a fork's `parent_template_id` is its source, not a
+    /// template, so fork lineage must not satisfy the fallback — neither a
+    /// fork of the deleted agent a block names, nor (one hop) a fork of an
+    /// agent launched from the template a block names. Unstamped, and with
+    /// the fork's id left in the stamp by pane reuse.
+    #[test]
+    fn fork_lineage_never_satisfies_the_block_fallback() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        // A fork of user agent B sits stale on the block; B is deleted.
+        store
+            .agent_def_insert(&mut sample_agent("agent-src-b", "agent-src-b"))
+            .unwrap();
+        fork_launched_on(
+            &store,
+            &agents_root,
+            "agent-src-b",
+            "agent-fork-b",
+            "block-fork",
+        );
+        assert!(store.agent_def_delete("agent-src-b").unwrap());
+        // A fork of an agent launched from template T sits stale on another.
+        let mut tpl = sample_agent("tpl-forked", "tpl-forked");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let from_tpl = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-forked",
+            "inst-maks",
+            "block-elsewhere-2",
+        );
+        fork_launched_on(
+            &store,
+            &agents_root,
+            &from_tpl,
+            "agent-fork-t",
+            "block-fork-t",
+        );
+
+        for (block, names, fork) in [
+            ("block-fork", "agent-src-b", "agent-fork-b"),
+            ("block-fork-t", "tpl-forked", "agent-fork-t"),
+        ] {
+            for stamped in [None, Some(fork)] {
+                block_showing_stamped(&store, block, Some(names), stamped);
+                assert!(
+                    store
+                        .instance_get_active_for_block(block)
+                        .unwrap()
+                        .is_none(),
+                    "{block} naming {names}, stamped={stamped:?}: must not resolve to the fork"
+                );
+                store.delete::<crate::backend::obj::Block>(block).ok();
+            }
+        }
+    }
+
+    /// Codex P1 on #3576, resolved fail-safe: the promoted clone a launch
+    /// was repointed to is deleted afterwards (`agent_def_delete` keeps
+    /// derived rows), so no lineage reaches the template the block names.
+    /// The launch resolves to nothing — never to another row — until it is
+    /// relaunched. (Re-parenting on delete was tried and dropped: it mutated
+    /// forks' credential fallback and the registry mirrors.)
+    #[test]
+    fn a_launch_whose_promoted_clone_was_deleted_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-clone-gone", "tpl-clone-gone");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let launched = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-clone-gone",
+            "inst-cg",
+            "block-cg",
+        );
+        let clone = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-clone-gone",
+            "inst-cg-clone",
+            "block-cg-elsewhere",
+        );
+        store
+            .instance_repoint_definition("tpl-clone-gone", &clone)
+            .unwrap();
+        assert!(store.agent_def_delete(&clone).unwrap());
+
+        for stamped in [Some(launched.as_str()), None] {
+            block_showing_stamped(&store, "block-cg", Some("tpl-clone-gone"), stamped);
+            assert!(
+                store.instance_get_active_for_block("block-cg").unwrap().is_none(),
+                "stamped={stamped:?}"
+            );
+            store.delete::<crate::backend::obj::Block>("block-cg").ok();
+        }
+    }
+
+    /// A stale stamp — pane reuse left A's id while B, launched from the
+    /// same template later, has since folded onto the block — is not the
+    /// block's latest launch, so it resolves to nothing, never to A.
+    #[test]
+    fn a_stale_stamp_overtaken_by_a_later_launch_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-stale", "tpl-stale");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let a = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-stale",
+            "inst-stale-a",
+            "block-stale-stamp",
+        );
+        let mut later = make_named_inst("inst-stale-b", "inst-stale-b", &agents_root);
+        later.definition_id = "tpl-stale".to_string();
+        later.block_id = "block-stale-stamp".to_string();
+        later.started_at = 5_000;
+        store.instance_create(&later).unwrap();
+
+        block_showing_stamped(&store, "block-stale-stamp", Some("tpl-stale"), Some(&a));
+        assert!(store
+            .instance_get_active_for_block("block-stale-stamp")
+            .unwrap()
+            .is_none());
+    }
+
+    /// Codex P1 on #3576: an unstamped legacy block with two launches from
+    /// the same template — A, then B — resolves to B, the latest launch,
+    /// even after A's row is renamed (which bumps `updated_at`, not
+    /// `started_at`). Likewise for a block naming no agent.
+    #[test]
+    fn unstamped_fallbacks_rank_by_launch_time_not_by_activity() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-order", "tpl-order");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let a = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-order",
+            "inst-order-a",
+            "block-order",
+        );
+        let mut later = make_named_inst("inst-order-b", "inst-order-b", &agents_root);
+        later.definition_id = "tpl-order".to_string();
+        later.block_id = "block-order".to_string();
+        later.started_at = 5_000;
+        let b = store.instance_create(&later).unwrap().id;
+        store.instance_rename(&a, "order-a-renamed").unwrap();
+
+        for names in [Some("tpl-order"), None] {
+            block_showing(&store, "block-order", names);
+            let got = store.instance_get_active_for_block("block-order").unwrap();
+            assert_eq!(got.map(|r| r.id), Some(b.clone()), "agentId={names:?}");
+            store
+                .delete::<crate::backend::obj::Block>("block-order")
+                .ok();
+        }
+    }
+
+    /// Adversarial review of #3576: the stamp selects only within what the
+    /// block names. A stale stamp naming an unrelated agent — left by pane
+    /// reuse when a later launch's stamp write failed and that launch was
+    /// then deleted — resolves to nothing, even as the block's only launch.
+    #[test]
+    fn a_stale_stamp_naming_an_unrelated_agent_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-unrel", "tpl-unrel");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let unrelated = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-unrel",
+            "inst-unrel",
+            "block-unrel",
+        );
+        // The block names a deleted user agent, whose stamp write failed.
+        store
+            .agent_def_insert(&mut sample_agent("agent-gone-b", "agent-gone-b"))
+            .unwrap();
+        assert!(store.agent_def_delete("agent-gone-b").unwrap());
+        block_showing_stamped(
+            &store,
+            "block-unrel",
+            Some("agent-gone-b"),
+            Some(&unrelated),
+        );
+        assert!(store
+            .instance_get_active_for_block("block-unrel")
+            .unwrap()
+            .is_none());
+    }
+
+    /// Each filter on the stamped row, pinned: moved to another block, or
+    /// stopped, it no longer resolves; a *stopped* later launch on the block
+    /// does not count against it.
+    #[test]
+    fn a_stamped_row_must_be_active_on_this_block_and_only_active_launches_outrank_it() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-pin", "tpl-pin");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let stamped =
+            launch_from_template_on(&store, &agents_root, "tpl-pin", "inst-pin", "block-pin");
+        let mut later = make_named_inst("inst-pin-later", "inst-pin-later", &agents_root);
+        later.definition_id = "tpl-pin".to_string();
+        later.block_id = "block-pin".to_string();
+        later.started_at = 5_000;
+        later.status = "stopped".to_string();
+        store.instance_create(&later).unwrap();
+
+        block_showing_stamped(&store, "block-pin", Some("tpl-pin"), Some(&stamped));
+        let got = store.instance_get_active_for_block("block-pin").unwrap();
+        assert_eq!(
+            got.map(|r| r.id),
+            Some(stamped.clone()),
+            "a stopped later launch does not outrank it"
+        );
+
+        // Relaunched in another pane: no longer this block's launch.
+        store
+            .instance_update_partial(
+                &stamped,
+                &crate::backend::storage::InstanceUpdate {
+                    block_id: Some("block-pin-elsewhere".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            store
+                .instance_get_active_for_block("block-pin")
+                .unwrap()
+                .is_none(),
+            "moved"
+        );
+        store
+            .instance_update_partial(
+                &stamped,
+                &crate::backend::storage::InstanceUpdate {
+                    block_id: Some("block-pin".to_string()),
+                    status: Some("stopped".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            store
+                .instance_get_active_for_block("block-pin")
+                .unwrap()
+                .is_none(),
+            "stopped"
+        );
+    }
+    /// ReAgent P0 on #3576: two plain user agents share a pane — A, then B,
+    /// whose stamp write failed — and B is deleted. The block names deleted
+    /// B with A's stale stamp; A has no ancestor (`parent_template_id` is
+    /// empty), which is not "an ancestor since deleted". Resolves to nothing.
+    #[test]
+    fn a_stale_stamp_naming_a_plain_agent_is_not_an_orphan() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        launch_user_agent_on(&store, &agents_root, "agent-plain-a", "block-plain");
+        store.agent_def_insert(&mut sample_agent("agent-plain-b", "agent-plain-b")).unwrap();
+        assert!(store.agent_def_delete("agent-plain-b").unwrap());
+        block_showing_stamped(&store, "block-plain", Some("agent-plain-b"), Some("agent-plain-a"));
+        assert!(store.instance_get_active_for_block("block-plain").unwrap().is_none());
+    }
+
+    /// ReAgent P1 on #3576: a stamped row whose ancestor is gone does not
+    /// resolve on that alone — it must relate to what the block names. The
+    /// block names template A; the stamp names C, launched from template B,
+    /// since removed. Resolves to nothing.
+    #[test]
+    fn a_stamped_row_from_an_unrelated_removed_template_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        for id in ["tpl-named-a", "tpl-removed-b"] {
+            let mut tpl = sample_agent(id, id);
+            tpl.is_seeded = 1;
+            store.agent_def_insert(&mut tpl).unwrap();
+        }
+        let c = launch_from_template_on(&store, &agents_root, "tpl-removed-b", "inst-unrel-c", "block-unrel-tpl");
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM db_agents WHERE id = 'tpl-removed-b'", []).unwrap();
+        }
+        block_showing_stamped(&store, "block-unrel-tpl", Some("tpl-named-a"), Some(&c));
+        assert!(store.instance_get_active_for_block("block-unrel-tpl").unwrap().is_none());
+    }
+
+    /// Codex P2 on #3576: two active launches on a block in the same
+    /// millisecond leave "latest" undecided, so a stamp naming either
+    /// resolves to nothing rather than possibly to the stale one.
+    #[test]
+    fn a_stamp_tied_with_another_active_launch_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-tie", "tpl-tie");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let a = launch_from_template_on(&store, &agents_root, "tpl-tie", "inst-tie-a", "block-tie");
+        let _b = launch_from_template_on(&store, &agents_root, "tpl-tie", "inst-tie-b", "block-tie");
+        block_showing_stamped(&store, "block-tie", Some("tpl-tie"), Some(&a));
+        assert!(store.instance_get_active_for_block("block-tie").unwrap().is_none());
+    }
+
+    /// A block whose meta names no agent at all keeps today's fallback: the
+    /// agent whose latest launch is on it (a block from before `agentId`).
+    #[test]
+    fn a_block_naming_no_agent_keeps_the_latest_launch_fallback() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        launch_user_agent_on(&store, &agents_root, "agent-unnamed", "block-unnamed");
+        block_showing(&store, "block-unnamed", None);
+        let got = store.instance_get_active_for_block("block-unnamed").unwrap();
+        assert_eq!(got.map(|a| a.id).as_deref(), Some("agent-unnamed"));
+    }
+
     /// Identity M4a (adversarial review of #3570/#3571): a template-based
     /// continuation's block names only the template (`agentId`), yet it
     /// resolves to the row the launch folded into, because the fold moves
