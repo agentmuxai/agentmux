@@ -212,6 +212,36 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
         expect(s.g.top).toBe(10);
     });
 
+    it("a viewport shrink while pinned releases held-open tools that went off the top (clientHeight RO pin)", () => {
+        // ReAgent P1 on #3599: this pin source must run the collapse itself —
+        // its scroll event is a trusted pin batch, which skips it.
+        const [nodes] = createSignal<DocumentNode[]>([md("a")]);
+        const viewState = createAgentViewState(nodes);
+        const held = { ...emptyDocumentState(), expandedTools: new Set(["tool-off-screen"]) };
+        const [docState] = createSignal(held);
+        const release = vi.fn();
+        const utils = render(() => (
+            <AgentDocumentVirtualList
+                viewState={viewState}
+                documentState={docState}
+                onToggleCollapse={() => {}}
+                onTogglePin={() => {}}
+                onReleaseToolOpen={release}
+            />
+        ));
+        const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
+        const g = makeScrollable(scrollRef, { scrollTop: 200, scrollHeight: 500, clientHeight: 300 });
+        // A laid-out container (a zero-size rect means "hidden pane": skipped).
+        scrollRef.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, bottom: 300, right: 400, width: 400, height: 300, toJSON: () => ({}) }) as DOMRect;
+        // The composer grew: the container's own viewport shrinks by 100 px.
+        g.set({ clientHeight: 200 });
+        triggerResize(scrollRef); // only the clientHeight RO observes scrollRef
+        flushRaf(); // the pin's own scroll event: a trusted batch
+        expect(g.top).toBe(300);
+        // The held-open tool is not rendered any more (scrolled away): released.
+        expect(release).toHaveBeenCalledWith("tool-off-screen");
+    });
+
     it("typing in an editable element is not scroll input; PageUp elsewhere is", () => {
         const s = setup();
         const ta = document.createElement("textarea");

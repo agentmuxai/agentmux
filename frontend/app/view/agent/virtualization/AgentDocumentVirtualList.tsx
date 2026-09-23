@@ -648,6 +648,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             syncOverflowState();
             if (h > 0 && props.viewState.stickToBottom()) {
                 scrollToTrueBottom();
+                // Every pin source runs the held-open-tool collapse itself: the
+                // scroll event this pin causes is a trusted pin batch, which
+                // skips it in handleScrollNow. A viewport shrink while pinned
+                // (working row / composer growing below) can push a held-open
+                // tool off the top just as content growth can (ReAgent P1, #3599).
+                collapseScrolledOffTools();
             }
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
