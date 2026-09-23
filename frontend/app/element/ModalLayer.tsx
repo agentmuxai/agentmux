@@ -60,12 +60,24 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
     // add-account/new-memory) — so clicking outside should just close
     // them, like any other dismissible overlay.
     //
-    // "agent-stash" is the per-agent Accounts/Memories/MCP Servers/Skills
-    // modal (PR #2314 renamed it from "agent-setup" to distinguish it from
-    // the global Armory pane).
-    const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>(["agent-stash"]);
+    // CURRENTLY EMPTY. Its only member was "agent-stash" (the per-agent
+    // Accounts/Memories/MCP Servers/Skills modal), which no longer exists as
+    // a modal at all — it became a top-anchored drawer in
+    // SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.5, and a drawer has no
+    // backdrop to click. Kept (rather than deleted along with the
+    // `hasOpenForm` guard below) so the next kind that wants
+    // click-outside-to-close doesn't have to rebuild the guard from scratch;
+    // it costs one always-false memo read until then. Deliberately NOT
+    // folded into this PR: `ModalLayer` is shared by every modal in the app,
+    // and ripping out working machinery is a bigger blast radius than the
+    // Stash migration itself warrants.
+    const BACKDROP_DISMISSIBLE_KINDS = new Set<ModalLayerRequest["kind"]>([]);
 
-    // "agent-stash" is only SOMETIMES pure browse/view, though — its own
+    // The note below is retained because it is the REASON this guard exists
+    // at all, and applies to whatever kind is added to the set next — the
+    // failure it documents was not specific to Stash's markup in the end.
+    //
+    // "agent-stash" was only SOMETIMES pure browse/view — its own
     // Skills/MCP Servers tabs (AgentSkillsModal/AgentMcpModal) can be
     // showing a "+ New"/edit draft form, and its Memory tab
     // (AgentNativeMemoryModal) an in-place edit textarea — all local

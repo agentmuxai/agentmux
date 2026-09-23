@@ -18,7 +18,6 @@ import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/A
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
-import { AgentStashModal } from "@/app/view/agent/components/AgentStashModal";
 import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
 import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
 import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
@@ -51,8 +50,6 @@ export function requestLabel(req: ModalLayerRequest): string {
             return `Identity — ${req.agent.name}`;
         case "agent-memory":
             return `Memory — ${req.agentName}`;
-        case "agent-stash":
-            return "Stash";
         case "bundle-import-select":
             return "Import Bundle";
         case "bundle-import-preview":
@@ -295,19 +292,6 @@ export function renderRequest(
                         agentId={req.agentId}
                         agentName={req.agentName}
                         workingDirectory={req.workingDirectory}
-                        onClose={api.close}
-                    />
-                ),
-            };
-        case "agent-stash":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentStashModal
-                        agentId={req.agentId}
-                        agentName={req.agentName}
-                        workingDirectory={req.workingDirectory}
-                        initialTab={req.initialTab}
                         onClose={api.close}
                     />
                 ),

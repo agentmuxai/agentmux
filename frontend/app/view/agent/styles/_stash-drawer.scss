@@ -1,0 +1,128 @@
+// Stash drawer — top-anchored, docked under the pane header where its own
+// backpack toggle lives. Replaced the `agent-stash` modal.
+// SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1/§3.2/§3.2a.
+//
+// Mirrors the shell drawer's structural rules (_composer-strip.scss's
+// .agent-composer-details-* block) rather than sharing them: the shared
+// COMPONENT is ResizableDetailsDrawer, which namespaces its three structural
+// elements by a `classPrefix` prop precisely so the two drawers can be styled
+// independently — the shell's handle sits on its top edge, this one's on its
+// bottom edge, and their content has opposite density needs.
+
+// The component's own root — carries the JS-dragged inline `height`, and is
+// a DIRECT flex child of `.agent-view` (agent-view.tsx renders it with no
+// wrapper, deliberately).
+.agent-stash-drawer-resizable {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    // Sized by its own dragged height, not by available space.
+    flex: 0 0 auto;
+    min-height: 0;
+    border-bottom: 1px solid var(--border-color);
+
+    // §6 open questions 1/2, answered: the Stash and shell drawers are
+    // INDEPENDENT (either, both, or neither open — mutual exclusion would
+    // silently close a live shell holding real terminal state). This cap is
+    // what keeps that independence from squeezing the transcript to nothing:
+    // whatever the user drags to, Stash never takes more than half the pane.
+    //
+    // THE CAP IS ON THIS ELEMENT ON PURPOSE (reagentx P1, PR #3540). It must
+    // sit on the element that contains BOTH the body and the resize handle,
+    // for two reasons:
+    //
+    //   1. A percentage `max-height` resolves only against a containing block
+    //      with a DEFINITE height. `.agent-view` is `height: 100%`, so as its
+    //      direct child this resolves. The first cut put the cap on an
+    //      intermediate auto-height wrapper and gave this element
+    //      `max-height: 100%`, which per spec computed to `none` — so this
+    //      element rendered at its full dragged height (up to the JS clamp of
+    //      600px) while the wrapper clipped it with `overflow: hidden`.
+    //   2. Because the handle renders AFTER the body for `anchor="top"`, that
+    //      clipping cut off the handle itself — invisible and unreachable, so
+    //      a drawer dragged past 50% could never be shrunk again.
+    //
+    // With the cap here, flex does the right thing instead of clipping:
+    // `-body` is `flex: 1 1 auto; min-height: 0` so it absorbs the
+    // compression, while `-resize-handle` is `flex-shrink: 0` and keeps its
+    // 5px at the bottom edge — always on screen, always grabbable.
+    //
+    // Fails safe: if the percentage ever did fail to resolve, the result is
+    // simply no cap (drawer can reach the JS max), NOT a trapped handle.
+    max-height: 50%;
+}
+
+// Bottom-edge handle — the mirror of the shell drawer's top-edge one
+// (border on the edge that faces the content it resizes against).
+.agent-stash-drawer-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: ns-resize;
+    background: transparent;
+    border-bottom: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+
+    &:hover,
+    &--active {
+        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        border-bottom-color: var(--accent-color);
+    }
+}
+
+.agent-stash-drawer-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+// ── §3.2a density: composer-scale, not modal-scale ─────────────────────────
+//
+// The ported content (AgentStashModal) was sized for a modal with room to
+// breathe: --space-2/--space-4 (8/16px) padding and --text-sm text. In a
+// drawer it should read like the composer strip instead — measured values
+// from _composer-strip.scss: 9-11px fonts, 1-2px vertical padding, 2px gaps,
+// horizontal padding topping out at --space-2 (8px).
+//
+// Scoped under .agent-stash-drawer-resizable so the same component keeps its roomier
+// proportions anywhere else it is ever hosted — this is a host-specific
+// density, not a change to the component's own defaults.
+.agent-stash-drawer-resizable {
+    .agent-stash-modal-tabs {
+        gap: 2px;
+        padding: 2px var(--space-1-5) 0;
+    }
+
+    .agent-stash-modal-tab {
+        gap: var(--space-1);
+        padding: 2px var(--space-1-5);
+        font-size: 10px;
+
+        i {
+            width: 12px;
+        }
+    }
+
+    .agent-stash-modal-panel {
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-1-5);
+        font-size: 11px;
+    }
+
+    // NOTE: the Memory tab's own 780x520 standalone sizing needs no
+    // neutralization here — AgentStashModal.scss already does it under
+    // `.agent-stash-modal-panel`, which is host-agnostic (it was never
+    // scoped to `.modal-panel`), so it applies in the drawer unchanged.
+
+    // Replaces the `@container modal-mount` min-width:0 rescue
+    // (AgentStashModal.scss), which only ever fired inside ModalLayer's mount
+    // node and therefore never fires here. Unconditional rather than
+    // container-gated: flex children default to `min-width: auto`, and there
+    // is no width at which we'd want these two to refuse to shrink.
+    .agent-stash-modal-tabs,
+    .agent-stash-modal-panel {
+        min-width: 0;
+    }
+}
