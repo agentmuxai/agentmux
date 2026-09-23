@@ -28,7 +28,25 @@
  *   rust=true|false        run the Rust compile/test job
  *   frontend=true|false    run vitest / tsc
  *   docs_only=true|false   every changed file was documentation
+ *   docs_index=true|false  run the specs-index generator on all three OSes
  */
+
+/**
+ * Paths that can change what scripts/gen-docs-index.mjs produces on some OS, or
+ * how its cross-platform job runs. Its output is a pure function of file bytes,
+ * so it can only start to differ between platforms when the generator, its
+ * tests, their runtime (Node/vitest config and dependencies) or the job itself
+ * changes — not when a spec does. Specs are still asserted on every PR by the
+ * Linux `docs` job. docs/specs/SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md §7.
+ */
+const DOCS_INDEX_PATTERNS = [
+    /^scripts\/gen-docs-index\./,
+    /^scripts\/test-fixtures\/gen-docs-index\//,
+    /^scripts\/ci-classify-changes\./,
+    /^\.github\/workflows\/ci-pr\.yml$/,
+    /^package(-lock)?\.json$/,
+    /^(vite|vitest)\.config\./,
+];
 
 /**
  * Paths that cannot affect a build. Deliberately short: every entry here is a
@@ -98,8 +116,19 @@ export function classifyChanges(files) {
         .filter((p) => p !== "");
 
     if (paths.length === 0) {
-        return { rust: true, frontend: true, docs_only: false, reason: "no files resolved — running everything (R2)" };
+        return {
+            rust: true,
+            frontend: true,
+            docs_only: false,
+            docs_index: true,
+            reason: "no files resolved — running everything (R2)",
+        };
     }
+
+    // R2 for the index job too: an entry that is not a string means the input
+    // was not what this script expects, so run it rather than trust the rest.
+    const malformed = files.some((f) => typeof f !== "string");
+    const docs_index = malformed || paths.some((p) => DOCS_INDEX_PATTERNS.some((re) => re.test(p)));
 
     const nonDocs = paths.filter((p) => !isDocsOnlyPath(p));
     if (nonDocs.length === 0) {
@@ -107,6 +136,7 @@ export function classifyChanges(files) {
             rust: false,
             frontend: false,
             docs_only: true,
+            docs_index,
             reason: `all ${paths.length} changed file(s) are documentation`,
         };
     }
@@ -115,6 +145,7 @@ export function classifyChanges(files) {
         rust: true,
         frontend: true,
         docs_only: false,
+        docs_index,
         // Naming a concrete file makes a wrong decision debuggable from the log
         // alone, without re-deriving the whole list.
         reason: `${nonDocs.length} non-doc file(s), e.g. ${nonDocs[0]}`,
@@ -138,5 +169,6 @@ if (isMain) {
     console.log(`rust=${result.rust}`);
     console.log(`frontend=${result.frontend}`);
     console.log(`docs_only=${result.docs_only}`);
+    console.log(`docs_index=${result.docs_index}`);
     console.error(`ci-classify-changes: ${result.reason}`);
 }
