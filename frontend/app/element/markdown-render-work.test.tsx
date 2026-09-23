@@ -75,6 +75,56 @@ describe("Markdown streaming-render work invariants", () => {
         expect(__markdownRenderStats.processorBuilds).toBe(1);
     });
 
+    /**
+     * The way MarkdownBlock actually drives this component: `highlight` is
+     * `view().highlight`, a getter over a signal that yields a NEW object on
+     * every streaming commit. The processor memo tracked that signal through
+     * the prop getter, so it re-ran (and rebuilt the whole plugin chain) once
+     * per commit even though the boolean it derives never changed — live
+     * counters read `processorBuilds == commits` under real streaming while
+     * the static-prop test above stayed green. The memo must key off the
+     * resolved boolean, not the getter's upstream signal.
+     */
+    it("does not rebuild the processor when `highlight` is a reactive getter that re-yields the same value", () => {
+        __resetMarkdownRenderStats();
+        const [view, setView] = createSignal({ text: "", highlight: false });
+        render(() => <Markdown text={view().text} highlight={view().highlight} scrollable={false} />);
+        const step = Math.ceil(SAMPLE.length / 20);
+        for (let i = 1; i <= 20; i++) {
+            setView({ text: SAMPLE.slice(0, Math.min(i * step, SAMPLE.length)), highlight: false });
+        }
+
+        expect(__markdownRenderStats.commits).toBeGreaterThan(10);
+        expect(
+            __markdownRenderStats.processorBuilds,
+            `processor was built ${__markdownRenderStats.processorBuilds} times over ` +
+                `${__markdownRenderStats.commits} commits — it must not track the text signal`,
+        ).toBe(1);
+
+        // A genuine flip still rebuilds it — exactly once.
+        setView({ text: SAMPLE, highlight: true });
+        expect(__markdownRenderStats.processorBuilds).toBe(2);
+    });
+
+    /**
+     * Codex P2 on #3559. A completed `@@@start … @@@end` block renders as a
+     * `<waveblock>` placeholder whose markdown text is identical no matter
+     * what the block body holds, and MuxBlock reads its `blockmap` once at
+     * creation. Once that placeholder is inside the frozen prefix, editing
+     * ONLY the block body must still update it — the frozen DOM may not
+     * outlive the block data it was rendered from.
+     */
+    it("re-renders a frozen content-block placeholder when only its block body changes", () => {
+        const doc = (body: string) =>
+            `${LONG_FILLER}@@@start file "notes.txt"\n${body}\n@@@end file "notes.txt"\n\n${LONG_FILLER}## Tail\n\nstill streaming`;
+        const [content, setContent] = createSignal(doc("x".repeat(100)));
+        const { container } = render(() => <Markdown text={content()} scrollable={false} />);
+        expect(container.querySelector(".wave-block-size")?.textContent).toBe("0.1 KB");
+
+        setContent(doc("x".repeat(5 * 1024)));
+        expect(container.querySelector(".wave-block-size")?.textContent).toBe("5 KB");
+    });
+
     it("does not rebuild the processor when only the text changes", () => {
         __resetMarkdownRenderStats();
         const [content, setContent] = createSignal("first");
@@ -108,6 +158,41 @@ describe("Markdown streaming-render work invariants", () => {
                 `message over ${__markdownRenderStats.commits} commits (${ratio.toFixed(1)}x). ` +
                 `Incremental parsing should keep this near 1x; a full re-parse per commit is ~13x.`,
         ).toBeLessThan(2);
+    });
+
+    /**
+     * The DOM half of incremental rendering
+     * (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.1).
+     *
+     * #3521 made the PARSE incremental but the render still handed
+     * `toJsxRuntime` the whole frozen+tail hast every commit and swapped the
+     * entire element tree, so every paragraph, heading, code block and table
+     * of the streaming message was destroyed and re-created ~11×/s — measured
+     * as ~950 elements re-created per 10 s in a pane with zero rows added.
+     * The frozen prefix's DOM must survive commits; only the trailing open
+     * block may be rebuilt.
+     */
+    it("keeps the frozen prefix's DOM nodes across commits — only the trailing block is rebuilt", () => {
+        __resetMarkdownRenderStats();
+        const [content, setContent] = createSignal("");
+        const { container } = render(() => <Markdown text={content()} scrollable={false} />);
+        const step = Math.ceil(SAMPLE.length / 25);
+
+        // Stream far enough that the first heading is inside the frozen prefix.
+        setContent(SAMPLE.slice(0, step * 12));
+        const firstHeading = container.querySelector(".heading");
+        expect(firstHeading).not.toBeNull();
+        const headingCountBefore = container.querySelectorAll(".heading").length;
+
+        for (let i = 13; i <= 25; i++) {
+            setContent(SAMPLE.slice(0, Math.min(i * step, SAMPLE.length)));
+        }
+
+        // Same element object, still attached, and the document grew rather
+        // than being rebuilt from scratch.
+        expect(container.querySelector(".heading")).toBe(firstHeading);
+        expect(container.contains(firstHeading)).toBe(true);
+        expect(container.querySelectorAll(".heading").length).toBeGreaterThan(headingCountBefore);
     });
 
     /**
