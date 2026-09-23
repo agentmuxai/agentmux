@@ -11,10 +11,12 @@ solution... the goal is agent id unique... do the most robust solution."*
 **Evidence base:** five review rounds on #3520 (four P1s, one P0), a data check
 across 47 live databases, and direct measurement of `resolve_agent_id`'s real
 behaviour.
-**Revision 2 (2026-09-23).** Revision 1 was reviewed and **four of its
-load-bearing empirical claims were false**. §0 records them; §4, §5, §6, §7 and
-§9 are rewritten. The principle in §2 survived review unchanged; the mechanism
-did not. Read §0 first — its corrections are why the rest looks as it does.
+**Revision 3 (2026-09-23).** Three adversarial review passes so far. Revision 1
+had four false empirical claims (§0); revision 2 added two more and got §4.1
+wrong in the opposite direction from revision 1. §2's principle has survived
+every pass unchanged; the mechanism has been rewritten each time. Read §0 and
+§12 before trusting any specific claim here — the failure mode of this document
+has consistently been confident prose about unexamined code.
 
 ---
 
@@ -175,8 +177,13 @@ Three rules, in priority order:
    enters the system where it is known — at spawn and at registration — and is
    passed along. A function that takes a name and returns an identity exists at
    exactly one layer (§5), and no internal caller may use it.
-2. **Identity is proven, not asserted.** At any trust boundary, identity comes
-   from the connection, never from the request body (§6).
+2. **Identity is proven, not asserted.** At any trust boundary, identity is
+   established by a secret the server itself issued, never by a name the
+   request supplies (§6). Stated as "comes from the connection" in earlier
+   revisions, which is imprecise: this is loopback HTTP, where there is no
+   per-connection peer identity to read — a header is still an in-request
+   assertion. What makes it trustworthy is that only the server and the agent
+   it spawned know the value.
 3. **Names stay human.** MCP arguments, audit logs, the UI and agent-facing
    docs keep readable names throughout (§5.3). This spec makes nothing uglier
    for a human or a model.
@@ -207,31 +214,42 @@ and conflating them is what made the predecessor spec plausible.
 
 ## 4. Carrying it
 
-### 4.1 The agent asserts its own identity; the server verifies it
+### 4.1 The server registers the agent — neither the frontend nor the agent asserts identity
 
-Revision 1 had the frontend send the UID. §0.1 rules that out: the frontend's
-`block.meta.agentInstanceId` is documented as going stale on pane reuse, which
-is the respawn case this design must survive.
+This section has now been wrong twice, in opposite directions, and the
+correction is worth stating as a rule rather than a patch.
 
-**The process that knows its identity is the agent itself**, because the server
-told it at spawn. So:
+- **Revision 1** had the *frontend* assert the UID. Wrong: its
+  `block.meta.agentInstanceId` is documented as going stale on pane reuse
+  (§0.1), and it races the row's creation.
+- **Revision 2** had the *agent* assert it, holding a token. Also wrong: a
+  PTY/shell agent is a bare terminal. It has no `agentmux-mcp`, no HTTP client,
+  and its only outbound channel is bytes the frontend parses — so a token given
+  to it would land in the pane's persisted scrollback. Today such agents are
+  jekt-registered server-side from the block's `cmd:env`
+  (`blockcontroller/shell/lifecycle.rs:269-280`), precisely because they cannot
+  call back.
 
-- Spawn injects `AGENTMUX_AGENT_UID` (the agent's `db_agents.id`) and
-  `AGENTMUX_AGENT_TOKEN` (§6), both minted by the server that created the row.
-- The agent registers **itself**, presenting the token.
-- The server derives the UID **from the token**, not from the payload. A UID in
-  the body is a hint at most; the token is the identity.
+**The party that knows the identity authoritatively is the server.** It created
+the `db_agents` row, it minted the UID, and it set the process environment. It
+does not need to be told by anyone.
 
-This also answers a defect revision 1 did not know it had: the frontend starts
-the controller *before* `CreateAgentInstanceCommand` completes, inside a
-best-effort `try/catch`, and `instance_create` may legitimately return a
-different id than the caller passed (`storage/agents.rs:1541-1546`). Any
-frontend-asserted UID therefore races and can be absent or wrong. An
-agent-asserted, server-verified one cannot: it does not exist until the row
-does.
+So registration stays server-side and becomes UID-keyed at the existing call
+sites — `persistent.rs:3368` (inside `spawn_process`, before any output),
+`agent_handlers/input.rs` (turn start), and `shell/lifecycle.rs:818-822` for
+shell panes. The frontend's `/reactive/register` becomes a presence signal
+keyed by `block_id`; the agent asserts nothing.
 
-The frontend's registration calls become presence/lifecycle signals keyed by
-`block_id` — which it genuinely owns — and stop carrying identity at all.
+This also preserves a property revision 2 would have destroyed. Registration
+currently *precedes* the process: `bootstrap.rs:2074-2100` exists to serve
+registered-but-not-yet-spawned persistent controllers, a state every persistent
+agent occupies after an srv restart, and
+`REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03` records
+what breaks without it. An agent that can only register once it is running
+cannot be registered before it is running — revision 2 would have regressed
+that permanently, and §9.2's counters would have reported success.
+
+**Rule:** identity is asserted by whoever minted it. Everyone else is told.
 
 ### 4.2 What moves, and what must move together
 
@@ -250,16 +268,36 @@ re-keying `agent_to_block` while `agent_identity_confirmer` still compares
 display names makes every delivery an `"identity mismatch"`. They are one
 atomic change, not three phases.
 
-### 4.3 The alias map disappears, and that is the point
+### 4.3 The alias map survives — it resolves names this system cannot reach
 
-`alias_to_block` exists because the primary key is a *renameable* display name,
-so a second, stable key was bolted alongside it
-(`INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`). Once the primary key is a UID,
-"stable alternative key" is what the primary key already is. The alias map, its
-inverse, and their eviction rules are deleted rather than migrated.
+Revision 2 deleted `alias_to_block`, claiming it existed only because the
+primary key was renameable, so a UID primary key makes it redundant. **That is
+wrong**, and the reason is the most load-bearing constraint in this document.
 
-That is the clearest evidence the design is addressing the root cause: a whole
-subsystem that existed only to compensate for the defect stops being needed.
+`INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md` describes a jekt tagged
+`<!-- agentmux:agent_id=agentg -->` — *"the standing tag, unchanged since
+before this agent was renamed"* — failing to resolve because no live subscriber
+answered to `agentg`. Those tags are embedded in **GitHub pull request bodies**.
+They are immutable third-party data: not in this repo, not in any database this
+project owns, not backfillable by any migration.
+
+Every PR this project's agents open carries one. They will keep resolving
+years from now or they will silently stop routing review notifications.
+
+So the alias map is not a workaround for a renameable key. It is the one place
+where a **frozen historical name** is mapped to a **current identity**, and a
+UID primary key does not replace that — it is exactly what the alias should map
+*to*.
+
+Revision 2 also scheduled its deletion at M2 while keeping
+`AGENTMUX_AGENT_ID` emitting names through M4 (§9.4), so agents would have gone
+on minting PR tags for two phases after deleting their only resolver.
+
+**Corrected:** the alias map stays, re-keyed so aliases resolve to UIDs. New
+tags should embed the UID going forward, but the old ones must keep working
+indefinitely. This also falsifies revision 2's §5.4 claim that non-interactive
+ingress "never holds a name": the muxbus relay resolving a PR-body tag holds
+exactly that, and must go through the alias map rather than §5's resolver.
 
 ## 5. The one place names are interpreted
 
@@ -398,22 +436,51 @@ The same applies to jekt signing keys, which are name-derived today
 (`jekt_public_key_for(agent_id)`): a name-derived signing key is one that
 anyone sharing that name can forge, and no file mode changes that.
 
-**Expiry must not strand a running agent.** A token that expires mid-task turns
-a healthy agent silent, which is the failure mode #3520's first P1 already
-demonstrated is easy to create and hard to notice. Tokens are therefore
-long-lived for the process lifetime and invalidated on agent deletion, rather
-than short-lived and renewed — renewal is a liveness dependency on the very
-path being secured. Revoking on deletion is sufficient because the UID is never
-reused.
+**Expiry must not strand a running agent**, and neither must an srv restart.
+A token that expires mid-task turns a healthy agent silent — the failure mode
+#3520's first P1 showed is easy to create and hard to notice. So tokens are
+long-lived for the process lifetime and revoked on deletion, not renewed:
+renewal is a liveness dependency on the very path being secured, and the UID is
+never reused.
+
+Revision 2 then said the token lives "in server memory", which reintroduces the
+same failure at a different seam: **any srv restart — crash, auto-update,
+`task dev` — would leave every running agent holding a token nothing can
+verify**, with renewal forbidden by the rule above.
+
+`AGENTMUX_AUTH_KEY` survives restarts only because the *launcher* owns it and
+re-supplies it (`agentmux-launcher/src/srv_spawner.rs`), and a per-agent token
+has no such external owner. It must therefore be **durable server-side state
+keyed by UID**, restored on boot like any other agent state.
+
+That is not in tension with "a token cannot be protected by a file" above: the
+objection there is to a *name-keyed, agent-readable* file in shared space, not
+to the server persisting its own secrets where only the server reads them. The
+distinction the spec must hold is **who can read it**, not whether it touches
+disk.
 
 ### 6.4 Bootstrapping
 
-The token is injected at spawn by the server that created the row. There is no
-chicken-and-egg: the agent never authenticates to *obtain* it. Its
-confidentiality rests on process environment isolation, which `pane_env.rs`'s
-`PANE_ENV_KEEP` already governs and which this design tightens by replacing an
-instance-wide credential with a per-agent one — an inherited copy stops being
-omnipotent, exactly the retro's stated fallback position.
+The token is injected at spawn by the server that created the row, so there is
+no chicken-and-egg: the agent never authenticates in order to *obtain* it.
+
+**Revision 2's claim that `PANE_ENV_KEEP` governs its confidentiality was
+wrong.** `pane_env.rs`'s `keys_to_strip()` enumerates *srv's own* environment
+and removes only **inherited** variables. A token set explicitly on the child
+command is untouched by `sanitize_process_command`, and is therefore inherited
+by every descendant of the agent — its shell tools, build commands, any
+postinstall script. `PANE_ENV_KEEP` does not constrain it in either direction.
+
+Two things follow, neither optional:
+
+- Descendant inheritance must be handled deliberately, not assumed away. An
+  agent's own subprocesses holding its credential is a smaller blast radius
+  than today's instance-wide key — the retro's stated fallback position — but
+  it is not zero and the spec must not claim it is.
+- Delivery to the MCP process needs care: `backend/agent_config.rs` writes
+  `mcpServers.agentmux.env` into a `.mcp.json` **inside the agent's working
+  directory**, rewritten every launch. A token must not go there; that file is
+  in a worktree a human may commit.
 
 ## 7. Performance
 
@@ -465,11 +532,22 @@ changes two things at once.
 - **M1 — Mint and carry.** Server mints the UID and token at row creation and
   injects both at spawn; add UID columns alongside slug columns; dual-write.
   **No reader changes.** Revertible by ignoring the new fields.
-- **M2 — Registration and delivery, atomically.** The agent registers itself
-  with its token; the server derives the UID from the token; the registry,
-  **both identity confirmers**, and the alias map all move in the *same*
-  change (§4.2). Splitting them rejects every delivery as an identity
-  mismatch. Slug fallback retained **with a counter** (§9.2).
+- **M2 — Registration and delivery, atomically.** Registration stays
+  server-side (§4.1) and becomes UID-keyed; the registry, **both identity
+  confirmers**, and the **alias map** move in the *same* change (§4.2).
+  Splitting them rejects every delivery as an identity mismatch. Slug fallback
+  retained **with a counter** (§9.2).
+
+  Revision 2 had M2 deriving the UID from a token — which token verification
+  does not exist until M4. That ordering was unshippable. Because §4.1 now
+  keeps registration server-side, M2 needs no token at all and the dependency
+  disappears rather than being scheduled around.
+
+  **On "no phase changes two things at once":** M2 changes four. The rule is
+  about independently *revertible* units, not line counts — these four share
+  one key and reverting any one alone leaves the registry and its confirmers
+  disagreeing, which is strictly worse than either state. Atomic here means
+  smaller, not larger.
 - **M3 — Work queue and cron.** Columns hold UIDs; one-time backfill of live
   rows. Resolution moves to the MCP boundary so tool arguments stay readable.
 - **M4 — Proven identity.** Per-agent token; authz reads connection identity;
@@ -511,20 +589,41 @@ stale UID); the counters exist to catch the ones not yet known.
 `gh-agent.sh`, `bash_wrap.rs`, the OSC prompt hook and agent-facing docs all
 read it. It is renamed only in M5, with both set during a deprecation window.
 
-## 10. Salvage from #3520
+## 10. Failure modes #3520 demonstrated
 
-Four fixes are bugs in `main` today, independent of how keying is redesigned.
-They should land on their own rather than waiting for this spec:
+Revision 2 called these *"bugs in `main` today, independent of how keying is
+redesigned"* and recommended landing them separately. **That was wrong, and it
+is the same error §0 and §12 exist to warn about.**
 
-1. **`record_supervisor_decision` never resolved its target.** Nudge ceilings,
-   audit `block_id`s and respawn-staleness checks are all silently wrong right
-   now — two agents sharing a name share a nudge ceiling.
-2. **Teardown must not inherit delivery's fail-closed rule** — otherwise
-   `unregister` silently no-ops while reporting success.
-3. **Bindings derived from live state, not from a previously-stored key** —
-   otherwise one transient failure permanently poisons an agent.
-4. **No store read on the lookup path** — subsumed by this design, but the test
-   that pins it is worth keeping.
+Checked against `main`: the reactive handler has no resolver at all, and every
+key site — registration (`handler.rs:234`), unregistration (`:311`), delivery
+(`:482`) and `record_supervisor_decision` (`:990`) — uses
+`agent_id.to_lowercase()`. They are mutually consistent. There is nothing to
+salvage because nothing is broken there yet.
+
+All four were defects **introduced by the Phase 2 attempt**: three in code that
+existed only on that branch, and one site I converted the others around and
+missed. They are recorded here not as work to do, but as **constraints any
+implementation of §4 must satisfy** — each was found by review rather than by
+tests, and each would otherwise be rediscovered:
+
+1. **Do not put a store read on the lookup path.** Resolving per lookup means a
+   transient store error makes a registered, healthy agent unreachable. §4.1
+   avoids this by construction: identity arrives with the request, so there is
+   nothing to look up.
+2. **Derive state from what is registered, never from what was previously
+   stored.** A binding computed by comparing against a prior value cannot tell
+   "the same agent re-registered differently" from "a second agent appeared",
+   and gets it permanently wrong.
+3. **Teardown must not inherit delivery's fail-closed rule.** Refusing to guess
+   a recipient is right for delivery; applied to `unregister` it silently
+   no-ops while reporting success, leaking the registration.
+4. **Convert every key site together, or none.** Missing one leaves it keyed
+   differently from the rest, and delivery keeps working — so the failure is
+   invisible in tests while the logic around it is wrong.
+
+Constraint 4 is why §4.2 requires the registry, both identity confirmers and
+the alias map to move atomically rather than in sequence.
 
 ## 11. What this spec is not
 
@@ -539,12 +638,24 @@ They should land on their own rather than waiting for this spec:
 load-bearing empirical claims were false (§0). Every claim below that begins
 "measured" was re-run against `main` for this revision.
 
-Revision 2 then repeated the mistake once, which is worth recording precisely
-because it happened *inside* the correction: §6.3's original permissions claim
-was taken from that review and written in without being checked, and it was
-false. Reviewers are not a substitute for running the code — including
-reviewers who are right about everything else. Verify what you propagate, not
-just what you author. The pattern in both the
+Revision 2 then repeated the mistake twice, which is worth recording precisely
+because both happened *inside* the correction:
+
+- §6.3's permissions claim was taken from a review and written in without being
+  checked. It was false.
+- §10 asserted four defects were "bugs in `main` today". Checked afterwards:
+  `main` has no resolver, every key site agrees, nothing is broken. They were
+  defects the Phase 2 *attempt* introduced.
+
+**Reviewers are not a substitute for running the code** — including reviewers
+right about everything else. And a claim that follows naturally from something
+already verified is not thereby verified.
+
+Revision 3 corrects §4.1 (wrong twice, in opposite directions), §4.3 (deleting
+a map that resolves immutable third-party data), §6.3 (a token nothing can
+verify after an srv restart), §6.4 (`PANE_ENV_KEEP` does not govern what it
+was claimed to), §2's rule 2, and §9.1's unshippable phase order. Each came
+from adversarial review; none from a test. The pattern in both the
 predecessor spec and revision 1 is the same — a plausible statement about the
 code, written without running it, load-bearing by the time anyone checks — so
 treat any unmeasured assertion here as suspect rather than as merely
