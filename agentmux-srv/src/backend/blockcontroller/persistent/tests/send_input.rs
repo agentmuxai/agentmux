@@ -3494,3 +3494,66 @@ async fn which_boundary_outcomes_end_the_turn_and_apply_the_restart() {
     assert!(!b.apply_deferred_restart);
     assert!(!c.health_monitor.is_active_turn());
 }
+
+// ── Committed deferred restart (codex P1 on #3562) ──────────────────
+//
+// `turn_boundary_locked` commits `restart_pending` and releases `inner`
+// before `spawn.rs` calls `stop_process`. The process's stdin is still live
+// in that window, the turn is idle, and the process is about to die.
+
+/// Codex's scenario: an automated message arriving in that window must not
+/// be written into the doomed process and reported delivered.
+#[tokio::test]
+async fn a_message_arriving_after_a_restart_is_committed_is_kept_for_the_replacement() {
+    let (c, mut rx) = busy_controller();
+    c.inner.lock().unwrap().restart_when_idle = true;
+    let b = boundary(&c, 0).unwrap();
+    assert!(b.apply_deferred_restart, "precondition: the restart is committed");
+    assert!(!c.health_monitor.is_active_turn());
+
+    c.send_user_message("mid-restart".to_string()).unwrap();
+
+    assert!(rx.try_recv().is_err(), "nothing written into a process about to be killed");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept, not lost");
+}
+
+/// The process stays down until the next message respawns it. The watchdog
+/// must wait that out, never counting it toward stranding, and deliver to
+/// the replacement.
+#[tokio::test]
+async fn the_watchdog_waits_out_a_restart_and_delivers_to_the_replacement() {
+    let c = controller();
+    c.inner.lock().unwrap().restart_pending = true;
+    c.send_user_message("for the replacement".to_string()).unwrap();
+
+    let mut orphaned = 0;
+    for _ in 0..DEFERRED_ORPHAN_GRACE_TICKS * 3 {
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    }
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "never reported stranded");
+
+    // The replacement spawns (which clears `restart_pending`).
+    let (tx, mut rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.restart_pending = false;
+        inner.stdin_tx = Some(tx);
+    }
+    c.sweep_deferred_once(&mut orphaned);
+    assert!(rx.try_recv().unwrap().contains("for the replacement"));
+}
+
+/// Every write through `try_write_stdin_locked` honours it, `Immediate`
+/// included: an explicit error, not a write into a doomed process.
+#[tokio::test]
+async fn an_immediate_send_is_refused_while_a_restart_is_committed() {
+    let (c, mut rx) = idle_controller();
+    c.inner.lock().unwrap().restart_pending = true;
+
+    let err = c
+        .send_user_message_with_policy("now".to_string(), DeliverPolicy::Immediate)
+        .unwrap_err();
+
+    assert!(err.contains("restarting"), "{err}");
+    assert!(rx.try_recv().is_err());
+}

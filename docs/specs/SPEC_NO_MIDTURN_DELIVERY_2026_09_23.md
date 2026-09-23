@@ -200,6 +200,13 @@ does not re-mark the turn active. Going idle on `Held` would let the watchdog wr
 moment that writer released its claim (codex P1 on #3562). A deferred runtime-config restart
 applies only on `Empty`, since killing the process with an entry still queued would strand it.
 
+**Never write into a process that is being restarted.** A committed deferred config restart
+(`restart_pending`) leaves stdin live until the process exits. `try_write_stdin_locked` refuses
+while it is set, as the human path already does (codex P1 on #2858), so no write site can put a
+message into a doomed process and report it delivered. `Immediate` gets an explicit error. A
+deferred message waits for the replacement process, and the watchdog does not count that window
+toward stranding (codex P1 on #3562).
+
 **Only the current process's `result` is a boundary.** A fallback respawn can install a new
 process before the old stdout reader drains a buffered `result`. The flush writes to the *current*
 stdin, so acting on that stale `result` would inject into the replacement's running turn, mark it
@@ -218,7 +225,7 @@ Any enqueue that leaves the queue non-empty arms a per-controller watchdog task 
 disarms itself under the `inner` lock once the queue is empty). Each tick, under the lock:
 
 - **must wait** (a turn is running, a spawn is in flight, a stale-resume retry batch is being
-  replayed, or human messages are queued): do nothing. The idle fast path (§4.3) uses this *same*
+  replayed, human messages are queued, or a deferred config restart is committed): do nothing. The idle fast path (§4.3) uses this *same*
   predicate, so the two can never disagree about what "idle" means;
 - **idle with a live process**: release ONE entry and mark the turn active inside the same
   critical section, exactly as the fast path does;
@@ -269,6 +276,10 @@ Phase 2 is the behavior change. Phases 1 and 3 are safe to land independently.
   folded it into the turn that just ended), the turn stays marked active until the next input.
   This is the safe direction to fail: a deferred message waits longer, and nothing is written
   mid-turn.
+- **A config restart parks the queue until the next message.** After a deferred restart the
+  process stays down until something respawns it, and only `send_message` (a human message) can,
+  because `deliver_agent_message` has no spawn config. Deferred messages wait for that respawn.
+  They are kept, not lost, but they are not delivered on their own.
 - **A queued message is not yet visible in the transcript.** The blockfile append happens at
   delivery, so the operator sees the message where the agent actually received it. That is the
   honest rendering, but it means a deferred message is invisible while it waits — §8 Q3.

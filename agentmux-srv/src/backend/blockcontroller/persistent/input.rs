@@ -43,6 +43,15 @@ impl PersistentSubprocessController {
         if inner.spawning_in_progress {
             return Err("persistent process is still starting up — try again shortly".to_string());
         }
+        // A committed deferred restart leaves `stdin_tx` live until the process
+        // actually exits, and a line written into a process about to be killed
+        // is lost, even though its caller was told it was delivered. The human
+        // path (`decide_send_action`) already refuses DeliverDirect here (codex
+        // P1 on PR #2858); this is the same rule for every write through this
+        // helper (codex P1 on #3562).
+        if inner.restart_pending {
+            return Err("persistent process is restarting for a config change — try again shortly".to_string());
+        }
         let tx = inner
             .stdin_tx
             .as_ref()
@@ -222,8 +231,15 @@ impl PersistentSubprocessController {
     /// stop), or another writer owns stdin — see
     /// [`Self::stdin_owned_by_another_writer`]. Shared by the idle fast path
     /// and the watchdog, so the two can never disagree about what "idle" means.
+    ///
+    /// A committed config restart (`restart_pending`) also means wait. The
+    /// process is about to be killed, and it stays down until the next message
+    /// respawns it. The queue is kept for that replacement, and the watchdog
+    /// must not count this window toward reporting it stranded.
     pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
-        self.health_monitor.is_active_turn() || Self::stdin_owned_by_another_writer(inner)
+        self.health_monitor.is_active_turn()
+            || inner.restart_pending
+            || Self::stdin_owned_by_another_writer(inner)
     }
 
     /// Another writer is feeding stdin, and messages it carries were accepted
