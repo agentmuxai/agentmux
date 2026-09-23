@@ -50,9 +50,13 @@ because it is load-bearing tooling rather than merely a folder:
   it by path.
 
 Moving it means changing the generated preamble, which means regenerating
-`INDEX.md` — and `gen-docs-index.sh` is not reproducible across platforms (a
-Windows run emits ~21 extra status buckets and a different row order than CI's
-Linux run), so that regeneration has to happen somewhere matching CI.
+`INDEX.md`. When this was written, `gen-docs-index.sh` was not reproducible
+across platforms (a Windows run emitted ~21 extra status buckets and a different
+row order than CI's Linux run), so that regeneration had to happen somewhere
+matching CI. Since 2026-09-23 the generator is `scripts/gen-docs-index.mjs`,
+checked byte-identical on Linux, macOS and Windows in CI
+(`SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md`), so it can be regenerated
+anywhere; the reasons above for keeping `docs/specs/archive/` still hold.
 
 This is the hardening spec's own escape hatch — *"or explicitly document why more
 than one is needed if there's a real reason this audit didn't surface"* — being

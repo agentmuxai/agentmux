@@ -200,3 +200,60 @@ describe("classifyChanges — the real shapes this repo produces", () => {
         expect(r).toMatchObject({ rust: true, frontend: true, docs_only: false });
     });
 });
+
+describe("classifyChanges — docs_index, the cross-platform specs-index job", () => {
+    // docs/specs/SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md §7. Skipping
+    // this job is only safe when nothing that can make the generator's output
+    // differ by OS has changed; every such path must turn it on.
+    it("runs when the generator, its tests or fixtures change", () => {
+        for (const p of [
+            "scripts/gen-docs-index.mjs",
+            "scripts/gen-docs-index.sh",
+            "scripts/gen-docs-index.test.mjs",
+            "scripts/test-fixtures/gen-docs-index/statuses.golden",
+            "scripts/test-fixtures/gen-docs-index/fixtures.mjs",
+        ]) {
+            expect(classifyChanges([p]).docs_index, p).toBe(true);
+        }
+    });
+
+    it("runs when the job, its classifier or its runtime changes", () => {
+        for (const p of [
+            ".github/workflows/ci-pr.yml",
+            "scripts/ci-classify-changes.mjs",
+            "package.json",
+            "package-lock.json",
+            "vitest.config.ts",
+            "vite.config.ts",
+            // Attributes change the bytes the generator reads (Codex P2, #3590).
+            ".gitattributes",
+        ]) {
+            expect(classifyChanges([p]).docs_index, p).toBe(true);
+        }
+    });
+
+    it("runs when any one file in a larger PR qualifies", () => {
+        expect(classifyChanges(["docs/specs/A.md", "frontend/app/x.ts", "scripts/gen-docs-index.mjs"]).docs_index).toBe(
+            true
+        );
+    });
+
+    it("does not run for spec-only or unrelated changes (the Linux docs job still asserts specs)", () => {
+        expect(classifyChanges(["docs/specs/SPEC_X_2026_09_23.md", "docs/specs/INDEX.md"]).docs_index).toBe(false);
+        expect(classifyChanges(["agentmux-srv/src/lib.rs", "frontend/app/App.tsx"]).docs_index).toBe(false);
+        expect(classifyChanges(["scripts/check-doc-status.sh"]).docs_index).toBe(false);
+    });
+
+    it("R2: runs on an empty, missing or malformed list", () => {
+        expect(classifyChanges([]).docs_index).toBe(true);
+        expect(classifyChanges(null).docs_index).toBe(true);
+        expect(classifyChanges(["", " "]).docs_index).toBe(true);
+        expect(classifyChanges([{ filename: "docs/A.md" }]).docs_index).toBe(true);
+        expect(classifyChanges(["docs/A.md", 42]).docs_index).toBe(true);
+    });
+
+    it("tolerates git quoting and Windows separators, like the other outputs", () => {
+        expect(classifyChanges(['"scripts/gen-docs-index.mjs"']).docs_index).toBe(true);
+        expect(classifyChanges(["scripts\\gen-docs-index.mjs"]).docs_index).toBe(true);
+    });
+});
