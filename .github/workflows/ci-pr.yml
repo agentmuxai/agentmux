@@ -127,6 +127,7 @@ jobs:
       rust: ${{ steps.classify.outputs.rust }}
       frontend: ${{ steps.classify.outputs.frontend }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      docs_index: ${{ steps.classify.outputs.docs_index }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -146,7 +147,7 @@ jobs:
         # whole design exists to prevent.
         run: |
           run_everything() {
-            printf 'rust=true\nfrontend=true\ndocs_only=false\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\n' >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -410,13 +411,16 @@ jobs:
       # correct union instead of to a silently-wrong file. A failure here now
       # means real drift — a spec added without regenerating — which is the
       # author's to fix and takes one command. See the history note at the top
-      # of scripts/gen-docs-index.sh for why it used to fail for everyone.
+      # of scripts/gen-docs-index.mjs for why it used to fail for everyone.
       # Scoped to PRs that actually touch docs/specs (issue #3059) — an
       # unscoped assertion failed every open PR whenever main went stale,
       # including PRs with no docs in them at all. Same posture as the two
       # gates either side of it.
+      # Node directly, not the bash wrapper: the generator needs nothing but
+      # Node, and the `docs-index` job below runs the same check on Windows and
+      # macOS (docs/specs/SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md).
       - name: Specs index is current (changed specs only)
-        run: bash scripts/gen-docs-index.sh --check
+        run: node scripts/gen-docs-index.mjs --check
 
       - name: Spec citations resolve (changed files only)
         run: bash scripts/check-spec-citations.sh
@@ -505,6 +509,51 @@ jobs:
       # cannot tell them apart.
       - name: muxbus credential store gate
         run: bash scripts/check-muxbus-credential-store.sh
+
+  # The specs-index generator on all three OSes. Its output must be
+  # byte-identical everywhere or `--check` disagrees with whoever regenerated
+  # the index; the shell version it replaced only ever ran on Linux in CI and
+  # was recorded drifting on Windows (docs/archive/README.md, 2026-09-18).
+  #
+  # Path-conditional (classify output `docs_index`): the output is a pure
+  # function of file bytes, so it can only start to differ by OS when the
+  # generator, its tests, their runtime, this job, or `.gitattributes` (which
+  # decides the bytes a checkout produces) changes. Specs themselves
+  # are asserted on every PR by the `docs` job above. A skipped leg counts as
+  # passing in `ci-required` (scripts/ci-required-check.mjs), and this job is
+  # not a branch-protection context itself, so the #3506 matrix-name trap does
+  # not apply.
+  #
+  # Runs the generator's tests (golden trees produced by the original shell
+  # version) and `--check`, which on a PR that changes the generator compares
+  # this OS's output with the committed INDEX.md — the shell version's output
+  # until a spec changes it.
+  docs-index:
+    name: specs index (${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_index != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # --check diffs against the PR base.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: generator and classifier tests
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs
+      - name: Specs index is current (changed specs only)
+        run: node scripts/gen-docs-index.mjs --check
+      - name: bash wrapper reaches the same generator
+        shell: bash
+        run: bash scripts/gen-docs-index.sh --check
 
   frontend:
     name: vitest
@@ -603,7 +652,7 @@ jobs:
   # evaluateRequiredJobs already treats `failure` as fatal.
   ci-required:
     name: CI required
-    needs: [changes, docs, rust, frontend]
+    needs: [changes, docs, docs-index, rust, frontend]
     if: always()
     runs-on: ubuntu-latest
     steps:

@@ -131,6 +131,10 @@ run emits ~21 extra status buckets and a different row order than CI's Linux run
 so the regeneration has to happen somewhere that matches CI. That is a real
 constraint this audit did not surface, and it is why the spec's own escape hatch —
 "or explicitly document why more than one is needed" — applies here for now.
+**2026-09-23:** the reproducibility constraint is gone — the generator is now
+`scripts/gen-docs-index.mjs`, checked byte-identical on Linux, macOS and Windows
+in CI (`SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md`). The tooling reasons
+for keeping `docs/specs/archive/` are unchanged.
 
 ### Phase 3 — Auto-generated index (M)
 - Replace hand-maintained `docs/specs/INDEX.md` with a small script that walks `docs/specs/` (post-Phase-1), extracts `Status:`/`Superseded-by:`/date, and regenerates the index — so it's structurally impossible for it to silently go 6 weeks stale the way it did. Run it in CI on any `docs/specs/**` change, or as a pre-commit/pre-PR check.
