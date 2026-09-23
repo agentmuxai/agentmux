@@ -189,8 +189,13 @@ released prompt just started (codex P1 on #3562).
 **A failed write is not an empty queue.** The flush reports one of three outcomes: `Released`,
 `Empty` and `Failed` (e.g. the bounded stdin channel was momentarily full). `Failed` still ends the
 turn, since nothing new started, but the entry stays queued and the watchdog (§4.4.1) retries it.
-A deferred runtime-config restart applies only on `Empty`, since killing the process with an
-entry still queued would strand it.
+A fourth outcome, `Held`, is returned without writing when another writer owns stdin: a spawn in
+flight, a stale-resume retry batch being replayed (possibly into this same live process), or human
+messages queued behind a spawn. Those carry messages accepted earlier, so they must not be
+overtaken. The check lives inside the flush itself, so every release path honours it, the turn
+boundary included (reagent P1 on #3562). `Held` is treated like `Failed`. A deferred
+runtime-config restart applies only on `Empty`, since killing the process with an entry still
+queued would strand it.
 
 #### 4.4.1 The watchdog: when no turn boundary is coming
 

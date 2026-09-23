@@ -715,10 +715,10 @@ impl PersistentSubprocessController {
                                 &block_id_read,
                             );
 
-                            // Only go idle if nothing was released. A FAILED
-                            // write also goes idle — no turn started — but it
-                            // still has an accepted message waiting, which the
-                            // watchdog armed below retries.
+                            // Only go idle if nothing was released. A HELD or
+                            // FAILED flush also goes idle — no turn started — but
+                            // it still has an accepted message waiting, which the
+                            // watchdog armed below finishes once stdin is free.
                             if !matches!(flushed, DeferredFlush::Released(_)) {
                                 health_read.set_active_turn(false);
                             }
@@ -731,8 +731,8 @@ impl PersistentSubprocessController {
                             // loss `restart_when_idle` itself was introduced to
                             // fix (see its doc comment). It stays pending and
                             // applies at the boundary after the queue drains.
-                            // Not on a failed flush either: that entry is still
-                            // queued, and killing the process would strand it.
+                            // Not on a held or failed flush either: that entry is
+                            // still queued, and killing the process would strand it.
                             let deferred = if flushed == DeferredFlush::Empty {
                                 std::mem::replace(&mut locked.restart_when_idle, false)
                             } else {
@@ -756,7 +756,7 @@ impl PersistentSubprocessController {
                                 );
                                 released_deferred_line = Some(line);
                             }
-                            DeferredFlush::Failed => {
+                            DeferredFlush::Held | DeferredFlush::Failed => {
                                 if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
                                     ctrl.ensure_deferred_watchdog();
                                 }

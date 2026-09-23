@@ -3354,3 +3354,45 @@ async fn the_watchdog_task_delivers_after_a_spawn_that_never_starts_a_turn() {
     tokio::time::sleep(DEFERRED_WATCHDOG_TICK * 3).await;
     assert!(!c.inner.lock().unwrap().deferred_watchdog_armed);
 }
+
+/// Reagent P1 on #3562: the turn-boundary flush must honour the same
+/// "another writer owns stdin" rule as the fast path and the watchdog. A
+/// `result` on the live process can land while a stale-resume retry batch
+/// is being replayed into that same channel (`drain_claim`), or while human
+/// messages are queued behind a spawn; writing the deferred message then
+/// would overtake messages accepted before it.
+#[tokio::test]
+async fn a_turn_boundary_holds_the_queue_while_another_writer_owns_stdin() {
+    let cases: [(&str, fn(&mut PersistentInner, bool)); 3] = [
+        ("retry batch being replayed", |i, on| i.drain_claim = on),
+        ("spawn in flight", |i, on| i.spawning_in_progress = on),
+        ("human messages queued", |i, on| {
+            if on {
+                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string()));
+            } else {
+                i.pending_send_messages.clear();
+            }
+        }),
+    ];
+    for (why, set) in cases {
+        let (c, mut rx) = busy_controller();
+        c.send_user_message("automated".to_string()).unwrap();
+        set(&mut c.inner.lock().unwrap(), true);
+
+        let flushed = {
+            let mut inner = c.inner.lock().unwrap();
+            PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+        };
+        assert_eq!(flushed, DeferredFlush::Held, "{why}");
+        assert!(rx.try_recv().is_err(), "must not write: {why}");
+        assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept: {why}");
+
+        // The other writer finishes and the turn it started ends; the
+        // watchdog then releases the held entry.
+        set(&mut c.inner.lock().unwrap(), false);
+        c.health_monitor.set_active_turn(false);
+        let mut orphaned = 0;
+        c.sweep_deferred_once(&mut orphaned);
+        assert!(rx.try_recv().unwrap().contains("automated"), "delivered afterwards: {why}");
+    }
+}
