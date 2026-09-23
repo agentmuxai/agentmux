@@ -84,8 +84,8 @@ Three layers found and fixed in three days, each measured before and after:
 Still open, with numbers, in that last doc's §6: the streaming message's DOM is
 rebuilt per commit (parse is incremental, DOM is not), and pin-to-bottom forces
 layout up to 3× per flush. Re-measure with
-`scripts/ui-screenshots/typing-under-load-experiment.mjs` — it needs no human at
-the keyboard.
+`scripts/ui-screenshots/typing-under-load-experiment.mjs` (#3569) — it needs no
+human at the keyboard.
 
 ### 2.2 Decided but never built
 

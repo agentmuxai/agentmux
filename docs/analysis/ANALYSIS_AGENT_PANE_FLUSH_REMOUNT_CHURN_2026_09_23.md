@@ -32,7 +32,8 @@ a scrollbar with its forced layouts each time. One equality-gated memo fixes it.
 ## 1. What was measured, and how
 
 All numbers come from the running dev build (`main @ 7519f71`, CEF/Chrome 152)
-over CDP, with the four scripts this PR adds under `scripts/ui-screenshots/`:
+over CDP, with the scripts under `scripts/ui-screenshots/` added in #3569
+(split out of this PR so its tooling review doesn't hold up the fix):
 
 | Script | Instrument |
 |---|---|
@@ -203,6 +204,8 @@ length, which is exactly why this run reads worse than the first.
    retry storm in its first minute.
 
 ## 7. How to re-measure
+
+With the scripts from #3569:
 
 ```
 # find the dev page target, then (window must be restored, not minimized):
