@@ -43,7 +43,11 @@ for (const [nid, us] of selfUs) {
   byUrl.set(url || "(native/idle)", (byUrl.get(url || "(native/idle)") || 0) + us);
 }
 const top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
-console.log(`total sampled: ${(total / 1000).toFixed(0)} ms over ${secs}s  -> main-thread busy ≈ ${(100 * total / (Number(secs) * 1e6)).toFixed(0)}%\n`);
+// Busy = every sample except the `(idle)` node; the full sampled duration stays
+// the denominator. (Counting `(idle)` as busy made an idle capture read ~100%.)
+let idleUs = 0;
+for (const [nid, us] of selfUs) if (nodes.get(nid).callFrame.functionName === "(idle)") idleUs += us;
+console.log(`total sampled: ${(total / 1000).toFixed(0)} ms over ${secs}s  -> main-thread busy ≈ ${(100 * (total - idleUs) / Math.max(1, total)).toFixed(0)}% (idle ${(idleUs / 1000).toFixed(0)} ms)\n`);
 console.log("TOP SELF-TIME BY FILE:");
 for (const [k, v] of top(byUrl, 12)) console.log(`  ${(v / 1000).toFixed(0).padStart(6)} ms  ${(100 * v / total).toFixed(1).padStart(5)}%  ${k}`);
 console.log("\nTOP SELF-TIME BY FUNCTION:");

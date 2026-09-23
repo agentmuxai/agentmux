@@ -26,8 +26,9 @@ const focus = await evalIn(`(()=>{const a=document.activeElement;return {tag:a&&
 console.error("focused:", JSON.stringify(focus));
 if (focus.tag !== "TEXTAREA") { console.error("no textarea focused — click into the composer first"); process.exit(2); }
 
-// 2. Arm the recorder.
-await evalIn(`(()=>{const P=window.__synProbe={t0:performance.now(),loafs:[],mut:0,keys:0,inputs:0};
+// 2. Arm the recorder. Snapshot the focused composer's draft + selection so the
+// cleanup below restores it exactly rather than guessing which suffix was ours.
+await evalIn(`(()=>{const a=document.activeElement;const P=window.__synProbe={t0:performance.now(),loafs:[],mut:0,keys:0,inputs:0,draft:{el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd}};
   P.kh=()=>P.keys++; P.ih=()=>P.inputs++;
   document.addEventListener("keydown",P.kh,true); document.addEventListener("input",P.ih,true);
   P.mo=new MutationObserver(m=>P.mut+=m.length); P.mo.observe(document,{subtree:true,childList:true,characterData:true,attributes:true});
@@ -51,9 +52,9 @@ for (let i = 0; i < n; i++) {
 }
 await new Promise((r) => setTimeout(r, 800)); // let the tail settle
 
-// 4. Read out + disarm + remove the typed text.
+// 4. Read out + disarm + restore the original draft.
 const out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);
-  const a=document.activeElement; let removed=0; if(a&&a.tagName==="TEXTAREA"){const v=a.value; const m=v.match(/${ch}+$/); if(m){removed=m[0].length; a.value=v.slice(0,-removed); a.dispatchEvent(new Event("input",{bubbles:true}))}}
+  const d=P.draft; const removed=d.el.value.length-d.value.length; d.el.value=d.value; d.el.setSelectionRange(d.start,d.end); d.el.dispatchEvent(new Event("input",{bubbles:true}));
   const L=P.loafs; const scr=l=>l.scripts.reduce((a,s)=>a+s.dur,0); const sum=f=>+L.reduce((a,l)=>a+f(l),0).toFixed(0);
   const q=(arr,p)=>{if(!arr.length)return null;const s=[...arr].sort((x,y)=>x-y);return +s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1)};
   const byInv=new Map(); for(const l of L) for(const s of l.scripts){const k=s.inv+" | "+s.fn+" @ "+s.url+":"+s.line; const v=byInv.get(k)||{n:0,dur:0,fl:0}; v.n++; v.dur+=s.dur; v.fl+=s.fl; byInv.set(k,v)}

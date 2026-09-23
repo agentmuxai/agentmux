@@ -81,6 +81,9 @@ if (!(await focusComposer(typeInto))) {
   process.exit(3);
 }
 log(`B) ${secs}s streaming + synthetic typing into ${typeInto} at ${kps}/s`);
+// Snapshot the composer's draft + selection so cleanup restores it exactly,
+// rather than guessing which trailing characters were ours.
+await evalIn(`(()=>{const a=document.activeElement;window.__expDraft=a&&a.tagName==="TEXTAREA"?{el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd}:null;return true})()`);
 await evalIn(ARM);
 const n = secs * kps, interval = 1000 / kps, kc = ch.toUpperCase().charCodeAt(0), t0 = Date.now();
 for (let i = 0; i < n; i++) {
@@ -93,7 +96,7 @@ for (let i = 0; i < n; i++) {
 const remaining = t0 + secs * 1000 - Date.now();
 if (remaining > 0) await sleep(remaining);
 results.B_streaming_plus_typing = await evalIn(READ);
-// clean up typed text
-await evalIn(`(()=>{const a=document.activeElement;if(a&&a.tagName==="TEXTAREA"){const m=a.value.match(/${ch}+$/);if(m){a.value=a.value.slice(0,-m[0].length);a.dispatchEvent(new Event("input",{bubbles:true}))}}return true})()`);
+// Restore the composer's original draft and selection exactly.
+await evalIn(`(()=>{const d=window.__expDraft;if(d&&d.el){d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}))}delete window.__expDraft;return true})()`);
 ws.close();
 console.log(JSON.stringify(results, null, 1));
