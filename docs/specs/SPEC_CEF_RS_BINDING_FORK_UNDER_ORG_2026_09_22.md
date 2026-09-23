@@ -1,7 +1,7 @@
 # SPEC — Own the `cef-dll-sys` binding fork: `agentmuxai/cef-rs`
 
 **Date:** 2026-09-22
-**Status:** implemented — fork created and populated 2026-09-22, workspace repointed in this PR
+**Status:** implemented in #3547 — fork created and populated 2026-09-22, workspace repointed there
 **Author:** AgentY
 **Related:**
 `Cargo.toml` (`[patch.crates-io]`, the single pin this spec is about),
