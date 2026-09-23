@@ -1284,6 +1284,7 @@ impl Store {
             // Identity M4a: also read before the DELETE.
             tombstone_key_names(&conn, id)?;
             purge_name_keyed_keys(&conn, id)?;
+            adopt_children_of(&conn, id)?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed
@@ -2266,6 +2267,7 @@ impl Store {
             // Identity M4a: read the names before the row goes.
             tombstone_key_names(&conn, id)?;
             purge_name_keyed_keys(&conn, id)?;
+            adopt_children_of(&conn, id)?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and
@@ -2394,11 +2396,11 @@ impl Store {
                 // the older row. Never a fork: a fork is launched under its
                 // own row id, so a fork reached here is a stale stamp. And
                 // the row must still relate to what the block names —
-                // launched from it, one hop from it, or orphaned: it *had*
-                // an ancestor, since deleted (as a promoted clone can be). A
-                // row with no ancestor at all (`parent_template_id` empty, a
-                // plain agent) is not orphaned (ReAgent P0 on #3576) — so a
-                // stale stamp naming an unrelated agent cannot select it.
+                // launched from it, or one hop from it — so a stale stamp
+                // naming an unrelated agent cannot select it (ReAgent P0/P1
+                // on #3576). Deletion keeps that lineage intact: deleting an
+                // intermediate row re-parents its children
+                // (`adopt_children_of`).
                 // Recorded: a legacy continuation stamp naming an id that
                 // never had a row (m0025 keyed chains to their root) resolves
                 // to nothing, not to the root — nothing distinguishes it from
@@ -2411,9 +2413,7 @@ impl Store {
                             OR a.parent_template_id IN (
                                 SELECT id FROM db_agents
                                 WHERE parent_template_id = ?3 AND is_template = 0 AND branch_label = '')
-                            OR (a.parent_template_id != ''
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM db_agents p WHERE p.id = a.parent_template_id)))
+                            )
                        AND NOT EXISTS (
                            SELECT 1 FROM db_agents b
                            WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
@@ -2635,6 +2635,26 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         )?;
     }
     Ok(())
+}
+
+/// Before `id`'s row is deleted, hand its children to its own parent:
+/// every row whose `parent_template_id` is `id` gets `id`'s
+/// `parent_template_id` instead. Only when that is non-empty — deleting a
+/// template or a plain agent (no parent) leaves its children pointing at the
+/// deleted id, which is how a block naming a removed template still finds
+/// its launches. The case this exists for: the template-promotion migration
+/// repointed launch rows to a promoted clone, whose own parent is the
+/// template; deleting the clone would otherwise strand those rows' lineage,
+/// and a pane naming the template could no longer resolve its launch
+/// (Codex P1 on #3576). Idempotent; a missing row does nothing.
+fn adopt_children_of(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
+    Ok(conn.execute(
+        "UPDATE db_agents
+         SET parent_template_id = (SELECT parent_template_id FROM db_agents WHERE id = ?1)
+         WHERE parent_template_id = ?1 AND id != ?1
+           AND COALESCE((SELECT parent_template_id FROM db_agents WHERE id = ?1), '') != ''",
+        params![id],
+    )?)
 }
 
 /// Whether any row other than `id` holds `folded` as its slug, folded as the
