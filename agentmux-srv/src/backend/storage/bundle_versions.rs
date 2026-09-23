@@ -51,6 +51,12 @@ pub struct BundleVersion {
     /// `source: "human"`), so it alone cannot answer "who actually made
     /// this change" — this field is what a reviewer should trust for that.
     pub written_by: String,
+    /// Identity M4c-1 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): the writer's UID beside `written_by`, taken from the
+    /// request's `Caller` — its `X-Agent-Token` — never from a body field.
+    /// Empty = unknown: an Unattributed write, the Armory UI, a seeder.
+    /// Dual-written; nothing branches on it.
+    pub written_by_uid: String,
     pub created_at: i64,
 }
 
@@ -64,6 +70,8 @@ pub struct BundleVersionSummary {
     pub source: String,
     pub source_detail: String,
     pub written_by: String,
+    /// See [`BundleVersion::written_by_uid`].
+    pub written_by_uid: String,
     pub created_at: i64,
 }
 
@@ -93,6 +101,7 @@ pub(crate) fn content_hash(name: &str, instructions: &str) -> String {
 /// parent-chain-lookup + INSERT SQL in two places. `pub(crate)`, not
 /// private: `bundles.rs` is a sibling module in this same crate, not this
 /// one.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn bundle_version_insert_tx(
     tx: &rusqlite::Transaction,
     bundle_id: &str,
@@ -101,6 +110,7 @@ pub(crate) fn bundle_version_insert_tx(
     source: &str,
     source_detail: &str,
     written_by: &str,
+    written_by_uid: &str,
 ) -> Result<BundleVersion, StoreError> {
     let id = uuid::Uuid::new_v4().to_string();
     let hash = content_hash(name, instructions);
@@ -120,8 +130,8 @@ pub(crate) fn bundle_version_insert_tx(
     };
     tx.execute(
         "INSERT INTO db_bundle_versions
-             (id, bundle_id, name, instructions, content_hash, parent_version_id, source, source_detail, written_by, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (id, bundle_id, name, instructions, content_hash, parent_version_id, source, source_detail, written_by, created_at, written_by_uid)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             id,
             bundle_id,
@@ -133,6 +143,7 @@ pub(crate) fn bundle_version_insert_tx(
             source_detail,
             written_by,
             created_at,
+            written_by_uid,
         ],
     )?;
 
@@ -146,6 +157,7 @@ pub(crate) fn bundle_version_insert_tx(
         source: source.to_string(),
         source_detail: source_detail.to_string(),
         written_by: written_by.to_string(),
+        written_by_uid: written_by_uid.to_string(),
         created_at,
     })
 }
@@ -175,7 +187,8 @@ impl Store {
     ) -> Result<BundleVersion, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let version = bundle_version_insert_tx(&tx, bundle_id, name, instructions, source, source_detail, written_by)?;
+        // No `Caller` reaches this standalone path, so no writer UID.
+        let version = bundle_version_insert_tx(&tx, bundle_id, name, instructions, source, source_detail, written_by, "")?;
         tx.commit()?;
         Ok(version)
     }
@@ -194,7 +207,7 @@ impl Store {
     pub fn bundle_version_list(&self, bundle_id: &str) -> Result<Vec<BundleVersionSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, content_hash, parent_version_id, source, source_detail, written_by, created_at
+            "SELECT id, content_hash, parent_version_id, source, source_detail, written_by, created_at, written_by_uid
              FROM db_bundle_versions
              WHERE bundle_id = ?1
              ORDER BY created_at DESC, rowid DESC",
@@ -209,6 +222,7 @@ impl Store {
                     source_detail: row.get(4)?,
                     written_by: row.get(5)?,
                     created_at: row.get(6)?,
+                    written_by_uid: row.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -223,7 +237,7 @@ impl Store {
     pub fn bundle_version_get(&self, version_id: &str) -> Result<Option<BundleVersion>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, bundle_id, name, instructions, content_hash, parent_version_id, source, source_detail, written_by, created_at
+            "SELECT id, bundle_id, name, instructions, content_hash, parent_version_id, source, source_detail, written_by, created_at, written_by_uid
              FROM db_bundle_versions
              WHERE id = ?1",
         )?;
@@ -239,6 +253,7 @@ impl Store {
                 source_detail: row.get(7)?,
                 written_by: row.get(8)?,
                 created_at: row.get(9)?,
+                written_by_uid: row.get(10)?,
             })
         }) {
             Ok(v) => Ok(Some(v)),

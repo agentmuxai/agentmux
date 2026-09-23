@@ -96,6 +96,13 @@ pub struct WorkItem {
     pub max_attempts: i64,
     #[serde(default)]
     pub created_by: String,
+    /// Identity M4c-1 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): the enqueuer's UID, taken from the request's `Caller` — its
+    /// `X-Agent-Token` — never from a body field. Empty = the enqueue was
+    /// Unattributed; never guessed. Dual-written beside `created_by`;
+    /// nothing branches on it.
+    #[serde(default)]
+    pub created_by_uid: String,
     pub created_at: i64,
     pub updated_at: i64,
     /// ms epoch; not claimable before this. `None` = claimable immediately.
@@ -142,6 +149,7 @@ fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
         attempts: row.get("attempts")?,
         max_attempts: row.get("max_attempts")?,
         created_by: row.get("created_by")?,
+        created_by_uid: row.get("created_by_uid")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         not_before: row.get("not_before")?,
@@ -152,7 +160,7 @@ fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
 const COLS: &str = "id, title, payload, kind, target_agent, target_group, priority, state, \
                     claimed_by, claim_expires, attempts, max_attempts, created_by, \
                     created_at, updated_at, not_before, result, \
-                    target_agent_uid, claimed_by_uid";
+                    target_agent_uid, claimed_by_uid, created_by_uid";
 
 impl Store {
     /// Insert a new `open` item. `id` is caller-supplied so an enqueue can be
@@ -165,14 +173,14 @@ impl Store {
                 (id, title, payload, kind, target_agent, target_group, priority, state,
                  claimed_by, claim_expires, attempts, max_attempts, created_by,
                  created_at, updated_at, not_before, result,
-                 target_agent_uid, claimed_by_uid)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'')",
+                 target_agent_uid, claimed_by_uid, created_by_uid)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'',?19)",
             params![
                 item.id, item.title, item.payload, item.kind, item.target_agent,
                 item.target_group, item.priority, work_state::OPEN, "",
                 None::<i64>, 0i64, if item.max_attempts > 0 { item.max_attempts } else { 3 },
                 item.created_by, item.created_at, item.updated_at, item.not_before, "",
-                item.target_agent_uid,
+                item.target_agent_uid, item.created_by_uid,
             ],
         )?;
         Ok(())
@@ -483,6 +491,7 @@ mod tests {
             attempts: 0,
             max_attempts: 3,
             created_by: "tester".into(),
+            created_by_uid: String::new(),
             created_at: 1000,
             updated_at: 1000,
             not_before: None,
@@ -526,6 +535,41 @@ mod tests {
         assert_eq!(claimed.claimed_by, "agenty-2");
         assert_eq!(claimed.claimed_by_uid, "4f3c-a91");
         assert_eq!(claimed.target_agent_uid, "4f3c-a91");
+    }
+
+    /// Identity M4c-1: the enqueuer's UID is stored beside `created_by` and
+    /// read back by every read path (get, claim's RETURNING, list).
+    #[test]
+    fn created_by_uid_round_trips_through_enqueue_claim_and_list() {
+        let (s, _d) = store();
+        let mut w = item("w-cbu", "attributed");
+        w.created_by_uid = "uid-enqueuer".into();
+        s.work_queue_enqueue(&w).unwrap();
+        let mut later = item("w-cbu-none", "unattributed");
+        later.created_at = 1001;
+        s.work_queue_enqueue(&later).unwrap();
+
+        let stored = s.work_queue_get("w-cbu").unwrap().unwrap();
+        assert_eq!(stored.created_by, "tester");
+        assert_eq!(stored.created_by_uid, "uid-enqueuer");
+        assert_eq!(
+            s.work_queue_get("w-cbu-none")
+                .unwrap()
+                .unwrap()
+                .created_by_uid,
+            ""
+        );
+
+        let claimed = s
+            .work_queue_claim(&any("a1"), 2000, 60_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.id, "w-cbu");
+        assert_eq!(claimed.created_by_uid, "uid-enqueuer");
+        let listed = s.work_queue_list("", 10).unwrap();
+        assert!(listed
+            .iter()
+            .any(|i| i.id == "w-cbu" && i.created_by_uid == "uid-enqueuer"));
     }
 
     /// Identity M3: an item addressed by UID is claimable by the agent with
