@@ -2999,6 +2999,35 @@ async fn a_stop_request_gates_deferred_writes_into_the_dying_process() {
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept for the next process");
 }
 
+/// Reagent P1 on #3562: an IDLE agent whose kill was requested must defer an
+/// automated send, not refuse it. `restart_pending` and a spawn in flight
+/// already do. Once the process has actually exited (`stdin_tx` cleared),
+/// the ordinary no-process rules apply again: a send fails into the caller's
+/// respawn fallback, and the watchdog's grace window runs, delivering after a
+/// respawn or reporting, never parking forever.
+#[tokio::test]
+async fn an_idle_agent_being_stopped_defers_until_the_process_is_gone() {
+    let (c, mut rx) = idle_controller();
+    let (kill_tx, _kill_rx) = tokio::sync::oneshot::channel();
+    c.inner.lock().unwrap().kill_tx = Some(kill_tx);
+    c.stop_process(true).unwrap();
+
+    c.send_user_message("while dying".to_string()).unwrap();
+    assert!(rx.try_recv().is_err(), "nothing written into the dying process");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "deferred, not refused");
+
+    // The process exits.
+    c.inner.lock().unwrap().stdin_tx = None;
+    let err = c.send_user_message("after exit".to_string()).unwrap_err();
+    assert!(err.contains("not running"), "the respawn fallback's error: {err}");
+
+    let mut orphaned = 0;
+    for _ in 1..DEFERRED_ORPHAN_GRACE_TICKS {
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    }
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Exit, "reported, not parked");
+}
+
 /// The §4.2 race, with real threads: concurrent senders hitting a busy
 /// controller must all be accounted for — none written through, none lost
 /// between the turn-state check and the enqueue.

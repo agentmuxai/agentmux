@@ -53,8 +53,9 @@ impl PersistentSubprocessController {
             return Err("persistent process is restarting for a config change — try again shortly".to_string());
         }
         // Likewise once a kill has been requested: the process is going down
-        // and a line written now dies with it (see `stop_pending`).
-        if inner.stop_pending {
+        // and a line written now dies with it (see `stop_pending`). Once it
+        // has exited, "not running" below is the accurate answer.
+        if inner.stop_pending && inner.stdin_tx.is_some() {
             return Err("persistent process is stopping — try again shortly".to_string());
         }
         let tx = inner
@@ -246,9 +247,17 @@ impl PersistentSubprocessController {
     /// process is about to be killed, and it stays down until the next message
     /// respawns it. The queue is kept for that replacement, and the watchdog
     /// must not count this window toward reporting it stranded.
+    ///
+    /// A requested kill (`stop_pending`) means wait too, but only while the
+    /// dying process still holds `stdin_tx`: writes are refused then, and a
+    /// refusal must not reach an automated caller as an error (reagent P1 on
+    /// #3562). Once it exits, the ordinary no-process rules apply. A send
+    /// fails into the caller's respawn fallback, and the watchdog's grace
+    /// window runs, so nothing parks unreported behind a stop.
     pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
         self.health_monitor.is_active_turn()
             || inner.restart_pending
+            || (inner.stop_pending && inner.stdin_tx.is_some())
             || Self::stdin_owned_by_another_writer(inner)
     }
 
