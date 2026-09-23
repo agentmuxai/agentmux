@@ -229,9 +229,12 @@ fn require_local_agent_row(mstore: &Store, agent_id: &str) -> Result<(), String>
 /// `agent_id` on `block_id` — a lifecycle-only update, never
 /// `instance_create` with a fresh record (whose fold would blank the agent's
 /// account, bundle and workspace) — and stamp the block with the row id.
-/// Best-effort: a failure is logged, never fails the open; for a user agent
-/// the block's `agentId` already names its row.
-fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) {
+/// A row that is gone (the agent deleted mid-open — the delete handlers do
+/// not take `AGENT_OPEN_LOCKS`) or a failed write **fails the open**: the
+/// spawn would otherwise resolve to nothing, tokenless and past the
+/// credential gate (Codex P1 on #3584). A failed stamp is only logged — for a
+/// user agent the block's `agentId` already names its row.
+fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) -> Result<(), String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -249,16 +252,17 @@ fn record_agent_open_launch(mstore: &Store, agent_id: &str, block_id: &str) {
             }
         }
         Ok(false) => {
-            tracing::warn!(
-                agent_id,
-                block_id,
-                "agent.open: no local row to record the launch on"
-            );
+            return Err(format!(
+                "AGENT_ROW_UNAVAILABLE: agent '{agent_id}' has no local row to record the launch on (deleted?) — not started"
+            ));
         }
         Err(e) => {
-            tracing::warn!(agent_id, block_id, error = %e, "agent.open: recording the launch failed");
+            return Err(format!(
+                "AGENT_ROW_UNAVAILABLE: recording the launch of agent '{agent_id}' failed ({e}) — not started"
+            ));
         }
     }
+    Ok(())
 }
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -367,7 +371,7 @@ pub(crate) async fn open_agent_impl(
                         // block (Codex P2 on #3584). Only on this branch's
                         // resync, never for a pane that is already live.
                         if is_user_agent {
-                            record_agent_open_launch(&mstore, &agent.id, &existing.oid);
+                            record_agent_open_launch(&mstore, &agent.id, &existing.oid)?;
                         }
                         // Register controller
                         let block_for_resync = mstore.must_get::<Block>(&existing.oid)
@@ -836,7 +840,7 @@ pub(crate) async fn open_agent_impl(
                 // it, and that capture finds the row by block (Codex P2 on
                 // #3584).
                 if is_user_agent {
-                    record_agent_open_launch(&mstore, &agent.id, &block_id);
+                    record_agent_open_launch(&mstore, &agent.id, &block_id)?;
                 }
 
                 // 9. Register controller (resync)
@@ -1484,6 +1488,22 @@ mod record_agent_open_launch_tests {
         assert!(require_local_agent_row(&store, "agent-here").is_ok());
     }
 
+    /// Codex P1 on #3584: an agent deleted between the row check and the
+    /// record (the delete handlers do not take the open lock) fails the open
+    /// rather than spawning a block that names a missing row.
+    #[test]
+    fn an_open_whose_agent_was_deleted_mid_open_is_refused() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = test_agent_def("agent-gone-mid", "GoneMid", "claude", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        assert!(require_local_agent_row(&store, "agent-gone-mid").is_ok());
+        assert!(store.agent_def_delete("agent-gone-mid").unwrap());
+        let err =
+            record_agent_open_launch(&store, "agent-gone-mid", &uuid::Uuid::new_v4().to_string())
+                .unwrap_err();
+        assert!(err.starts_with("AGENT_ROW_UNAVAILABLE"), "{err}");
+    }
+
     #[test]
     fn an_agent_open_launch_is_recorded_stamped_and_resolves() {
         let store = Store::open_in_memory().unwrap();
@@ -1506,7 +1526,7 @@ mod record_agent_open_launch_tests {
         };
         store.insert(&mut block).unwrap();
 
-        record_agent_open_launch(&store, "agent-open-x", &block_id);
+        record_agent_open_launch(&store, "agent-open-x", &block_id).unwrap();
 
         let stamped: Block = store.must_get(&block_id).unwrap();
         assert_eq!(
