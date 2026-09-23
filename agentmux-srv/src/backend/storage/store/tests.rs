@@ -2038,6 +2038,55 @@
         }
     }
 
+    /// A fork of `source`, launched on `block_id`: `forkagentdefinition`
+    /// stores the source in `parent_template_id` and always sets a
+    /// non-empty `branch_label` — the discriminator from a template launch.
+    fn fork_launched_on(store: &Store, agents_root: &Path, source: &str, id: &str, block_id: &str) {
+        let mut fork = sample_agent(id, id);
+        fork.parent_id = source.to_string();
+        fork.branch_label = "fork".to_string();
+        store.agent_def_insert(&mut fork).unwrap();
+        let mut inst = make_named_inst(&format!("inst-{id}"), id, agents_root);
+        inst.definition_id = id.to_string();
+        inst.block_id = block_id.to_string();
+        store.instance_create(&inst).unwrap();
+    }
+
+    /// Codex P1 on #3576: a fork's `parent_template_id` is its source, not a
+    /// template, so fork lineage must not satisfy the fallback — neither a
+    /// fork of the deleted agent a block names, nor (one hop) a fork of an
+    /// agent launched from the template a block names. Unstamped, and with
+    /// the fork's id left in the stamp by pane reuse.
+    #[test]
+    fn fork_lineage_never_satisfies_the_block_fallback() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        // A fork of user agent B sits stale on the block; B is deleted.
+        store.agent_def_insert(&mut sample_agent("agent-src-b", "agent-src-b")).unwrap();
+        fork_launched_on(&store, &agents_root, "agent-src-b", "agent-fork-b", "block-fork");
+        assert!(store.agent_def_delete("agent-src-b").unwrap());
+        // A fork of an agent launched from template T sits stale on another.
+        let mut tpl = sample_agent("tpl-forked", "tpl-forked");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let from_tpl = launch_from_template_on(&store, &agents_root, "tpl-forked", "inst-maks", "block-elsewhere-2");
+        fork_launched_on(&store, &agents_root, &from_tpl, "agent-fork-t", "block-fork-t");
+
+        for (block, names, fork) in [
+            ("block-fork", "agent-src-b", "agent-fork-b"),
+            ("block-fork-t", "tpl-forked", "agent-fork-t"),
+        ] {
+            for stamped in [None, Some(fork)] {
+                block_showing_stamped(&store, block, Some(names), stamped);
+                assert!(
+                    store.instance_get_active_for_block(block).unwrap().is_none(),
+                    "{block} naming {names}, stamped={stamped:?}: must not resolve to the fork"
+                );
+                store.delete::<crate::backend::obj::Block>(block).ok();
+            }
+        }
+    }
+
     /// A block whose meta names no agent at all keeps today's fallback: the
     /// agent whose latest launch is on it (a block from before `agentId`).
     #[test]
