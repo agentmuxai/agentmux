@@ -24,8 +24,8 @@ Patches live in the AgentMux fork of CEF:
   commit on the now-dead feature branch, which contradicts the branch above.
   Capture the SHA at build time (`git rev-parse --short HEAD`) and record it in
   the release notes — see CEF_FORK_MAINTENANCE.md §8 (P1).
-- **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` — adds `begin_window_drag` field to `_cef_window_t` in the linux_x86_64 binding
-- **Workspace patch in `Cargo.toml`:** `[patch.crates-io] cef-dll-sys = { git = "…AgentU-asaf/cef-rs", rev = "515b3ac5…" }`
+- **Rust binding:** `agentmuxai/cef-rs@agentmux/148-begin-window-drag` — adds `begin_window_drag` field to `_cef_window_t` in the linux_x86_64 binding (the org fork; the 152 branch the workspace pins today is `agentmux/fix-links-collision-152` on the same repo — see `SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md`)
+- **Workspace patch in `Cargo.toml`:** `[patch.crates-io] cef-dll-sys = { git = "…agentmuxai/cef-rs", rev = "<pinned rev>" }` — read the rev from the root `Cargo.toml`, not from here
 
 > **Annotation history:** `BeginWindowDrag` was annotated `added=14600` on the old CEF 146 branch, then briefly changed to `added=NEXT` during the 148 port (this caused a CppToC type-tag mismatch making all drags silently no-op), then corrected to `added=14800`. The current branch has the correct `added=14800` annotation.
 
