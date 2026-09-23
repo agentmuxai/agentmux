@@ -171,11 +171,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
     // Identity M4b-3: a launch that aborted (its row could not be recorded).
     const [launchError, setLaunchError] = createSignal<string | null>(null);
+    // Taken after every launch attempt, so a later attempt that did not
+    // abort clears the notice instead of leaving it up (review of #3583).
     const takeLaunchError = () => {
-        if (props.model.launchError) {
-            setLaunchError(props.model.launchError);
-            props.model.launchError = null;
-        }
+        setLaunchError(props.model.launchError);
+        props.model.launchError = null;
     };
     // Filter-bar query (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) —
     // narrows MyAgentsList only, not the template grid below it (Q1,
