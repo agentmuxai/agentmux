@@ -1,7 +1,8 @@
 # Typing should go into a pane the moment it opens (editor + terminal)
 
-**Status:** proposed — problem confirmed in code, design not yet agreed, nothing
-implemented.
+**Status:** active — terminal pane creation implemented in #TBD (§9), using a
+narrower fix than the shared-contract Option B this spec recommends. Editor,
+agent, and tab-switching (§4's "probably in") remain unimplemented.
 **Date:** 2026-09-16
 **Severity:** Medium — no data is lost, but every new editor or terminal pane
 costs the user a mouse trip before it can be typed into, on the app's two most
@@ -249,3 +250,57 @@ They are independent:
 - **Q5.** How long should a retry persist before giving up, and should it be
   bounded by attempts or by the block's mount signal? A timer would be a poor
   fit — the registry already knows when a block component mounts.
+
+## 9. What shipped for the terminal — a narrower fix than §3's Option B
+
+Landed only the terminal half, and via a smaller change than the
+recommended shared-contract retry (§3 Option B). Recorded here rather than
+silently deviating from the spec's own recommendation.
+
+### 9.1 Why terminal-only
+
+Reported directly: opening a terminal pane via the "+" picker and typing
+immediately sent every keystroke nowhere — confirmed live, not assumed
+(`document.activeElement` stayed on `<body>` after the pane opened;
+calling `terminal.focus()` by hand fixed it instantly). This is exactly
+§2b/§2d's diagnosis: the terminal's own `giveFocus()` already works once
+called, and §2d's "the creation path never reaches the contract at all"
+is the actual cause. Editor and agent panes have the same underlying gap
+(§2c) but weren't the reported symptom, and fixing them means actually
+implementing their stubbed `giveFocus()` bodies — separate, real work
+this pass didn't do.
+
+### 9.2 The fix
+
+`term.tsx`'s own `onMount` already had a mechanism for exactly this
+shape — `if (wasFocused) setTimeout(() => model.giveFocus(), 10)` — but
+gated behind `model.termRef.current != null`, which was written for one
+purpose only (preserve focus across a *remount* of an already-existing
+pane) and accidentally excluded the *first* construction, which is
+precisely §2d's creation path. `model.nodeModel.isFocused()` alone —
+without the null check — is true in both cases: on a remount that
+preserves existing focus (the original case), and on first creation,
+since `createBlock()` already inserts the new layout node with
+`focused: true` before `onMount` ever runs. Dropping the guard was the
+entire change; the retry timing, the `giveFocus()` call, and its
+`searchAtoms.isOpen()` guard were already correct and untouched.
+
+This is deliberately **not** §3's Option B (a tri-state
+`giveFocus()`/`focusWhenReady()` contract retried from the three shared
+call sites). That's the right long-term shape for covering editor, agent,
+and tab-switching in one mechanism — but it touches focus code shared by
+every pane type, and §3 itself flags real unresolved risk there (not
+stealing focus per §5, Q1's tri-state-vs-promise choice, Q5's
+retry-bound question). The terminal's own creation gap had a genuinely
+narrower, already-correct-elsewhere fix available, confirmed live to
+work, that doesn't touch anything shared. Recommending Option B still
+stands for §4's remaining scope; this section is not an argument against
+it.
+
+### 9.3 What's still open
+
+Editor and agent panes remain stubbed exactly as §2c describes — opening
+either and typing immediately still drops keystrokes into the dummy
+focus element. Tab-switch focus restoration (§4's "probably in", Q2) is
+untouched. §3's Option B is still the right design for closing those
+in one pass rather than three more narrow, per-view patches.
