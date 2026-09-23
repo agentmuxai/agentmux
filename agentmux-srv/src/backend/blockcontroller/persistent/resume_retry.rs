@@ -243,10 +243,43 @@ impl PersistentSubprocessController {
             }
         }
         let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
-            // Nothing to retry at all (shouldn't happen in practice —
-            // the batch always has at least the triggering message) —
-            // but if it ever does, this is a no-op, not a launch, so any
-            // held error line must still reach the user.
+            // Nothing to retry: `--resume <sid>` was attempted with nothing
+            // queued — the eager-resume path (issue #3463) — and the CLI
+            // rejected the id before any prompt arrived. There is no
+            // message to re-send, so this is a terminal idle-resume
+            // failure, not a retry. Codex P1 on PR #3538: returning here
+            // as before left the pane in "Reconnecting…" for good and never
+            // published a controller status, because the process-waiter
+            // hands `FireRetry` (not `PublishDone`) to this function on the
+            // assumption that a launch follows. Complete the recovery
+            // *decision* without a launch:
+            //
+            // - adopt whatever `find_recovery_session_id` found (or `None`)
+            //   so the NEXT message resumes it through the same gated,
+            //   tracked `--resume` a first-time resume gets — its outcome
+            //   (`Resumed`/`Fresh`) is emitted then, by the CLI's actual
+            //   confirmation, never claimed here (codex P1 on PR #2693);
+            // - resolve "Reconnecting…" now, since nothing downstream will;
+            // - publish the same terminal status a `PublishDone` exit would,
+            //   unless a newer generation already raced in — then that
+            //   process owns the status and this one must not stamp `done`
+            //   over it.
+            let publish_done = {
+                let mut inner = self.inner.lock().unwrap();
+                inner.session_id = recovered.clone();
+                let idle = inner.stdin_tx.is_none() && !inner.spawning_in_progress;
+                if idle {
+                    Self::set_status(&mut inner, STATUS_DONE);
+                }
+                idle
+            };
+            if recovered.is_some() {
+                // The `None` arm above already resolved it alongside `Fresh`.
+                publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
+            }
+            if publish_done {
+                self.publish_status();
+            }
             if let Some(line) = held_error_line {
                 self.flush_error_line_now(line);
             }
