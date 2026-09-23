@@ -704,50 +704,24 @@ impl PersistentSubprocessController {
                         // this exists to prevent. The next queued message goes
                         // out on *that* new turn's own `result` frame.
                         //
-                        // When one is released, `turn_active` deliberately
-                        // stays true: the send just started a turn. It only
-                        // goes false when the queue is empty.
-                        let (deferred_restart, flushed) = {
-                            let mut locked = inner_read.lock().unwrap();
-
-                            let flushed = PersistentSubprocessController::flush_one_deferred_locked(
-                                &mut locked,
-                                &block_id_read,
-                            );
-
-                            // Only go idle if nothing was released. A HELD or
-                            // FAILED flush also goes idle — no turn started — but
-                            // it still has an accepted message waiting, which the
-                            // watchdog armed below finishes once stdin is free.
-                            if !matches!(flushed, DeferredFlush::Released(_)) {
-                                health_read.set_active_turn(false);
-                            }
-
-                            // A deferred runtime-config restart waits for a
-                            // boundary with nothing queued. Applying it now
-                            // would `stop_process` the child we just wrote to,
-                            // destroying the message this flush had already
-                            // accepted responsibility for — the same silent
-                            // loss `restart_when_idle` itself was introduced to
-                            // fix (see its doc comment). It stays pending and
-                            // applies at the boundary after the queue drains.
-                            // Not on a held or failed flush either: that entry is
-                            // still queued, and killing the process would strand it.
-                            let deferred = if flushed == DeferredFlush::Empty {
-                                std::mem::replace(&mut locked.restart_when_idle, false)
-                            } else {
-                                false
-                            };
-                            if deferred {
-                                locked.restart_pending = true;
-                            }
-                            (deferred, flushed)
+                        // Which outcomes end the turn, and when the deferred
+                        // restart may apply: see `turn_boundary_locked`.
+                        let boundary = PersistentSubprocessController::turn_boundary_locked(
+                            &mut inner_read.lock().unwrap(),
+                            &health_read,
+                            &block_id_read,
+                            my_generation_read,
+                        );
+                        // `None`: this reader's process has been replaced. Its
+                        // `result` ends nothing the current process is doing,
+                        // so it must not flush into, idle, or restart that
+                        // process (codex P1 on #3562).
+                        let boundary_is_current = boundary.is_some();
+                        let turn_still_active = boundary.as_ref().is_some_and(|b| b.turn_still_active());
+                        let (flushed, deferred_restart) = match boundary {
+                            Some(b) => (b.flushed, b.apply_deferred_restart),
+                            None => (DeferredFlush::Empty, false),
                         };
-
-                        // Whether a deferred message was released decides the
-                        // `turn_active` this tick publishes, below — releasing
-                        // one keeps the turn alive.
-                        let released_deferred = matches!(flushed, DeferredFlush::Released(_));
                         match flushed {
                             DeferredFlush::Released(line) => {
                                 tracing::info!(
@@ -778,7 +752,7 @@ impl PersistentSubprocessController {
                         // unrelated status change (or process exit) — see
                         // send_message's matching publish_status() call for
                         // the turn-start side of this pair.
-                        if let Some(ref broker) = broker_read {
+                        if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
                             let status = {
                                 let locked = inner_read.lock().unwrap();
                                 BlockControllerRuntimeStatus {
@@ -792,12 +766,13 @@ impl PersistentSubprocessController {
                                     spawn_ts_ms: None,
                                     is_agent_pane: true,
                                     // NOT unconditionally false: if a deferred
-                                    // message was just released, the turn is
-                                    // still running and publishing "idle" here
+                                    // message was just released, or an earlier
+                                    // writer's prompt is still running (`Held`),
+                                    // the turn is live and publishing "idle" here
                                     // would hand subscribers (the Swarm badge,
                                     // `trackTurnJustEnded`) a bogus end-of-turn
                                     // for a turn that is actively in flight.
-                                    turn_active: released_deferred,
+                                    turn_active: turn_still_active,
                                 }
                             };
                             super::super::publish_controller_status(broker, &status);

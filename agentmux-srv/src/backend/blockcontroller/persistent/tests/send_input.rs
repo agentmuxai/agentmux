@@ -3396,3 +3396,101 @@ async fn a_turn_boundary_holds_the_queue_while_another_writer_owns_stdin() {
         assert!(rx.try_recv().unwrap().contains("automated"), "delivered afterwards: {why}");
     }
 }
+
+// ── Turn-boundary decision (`turn_boundary_locked`) ──────────────────
+
+fn boundary(c: &PersistentSubprocessController, generation: u64) -> Option<TurnBoundary> {
+    PersistentSubprocessController::turn_boundary_locked(
+        &mut c.inner.lock().unwrap(),
+        &c.health_monitor,
+        "block",
+        generation,
+    )
+}
+
+/// Codex P1 on #3562: a `result` buffered from a REPLACED process must not
+/// act on the current one. The flush writes to the current `stdin_tx`, so it
+/// would inject into the replacement's running turn, and the idle flip and
+/// deferred restart would hit that process too.
+#[tokio::test]
+async fn a_result_from_a_replaced_process_touches_nothing() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("queued".to_string()).unwrap();
+    let current = {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawn_generation = 2;
+        inner.restart_when_idle = true;
+        inner.spawn_generation
+    };
+
+    assert_eq!(boundary(&c, current - 1), None);
+
+    assert!(rx.try_recv().is_err(), "nothing injected into the replacement");
+    assert!(c.health_monitor.is_active_turn(), "the replacement's turn is still running");
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.deferred_deliveries.len(), 1, "the queue waits for the real boundary");
+    assert!(inner.restart_when_idle, "the deferred restart is not consumed");
+    assert!(!inner.restart_pending);
+}
+
+/// Codex P1 on #3562: `Held` keeps the turn active. The earlier writer's
+/// prompt is still running or about to, and the drain does not re-mark the
+/// turn active, so going idle would let the watchdog write mid-turn the
+/// moment that writer released its claim.
+#[tokio::test]
+async fn a_held_boundary_keeps_the_turn_active_until_the_earlier_writers_own_result() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("automated".to_string()).unwrap();
+    c.inner.lock().unwrap().drain_claim = true;
+    let generation = c.inner.lock().unwrap().spawn_generation;
+
+    let b = boundary(&c, generation).unwrap();
+    assert_eq!(b.flushed, DeferredFlush::Held);
+    assert!(c.health_monitor.is_active_turn(), "must stay active on Held");
+
+    // The replay releases its claim while its prompt is still running: the
+    // watchdog must not write.
+    c.inner.lock().unwrap().drain_claim = false;
+    let mut orphaned = 0;
+    c.sweep_deferred_once(&mut orphaned);
+    assert!(rx.try_recv().is_err(), "no write while the replayed prompt runs");
+
+    // That prompt's own `result` is the boundary that releases it.
+    let b = boundary(&c, generation).unwrap();
+    assert!(matches!(b.flushed, DeferredFlush::Released(_)));
+    assert!(rx.try_recv().unwrap().contains("automated"));
+}
+
+/// The remaining outcomes: `Empty` and `Failed` end the turn; only `Empty`
+/// lets a deferred restart apply; `Released` keeps the turn and defers the
+/// restart.
+#[tokio::test]
+async fn which_boundary_outcomes_end_the_turn_and_apply_the_restart() {
+    // Empty: idle, restart applies.
+    let (c, _rx) = busy_controller();
+    c.inner.lock().unwrap().restart_when_idle = true;
+    let b = boundary(&c, 0).unwrap();
+    assert_eq!(b, TurnBoundary { flushed: DeferredFlush::Empty, apply_deferred_restart: true });
+    assert!(!c.health_monitor.is_active_turn());
+    assert!(c.inner.lock().unwrap().restart_pending);
+
+    // Released: still active, restart waits.
+    let (c, _rx) = busy_controller();
+    c.send_user_message("next".to_string()).unwrap();
+    c.inner.lock().unwrap().restart_when_idle = true;
+    let b = boundary(&c, 0).unwrap();
+    assert!(matches!(b.flushed, DeferredFlush::Released(_)));
+    assert!(!b.apply_deferred_restart);
+    assert!(c.health_monitor.is_active_turn());
+    assert!(c.inner.lock().unwrap().restart_when_idle, "still pending");
+
+    // Failed: idle (nothing started), restart waits (an entry is queued).
+    let (c, _rx) = busy_controller();
+    c.send_user_message("stuck".to_string()).unwrap();
+    c.inner.lock().unwrap().stdin_tx = None;
+    c.inner.lock().unwrap().restart_when_idle = true;
+    let b = boundary(&c, 0).unwrap();
+    assert_eq!(b.flushed, DeferredFlush::Failed);
+    assert!(!b.apply_deferred_restart);
+    assert!(!c.health_monitor.is_active_turn());
+}

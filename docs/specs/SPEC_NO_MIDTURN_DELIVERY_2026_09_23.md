@@ -193,9 +193,17 @@ A fourth outcome, `Held`, is returned without writing when another writer owns s
 flight, a stale-resume retry batch being replayed (possibly into this same live process), or human
 messages queued behind a spawn. Those carry messages accepted earlier, so they must not be
 overtaken. The check lives inside the flush itself, so every release path honours it, the turn
-boundary included (reagent P1 on #3562). `Held` is treated like `Failed`. A deferred
-runtime-config restart applies only on `Empty`, since killing the process with an entry still
-queued would strand it.
+boundary included (reagent P1 on #3562). The watchdog finishes both `Held` and `Failed` entries.
+They differ in turn state: `Failed` ends the turn, since nothing started, but `Held` keeps it
+active, because the earlier writer's prompt is running or about to and the drain that wrote it
+does not re-mark the turn active. Going idle on `Held` would let the watchdog write mid-turn the
+moment that writer released its claim (codex P1 on #3562). A deferred runtime-config restart
+applies only on `Empty`, since killing the process with an entry still queued would strand it.
+
+**Only the current process's `result` is a boundary.** A fallback respawn can install a new
+process before the old stdout reader drains a buffered `result`. The flush writes to the *current*
+stdin, so acting on that stale `result` would inject into the replacement's running turn, mark it
+idle, or restart it. A `result` from a replaced generation does nothing (codex P1 on #3562).
 
 #### 4.4.1 The watchdog: when no turn boundary is coming
 
@@ -256,6 +264,11 @@ Phase 2 is the behavior change. Phases 1 and 3 are safe to land independently.
   visible to whoever sent it.
 - **ACP and Codex are unchanged.** Only the persistent path is gated. ACP still sends immediately
   (§4.6); Codex still relies on its accidental `TurnAlreadyActive` requeue (§6.2).
+- **A `Held` boundary can over-hold.** If a `result` lands in the instant between a drain's last
+  write and its claim release, and that last prompt then produces no `result` of its own (the CLI
+  folded it into the turn that just ended), the turn stays marked active until the next input.
+  This is the safe direction to fail: a deferred message waits longer, and nothing is written
+  mid-turn.
 - **A queued message is not yet visible in the transcript.** The blockfile append happens at
   delivery, so the operator sees the message where the agent actually received it. That is the
   honest rendering, but it means a deferred message is invisible while it waits — §8 Q3.
