@@ -231,6 +231,7 @@ partial list.
 | [`SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14`](SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md) | Agent shell drawer: PSReadLine thaw resize causes a visible ~9px width blip ~300-350ms after open |
 | [`SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10`](SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) | Agent shell drawer: font-size seed race causes zoom jerk on open |
 | [`SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16`](SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md) | SPEC: Agent Startup Sequence |
+| [`SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22`](SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md) | Spec: Promote Agent Stash from a modal to a top-anchored drawer |
 | [`SPEC_AGENT_TOOL_CALL_TONES_2026_06_05`](SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md) | SPEC — Agent tool-call tones (subliminal "talking" voice) |
 | [`SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18`](SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md) | SPEC: Agent turn-phase timeline — unified, replayable phase-history logging + `muxlog phases` |
 | [`SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24`](SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md) | Spec: agent-view.scss Decomposition |
@@ -438,8 +439,10 @@ partial list.
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
 | [`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md) | Report: agent/swarm pane loading, ambient-call flood, and stale status |
 | [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
+| [`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23`](SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) | SPEC: show the provider account's email in the Armory |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
+| [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
@@ -523,7 +526,6 @@ partial list.
 | [`SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24`](SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md) | SPEC: Agent concept consolidation — DRY rethink |
 | [`SPEC_AGENT_DELETE_2026_09_16`](SPEC_AGENT_DELETE_2026_09_16.md) | SPEC: Agent Row Actions Menu — Delete + Duplicate (My Agents picker) |
 | [`SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21`](SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) | Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool |
-| [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) | SPEC — Versioned model dropdowns (CLI-aware), Claude CLI pin-to-latest, single-toggle Log |
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
@@ -532,7 +534,6 @@ partial list.
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
 | [`SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) | SPEC: Agent pane shell drawer — replace the Session/History bar with a process & shell info panel |
-| [`SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22`](SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md) | Spec: Promote Agent Stash from a modal to a top-anchored drawer |
 | [`SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19`](SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md) | SPEC: Agent Waiting Ambient Sound |
 | [`SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21`](SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md) | SPEC: Tool-call bursts restart the agent-pane "Working…" row's type-out reveal |
 | [`SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03`](SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md) | SPEC: `AgentWorkingRow` typography refresh — drop the accent-color text, match the thinking-text font, go bold |
