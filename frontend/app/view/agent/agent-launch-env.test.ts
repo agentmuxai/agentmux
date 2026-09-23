@@ -32,7 +32,12 @@ vi.mock("@/app/store/global", () => ({
     getApi: () => ({ checkNodejsAvailable: (...args: unknown[]) => checkNodejsAvailable(...args) }),
 }));
 
-import { checkNodejsForProvider, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig } from "./agent-launch-env";
+import {
+    checkNodejsForProvider,
+    commitLaunch,
+    resolveEffectiveLaunchProvider,
+    resolveInitialRuntimeConfig,
+} from "./agent-launch-env";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import type { ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
@@ -180,5 +185,77 @@ describe("checkNodejsForProvider", () => {
         checkNodejsAvailable.mockRejectedValue(new Error("RPC unavailable"));
         const result = await checkNodejsForProvider({ id: "codex", npmPackage: "@openai/codex" });
         expect(result).toBeNull();
+    });
+});
+
+describe("commitLaunch (identity M4b-3)", () => {
+    function harness(create: () => Promise<{ id: string }>) {
+        const calls: string[] = [];
+        const setMeta = vi.fn(async (m: Record<string, unknown>) => {
+            calls.push(`setMeta:${String(m.agentInstanceId)}`);
+        });
+        const resync = vi.fn(async () => {
+            calls.push("resync");
+        });
+        const createInstance = vi.fn(async () => {
+            calls.push("create");
+            return create();
+        });
+        return { calls, setMeta, resync, createInstance };
+    }
+
+    // The ordering the spec requires: the row is recorded and stamped in the
+    // same SetMeta as the block meta before any resync — the resync is where
+    // a continuation eager-resumes, and it must already be bound.
+    it("records the row, then stamps it in the one SetMeta, then resyncs", async () => {
+        const h = harness(async () => ({ id: "row-1" }));
+        const result = await commitLaunch({
+            isTemplate: true,
+            meta: { agentId: "tpl" },
+            createInstance: h.createInstance,
+            setMeta: h.setMeta,
+            resync: h.resync,
+            warn: () => {},
+        });
+        expect(h.calls).toEqual(["create", "setMeta:row-1", "resync"]);
+        expect(h.setMeta).toHaveBeenCalledWith({ agentId: "tpl", agentInstanceId: "row-1" });
+        expect(result).toEqual({ ok: true, instanceId: "row-1" });
+    });
+
+    // A template-backed launch whose row cannot be recorded never resyncs
+    // unbound: nothing is written, and the error surfaces in the picker.
+    it("aborts a template-backed launch whose create fails, writing nothing", async () => {
+        const h = harness(async () => {
+            throw new Error("db locked");
+        });
+        const result = await commitLaunch({
+            isTemplate: true,
+            meta: { agentId: "tpl" },
+            createInstance: h.createInstance,
+            setMeta: h.setMeta,
+            resync: h.resync,
+            warn: () => {},
+        });
+        expect(h.calls).toEqual(["create"]);
+        expect(result.ok).toBe(false);
+        expect(result.ok === false && result.error).toContain("db locked");
+    });
+
+    // A user agent's block already names its row, so a failed create stays
+    // best-effort — but the stamp is cleared (null), never left stale.
+    it("continues a user-agent launch whose create fails, clearing the stamp", async () => {
+        const h = harness(async () => {
+            throw new Error("db locked");
+        });
+        const result = await commitLaunch({
+            isTemplate: false,
+            meta: { agentId: "row-user" },
+            createInstance: h.createInstance,
+            setMeta: h.setMeta,
+            resync: h.resync,
+            warn: () => {},
+        });
+        expect(h.calls).toEqual(["create", "setMeta:null", "resync"]);
+        expect(result).toEqual({ ok: true, instanceId: null });
     });
 });
