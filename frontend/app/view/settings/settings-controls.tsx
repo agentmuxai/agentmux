@@ -75,6 +75,89 @@ export function SliderControl(p: { min: number; max: number; step: number; value
 }
 
 /**
+ * Debounced numeric settings input — every hand-rolled `<input
+ * type="number" onBlur={...}>` in this directory committed only on blur,
+ * so a setting never took effect until the user clicked away from the
+ * field entirely (confirmed live: typing a new value and waiting, still
+ * focused, left the setting unchanged; tabbing away committed it
+ * instantly). Reported as "I need to select the terminal pane for the
+ * update to take place" — the click on the terminal pane was just the
+ * nearest thing to click, not a meaningful "select". See
+ * SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md.
+ *
+ * Copies `SliderControl`'s own debounce shape verbatim (`local` signal
+ * for the displayed value, debounced commit timer, cleared and restarted
+ * on every keystroke) — that component already solved this correctly, it
+ * just never got extended to a plain number field. `onBlur` additionally
+ * flushes immediately rather than waiting out the debounce — the one case
+ * `SliderControl` doesn't need an equivalent for, since a range input has
+ * no "half-typed" state a user can tab away from mid-debounce.
+ *
+ * Uses a LONGER debounce than `SliderControl`'s 180ms — 400ms, not copied
+ * verbatim. Confirmed live (not assumed) that 180ms is too short for
+ * typing specifically: a drag gesture's every intermediate tick is a
+ * legitimate value (that's the whole point of a slider), but a number
+ * field's intermediate typed states are usually NOT — pausing mid-entry
+ * (e.g. typing "7700" of an intended "77000" and hesitating before the
+ * final digit) committed the incomplete value with 180ms, since "7700"
+ * alone is already in-range for `term:scrollback`. 400ms sits inside the
+ * normal range for "debounce after typing" UI conventions and comfortably
+ * covers ordinary inter-keystroke gaps while still committing well within
+ * half a second of the user stopping — "as reactive as possible with the
+ * least additional user effort" without firing mid-word.
+ *
+ * `min`/`max`/`parse` intentionally mirror each existing site's own
+ * validation exactly (`v >= min && (max == null || v <= max)`,
+ * `parseInt` vs `parseFloat`) — an invalid or out-of-range value is
+ * silently dropped, same as every current `onBlur` guard; this component
+ * changes WHEN a value commits, not what is accepted.
+ */
+export function NumberControl(p: {
+    min: number;
+    max?: number;
+    step: number;
+    /** Must match what the setting itself stores — silently defaulting an
+     *  integer setting to float parsing would let a fractional value
+     *  through where the consumer expects a whole number (e.g.
+     *  `term:scrollback`, in xterm.js display rows). Default "float". */
+    parse?: "int" | "float";
+    value: number;
+    onChange: (v: number) => void;
+    class?: string;
+}): JSX.Element {
+    const [local, setLocal] = createSignal(p.value);
+    createEffect(() => setLocal(p.value));
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    onCleanup(() => { if (timer != null) clearTimeout(timer); });
+    const parseVal = (raw: string) => (p.parse === "int" ? parseInt(raw, 10) : parseFloat(raw));
+    const inRange = (v: number) => !isNaN(v) && v >= p.min && (p.max == null || v <= p.max);
+    return (
+        <input
+            class={p.class ?? "setting-number"}
+            type="number" min={p.min} max={p.max} step={p.step}
+            value={local()}
+            onInput={(e) => {
+                const v = parseVal(e.currentTarget.value);
+                if (!isNaN(v)) setLocal(v); // mirror what's actually typed, valid or not
+                if (timer != null) clearTimeout(timer);
+                timer = setTimeout(() => { timer = null; if (inRange(v)) p.onChange(v); }, 400);
+            }}
+            onBlur={(e) => {
+                // Only flush if a debounce is actually PENDING — if it
+                // already fired (timer is null), the current value was
+                // already committed and re-committing it here would fire
+                // a second, redundant onChange for the same value.
+                if (timer == null) return;
+                clearTimeout(timer);
+                timer = null;
+                const v = parseVal(e.currentTarget.value);
+                if (inRange(v)) p.onChange(v);
+            }}
+        />
+    );
+}
+
+/**
  * Masked credential input — at-rest shows a fixed-width dot mask with a
  * "Replace" button (no partial/tail hint: this is a flat settings.json
  * string, not keychain-backed like the Armory identity form, so there's no

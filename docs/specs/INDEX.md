@@ -364,6 +364,7 @@ partial list.
 | [`SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26`](SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md) | SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
+| [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
 | [`SPEC_SETTINGS_PANE_COMPLETION_2026_07_14`](SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md) | SPEC — Settings pane: fill out the remaining sections (completes SPEC_SETTINGS_PANE_2026_06_25) |
 | [`SPEC_SETTINGS_PANE_SEARCH_2026_09_21`](SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md) | SPEC: Reusable fuzzy/synonym search utility, first shipped in the Settings pane |
 | [`SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19`](SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md) | SPEC — Settings: new "Recording / Input" section (mic setup, engine config, test-your-mic) |
