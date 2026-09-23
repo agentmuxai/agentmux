@@ -16,13 +16,16 @@
 //!   (`Store::agents_matching_name`): slug exactly, the others ASCII
 //!   case-insensitively. A name that would not select the caller's row.
 //! - `m4.actor_ambiguous.<site>` — the name selects the caller's row, but not
-//!   by its slug, and also selects another row: the colliding-name case, in
-//!   which a slug-keyed consumer (memory) resolves to the *other* agent.
+//!   by its slug, and also selects another row — any row, a template
+//!   included: the colliding-name case, in which a slug-keyed consumer
+//!   (memory) resolves to the *other* agent, and the template-stub case of
+//!   #3573.
 //! - `m4.actor_absent.<site>` — an attributed request that names no actor.
 //! - `m4.actor_unchecked.<site>` — the caller's row could not be read.
 //!
 //! **Never refused, never awaited, and nothing is written:** the check runs
-//! detached, off the async workers, so no response waits on it (§7); M4c
+//! detached on the blocking pool; the handler does not await it, though it
+//! contends for the store's connection lock like any store read (§7); M4c
 //! dual-writes the UID. This only measures how often the name and the token
 //! disagree before anything relies on the token. Unattributed requests are not
 //! checked — there is no row to compare with, and most are the UI (§6.5.1).
@@ -75,6 +78,7 @@ actor_sites! {
     GlobalMemoryWrite => "globalmemory_write",
     GlobalMemoryRevert => "globalmemory_revert",
     IdentityAccounts => "identity_accounts",
+    PresetGet => "preset_get",
     IdentityValidate => "identity_validate",
     HistorySearch => "history_search",
     WorkEnqueue => "work_enqueue",
@@ -101,9 +105,9 @@ pub(crate) fn names_the_row(row: &AgentNameMatch, actor: &str) -> bool {
 }
 
 /// What to count for `actor` against the caller's `row`; `None` when the
-/// name is the caller's own. `rows_named` lists every row the name selects
-/// (`Store::agents_matching_name`); it is asked only when the name selects
-/// the caller's row other than by its slug.
+/// name is the caller's own. `rows_named` lists every row the name selects,
+/// templates included (`Store::rows_answering_to`); it is asked only when
+/// the name selects the caller's row other than by its slug.
 pub(crate) fn classify(
     row: &AgentNameMatch,
     actor: &str,
@@ -124,9 +128,9 @@ pub(crate) fn classify(
 }
 
 /// Count `actor` against the caller's row at `site`. A no-op for an
-/// Unattributed caller. Never fails, never delays the request: the store
-/// reads run detached on the blocking pool (inline under test, so tests can
-/// read the counters right after the request).
+/// Unattributed caller. Never fails and is never awaited: the store reads
+/// run detached on the blocking pool (inline under test, so tests can read
+/// the counters right after the request).
 pub(crate) fn check_actor(
     state: &AppState,
     caller: Option<&Caller>,
@@ -150,7 +154,7 @@ pub(crate) fn check_actor(
 
 fn count_against_row(store: &Store, uid: &str, site: ActorSite, actor: &str) {
     let outcome = match store.agent_names_by_id(uid) {
-        Ok(Some(row)) => classify(&row, actor, |name| store.agents_matching_name(name)),
+        Ok(Some(row)) => classify(&row, actor, |name| store.rows_answering_to(name)),
         Ok(None) | Err(_) => Some(Outcome::Unchecked),
     };
     let Some(outcome) = outcome else {
@@ -246,11 +250,14 @@ mod tests {
             classify(&second, "agenty", only(vec![first.clone(), second.clone()])),
             Some(Outcome::Ambiguous)
         );
-        // The display name alone, selecting only the caller, is its own.
+        // "AGENTY" selects both rows by display name, so it is ambiguous too.
         assert_eq!(
-            classify(&second, "AGENTY", only(vec![second.clone()])),
-            None
+            classify(&second, "AGENTY", only(vec![first.clone(), second.clone()])),
+            Some(Outcome::Ambiguous)
         );
+        // A display name no other row holds is the caller's own.
+        let zed = row("uid-z", "Zed", "zed-2", "");
+        assert_eq!(classify(&zed, "zed", only(vec![zed.clone()])), None);
         assert_eq!(
             classify(&second, "agenty", |_| Err(StoreError::NotFound)),
             Some(Outcome::Unchecked)

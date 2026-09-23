@@ -883,7 +883,7 @@ folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
    | `bus:send` / `bus:inject` `from` (WebSocket; always Unattributed) | |
    | `/api/bus/{send,inject,broadcast}` `from` (HTTP) | |
    | UI automation `auth.agent_id` (`verified_block_id`: `ui/*`, pane close, dev-server register) | |
-   | identity `accounts` / `validate` `agent_id`, history search `agent` (owner = actor) | |
+   | identity `accounts` / `validate` `agent_id`, preset `get` `agent_id` in self mode, history search `agent` (owner = actor) | |
 
 5. **Cron launders its sender** (`source_agent:"cron"`), and stores only a
    `created_by` name.
@@ -923,15 +923,21 @@ folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
   counted (`m4.actor_mismatch.<site>`) — logged, never refused. Two more
   outcomes are counted apart, because the mismatch test cannot see them: a
   name that selects the caller's row but is not its slug **and also selects
-  another row** (`m4.actor_ambiguous.<site>` — the colliding-name case, where
-  a slug-keyed consumer such as memory resolves to the *other* agent), and an
-  attributed request that names no actor (`m4.actor_absent.<site>`).
+  another row, a template included** (`m4.actor_ambiguous.<site>` — the
+  colliding-name case, where a slug-keyed consumer such as memory resolves
+  to the *other* agent; slug collision suffixing counts templates, so a
+  "Claude" made from the "Claude" template is `claude-2`), and an attributed
+  request that names no actor (`m4.actor_absent.<site>`). A caller row that
+  cannot be read is `m4.actor_unchecked.<site>`, and a work claim whose
+  carried `agent_uid` is not the token's is
+  `m4.actor_uid_mismatch.work_claim`.
   **Expected noise, recorded:** a template-created stub is launched with a
   frontend-derived slug that the backend's collision suffixing can make
   differ from the row's (`AgentPicker.tsx` → `agent-config-builder.ts`), so
-  such an agent mismatches on every call until relaunched; that is a real
-  defect the counter correctly reports, fixed separately, and these counters
-  gate nothing until it is.
+  such an agent is counted (ambiguous, or a mismatch when the derived slug
+  is not its name) on every call until relaunched — a real defect the
+  counters correctly report, fixed separately (#3573). These counters are
+  measurements for M4c, never a phase gate (§9.2).
 - **The MCP sends `X-Agent-Token`** from the inherited
   `AGENTMUX_AGENT_TOKEN` (inheritance only — never `.mcp.json`).
   `agentmux-mcp` is configured only through `.mcp.json`, which only Claude
@@ -1119,7 +1125,9 @@ lose. The honest claim is narrower and sufficient.
 **The design adds no read to any hot path.** It removes the one #3520
 introduced, which is a regression this spec must not repeat rather than a win
 it can claim. M4a-2's actor check does read the caller's row, so it runs
-detached on the blocking pool and no response waits on it; attributing the
+detached on the blocking pool and the handler does not await it — though it
+contends for the store's single connection lock like any store read, so a
+handler's own store work can queue briefly behind it. Attributing the
 request itself stays one in-memory map hit. The remaining registration read pre-exists and is out of scope —
 noted so a future reader does not mistake it for something this design caused.
 
@@ -1384,7 +1392,9 @@ changes two things at once.
 Each fallback increments a counter tagged with its call site. M5 proceeds only
 when they read zero across a full release cycle — and, since M4, when the
 §6.5.6 live gauges read zero too, sampled on every channel's srv (counters
-and gauges are in memory per srv, since its boot).
+and gauges are in memory per srv, since its boot). The `m4.actor_*`
+counters (§6.5.3) are excluded: they measure name/token disagreement for
+M4c, and expected noise (#3573) keeps them moving until that is fixed.
 
 This is the mechanism the predecessor lacked: it had no way to know whether a
 phase had actually taken effect, which is precisely how Phase 2 could be
