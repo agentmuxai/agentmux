@@ -38,8 +38,8 @@ set -uo pipefail
 # existing ~/cef-build tree would auto-fetch the WRONG runtime and fail
 # Taskfile.yml's version guard.
 RELEASE_REPO="agentmuxai/cef"
-RELEASE_TAG="cef-windows-x86_64-152.0.7977.83"
-ASSET_PATTERN="cef-windows-x86_64-152.0.7977.83.zip"
+RELEASE_TAG="cef-windows-x86_64-152.0.7977.83-r2"
+ASSET_PATTERN="cef-windows-x86_64-152.0.7977.83-r2.zip"
 
 target_dir="${1:?usage: fetch-patched-cef-windows.sh <target-dir>}"
 

@@ -161,7 +161,7 @@ jobs:
         env:
           MACOS_AVAILABLE: ${{ needs.check-macos.outputs.available }}
         run: |
-          WIN_TAG="cef-windows-x86_64-152.0.7977.83"
+          WIN_TAG="cef-windows-x86_64-152.0.7977.83-r2"
           LINUX_TAG="cef-linux-x86_64-152.0.7977.83-codecs"
           MACOS_TAG="cef-macos-arm64-152.0.7977.83-codecs"
 

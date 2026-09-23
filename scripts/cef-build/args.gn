@@ -95,3 +95,14 @@ is_official_build=true
 use_thin_lto=true
 is_cfi=false
 chrome_pgo_phase=0
+
+# --- raw_ptr instance tracer: MUST stay false on every platform (2026-09-23) ---
+# Chromium's default is false and upstream CEF's tools/gn_args.py only forces it
+# on for non-debug Windows builds, but an args file regenerated from a debug or
+# ASan configuration would carry `=true` — and that flag deadlocked the Windows
+# renderer on 2026-09-22 (a self-deadlock on the tracer's global mutex via
+# GWP-ASan; every thread in the process then queues behind it). Pinned here so
+# the guard is explicit rather than relying on the default. See
+# scripts/cef-build/args-windows.gn and
+# docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md.
+enable_backup_ref_ptr_instance_tracer=false

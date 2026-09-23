@@ -425,3 +425,35 @@ This doc's Windows-specific steps need validation against a real build
 before being treated as equally trustworthy to the Linux/macOS docs —
 update the "Status" note at the top once that's happened, with real
 timing/size numbers replacing the estimates above.
+
+### 7a. Ship the symbols too, and which out dir is real (added 2026-09-23)
+
+Two lessons from the 2026-09-22 renderer deadlock
+(`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`),
+where the only reason the crash dump could be read was that the build machine
+still had the matching PDB on disk:
+
+- **Attach `libcef.dll.pdb` to every release tag.** The build produces it next
+  to `libcef.dll` (~5.4 GB); `xz -T0 -6` brings it to ~600 MB, under GitHub's
+  2 GB per-asset limit, in about a minute on 32 cores. Name it so it cannot
+  match the runtime download's `*.zip` pattern in `.github/workflows/build-windows.yml`
+  (e.g. `libcef.dll.pdb-<tag>.xz`). Upstream CEF symbol packages do **not**
+  match this fork's binary (different link order), so without this asset a
+  dump from the field is unreadable. Also keep the exact `args.gn` and fork
+  commit in the release notes.
+- **`out\Release_GN_x64` may be a staged runtime copy, not a build tree.** On
+  the current build machine the real incremental tree (with `build.ninja`,
+  `obj\`, `args.gn`) is `out\Release_GN_152`; `Release_GN_x64` only holds the
+  copied DLLs/paks. Check for `build.ninja` before pointing ninja or the
+  configure script at a directory, or you will start a cold 3-6 hour build
+  next to a warm one.
+- **Toolchain env on this machine** for `gn gen`: `DEPOT_TOOLS_WIN_TOOLCHAIN=0`,
+  `vs2022_install="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"`,
+  and `C:\depot_tools` first on `PATH` (the Prerequisites section above covers
+  why; `gn gen` fails with "No supported Visual Studio can be found" without
+  the second one).
+- **Release tags are `cef-windows-x86_64-<chromium version>[-rN]`**, e.g.
+  `cef-windows-x86_64-152.0.7977.83-r2` for a rebuild of the same Chromium
+  with changed GN args (the `-r2` cut is the one with
+  `enable_backup_ref_ptr_instance_tracer=false`). `release.yml`'s milestone
+  check only reads the leading number, so a suffix is safe.
