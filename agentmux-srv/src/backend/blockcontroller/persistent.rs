@@ -1237,10 +1237,44 @@ impl PersistentSubprocessController {
                 // it, like that other caller does, would reintroduce the
                 // exact "perpetually WORKING with nothing queued" bug this
                 // PR fixes for the far more common empty-queue case.
-                if !self.inner.lock().unwrap().pending_send_messages.is_empty() {
+                //
+                // reagent P1 on PR #3523: that emptiness check and the drain
+                // used to be two separate lock acquisitions. A send landing
+                // in the gap is routed to `Queued` (the claim is still held),
+                // and `Queued` deliberately does NOT publish turn-active —
+                // the contract is that the spawn-claim holder does it.
+                // Neither does the drain loop. So the message was delivered
+                // and the turn genuinely ran while the pane, Swarm view and
+                // subagent watcher all reported idle.
+                //
+                // Every other spawner publishes unconditionally before
+                // draining, so only eager resume had the gap: it is the one
+                // spawner that routinely has nothing of its own to deliver,
+                // which is why the publish is conditional at all.
+                //
+                // Both are closed by deciding under ONE acquisition of the
+                // same lock `decide_send_action` decides under, so a
+                // concurrent sender is strictly before us (we observe its
+                // message, publish once, and drain it) or strictly after (it
+                // observes a released claim plus a live `stdin_tx`, takes
+                // `DeliverDirect`, and publishes turn-active itself).
+                let has_queued_work = {
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.pending_send_messages.is_empty() {
+                        // Nothing to drain, so release the claim here rather
+                        // than spawning a drain task whose only job would be
+                        // to release it one hop later — that hop WAS the
+                        // window.
+                        inner.spawning_in_progress = false;
+                        false
+                    } else {
+                        true
+                    }
+                };
+                if has_queued_work {
                     self.mark_turn_active_and_publish();
+                    self.drain_queue_after_successful_spawn(retry_config, false);
                 }
-                self.drain_queue_after_successful_spawn(retry_config, false);
                 EagerResumeOutcome::Spawned
             }
             Err(e) => {
@@ -1254,11 +1288,25 @@ impl PersistentSubprocessController {
                 // respawn if something queued during the attempt (it needs
                 // a live process to go to), otherwise just release the
                 // claim — there's nothing to drain.
-                let has_leftovers = !self.inner.lock().unwrap().pending_send_messages.is_empty();
+                //
+                // Decided under ONE acquisition, same as the success branch
+                // above and for the same reason (codex P2 on PR #3523): as
+                // two, a send arriving in the gap saw the claim still held,
+                // queued its prompt and returned success, and this branch
+                // then cleared the claim without rechecking or draining —
+                // stranding an accepted prompt until some unrelated later
+                // send happened to become the next spawner.
+                let has_leftovers = {
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.pending_send_messages.is_empty() {
+                        inner.spawning_in_progress = false;
+                        false
+                    } else {
+                        true
+                    }
+                };
                 if has_leftovers {
                     self.respawn_once_for_leftover_queue(retry_config);
-                } else {
-                    self.inner.lock().unwrap().spawning_in_progress = false;
                 }
                 EagerResumeOutcome::DeclinedTo("spawn failed")
             }
@@ -2600,7 +2648,7 @@ impl PersistentSubprocessController {
         let json_str = json_msg.to_string();
 
         {
-            let inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock().unwrap();
             // reagentx P1 on PR #2360 (sixth review pass, round 7):
             // `spawn_process` sets `stdin_tx` synchronously, well before
             // the queued message that triggered the spawn is actually
@@ -2631,6 +2679,36 @@ impl PersistentSubprocessController {
                 .ok_or("persistent process not running")?;
             tx.try_send(json_str.clone())
                 .map_err(|e| format!("stdin send failed: {e}"))?;
+            // codex P1 + reagent P1 on PR #3523, found independently by
+            // both: track this into the CURRENT generation's retry batch,
+            // exactly as `send_message`'s `DeliverDirect` branch does. That
+            // fix covered the typed-in-the-UI path and missed this one — the
+            // MuxBus/reactive injection path (`deliver_agent_message`).
+            //
+            // The gap matters most for eager resume, which spawns with an
+            // unconfirmed `--resume` and NO seed message, so the retry batch
+            // starts empty. An injected prompt written straight to stdin and
+            // never appended leaves it empty, so when the resumed sid turns
+            // out to be stale the retry fires with nothing to redeliver —
+            // and the prompt is gone, even though the caller was returned
+            // `AgentDelivery::Structured` and the live blockfile append
+            // below already rendered it to the operator. Silent loss of a
+            // message we acknowledged.
+            //
+            // Read the generation and apply in this SAME lock acquisition
+            // (already held for `try_send`) — a separate one risks a
+            // concurrent respawn bumping `spawn_generation` in between,
+            // making the event carry a stale generation that `update()`'s
+            // catch-all silently ignores.
+            //
+            // A no-op when no unconfirmed resume is in flight, so it costs
+            // nothing on the ordinary path.
+            let generation = inner.spawn_generation;
+            let seq = inner.take_next_message_seq();
+            inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
+                generation,
+                entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
+            });
         }
 
         // Persist the injected message to the blockfile WITH a live event —
@@ -9152,6 +9230,125 @@ setInterval(() => {{}}, 1000);
             c.inner.lock().unwrap().current_pid.is_none(),
             "must not spawn at all while another spawn's claim is already held"
         );
+    }
+
+    // reagent P1 on PR #3523. The success path used to check "is anything
+    // queued?" and kick off the drain as two SEPARATE lock acquisitions,
+    // holding the spawn claim across the gap. A `send_message` landing in
+    // that gap is routed to `Queued` — which deliberately does NOT publish
+    // turn-active, because the spawn-claim holder is supposed to — and the
+    // drain loop does not publish it either. So the message was delivered
+    // while the pane, Swarm view and subagent watcher all read idle.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_queue_eager_resume_releases_its_claim_before_returning() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        let stub = write_stub();
+        let c = controller("blk-claim-sync").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController { mstore: Some(store), ..c };
+        let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
+
+        let result = Controller::start(&c, meta, None, false);
+        assert!(result.is_ok(), "{result:?}");
+        assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+        // Synchronously — deliberately NOT a polling loop. "Eventually
+        // released, one tokio task hop later" is precisely the window the
+        // bug lived in, so a test that waits for it would still pass
+        // against the broken version.
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "an empty-queue eager resume must release its spawn claim before start() returns"
+        );
+
+        // What that release buys: the next message is delivered by its own
+        // caller — and `DeliverDirect` publishes turn-active itself —
+        // instead of being queued behind a claim whose holder has already
+        // decided not to publish for it.
+        assert!(
+            matches!(
+                c.decide_send_action("{\"probe\":true}", None),
+                SendAction::DeliverDirect
+            ),
+            "with the claim released and stdin live, the next send must go direct"
+        );
+
+        assert!(
+            !c.health_monitor.is_active_turn(),
+            "an eager resume with nothing queued must still not report an active turn"
+        );
+    }
+
+    // codex P1 + reagent P1 on PR #3523, found independently by both: the
+    // SIBLING of the test below. That one covers `send_message`'s
+    // `DeliverDirect`, the path a human typing in the UI takes. This covers
+    // `send_user_message` — the MuxBus/reactive injection path
+    // (`deliver_agent_message`), which writes straight to stdin and was
+    // never appended to the retry batch at all.
+    //
+    // Same consequence, worse optics: the caller was told delivery
+    // succeeded and the transcript already rendered the message to the
+    // operator, so a stale resume silently loses a prompt everyone has been
+    // told landed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_injected_message_after_eager_resume_is_tracked_for_stale_resume_retry() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        let stub = write_stub();
+        let c = controller("blk-track-injected").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController { mstore: Some(store), ..c };
+        let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
+
+        Controller::start(&c, meta, None, false).unwrap();
+        assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+        // Precondition: an unconfirmed `--resume` with an empty batch — the
+        // state in which losing an injected message is possible at all.
+        {
+            let inner = c.inner.lock().unwrap();
+            match &inner.resume {
+                persistent_resume::ResumeState::AwaitingOutcome { retry, .. } => {
+                    assert!(retry.messages.is_empty(), "nothing delivered yet");
+                }
+                other => panic!("expected AwaitingOutcome, got {other:?}"),
+            }
+        }
+
+        // Raw text, not a stream-json envelope — `send_user_message` does
+        // the wrapping itself, same as `send_message`.
+        let msg = "injected from muxbus";
+        c.send_user_message(msg.to_string()).unwrap();
+
+        let inner = c.inner.lock().unwrap();
+        match &inner.resume {
+            persistent_resume::ResumeState::AwaitingOutcome { retry, .. } => {
+                assert_eq!(
+                    retry.messages.len(),
+                    1,
+                    "the injected message must be tracked into the retry batch, not silently dropped"
+                );
+                let tracked: serde_json::Value = serde_json::from_str(&retry.messages[0].json)
+                    .expect("tracked entry must be valid JSON");
+                assert_eq!(tracked["message"]["content"], msg);
+            }
+            other => panic!("expected AwaitingOutcome with the tracked message, got {other:?}"),
+        }
     }
 
     // codex P1 on PR #3513 (re-review): eager resume attempts `--resume
