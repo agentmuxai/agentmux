@@ -39,6 +39,7 @@ fn persist_oauth_direct_account(
     provider_id: &str,
     dir: Option<&str>,
     _session_id: &str,
+    email: Option<&str>,
 ) -> Option<String> {
     let dir = match dir.filter(|s| !s.is_empty()) {
         Some(d) => d,
@@ -61,9 +62,19 @@ fn persist_oauth_direct_account(
         name: format!("{provider_id}-oauth"),
         provider: provider_id.to_string(),
         kind: "oauth".to_string(),
+        // `display_name` is deliberately left for the USER to set — see
+        // SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §2. The login email is
+        // provider metadata and belongs in `context`, so naming an account
+        // "work" later cannot clobber it and vice versa.
         display_name: String::new(),
         secret_ref: SecretRef::OAuthConfigDir { dir: dir.to_string() },
-        context: serde_json::json!({}),
+        // The key is OMITTED, not set empty, when the provider reported no
+        // email — so "this provider does not surface one" stays
+        // distinguishable from "logged in as a blank address" downstream.
+        context: match email.map(str::trim).filter(|e| !e.is_empty()) {
+            Some(e) => serde_json::json!({ "email": e }),
+            None => serde_json::json!({}),
+        },
         // Same rationale as the bundle path: a binding the user JUST
         // OAuth'd into is `valid` by definition.
         status: crate::identity::resolver::oauth_status::VALID.to_string(),
@@ -132,11 +143,12 @@ pub(crate) fn persist_oauth_success(
     provider_id: &str,
     dir: Option<&str>,
     session_id: &str,
+    email: Option<&str>,
 ) -> (String, Option<String>) {
     if account_id.is_empty() {
         return (String::new(), None);
     }
-    let persisted = persist_oauth_direct_account(mstore, identity_store, broker, account_id, provider_id, dir, session_id);
+    let persisted = persist_oauth_direct_account(mstore, identity_store, broker, account_id, provider_id, dir, session_id, email);
     (String::new(), persisted)
 }
 
@@ -157,6 +169,7 @@ mod tests {
             "claude",
             Some("/some/account/dir"),
             "sess-z",
+            None,
         );
         assert_eq!(r, Some("acc-1".to_string()));
 
@@ -175,9 +188,54 @@ mod tests {
         let mstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::mps::Broker::new());
-        let r = persist_oauth_direct_account(&mstore, &identity_store, &broker, "acc-1", "claude", None, "sess-z");
+        let r = persist_oauth_direct_account(&mstore, &identity_store, &broker, "acc-1", "claude", None, "sess-z", None);
         assert!(r.is_none());
         assert!(mstore.identity_get("acc-1").unwrap().is_none(), "nothing persisted when dir is unresolved");
+    }
+
+    // SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md. The login email is provider
+    // metadata and goes in `context`, NOT `display_name` — that field belongs
+    // to the user, so writing an email there would clobber any label they set
+    // (and vice versa).
+    #[test]
+    fn persist_records_the_login_email_in_context_leaving_display_name_free() {
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        let identity_store = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        persist_oauth_direct_account(
+            &mstore,
+            &identity_store,
+            &broker,
+            "acc-1",
+            "claude",
+            Some("/dir"),
+            "sess-z",
+            Some("user@example.com"),
+        );
+        let acct = mstore.identity_get("acc-1").unwrap().expect("account row");
+        assert_eq!(acct.context["email"], "user@example.com");
+        assert_eq!(acct.display_name, "", "display_name stays the user's to set");
+    }
+
+    // Absent, not empty. A provider whose CLI reports no email must stay
+    // distinguishable from one that reported a blank address — otherwise the
+    // Armory cannot tell "nothing to show" from "logged in as ''".
+    #[test]
+    fn persist_omits_the_email_key_entirely_when_none_was_captured() {
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        let identity_store = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        for email in [None, Some(""), Some("   ")] {
+            let id = format!("acc-{}", email.unwrap_or("none").len());
+            persist_oauth_direct_account(
+                &mstore, &identity_store, &broker, &id, "claude", Some("/dir"), "sess-z", email,
+            );
+            let acct = mstore.identity_get(&id).unwrap().expect("account row");
+            assert!(
+                acct.context.get("email").is_none(),
+                "blank email {email:?} must not create the key"
+            );
+        }
     }
 
     #[test]
@@ -199,6 +257,7 @@ mod tests {
             "claude",
             Some("/some/dir"),
             "sess-route",
+            None,
         );
         assert_eq!(bundle_id, "", "bundle id is always empty now");
         assert_eq!(account_id, Some("acc-1".to_string()));
@@ -226,6 +285,7 @@ mod tests {
             "claude",
             Some("/some/dir"),
             "sess-empty",
+            None,
         );
         assert_eq!(bundle_id, "");
         assert_eq!(account_id, None, "empty account_id must not be persisted");
