@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Sets the `Codex review` commit status on a PR's head: success only once
-// Codex has said "Didn't find any major issues" about that exact commit.
+// Codex has said "Didn't find any major issues" about that exact commit, or
+// answered the request for it with its out-of-quota notice.
 // Run by .github/workflows/codex-review-gate.yml.
 //
 // Why a status keyed to the head commit: #3513 merged at 18:07 while Codex
@@ -11,11 +12,17 @@
 // matched on the "Reviewed commit" Codex prints, never on "Codex said OK
 // somewhere in this PR".
 //
-// What Codex posts (observed on #3513/#3523/#3538):
+// What Codex posts (observed on #3513/#3523/#3538/#3562):
 //   - no findings: an ISSUE COMMENT "Codex Review: Didn't find any major
 //     issues. ..." with "**Reviewed commit:** `<10-char sha>`"
 //   - findings:    a PR REVIEW (state COMMENTED) with the same
 //     "Reviewed commit" line and inline comments.
+//   - out of quota: an ISSUE COMMENT "You have reached your Codex usage
+//     limits for code reviews. ..." naming no commit. It answers the latest
+//     ReAgent trigger ("@codex review" by a5af with
+//     `<!-- reagent:codex-trigger head=<sha> -->`), so it counts for that
+//     head, and passes it: Codex being unavailable must not block merges
+//     (#3562 sat pending). A later real verdict on the head still wins.
 //
 // Codex only reviews when asked by a5af, not a bot. ReAgent decides when
 // to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
@@ -27,9 +34,15 @@
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
 
+// Only ReAgent's trigger names the head it asked about; reagent's
+// codex_policy.py reads the same marker from the same author.
+export const TRIGGER_AUTHOR = "a5af";
+
 const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 // Straight or curly apostrophe.
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
+const USAGE_LIMIT = /reached your Codex usage limits/i;
+const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
 
 // Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
 // Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
@@ -53,16 +66,33 @@ export function reviewedCommit(body) {
     return m ? m[1].toLowerCase() : null;
 }
 
+/** The head named by the latest ReAgent trigger posted at or before `at`, or null. */
+function triggeredHeadAt(comments, at) {
+    let head = null;
+    let headAt = "";
+    for (const c of comments) {
+        if (c.user?.login !== TRIGGER_AUTHOR || String(c.created_at) > String(at)) continue;
+        const m = TRIGGER_HEAD.exec(c.body ?? "");
+        if (m && String(c.created_at) >= headAt) {
+            head = m[1].toLowerCase();
+            headAt = String(c.created_at);
+        }
+    }
+    return head;
+}
+
+function commentOutput(c, comments) {
+    const body = c.body ?? "";
+    if (USAGE_LIMIT.test(body)) {
+        return { kind: "quota", at: c.created_at, sha: triggeredHeadAt(comments, c.created_at) };
+    }
+    return { kind: NO_MAJOR_ISSUES.test(body) ? "ok" : "other", at: c.created_at, sha: reviewedCommit(body) };
+}
+
 /** Every Codex verdict that names a commit, oldest first. */
 function codexOutputs({ comments = [], reviews = [] }) {
     return [
-        ...comments
-            .filter((c) => c.user?.login === CODEX_LOGIN)
-            .map((c) => ({
-                kind: NO_MAJOR_ISSUES.test(c.body ?? "") ? "ok" : "other",
-                at: c.created_at,
-                sha: reviewedCommit(c.body),
-            })),
+        ...comments.filter((c) => c.user?.login === CODEX_LOGIN).map((c) => commentOutput(c, comments)),
         // A dismissed findings review no longer counts against a commit. It
         // does not count for it either: only a Codex OK passes.
         ...reviews
@@ -95,6 +125,9 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [], filesS
 
     if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
+    }
+    if (onHead?.kind === "quota") {
+        return { state: "success", description: `Codex is out of review quota; ${short} passes without it` };
     }
     if (onHead?.kind === "findings") {
         return {
