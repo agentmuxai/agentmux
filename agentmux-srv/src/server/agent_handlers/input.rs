@@ -1898,13 +1898,10 @@ mod tests {
         );
     }
 
-    /// Spec §6.3: revoked on deletion. Deleting the agent through either
-    /// deletion entry point takes its token with it, so a later spawn on a
-    /// reused block cannot resurrect the old credential.
     /// Codex P1 on #3591: the builder re-checks deletion at its last read —
     /// an agent deleted after the gate's lookup (no row resolves now, and the
     /// shared registry holds only a retired record) is reported, so the spawn
-    /// is refused; a live agent, or a store with no registry, is not.
+    /// is refused; a live agent is not.
     #[test]
     fn the_builder_recheck_reports_an_agent_deleted_after_the_gate() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1931,6 +1928,9 @@ mod tests {
         );
     }
 
+    /// Spec §6.3: revoked on deletion. Deleting the agent through either
+    /// deletion entry point takes its token with it, so a later spawn on a
+    /// reused block cannot resurrect the old credential.
     #[test]
     fn deleting_the_agent_revokes_its_token() {
         let store = Store::open_in_memory().unwrap();
