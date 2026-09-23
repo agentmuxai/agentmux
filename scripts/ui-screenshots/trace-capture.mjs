@@ -19,7 +19,7 @@ console.error("attaching to", page.title);
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false, maxPayload: 1 << 30 });
 await new Promise((r, e) => { ws.once("open", r); ws.once("error", e); });
 let id = 0; const pending = new Map(); const chunks = [];
-let done; const complete = new Promise((r) => (done = r));
+let done, fail; const complete = new Promise((r, rj) => { done = r; fail = rj; });
 ws.on("message", (m) => {
   const j = JSON.parse(m);
   if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); return; }
@@ -27,6 +27,11 @@ ws.on("message", (m) => {
   if (j.method === "Tracing.tracingComplete") done();
 });
 const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
+// A dropped CDP connection (target reload/close) sends no responses; reject
+// everything still waiting instead of hanging forever.
+const failAll = (why) => { fail?.(new Error(why)); for (const f of pending.values()) f({ error: { message: why } }); pending.clear(); };
+ws.on("close", () => failAll("CDP socket closed"));
+ws.on("error", (e) => failAll(`CDP socket error: ${e.message}`));
 
 const cats = [
   "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame",
@@ -55,14 +60,19 @@ const byThread = new Map(), byName = new Map(), longTasks = [];
 // thread, sort by start, and keep only events not contained in a kept one.
 const TASK_NAMES = new Set(["MessageLoop::RunTask", "ThreadControllerImpl::RunTask", "RunTask"]);
 const tasksByThread = new Map();
+// Aggregate by pid:tid — several renderer processes share labels like
+// "Renderer / CrRendererMain", and merging them would treat one process's
+// overlapping tasks as nested aliases of another's. Names are display-only.
+const label = new Map();
 for (const e of chunks) {
   if (e.ph !== "X" || !e.dur) continue;
-  const tkey = `${procName.get(e.pid) || e.pid} / ${threadName.get(`${e.pid}:${e.tid}`) || e.tid}`;
+  const tkey = `${e.pid}:${e.tid}`;
+  if (!label.has(tkey)) label.set(tkey, `${procName.get(e.pid) || e.pid} / ${threadName.get(tkey) || e.tid} [${tkey}]`);
   if (TASK_NAMES.has(e.name)) {
     if (!tasksByThread.has(tkey)) tasksByThread.set(tkey, []);
     tasksByThread.get(tkey).push(e);
   }
-  const nkey = `${e.name}  [${tkey}]`;
+  const nkey = `${e.name}  [${label.get(tkey)}]`;
   byName.set(nkey, (byName.get(nkey) || 0) + e.dur);
 }
 for (const [tkey, evs] of tasksByThread) {
@@ -79,9 +89,9 @@ for (const [tkey, evs] of tasksByThread) {
 const top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
 const ms = (us) => (us / 1000).toFixed(0).padStart(7);
 console.log(`\nBUSY TIME PER THREAD (outermost RunTask sum over ${secs}s):`);
-for (const [k, v] of top(byThread, 14)) console.log(`  ${ms(v)} ms  ${(100 * v / (Number(secs) * 1e6)).toFixed(0).padStart(3)}%  ${k}`);
+for (const [k, v] of top(byThread, 14)) console.log(`  ${ms(v)} ms  ${(100 * v / (Number(secs) * 1e6)).toFixed(0).padStart(3)}%  ${label.get(k)}`);
 console.log(`\nLONG TASKS >50ms: ${longTasks.length}  (max ${ms(Math.max(0, ...longTasks.map((l) => l.dur)))} ms)`);
 const ltBy = new Map(); for (const l of longTasks) ltBy.set(l.tkey, (ltBy.get(l.tkey) || 0) + 1);
-for (const [k, v] of top(ltBy, 6)) console.log(`  ${String(v).padStart(4)}  ${k}`);
+for (const [k, v] of top(ltBy, 6)) console.log(`  ${String(v).padStart(4)}  ${label.get(k)}`);
 console.log("\nTOP EVENTS BY TOTAL DURATION (inclusive, so nested events double-count):");
 for (const [k, v] of top(byName, 30)) console.log(`  ${ms(v)} ms  ${k}`);

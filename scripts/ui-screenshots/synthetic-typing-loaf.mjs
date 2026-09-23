@@ -18,6 +18,11 @@ await new Promise((r, e) => { ws.once("open", r); ws.once("error", e); });
 let id = 0; const pending = new Map();
 ws.on("message", (m) => { const j = JSON.parse(m); if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); } });
 const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
+// A dropped CDP connection (target reload/close) sends no responses; reject
+// everything still waiting instead of hanging forever.
+const failAll = (why) => { for (const f of pending.values()) f({ error: { message: why } }); pending.clear(); };
+ws.on("close", () => failAll("CDP socket closed"));
+ws.on("error", (e) => failAll(`CDP socket error: ${e.message}`));
 const evalIn = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails));
@@ -40,7 +45,7 @@ await evalIn(`(()=>{const a=document.activeElement;const P=window.__synProbe={t0
   P.kh=()=>P.keys++; P.ih=()=>P.inputs++;
   document.addEventListener("keydown",P.kh,true); document.addEventListener("input",P.ih,true);
   P.mo=new MutationObserver(m=>P.mut+=m.length); P.mo.observe(document,{subtree:true,childList:true,characterData:true,attributes:true});
-  P.po=new PerformanceObserver(l=>{for(const e of l.getEntries()){P.loafs.push({start:+(e.startTime-P.t0).toFixed(0),dur:+e.duration.toFixed(0),blocking:+e.blockingDuration.toFixed(0),render:e.renderStart?+(e.startTime+e.duration-e.renderStart).toFixed(0):0,styleLayout:e.styleAndLayoutStart?+(e.startTime+e.duration-e.styleAndLayoutStart).toFixed(0):0,scripts:(e.scripts||[]).map(s=>({inv:(s.invoker||"").slice(0,60),fn:(s.sourceFunctionName||"").slice(0,40),url:(s.sourceURL||"").replace(/^.*\\/(node_modules\\/\\.vite\\/deps|app)\\//,"$1/").slice(0,55),line:s.sourceCharPosition,dur:+s.duration.toFixed(1),fl:+s.forcedStyleAndLayoutDuration.toFixed(1)}))})}});
+  P.po=new PerformanceObserver(P.poCb=l=>{for(const e of l.getEntries()){P.loafs.push({start:+(e.startTime-P.t0).toFixed(0),dur:+e.duration.toFixed(0),blocking:+e.blockingDuration.toFixed(0),render:e.renderStart?+(e.startTime+e.duration-e.renderStart).toFixed(0):0,styleLayout:e.styleAndLayoutStart?+(e.startTime+e.duration-e.styleAndLayoutStart).toFixed(0):0,scripts:(e.scripts||[]).map(s=>({inv:(s.invoker||"").slice(0,60),fn:(s.sourceFunctionName||"").slice(0,40),url:(s.sourceURL||"").replace(/^.*\\/(node_modules\\/\\.vite\\/deps|app)\\//,"$1/").slice(0,55),line:s.sourceCharPosition,dur:+s.duration.toFixed(1),fl:+s.forcedStyleAndLayoutDuration.toFixed(1)}))})}});
   P.po.observe({type:"long-animation-frame"});
   // rAF gap sampler
   P.gaps=[]; let last=performance.now(); P.raf=true; (function f(t){P.gaps.push(t-last); last=t; if(P.raf) requestAnimationFrame(f)})(last);
@@ -61,7 +66,7 @@ for (let i = 0; i < n; i++) {
 await new Promise((r) => setTimeout(r, 800)); // let the tail settle
 
 // 4. Read out + disarm + restore the original draft.
-const out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);
+const out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);
   const d=P.draft; const removed=d.el.value.length-d.value.length; d.el.value=d.value; d.el.setSelectionRange(d.start,d.end); d.el.dispatchEvent(new Event("input",{bubbles:true}));
   const L=P.loafs; const scr=l=>l.scripts.reduce((a,s)=>a+s.dur,0); const sum=f=>+L.reduce((a,l)=>a+f(l),0).toFixed(0);
   const q=(arr,p)=>{if(!arr.length)return null;const s=[...arr].sort((x,y)=>x-y);return +s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1)};

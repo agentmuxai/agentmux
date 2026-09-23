@@ -20,6 +20,11 @@ await new Promise((r, e) => { ws.once("open", r); ws.once("error", e); });
 let id = 0; const pending = new Map();
 ws.on("message", (m) => { const j = JSON.parse(m); if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); } });
 const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
+// A dropped CDP connection (target reload/close) sends no responses; reject
+// everything still waiting instead of hanging forever.
+const failAll = (why) => { for (const f of pending.values()) f({ error: { message: why } }); pending.clear(); };
+ws.on("close", () => failAll("CDP socket closed"));
+ws.on("error", (e) => failAll(`CDP socket error: ${e.message}`));
 
 await send("Profiler.enable");
 await send("Profiler.setSamplingInterval", { interval: 500 }); // µs
