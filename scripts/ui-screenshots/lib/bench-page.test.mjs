@@ -137,6 +137,23 @@ describe("typing target", () => {
     });
 });
 
+describe("install", () => {
+    it("replaces an existing instance, disposing it and putting its held draft back", () => {
+        const { ta } = pane("b1", "draft");
+        window.__fcb.armTyping("b1");
+        ta.value += "fff";
+        const old = window.__fcb;
+        expect(window.eval(SRC)).toBe("installed (replaced an existing instance)");
+        expect(window.__fcb).not.toBe(old);
+        expect(ta.value).toBe("draft");
+        // The old guard is gone: a key elsewhere is not swallowed any more.
+        const other = pane("b2").ta;
+        const ev = new KeyboardEvent("keydown", { key: "f", bubbles: true, cancelable: true });
+        other.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+    });
+});
+
 describe("discover", () => {
     it("lists each block once even when several elements carry its data-blockid", async () => {
         const { frame } = pane("b1");

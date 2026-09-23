@@ -238,15 +238,49 @@ async function main() {
     assertDevPort(opts.port, { allowProduction: opts.allowProduction });
 
     const { session: page, target } = await connectPage(opts.port, opts.target);
-    const browser = await connectBrowser(opts.port);
+    let browser = null;
+    // Every exit path closes both sessions: an open CDP socket keeps Node
+    // alive, so an early failure (no panes, hidden page) used to leave the
+    // process hanging until something killed it.
+    try {
+        browser = await connectBrowser(opts.port);
+        await run(opts, page, browser, target);
+    } finally {
+        await page.close().catch(() => {});
+        await browser?.close().catch(() => {});
+    }
+}
+
+/**
+ * Install the harness and find the panes, retrying for up to `waitMs`: the
+ * page may be mid-reload (Vite reloads it when the served tree changes), when
+ * it briefly has no panes and no harness.
+ */
+async function discover(page, opts, waitMs = 30_000) {
+    const harness = readFileSync(join(HERE, "lib", "bench-page.js"), "utf8");
+    const deadline = Date.now() + waitMs;
+    for (;;) {
+        let init = null;
+        try {
+            await page.evaluate(harness);
+            init = await page.evaluate(`window.__fcb.init(${JSON.stringify(opts.panes)})`);
+            if (init.visibility === "visible" && init.panes.length > 0) return init;
+        } catch (e) {
+            if (Date.now() >= deadline) throw e;
+        }
+        if (Date.now() >= deadline) {
+            if (!init) throw new Error("could not install the harness");
+            if (init.visibility !== "visible") throw new Error(`page is ${init.visibility} — restore the window first`);
+            throw new Error(`no matching visible agent panes (visible: ${init.available.join(", ") || "none"})`);
+        }
+        await sleep(1000);
+    }
+}
+
+async function run(opts, page, browser, target) {
     log(`page: ${target.title}`);
     await page.send("Performance.enable");
-    await page.evaluate(readFileSync(join(HERE, "lib", "bench-page.js"), "utf8"));
-
-    const init = await page.evaluate(`window.__fcb.init(${JSON.stringify(opts.panes)})`);
-    if (init.visibility !== "visible") throw new Error(`page is ${init.visibility} — restore the window first`);
-    if (init.panes.length === 0)
-        throw new Error(`no matching visible agent panes (visible: ${init.available.join(", ") || "none"})`);
+    const init = await discover(page, opts);
     const real = init.panes.filter((p) => p.nodeCount > 0 && !p.syntheticOnly);
     if (real.length && !opts.clearExisting) {
         throw new Error(
@@ -288,18 +322,36 @@ async function main() {
     process.once("SIGTERM", onSignal(143));
 
     try {
-        if (opts.clearExisting && real.length) await page.evaluate(`window.__fcb.clear(${JSON.stringify(blockIds)})`);
+        // Start every pane from empty, or the history count N would be wrong:
+        // a pane holding leftovers from an interrupted or --keep run is bench
+        // content and is cleared without asking (ReAgent P1, #3593); real
+        // content was refused above unless --clear-existing.
+        if (init.panes.some((p) => p.nodeCount > 0)) {
+            await page.evaluate(`window.__fcb.clear(${JSON.stringify(blockIds)})`);
+            await sleep(500);
+        }
+        // What a clear leaves: a pane can refill with a few transcript nodes
+        // (history re-delivered into the view after the clear). They cannot be
+        // removed from here, so they are measured and reported, not assumed away.
+        const after = await page.evaluate(`window.__fcb.init(${JSON.stringify(blockIds)})`);
+        const residual = Object.fromEntries(after.panes.map((p) => [p.blockId, p.nodeCount ?? 0]));
+        const leftovers = Object.entries(residual).filter(([, n]) => n > 0);
+        if (leftovers.length) {
+            log(
+                `note: panes not empty at start — ${leftovers.map(([b, n]) => `${b.slice(0, 8)}: ${n} node(s)`).join(", ")}; recorded as residualNodes`
+            );
+        }
         if (opts.soakMinutes != null) {
-            await soak(page, browser, opts, typingBlock);
+            await soak(page, browser, opts, typingBlock, residual);
         } else {
-            await sweep(page, browser, opts, typingBlock, blockIds);
+            await sweep(page, browser, opts, typingBlock, blockIds, residual);
         }
     } finally {
         await cleanup();
     }
 }
 
-async function sweep(page, browser, opts, typingBlock, blockIds) {
+async function sweep(page, browser, opts, typingBlock, blockIds, residual) {
     const results = [];
     let have = 0;
     for (const n of opts.history) {
@@ -322,6 +374,8 @@ async function sweep(page, browser, opts, typingBlock, blockIds) {
         bench: "full-conversation",
         at: new Date().toISOString(),
         opts: { ...opts, panes: blockIds },
+        // Nodes each pane held before any synthetic history (see main()).
+        residualNodes: residual,
         results,
     };
     const out = opts.out ?? `full-conversation-bench-${Date.now()}.json`;
@@ -330,8 +384,12 @@ async function sweep(page, browser, opts, typingBlock, blockIds) {
     if (results.some((r) => r.invalid)) process.exitCode = 3;
 }
 
-async function soak(page, browser, opts, typingBlock) {
+async function soak(page, browser, opts, typingBlock, residual) {
     const out = opts.out ?? `soak-${Date.now()}.jsonl`;
+    appendFileSync(
+        out,
+        JSON.stringify({ header: true, at: new Date().toISOString(), opts, residualNodes: residual }) + "\n"
+    );
     const end = Date.now() + opts.soakMinutes * 60_000;
     let turns = 0;
     let invalid = 0;

@@ -14,7 +14,16 @@
 // docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md, Phase 0.
 
 (() => {
-    if (window.__fcb) return "already installed";
+    // Always install fresh: an instance left in the page by an earlier run (or
+    // an older version of this file) must not be reused. Dispose it first so
+    // its listeners go and any draft it was holding is put back.
+    let replaced = false;
+    if (window.__fcb) {
+        try {
+            window.__fcb.dispose?.();
+        } catch {}
+        replaced = true;
+    }
 
     const SYN = "fcb-";
     const q = (arr, p) => {
@@ -59,9 +68,37 @@
         visibility: { hiddenDuring: false },
     });
 
-    document.addEventListener("visibilitychange", () => {
+    const onVisibility = () => {
         if (document.visibilityState !== "visible") F.visibility.hiddenDuring = true;
-    });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    /** Remove every listener and observer this instance added; put back a
+     *  draft it was holding (synchronously, on the captured composer only —
+     *  the async live-composer path is restoreTyping's job). */
+    F.dispose = () => {
+        document.removeEventListener("visibilitychange", onVisibility);
+        const W = F.win;
+        if (W) {
+            W.raf = false;
+            W.po?.disconnect();
+            W.eo?.disconnect();
+            if (W.kh) document.removeEventListener("keydown", W.kh, true);
+        }
+        const T = F.typing;
+        if (T) {
+            document.removeEventListener("keydown", T.guard, true);
+            if (T.el.isConnected) {
+                T.el.value = T.value;
+                try {
+                    T.el.setSelectionRange(T.start, T.end);
+                } catch {}
+                T.el.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+        }
+        F.typing = null;
+        F.win = null;
+    };
 
     /**
      * Resolve a live module instance (the one the app is using). Prefer the URL
@@ -383,5 +420,5 @@
         return { ok: false, blockId: T.blockId, draft: T.value, stray: T.stray };
     };
 
-    return "installed";
+    return replaced ? "installed (replaced an existing instance)" : "installed";
 })();

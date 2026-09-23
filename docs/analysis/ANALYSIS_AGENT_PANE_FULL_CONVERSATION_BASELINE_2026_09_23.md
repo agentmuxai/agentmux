@@ -95,5 +95,13 @@ misses the fps and key→paint targets even at N = 0.
 - 3 panes, not 4. Load per pane is the same as the spec's; total load is ¾.
 - One run per N. The next runs should repeat each N (at least 3) to report
   spread, especially for the frame-time columns.
+- The first pane (Mopeo) almost certainly started with ~6 real nodes, not 0:
+  after a clear, that pane refills with a few nodes of its old transcript.
+  Found after this baseline was taken; the bench now records it
+  (`residualNodes`) — a later run reported `{Mopeo: 6, Poal: 0, Oozp: 0}`. Six
+  small nodes against 3 × N synthetic turns does not change the picture, but
+  the N = 0 row is "≈ 0", not exactly 0, for that pane.
+- None of the three agents was running (no provider account in the dev
+  profile), so no real agent output was streaming during the windows.
 - Synthetic content is uniform; real conversations mix tool-heavy and
   prose-heavy turns. The fault suite (a later Phase 0 PR) covers the extremes.
