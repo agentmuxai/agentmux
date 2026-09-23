@@ -207,6 +207,24 @@ mod resolve_cli_args_tests {
     }
 }
 
+/// Identity M4b-4 (spec §6.5.8): a user agent's local row, backfilled from
+/// the shared registry if it is another channel's — and **confirmed**, or the
+/// open fails: without a local row the spawn would resolve to nothing, with
+/// no UID/token and no credential gate, exactly the process M4b closes (Codex
+/// P1 on #3584). `agent_def_list` listed the agent, so a missing row here is a
+/// failed backfill, not a missing agent.
+fn require_local_agent_row(mstore: &Store, agent_id: &str) -> Result<(), String> {
+    match mstore.agent_row_ensure_local(agent_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!(
+            "AGENT_ROW_UNAVAILABLE: could not create a local row for agent '{agent_id}' — not started"
+        )),
+        Err(e) => Err(format!(
+            "AGENT_ROW_UNAVAILABLE: local row for agent '{agent_id}' could not be read or created ({e}) — not started"
+        )),
+    }
+}
+
 /// Identity M4b-4 (spec §6.5.8): record `agent.open`'s launch of user agent
 /// `agent_id` on `block_id` — a lifecycle-only update, never
 /// `instance_create` with a fresh record (whose fold would blank the agent's
@@ -315,9 +333,7 @@ pub(crate) async fn open_agent_impl(
                 // is a template session and has no row.
                 let is_user_agent = agent.is_seeded == 0;
                 if is_user_agent {
-                    if let Err(e) = mstore.agent_row_ensure_local(&agent.id) {
-                        tracing::warn!(agent_id = %agent.id, error = %e, "agent.open: local row backfill failed");
-                    }
+                    require_local_agent_row(&mstore, &agent.id)?;
                 }
 
                 // 2. Resolve provider
@@ -345,10 +361,18 @@ pub(crate) async fn open_agent_impl(
                         let _ = crate::server::service::update_object_meta(
                             &mstore, &format!("block:{}", existing.oid), &meta_update,
                         );
+                        // Identity M4b-4: record the launch before the
+                        // resync — a controller can report its session id
+                        // during it, and that capture finds the row by
+                        // block (Codex P2 on #3584). Only on this branch's
+                        // resync, never for a pane that is already live.
+                        if is_user_agent {
+                            record_agent_open_launch(&mstore, &agent.id, &existing.oid);
+                        }
                         // Register controller
                         let block_for_resync = mstore.must_get::<Block>(&existing.oid)
                             .map_err(|e| format!("agent.open: reload block: {e}"))?;
-                        let resynced = blockcontroller::resync_controller(
+                        let _ = blockcontroller::resync_controller(
                             &block_for_resync, &tab_id, None, true, true,
                             Some(broker.clone()), Some(event_bus.clone()), Some(mstore.clone()),
                             Some(filestore.clone()),
@@ -356,11 +380,6 @@ pub(crate) async fn open_agent_impl(
                             mstore.shared_agent_registry(),
                             app_state.boot_id.clone(), &app_state.auth_key,
                         );
-                        // Identity M4b-4: only a reopen that actually resynced
-                        // records a launch — never a pane that is already live.
-                        if resynced.is_ok() && is_user_agent {
-                            record_agent_open_launch(&mstore, &agent.id, &existing.oid);
-                        }
                     }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
                         .map(|s| s.shellprocstatus)
@@ -812,6 +831,14 @@ pub(crate) async fn open_agent_impl(
                 //    proper allocation is tracked as a follow-up.
                 write_agent_config_files(&mstore, &app_state.id_store, &app_state.identity_store, &agent, routing_id, &work_dir)?;
 
+                // Identity M4b-4: record the launch and stamp the block before
+                // the resync — a controller can report its session id during
+                // it, and that capture finds the row by block (Codex P2 on
+                // #3584).
+                if is_user_agent {
+                    record_agent_open_launch(&mstore, &agent.id, &block_id);
+                }
+
                 // 9. Register controller (resync)
                 let block_for_resync = mstore.must_get::<Block>(&block_id)
                     .map_err(|e| format!("agent.open: reload block: {e}"))?;
@@ -831,11 +858,6 @@ pub(crate) async fn open_agent_impl(
                     app_state.boot_id.clone(),
                     &app_state.auth_key,
                 )?;
-
-                // Identity M4b-4: record the launch and stamp the block.
-                if is_user_agent {
-                    record_agent_open_launch(&mstore, &agent.id, &block_id);
-                }
 
                 // 10. Broadcast block + tab + layout updates to frontend
                 {
@@ -1449,6 +1471,19 @@ mod record_agent_open_launch_tests {
     /// Identity M4b-4 (spec §6.5.8): an `agent.open` of a user agent records
     /// the launch on its row (lifecycle only) and stamps the block, so the
     /// block resolves to that row — the row's UID and token at its spawn.
+    /// Codex P1 on #3584: an open whose local row cannot be confirmed
+    /// (here: an agent that exists neither locally nor in a registry) fails
+    /// instead of spawning row-less; a local agent passes.
+    #[test]
+    fn an_open_without_a_confirmed_local_row_is_refused() {
+        let store = Store::open_in_memory().unwrap();
+        let err = require_local_agent_row(&store, "agent-nowhere").unwrap_err();
+        assert!(err.starts_with("AGENT_ROW_UNAVAILABLE"), "{err}");
+        let mut def = test_agent_def("agent-here", "Here", "claude", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        assert!(require_local_agent_row(&store, "agent-here").is_ok());
+    }
+
     #[test]
     fn an_agent_open_launch_is_recorded_stamped_and_resolves() {
         let store = Store::open_in_memory().unwrap();
