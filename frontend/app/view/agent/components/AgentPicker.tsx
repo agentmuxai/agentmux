@@ -169,6 +169,14 @@ interface AgentPickerProps {
 export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
+    // Identity M4b-3: a launch that aborted (its row could not be recorded).
+    const [launchError, setLaunchError] = createSignal<string | null>(null);
+    const takeLaunchError = () => {
+        if (props.model.launchError) {
+            setLaunchError(props.model.launchError);
+            props.model.launchError = null;
+        }
+    };
     // Filter-bar query (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) —
     // narrows MyAgentsList only, not the template grid below it (Q1,
     // confirmed by the human operator): the ask was specifically to find
@@ -324,6 +332,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     setNodejsError(props.model.nodejsError);
                     props.model.nodejsError = null;
                 }
+                takeLaunchError();
             } finally {
                 setLaunching(null);
             }
@@ -443,6 +452,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // "click Maks → startup context replayed" report).
                 continueSessionId: row.session_id ?? "",
             });
+            takeLaunchError();
         } finally {
             setLaunching(null);
         }
@@ -639,6 +649,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 setNodejsError(props.model.nodejsError);
                 props.model.nodejsError = null;
             }
+            takeLaunchError();
         } finally {
             setLaunching(null);
         }
@@ -713,6 +724,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         setNodejsError(props.model.nodejsError);
                         props.model.nodejsError = null;
                     }
+                    takeLaunchError();
                 } finally {
                     setLaunching(null);
                 }
@@ -1039,6 +1051,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             host this in). */}
                         <HiddenTemplatesSection />
 
+                        <Show when={launchError()}>
+                            <div class="agent-nodejs-notice">
+                                <div class="nodejs-notice-icon">
+                                    <i class="fa-solid fa-circle-exclamation" />
+                                </div>
+                                <div class="nodejs-notice-content">
+                                    <div class="nodejs-notice-title">Launch aborted</div>
+                                    <div class="nodejs-notice-text">{launchError()}</div>
+                                </div>
+                            </div>
+                        </Show>
                         <Show when={nodejsError()}>
                             <div class="agent-nodejs-notice">
                                 <div class="nodejs-notice-icon">
