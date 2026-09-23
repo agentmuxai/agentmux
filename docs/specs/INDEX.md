@@ -878,6 +878,7 @@ partial list.
 | [`SPEC_SETTINGS_MESSAGING_BRIDGES_SECTION_2026_08_22`](SPEC_SETTINGS_MESSAGING_BRIDGES_SECTION_2026_08_22.md) | SPEC — Settings: new "Integrations" section (Discord / Telegram / Slack / WhatsApp bridges) |
 | [`SPEC_SETTINGS_PANE_2026_06_25`](SPEC_SETTINGS_PANE_2026_06_25.md) | Spec: Settings → Widget Pane with UI Form |
 | [`SPEC_SETTINGS_WIDGET`](SPEC_SETTINGS_WIDGET.md) | Spec: Settings Widget |
+| [`SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22`](SPEC_SHUTDOWN_INVALID_CONFIGURATION_FLASH_2026_09_22.md) | SPEC: "invalid configuration" flashes during a normal window close |
 | [`SPEC_SLASH_TERMINAL_COMMAND_2026_06_25`](SPEC_SLASH_TERMINAL_COMMAND_2026_06_25.md) | SPEC: `/terminal` Slash Command — Open Agent CWD in New Terminal Pane |
 | [`SPEC_SPLASH_SCREEN_BORDER_2026_08_25`](SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md) | SPEC — Splash screen: add a darkened 2px border, across all 3 platforms |
 | [`SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25`](SPEC_SPLASH_STARTUP_TELEMETRY_2026_06_25.md) | Spec: Splash Screen Startup Telemetry |
