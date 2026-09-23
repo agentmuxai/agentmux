@@ -2390,7 +2390,9 @@ impl Store {
                 // which migrations and deletions rewrite (a removed
                 // template, a promoted clone deleted after the repoint).
                 // Accepted only while it is still the block's latest launch
-                // (by `started_at`, which only a launch or fold moves): a
+                // (by `started_at`, which only a launch or fold moves; a tie
+                // with another active launch is undecided and rejected —
+                // Codex P2 on #3576): a
                 // stale stamp left by pane reuse, with a newer launch since
                 // folded onto the block, resolves to nothing rather than to
                 // the older row. Never a fork: a fork is launched under its
@@ -2417,7 +2419,7 @@ impl Store {
                        AND NOT EXISTS (
                            SELECT 1 FROM db_agents b
                            WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
-                             AND b.status IN ('running', 'paused') AND b.started_at > a.started_at)"
+                             AND b.status IN ('running', 'paused') AND b.started_at >= a.started_at)"
                 ))?;
                 return match stmt.query_row(params![block_id, stamped, agent_id], map_instance_row)
                 {
@@ -2646,12 +2648,16 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
 /// repointed launch rows to a promoted clone, whose own parent is the
 /// template; deleting the clone would otherwise strand those rows' lineage,
 /// and a pane naming the template could no longer resolve its launch
-/// (Codex P1 on #3576). Idempotent; a missing row does nothing.
+/// (Codex P1 on #3576). **Never a fork:** a fork stores its source in the
+/// same column, and re-parented onto a template it would inherit that
+/// template's account links (`template_parent_id_if_seeded`), which forks
+/// deliberately do not (Codex P1 on #3576) — a fork keeps pointing at its
+/// deleted source. Idempotent; a missing row does nothing.
 fn adopt_children_of(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
     Ok(conn.execute(
         "UPDATE db_agents
          SET parent_template_id = (SELECT parent_template_id FROM db_agents WHERE id = ?1)
-         WHERE parent_template_id = ?1 AND id != ?1
+         WHERE parent_template_id = ?1 AND id != ?1 AND branch_label = ''
            AND COALESCE((SELECT parent_template_id FROM db_agents WHERE id = ?1), '') != ''",
         params![id],
     )?)

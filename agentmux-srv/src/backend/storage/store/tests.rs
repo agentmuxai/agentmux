@@ -2384,6 +2384,48 @@
         assert!(store.instance_get_active_for_block("block-unrel-tpl").unwrap().is_none());
     }
 
+    /// Codex P1 on #3576: deleting an agent hands its *launch* children to
+    /// its parent, never its forks — a fork re-parented onto a template
+    /// would inherit that template's account links (`inject.rs`
+    /// `template_parent_id_if_seeded`), which forks deliberately do not.
+    #[test]
+    fn deleting_an_agent_does_not_re_parent_its_forks() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-adopt", "tpl-adopt");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let source = launch_from_template_on(&store, &agents_root, "tpl-adopt", "inst-adopt-src", "block-adopt");
+        fork_launched_on(&store, &agents_root, &source, "agent-adopt-fork", "block-adopt-fork");
+        assert!(store.agent_def_delete(&source).unwrap());
+        let parent: String = {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT parent_template_id FROM db_agents WHERE id = 'agent-adopt-fork'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(parent, source, "the fork keeps pointing at its deleted source");
+    }
+
+    /// Codex P2 on #3576: two active launches on a block in the same
+    /// millisecond leave "latest" undecided, so a stamp naming either
+    /// resolves to nothing rather than possibly to the stale one.
+    #[test]
+    fn a_stamp_tied_with_another_active_launch_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-tie", "tpl-tie");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let a = launch_from_template_on(&store, &agents_root, "tpl-tie", "inst-tie-a", "block-tie");
+        let _b = launch_from_template_on(&store, &agents_root, "tpl-tie", "inst-tie-b", "block-tie");
+        block_showing_stamped(&store, "block-tie", Some("tpl-tie"), Some(&a));
+        assert!(store.instance_get_active_for_block("block-tie").unwrap().is_none());
+    }
+
     /// A block whose meta names no agent at all keeps today's fallback: the
     /// agent whose latest launch is on it (a block from before `agentId`).
     #[test]
