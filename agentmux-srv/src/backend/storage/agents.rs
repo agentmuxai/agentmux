@@ -2581,6 +2581,71 @@ mod tests {
         }
     }
 
+    /// The invariant `agent_open.rs`'s launch recording depends on
+    /// (codex P2 + reagent P1 on PR #3523). That path re-folds an existing
+    /// agent's row to point `last_block_id` at the block it just created, so
+    /// eager resume's launch-specific gate (`instance_get_by_block_id`) can
+    /// see it.
+    ///
+    /// Two halves, and the second is why it carries the row forward with
+    /// `..existing` instead of building a fresh `AgentInstance`: the fold's
+    /// UPDATE writes `identity_id`, `memory_id`, `instance_name` and
+    /// `working_directory` UNGUARDED (only `last_block_id` and `session_id`
+    /// are `CASE WHEN ?= ''` protected), so a naively-constructed row would
+    /// silently wipe the agent's bound account and memory bundle — a far
+    /// worse regression than the one that fix addresses.
+    #[test]
+    fn folding_a_relaunch_repoints_the_block_without_clearing_bindings() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store.upsert(&global_user_agent("def-relaunch", "Relaunch")).unwrap();
+        store.set_def_registry(def_store);
+
+        let mut inst = instance("inst-relaunch", "def-relaunch");
+        inst.block_id = "blk-first".to_string();
+        inst.identity_id = "acct-bound".to_string();
+        inst.memory_id = "bundle-bound".to_string();
+        inst.instance_name = "Relaunch".to_string();
+        inst.working_directory = "/work/relaunch".to_string();
+        let created = store.instance_create(&inst).unwrap();
+        assert_eq!(created.block_id, "blk-first");
+
+        // What agent_open does: carry the row forward, change only the block.
+        let existing = store.instance_get(&created.id).unwrap().unwrap();
+        let relaunch = AgentInstance { block_id: "blk-second".to_string(), ..existing };
+        store.instance_create(&relaunch).unwrap();
+
+        // Half 1: the launch-specific lookup now resolves the NEW block, which
+        // is the whole point — and no longer the old one.
+        let by_new = store.instance_get_by_block_id("blk-second").unwrap();
+        assert!(by_new.is_some(), "the relaunch must repoint last_block_id at the new block");
+        assert!(
+            store.instance_get_by_block_id("blk-first").unwrap().is_none(),
+            "one row per agent — the old block must no longer resolve"
+        );
+
+        // Half 2: nothing else moved.
+        let after = store.instance_get(&created.id).unwrap().unwrap();
+        assert_eq!(after.identity_id, "acct-bound", "the bound account must survive a relaunch fold");
+        assert_eq!(after.memory_id, "bundle-bound", "the memory bundle must survive a relaunch fold");
+        assert_eq!(after.instance_name, "Relaunch");
+        assert_eq!(after.working_directory, "/work/relaunch");
+
+        // And it folded rather than inserting a second row for the agent.
+        let rows: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM db_agents WHERE id = ?1 AND is_template = 0",
+                params!["def-relaunch"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 1, "a relaunch must fold onto the agent's row, not create a second");
+    }
+
     #[test]
     fn instance_create_backfills_local_definition_from_registry_only_record() {
         let store = Store::open_in_memory().unwrap();
