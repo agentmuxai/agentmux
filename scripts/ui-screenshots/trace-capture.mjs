@@ -1,3 +1,6 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
 // Capture a Chromium trace (all processes: browser, renderer main+compositor,
 // GPU) via CDP for N seconds, save it, and summarize where time goes per
 // process/thread and per top-level event name — for when a JS CPU profile

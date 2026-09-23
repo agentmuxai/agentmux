@@ -1,3 +1,6 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
 // Evaluate a JS expression (may return a Promise) in a CDP page target and
 // print the JSON result. Used to run in-page instrumentation (Event Timing,
 // long tasks, rAF gaps, mutation rate) against a live dev build.

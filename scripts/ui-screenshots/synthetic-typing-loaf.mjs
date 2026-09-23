@@ -1,3 +1,6 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
 // Reproduce "hold a key" typing into a focused composer via CDP Input events
 // while recording Long Animation Frames in-page, then print an attribution
 // summary. Removes the need for a human to type during a capture.

@@ -1,3 +1,6 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
 // Attach to a CDP page target and capture a V8 CPU profile of the renderer
 // main thread for N seconds. Writes a .cpuprofile (loadable in DevTools
 // Performance/JS Profiler) and prints a self-time summary.

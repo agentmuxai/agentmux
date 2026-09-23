@@ -1,3 +1,6 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
 // Hands-free A/B: same streaming load, LoAF-attributed frames WITHOUT typing
 // (A) vs WITH synthetic key-repeat typing (B). Optionally kicks off the load by
 // sending a prompt into every EMPTY agent composer in the page first.
