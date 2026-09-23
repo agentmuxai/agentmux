@@ -2087,6 +2087,48 @@
         }
     }
 
+    /// Codex P1 on #3576: the promoted clone a launch was repointed to is
+    /// deleted afterwards (`agent_def_delete` keeps derived rows), so no
+    /// lineage reaches the template any more. A stamped block still resolves
+    /// its launch — the stamp is the evidence, not the lineage.
+    #[test]
+    fn a_stamped_launch_resolves_after_its_promoted_clone_is_deleted() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-clone-gone", "tpl-clone-gone");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let launched = launch_from_template_on(&store, &agents_root, "tpl-clone-gone", "inst-cg", "block-cg");
+        let clone = launch_from_template_on(&store, &agents_root, "tpl-clone-gone", "inst-cg-clone", "block-cg-elsewhere");
+        store.instance_repoint_definition("tpl-clone-gone", &clone).unwrap();
+        assert!(store.agent_def_delete(&clone).unwrap());
+
+        block_showing_stamped(&store, "block-cg", Some("tpl-clone-gone"), Some(&launched));
+        let got = store.instance_get_active_for_block("block-cg").unwrap();
+        assert_eq!(got.map(|r| r.id), Some(launched));
+    }
+
+    /// A stale stamp — pane reuse left A's id while B, launched from the
+    /// same template later, has since folded onto the block — is not the
+    /// block's latest launch, so it resolves to nothing, never to A.
+    #[test]
+    fn a_stale_stamp_overtaken_by_a_later_launch_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-stale", "tpl-stale");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let a = launch_from_template_on(&store, &agents_root, "tpl-stale", "inst-stale-a", "block-stale-stamp");
+        let mut later = make_named_inst("inst-stale-b", "inst-stale-b", &agents_root);
+        later.definition_id = "tpl-stale".to_string();
+        later.block_id = "block-stale-stamp".to_string();
+        later.started_at = 5_000;
+        store.instance_create(&later).unwrap();
+
+        block_showing_stamped(&store, "block-stale-stamp", Some("tpl-stale"), Some(&a));
+        assert!(store.instance_get_active_for_block("block-stale-stamp").unwrap().is_none());
+    }
+
     /// A block whose meta names no agent at all keeps today's fallback: the
     /// agent whose latest launch is on it (a block from before `agentId`).
     #[test]
