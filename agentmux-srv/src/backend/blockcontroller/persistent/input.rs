@@ -461,7 +461,8 @@ impl PersistentSubprocessController {
         };
 
         if !stranded.is_empty() {
-            self.log_stranded_deferred(
+            Self::log_stranded_deferred(
+                &self.block_id,
                 "no process and no spawn in flight for the whole grace window",
                 &stranded,
             );
@@ -489,7 +490,7 @@ impl PersistentSubprocessController {
             let mut inner = self.inner.lock().unwrap();
             inner.deferred_deliveries.drain(..).collect()
         };
-        self.log_stranded_deferred(reason, &stranded);
+        Self::log_stranded_deferred(&self.block_id, reason, &stranded);
     }
 
     /// **Known gap:** reporting is currently a loud structured log, not a
@@ -498,18 +499,21 @@ impl PersistentSubprocessController {
     /// address a reply to; carrying that identity through is Phase 3. Until
     /// then a stranded message is visible in the logs rather than in the
     /// sender's response — better than silence, short of the spec's intent.
-    fn log_stranded_deferred(&self, reason: &str, stranded: &[String]) {
+    ///
+    /// Takes `block_id` rather than `&self` so `shutdown`'s `'static` future,
+    /// which holds no controller reference, can report through it too.
+    pub(super) fn log_stranded_deferred(block_id: &str, reason: &str, stranded: &[String]) {
         if stranded.is_empty() {
             return;
         }
         tracing::warn!(
-            block_id = %self.block_id,
+            block_id = %block_id,
             reason = %reason,
             stranded = stranded.len(),
             "deferred messages were accepted but never delivered"
         );
         for line in stranded {
-            tracing::warn!(block_id = %self.block_id, message = %line, "stranded deferred message");
+            tracing::warn!(block_id = %block_id, message = %line, "stranded deferred message");
         }
     }
 

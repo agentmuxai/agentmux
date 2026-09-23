@@ -113,6 +113,29 @@ async fn never_spawned_is_not_running() {
     assert_eq!(outcome, StopOutcome::NotRunning);
 }
 
+/// Codex P2 on #3562: a message deferred behind a spawn that then failed
+/// leaves the queue non-empty with no process. Closing the pane inside the
+/// watchdog's grace window must still report it: the no-process return used
+/// to skip the reporting, and the watchdog (weak ref) died with the
+/// controller, so the accepted message vanished without a trace.
+#[tokio::test]
+async fn shutdown_with_no_process_still_reports_deferred_messages() {
+    let c = PersistentSubprocessController::new("tab".into(), "blk-orphan".into(), None, None, None, None);
+    c.inner
+        .lock()
+        .unwrap()
+        .deferred_deliveries
+        .push_back(PersistentSubprocessController::encode_user_message("behind a failed spawn"));
+
+    let outcome = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(1)).await;
+
+    assert_eq!(outcome, StopOutcome::NotRunning);
+    assert!(
+        c.inner.lock().unwrap().deferred_deliveries.is_empty(),
+        "drained and reported, not left for a watchdog that dies with the controller"
+    );
+}
+
 /// Mid-turn: EOF alone would let the turn run on (§5.1). The interrupt
 /// ends it, the process exits well inside the deadline, and the
 /// interrupted turn's `is_error` result is NOT reported as a failure.
