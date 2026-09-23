@@ -1,0 +1,114 @@
+// Stash drawer — top-anchored, docked under the pane header where its own
+// backpack toggle lives. Replaced the `agent-stash` modal.
+// SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1/§3.2/§3.2a.
+//
+// Mirrors the shell drawer's structural rules (_composer-strip.scss's
+// .agent-composer-details-* block) rather than sharing them: the shared
+// COMPONENT is ResizableDetailsDrawer, which namespaces its three structural
+// elements by a `classPrefix` prop precisely so the two drawers can be styled
+// independently — the shell's handle sits on its top edge, this one's on its
+// bottom edge, and their content has opposite density needs.
+
+.agent-stash-drawer {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border-color);
+
+    // §6 open question 1/2, answered: the Stash and shell drawers are
+    // INDEPENDENT (either, both, or neither open — mutual exclusion would
+    // silently close a live shell holding real terminal state). This cap is
+    // what keeps that independence from squeezing the transcript to nothing:
+    // whatever the user drags to, and whatever the shell is also taking,
+    // Stash never occupies more than half the pane. Resolves against
+    // `.agent-view`'s definite `height: 100%` (agent-view.scss).
+    max-height: 50%;
+}
+
+.agent-stash-drawer-resizable {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    // Fills whatever the capped wrapper above allows, rather than forcing its
+    // dragged inline height through it.
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
+}
+
+// Bottom-edge handle — the mirror of the shell drawer's top-edge one
+// (border on the edge that faces the content it resizes against).
+.agent-stash-drawer-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: ns-resize;
+    background: transparent;
+    border-bottom: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+
+    &:hover,
+    &--active {
+        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        border-bottom-color: var(--accent-color);
+    }
+}
+
+.agent-stash-drawer-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+}
+
+// ── §3.2a density: composer-scale, not modal-scale ─────────────────────────
+//
+// The ported content (AgentStashModal) was sized for a modal with room to
+// breathe: --space-2/--space-4 (8/16px) padding and --text-sm text. In a
+// drawer it should read like the composer strip instead — measured values
+// from _composer-strip.scss: 9-11px fonts, 1-2px vertical padding, 2px gaps,
+// horizontal padding topping out at --space-2 (8px).
+//
+// Scoped under .agent-stash-drawer so the same component keeps its roomier
+// proportions anywhere else it is ever hosted — this is a host-specific
+// density, not a change to the component's own defaults.
+.agent-stash-drawer {
+    .agent-stash-modal-tabs {
+        gap: 2px;
+        padding: 2px var(--space-1-5) 0;
+    }
+
+    .agent-stash-modal-tab {
+        gap: var(--space-1);
+        padding: 2px var(--space-1-5);
+        font-size: 10px;
+
+        i {
+            width: 12px;
+        }
+    }
+
+    .agent-stash-modal-panel {
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-1-5);
+        font-size: 11px;
+    }
+
+    // NOTE: the Memory tab's own 780x520 standalone sizing needs no
+    // neutralization here — AgentStashModal.scss already does it under
+    // `.agent-stash-modal-panel`, which is host-agnostic (it was never
+    // scoped to `.modal-panel`), so it applies in the drawer unchanged.
+
+    // Replaces the `@container modal-mount` min-width:0 rescue
+    // (AgentStashModal.scss), which only ever fired inside ModalLayer's mount
+    // node and therefore never fires here. Unconditional rather than
+    // container-gated: flex children default to `min-width: auto`, and there
+    // is no width at which we'd want these two to refuse to shrink.
+    .agent-stash-modal-tabs,
+    .agent-stash-modal-panel {
+        min-width: 0;
+    }
+}

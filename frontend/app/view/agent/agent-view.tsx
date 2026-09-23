@@ -41,7 +41,6 @@ import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
 import {
@@ -86,6 +85,7 @@ import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBan
 import { PaneRow } from "./components/PaneRow";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
+import { AgentStashModal } from "./components/AgentStashModal";
 import { BtwOverlay } from "./components/BtwOverlay";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
@@ -548,41 +548,28 @@ const AgentPresentationView = ({
     // tab with no agentId yet — see that component's comment for the full
     // rationale.
 
-    // Wire the pane-scoped modal callback into the model so the single
-    // title-bar "Stash" (backpack) icon can open the unified tabbed
-    // modal (Accounts + Memory) without holding a SolidJS context in the
-    // model. Mirrors the former _setOverlayTab pattern; supersedes the
-    // separate _openIdentityModal / _openBundleModal callbacks.
-    const modalLayer = useModalLayer();
+    // Wire the Stash drawer's open/close/read callbacks into the model so
+    // the single title-bar "Stash" (backpack) icon can drive it without the
+    // model holding a SolidJS context.
+    //
+    // These used to open a MODAL (`modalLayer.open({kind:"agent-stash"})`);
+    // the drawer replaced it in
+    // SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.3, which is why all
+    // three collapse to one-liners now — no layer to open, no backdrop to
+    // dismiss, just a reducer field. The callback NAMES keep their
+    // `...StashModal` spelling only to avoid churning agent-model.ts's
+    // already-shipped toggle wiring (PR #3516) in the same change; they are
+    // drawer callbacks now.
     onMount(() => {
-        model._openAgentStashModal = () => {
-            // Prefer cmd:cwd (actual launch cwd, set by launchAgentDefinition)
-            // over AgentDefinition.working_directory, which is often empty or a
-            // stale default for template-launched and continuation agents.
-            const block = model.blockAtom();
-            const workingDirectory = (block?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || "";
-            const agent = currentAgent() ?? null;
-            modalLayer.open({
-                kind: "agent-stash",
-                agentId,
-                agentName: agentName(),
-                workingDirectory,
-                // No loadable definition (quick-launch pane) → default to
-                // the Memory tab; the Accounts tab works from agentId alone
-                // but the Memory tab is the more useful default for a pane
-                // with no saved definition yet.
-                initialTab: agent ? "accounts" : "memory",
-            });
-        };
-        // Second click on the Stash button retracts it — the button is now
-        // a real toggle (agent-model.ts's ToggleIconButtonDecl), not an
-        // always-opens button.
-        model._closeAgentStashModal = () => modalLayer.close();
-        // Read fresh at call time (agent-model.ts's endIconButtons() reads
-        // this inside blockframe.tsx's createMemo, so the signal read
-        // inside modalLayer.current() is tracked) — reflects every close
-        // path (X button, Escape, backdrop click), not just this button.
-        model._isAgentStashOpen = () => modalLayer.current()?.kind === "agent-stash";
+        model._openAgentStashModal = () => paneModel.dispatchPane({ type: "StashExpand" }, "user");
+        model._closeAgentStashModal = () => paneModel.dispatchPane({ type: "StashCollapse" }, "user");
+        // Read fresh at call time. `paneModel.state` exposes each field as
+        // its own signal (agent-pane-state-store.ts's createFieldSignals),
+        // and agent-model.ts's endIconButtons() reads this inside
+        // blockframe.tsx's createMemo — so the icon's highlighted state
+        // tracks `stashOpen` reactively, including closes that don't come
+        // from the button itself.
+        model._isAgentStashOpen = () => paneModel.state.stashOpen;
     });
     onCleanup(() => {
         model._openAgentStashModal = null;
@@ -2232,6 +2219,59 @@ const AgentPresentationView = ({
                 cover can't be 69%-sized by the pane zoom.
                 See REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md §F. */}
             <PaneLoadingCover phase={readiness.phase} />
+            {/* Stash drawer — top-anchored, directly under the pane header
+                where its own backpack toggle lives
+                (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1).
+                Replaced the former `agent-stash` MODAL; the header icon
+                (agent-model.ts's endIconButtons) drives `stashOpen` through
+                the three callbacks wired in onMount above.
+
+                Deliberately OUTSIDE `.agent-view-zoomed`, exactly like the
+                Shell drawer below, for two reasons beyond symmetry: the
+                drag-to-resize math reads `ev.clientY` (visual px) and writes
+                a `height` (layout px), which CSS `zoom` makes disagree —
+                the same coordinate-space trap
+                SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md
+                records for the shell — and §3.2a's composer-scale density
+                values are already tuned small, so compounding them with a
+                per-pane zoom would read as either unusable or enormous
+                rather than merely scaled. It stays a flex child of
+                `.agent-view` so the transcript below still shrinks to make
+                room for it. */}
+            <Show when={paneModel.state.stashOpen}>
+                <div class="agent-stash-drawer" id={`agent-stash-drawer-${model.blockId}`}>
+                    <ResizableDetailsDrawer
+                        blockId={model.blockId}
+                        anchor="top"
+                        classPrefix="agent-stash-drawer"
+                        persistMetaKey="agent:stashheight"
+                        persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
+                    >
+                        <AgentStashModal
+                            agentId={agentId}
+                            agentName={agentName()}
+                            // Prefer cmd:cwd (the actual launch cwd, set by
+                            // launchAgentDefinition) over
+                            // AgentDefinition.working_directory, which is often
+                            // empty or a stale default for template-launched and
+                            // continuation agents.
+                            workingDirectory={
+                                (block()?.meta?.["cmd:cwd"] as string) ||
+                                currentAgent()?.working_directory ||
+                                ""
+                            }
+                            // No loadable definition (quick-launch pane) → default
+                            // to the Memory tab; the Accounts tab works from
+                            // agentId alone but Memory is the more useful default
+                            // for a pane with no saved definition yet.
+                            initialTab={currentAgent() ? "accounts" : "memory"}
+                            // No `onClose` — closing is the header icon's job, so
+                            // the Memory tab hides its footer Close button rather
+                            // than rendering a dead one (§3.4).
+                        />
+                    </ResizableDetailsDrawer>
+                </div>
+            </Show>
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Gradient progress bar — marching-ants shimmer traced around
                 the full pane perimeter while working, hidden at rest.

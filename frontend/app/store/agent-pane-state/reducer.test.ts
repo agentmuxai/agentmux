@@ -3039,6 +3039,87 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    // ── Stash drawer ────────────────────────────────────────────────────
+    // SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.3. Deliberately the
+    // same command triple as the composer details panel above (the shell
+    // drawer) rather than a bespoke atom: the Stash drawer is the same
+    // category of per-pane UI state, and `endIconButtons()`'s toggle-highlight
+    // memo (agent-model.ts) needs a reactive read, which the pane view's
+    // per-field signals already provide for reducer state.
+    describe("Stash drawer", () => {
+        it("initial state: stashOpen false", () => {
+            const s = mk();
+            expect(s.stashOpen).toBe(false);
+        });
+
+        it("StashToggle: closed → open", () => {
+            const s = mk();
+            const r = update(s, { type: "StashToggle" });
+            expect(r.state.stashOpen).toBe(true);
+            expect(r.events).toEqual([]);
+        });
+
+        it("StashToggle: open → closed", () => {
+            let s = mk();
+            s = update(s, { type: "StashToggle" }).state;
+            s = update(s, { type: "StashToggle" }).state;
+            expect(s.stashOpen).toBe(false);
+        });
+
+        it("StashExpand: idempotent when already open", () => {
+            let s = mk();
+            s = update(s, { type: "StashExpand" }).state;
+            const r = update(s, { type: "StashExpand" });
+            expect(r.state).toBe(s);
+        });
+
+        it("StashExpand: opens when closed", () => {
+            const s = mk();
+            const r = update(s, { type: "StashExpand" });
+            expect(r.state.stashOpen).toBe(true);
+        });
+
+        it("StashCollapse: idempotent when already closed", () => {
+            const s = mk();
+            const r = update(s, { type: "StashCollapse" });
+            expect(r.state).toBe(s);
+        });
+
+        it("StashCollapse: closes an open drawer", () => {
+            let s = mk();
+            s = update(s, { type: "StashExpand" }).state;
+            const r = update(s, { type: "StashCollapse" });
+            expect(r.state.stashOpen).toBe(false);
+        });
+
+        it("is independent of the shell drawer — both can be open at once", () => {
+            // §6 open question 1, answered: mutual exclusion would silently
+            // close a live shell (which owns real terminal state), so the two
+            // drawers are independent axes. The transcript is protected by a
+            // CSS max-height on the Stash drawer instead (§3.1), not by
+            // forcing one closed here.
+            let s = mk();
+            s = update(s, { type: "DetailsExpand" }).state;
+            s = update(s, { type: "StashExpand" }).state;
+            expect(s.detailsOpen).toBe(true);
+            expect(s.stashOpen).toBe(true);
+
+            s = update(s, { type: "StashCollapse" }).state;
+            expect(s.detailsOpen).toBe(true); // shell untouched
+            expect(s.stashOpen).toBe(false);
+        });
+
+        it("TurnStart leaves an open Stash drawer open", () => {
+            // Same reasoning as the details panel above: sending a message
+            // must not yank a surface the user deliberately opened.
+            let s = ready(100);
+            s = update(s, { type: "StashExpand" }).state;
+            const r = update(s, { type: "TurnStart", at: 200 });
+            expect(r.state.stashOpen).toBe(true);
+            expect(r.state.turnPhase.kind).toBe("Submitting");
+        });
+    });
+
     // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md — a sibling axis to
     // TurnPhase for "is there a live agent-declared long-running task
     // attached to this pane," independent of turn state.
