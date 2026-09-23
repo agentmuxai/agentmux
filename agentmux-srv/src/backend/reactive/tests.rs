@@ -3513,3 +3513,57 @@ async fn a_slug_two_agents_share_addresses_neither() {
         assert_eq!(ok.block_id.as_deref(), Some(block));
     }
 }
+
+/// ReAgent P1 (second round) on #3520. `unregister_agent` used `lookup_key`
+/// alone, which fails closed on an ambiguous slug — correct for delivery,
+/// wrong for teardown. `/agentmux/reactive/unregister` (the normal graceful
+/// close path, fired on every pane close) became a permanent no-op for exactly
+/// the colliding agents this phase exists to separate, leaking their registry
+/// entries for the life of the process while still reporting success.
+#[tokio::test]
+async fn unregister_works_for_an_agent_whose_slug_is_ambiguous() {
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(test_resolver(&[
+        ("AgentY", "def-a"),
+        ("AGENTY", "def-b"),
+        ("def-a", "def-a"),
+        ("def-b", "def-b"),
+    ]));
+
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+    handler.register_agent("AGENTY", "block-b", None).unwrap();
+    assert!(handler.get_agent("def-a").is_some(), "precondition: both registered");
+    assert!(handler.get_agent("def-b").is_some());
+
+    // The slug is ambiguous, but this caller's own spelling still identifies it.
+    handler.unregister_agent("AgentY");
+
+    assert!(handler.get_agent("def-a").is_none(), "teardown must actually remove the entry");
+    assert!(handler.get_agent("def-b").is_some(), "the sibling must be untouched");
+
+    // With the collision gone, the slug must address the survivor again rather
+    // than staying permanently Ambiguous.
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agenty".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-after".to_string()),
+        ..Default::default()
+    });
+    assert!(resp.success, "slug must resolve again once unambiguous: {:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-b"));
+
+    // And once the survivor leaves too, the slug binds to nothing — so a later
+    // agent taking that name does not inherit a stale verdict.
+    handler.unregister_agent("AGENTY");
+    assert!(handler.get_agent("def-b").is_none(), "second teardown must also remove");
+    handler.register_agent("fresh", "block-c", None).unwrap();
+    handler.register_agent("AGENTY", "block-d", None).unwrap();
+    let reused = handler.inject_message(InjectionRequest {
+        target_agent: "agenty".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-reuse".to_string()),
+        ..Default::default()
+    });
+    assert!(reused.success, "a reused slug must not inherit the old collision: {:?}", reused.error);
+    assert_eq!(reused.block_id.as_deref(), Some("block-d"));
+}

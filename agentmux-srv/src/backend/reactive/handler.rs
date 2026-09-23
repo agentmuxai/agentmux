@@ -415,10 +415,21 @@ impl Handler {
 
     /// Unregister an agent.
     pub fn unregister_agent(&mut self, agent_id: &str) {
-        let Some(agent_key) = self.lookup_key(agent_id) else {
-            return;
-        };
-        self.slug_bindings.remove(&agent_id.to_lowercase());
+        // NOT `lookup_key` alone. That fails closed on an ambiguous slug, which
+        // is right for *delivery* — refusing to guess a recipient — but wrong
+        // for teardown: returning early would make `/agentmux/reactive/
+        // unregister` a permanent no-op for precisely the colliding agents this
+        // phase exists to separate, leaking their registry entries, alias and
+        // audit record for the life of the process (ReAgent P1 on #3520).
+        //
+        // Resolving cold is safe here because it uses the caller's own exact
+        // spelling: when "AgentY" and "AGENTY" collide on `agenty`, the shared
+        // slug is ambiguous but each caller's own string still resolves to its
+        // own id. Nothing is removed if that also fails, which is no worse than
+        // the early return it replaces.
+        let agent_key = self
+            .lookup_key(agent_id)
+            .unwrap_or_else(|| self.canonical_key(agent_id));
         if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
             self.log_audit_registration("unregister", agent_id, &block_id, None, None);
@@ -436,6 +447,32 @@ impl Handler {
             }
         }
         self.agent_info.remove(&agent_key);
+        self.rebind_slug_from_registrations(agent_id);
+    }
+
+    /// Recompute a slug's binding from the registrations that remain.
+    ///
+    /// Removing the binding outright would be wrong when a colliding sibling
+    /// is still registered, and leaving it `Ambiguous` would be wrong once the
+    /// collision is gone — a later agent taking that slug would inherit the
+    /// old verdict and be unaddressable by it for the life of the process.
+    /// Deriving it from `agent_info` keeps the two in step by construction.
+    fn rebind_slug_from_registrations(&mut self, agent_id: &str) {
+        let slug = agent_id.to_lowercase();
+        let mut keys = self
+            .agent_info
+            .iter()
+            .filter(|(_, reg)| reg.agent_id.to_lowercase() == slug)
+            .map(|(key, _)| key.clone());
+        let binding = match (keys.next(), keys.next()) {
+            (Some(only), None) => Some(SlugBinding::Unique(only)),
+            (Some(_), Some(_)) => Some(SlugBinding::Ambiguous),
+            _ => None,
+        };
+        match binding {
+            Some(b) => self.slug_bindings.insert(slug, b),
+            None => self.slug_bindings.remove(&slug),
+        };
     }
 
     /// Unregister by block ID.
