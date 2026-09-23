@@ -202,6 +202,12 @@ impl SubprocessController {
             .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        // Identity M4a: record what this turn's `docker exec` is actually given.
+        crate::backend::identity_spawn::record_process_spawn(
+            &self.block_id,
+            crate::backend::identity_spawn::SpawnPath::Container,
+            &container_env.iter().cloned().collect(),
+        );
 
         // Snapshot container params for the queue-drain path before base_cmd is consumed.
         let cm_for_drain = cm.clone();

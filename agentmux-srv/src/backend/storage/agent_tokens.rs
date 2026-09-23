@@ -320,4 +320,32 @@ mod tests {
             assert!(tombstones.iter().all(|(_, uid)| uid == "uid-agenty"));
         }
     }
+
+    /// The colliding-names fixture: deleting the second "AgentY" (slug
+    /// agenty-2) must not tombstone `agenty`, the first one's slug — its
+    /// signing keys sit under that name, and a tombstone would cost the
+    /// rightful, live owner its key at M4d (adversarial review of #3571).
+    #[test]
+    fn deleting_one_of_two_same_named_agents_spares_the_others_slug() {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = object_store();
+        for (id, name, slug) in [
+            ("uid-first", "AgentY", "agenty"),
+            ("uid-second", "AGENTY", "agenty-2"),
+        ] {
+            let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+            def.slug = slug.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+        }
+        assert!(store.agent_def_delete("uid-second").unwrap());
+        let tombstones = {
+            let conn = store.conn.lock().unwrap();
+            super::super::agents::key_tombstones_for_tests(&conn)
+        };
+        assert_eq!(
+            tombstones,
+            vec![("agenty-2".to_string(), "uid-second".to_string())],
+            "only the deleted agent's own slug"
+        );
+    }
 }

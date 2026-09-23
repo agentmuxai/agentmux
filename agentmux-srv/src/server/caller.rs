@@ -100,7 +100,9 @@ pub(crate) async fn caller_middleware(
     next: Next,
 ) -> Response {
     let full_key = req.extensions().get::<ReactiveAuthVia>() == Some(&ReactiveAuthVia::FullAuthKey);
-    let token = if req.uri().path() == "/ws" {
+    // A CORS preflight skips auth, so it is never marked; it is not a
+    // token on a LAN key and must not be counted as one.
+    let token = if req.uri().path() == "/ws" || req.method() == axum::http::Method::OPTIONS {
         None
     } else {
         req.headers()
@@ -131,12 +133,30 @@ pub(crate) async fn handle_identity_fallbacks(
             .into_iter()
             .map(|(site, n)| (site.to_string(), serde_json::json!(n)))
             .collect();
-    let (tokenless_or_unknown, unidentified) = crate::backend::identity_spawn::live_gauges(
-        &state.reactive_handler.list_agents(),
-        |block| crate::backend::blockcontroller::get_controller(block).is_some(),
-    );
+    // `has_row` reads the store per UID-less registration, so off the async
+    // worker (incident #1782).
+    let registrations = state.reactive_handler.list_agents();
+    let mstore = state.mstore.clone();
+    // A failed read reports the gauges as null, never as a drained zero.
+    let gauges = tokio::task::spawn_blocking(move || {
+        crate::backend::identity_spawn::live_gauges(
+            &registrations,
+            |block| crate::backend::blockcontroller::get_controller(block).is_some(),
+            |block| crate::backend::identity_spawn::store_block_has_row(&mstore, block),
+        )
+    })
+    .await
+    .ok();
+    let (tokenless_or_unknown, unidentified) = match gauges {
+        Some((t, u)) => (serde_json::json!(t), serde_json::json!(u)),
+        None => (serde_json::Value::Null, serde_json::Value::Null),
+    };
     let caller_uid = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string));
     axum::Json(serde_json::json!({
+        // Counters and gauges are in memory, per srv, since this boot: a
+        // counter that has not fired is absent (read it as zero), and a gate
+        // reader must sample every channel's srv (spec §9.2).
+        "boot_id": state.boot_id.to_string(),
         "caller": caller_uid,
         "counters": counters,
         "gauges": {

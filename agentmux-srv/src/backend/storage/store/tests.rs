@@ -1854,6 +1854,51 @@
         assert_eq!(got.identity_id, "id-legacy-tpl");
     }
 
+    /// Identity M4a (adversarial review of #3570/#3571): a template-based
+    /// continuation's block names only the template (`agentId`), yet it
+    /// resolves to the row the launch folded into, because the fold moves
+    /// that row's latest launch onto the new block. So the spawn counters
+    /// and the live gauge, which ask `uid_for_block`, count a continuation as
+    /// row-backed — the gap it is — not as a row-less pane.
+    #[test]
+    fn a_template_continuation_block_resolves_to_the_row_it_folds_into() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-cont", "tpl-cont");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut first = make_named_inst("inst-cont-root", "ContRoot", &agents_root);
+        first.definition_id = "tpl-cont".to_string();
+        first.block_id = "block-cont-a".to_string();
+        let root = store.instance_create(&first).unwrap();
+
+        let mut cont = make_named_inst("inst-cont-next", "ContRoot", &agents_root);
+        cont.definition_id = "tpl-cont".to_string();
+        cont.parent_instance_id = root.id.clone();
+        cont.block_id = "block-cont-b".to_string();
+        let folded = store.instance_create(&cont).unwrap();
+        assert_eq!(folded.id, root.id, "a continuation folds into its row");
+
+        let mut block = crate::backend::obj::Block {
+            oid: "block-cont-b".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("agentId".to_string(), serde_json::json!("tpl-cont"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        assert_eq!(
+            crate::backend::agent_resolve::uid_for_block(&store, "block-cont-b").as_deref(),
+            Some(root.id.as_str())
+        );
+    }
+
     #[test]
     fn instance_get_active_for_block_phase_3b4_honors_legacy_agent_id_meta_key() {
         // Older blocks may still carry `agent:id` instead of `agentId`.
