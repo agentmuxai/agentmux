@@ -33,7 +33,7 @@ The patches live in the same fork/branch as Linux:
   before building; if it fails, fix the integration branch rather than building
   around it.
 - **Base:** Chromium 148 (CEF branch 7778)
-- **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` (pinned in
+- **Rust binding:** `agentmuxai/cef-rs@agentmux/148-begin-window-drag` (pinned in
   `Cargo.toml` `[patch]`; the binding's `_cef_window_t` carries `begin_window_drag`
   for both linux and macos arch dirs).
 
