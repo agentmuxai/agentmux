@@ -63,7 +63,8 @@ export function findSafeSplitPoint(text: string): number {
     if (REF_DEFINITION.test(text) || FOOTNOTE.test(text)) return -1;
 
     let inFence = false;
-    let fenceMarker = "";
+    let fenceChar = "";
+    let fenceLen = 0;
     let inComment = false;
     let lastSafe = -1;
 
@@ -76,27 +77,58 @@ export function findSafeSplitPoint(text: string): number {
         const line = text.slice(lineStart, lineEnd);
         const trimmed = line.trim();
 
+        // Fence markers may be indented at most 3 spaces; at 4+ the line is
+        // indented-code content and cannot open or close a fence
+        // (CommonMark §4.5). Anything more indented is deliberately not
+        // treated as a fence at all.
+        const indent = line.length - line.trimStart().length;
+        const body = indent <= 3 ? line.trimEnd().slice(indent) : "";
+        const fenceRun = /^(`{3,}|~{3,})(.*)$/.exec(body);
+
         if (inComment) {
             if (trimmed.includes("-->")) inComment = false;
         } else if (inFence) {
-            // A closing fence must be at least as long as the opener and use
-            // the same character; anything else is fence content.
-            if (trimmed.startsWith(fenceMarker)) {
+            // CommonMark §4.5: a CLOSING fence is a run of the SAME character,
+            // at least as long as the opener, followed by nothing but
+            // whitespace.
+            //
+            // It is not enough for the line to merely START with the fence
+            // characters. An inner "```python" inside an outer "```markdown"
+            // block is fence CONTENT, not a close — and agents emit exactly
+            // that constantly when explaining markdown or showing nested
+            // snippets. Treating it as a close desyncs this scan from the real
+            // parser, and the scan then hands back a "safe" point that is
+            // actually inside an open code block, corrupting what renders.
+            // Caught by ReAgent on PR #3521; regression test
+            // "never splits when an inner fence-like line appears inside a
+            // fence" in markdown-incremental.test.ts.
+            const closes =
+                fenceRun !== null &&
+                fenceRun[2].trim() === "" &&
+                fenceRun[1][0] === fenceChar &&
+                fenceRun[1].length >= fenceLen;
+            if (closes) {
                 inFence = false;
-                fenceMarker = "";
+                fenceChar = "";
+                fenceLen = 0;
             }
-        } else {
-            const fence = /^(`{3,}|~{3,})/.exec(trimmed);
-            if (fence) {
+        } else if (fenceRun) {
+            // CommonMark §4.5: a backtick fence's info string may not itself
+            // contain a backtick — that case is an inline code span, not a
+            // fence, so opening one here would desync the scan the same way.
+            const marker = fenceRun[1];
+            const info = fenceRun[2];
+            if (!(marker[0] === "`" && info.includes("`"))) {
                 inFence = true;
-                fenceMarker = fence[1];
-            } else if (trimmed.startsWith("<!--") && !trimmed.includes("-->")) {
-                inComment = true;
-            } else if (prevLineBlank && trimmed.length > 0 && !UNSAFE_TAIL_START.test(line)) {
-                // `lineStart` begins a fresh top-level block and everything
-                // before it is closed — a provably safe cut.
-                if (lineStart >= MIN_PREFIX_CHARS) lastSafe = lineStart;
+                fenceChar = marker[0];
+                fenceLen = marker.length;
             }
+        } else if (trimmed.startsWith("<!--") && !trimmed.includes("-->")) {
+            inComment = true;
+        } else if (prevLineBlank && trimmed.length > 0 && !UNSAFE_TAIL_START.test(line)) {
+            // `lineStart` begins a fresh top-level block and everything
+            // before it is closed — a provably safe cut.
+            if (lineStart >= MIN_PREFIX_CHARS) lastSafe = lineStart;
         }
 
         prevLineBlank = !inFence && !inComment && trimmed.length === 0;
