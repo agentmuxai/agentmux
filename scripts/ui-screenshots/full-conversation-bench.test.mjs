@@ -27,7 +27,10 @@ describe("parseArgs", () => {
             typeInto: 0,
             kps: 20,
             soakMinutes: null,
+            streamMode: "pipeline",
         });
+        expect(parseArgs(["--stream-mode", "direct"]).streamMode).toBe("direct");
+        expect(() => parseArgs(["--stream-mode", "x"])).toThrow(/pipeline or direct/);
     });
 
     it("reads panes, history, typing target and soak", () => {

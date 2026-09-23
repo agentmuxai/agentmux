@@ -5,9 +5,11 @@
 // over CDP; defines window.__fcb. Plain browser JavaScript (no imports at load
 // time) so it can be sent as one Runtime.evaluate expression.
 //
-// Synthetic content goes straight into each pane's document store through the
-// live module instance (`getPaneModel(blockId).dispatchDoc`), so the bench
-// needs no agents and no tokens and is exactly repeatable. Every node it
+// Synthetic history goes straight into each pane's document store through the
+// live module instance (`getPaneModel(blockId).dispatchDoc`); each window's
+// streamed reply goes, by default, through the pane's real output
+// subscription as provider NDJSON (see startWindow). No agents and no tokens,
+// and exactly repeatable. Every node it
 // creates has an id starting with "fcb-", which is how a pane is recognised as
 // holding only bench content.
 //
@@ -73,6 +75,23 @@
     };
     document.addEventListener("visibilitychange", onVisibility);
 
+    /** One NDJSON line, base64-encoded as the file subject delivers it. */
+    const ndjson64 = (o) => {
+        const bytes = new TextEncoder().encode(JSON.stringify(o) + String.fromCharCode(10));
+        let s = "";
+        for (const b of bytes) s += String.fromCharCode(b);
+        return btoa(s);
+    };
+    /** getFileSubject() counts references; give each one back exactly once. */
+    const releaseSubjects = (W) => {
+        for (const subj of W.subjects ?? []) {
+            try {
+                subj.release();
+            } catch {}
+        }
+        W.subjects = [];
+    };
+
     /** Remove every listener and observer this instance added; put back a
      *  draft it was holding (synchronously, on the captured composer only —
      *  the async live-composer path is restoreTyping's job). */
@@ -84,6 +103,8 @@
             W.po?.disconnect();
             W.eo?.disconnect();
             if (W.kh) document.removeEventListener("keydown", W.kh, true);
+            for (const t of W.timers ?? []) clearTimeout(t);
+            releaseSubjects(W);
         }
         const T = F.typing;
         if (T) {
@@ -149,6 +170,9 @@
     };
 
     F.init = async (blockIds) => {
+        // For "pipeline" streaming (see startWindow): the live file-subject
+        // registry every pane's useAgentStream subscribes to.
+        F.mps = await liveModule("/frontend/app/store/mps.ts").catch(() => null);
         const found = await F.discover();
         const want = blockIds && blockIds.length ? found.filter((p) => blockIds.includes(p.blockId)) : found;
         F.panes = new Map(want.map((p) => [p.blockId, { model: p.model }]));
@@ -245,7 +269,7 @@
             .map((v) => ({ ...v, ms: +v.ms.toFixed(1), forcedLayoutMs: +v.forcedLayoutMs.toFixed(1) }));
     };
 
-    F.startWindow = ({ streamKb, secs }) => {
+    F.startWindow = ({ streamKb, secs, mode = "pipeline" }) => {
         if (document.visibilityState !== "visible")
             throw new Error(`page is ${document.visibilityState} at window start`);
         const W = (F.win = {
@@ -282,42 +306,115 @@
         requestAnimationFrame(f);
 
         // Stream one synthetic message into every pane at ~11 commits/s.
+        W.mode = mode;
+        W.timers = [];
+        W.subjects = [];
         const commits = Math.max(1, Math.round((secs * 1000) / 90));
+        const every = (fn) =>
+            new Promise((resolve) => {
+                let k = 0;
+                const tick = () => {
+                    k++;
+                    const a = performance.now();
+                    fn(k);
+                    W.dispatchMs.push(performance.now() - a);
+                    if (k < commits) W.timers.push(setTimeout(tick, 90));
+                    else resolve();
+                };
+                W.timers.push(setTimeout(tick, 90));
+            });
+        if (mode === "pipeline" && !F.mps) throw new Error("pipeline mode: could not load the stream subject module");
         W.done = Promise.all(
-            [...F.panes].map(
-                ([, { model }]) =>
-                    new Promise((resolve) => {
-                        const text = markdown(streamKb);
-                        const id = `${SYN}stream-${F.seq++}`;
-                        model.dispatchDoc({
-                            type: "StreamFlush",
-                            newNodes: [{ type: "markdown", id, content: "", timestamp: Date.now() }],
-                            updatedNodes: [],
+            [...F.panes].map(([blockId, { model }]) => {
+                const text = markdown(streamKb);
+                const step = Math.ceil(text.length / commits);
+                if (mode === "pipeline") {
+                    // The real path: provider NDJSON (Claude stream-json with
+                    // partial messages) into the pane's output subject, so the
+                    // translator, parser, flush queue and stream scheduler all
+                    // run exactly as for a live agent. dispatchMs is then the
+                    // synchronous cost of accepting a chunk (decode + parse +
+                    // queue), not of the flush, which happens in a frame.
+                    const subj = F.mps.getFileSubject(blockId, "output");
+                    W.subjects.push(subj);
+                    const msgId = `msg_${SYN}${F.seq++}`;
+                    const send = (o) => subj.next({ fileop: "append", data64: ndjson64(o) });
+                    send({
+                        type: "stream_event",
+                        event: {
+                            type: "message_start",
+                            message: {
+                                id: msgId,
+                                type: "message",
+                                role: "assistant",
+                                content: [],
+                                model: "bench",
+                                usage: { input_tokens: 1, output_tokens: 1 },
+                            },
+                        },
+                    });
+                    send({
+                        type: "stream_event",
+                        event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+                    });
+                    return every((k) =>
+                        send({
+                            type: "stream_event",
+                            event: {
+                                type: "content_block_delta",
+                                index: 0,
+                                delta: {
+                                    type: "text_delta",
+                                    text: text.slice((k - 1) * step, Math.min(k * step, text.length)),
+                                },
+                            },
+                        })
+                    ).then(() => {
+                        send({ type: "stream_event", event: { type: "content_block_stop", index: 0 } });
+                        send({
+                            type: "assistant",
+                            message: {
+                                id: msgId,
+                                type: "message",
+                                role: "assistant",
+                                content: [{ type: "text", text }],
+                                model: "bench",
+                            },
                         });
-                        const step = Math.ceil(text.length / commits);
-                        let k = 0;
-                        const tick = () => {
-                            k++;
-                            const a = performance.now();
-                            model.dispatchDoc({
-                                type: "StreamFlush",
-                                newNodes: [],
-                                updatedNodes: [
-                                    {
-                                        type: "markdown",
-                                        id,
-                                        content: text.slice(0, Math.min(k * step, text.length)),
-                                        timestamp: Date.now(),
-                                    },
-                                ],
-                            });
-                            W.dispatchMs.push(performance.now() - a);
-                            if (k < commits) setTimeout(tick, 90);
-                            else resolve();
-                        };
-                        setTimeout(tick, 90);
+                        send({
+                            type: "stream_event",
+                            event: {
+                                type: "message_delta",
+                                delta: { stop_reason: "end_turn" },
+                                usage: { output_tokens: 1 },
+                            },
+                        });
+                        send({ type: "stream_event", event: { type: "message_stop" } });
+                    });
+                }
+                // "direct": straight into the document store — isolates the
+                // store and render cost from the parse/flush pipeline.
+                const id = `${SYN}stream-${F.seq++}`;
+                model.dispatchDoc({
+                    type: "StreamFlush",
+                    newNodes: [{ type: "markdown", id, content: "", timestamp: Date.now() }],
+                    updatedNodes: [],
+                });
+                return every((k) =>
+                    model.dispatchDoc({
+                        type: "StreamFlush",
+                        newNodes: [],
+                        updatedNodes: [
+                            {
+                                type: "markdown",
+                                id,
+                                content: text.slice(0, Math.min(k * step, text.length)),
+                                timestamp: Date.now(),
+                            },
+                        ],
                     })
-            )
+                );
+            })
         );
         return true;
     };
@@ -325,6 +422,7 @@
     F.finishWindow = async () => {
         const W = F.win;
         await W.done;
+        releaseSubjects(W);
         await nextFrames(3);
         W.raf = false;
         for (const e of W.po.takeRecords()) W.loafs.push(loafEntry(e));
