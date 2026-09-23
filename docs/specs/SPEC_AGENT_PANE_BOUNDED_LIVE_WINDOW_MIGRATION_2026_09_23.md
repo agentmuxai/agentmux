@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** active — Phase 0 (bench + `main` baseline) in #3593; Phases 1–10 not started.
+**Status:** active — Phase 0 (bench + `main` baseline) in #3593; Phases 1 and 2 in #3599; Phases 3–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing

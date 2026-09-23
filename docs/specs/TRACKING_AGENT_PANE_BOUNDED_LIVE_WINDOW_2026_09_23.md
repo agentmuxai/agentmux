@@ -15,9 +15,9 @@
 | — | Specs-index generator ported to Node (unblocked fast doc work on Windows) | #3590 | merged |
 | — | CDP measurement scripts | #3569 | merged |
 | 0 | Full-conversation bench + `main` baseline | #3593 | merged |
-| 0b | Bench streams through the real pipeline (`--stream-mode pipeline`, default) | this PR's companion (see §4) | open |
-| 1 | Pin-to-bottom without forced layout | this PR (together with Phase 2 — see §3.1) | open |
-| 2 | Cross-pane stream scheduler, input first | this PR | open |
+| 0b | Bench streams through the real pipeline (`--stream-mode pipeline`, default) | #3598 | open |
+| 1 | Pin-to-bottom without forced layout | #3599 (together with Phase 2 — see §3.1) | open |
+| 2 | Cross-pane stream scheduler, input first | #3599 | open |
 | 3 | Tail holds only the turn in flight | — | not started |
 | 4 | O(batch + log n) stores | — | not started |
 | 5 | Node identity and durability | — | not started |
@@ -112,8 +112,8 @@ forced layout 2,117 vs 2,129 ms per 10 s — no difference (rows already carry
 
 ## 4. Open follow-ups
 
-- **Bench pipeline mode** (`--stream-mode pipeline`, default) — companion PR to
-  this one; §2.1's numbers were taken with it.
+- **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
+  numbers were taken with it.
 - **Profile the ~40 ms flush** (§3.4).
 - **macOS and Linux baselines** (spec §7 Phase 0).
 - **Fault-suite runner** (spec §8) — a later Phase 0 PR.
