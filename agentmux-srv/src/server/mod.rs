@@ -2840,7 +2840,7 @@ async fn handle_window_focus(
 /// Auth middleware matching Go pkg/authkey/authkey.go:18-42.
 async fn auth_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     if req.method() == Method::OPTIONS {
@@ -2873,7 +2873,12 @@ async fn auth_middleware(
     });
 
     match auth_key {
-        Some(key) if key == state.auth_key => next.run(req).await,
+        Some(key) if key == state.auth_key => {
+            // Identity M4a: `caller_middleware` derives a `Caller` only for a
+            // request marked as full-key authenticated — never by default.
+            req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
+            next.run(req).await
+        }
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "unauthorized"})),

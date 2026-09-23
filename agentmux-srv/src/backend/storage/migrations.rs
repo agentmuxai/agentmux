@@ -428,7 +428,15 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 11;
 ///        `PRIMARY KEY` that is a UUID for every non-template row. Not read
 ///        by anything until M4 — mint-and-carry only, revertible by ignoring
 ///        the field. See `storage/agent_tokens.rs`.
-pub const OBJECT_SCHEMA_VERSION: i64 = 37;
+///   v38 — db_agent_key_tombstones: the lowercased names (slug, display
+///        name, instance name) of every deleted agent — identity M4a of
+///        `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.4.
+///        Signing keys are keyed by name, so a later agent that takes a
+///        deleted agent's name would inherit its keys; M4d copies name-keyed
+///        keys to UIDs and must never copy a tombstoned name's. Written from
+///        M4a on, before any copy exists, so the record is complete when M4d
+///        reads it. Written only — nothing reads it until M4d.
+pub const OBJECT_SCHEMA_VERSION: i64 = 38;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -1027,6 +1035,17 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id   TEXT PRIMARY KEY,
             token      TEXT NOT NULL,
             created_at INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v38: names of deleted agents, lowercased -- identity M4a,
+        -- SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.4. A
+        -- name-keyed signing key under a tombstoned name is never carried to
+        -- a new agent's UID (M4d); the reuser gets a fresh keypair. Keyed by
+        -- name because that is what the legacy key tables are keyed by.
+        CREATE TABLE IF NOT EXISTS db_agent_key_tombstones (
+            name        TEXT PRIMARY KEY,
+            deleted_uid TEXT NOT NULL,
+            deleted_at  INTEGER NOT NULL DEFAULT 0
         );
 
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key

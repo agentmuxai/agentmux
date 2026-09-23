@@ -4833,3 +4833,28 @@ async fn m4a_a_token_without_the_auth_key_is_still_unauthorized() {
     let resp = build_router(state).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+/// Through the real LAN-forward route group: a valid token on a LAN-key
+/// request is ignored (counted), never lifted to host trust.
+#[tokio::test]
+async fn m4a_a_token_on_a_lan_key_request_is_not_attributed() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-agenty").unwrap();
+    let count = || {
+        crate::backend::agent_resolve::uid_fallback_counts()
+            .into_iter()
+            .find(|(s, _)| *s == "m4.token_on_lan_key")
+            .map_or(0, |(_, n)| n)
+    };
+    let before = count();
+    let req = Request::builder()
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .header("X-Agent-Token", &token)
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(count() > before);
+}

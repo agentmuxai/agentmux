@@ -584,11 +584,6 @@ pub(crate) async fn build_persistent_spawn_env(
             identity.as_ref().and_then(|i| i.slug.as_deref()),
         );
         carry_agent_uid_env(&mut env_vars, identity.as_ref());
-        crate::backend::identity_spawn::record_spawn(
-            block_id,
-            env_vars.contains_key("AGENTMUX_AGENT_TOKEN"),
-            Some("spawn.no_token.persistent"),
-        );
     }
     // Per-agent git commit identity -- see git_identity_env_vars() doc
     // comment. Still overridable per the same "user-provided values take

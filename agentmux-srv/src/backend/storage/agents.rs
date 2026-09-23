@@ -1281,6 +1281,8 @@ impl Store {
             // Read BEFORE the DELETE — afterwards there is no row to ask.
             // See `scope_for_row` for what this decides and why.
             let scope = Self::scope_for_row(&conn, id);
+            // Identity M4a: also read before the DELETE.
+            tombstone_key_names(&conn, id)?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed
@@ -2207,6 +2209,8 @@ impl Store {
             if Self::scope_for_row(&conn, id) == RecordScope::FileKeyOnly {
                 return Ok(false);
             }
+            // Identity M4a: read the names before the row goes.
+            tombstone_key_names(&conn, id)?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and
@@ -2439,6 +2443,52 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
 /// `db_work_queue.target_agent` is deliberately absent: releasing work
 /// claimed against a deleted agent is a state change, not a row to drop —
 /// open question §8.3 of the spec above.
+/// Record the lowercased names `id` is known by — the keys its legacy
+/// name-keyed signing keys may sit under — in `db_agent_key_tombstones`,
+/// before its row is deleted (identity M4a, spec §6.5.4). A template row is
+/// skipped: templates are never deleted through here as agents, and their
+/// names are shared by design. Idempotent; a missing row records nothing.
+fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), StoreError> {
+    let names: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            e => Err(e),
+        })?;
+    let Some((slug, name, instance_name)) = names else {
+        return Ok(());
+    };
+    let now = agentmux_common::time::now_secs();
+    for n in [slug, name, instance_name] {
+        let n = n.trim().to_lowercase();
+        if n.is_empty() {
+            continue;
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO db_agent_key_tombstones (name, deleted_uid, deleted_at) VALUES (?1, ?2, ?3)",
+            params![n, id, now],
+        )?;
+    }
+    Ok(())
+}
+
+/// Tombstoned names, for tests (M4d is the production reader).
+#[cfg(test)]
+pub(super) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(String, String)> {
+    let mut stmt = conn
+        .prepare("SELECT name, deleted_uid FROM db_agent_key_tombstones ORDER BY name")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
 #[cfg(test)]
 pub(super) fn purge_agent_dependents_for_tests(
     conn: &rusqlite::Connection,
