@@ -1100,9 +1100,15 @@ impl PersistentSubprocessController {
     /// and has nothing to race against; this check would otherwise always
     /// (and vacuously) fail for it. Every controller that actually reaches
     /// `start()` in production has `self_ref` set — `resync_controller`
-    /// calls `set_self_ref()` immediately after `register_controller`, for
-    /// every controller type that has one — so this early return never
-    /// masks the real race.
+    /// calls `set_self_ref()` and `register_controller()` back to back,
+    /// BEFORE it calls `start()` (`blockcontroller/mod.rs`, the "Create new
+    /// controller" branch), so both are always in place by the time this
+    /// runs and the early return never masks the real race. (reagent P2 on
+    /// PR #3523: an earlier revision of this sentence had that pair in the
+    /// opposite order — `set_self_ref()` is actually called FIRST. The
+    /// conclusion was right either way, but the stated ordering was not,
+    /// and this comment is exactly where someone would come to reason
+    /// about registration-order invariants.)
     fn still_registered_for_replace_check(&self) -> bool {
         let Some(weak) = self.self_ref.lock().unwrap().clone() else {
             return true;
@@ -1320,21 +1326,63 @@ impl PersistentSubprocessController {
         let retry_config = config.clone();
         match self.spawn_process(config, None) {
             Ok(()) => {
-                // Releases the claim and delivers anything that queued
-                // during the gate's wait above — same mechanism
-                // `respawn_once_for_leftover_queue` uses for the identical
-                // "spawned with nothing of our own, but the queue might not
-                // be empty" shape. `mark_turn_active_and_publish()` (the
-                // PUBLISH side of the flag `spawn_process`'s own internal
-                // check already set the RAW side of) only if something is
-                // actually about to be delivered — unconditionally calling
-                // it, like that other caller does, would reintroduce the
-                // exact "perpetually WORKING with nothing queued" bug this
-                // PR fixes for the far more common empty-queue case.
-                if !self.inner.lock().unwrap().pending_send_messages.is_empty() {
+                // `mark_turn_active_and_publish()` (the PUBLISH side of the
+                // flag `spawn_process`'s own internal check already set the
+                // RAW side of) only when something is actually about to be
+                // delivered. Calling it unconditionally, the way every
+                // other spawner does, would reintroduce the exact
+                // "perpetually WORKING with nothing queued" bug — eager
+                // resume's common case is spawning with an empty queue,
+                // which no other spawner ever does (they all carry at
+                // least their own triggering message).
+                //
+                // reagent P1 on PR #3523: that emptiness check and the
+                // drain below used to be two separate lock acquisitions.
+                // A `send_message` landing in the gap is routed to
+                // `Queued` (the claim is still held), and `Queued`
+                // deliberately does NOT publish turn-active — the contract
+                // is that the spawn-claim holder does it. Neither does the
+                // drain loop. So that message got delivered with
+                // turn_active never published true: the pane, Swarm view
+                // and subagent watcher all read idle while a turn was
+                // genuinely in flight — the inverse of the bug the
+                // conditional exists to prevent.
+                //
+                // Both are closed by deciding under ONE acquisition of the
+                // same lock `decide_send_action` makes its own three-way
+                // decision under, so a concurrent sender is strictly
+                // before us (we observe its message, publish, and drain
+                // it) or strictly after (it observes a released claim and
+                // a live `stdin_tx`, takes `DeliverDirect`, and publishes
+                // turn-active itself).
+                let has_queued_work = {
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.pending_send_messages.is_empty() {
+                        // Nothing to drain, so release the spawn claim
+                        // right here instead of spawning a drain task
+                        // whose only job would be to release it — this is
+                        // exactly what `QueueDrainClaim::SpawnClaim::
+                        // release` does, and what the drain's own
+                        // empty-queue branch would have done one task
+                        // hop later.
+                        inner.spawning_in_progress = false;
+                        false
+                    } else {
+                        true
+                    }
+                };
+                if has_queued_work {
                     self.mark_turn_active_and_publish();
+                    // Delivers what we observed plus anything that queues
+                    // while it runs (the claim stays held for the drain's
+                    // whole lifetime, and its own release path re-checks
+                    // the queue under the lock before letting go) — same
+                    // mechanism `respawn_once_for_leftover_queue` uses for
+                    // the identical "spawned with nothing of our own, but
+                    // the queue might not be empty" shape. Everything in
+                    // that batch is covered by the single publish above.
+                    self.drain_queue_after_successful_spawn(retry_config, false);
                 }
-                self.drain_queue_after_successful_spawn(retry_config, false);
                 EagerResumeOutcome::Spawned
             }
             Err(e) => {
@@ -9107,6 +9155,72 @@ setInterval(() => {}, 1000);
         assert!(
             !c.inner.lock().unwrap().spawning_in_progress,
             "the spawn claim must still be released on this decline path"
+        );
+    }
+
+    // reagent P1 on PR #3523. The success path used to check "is anything
+    // queued?" and kick off the drain as two SEPARATE lock acquisitions,
+    // holding the spawn claim across the gap. A `send_message` landing in
+    // that gap is routed to `Queued` — which deliberately does NOT publish
+    // turn-active, because the spawn-claim holder is supposed to — and the
+    // drain loop does not publish it either. So the message was delivered
+    // while the pane, Swarm view and subagent watcher all still read idle:
+    // the exact inverse of the "perpetually WORKING" bug the conditional
+    // was added to prevent.
+    //
+    // Every other spawner publishes unconditionally before draining, so
+    // only eager resume (the one spawner that routinely has nothing of its
+    // own to deliver) ever had this gap.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_queue_eager_resume_releases_its_claim_before_returning() {
+        if !has_node() {
+            eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+            return;
+        }
+        let store = make_store();
+        wire_bare_instance(&store, "blk-claim-sync");
+        let stub = write_stub();
+        let c = controller("blk-claim-sync").with_identity_stores(
+            Some(store.clone()),
+            Some(store.clone()),
+            "key".to_string(),
+        );
+        let c = PersistentSubprocessController { mstore: Some(store), ..c };
+        let meta = meta_with_session("resumed-session", &[stub.to_string_lossy().as_ref()]);
+        let _kill_on_drop = KillOnDrop(&c);
+
+        let result = Controller::start(&c, meta, None, false);
+        assert!(result.is_ok(), "{result:?}");
+        assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+        // Synchronously — deliberately NOT a polling loop. "Eventually
+        // released, one tokio task hop later" is precisely the window the
+        // bug lived in, so a test that waits for it would still pass
+        // against the broken version.
+        assert!(
+            !c.inner.lock().unwrap().spawning_in_progress,
+            "an empty-queue eager resume must release its spawn claim before start() returns"
+        );
+
+        // What that release actually buys, asserted at the mechanism that
+        // matters: the next message is delivered by its own caller — and
+        // `DeliverDirect` publishes turn-active itself — instead of being
+        // queued behind a claim whose holder has already decided not to
+        // publish for it.
+        assert!(
+            matches!(
+                c.decide_send_action("{\"probe\":true}", None),
+                SendAction::DeliverDirect
+            ),
+            "with the claim released and stdin live, the next send must go direct"
+        );
+
+        // And the empty-queue resume itself still reads idle — the
+        // original "perpetually WORKING with nothing queued" property this
+        // conditional exists for, which the fix must not regress.
+        assert!(
+            !c.health_monitor.is_active_turn(),
+            "an eager resume with nothing queued must still not report an active turn"
         );
     }
 
