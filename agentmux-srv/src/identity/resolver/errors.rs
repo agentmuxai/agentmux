@@ -65,10 +65,15 @@ pub enum SpawnGateError {
 impl std::fmt::Display for SpawnGateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // Starts "this agent's" so muxspect's `classify_last_error_source`
+            // files it under "identity" with the other gate refusals, and
+            // carries "was deleted, so this pane cannot start" — the phrase
+            // `agents/failure.rs` classifies it by (no Retry: a retry is
+            // refused identically).
             SpawnGateError::AgentDeleted { agent_id } => write!(
                 f,
-                "this pane's agent ({agent_id}) was deleted, so it cannot start. \
-                 Close the pane, or launch another agent in it.",
+                "this agent's definition ({agent_id}) was deleted, so this pane cannot \
+                 start. Close the pane, or launch another agent in it.",
             ),
             // "Bind an account in the Armory" is now the ONLY path — the
             // ambient/"use global CLI login" opt-in this used to also

@@ -49,6 +49,7 @@ mod provider;
 mod secret;
 
 pub use errors::{ResolverError, SpawnGateError};
+pub(crate) use inject::block_agent_id;
 pub use inject::{
     inject_identity_env, inject_identity_env_async, inject_identity_env_with_broker, resolve_account,
     resolve_bound_oauth_config_dir,

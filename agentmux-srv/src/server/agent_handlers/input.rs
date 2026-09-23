@@ -370,6 +370,23 @@ pub(crate) fn carry_agent_uid_env(
     }
 }
 
+/// #3577: the id of the deleted agent `block_id` names, when the block
+/// resolved to no row (`identity` is `None`) and its agent was deleted —
+/// the builder's last-read re-check of the gate's refusal (Codex P1 on
+/// #3591). `None` whenever a row resolved, or the block names nothing
+/// deleted.
+pub(crate) fn deleted_agent_of_rowless_block(
+    mstore: &crate::backend::storage::store::Store,
+    block_id: &str,
+    identity: Option<&PersistedAgentIdentity>,
+) -> Option<String> {
+    if identity.is_some() {
+        return None;
+    }
+    crate::identity::resolver::block_agent_id(mstore, block_id)
+        .filter(|agent_id| mstore.agent_was_deleted(agent_id))
+}
+
 /// Identity M4b-2 (spec §6.5.8): carry `block_id`'s row UID and token into
 /// the env of a controller that builds its own (App Server, ACP) instead of
 /// going through [`build_persistent_spawn_env`]. Same resolution and the
@@ -585,11 +602,26 @@ pub(crate) async fn build_persistent_spawn_env(
             let mstore = mstore_for_slug.clone();
             let owned_block_id = block_id.to_string();
             match tokio::task::spawn_blocking(move || {
-                persisted_agent_identity(&mstore, &owned_block_id)
+                let identity = persisted_agent_identity(&mstore, &owned_block_id);
+                // #3577, re-checked here: this is the last store read before
+                // the process starts. The gate refused a deleted agent, but
+                // the agent can be deleted after the gate's lookup succeeded
+                // (the delete handlers share no lock with the spawn path) —
+                // then no row resolves here, and without this the spawn
+                // would go ahead with no identity (Codex P1 on #3591). A
+                // delete after THIS read is a delete of a running agent.
+                let deleted =
+                    deleted_agent_of_rowless_block(&mstore, &owned_block_id, identity.as_ref());
+                (identity, deleted)
             })
             .await
             {
-                Ok(identity) => identity,
+                Ok((_, Some(agent_id))) => {
+                    return Err(crate::identity::resolver::SpawnGateError::AgentDeleted {
+                        agent_id,
+                    });
+                }
+                Ok((identity, None)) => identity,
                 Err(e) => {
                     tracing::warn!(
                         block_id = %block_id,
@@ -1869,6 +1901,36 @@ mod tests {
     /// Spec §6.3: revoked on deletion. Deleting the agent through either
     /// deletion entry point takes its token with it, so a later spawn on a
     /// reused block cannot resurrect the old credential.
+    /// Codex P1 on #3591: the builder re-checks deletion at its last read —
+    /// an agent deleted after the gate's lookup (no row resolves now, and the
+    /// shared registry holds only a retired record) is reported, so the spawn
+    /// is refused; a live agent, or a store with no registry, is not.
+    #[test]
+    fn the_builder_recheck_reports_an_agent_deleted_after_the_gate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let defs = crate::registry::DefinitionStore::open(tmp.path().join("definitions")).unwrap();
+        store.set_def_registry(std::sync::Arc::new(defs));
+        let mut def = agent_def("uid-late-del", "LateDel");
+        store.agent_def_insert(&mut def).unwrap();
+        block_with_agent_id(&store, "block-late-del", "uid-late-del");
+        let live = persisted_agent_identity(&store, "block-late-del");
+        assert!(live.is_some());
+        assert_eq!(
+            super::deleted_agent_of_rowless_block(&store, "block-late-del", live.as_ref()),
+            None
+        );
+
+        assert!(store.agent_def_delete("uid-late-del").unwrap());
+        let after = persisted_agent_identity(&store, "block-late-del");
+        assert_eq!(after, None);
+        assert_eq!(
+            super::deleted_agent_of_rowless_block(&store, "block-late-del", after.as_ref())
+                .as_deref(),
+            Some("uid-late-del")
+        );
+    }
+
     #[test]
     fn deleting_the_agent_revokes_its_token() {
         let store = Store::open_in_memory().unwrap();
