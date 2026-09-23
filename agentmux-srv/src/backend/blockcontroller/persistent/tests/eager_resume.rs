@@ -869,3 +869,104 @@ async fn a_direct_message_after_eager_resume_is_tracked_for_stale_resume_retry()
         other => panic!("expected AwaitingOutcome with the tracked message, got {other:?}"),
     }
 }
+
+fn bogus_config(session_id: &str) -> PersistentSpawnConfig {
+    PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: session_id.to_string(),
+        message_id: None,
+    }
+}
+
+/// The predicate and the producer live together in `mod.rs`; this pins
+/// that they agree on both variants and reject an unrelated failure.
+#[test]
+fn is_held_elsewhere_error_recognises_both_refusals_and_nothing_else() {
+    assert!(is_held_elsewhere_error(&held_elsewhere_error("blk-other", false)));
+    assert!(is_held_elsewhere_error(&held_elsewhere_error("blk-other", true)));
+    assert!(!is_held_elsewhere_error("stdin send failed: channel closed"));
+    assert!(!is_held_elsewhere_error("failed to spawn: No such file or directory"));
+}
+
+/// Codex P1 on PR #3551: an eager resume refused by the duplicate-session
+/// guard must NOT fall back to a fresh spawn for the prompt that queued
+/// during the attempt — that hands it to a blank conversation while the
+/// real one is open next door. Release the claim, keep the queue, keep the
+/// session id (the next send goes through the guard again), report why.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ownership_refusal_with_queued_work_reports_and_keeps_the_queue_instead_of_spawning_fresh() {
+    let store = make_store();
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+    let c = PersistentSubprocessController {
+        mstore: Some(store),
+        broker: Some(broker.clone()),
+        filestore: Some(filestore.clone()),
+        ..controller("blk-owned-elsewhere")
+    };
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawning_in_progress = true; // the eager attempt's claim
+        inner.session_id = Some("sid-owned".to_string());
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+    }
+
+    c.settle_eager_spawn_failure(&held_elsewhere_error("blk-other", false), bogus_config("sid-owned"));
+
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.current_pid.is_none(), "must not spawn anything");
+    assert!(!inner.spawning_in_progress, "the claim must be released");
+    assert_eq!(
+        inner.pending_send_messages.len(),
+        1,
+        "the accepted prompt stays queued for the next, guarded attempt"
+    );
+    assert_eq!(
+        inner.session_id.as_deref(),
+        Some("sid-owned"),
+        "the session id must survive — clearing it is exactly the bypass"
+    );
+    drop(inner);
+    // An ownership refusal is not a failure CLASS (`agents::failure` keys on
+    // credential/config phrases, and this is neither), so the report is the
+    // error-result frame appended to the pane's output — the same channel
+    // the CLI's own errors arrive on.
+    let reported = filestore
+        .read_file("blk-owned-elsewhere", PERSISTENT_OUTPUT_SUBJECT)
+        .unwrap()
+        .map(|bytes| String::from_utf8_lossy(&bytes).contains("already open in another pane"))
+        .unwrap_or(false);
+    assert!(reported, "the operator must be told why the prompt is not running");
+}
+
+/// The other failure class keeps its fallback: a generic spawn failure with
+/// queued work still hands off to `respawn_once_for_leftover_queue`, whose
+/// first act is clearing the session id for a fresh start.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_generic_spawn_failure_with_queued_work_still_falls_back_to_a_fresh_respawn() {
+    let c = controller("blk-generic-failure");
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawning_in_progress = true;
+        inner.session_id = Some("sid-any".to_string());
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"accepted\":\"prompt\"}".to_string()));
+    }
+
+    c.settle_eager_spawn_failure("failed to spawn: No such file or directory", bogus_config("sid-any"));
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id, None, "the fallback respawn clears the session id for a fresh start");
+    assert!(!inner.spawning_in_progress, "a failed fallback releases the claim too");
+    assert_eq!(inner.pending_send_messages.len(), 1, "an undeliverable prompt is still not dropped");
+}
