@@ -1,11 +1,11 @@
 # SPEC: agent identity is carried, never derived
 
 **Date:** 2026-09-23
-**Status:** proposed — redesign of
-`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase 2 was
-implemented and proven unable to fix the defect it targeted. Supersedes that
-spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid and are
-cited rather than restated.
+**Status:** active — M0 shipped in #3543 (2026-09-23); M1–M5 not started.
+Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
+2 was implemented and proven unable to fix the defect it targeted. Supersedes
+that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
+and are cited rather than restated.
 **Trigger:** Repo owner, after Phase 2's failure: *"redesign the entire
 solution... the goal is agent id unique... do the most robust solution."*
 **Evidence base:** five review rounds on #3520 (four P1s, one P0), a data check
@@ -529,6 +529,23 @@ changes two things at once.
   already exists. Split explicitly into name and slug variables, both set on
   both paths, before anything depends on either. Pure disambiguation, no new
   concepts — and nothing below is trustworthy until it lands.
+
+  **Shipped in #3543.** `build_persistent_spawn_env` now sets
+  `AGENTMUX_AGENT_DISPLAY` from `block.meta["agentName"]` and
+  `AGENTMUX_AGENT_SLUG` from the block's `db_agents` row on the server path;
+  the frontend path already set both. Two things measured while doing it,
+  recorded because §0.2 did not know them:
+  - **There are three launch paths, not two.** The quick-launch path
+    (`launchAgent` in `agent-model.ts`) carries a *provider key* as
+    `agentId` and has no `db_agents` row at all, so it has no slug in the
+    identity sense. M0 leaves `AGENTMUX_AGENT_SLUG` unset there rather than
+    derive one from the name; M1 must decide whether such a pane gets a row
+    (and so a UID) or is declared outside the identity system.
+  - **Server knowledge wins over `cmd:env`** for these two variables, the
+    reverse of the surrounding "user-provided values take precedence" rule:
+    the `cmd:env` copy is a launch-time snapshot a rename leaves stale.
+    Disagreement is logged (§9.2), not silently resolved.
+  `AGENTMUX_AGENT_ID` itself was neither read nor written, per §9.4.
 - **M1 — Mint and carry.** Server mints the UID and token at row creation and
   injects both at spawn; add UID columns alongside slug columns; dual-write.
   **No reader changes.** Revertible by ignoring the new fields.

@@ -183,6 +183,111 @@ fn git_identity_env_vars(agent_id: &str) -> [(&'static str, String); 4] {
     ]
 }
 
+/// Identity M0 — `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md`
+/// §9.1: make the display name and the slug two explicit variables, present
+/// on every launch path.
+///
+/// **Why.** `AGENTMUX_AGENT_ID` means two different things depending on who
+/// spawned the agent (spec §0.2): the frontend's `launchAgentDefinition`
+/// writes the definition *slug* into it (`agent-model.ts`), while this
+/// server path's fallback writes the *display name*
+/// (`block.meta["agentName"]`, a few lines above the call site). Nothing
+/// downstream can tell which it got. The frontend path already sets
+/// `AGENTMUX_AGENT_DISPLAY` and `AGENTMUX_AGENT_SLUG` alongside it; this
+/// path set neither, so a reader that wanted the unambiguous form had
+/// nothing to read. After this, both are always present when the server
+/// knows them, and later phases can migrate readers off `AGENTMUX_AGENT_ID`
+/// one at a time.
+///
+/// **Precedence.** The server's own knowledge wins, `cmd:env` is the
+/// fallback — the reverse of the "user-provided values take precedence"
+/// rule the surrounding identity variables follow, deliberately:
+///
+/// - `display_name` is `block.meta["agentName"]`, the value the primary
+///   reactive registration is keyed on (see the Register-tail of
+///   `run_agent_turn`) and the name the pane header shows. A `cmd:env` copy
+///   is a launch-time snapshot that a rename (`setViewName`) leaves stale.
+/// - `persisted_slug` is `db_agents.slug` for this block's agent — the
+///   collision-resolved value `agent_def_insert` minted. A `cmd:env` copy is
+///   whatever the frontend computed before that row existed.
+///
+/// When the two disagree it is logged, not silently resolved: a disagreement
+/// is exactly the kind of signal spec §9.2 says a phase must be able to
+/// observe.
+///
+/// **What this does not do.** `AGENTMUX_AGENT_ID` is never read or written
+/// here. Spec §9.4 keeps its present value on both paths through M4; the
+/// git identity, `MUXBUS_AGENT_ID`, the PR-body tag and the OSC prompt hook
+/// all still derive from it, unchanged.
+pub(crate) fn split_agent_identity_env(
+    env_vars: &mut std::collections::HashMap<String, String>,
+    display_name: &str,
+    persisted_slug: Option<&str>,
+) {
+    let set_authoritative = |env_vars: &mut std::collections::HashMap<String, String>,
+                             key: &str,
+                             value: &str| {
+        let value = value.trim();
+        if value.is_empty() {
+            return;
+        }
+        if let Some(existing) = env_vars
+            .get(key)
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+        {
+            if existing != value {
+                tracing::info!(
+                    key,
+                    cmd_env = %existing,
+                    authoritative = %value,
+                    "spawn env: cmd:env disagrees with the server's value — server wins (identity M0)"
+                );
+            }
+        }
+        env_vars.insert(key.to_string(), value.to_string());
+    };
+    set_authoritative(env_vars, "AGENTMUX_AGENT_DISPLAY", display_name);
+    if let Some(slug) = persisted_slug {
+        set_authoritative(env_vars, "AGENTMUX_AGENT_SLUG", slug);
+    }
+}
+
+/// `db_agents.slug` for the agent shown on `block_id`, if it has a row.
+///
+/// Resolves the block → row the same way the identity injector does
+/// (`identity/resolver/inject.rs`): `block.meta.agentId` first, then the
+/// latest active launch on this block. A quick-launch pane (`launchAgent`
+/// in `agent-model.ts`, whose `agentId` is a provider key like `"claude"`)
+/// has no row and gets `None` — it has no slug in the identity sense, and
+/// deriving one from its display name would recreate the lossy path spec
+/// §1.1 measured as the root defect.
+///
+/// A store error is logged and treated as "unknown", never as a spawn
+/// failure: this is disambiguation, not a gate, and spec §10 constraint 1
+/// forbids a store read from making a healthy agent unreachable.
+fn persisted_agent_slug(
+    mstore: &crate::backend::storage::store::Store,
+    block_id: &str,
+) -> Option<String> {
+    let instance = match mstore.instance_get_active_for_block(block_id) {
+        Ok(Some(instance)) => instance,
+        Ok(None) => return None,
+        Err(e) => {
+            tracing::warn!(block_id, error = %e, "spawn env: instance lookup failed — no AGENTMUX_AGENT_SLUG from store");
+            return None;
+        }
+    };
+    match mstore.agent_def_get(&instance.definition_id) {
+        Ok(Some(def)) if !def.slug.trim().is_empty() => Some(def.slug),
+        Ok(_) => None,
+        Err(e) => {
+            tracing::warn!(block_id, error = %e, "spawn env: definition lookup failed — no AGENTMUX_AGENT_SLUG from store");
+            None
+        }
+    }
+}
+
 /// The slice of [`AppState`] an agent turn needs in order to be started.
 ///
 /// Exists so [`run_agent_turn`] can be driven from somewhere other than the
@@ -298,6 +403,9 @@ pub(crate) async fn build_persistent_spawn_env(
     // the static cmd:env block. Oauth-class resolution failures are
     // BLOCKING unless the agent opted into ambient login (layer-3 spawn
     // gate, SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.2).
+    // Kept for the identity-M0 slug lookup below; `mstore` itself moves into
+    // the identity injector.
+    let mstore_for_slug = mstore.clone();
     let mut env_vars = crate::identity::resolver::inject_identity_env_async(
         mstore,
         id_store.clone(),
@@ -360,6 +468,33 @@ pub(crate) async fn build_persistent_spawn_env(
         if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
             env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
         }
+    }
+    // Identity M0: name and slug as two explicit variables, on this path
+    // too. The frontend's `launchAgentDefinition` already sets both; this
+    // path never did, so a reader could only get at either by guessing
+    // what `AGENTMUX_AGENT_ID` held. See `split_agent_identity_env`.
+    {
+        let display_name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
+        let persisted_slug = {
+            let mstore = mstore_for_slug.clone();
+            let owned_block_id = block_id.to_string();
+            match tokio::task::spawn_blocking(move || {
+                persisted_agent_slug(&mstore, &owned_block_id)
+            })
+            .await
+            {
+                Ok(slug) => slug,
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        error = %e,
+                        "spawn env: persisted-slug lookup task failed — AGENTMUX_AGENT_SLUG falls back to cmd:env"
+                    );
+                    None
+                }
+            }
+        };
+        split_agent_identity_env(&mut env_vars, &display_name, persisted_slug.as_deref());
     }
     // Per-agent git commit identity -- see git_identity_env_vars() doc
     // comment. Still overridable per the same "user-provided values take
@@ -1215,6 +1350,245 @@ mod tests {
         let b_map: std::collections::HashMap<&str, String> = b.into_iter().collect();
         assert_ne!(a_map["GIT_AUTHOR_EMAIL"], b_map["GIT_AUTHOR_EMAIL"]);
         assert_ne!(a_map["GIT_AUTHOR_NAME"], b_map["GIT_AUTHOR_NAME"]);
+    }
+
+    // ---- identity M0: split_agent_identity_env ---------------------------
+    //
+    // Fixture per SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §9.3:
+    // two agents whose names collide under `derive_slug` ("AgentY" and
+    // "AGENTY" both lowercase to "agenty"), which `agent_def_insert` gave
+    // the suffixed slugs `agenty-2` / `agenty-3`. Every assertion below is
+    // made against that pair so a change that only works for one agent
+    // cannot pass.
+
+    use super::split_agent_identity_env;
+    use std::collections::HashMap;
+
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// The server launch path (`input.rs` fallback) — `cmd:env` carries
+    /// nothing identity-shaped, so both must be filled from what the server
+    /// knows. Positive case first (retro §5): prove they are SET before
+    /// proving anything about what they are not.
+    #[test]
+    fn server_path_sets_both_display_and_slug_from_server_knowledge() {
+        let mut e = env(&[("AGENTMUX_AGENT_ID", "AgentY")]);
+        split_agent_identity_env(&mut e, "AgentY", Some("agenty-3"));
+        assert_eq!(e["AGENTMUX_AGENT_DISPLAY"], "AgentY");
+        assert_eq!(e["AGENTMUX_AGENT_SLUG"], "agenty-3");
+    }
+
+    /// The frontend launch path (`launchAgentDefinition`) already set both
+    /// to the same values the server holds — nothing changes, nothing is
+    /// duplicated under a different key.
+    #[test]
+    fn frontend_path_with_agreeing_values_is_left_as_is() {
+        let before = env(&[
+            ("AGENTMUX_AGENT_ID", "agenty-2"),
+            ("AGENTMUX_AGENT_SLUG", "agenty-2"),
+            ("AGENTMUX_AGENT_DISPLAY", "AGENTY"),
+        ]);
+        let mut e = before.clone();
+        split_agent_identity_env(&mut e, "AGENTY", Some("agenty-2"));
+        assert_eq!(e, before);
+    }
+
+    /// §9.4: this phase must not change what `AGENTMUX_AGENT_ID` holds on
+    /// either path. Slug-valued on the frontend path, name-valued on the
+    /// server path — both survive byte-for-byte.
+    #[test]
+    fn agentmux_agent_id_is_never_touched_on_either_path() {
+        let mut frontend = env(&[("AGENTMUX_AGENT_ID", "agenty-2")]);
+        split_agent_identity_env(&mut frontend, "AGENTY", Some("agenty-2"));
+        assert_eq!(frontend["AGENTMUX_AGENT_ID"], "agenty-2");
+
+        let mut server = env(&[("AGENTMUX_AGENT_ID", "AgentY")]);
+        split_agent_identity_env(&mut server, "AgentY", Some("agenty-3"));
+        assert_eq!(server["AGENTMUX_AGENT_ID"], "AgentY");
+
+        let mut none = env(&[]);
+        split_agent_identity_env(&mut none, "AgentY", Some("agenty-3"));
+        assert!(
+            !none.contains_key("AGENTMUX_AGENT_ID"),
+            "must not invent one either"
+        );
+    }
+
+    /// The server's knowledge wins over a `cmd:env` snapshot: a rename after
+    /// launch moves `block.meta["agentName"]` but not the frozen env copy,
+    /// and the persisted slug is the collision-resolved one, not whatever
+    /// the frontend computed before the row existed.
+    #[test]
+    fn server_values_override_stale_cmd_env_snapshots() {
+        let mut e = env(&[
+            ("AGENTMUX_AGENT_DISPLAY", "AgentY"),
+            ("AGENTMUX_AGENT_SLUG", "agenty"),
+        ]);
+        split_agent_identity_env(&mut e, "AgentY (renamed)", Some("agenty-3"));
+        assert_eq!(e["AGENTMUX_AGENT_DISPLAY"], "AgentY (renamed)");
+        assert_eq!(e["AGENTMUX_AGENT_SLUG"], "agenty-3");
+    }
+
+    /// A quick-launch pane (`launchAgent`, provider key as `agentId`) has no
+    /// `db_agents` row and therefore no slug. The display name is still set;
+    /// the slug is NOT derived from it — that derivation is the lossy step
+    /// spec §1.1 identifies as the defect. A `cmd:env` slug survives as the
+    /// fallback.
+    #[test]
+    fn no_persisted_row_sets_display_only_and_keeps_any_cmd_env_slug() {
+        let mut bare = env(&[]);
+        split_agent_identity_env(&mut bare, "AgentY", None);
+        assert_eq!(bare["AGENTMUX_AGENT_DISPLAY"], "AgentY");
+        assert!(!bare.contains_key("AGENTMUX_AGENT_SLUG"));
+
+        let mut with_fallback = env(&[("AGENTMUX_AGENT_SLUG", "agenty-3")]);
+        split_agent_identity_env(&mut with_fallback, "AgentY", None);
+        assert_eq!(with_fallback["AGENTMUX_AGENT_SLUG"], "agenty-3");
+    }
+
+    /// An empty or whitespace display name (a pane with no `agentName` meta
+    /// yet) sets nothing and does not clobber a `cmd:env` value with "".
+    #[test]
+    fn empty_display_name_sets_nothing_and_preserves_cmd_env() {
+        let mut bare = env(&[]);
+        split_agent_identity_env(&mut bare, "   ", None);
+        assert!(!bare.contains_key("AGENTMUX_AGENT_DISPLAY"));
+
+        let mut with_fallback = env(&[("AGENTMUX_AGENT_DISPLAY", "AgentY")]);
+        split_agent_identity_env(&mut with_fallback, "", Some("  "));
+        assert_eq!(with_fallback["AGENTMUX_AGENT_DISPLAY"], "AgentY");
+        assert!(!with_fallback.contains_key("AGENTMUX_AGENT_SLUG"));
+    }
+
+    /// The whole point: after the split, the two colliding agents are
+    /// distinguishable by BOTH variables, whereas anything derived from the
+    /// display name alone is not.
+    #[test]
+    fn colliding_names_stay_separable_after_the_split() {
+        let mut a = env(&[("AGENTMUX_AGENT_ID", "AgentY")]);
+        let mut b = env(&[("AGENTMUX_AGENT_ID", "AGENTY")]);
+        split_agent_identity_env(&mut a, "AgentY", Some("agenty-3"));
+        split_agent_identity_env(&mut b, "AGENTY", Some("agenty-2"));
+
+        assert_ne!(a["AGENTMUX_AGENT_SLUG"], b["AGENTMUX_AGENT_SLUG"]);
+        assert_ne!(a["AGENTMUX_AGENT_DISPLAY"], b["AGENTMUX_AGENT_DISPLAY"]);
+        // …and the reason the slug has to come from the store rather than
+        // from the name: lowercased, the names are the same string.
+        assert_eq!(
+            a["AGENTMUX_AGENT_DISPLAY"].to_lowercase(),
+            b["AGENTMUX_AGENT_DISPLAY"].to_lowercase(),
+        );
+    }
+
+    // ---- identity M0: persisted_agent_slug against a real store ----------
+
+    use super::persisted_agent_slug;
+    use crate::backend::storage::agents::AgentDefinition;
+    use crate::backend::storage::store::Store;
+
+    fn agent_def(id: &str, name: &str) -> AgentDefinition {
+        AgentDefinition {
+            conversation_visibility:
+                crate::backend::storage::agents::default_conversation_visibility(),
+            id: id.to_string(),
+            // Empty on purpose: `agent_def_insert` derives it from `name`
+            // and collision-resolves, exactly as the launch flow does.
+            slug: String::new(),
+            name: name.to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        }
+    }
+
+    fn block_with_agent_id(store: &Store, block_id: &str, agent_id: &str) {
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m.insert("agentId".to_string(), serde_json::json!(agent_id));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+    }
+
+    /// The §1.1 scenario end to end: two agents whose names collide under
+    /// `derive_slug` get `agenty` and `agenty-2` from `agent_def_insert`, and
+    /// the lookup returns each block's OWN row's slug — the suffixed one for
+    /// the second agent, which no derivation from its name could produce.
+    #[test]
+    fn persisted_agent_slug_returns_the_rows_collision_resolved_slug() {
+        let store = Store::open_in_memory().unwrap();
+        let mut first = agent_def("uid-first", "AgentY");
+        store.agent_def_insert(&mut first).unwrap();
+        let mut second = agent_def("uid-second", "AGENTY");
+        store.agent_def_insert(&mut second).unwrap();
+        assert_eq!(
+            first.slug, "agenty",
+            "fixture: first insert keeps the bare slug"
+        );
+        assert_eq!(
+            second.slug, "agenty-2",
+            "fixture: second insert is suffixed"
+        );
+
+        block_with_agent_id(&store, "block-first", "uid-first");
+        block_with_agent_id(&store, "block-second", "uid-second");
+
+        assert_eq!(
+            persisted_agent_slug(&store, "block-first").as_deref(),
+            Some("agenty")
+        );
+        assert_eq!(
+            persisted_agent_slug(&store, "block-second").as_deref(),
+            Some("agenty-2")
+        );
+    }
+
+    /// A quick-launch pane carries a provider key as `agentId` and has no
+    /// `db_agents` row; a block that does not exist has nothing either.
+    /// Both are "no slug", never an error and never a derived value.
+    #[test]
+    fn persisted_agent_slug_is_none_for_quick_launch_panes_and_missing_blocks() {
+        let store = Store::open_in_memory().unwrap();
+        block_with_agent_id(&store, "block-quick", "claude");
+        assert_eq!(persisted_agent_slug(&store, "block-quick"), None);
+        assert_eq!(persisted_agent_slug(&store, "block-missing"), None);
     }
 
     #[test]
