@@ -1,7 +1,7 @@
 # SPEC: Port the specs-index generator to Node
 
 **Date:** 2026-09-23
-**Status:** proposed
+**Status:** implemented — #3590 (port, wrapper, golden-fixture tests, the `specs index (<os>)` CI job, docs corrections). §9 follow-ups not started.
 **Author:** Manoz
 **Related:**
 `docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` (Phase 3 introduced the generated index),

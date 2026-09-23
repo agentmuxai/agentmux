@@ -287,6 +287,7 @@ partial list.
 | [`SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16`](SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md) | SPEC: Restore Launcher IPC in `task dev` Mode |
 | [`SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25`](SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25.md) | Spec: `task dev TITLE="..."` — per-session window title for dev builds |
 | [`SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12`](SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12.md) | SPEC: Divider-Pill Rule Misalignment Fix |
+| [`SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23`](SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md) | SPEC: Port the specs-index generator to Node |
 | [`SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION`](SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md) | Dynamic ellipsis truncation for tool summaries |
 | [`SPEC_EDITOR_FILE_TREE_2026-05-26`](SPEC_EDITOR_FILE_TREE_2026-05-26.md) | Spec: Editor Pane — File Tree Explorer + Extensions |
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
@@ -564,7 +565,6 @@ partial list.
 | [`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25`](SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) | SPEC: Default fresh-start widgets — Agent, Swarm, Armory, Sysinfo |
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
 | [`SPEC_DOCS_CLEANUP_AUDIT_2026_08_22`](SPEC_DOCS_CLEANUP_AUDIT_2026_08_22.md) | SPEC — Docs cleanup audit: what's stale, duplicated, or mis-shelved |
-| [`SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23`](SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md) | SPEC: Port the specs-index generator to Node |
 | [`SPEC_EARLY_ALPHA_WARNING_2026_06_05`](SPEC_EARLY_ALPHA_WARNING_2026_06_05.md) | SPEC: Early Alpha Warning — README & Microsoft Store Partner Center |
 | [`SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21`](SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21.md) | SPEC — Editor Markdown Live Preview Panel |
 | [`SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15`](SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md) | SPEC — Fast startup: the Upgrade button owns migrations and updates, the boot path owns nothing deferrable |
