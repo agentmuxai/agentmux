@@ -20,7 +20,7 @@ import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { buildConfigFiles } from "./agent-config-builder";
-import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig } from "./agent-launch-env";
+import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
@@ -67,6 +67,8 @@ export class AgentViewModel implements ViewModel {
     agentDefinitions: () => AgentDefinition[];
     endIconButtons: () => (IconButtonDecl | ToggleIconButtonDecl)[];
     nodejsError: string | null = null;
+    /** Why the last launch aborted, for the picker to show (identity M4b-3). */
+    launchError: string | null = null;
 
     // Callbacks wired by AgentPresentationView on mount so the title-bar
     // button can open/close the pane-scoped Stash modal, and read whether
@@ -262,6 +264,9 @@ export class AgentViewModel implements ViewModel {
                     agentCliArgs: null,
                     agentBinDir: null,
                     controller: null,
+                    // Identity M4b-3 (spec §6.5.8): a stamp left behind here
+                    // would name the previous launch's row to the next one.
+                    agentInstanceId: null,
                 },
             });
         } catch {
@@ -735,6 +740,47 @@ export class AgentViewModel implements ViewModel {
                 });
             }
 
+            // Record this launch as an `AgentInstance` row in the DB so the
+            // backend can track which pane is running which definition,
+            // surface concurrent launches, and (later) carry GitHub work
+            // context. See
+            // docs/specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 5.
+            //
+            // Identity M4b-3: recorded by `commitLaunch` below, before the
+            // block's meta and resync — see its doc comment.
+            const createInstance = () =>
+                RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
+                    definition_id: agent.id,
+                    block_id: blockId,
+                    // PR-F.3: launch modal carries the user's bundle
+                    // picks. Empty / "blank" no longer buys ambient-creds
+                    // fallback — the backend resolver's layer-3 gate now
+                    // requires a real bound account for any oauth-class
+                    // provider regardless of identity_id's value (#2463
+                    // Finding 2). Issue #1624 PR-C Part B — `accountId`
+                    // replaces the old bundle-id `identityId`; this column
+                    // keeps its name (`identity_id`) since it's a legacy
+                    // `db_agent_instances` field, not part of the new
+                    // direct-link system.
+                    identity_id: overrides?.accountId,
+                    memory_id: overrides?.bundleId,
+                    // v8: named-agent continuation. The instance name
+                    // is the AGENTMUX_AGENT_ID the user picked in the
+                    // modal; finalWorkDir is the path that
+                    // WriteAgentConfigCommand resolved (after slug
+                    // collision suffixing). Both are persisted so the
+                    // launch modal's "Continue agent" dropdown can
+                    // surface this instance later. See
+                    // SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md.
+                    instance_name: instanceName,
+                    working_directory: finalWorkDir,
+                    // v8 continuation: chain lineage to the prior row
+                    // so the dropdown query can collapse continuations
+                    // (filter parent_instance_id = '' surfaces only
+                    // the "root" of each chain).
+                    parent_instance_id: overrides?.continueOfInstanceId,
+                });
+
             // Seed the initial runtime config (permission mode / model /
             // effort — see resolveInitialRuntimeConfig's own doc comment
             // for why launchAgentDefinition never set this key at all
@@ -772,67 +818,27 @@ export class AgentViewModel implements ViewModel {
                 "frame:activebordercolor": agentColor,
                 "frame:bordercolor": dimAgentColor(agentColor),
             };
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref,
+            // Identity M4b-3 (spec §6.5.8): record the launch row, THEN one
+            // SetMeta carrying the block meta and its stamp, THEN resync —
+            // see `commitLaunch`. Resync creates the controller (a no-op
+            // start that waits for the first message, or a continuation's
+            // eager resume).
+            const committed = await commitLaunch({
+                isTemplate: agent.is_seeded === 1,
                 meta,
+                createInstance,
+                setMeta: (m) => RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: m }),
+                resync: () =>
+                    RpcApi.ControllerResyncCommand(TabRpcClient, {
+                        tabid: targetTabId ?? atoms.staticTabId(),
+                        blockid: blockId,
+                        forcerestart: true,
+                    }),
+                warn: (msg) => Logger.warn("agent", msg),
             });
-
-            // Create SubprocessController (no-op start — waits for first message)
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: targetTabId ?? atoms.staticTabId(),
-                blockid: blockId,
-                forcerestart: true,
-            });
-
-            // Record this launch as an `AgentInstance` row in the DB so the
-            // backend can track which pane is running which definition,
-            // surface concurrent launches, and (later) carry GitHub work
-            // context. Best-effort — a failure here doesn't abort the
-            // launch (the agent already started). Stash the instance id
-            // into block meta so downstream code (status updates,
-            // bus targeting, lineage) can reference it. See
-            // docs/specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 5.
-            try {
-                const inst = await RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
-                    definition_id: agent.id,
-                    block_id: blockId,
-                    // PR-F.3: launch modal carries the user's bundle
-                    // picks. Empty / "blank" no longer buys ambient-creds
-                    // fallback — the backend resolver's layer-3 gate now
-                    // requires a real bound account for any oauth-class
-                    // provider regardless of identity_id's value (#2463
-                    // Finding 2). Issue #1624 PR-C Part B — `accountId`
-                    // replaces the old bundle-id `identityId`; this column
-                    // keeps its name (`identity_id`) since it's a legacy
-                    // `db_agent_instances` field, not part of the new
-                    // direct-link system.
-                    identity_id: overrides?.accountId,
-                    memory_id: overrides?.bundleId,
-                    // v8: named-agent continuation. The instance name
-                    // is the AGENTMUX_AGENT_ID the user picked in the
-                    // modal; finalWorkDir is the path that
-                    // WriteAgentConfigCommand resolved (after slug
-                    // collision suffixing). Both are persisted so the
-                    // launch modal's "Continue agent" dropdown can
-                    // surface this instance later. See
-                    // SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md.
-                    instance_name: instanceName,
-                    working_directory: finalWorkDir,
-                    // v8 continuation: chain lineage to the prior row
-                    // so the dropdown query can collapse continuations
-                    // (filter parent_instance_id = '' surfaces only
-                    // the "root" of each chain).
-                    parent_instance_id: overrides?.continueOfInstanceId,
-                });
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref,
-                    meta: { agentInstanceId: inst.id },
-                });
-            } catch (e: any) {
-                Logger.warn(
-                    "agent",
-                    `agent instance row create failed: ${e?.message ?? String(e)}`,
-                );
+            if (committed.ok === false) {
+                this.launchError = committed.error;
+                return false;
             }
 
             // Write-through: link this agent definition directly to the
