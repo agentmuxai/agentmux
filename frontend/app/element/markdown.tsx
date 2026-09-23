@@ -321,7 +321,17 @@ const Markdown = (props: MarkdownProps) => {
     const renderSegment = (children: any[]): { element: JSX.Element; dispose: () => void } =>
         createRoot((dispose) => {
             stats.domSegmentRenders++;
-            return { element: hastToElement(children), dispose };
+            try {
+                return { element: hastToElement(children), dispose };
+            } catch (e) {
+                // The root exists the moment createRoot runs its callback; if
+                // the render throws, nothing above ever receives `dispose`, so
+                // the root's reactive scope would leak. Tear it down here and
+                // let the render memo's catch handle the error as before.
+                // (ReAgent P2 on PR #3559.)
+                dispose();
+                throw e;
+            }
         });
 
     /** Solid accepts nested arrays, but flatten so the reconcile sees one flat node list.
