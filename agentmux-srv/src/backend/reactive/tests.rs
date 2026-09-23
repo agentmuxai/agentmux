@@ -3602,3 +3602,54 @@ async fn supervisor_decision_resolves_the_target_like_every_other_entry_point() 
         "supervisor decision must resolve the target's real block"
     );
 }
+
+/// ReAgent P1 (fourth round) on #3520. An agent's key can legitimately CHANGE
+/// between registrations: it registers while the store is unreachable (falling
+/// back to the slug), then re-registers — which `input.rs` does on EVERY turn
+/// for subprocess agents — once the resolver succeeds and returns its canonical
+/// id.
+///
+/// Binding by comparing the previously-bound key against the new one treated
+/// that as two agents colliding and marked the slug `Ambiguous` permanently, so
+/// one transient resolver failure made a single agent unaddressable by name
+/// from every external channel (Slack/Discord/Telegram/WhatsApp/MCP) until it
+/// fully unregistered. Only `unregister` recomputed the binding; register never
+/// did.
+#[tokio::test]
+async fn a_re_registration_under_a_new_key_does_not_poison_the_slug() {
+    let calls = Arc::new(Mutex::new(0usize));
+    let counter = calls.clone();
+    // Fails the first time, succeeds thereafter — the recovery direction.
+    let recovering: AgentKeyResolver = Arc::new(move |agent_id: &str| {
+        let mut n = counter.lock().unwrap();
+        *n += 1;
+        if *n == 1 || agent_id != "AgentY" {
+            None
+        } else {
+            Some("def-a".to_string())
+        }
+    });
+
+    let (mut handler, _sent) = recording_handler();
+    handler.set_agent_key_resolver(recovering);
+
+    // Turn 1: store unreachable, so it registers under the slug key.
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+    // Turn 2: same agent, same block, resolver now works — key becomes def-a.
+    handler.register_agent("AgentY", "block-a", None).unwrap();
+
+    // Exactly one registration survives, under the canonical key.
+    assert!(handler.get_agent("def-a").is_some(), "re-registration must land on the canonical key");
+
+    // And the slug still addresses it. Pre-fix this returned "agent not found"
+    // because the slug had been marked Ambiguous by a collision that never
+    // happened.
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "AgentY".to_string(),
+        message: "hi".to_string(),
+        request_id: Some("req-rereg".to_string()),
+        ..Default::default()
+    });
+    assert!(resp.success, "one agent's own re-registration must not poison its slug: {:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-a"));
+}

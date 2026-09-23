@@ -235,25 +235,6 @@ impl Handler {
         }
     }
 
-    /// Record that `agent_id` registered under `key`, or mark the slug
-    /// ambiguous if a different agent already answers to it.
-    fn bind_slug(&mut self, agent_id: &str, key: &str) {
-        let slug = agent_id.to_lowercase();
-        match self.slug_bindings.get(&slug) {
-            Some(SlugBinding::Unique(existing)) if existing != key => {
-                tracing::warn!(
-                    slug = %slug,
-                    "reactive registry: two agents share this slug; it no longer addresses either"
-                );
-                self.slug_bindings.insert(slug, SlugBinding::Ambiguous);
-            }
-            Some(_) => {}
-            None => {
-                self.slug_bindings.insert(slug, SlugBinding::Unique(key.to_string()));
-            }
-        }
-    }
-
     fn canonical_key(&self, agent_id: &str) -> String {
         if let Some(resolve) = &self.agent_key_resolver {
             if let Some(id) = resolve(agent_id) {
@@ -336,9 +317,6 @@ impl Handler {
         }
 
         let agent_key = self.canonical_key(agent_id);
-        // Pin slug → key now, so no later lookup depends on the resolver (and
-        // therefore on the store) being reachable. See `slug_bindings`.
-        self.bind_slug(agent_id, &agent_key);
 
         // Remove existing registration for this agent
         let evicted_block = self.agent_to_block.remove(&agent_key);
@@ -369,6 +347,24 @@ impl Handler {
                 registration_nonce,
             },
         );
+        // Bind slug → key from what is now actually registered, not by
+        // comparing against the previously bound key.
+        //
+        // An agent's key can legitimately CHANGE between registrations: it
+        // registers while the store is unreachable (falling back to the slug),
+        // then re-registers — which `input.rs` does on EVERY turn for
+        // subprocess agents — once the resolver succeeds and returns its
+        // canonical id. Comparing old key against new treated that as two
+        // agents colliding and marked the slug `Ambiguous` permanently, so a
+        // single transient resolver failure made one agent unaddressable by
+        // name from every external channel until it fully unregistered
+        // (ReAgent P1 on #3520).
+        //
+        // Deriving from `agent_info` cannot make that mistake: the block-keyed
+        // eviction above has already removed this agent's prior entry, so a
+        // re-registration leaves exactly one and binds `Unique`, while two
+        // genuinely distinct agents leave two and bind `Ambiguous`.
+        self.rebind_slug_from_registrations(agent_id);
 
         self.log_audit_registration(
             "register",
