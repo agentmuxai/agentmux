@@ -2350,7 +2350,39 @@ impl Store {
                 Err(rusqlite::Error::QueryReturnedNoRows) => {}
                 Err(e) => return Err(e.into()),
             }
+            // The block names something that is not an agent row. Only a
+            // template may fall back — a template launch or continuation
+            // finds the row it created or folded into — and only to a row
+            // launched from that template. A block naming a deleted agent
+            // (its pane survived the delete) or a provider key resolves to
+            // nothing: row status is never corrected when a pane is
+            // switched or a process exits, so the latest launch on the block
+            // can be another agent's stale `running` row, and resolving to
+            // it handed the pane that agent's UID, token, slug and provider
+            // credentials.
+            let is_template: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1 AND is_template = 1)",
+                params![agent_id],
+                |r| r.get(0),
+            )?;
+            if !is_template {
+                return Ok(None);
+            }
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {INSTANCE_COLUMNS} FROM db_agents
+                 WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
+                   AND parent_template_id = ?2
+                 ORDER BY updated_at DESC
+                 LIMIT 1"
+            ))?;
+            return match stmt.query_row(params![block_id, agent_id], map_instance_row) {
+                Ok(a) => Ok(Some(a)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.into()),
+            };
         }
+        // A block whose meta names no agent (from before `agentId`): the
+        // agent whose latest launch is on it.
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(
             "SELECT {INSTANCE_COLUMNS} FROM db_agents
