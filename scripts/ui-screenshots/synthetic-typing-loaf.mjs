@@ -47,8 +47,15 @@ if (focus.vis !== "visible") { console.error(`page is ${focus.vis} — restore t
 
 // 2. Arm the recorder. Snapshot the focused composer's draft + selection so the
 // cleanup below restores it exactly rather than guessing which suffix was ours.
-await evalIn(`(()=>{const a=document.activeElement;const P=window.__synProbe={t0:performance.now(),loafs:[],mut:0,keys:0,inputs:0,draft:{el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd}};
-  P.kh=()=>P.keys++; P.ih=()=>P.inputs++;
+// The owning block is recorded too, so the draft can be restored through the
+// block's live composer if this one is remounted mid-capture (see RESTORE).
+await evalIn(`(()=>{const a=document.activeElement;const P=window.__synProbe={t0:performance.now(),loafs:[],mut:0,keys:0,inputs:0,stray:0,hiddenDuring:false,draft:{el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd,blockId:a.closest("[data-blockid]")?.getAttribute("data-blockid")??null}};
+  // A synthetic key whose target is not the captured composer (focus moved, or
+  // the footer remounted on a pane-stack tab switch) is swallowed before it can
+  // type into anything else, and counted so the capture is reported invalid.
+  P.kh=e=>{P.keys++; if(e.target!==P.draft.el){e.preventDefault();e.stopImmediatePropagation();P.stray++}}; P.ih=()=>P.inputs++;
+  // Hidden at any moment during the capture means rAF/timers were throttled.
+  P.vh=()=>{if(document.visibilityState!=="visible")P.hiddenDuring=true}; document.addEventListener("visibilitychange",P.vh);
   document.addEventListener("keydown",P.kh,true); document.addEventListener("input",P.ih,true);
   P.mo=new MutationObserver(m=>P.mut+=m.length); P.mo.observe(document,{subtree:true,childList:true,characterData:true,attributes:true});
   P.po=new PerformanceObserver(P.poCb=l=>{for(const e of l.getEntries()){P.loafs.push({start:+(e.startTime-P.t0).toFixed(0),dur:+e.duration.toFixed(0),blocking:+e.blockingDuration.toFixed(0),render:e.renderStart?+(e.startTime+e.duration-e.renderStart).toFixed(0):0,styleLayout:e.styleAndLayoutStart?+(e.startTime+e.duration-e.styleAndLayoutStart).toFixed(0):0,scripts:(e.scripts||[]).map(s=>({inv:(s.invoker||"").slice(0,60),fn:(s.sourceFunctionName||"").slice(0,40),url:(s.sourceURL||"").replace(/^.*\\/(node_modules\\/\\.vite\\/deps|app)\\//,"$1/").slice(0,55),line:s.sourceCharPosition,dur:+s.duration.toFixed(1),fl:+s.forcedStyleAndLayoutDuration.toFixed(1)}))})}});
@@ -60,8 +67,32 @@ await evalIn(`(()=>{const a=document.activeElement;const P=window.__synProbe={t0
 // Put the composer back exactly as it was — on normal completion, on a thrown
 // error, and on Ctrl-C / SIGTERM — so an interrupted capture never leaves
 // synthetic characters in (or over) a real draft.
-const RESTORE = `(()=>{const P=window.__synProbe;if(!P||P.restored)return false;const d=P.draft;d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}));P.restored=true;return true})()`;
-const restoreAndExit = async (code) => { try { await evalIn(RESTORE); } catch {} process.exit(code); };
+//
+// Through the LIVE composer, not just the captured element: every synthetic key
+// went through AgentFooter.handleInput, which persists the value per block
+// (composerDrafts). If the footer remounted meanwhile, the captured element is
+// detached and the new footer restored the synthetic text from that map, so
+// the block's current composer is written instead (its input event persists
+// the original draft back). If none is mounted within 30 s, report it with the
+// draft text so nothing is lost silently.
+const RESTORE = `(async()=>{const P=window.__synProbe;if(!P||P.restored)return {ok:true,how:"nothing to restore"};const d=P.draft;
+  const write=el=>{el.value=d.value;try{el.setSelectionRange(d.start,d.end)}catch{}el.dispatchEvent(new Event("input",{bubbles:true}))};
+  const done=how=>{P.restored=true;return {ok:true,how}};
+  if(d.el.isConnected){write(d.el);return done("captured composer")}
+  const find=()=>d.blockId?document.querySelector('[data-blockid="'+CSS.escape(d.blockId)+'"] textarea.agent-input'):null;
+  for(let i=0;i<300;i++){const el=find();if(el){write(el);return done("remounted composer")}await new Promise(r=>setTimeout(r,100))}
+  return {ok:false,blockId:d.blockId,draft:d.value}})()`;
+const restoreDraft = async () => {
+  const r = await evalIn(RESTORE);
+  if (r && r.ok === false) {
+    console.error(`\nCOULD NOT RESTORE the composer draft of block ${r.blockId}: its composer was not mounted within 30 s.`);
+    console.error(`The composer may show synthetic "${ch}" characters. Your original draft was:\n---\n${r.draft}\n---`);
+    return false;
+  }
+  if (r && r.how === "remounted composer") console.error("restored the draft through the remounted composer");
+  return true;
+};
+const restoreAndExit = async (code) => { let ok = true; try { ok = await restoreDraft(); } catch { ok = false; } process.exit(ok ? code : 4); };
 process.once("SIGINT", () => restoreAndExit(130));
 process.once("SIGTERM", () => restoreAndExit(143));
 
@@ -75,6 +106,11 @@ const tStart = Date.now();
 for (let i = 0; i < n; i++) {
   const due = tStart + i * interval;
   const wait = due - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  // Once a second, stop as soon as the composer is gone or unfocused (the key
+  // guard already swallows strays; this ends the capture promptly).
+  if (i > 0 && i % Number(kps) === 0 && !(await evalIn(`(()=>{const d=window.__synProbe.draft;return d.el.isConnected&&document.activeElement===d.el})()`))) {
+    throw new Error("the composer lost focus or was remounted during the capture");
+  }
   // fire-and-forget so slow frames don't throttle our input rate (that's what the OS does)
   send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, text: ch, unmodifiedText: ch, autoRepeat: i > 0 }).catch((e) => console.error(String(e)));
   send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode }).catch((e) => console.error(String(e)));
@@ -82,18 +118,26 @@ for (let i = 0; i < n; i++) {
 await new Promise((r) => setTimeout(r, 800)); // let the tail settle
 
 // 4. Read out + disarm (the finally below restores the draft).
-  out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);
+  out = await evalIn(`(()=>{const P=window.__synProbe;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("input",P.ih,true);document.removeEventListener("visibilitychange",P.vh);
   const d=P.draft; const removed=d.el.value.length-d.value.length;
   const L=P.loafs; const scr=l=>l.scripts.reduce((a,s)=>a+s.dur,0); const sum=f=>+L.reduce((a,l)=>a+f(l),0).toFixed(0);
   const q=(arr,p)=>{if(!arr.length)return null;const s=[...arr].sort((x,y)=>x-y);return +s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1)};
   const byInv=new Map(); for(const l of L) for(const s of l.scripts){const k=s.inv+" | "+s.fn+" @ "+s.url+":"+s.line; const v=byInv.get(k)||{n:0,dur:0,fl:0}; v.n++; v.dur+=s.dur; v.fl+=s.fl; byInv.set(k,v)}
-  return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydownsSeen:P.keys,inputsSeen:P.inputs,typedCharsRemoved:removed,mutations:P.mut,
+  return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydownsSeen:P.keys,inputsSeen:P.inputs,typedCharsRemoved:removed,strayKeys:P.stray,hiddenDuring:P.hiddenDuring,visibilityAtRead:document.visibilityState,composerDetached:!d.el.isConnected,mutations:P.mut,
     frames:P.gaps.length,rafGapMs:{p50:q(P.gaps,.5),p95:q(P.gaps,.95),max:q(P.gaps,1),over50:P.gaps.filter(g=>g>50).length},
     loaf:{count:L.length,totalMs:sum(l=>l.dur),blockingMs:sum(l=>l.blocking),scriptMs:sum(scr),forcedLayoutInScriptsMs:sum(l=>l.scripts.reduce((a,s)=>a+s.fl,0)),renderPhaseMs:sum(l=>l.render),ofWhichStyleLayoutMs:sum(l=>l.styleLayout),maxMs:L.length?Math.max(...L.map(l=>l.dur)):0},
     topScripts:[...byInv].map(([k,v])=>({k,n:v.n,ms:+v.dur.toFixed(0),forcedLayoutMs:+v.fl.toFixed(0)})).sort((a,b)=>b.ms-a.ms).slice(0,14),
     worst4:[...L].sort((a,b)=>b.dur-a.dur).slice(0,4).map(l=>({dur:l.dur,blocking:l.blocking,scriptMs:+scr(l).toFixed(0),renderMs:l.render,styleLayoutMs:l.styleLayout,top:[...l.scripts].sort((a,b)=>b.dur-a.dur).slice(0,3).map(s=>s.inv.slice(0,32)+"|"+s.fn+"@"+s.url.slice(-26)+" "+s.dur+"ms fl="+s.fl)}))}})()`);
 } finally {
-  await evalIn(RESTORE).catch(() => {});
+  if (!(await restoreDraft().catch(() => false))) process.exitCode = 4;
 }
 ws.close();
-console.log(JSON.stringify(out, null, 1));
+// A capture during which the page was hidden, or whose keys left the composer,
+// measured something else: print it for the record, but fail the run.
+const invalid = out.hiddenDuring || out.visibilityAtRead !== "visible"
+  ? "the page was hidden during the capture (rAF/timers throttled)"
+  : out.strayKeys > 0 || out.composerDetached
+    ? `typing left the composer (${out.strayKeys} stray key(s)${out.composerDetached ? ", composer remounted" : ""})`
+    : null;
+console.log(JSON.stringify(invalid ? { invalid, ...out } : out, null, 1));
+if (invalid) { console.error(`INVALID: ${invalid}`); if (!process.exitCode) process.exitCode = 3; }

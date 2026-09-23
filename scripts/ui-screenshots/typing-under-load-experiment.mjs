@@ -50,6 +50,11 @@ const log = (...a) => console.error(new Date().toISOString().slice(11, 19), ...a
 
 const vis = await evalIn(`document.visibilityState`);
 if (vis !== "visible") { console.error(`page is ${vis} — restore the window first`); process.exit(2); }
+// Hidden pages suspend rAF and throttle timers, so a window during which the
+// page was hidden at any moment measures throttling, not typing. The check
+// above is only the start: every window re-checks on arm and on read, and a
+// listener catches a hide-and-restore that happens entirely inside a window.
+const HIDDEN_DURING = (w) => w.hiddenDuring || w.visibilityAtRead !== "visible";
 
 // Composers in document order. A pane is addressed by its index, or by an agent
 // name that must match EXACTLY one "Send message to <name>..." placeholder —
@@ -91,17 +96,23 @@ if (prompt) {
 }
 
 // --- LoAF recorder (shared) ---
-const ARM = `(()=>{const P=window.__exp={t0:performance.now(),loafs:[],mut:0,keys:0,gaps:[]};
-  P.kh=()=>P.keys++; document.addEventListener("keydown",P.kh,true);
+const ARM = `(()=>{if(document.visibilityState!=="visible")throw new Error("page is "+document.visibilityState+" at window start — restore the window");
+  const P=window.__exp={t0:performance.now(),loafs:[],mut:0,keys:0,gaps:[],stray:0,hiddenDuring:false};
+  P.vh=()=>{if(document.visibilityState!=="visible")P.hiddenDuring=true}; document.addEventListener("visibilitychange",P.vh);
+  // During a typed window, a synthetic key whose target is not the captured
+  // composer (focus moved, the footer remounted on a tab switch) is swallowed
+  // before it can type into anything else, and counted so the window aborts.
+  const d=window.__expDraft; P.kh=e=>{P.keys++; if(d&&e.target!==d.el){e.preventDefault();e.stopImmediatePropagation();P.stray++}}; document.addEventListener("keydown",P.kh,true);
   P.mo=new MutationObserver(m=>P.mut+=m.length); P.mo.observe(document,{subtree:true,childList:true,characterData:true,attributes:true});
   P.po=new PerformanceObserver(P.poCb=l=>{for(const e of l.getEntries()){P.loafs.push({start:+(e.startTime-P.t0).toFixed(0),dur:+e.duration.toFixed(0),blocking:+e.blockingDuration.toFixed(0),render:e.renderStart?+(e.startTime+e.duration-e.renderStart).toFixed(0):0,styleLayout:e.styleAndLayoutStart?+(e.startTime+e.duration-e.styleAndLayoutStart).toFixed(0):0,scripts:(e.scripts||[]).map(s=>({inv:(s.invoker||"").slice(0,60),fn:(s.sourceFunctionName||"").slice(0,40),url:(s.sourceURL||"").replace(/^.*\\/(node_modules\\/\\.vite\\/deps|app)\\//,"$1/").slice(0,55),line:s.sourceCharPosition,dur:+s.duration.toFixed(1),fl:+s.forcedStyleAndLayoutDuration.toFixed(1)}))})}});
   P.po.observe({type:"long-animation-frame"});
   let last=performance.now(); P.raf=true; (function f(t){P.gaps.push(t-last); last=t; if(P.raf) requestAnimationFrame(f)})(last); return true})()`;
-const READ = `(()=>{const P=window.__exp;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);
+const READ = `(()=>{const P=window.__exp;P.raf=false;P.poCb({getEntries:()=>P.po.takeRecords()});P.mut+=P.mo.takeRecords().length;P.po.disconnect();P.mo.disconnect();document.removeEventListener("keydown",P.kh,true);document.removeEventListener("visibilitychange",P.vh);
   const L=P.loafs; const scr=l=>l.scripts.reduce((a,s)=>a+s.dur,0); const sum=f=>+L.reduce((a,l)=>a+f(l),0).toFixed(0);
   const q=(arr,p)=>{if(!arr.length)return null;const s=[...arr].sort((x,y)=>x-y);return +s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1)};
   const byInv=new Map(); for(const l of L) for(const s of l.scripts){const k=s.inv+" | "+s.fn+" @ "+s.url+":"+s.line; const v=byInv.get(k)||{n:0,dur:0,fl:0}; v.n++; v.dur+=s.dur; v.fl+=s.fl; byInv.set(k,v)}
-  return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydowns:P.keys,mutations:P.mut,frames:P.gaps.length,gaps:P.gaps.map(g=>+g.toFixed(1)),loafDurs:L.map(l=>l.dur),
+  const d=window.__expDraft;
+  return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydowns:P.keys,strayKeys:P.stray,hiddenDuring:P.hiddenDuring,visibilityAtRead:document.visibilityState,composerDetached:!!(d&&!d.el.isConnected),mutations:P.mut,frames:P.gaps.length,gaps:P.gaps.map(g=>+g.toFixed(1)),loafDurs:L.map(l=>l.dur),
     rafGapMs:{p50:q(P.gaps,.5),p95:q(P.gaps,.95),max:q(P.gaps,1),over50:P.gaps.filter(g=>g>50).length},
     loaf:{count:L.length,totalMs:sum(l=>l.dur),blockingMs:sum(l=>l.blocking),scriptMs:sum(scr),forcedLayoutInScriptsMs:sum(l=>l.scripts.reduce((a,s)=>a+s.fl,0)),renderPhaseMs:sum(l=>l.render),ofWhichStyleLayoutMs:sum(l=>l.styleLayout),maxMs:L.length?Math.max(...L.map(l=>l.dur)):0},
     allScripts:[...byInv].map(([k,v])=>({k,n:v.n,ms:+v.dur.toFixed(0),forcedLayoutMs:+v.fl.toFixed(0)})),
@@ -113,19 +124,47 @@ const READ = `(()=>{const P=window.__exp;P.raf=false;P.poCb({getEntries:()=>P.po
 // would measure the wrong workload — so that aborts the run instead.
 const kc = ch.toUpperCase().charCodeAt(0), interval = 1000 / kps;
 // Restores the composer exactly; used by runWindow's finally and by signals.
-const RESTORE = `(()=>{const d=window.__expDraft;if(d&&d.el){d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}))}delete window.__expDraft;return true})()`;
+//
+// Through the LIVE composer, not just the captured element. Every synthetic key
+// went through AgentFooter.handleInput, which persists the value per block
+// (composerDrafts); if the footer remounted during the window (an ordinary
+// pane-stack tab switch), the captured element is detached and the new footer
+// restored the synthetic text from that map, so writing to the detached
+// element would fix nothing. So: the captured element if still connected, else
+// the block's current composer (found via the block frame's data-blockid); the
+// bubbled input event runs handleInput, which persists the original draft back.
+// If the block has no composer mounted, wait up to 30 s for it to come back;
+// failing that, report it with the draft text so nothing is lost silently.
+const RESTORE = `(async()=>{const d=window.__expDraft;if(!d)return {ok:true,how:"nothing to restore"};
+  const write=el=>{el.value=d.value;try{el.setSelectionRange(d.start,d.end)}catch{}el.dispatchEvent(new Event("input",{bubbles:true}))};
+  const done=how=>{delete window.__expDraft;return {ok:true,how}};
+  if(d.el.isConnected){write(d.el);return done("captured composer")}
+  const find=()=>d.blockId?document.querySelector('[data-blockid="'+CSS.escape(d.blockId)+'"] textarea.agent-input'):null;
+  for(let i=0;i<300;i++){const el=find();if(el){write(el);return done("remounted composer")}await new Promise(r=>setTimeout(r,100))}
+  return {ok:false,blockId:d.blockId,draft:d.value}})()`;
+const restoreDraft = async () => {
+  const r = await evalIn(RESTORE);
+  if (r && r.ok === false) {
+    console.error(`\nCOULD NOT RESTORE the composer draft of block ${r.blockId}: its composer was not mounted within 30 s.`);
+    console.error(`The composer may show synthetic "${ch}" characters. Your original draft was:\n---\n${r.draft}\n---`);
+    return false;
+  }
+  if (r && r.how === "remounted composer") log("restored the draft through the remounted composer");
+  return true;
+};
 // The restore's input event runs AgentFooter.handleInput, which schedules a
 // scroll via requestAnimationFrame — let that land before the next window arms,
 // or its work is measured in (and credited to) the wrong condition.
 const SETTLE = `new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(r,50))))`;
-const restoreAndExit = async (code) => { try { await evalIn(RESTORE); } catch {} process.exit(code); };
+const restoreAndExit = async (code) => { let ok = true; try { ok = await restoreDraft(); } catch { ok = false; } process.exit(ok ? code : 4); };
 process.once("SIGINT", () => restoreAndExit(130));
 process.once("SIGTERM", () => restoreAndExit(143));
 async function runWindow(typed) {
   if (typed) {
     if (!(await focusComposerAt(typeIdx))) throw new Error(`could not focus composer ${typeIdx}`);
-    // Snapshot draft + selection so cleanup restores it exactly.
-    await evalIn(`(()=>{const a=document.activeElement;window.__expDraft={el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd};return true})()`);
+    // Snapshot draft + selection + owning block so cleanup restores it exactly,
+    // even through a remounted composer (see RESTORE).
+    await evalIn(`(()=>{const a=document.activeElement;window.__expDraft={el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd,blockId:a.closest("[data-blockid]")?.getAttribute("data-blockid")??null};return true})()`);
   }
   await evalIn(ARM);
   const t0 = Date.now();
@@ -133,17 +172,26 @@ async function runWindow(typed) {
     if (typed) {
       for (let i = 0; i < secs * kps; i++) {
         const w = t0 + i * interval - Date.now(); if (w > 0) await sleep(w);
+        // Once a second, stop typing as soon as the composer is gone (the key
+        // guard already swallows strays; this ends the window promptly).
+        if (i > 0 && i % kps === 0 && !(await evalIn(`!!window.__expDraft&&window.__expDraft.el.isConnected&&document.activeElement===window.__expDraft.el`))) {
+          throw new Error("the composer lost focus or was remounted during the typed window");
+        }
         send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 }).catch((e) => console.error(String(e)));
         send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc }).catch((e) => console.error(String(e)));
       }
     }
     const remaining = t0 + secs * 1000 - Date.now();
     if (remaining > 0) await sleep(remaining);
-    return await evalIn(READ);
+    const r = await evalIn(READ);
+    if (HIDDEN_DURING(r)) throw new Error("the page was hidden during this window (rAF/timers throttled); restore the window and rerun");
+    if (r.strayKeys > 0 || r.composerDetached) throw new Error(`typing left the composer during the window (${r.strayKeys} stray key(s)${r.composerDetached ? ", composer remounted" : ""})`);
+    return r;
   } finally {
     if (typed) {
-      await evalIn(RESTORE).catch(() => {});
+      const ok = await restoreDraft().catch(() => false);
       await evalIn(SETTLE).catch(() => {});
+      if (!ok) process.exitCode = 4;
     }
   }
 }
