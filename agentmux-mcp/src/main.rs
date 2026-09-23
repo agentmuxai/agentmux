@@ -323,10 +323,13 @@ pub(crate) fn agent_slug() -> Result<String> {
 /// Identity M3 (spec §5): resolve a typed agent name at the boundary — the
 /// only place a name is turned into a UID — before a tool stores it.
 /// `Ok(Some(uid))` when exactly one identified agent matches; `Ok(None)` when
-/// none does or the match has no UID (the tool then sends the name and the
-/// server records the miss); `Err` with the candidates when the name is
-/// ambiguous, so the model can retry by uid instead of enqueueing something
-/// that can never be delivered unambiguously (§5.2).
+/// none does, the match has no UID, or the srv predates the endpoint (the
+/// tool then sends the name and the server records the miss). `Err` in two
+/// cases, both of which fail the tool call: the name is ambiguous — the
+/// error lists the candidates so the model can retry by uid (§5.2) — or the
+/// resolver could not answer (a store fault, any other non-2xx, an
+/// unreadable or unexpected response), where sending the bare name would
+/// skip the ambiguity check. See `interpret_resolve_response`.
 async fn resolve_agent_name_at_boundary(
     client: &reqwest::Client,
     local_url: &str,
