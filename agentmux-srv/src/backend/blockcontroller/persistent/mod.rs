@@ -40,8 +40,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use super::{
-    BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
-    STATUS_RUNNING,
+    BlockControllerRuntimeStatus, BlockInputUnion, Controller, DeliverPolicy, STATUS_DONE,
+    STATUS_INIT, STATUS_RUNNING,
 };
 use super::core;
 use super::health::TurnActivityTracker;
@@ -351,6 +351,23 @@ struct PersistentInner {
     /// spawn or arrived while someone else's spawn was already in flight.
     /// Drained by `release_spawn_claim_and_drain_queue`.
     pending_send_messages: VecDeque<QueuedMessage>,
+    /// Non-human messages (jekt, muxbus, bridges, MCP `SendMessage`) that
+    /// arrived while a turn was in flight and were deferred to the next turn
+    /// boundary rather than steering the agent mid-explanation.
+    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.
+    ///
+    /// Distinct from `pending_send_messages`, which orders messages around a
+    /// *spawn*; this one orders them around a *turn*. Entries are the fully
+    /// encoded stream-json stdin lines, ready to write.
+    ///
+    /// This field and the `turn_active` flag it coordinates with MUST be read
+    /// and written under this one mutex — §4.2. `PersistentInner`'s lock is
+    /// what serializes them, because the turn-end handler in `spawn.rs`
+    /// already calls `health_monitor.set_active_turn(false)` while holding it.
+    /// Splitting them across two locks reintroduces the stranding race in
+    /// which a message enqueued just as a flush observes the queue empty has
+    /// no future trigger.
+    deferred_deliveries: VecDeque<String>,
     /// Exclusive claim held by a stale-resume retry batch flush (issue
     /// #2367; spec §4 option 2 of
     /// SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09).
@@ -801,6 +818,19 @@ pub struct PersistentSubprocessController {
 /// See `answer_question` and SPEC_ASK_USER_QUESTION_2026_06_15.md §10.1.
 const ANSWER_RESUME_FALLBACK_MS: u64 = 4000;
 
+/// Bound on `PersistentInner::deferred_deliveries`. Past this, enqueueing
+/// returns an error instead of a false success, so a caller is never told a
+/// message was delivered and then has it silently dropped
+/// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5). Senders already handle
+/// transient delivery failure — the reactive handler, muxbus and the bridges
+/// all have to cope with an unreachable target instance — so surfacing a full
+/// queue as one more retryable failure needs no new machinery on their side.
+///
+/// 64 is chosen to be far above any plausible legitimate backlog for a single
+/// turn while still bounding memory: these are whole messages, and the queue
+/// is per-block.
+pub(super) const MAX_DEFERRED_DELIVERIES: usize = 64;
+
 /// Compose the directive follow-up message used by the AskUserQuestion dead-air
 /// fallback. `answers` maps each question's text to the selected label(s) or free
 /// text (the same object delivered in the control_response). The message is
@@ -977,6 +1007,7 @@ impl PersistentSubprocessController {
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
+                deferred_deliveries: VecDeque::new(),
                 drain_claim: false,
                 next_message_seq: 0,
                 drain_send_in_flight: false,
@@ -1121,6 +1152,7 @@ impl Controller for PersistentSubprocessController {
 
     fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
         self.stop_process(true)?;
+        self.report_stranded_deferred_deliveries("controller stopped");
         let mut inner = self.inner.lock().unwrap();
         if inner.proc_status != new_status {
             Self::set_status(&mut inner, new_status);
@@ -1149,6 +1181,14 @@ impl Controller for PersistentSubprocessController {
                 }
                 // Nothing queued may start a new turn after the interrupt.
                 g.pending_send_messages.clear();
+                if !g.deferred_deliveries.is_empty() {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        stranded = g.deferred_deliveries.len(),
+                        "pane shutdown with deferred messages still queued — they were accepted but never delivered"
+                    );
+                    g.deferred_deliveries.clear();
+                }
                 // Before the interrupt: its `is_error` result is our stop,
                 // not a failure (§9.4).
                 g.shutdown_generation = Some(g.spawn_generation);

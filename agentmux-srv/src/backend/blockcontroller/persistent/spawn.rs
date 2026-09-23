@@ -685,15 +685,61 @@ impl PersistentSubprocessController {
                         // closes. `restart_pending` is committed in the SAME
                         // acquisition so no send can slip into `DeliverDirect`
                         // between the decision and the kill.
-                        let deferred_restart = {
+                        // The turn boundary is also the flush point for
+                        // messages deferred by
+                        // `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.4.
+                        //
+                        // Exactly ONE message is released per boundary, never
+                        // the whole queue: writing to stdin starts a new turn,
+                        // so a burst drain would write message #2 while #1's
+                        // turn was already running — the precise mid-turn write
+                        // this exists to prevent. The next queued message goes
+                        // out on *that* new turn's own `result` frame.
+                        //
+                        // When one is released, `turn_active` deliberately
+                        // stays true: the send just started a turn. It only
+                        // goes false when the queue is empty.
+                        let (deferred_restart, flushed) = {
                             let mut locked = inner_read.lock().unwrap();
-                            health_read.set_active_turn(false);
-                            let deferred = std::mem::replace(&mut locked.restart_when_idle, false);
+
+                            let flushed = PersistentSubprocessController::flush_one_deferred_locked(
+                                &mut locked,
+                                &block_id_read,
+                            );
+
+                            // Only go idle if nothing was released.
+                            if flushed.is_none() {
+                                health_read.set_active_turn(false);
+                            }
+
+                            // A deferred runtime-config restart waits for a
+                            // boundary with nothing queued. Applying it now
+                            // would `stop_process` the child we just wrote to,
+                            // destroying the message this flush had already
+                            // accepted responsibility for — the same silent
+                            // loss `restart_when_idle` itself was introduced to
+                            // fix (see its doc comment). It stays pending and
+                            // applies at the boundary after the queue drains.
+                            let deferred = if flushed.is_none() {
+                                std::mem::replace(&mut locked.restart_when_idle, false)
+                            } else {
+                                false
+                            };
                             if deferred {
                                 locked.restart_pending = true;
                             }
-                            deferred
+                            (deferred, flushed)
                         };
+
+                        if let Some(line) = flushed {
+                            tracing::info!(
+                                block_id = %block_id_read,
+                                "turn ended — released one deferred message"
+                            );
+                            if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                                ctrl.append_delivered_message(&line);
+                            }
+                        }
                         if deferred_restart {
                             tracing::info!(
                                 block_id = %block_id_read,

@@ -1568,26 +1568,39 @@ fn decide_retry_batch_action_marks_every_entry_as_already_persisted() {
 /// reagentx P1 on PR #2360 (sixth review pass, round 7): `spawn_process`
 /// sets `stdin_tx` synchronously, well before the queued message that
 /// triggered the spawn is actually delivered by the background drain.
-/// A muxbus/jekt steering message (`send_user_message`) landing in
-/// that window must not `try_send` straight to the live channel — it
-/// has no way to safely queue behind the drain (its persistence is a
-/// live, visible append, not the drain's silent persist), so it must
-/// error instead of reordering ahead of whatever the drain is still
-/// working through.
+/// A muxbus/jekt message (`send_user_message`) landing in that window
+/// must not `try_send` straight to the live channel, reordering itself
+/// ahead of whatever the drain is still working through.
+///
+/// This used to be enforced by returning a retryable error, because there
+/// was no safe place to hold the message. `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+/// §3.2.1 gave it one: it is deferred to the turn-boundary queue and released
+/// after the drain, so the no-reordering invariant now holds *without* the
+/// caller having to retry — and without the jekt being dropped outright,
+/// which is what the old error actually caused in production (the reactive
+/// handler has no retry).
 #[tokio::test]
-async fn send_user_message_errors_instead_of_reordering_while_a_drain_is_still_active() {
+async fn send_user_message_defers_instead_of_reordering_while_a_drain_is_still_active() {
     let c = controller();
-    let (tx, _rx) = mpsc::channel::<String>(4);
+    let (tx, mut rx) = mpsc::channel::<String>(4);
     {
         let mut inner = c.inner.lock().unwrap();
         inner.stdin_tx = Some(tx);
         inner.spawning_in_progress = true;
     }
 
-    let err = c.send_user_message("steer".to_string()).unwrap_err();
+    c.send_user_message("steer".to_string())
+        .expect("a mid-spawn message is accepted, not rejected");
+
     assert!(
-        err.contains("starting up"),
-        "should surface a clear, retryable error instead of reordering, got {err:?}"
+        rx.try_recv().is_err(),
+        "nothing may reach live stdin ahead of the in-flight drain"
+    );
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.deferred_deliveries.len(),
+        1,
+        "the message must be held for the next turn boundary, not dropped"
     );
 }
 
@@ -2810,5 +2823,241 @@ fn decide_retry_batch_action_prepends_ahead_of_an_unrelated_later_message() {
         inner.pending_send_messages.iter().cloned().collect::<Vec<_>>(),
         vec!["A".to_string(), "later-message".to_string()],
         "the retry's own (chronologically earlier) message must precede the later, unrelated one"
+    );
+}
+
+// ── No mid-turn delivery (SPEC_NO_MIDTURN_DELIVERY_2026_09_23) ───────
+//
+// The guarantee: a message from an automated sender is never written to
+// live stdin while a turn is in flight. These tests pin the four ways
+// that guarantee can break — writing anyway, draining too eagerly,
+// stranding a message, and silently dropping one.
+
+/// A live controller with a turn already running.
+fn busy_controller() -> (PersistentSubprocessController, mpsc::Receiver<String>) {
+    let c = controller();
+    let (tx, rx) = mpsc::channel::<String>(16);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+    }
+    c.health_monitor.set_active_turn(true);
+    (c, rx)
+}
+
+/// The core guarantee: mid-turn arrivals do not reach the agent.
+#[tokio::test]
+async fn a_message_arriving_mid_turn_is_queued_not_written() {
+    let (c, mut rx) = busy_controller();
+
+    c.send_user_message("from github".to_string()).unwrap();
+
+    assert!(
+        rx.try_recv().is_err(),
+        "a mid-turn message must not reach live stdin — that is the interrupt this prevents"
+    );
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+}
+
+/// The idle fast-path still delivers immediately — deferral must not
+/// become "everything waits for a turn that never starts".
+#[tokio::test]
+async fn a_message_arriving_while_idle_is_delivered_immediately() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(16);
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+
+    c.send_user_message("hello".to_string()).unwrap();
+
+    let line = rx.try_recv().expect("an idle agent receives the message now");
+    assert!(line.contains("hello"));
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+}
+
+/// `Immediate` is the human operator's own deliberate interruption and
+/// must bypass the queue entirely.
+#[tokio::test]
+async fn immediate_policy_still_steers_mid_turn() {
+    let (c, mut rx) = busy_controller();
+
+    c.send_user_message_with_policy("stop what you are doing".to_string(), DeliverPolicy::Immediate)
+        .unwrap();
+
+    let line = rx.try_recv().expect("Immediate writes through a live turn");
+    assert!(line.contains("stop what you are doing"));
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+}
+
+/// §4.5: a full queue returns an error rather than accepting a message
+/// it will then drop. Reporting success and losing the message is the
+/// failure mode this guards.
+#[tokio::test]
+async fn a_full_queue_reports_an_error_rather_than_accepting_and_dropping() {
+    let (c, _rx) = busy_controller();
+    for i in 0..MAX_DEFERRED_DELIVERIES {
+        c.send_user_message(format!("msg-{i}")).unwrap();
+    }
+
+    let err = c.send_user_message("one too many".to_string()).unwrap_err();
+
+    assert!(err.contains("full"), "got {err:?}");
+    assert_eq!(
+        c.inner.lock().unwrap().deferred_deliveries.len(),
+        MAX_DEFERRED_DELIVERIES,
+        "the rejected message must not have been queued"
+    );
+}
+
+/// FIFO: a message accepted while idle-but-backlogged must not jump the
+/// queue. Ordering is what makes one-per-boundary release coherent.
+#[tokio::test]
+async fn delivery_order_is_preserved_when_a_backlog_exists() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(16);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.deferred_deliveries.push_back(
+            PersistentSubprocessController::encode_user_message("earlier"),
+        );
+    }
+
+    // Idle, but something older is already waiting.
+    c.send_user_message("later".to_string()).unwrap();
+
+    let line = rx.try_recv().expect("the head of the queue goes out");
+    assert!(
+        line.contains("earlier"),
+        "the older message must go first, got {line}"
+    );
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.deferred_deliveries.len(), 1, "the newer one waits its turn");
+    assert!(inner.deferred_deliveries[0].contains("later"));
+}
+
+/// §4.5: teardown must not silently discard accepted messages.
+#[tokio::test]
+async fn teardown_drains_the_queue_rather_than_discarding_it_silently() {
+    let (c, _rx) = busy_controller();
+    c.send_user_message("will not make it".to_string()).unwrap();
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+
+    c.report_stranded_deferred_deliveries("test teardown");
+
+    assert!(
+        c.inner.lock().unwrap().deferred_deliveries.is_empty(),
+        "the queue is drained by the report path, not left dangling"
+    );
+}
+
+/// The §4.2 race, with real threads: concurrent senders hitting a busy
+/// controller must all be accounted for — none written through, none lost
+/// between the turn-state check and the enqueue.
+#[test]
+fn concurrent_senders_against_a_busy_turn_strand_nothing() {
+    use std::sync::Arc as StdArc;
+
+    let c = controller();
+    let (tx, _rx) = mpsc::channel::<String>(64);
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    c.health_monitor.set_active_turn(true);
+    let c = StdArc::new(c);
+
+    let handles: Vec<_> = (0..16)
+        .map(|i| {
+            let c = StdArc::clone(&c);
+            std::thread::spawn(move || c.send_user_message(format!("msg-{i}")).is_ok())
+        })
+        .collect();
+    let accepted = handles
+        .into_iter()
+        .map(|h| h.join().expect("sender thread panicked"))
+        .filter(|accepted| *accepted)
+        .count();
+
+    assert_eq!(accepted, 16, "every sender should be accepted");
+    assert_eq!(
+        c.inner.lock().unwrap().deferred_deliveries.len(),
+        16,
+        "every accepted message must be in the queue — none written through, none lost"
+    );
+}
+
+/// §4.4, the rule that makes the whole thing sound: a turn boundary
+/// releases exactly ONE message. Releasing two would write the second
+/// into the turn the first just started — the mid-turn write this
+/// mechanism exists to prevent.
+#[tokio::test]
+async fn a_turn_boundary_releases_exactly_one_message() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("first".to_string()).unwrap();
+    c.send_user_message("second".to_string()).unwrap();
+    c.send_user_message("third".to_string()).unwrap();
+
+    let flushed = {
+        let mut inner = c.inner.lock().unwrap();
+        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+    };
+
+    assert!(flushed.expect("one message released").contains("first"));
+    let line = rx.try_recv().expect("it reached stdin");
+    assert!(line.contains("first"));
+    assert!(
+        rx.try_recv().is_err(),
+        "only ONE message may go out per boundary — a burst drain writes mid-turn"
+    );
+    assert_eq!(
+        c.inner.lock().unwrap().deferred_deliveries.len(),
+        2,
+        "the rest wait for their own boundaries"
+    );
+}
+
+/// Draining across successive boundaries preserves send order.
+#[tokio::test]
+async fn successive_boundaries_drain_in_order() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("one".to_string()).unwrap();
+    c.send_user_message("two".to_string()).unwrap();
+
+    for _ in 0..2 {
+        let mut inner = c.inner.lock().unwrap();
+        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block");
+    }
+
+    assert!(rx.try_recv().unwrap().contains("one"));
+    assert!(rx.try_recv().unwrap().contains("two"));
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+}
+
+/// An empty queue at a boundary releases nothing — this is the case where
+/// the caller lets the turn actually go idle.
+#[tokio::test]
+async fn an_empty_queue_releases_nothing_at_a_boundary() {
+    let (c, _rx) = busy_controller();
+
+    let mut inner = c.inner.lock().unwrap();
+    assert!(PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block").is_none());
+}
+
+/// A dead process must not silently eat the queue: the entries stay put so
+/// teardown can report them (§4.5).
+#[tokio::test]
+async fn a_failed_flush_leaves_the_queue_intact_for_teardown() {
+    let (c, _rx) = busy_controller();
+    c.send_user_message("stranded".to_string()).unwrap();
+    // The process goes away before the boundary is reached.
+    c.inner.lock().unwrap().stdin_tx = None;
+
+    let flushed = {
+        let mut inner = c.inner.lock().unwrap();
+        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+    };
+
+    assert!(flushed.is_none());
+    assert_eq!(
+        c.inner.lock().unwrap().deferred_deliveries.len(),
+        1,
+        "a failed write must not drop the message"
     );
 }
