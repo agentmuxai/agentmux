@@ -42,11 +42,6 @@ permissions:
   pull-requests: read
   issues: read
 
-concurrency:
-  # Every run re-reads the PR's current state, so only the latest matters.
-  group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-  cancel-in-progress: true
-
 jobs:
   evaluate:
     if: >-
@@ -58,6 +53,14 @@ jobs:
         github.event.review.user.login == 'chatgpt-codex-connector[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Job-level, not workflow-level: a run whose `if:` skips this job (every
+    # non-Codex review or comment) must not join the group. At workflow level
+    # it did, and cancelled the push's evaluation a second earlier -- the new
+    # head got no status and the PR showed a failed `evaluate` (#3556).
+    # Every run re-reads the PR's current state, so only the latest matters.
+    concurrency:
+      group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
