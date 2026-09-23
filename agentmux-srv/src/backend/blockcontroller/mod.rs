@@ -514,6 +514,8 @@ pub fn release_block_processes(block_id: &str) {
         broker.forget(block_id);
         broker.emit_tracked_blocks_changed();
     }
+    // Identity M4a: the block's "spawned with a token" record goes with it.
+    crate::backend::identity_spawn::forget_block(block_id);
 }
 
 // ---- Close-on-exit handler (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10) ----

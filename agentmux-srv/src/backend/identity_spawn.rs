@@ -51,6 +51,16 @@ pub(crate) fn record_spawn(
     }
 }
 
+/// Drop `block_id`'s record when its processes are released
+/// (`blockcontroller::release_block_processes`), so the map is bounded by
+/// open blocks, not by every block ever opened.
+pub(crate) fn forget_block(block_id: &str) {
+    carried_by_block()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(block_id);
+}
+
 /// Whether the process this srv last spawned on `block_id` carried a token;
 /// `None` if this srv has not spawned one there.
 pub(crate) fn carried_token(block_id: &str) -> Option<bool> {
@@ -112,5 +122,14 @@ mod tests {
         assert_eq!(live_gauges(&regs), (2, 1));
         assert_eq!(carried_token(with), Some(true));
         assert_eq!(carried_token(unknown), None);
+    }
+
+    /// Releasing a block's processes drops its record (ReAgent P2 on #3571:
+    /// the map must not grow with every pane ever opened).
+    #[test]
+    fn releasing_a_block_forgets_its_record() {
+        record_spawn("m4a-blk-closed", true, None);
+        crate::backend::blockcontroller::release_block_processes("m4a-blk-closed");
+        assert_eq!(carried_token("m4a-blk-closed"), None);
     }
 }
