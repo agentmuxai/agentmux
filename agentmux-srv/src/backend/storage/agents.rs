@@ -2135,6 +2135,65 @@ impl Store {
         }
     }
 
+    /// Ensure a user agent `id` has a local `db_agents` row, backfilling it
+    /// from the shared definition registry when it exists only there (a
+    /// cross-channel agent) — the same backfill `instance_create` runs, without
+    /// its fold. Identity M4b-4 (spec §6.5.8): so a block naming a
+    /// cross-channel agent resolves to a local row at its spawn. Returns
+    /// whether the row exists afterwards.
+    pub fn agent_row_ensure_local(&self, id: &str) -> Result<bool, StoreError> {
+        if self.agent_row_get(id)?.is_some() {
+            return Ok(true);
+        }
+        if let Some(reg) = self.shared_def_registry() {
+            match reg.get(id) {
+                Ok(Some(record)) => {
+                    if let Err(e) = self.agent_def_backfill_local_from_registry(&record) {
+                        tracing::warn!(definition_id = %id, error = %e, "agent_row_ensure_local: registry backfill failed");
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(definition_id = %id, error = %e, "agent_row_ensure_local: registry lookup failed");
+                }
+            }
+        }
+        Ok(self.agent_row_get(id)?.is_some())
+    }
+
+    /// Record a launch of user agent `id` on `block_id`: a **lifecycle-only**
+    /// update — `last_block_id`, `status = running`, `started_at`,
+    /// `ended_at = 0`, a monotonic `updated_at` and the registry mirror — the
+    /// columns `instance_create`'s fold moves, and none of the ones it would
+    /// overwrite from a caller's record (`name`, `identity_id`, `memory_id`,
+    /// `instance_name`, `github_context`, `user_hidden`). Identity M4b-4 (spec
+    /// §6.5.8), for `agent.open`, which has no such record. Returns false for
+    /// a template or a missing row.
+    pub fn instance_record_launch(
+        &self,
+        id: &str,
+        block_id: &str,
+        started_at: i64,
+    ) -> Result<bool, StoreError> {
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            let now_ms = Self::monotonic_updated_at(&conn, 0);
+            conn.execute(
+                "UPDATE db_agents
+                 SET last_block_id = ?2, status = 'running', started_at = ?3, ended_at = 0, updated_at = ?4
+                 WHERE id = ?1 AND is_template = 0",
+                params![id, block_id, started_at, now_ms],
+            )?
+        };
+        if rows == 0 {
+            return Ok(false);
+        }
+        if let Some(fresh) = self.instance_get(id)? {
+            self.registry_upsert_if_named(&fresh);
+        }
+        Ok(true)
+    }
+
     /// Partial update of an agent's launch state. Only `Some` fields are
     /// written; `None` leaves that column untouched. `Some("")` explicitly
     /// clears (the `updateagentinstance` command contract, and
