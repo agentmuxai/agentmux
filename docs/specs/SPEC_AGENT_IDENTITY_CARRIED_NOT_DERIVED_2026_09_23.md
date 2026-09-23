@@ -3,7 +3,7 @@
 **Date:** 2026-09-23
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
-work queue and cron, dual-written), M2–M5 not started.
+work queue and cron, dual-written) in #3550. M2–M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -577,12 +577,30 @@ changes two things at once.
     carry the token (same user boundary as the docker socket) — stated,
     not claimed zero, per §6.4.
 
-  **M1b — not started.** UID columns beside `target_agent`/`claimed_by`
-  (work queue) and `target` (cron), dual-written at enqueue/claim/create.
-  The claimer's own UID can be *carried* (it is now in its env); a typed
-  target must be *resolved* at authoring time per §5.4, and an
-  `Ambiguous`/`None` result leaves the UID column empty rather than
-  guessing.
+  **M1b — shipped in #3550.** `db_work_queue.target_agent_uid` /
+  `claimed_by_uid` (identity store v10) and `db_cron_jobs.target_uid`
+  (shared store v11, mirrored in the identity store), dual-written and
+  read by nothing. Two mechanisms, deliberately: the target is *resolved*
+  once at enqueue/create through `agent_resolve::resolve_uid_for_dual_write`
+  (§5.4 — authoring time, never fire time), and the claimer's UID is
+  *carried* — `agentmux-mcp` sends `AGENTMUX_AGENT_UID` on `WorkClaim`,
+  with resolution of `agent_id` only as a counted fallback. Measured and
+  recorded rather than hidden:
+  - **A display name does not resolve** (§1.1's exact-case slug tier), so
+    a `target_agent` typed as `"AgentY"` leaves the column empty and is
+    counted. M3 fixes this at the MCP boundary through §5's entry point;
+    a normalising resolver would misroute (§1.1) and is not the answer.
+  - **The queue is global, the resolver is per-channel**, so a target in
+    another channel stays empty here.
+  - **`db_cron_jobs` lives in the shared store**, not the identity store
+    the queue uses; the handlers read the shared copy. Both copies got the
+    column. Cron's store placement is a pre-existing unmigrated case
+    (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` step 1b), not changed here.
+  - **§9.2's counters exist now**: `agent_resolve::uid_fallback_counts()`,
+    in-memory, keyed by call site. No endpoint yet — M2 should expose them
+    together with the registry's own fallback counter.
+  - Every path that clears `claimed_by` clears `claimed_by_uid` (§10
+    constraint 2).
 - **M2 — Registration and delivery, atomically.** Registration stays
   server-side (§4.1) and becomes UID-keyed; the registry, **both identity
   confirmers**, and the **alias map** move in the *same* change (§4.2).
