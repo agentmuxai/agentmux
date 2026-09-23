@@ -2081,6 +2081,35 @@ impl Store {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Every row a name selects, **templates and hidden rows included** — the
+    /// identity M4a-2 ambiguity check (spec §6.5.3). Unlike
+    /// [`Self::agents_matching_name`], which lists only the agents a typed
+    /// name could mean, this asks whether the name is *anyone else's*: slug
+    /// collision suffixing (`resolve_slug_collision`) counts template rows,
+    /// so a "Claude" made from the "Claude" template is `claude-2`, and a name
+    /// its MCP sends as `claude` belongs to the template (#3573).
+    pub fn rows_answering_to(&self, name: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, slug, instance_name FROM db_agents
+             WHERE slug = ?1 OR name = ?1 COLLATE NOCASE OR instance_name = ?1 COLLATE NOCASE
+             ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![name], |row| {
+            Ok(AgentNameMatch {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                slug: row.get(2)?,
+                instance_name: row.get(3)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// The names row `id` answers to — the by-id counterpart of
     /// [`Self::agents_matching_name`], for checking a body's actor name
     /// against the calling agent's own row (identity M4a-2, spec §6.5.3).
