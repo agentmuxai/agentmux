@@ -114,7 +114,6 @@ pub(crate) fn record_uid_fallback(site: &'static str) {
 
 /// Snapshot of every fallback counter, for the exit-criterion check (spec
 /// §9.2). Sorted by site so output is stable.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn uid_fallback_counts() -> Vec<(&'static str, u64)> {
     let counts = UID_FALLBACK_COUNTS.get_or_init(Default::default);
     let guard = counts.lock().unwrap_or_else(|e| e.into_inner());

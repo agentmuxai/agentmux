@@ -1290,7 +1290,7 @@ impl Store {
             // permanently, with no UI path left to try again. Every
             // statement in the purge is an idempotent DELETE, so running it
             // for an id with no rows costs a few no-op statements.
-            purge_agent_dependents(&conn, id)?;
+            purge_agent_dependents(&conn, id, self.token_index().as_deref())?;
             (rows, scope)
         };
         // Tombstone the global definition record so another channel's stale
@@ -1375,7 +1375,7 @@ impl Store {
     /// serves both stores. Returns rows removed.
     pub fn agent_dependents_purge(&self, id: &str) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
-        purge_agent_dependents(&conn, id)
+        purge_agent_dependents(&conn, id, self.token_index().as_deref())
     }
 
     /// The non-SQLite half of deleting an agent row: observations keyed to
@@ -2214,7 +2214,7 @@ impl Store {
             // arriving from the launch side, and an agent deleted through
             // this name used to keep its credentials and signing keys on
             // disk purely because the cleanup lived in the other function.
-            purge_agent_dependents(&conn, id)?;
+            purge_agent_dependents(&conn, id, self.token_index().as_deref())?;
             rows
         };
         // Unconditional, for the reason `agent_def_delete`'s own sweep is
@@ -2439,7 +2439,20 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
 /// `db_work_queue.target_agent` is deliberately absent: releasing work
 /// claimed against a deleted agent is a state change, not a row to drop —
 /// open question §8.3 of the spec above.
-fn purge_agent_dependents(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
+#[cfg(test)]
+pub(super) fn purge_agent_dependents_for_tests(
+    conn: &rusqlite::Connection,
+    id: &str,
+    tokens: Option<&super::agent_tokens::TokenIndex>,
+) -> Result<usize, StoreError> {
+    purge_agent_dependents(conn, id, tokens)
+}
+
+fn purge_agent_dependents(
+    conn: &rusqlite::Connection,
+    id: &str,
+    tokens: Option<&super::agent_tokens::TokenIndex>,
+) -> Result<usize, StoreError> {
     const BY_AGENT_ID: &[&str] = &[
         "db_agent_content",
         "db_agent_skills",
@@ -2468,6 +2481,13 @@ fn purge_agent_dependents(conn: &rusqlite::Connection, id: &str) -> Result<usize
         // Table names are compile-time constants from the list above, never
         // caller input — the id itself is still bound as a parameter.
         removed += conn.execute(&format!("DELETE FROM {table} WHERE agent_id=?1"), params![id])?;
+        // Identity M4a: the index follows the token row's own delete, not
+        // the purge's overall result (spec §6.5.3).
+        if *table == "db_agent_tokens" {
+            if let Some(tokens) = tokens {
+                tokens.forget_uid(id);
+            }
+        }
     }
     // The two that key on the agent differently.
     if present.contains("db_conversation_trust_grants") {

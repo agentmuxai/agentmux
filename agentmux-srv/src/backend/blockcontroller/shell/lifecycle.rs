@@ -769,6 +769,10 @@ impl Controller for ShellController {
         // branch can launch anything; both inherited the full instance identity
         // while this lived inside the third branch (ReAgent P0 on PR #3326).
         crate::backend::pane_env::sanitize_pty_command(&mut cmd);
+        // Identity M4a: a terminal pane never carries a token. No counter —
+        // most panes are not agents — but an agent CLI that registers from
+        // this block shows in the live gauge.
+        crate::backend::identity_spawn::record_spawn(&self.block_id, false, None);
 
         // Set working directory if specified
         let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");

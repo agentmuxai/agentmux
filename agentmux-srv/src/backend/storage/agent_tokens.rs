@@ -34,9 +34,13 @@
 //! credential (spec §6.3). This table cannot have that defect: `db_agents.id`
 //! is a `PRIMARY KEY`, and every non-template row is a UUID.
 //!
-//! **Nothing reads the token yet.** M1 mints and carries; M4 verifies. Until
-//! then the value is inert, which is what makes this phase revertible by
-//! ignoring the new field.
+//! **Read since M4a** through [`TokenIndex`]: a request carrying
+//! `X-Agent-Token` is attributed to the UID the token was minted for
+//! (spec §6.5.3). Attribution only — an unknown token is treated as absent,
+//! never refused.
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use rusqlite::params;
 
@@ -59,7 +63,90 @@ fn random_token() -> String {
     hex::encode(bytes)
 }
 
+/// token → UID, in memory, so attributing a request never reads the store
+/// (spec §10.1). Attached to the channel's object store only
+/// ([`Store::attach_token_index`]) and kept in step with `db_agent_tokens`
+/// by the two statements that change it — mint (`agent_token_ensure`) and
+/// revoke (`purge_agent_dependents`) — each under the store's connection
+/// lock, so the index never disagrees with a committed row (spec §6.5.3:
+/// purge is a sequence of autocommit statements, not a transaction, so
+/// the index follows the token statement itself, not the purge's result).
+#[derive(Default)]
+pub struct TokenIndex {
+    maps: RwLock<TokenMaps>,
+}
+
+#[derive(Default)]
+struct TokenMaps {
+    uid_by_token: HashMap<String, String>,
+    token_by_uid: HashMap<String, String>,
+}
+
+impl TokenIndex {
+    /// The UID `token` was minted for, if any.
+    pub fn uid_for(&self, token: &str) -> Option<String> {
+        let maps = self.maps.read().unwrap_or_else(|e| e.into_inner());
+        maps.uid_by_token.get(token).cloned()
+    }
+
+    fn insert(&self, uid: &str, token: &str) {
+        let mut maps = self.maps.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = maps.token_by_uid.insert(uid.to_string(), token.to_string()) {
+            if old != token {
+                maps.uid_by_token.remove(&old);
+            }
+        }
+        maps.uid_by_token.insert(token.to_string(), uid.to_string());
+    }
+
+    /// Drop `uid`'s token. Called by `purge_agent_dependents` right after
+    /// the row's delete, under the same connection lock.
+    pub(super) fn forget_uid(&self, uid: &str) {
+        let mut maps = self.maps.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(token) = maps.token_by_uid.remove(uid) {
+            maps.uid_by_token.remove(&token);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.maps
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .uid_by_token
+            .len()
+    }
+}
+
 impl Store {
+    /// Build this store's [`TokenIndex`] from `db_agent_tokens` and attach
+    /// it, so mint and revoke keep it current from here on. Called once, on
+    /// the channel's object store at boot — never on the shared, identity or
+    /// migration-time stores, which must not grow an index of their own.
+    pub fn attach_token_index(&self) -> Result<Arc<TokenIndex>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let index = Arc::new(TokenIndex::default());
+        {
+            let mut stmt = conn.prepare("SELECT agent_id, token FROM db_agent_tokens")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (uid, token) = row?;
+                index.insert(&uid, &token);
+            }
+        }
+        *self.token_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(index.clone());
+        Ok(index)
+    }
+
+    /// The attached [`TokenIndex`], if this store has one.
+    pub fn token_index(&self) -> Option<Arc<TokenIndex>> {
+        self.token_index
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     /// This agent's token if one has been minted, without minting.
     ///
     /// The verification read (M4) is the production caller; until it lands
@@ -99,7 +186,12 @@ impl Store {
             params![uid, random_token(), now_secs()],
         )?;
         let mut stmt = conn.prepare("SELECT token FROM db_agent_tokens WHERE agent_id = ?1")?;
-        Ok(stmt.query_row(params![uid], |row| row.get(0))?)
+        let token: String = stmt.query_row(params![uid], |row| row.get(0))?;
+        // Still under the connection lock: the index follows the row.
+        if let Some(index) = self.token_index() {
+            index.insert(uid, &token);
+        }
+        Ok(token)
     }
 }
 
@@ -145,5 +237,48 @@ mod tests {
         assert!(store.agent_token_ensure("").is_err());
         assert!(store.agent_token_ensure("   ").is_err());
         assert_eq!(store.agent_token_load("").unwrap(), None);
+    }
+
+    // ---- identity M4a: the index follows the token rows ----------------
+
+    /// Mint puts the token in the index, and attaching to a store that
+    /// already holds tokens loads them — an srv restart attributes a running
+    /// agent's requests without it respawning.
+    #[test]
+    fn the_index_follows_mint_and_is_rebuilt_on_attach() {
+        let store = object_store();
+        let before = store.agent_token_ensure("uid-a").unwrap();
+        let index = store.attach_token_index().unwrap();
+        assert_eq!(
+            index.uid_for(&before).as_deref(),
+            Some("uid-a"),
+            "loaded on attach"
+        );
+        let minted = store.agent_token_ensure("uid-b").unwrap();
+        assert_eq!(
+            index.uid_for(&minted).as_deref(),
+            Some("uid-b"),
+            "added on mint"
+        );
+        assert_eq!(index.len(), 2);
+    }
+
+    /// Purge revokes the token from the index as well as the table.
+    #[test]
+    fn purge_removes_the_token_from_the_index() {
+        let store = object_store();
+        let index = store.attach_token_index().unwrap();
+        let token = store.agent_token_ensure("uid-a").unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            super::super::agents::purge_agent_dependents_for_tests(
+                &conn,
+                "uid-a",
+                store.token_index().as_deref(),
+            )
+            .unwrap();
+        }
+        assert_eq!(index.uid_for(&token), None);
+        assert_eq!(store.agent_token_load("uid-a").unwrap(), None);
     }
 }
