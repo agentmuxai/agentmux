@@ -1,5 +1,25 @@
 # AgentMux Version History
 
+## 0.56.13 — 2026-09-23
+
+- docs(report): why agents cannot read @a5af packages from GitHub Packages
+- agent-pane: backgrounded panes no longer render markdown, freeing the main thread for the pane you're typing in
+- feat(armory): show the provider account's login email on its entry
+- replace the Stash modal with a top-anchored, resizable, data-dense drawer
+- refactor(blockcontroller): split persistent.rs into a directory module
+- fix(spawn): server spawn path now sets AGENTMUX_AGENT_DISPLAY and AGENTMUX_AGENT_SLUG explicitly (identity M0)
+- refactor(app_api): split bundle.rs into a directory module
+- Armory Accounts page density: brand tiles become compact chips, connected-account rows and headers tightened to composer scale, so the connected list is above the fold
+- build(cef): point the cef-dll-sys binding patch at the org-owned agentmuxai/cef-rs fork
+- feat(spawn): mint a per-agent local identity token and carry AGENTMUX_AGENT_UID + AGENTMUX_AGENT_TOKEN into the process (identity M1a)
+- fix(cef-build): turn off the raw_ptr instance tracer in the Windows CEF args; incident report for the 2026-09-22 renderer deadlock
+- feat(work-queue,cron): dual-write the target and claimer UID beside the slug columns (identity M1b)
+- feat(focus): auto-focus a pane's input on selection (agent, editor, terminal); keep the editor caret on content-driven CodeMirror rebuilds
+- fix(agent): land the eager-resume review fixes on the split persistent module, and settle an empty eager-resume retry as done
+- fix(agent): discard and report queued prompts when a candidate leftover respawn is refused by the duplicate-session guard
+- fix(cef-build): pin the tracer-free Windows CEF runtime (152.0.7977.83-r2) and guard the tracer off on macOS/Linux
+- feat(reactive): key the agent registry by UID with typed name bindings; ambiguous names are refused with candidates instead of last-writer-wins (identity M2)
+
 ## 0.56.12 — 2026-09-22
 
 - fix(release): task release:patch/minor silently dropped '-- --dry-run' and performed a real release
