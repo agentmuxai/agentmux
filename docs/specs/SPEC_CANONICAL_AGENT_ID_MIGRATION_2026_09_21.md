@@ -7,9 +7,10 @@ Phase 0 and Phase 4 are complete. Landed: the `instance_get_by_slug`
 fail-closed fix (#3500), registry-guard test coverage (#3503), Phase 0's shared
 resolver (#3504, which also subsumes Phase 1 as §6 defines it), Phase 4
 (#3508), and Phase 0's §4 safety net (#3514).
-Remaining: Phase 2 (needs the rollout decision §6 flags), Phase 3 and Phase 5
-— both carry a recommendation NOT to proceed as written; see their §6 entries
-before picking either up.
+Remaining: Phase 2, Phase 3 and Phase 5 — all three carry a recommendation NOT
+to proceed as written; see their §6 entries before picking any up. Phase 2's is
+the strongest: its stated approach was tried in #3520 and verified unable to
+fix the defect it targets.
 **§2.5 records a verification pass against `main` @ `059cc6e` (2026-09-22)
 correcting §2/§4/§7, plus two later self-corrections (§2.5.2, §2.5.5) where
 this document asserted system behaviour inferred from a single function
@@ -438,6 +439,62 @@ re-registers on next connect/heartbeat, as they already do today on any
 srv restart) sufficient, or does anything need to survive a mid-flight
 deploy without a restart? Flagging as needing a rollout-safety check before
 merge, not resolved here.
+
+> ## ⚠ Phase 2 as specified cannot work — verified 2026-09-22 (#3520)
+>
+> The instruction above — *"`register_agent_with_nonce` resolves the incoming
+> slug via Phase 0 before inserting"* — is unsound **for precisely the case it
+> was written to fix**. An attempt is in #3520 (draft, not for merge); this
+> records why, so the next attempt does not rediscover it the same way.
+>
+> **The registry's `agent_id` is a display name, not a slug.** `input.rs`
+> passes `block.meta["agentName"]` — typically capitalised. Measured against
+> the real `resolve_agent_id`:
+>
+> ```
+> resolve_agent_id("agenty")  = Ok("def-a")
+> resolve_agent_id("AgentY")  = Err(unknown agent)
+> resolve_agent_id("AGENTY")  = Err(unknown agent)
+> ```
+>
+> Tier 1 is an exact-case `WHERE slug = ?1` against a column `derive_slug`
+> lowercases at write time; tier 2 is an id lookup; tier 3 normalizes
+> internally. So a display name resolves to nothing, and a handler keyed this
+> way falls back to the slug essentially always — the phase becomes a no-op.
+>
+> **Normalizing the input with `derive_slug` is worse, not better.** Because
+> `agent_def_insert` suffix-resolves, two agents whose names collide receive
+> `agenty-2` and `agenty-3`, while bare `agenty` belongs to a *different*
+> agent:
+>
+> ```
+> Agent B (name "AGENTY") -> slug "agenty-2"
+> Agent C (name "AgentY") -> slug "agenty-3"
+> derive_slug("AGENTY") = "agenty" -> resolves to def-a   <- unrelated agent
+> derive_slug("AgentY") = "agenty" -> resolves to def-a   <- same
+> ```
+>
+> That is silent misrouting onto a third party — strictly worse than the
+> eviction bug the phase exists to fix.
+>
+> **The root reason.** `derive_slug` is lossy, and *that lossiness is the
+> collision*. Any resolver whose only input is the display name either fails
+> to resolve or misroutes. No amount of care inside the resolver changes that,
+> because the information needed to tell the two agents apart is not in its
+> argument.
+>
+> **What a working Phase 2 needs:** registration must carry an identifier that
+> is already unique — the definition id, or the block id, both of which the
+> caller holds — instead of a name to be resolved. `find_active_record_by_
+> slug_and_definition` already exists for exactly this shape and resolves
+> collisions the slug-only lookup must refuse.
+>
+> **Worth salvaging from #3520**, independent of the keying question: pinning
+> the slug binding rather than re-resolving per lookup (a transient store
+> error made a live agent unreachable); deriving bindings from live state
+> rather than from the previously-bound key; teardown not inheriting
+> delivery's fail-closed rule; and `record_supervisor_decision` resolving its
+> target like every other entry point, which it never did.
 
 ### Phase 3 — Work Queue (§2 #2)
 `target_agent`/`claimed_by` columns store `db_agents.id`. Resolution happens
