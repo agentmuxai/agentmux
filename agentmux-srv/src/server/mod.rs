@@ -2508,9 +2508,18 @@ struct AgentPresetGetQuery {
 /// Backs the `PresetGet` MCP tool.
 async fn handle_agent_preset_get(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentPresetGetQuery>,
 ) -> impl IntoResponse {
     if q.id.is_empty() && q.name.is_empty() {
+        // Self mode: `agent_id` is the actor (owner = actor). By id or name
+        // it is only an optional hint, so it is not checked there.
+        actor::check_actor(
+            &state,
+            caller.as_deref(),
+            actor::ActorSite::PresetGet,
+            Some(&q.agent_id),
+        );
         if q.agent_id.is_empty() {
             return (
                 StatusCode::BAD_REQUEST,
