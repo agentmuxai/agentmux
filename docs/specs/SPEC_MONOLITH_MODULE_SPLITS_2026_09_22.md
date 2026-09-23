@@ -1,7 +1,7 @@
 # SPEC — Split the two largest `agentmux-srv` files into directory modules
 
 **Date:** 2026-09-22
-**Status:** implemented — Phase 1 (`persistent.rs`) in this PR; Phase 2 (`bundle.rs`) follows in its own PR; Phase 3 is scoped in §6, not scheduled
+**Status:** implemented in #3542 (Phase 1, `persistent.rs`) and #3544 (Phase 2, `bundle.rs`); Phase 3 is scoped in §6, not scheduled
 **Author:** AgentY
 **Related:**
 `agentmux-srv/src/backend/blockcontroller/persistent/` (Phase 1 result),
