@@ -239,7 +239,7 @@ mod spawn_site_coverage {
          "test: runs the fixture server built above; lives and dies with the test"),
         ("src/backend/blockcontroller/app_server_controller.rs", "\"rustc\"", 1,
          "test: compiles the same fixture server binary before exercising the controller"),
-        ("src/backend/blockcontroller/persistent.rs", "\"echo\"", 1,
+        ("src/backend/blockcontroller/persistent/tests/send_input.rs", "\"echo\"", 1,
          "not a spawn: appears inside a comment explaining why `echo` cannot be spawned directly"),
         ("src/backend/blockcontroller/shell/lifecycle.rs", "\"/bin/sh\"", 1,
          "sanitized: Unix fallback shell, covered by the same single sanitize_pty_command"),
