@@ -2147,12 +2147,14 @@
         }
     }
 
-    /// Codex P1 on #3576: the promoted clone a launch was repointed to is
-    /// deleted afterwards (`agent_def_delete` keeps derived rows). Deleting
-    /// it re-parents its children to its own parent (the template), so the
-    /// launch keeps its lineage and still resolves, stamped or not.
+    /// Codex P1 on #3576, resolved fail-safe: the promoted clone a launch
+    /// was repointed to is deleted afterwards (`agent_def_delete` keeps
+    /// derived rows), so no lineage reaches the template the block names.
+    /// The launch resolves to nothing — never to another row — until it is
+    /// relaunched. (Re-parenting on delete was tried and dropped: it mutated
+    /// forks' credential fallback and the registry mirrors.)
     #[test]
-    fn a_stamped_launch_resolves_after_its_promoted_clone_is_deleted() {
+    fn a_launch_whose_promoted_clone_was_deleted_resolves_to_nothing() {
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
         let mut tpl = sample_agent("tpl-clone-gone", "tpl-clone-gone");
@@ -2179,8 +2181,10 @@
 
         for stamped in [Some(launched.as_str()), None] {
             block_showing_stamped(&store, "block-cg", Some("tpl-clone-gone"), stamped);
-            let got = store.instance_get_active_for_block("block-cg").unwrap();
-            assert_eq!(got.map(|r| r.id), Some(launched.clone()), "stamped={stamped:?}");
+            assert!(
+                store.instance_get_active_for_block("block-cg").unwrap().is_none(),
+                "stamped={stamped:?}"
+            );
             store.delete::<crate::backend::obj::Block>("block-cg").ok();
         }
     }
@@ -2382,32 +2386,6 @@
         }
         block_showing_stamped(&store, "block-unrel-tpl", Some("tpl-named-a"), Some(&c));
         assert!(store.instance_get_active_for_block("block-unrel-tpl").unwrap().is_none());
-    }
-
-    /// Codex P1 on #3576: deleting an agent hands its *launch* children to
-    /// its parent, never its forks — a fork re-parented onto a template
-    /// would inherit that template's account links (`inject.rs`
-    /// `template_parent_id_if_seeded`), which forks deliberately do not.
-    #[test]
-    fn deleting_an_agent_does_not_re_parent_its_forks() {
-        let (tmp, store, _reg) = store_with_registry();
-        let agents_root = tmp.path().join("agents");
-        let mut tpl = sample_agent("tpl-adopt", "tpl-adopt");
-        tpl.is_seeded = 1;
-        store.agent_def_insert(&mut tpl).unwrap();
-        let source = launch_from_template_on(&store, &agents_root, "tpl-adopt", "inst-adopt-src", "block-adopt");
-        fork_launched_on(&store, &agents_root, &source, "agent-adopt-fork", "block-adopt-fork");
-        assert!(store.agent_def_delete(&source).unwrap());
-        let parent: String = {
-            let conn = store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT parent_template_id FROM db_agents WHERE id = 'agent-adopt-fork'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap()
-        };
-        assert_eq!(parent, source, "the fork keeps pointing at its deleted source");
     }
 
     /// Codex P2 on #3576: two active launches on a block in the same
