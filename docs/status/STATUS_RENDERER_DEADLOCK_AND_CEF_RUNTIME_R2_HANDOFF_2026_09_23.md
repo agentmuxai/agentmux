@@ -15,7 +15,7 @@ On 2026-09-22 22:42 the operator's v0.56.12 main window froze permanently. The r
 
 | Item | Where | State |
 |---|---|---|
-| RCA + recovery procedure | `docs/incident/INCIDENT_2026_09_22_...md` | merged in #3549 (2026-09-23 07:04Z) |
+| RCA + recovery procedure | `docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md` | merged in #3549 (2026-09-23 07:04Z) |
 | `args-windows.gn` tracer `true` → `false` | #3549 | merged |
 | Windows CEF rebuilt with tracer off | `~/cef-build/chromium_git/chromium/src/out/Release_GN_152` | done 02:15 local; 34,869 steps, 0 errors; buildflag header reads `(0)`; cdb finds no `InstanceTracer` symbols in the new DLL; cefsimple boots |
 | Release `cef-windows-x86_64-152.0.7977.83-r2` | `agentmuxai/cef` (author agent3-workflow[bot]) | runtime zip 192 MB + `libcef.dll.pdb-152.0.7977.83-r2.xz` 598 MB + `SHA256SUMS.txt` |
