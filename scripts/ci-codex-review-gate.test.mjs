@@ -86,6 +86,24 @@ describe("evaluateCodexGate", () => {
         expect(r.state).toBe("failure");
     });
 
+    it("drops a dismissed findings review back to pending, not success", () => {
+        // Dismissal clears the failure, but only a Codex OK passes the gate.
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [{ ...findingsReview(HEAD), state: "DISMISSED" }],
+        });
+        expect(r.state).toBe("pending");
+    });
+
+    it("falls back to an earlier OK once later findings are dismissed", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(HEAD, "2026-09-23T05:00:00Z")],
+            reviews: [{ ...findingsReview(HEAD, "2026-09-23T06:00:00Z"), state: "DISMISSED" }],
+        });
+        expect(r.state).toBe("success");
+    });
+
     it("ignores findings on an older commit", () => {
         const r = evaluateCodexGate({
             headSha: HEAD,

@@ -42,7 +42,11 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [] }) {
     const short = head.slice(0, 10);
     const outputs = [
         ...comments.map((c) => ({ kind: "comment", at: c.created_at, body: c.body, login: c.user?.login })),
-        ...reviews.map((r) => ({ kind: "review", at: r.submitted_at, body: r.body, login: r.user?.login })),
+        // A dismissed findings review no longer counts against the head. It
+        // does not count for it either: only a Codex OK passes.
+        ...reviews
+            .filter((r) => r.state !== "DISMISSED")
+            .map((r) => ({ kind: "review", at: r.submitted_at, body: r.body, login: r.user?.login })),
     ]
         .filter((o) => o.login === CODEX_LOGIN)
         .filter((o) => {
