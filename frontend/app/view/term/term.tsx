@@ -10,6 +10,7 @@ import { ISearchOptions } from "@xterm/addon-search";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { resolveTermFontFamily } from "./termfontfamily";
 import { resolveTermScrollback } from "./termscrollback";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
@@ -83,6 +84,24 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     const termSettings = createMemo(() => termSettingsAtom());
     const termMode = createMemo(() => blockData()?.meta?.["term:mode"] ?? "term");
     const termFontSize = createMemo(() => model.fontSizeAtom());
+    const termScrollSensitivity = createMemo(() => model.scrollSensitivityAtom());
+    // Settings resolved once at TermWrap construction and never revisited
+    // until now — see SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md
+    // §6.1. Promoted from one-shot local `const`s inside onMount (below) to
+    // top-level memos so onMount and the live-apply effects further down
+    // share one source of truth instead of onMount re-deriving its own copy.
+    const termFontFamily = createMemo(() => {
+        const connFontFamily = (atoms.fullConfigAtom() as any)?.connections?.[blockData()?.meta?.connection]?.[
+            "term:fontfamily"
+        ];
+        return resolveTermFontFamily(termSettings(), connFontFamily);
+    });
+    const termScrollbackDepth = createMemo(() => resolveTermScrollback(termSettings(), blockData()?.meta));
+    // Default ON: modern shells (bash 4+, zsh, fish) all support BPM and it
+    // prevents the shell from executing partial lines mid-paste. Disable
+    // per-pane via term:allowbracketedpaste=false for legacy shells that
+    // don't support it.
+    const termAllowBracketedPaste = createMemo(() => getOverrideConfigAtom(blockId, "term:allowbracketedpaste")() ?? true);
     const isFocused = createMemo(() => model.nodeModel.isFocused());
     const isMI = createMemo(() => atoms.isTermMultiInput());
     const isBasicTerm = createMemo(() => blockData()?.meta?.controller != "cmd");
@@ -163,19 +182,10 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     // Initialize terminal
     onMount(() => {
         const fullConfig = atoms.fullConfigAtom();
-        const connFontFamily = (fullConfig as any)?.connections?.[blockData()?.meta?.connection]?.["term:fontfamily"];
         const termThemeName = model.termThemeNameAtom();
         const termTransparency = model.termTransparencyAtom();
-        const termBPMAtom = getOverrideConfigAtom(blockId, "term:allowbracketedpaste");
         const [termTheme] = computeTheme(fullConfig, termThemeName, termTransparency);
         const ts = termSettings();
-        // Shared with the agent Shell drawer so both surfaces read the same
-        // setting — see termscrollback.ts for why that matters.
-        const termScrollback = resolveTermScrollback(ts, blockData()?.meta);
-        // Default ON: modern shells (bash 4+, zsh, fish) all support BPM and it
-        // prevents the shell from executing partial lines mid-paste. Disable per-pane
-        // via term:allowbracketedpaste=false for legacy shells that don't support it.
-        const termAllowBPM = termBPMAtom() ?? true;
         const wasFocused = model.termRef.current != null && model.nodeModel.isFocused();
         const termWrap = new TermWrap(
             blockId,
@@ -183,14 +193,14 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             {
                 theme: termTheme,
                 fontSize: termFontSize(),
-                fontFamily: ts?.["term:fontfamily"] ?? connFontFamily ?? "Hack",
+                fontFamily: termFontFamily(),
                 drawBoldTextInBrightColors: false,
                 fontWeight: "normal",
                 fontWeightBold: "bold",
                 allowTransparency: true,
-                scrollback: termScrollback,
+                scrollback: termScrollbackDepth(),
                 allowProposedApi: true,
-                ignoreBracketedPasteMode: !termAllowBPM,
+                ignoreBracketedPasteMode: !termAllowBracketedPaste(),
             },
             {
                 keydownHandler: model.handleTerminalKeydown.bind(model),
@@ -242,13 +252,41 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         onCleanup(() => viewRef.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
     });
 
-    // Update font size in-place when zoom changes
+    // Update font size AND font family in-place when either changes — both
+    // affect character-cell geometry (a font-family swap can change glyph
+    // width same as a size change would), so both need handleResize() and
+    // share one effect rather than each independently triggering it.
     createEffect(() => {
         const fs = termFontSize();
+        const ff = termFontFamily();
         const termWrap = model.termRef.current;
         if (termWrap?.terminal && termWrap.loaded) {
             termWrap.terminal.options.fontSize = fs;
+            termWrap.terminal.options.fontFamily = ff;
             termWrap.handleResize();
+        }
+    });
+
+    // Update scroll sensitivity, scrollback depth, and bracketed-paste
+    // mode in-place when any changes — all three were previously only
+    // applied at Terminal construction, so changing any of them in
+    // Settings had no effect on already-open panes until reopened. Grouped
+    // into one effect: unlike font size/family above, none of these
+    // affect cell geometry, so nothing here needs handleResize(). (theme
+    // — the fourth setting audited alongside these — turned out to
+    // already be live via termtheme.ts's TermThemeUpdater, so it isn't
+    // here.) See SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md §6.1
+    // (and REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md for
+    // scrollSensitivity specifically, the first of these fixed).
+    createEffect(() => {
+        const ss = termScrollSensitivity();
+        const sb = termScrollbackDepth();
+        const bpm = termAllowBracketedPaste();
+        const termWrap = model.termRef.current;
+        if (termWrap?.terminal && termWrap.loaded) {
+            termWrap.terminal.options.scrollSensitivity = ss;
+            termWrap.terminal.options.scrollback = sb;
+            termWrap.terminal.options.ignoreBracketedPasteMode = !bpm;
         }
     });
 

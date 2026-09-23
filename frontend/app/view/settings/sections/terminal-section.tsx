@@ -5,7 +5,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
 import type { SettingsIndexEntry } from "../settings-model";
-import { set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { NumberControl, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -123,14 +123,11 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.fontSize.label}
                 description={TERMINAL_SETTINGS.fontSize.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number"
-                        type="number" min={8} max={32}
+                        min={8} max={32} step={1} parse="int"
                         value={(s()["term:fontsize"] as number) ?? 14}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 8 && v <= 32) set("term:fontsize", v);
-                        }}
+                        onChange={(v) => set("term:fontsize", v)}
                     />
                 }
             />
@@ -171,14 +168,11 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.scrollback.label}
                 description={TERMINAL_SETTINGS.scrollback.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={1000} max={100000} step={1000}
+                        min={1000} max={100000} step={1000} parse="int"
                         value={(s()["term:scrollback"] as number) ?? 10000}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 1000 && v <= 100000) set("term:scrollback", v);
-                        }}
+                        onChange={(v) => set("term:scrollback", v)}
                     />
                 }
             />
@@ -232,14 +226,11 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.scrollSensitivity.label}
                 description={TERMINAL_SETTINGS.scrollSensitivity.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={0.1} max={10} step={0.1}
+                        min={0.1} max={10} step={0.1}
                         value={(s()["term:scrollsensitivity"] as number) ?? 1}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 0.1 && v <= 10) set("term:scrollsensitivity", v);
-                        }}
+                        onChange={(v) => set("term:scrollsensitivity", v)}
                     />
                 }
             />
@@ -272,14 +263,11 @@ export function TerminalSection(): JSX.Element {
                     label={TERMINAL_SETTINGS.predictiveEchoThreshold.label}
                     description={TERMINAL_SETTINGS.predictiveEchoThreshold.description}
                     control={
-                        <input
+                        <NumberControl
                             class="setting-number setting-number--wide"
-                            type="number" min={0}
+                            min={0} step={1}
                             value={(s()["term:predictiveecho:thresholdms"] as number) ?? 100}
-                            onBlur={(e) => {
-                                const v = parseFloat(e.currentTarget.value);
-                                if (!isNaN(v) && v >= 0) set("term:predictiveecho:thresholdms", v);
-                            }}
+                            onChange={(v) => set("term:predictiveecho:thresholdms", v)}
                         />
                     }
                 />
@@ -289,14 +277,11 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.agentMaxRuntime.label}
                 description={TERMINAL_SETTINGS.agentMaxRuntime.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={0} step={0.5}
+                        min={0} step={0.5}
                         value={(s()["term:agentmaxruntimehours"] as number) ?? 0}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 0) set("term:agentmaxruntimehours", v);
-                        }}
+                        onChange={(v) => set("term:agentmaxruntimehours", v)}
                     />
                 }
             />
@@ -305,14 +290,11 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.agentIdleTimeout.label}
                 description={TERMINAL_SETTINGS.agentIdleTimeout.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={0}
+                        min={0} step={1}
                         value={(s()["term:agentidletimeoutmins"] as number) ?? 0}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 0) set("term:agentidletimeoutmins", v);
-                        }}
+                        onChange={(v) => set("term:agentidletimeoutmins", v)}
                     />
                 }
             />

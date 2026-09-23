@@ -5,7 +5,7 @@ import { type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import type { SettingsIndexEntry } from "../settings-model";
-import { KeyValueEditor, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -100,14 +100,11 @@ export function AdvancedSection(): JSX.Element {
                 label={ADVANCED_SETTINGS.autoAnswerTimeout.label}
                 description={ADVANCED_SETTINGS.autoAnswerTimeout.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={1}
+                        min={1} step={1}
                         value={((s()["agent:askquestiontimeoutms"] as number) ?? 30000) / 1000}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 1) set("agent:askquestiontimeoutms", Math.round(v * 1000));
-                        }}
+                        onChange={(v) => set("agent:askquestiontimeoutms", Math.round(v * 1000))}
                     />
                 }
             />
@@ -129,14 +126,11 @@ export function AdvancedSection(): JSX.Element {
                 label={ADVANCED_SETTINGS.sampleInterval.label}
                 description={ADVANCED_SETTINGS.sampleInterval.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={1}
+                        min={1} step={1}
                         value={(s()["telemetry:interval"] as number) ?? 1}
-                        onBlur={(e) => {
-                            const v = parseFloat(e.currentTarget.value);
-                            if (!isNaN(v) && v >= 1) set("telemetry:interval", v);
-                        }}
+                        onChange={(v) => set("telemetry:interval", v)}
                     />
                 }
             />
@@ -145,14 +139,11 @@ export function AdvancedSection(): JSX.Element {
                 label={ADVANCED_SETTINGS.historyLength.label}
                 description={ADVANCED_SETTINGS.historyLength.description}
                 control={
-                    <input
+                    <NumberControl
                         class="setting-number setting-number--wide"
-                        type="number" min={30} max={1024}
+                        min={30} max={1024} step={1} parse="int"
                         value={(s()["telemetry:numpoints"] as number) ?? 120}
-                        onBlur={(e) => {
-                            const v = parseInt(e.currentTarget.value, 10);
-                            if (!isNaN(v) && v >= 30 && v <= 1024) set("telemetry:numpoints", v);
-                        }}
+                        onChange={(v) => set("telemetry:numpoints", v)}
                     />
                 }
             />
