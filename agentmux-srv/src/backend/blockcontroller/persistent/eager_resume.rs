@@ -190,6 +190,13 @@ impl PersistentSubprocessController {
                 // classify/persist/publish treatment every other terminal
                 // failure gets, so it surfaces in the pane's failure-recovery
                 // UI instead of vanishing.
+                // The backlog is retained for the next, properly-gated
+                // spawner. Its replay ORDER, should that resume also turn
+                // out stale, is not this branch's problem: the retry batch
+                // is kept in seq (acceptance) order by
+                // `persistent_resume::RetryPayload::append_in_seq_order`,
+                // so these older prompts replay ahead of whichever newer
+                // prompt ends up seeding that spawn (codex P2 on PR #3551).
                 let stranded = {
                     let mut inner = self.inner.lock().unwrap();
                     inner.spawning_in_progress = false;
@@ -335,19 +342,31 @@ impl PersistentSubprocessController {
     /// same conversation is open — or still closing — in another pane. A
     /// fresh spawn there would deliver the accepted prompt to a blank
     /// conversation, bypassing the very guard `spawn_process` just applied.
-    /// Instead: release the claim, keep the queue (the same shape as the
-    /// credential-gate decline — the user's next send is the next chance,
-    /// and goes through the guard again), and tell them why nothing is
-    /// running.
+    /// Instead: release the claim, DISCARD the queue, keep the session id,
+    /// and tell the user which prompts were not delivered and why.
+    ///
+    /// Discarded, not retained (codex P1 on PR #3551, third round): keeping
+    /// the prompts queued — the credential-gate decline's shape — only
+    /// defers the bypass. The next send would become the spawner, hit the
+    /// same refusal, and `release_spawn_claim_and_drain_queue`'s generic
+    /// failed-spawn path, which knows nothing about WHY, would see the
+    /// leftovers and hand them to `respawn_once_for_leftover_queue` — a
+    /// fresh, blank conversation after all. The only way to make that path
+    /// unable to misread them is for them not to be there.
     pub(super) fn settle_eager_spawn_failure(&self, err: &str, retry_config: PersistentSpawnConfig) {
         let ownership_refusal = is_held_elsewhere_error(err);
-        let stranded = {
+        let (stranded, discarded) = {
             let mut inner = self.inner.lock().unwrap();
             let n = inner.pending_send_messages.len();
+            let mut discarded = 0;
             if n == 0 || ownership_refusal {
                 inner.spawning_in_progress = false;
             }
-            n
+            if ownership_refusal {
+                discarded = inner.pending_send_messages.len();
+                inner.pending_send_messages.clear();
+            }
+            (n, discarded)
         };
         if stranded == 0 {
             return;
@@ -364,7 +383,8 @@ impl PersistentSubprocessController {
             "subtype": "error_during_execution",
             "error": {
                 "message": format!(
-                    "[AgentMux] {stranded} queued prompt(s) are waiting: this agent was not resumed. {err}"
+                    "[AgentMux] {discarded} queued prompt(s) were not delivered and have been discarded: \
+                     this agent was not resumed. {err}"
                 )
             }
         });

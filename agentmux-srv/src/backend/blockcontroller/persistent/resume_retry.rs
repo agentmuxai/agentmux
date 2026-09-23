@@ -534,16 +534,38 @@ impl PersistentSubprocessController {
     /// `spawn_generation` is bumped in the same lock acquisition that
     /// installs a new spawn, and `spawning_in_progress` covers the claim
     /// window before it — together they say whether anyone has moved on.
+    ///
+    /// The side effects themselves (outcome frame, status publish, error
+    /// flush) do I/O and cannot run under `inner`'s lock — so the second
+    /// check also TAKES the spawn claim (reagent P1 on PR #3551, third
+    /// round): with `spawning_in_progress` held, a send arriving during
+    /// those side effects routes to `Queued` behind this settlement instead
+    /// of becoming a spawner, exactly as `decide_send_action` treats any
+    /// other claim holder. Releasing the claim afterwards hands off anything
+    /// that queued behind it — a spawn on the just-adopted session, the same
+    /// thing `BecomeSpawner` would have done — so nothing is stranded and no
+    /// generation can move on underneath the settlement.
     pub(super) fn settle_empty_resume_retry(
         &self,
         retry_generation: u64,
-        config: PersistentSpawnConfig,
+        mut config: PersistentSpawnConfig,
         held_error_line: Option<String>,
         attempted_sid: String,
     ) {
-        let owns = |inner: &PersistentInner| {
-            inner.spawn_generation == retry_generation && !inner.spawning_in_progress && inner.stdin_tx.is_none()
-        };
+        // Ownership is generation + no live process — deliberately NOT
+        // `!spawning_in_progress` (codex P1 on PR #3551, third round). That
+        // flag can still be THIS generation's own eager claim: the eagerly
+        // resumed CLI can reject a stale id fast enough for its waiter to
+        // fire before `try_eager_resume` reaches the arm that releases it.
+        // Treating that as "superseded" dropped the whole settlement while
+        // `FireRetry` had already suppressed the waiter's `PublishDone` —
+        // status stuck on `running`, recovery candidate and `Fresh` lost.
+        // A genuinely newer generation is identified by `spawn_generation`,
+        // which `spawn_process` bumps under the lock before anything of the
+        // new process exists; a newer spawner that has claimed but not yet
+        // bumped has no session of its own yet, and adopting the recovered
+        // id underneath it is exactly what it would then `--resume`.
+        let owns = |inner: &PersistentInner| inner.spawn_generation == retry_generation && inner.stdin_tx.is_none();
         if !owns(&self.inner.lock().unwrap()) {
             tracing::debug!(
                 block_id = %self.block_id,
@@ -553,14 +575,26 @@ impl PersistentSubprocessController {
             return;
         }
         let recovered = self.find_recovery_session_id(&config);
-        let still_owner = {
+        config.session_id = recovered.clone().unwrap_or_default();
+        // `took_claim`: whether THIS settlement now holds the spawn claim
+        // across its side effects. If someone already holds it (the eager
+        // path's own unwinding claim, or a spawner between its claim and
+        // its generation bump), their claim already excludes any third
+        // spawner and is theirs to release — this settlement must not touch
+        // it, and must not hand off on their behalf either.
+        let (still_owner, took_claim) = {
             let mut inner = self.inner.lock().unwrap();
             let still_owner = owns(&inner);
+            let mut took_claim = false;
             if still_owner {
                 inner.session_id = recovered.clone();
                 Self::set_status(&mut inner, STATUS_DONE);
+                if !inner.spawning_in_progress {
+                    inner.spawning_in_progress = true;
+                    took_claim = true;
+                }
             }
-            still_owner
+            (still_owner, took_claim)
         };
         if !still_owner {
             return;
@@ -573,6 +607,32 @@ impl PersistentSubprocessController {
         // why the resume failed still reaches them (codex P2 on PR #2371).
         if let Some(line) = held_error_line {
             self.flush_error_line_now(line);
+        }
+        if !took_claim {
+            return;
+        }
+        // Release the claim under ONE acquisition with the leftover check
+        // (codex P2 on PR #3523's reasoning): a send that queued behind it
+        // needs a live process to go to, and this settlement is the only
+        // claim holder that knows it is there.
+        let queued_behind_claim = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.pending_send_messages.is_empty() {
+                inner.spawning_in_progress = false;
+                false
+            } else {
+                true
+            }
+        };
+        if queued_behind_claim {
+            let retry_config = config.clone();
+            match self.spawn_process(config, None) {
+                Ok(()) => {
+                    self.mark_turn_active_and_publish();
+                    self.drain_queue_after_successful_spawn(retry_config, true);
+                }
+                Err(e) => self.settle_eager_spawn_failure(&e, retry_config),
+            }
         }
     }
 }
