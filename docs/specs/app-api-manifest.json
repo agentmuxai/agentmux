@@ -77,7 +77,7 @@
       "path": "/agentmux/reactive/inject",
       "exactMatch": false,
       "rustRequestStruct": "agentmux_srv::backend::reactive::types::InjectionRequest",
-      "note": "InjectionRequest has many more optional fields (source_agent, request_id, priority, wait_for_idle, jekt_tier, delivery_tier, forward_hops, ts_secs, jekt_sig, ...) that muxsh never sets — this entry lists only the two muxsh actually constructs. Subset-checked, not exact-matched.",
+      "note": "InjectionRequest has many more optional fields (source_agent, request_id, priority, jekt_tier, delivery_tier, forward_hops, ts_secs, jekt_sig, ...) that muxsh never sets — this entry lists only the two muxsh actually constructs. Subset-checked, not exact-matched.",
       "requestFields": ["target_agent", "message"],
       "usedBy": ["muxsh agent send"]
     }

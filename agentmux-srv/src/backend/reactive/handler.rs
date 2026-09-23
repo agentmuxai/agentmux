@@ -1606,7 +1606,6 @@ impl Handler {
                     source_agent: source_agent.map(|s| s.to_string()),
                     request_id: Some(request_id.to_string()),
                     priority: Some("normal".to_string()),
-                    wait_for_idle: false,
                     jekt_tier: Some(super::types::JektTier::Coord),
                     delivery_tier: Some("host".to_string()),
                     forward_hops: 0,

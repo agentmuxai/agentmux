@@ -198,7 +198,6 @@ fn handle_update(update: &Update, config: &TelegramConfig, health: &Arc<Mutex<Br
         source_agent: Some("telegram".to_string()),
         request_id: Some(update.update_id.to_string()),
         priority: None,
-        wait_for_idle: false,
         jekt_tier: None,
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,

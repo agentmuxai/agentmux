@@ -419,7 +419,6 @@ fn handle_dispatch(
                 source_agent: Some("discord".to_string()),
                 request_id: Some(msg.id.clone()),
                 priority: None,
-                wait_for_idle: false,
                 jekt_tier: None,
                 delivery_tier: Some("wan".to_string()),
                 forward_hops: 0,
