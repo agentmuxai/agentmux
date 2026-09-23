@@ -348,4 +348,55 @@ mod tests {
             "only the deleted agent's own slug"
         );
     }
+
+    /// Identity M4a-3 (spec §6.5.4): deleting an agent deletes the signing
+    /// keys filed under its slug, so a later agent taking the name gets
+    /// fresh ones instead of the dead agent's — through both deletion paths.
+    /// The colliding-names fixture: deleting the second "AgentY" (agenty-2)
+    /// leaves the first one's `agenty` keys alone.
+    #[test]
+    fn deleting_an_agent_deletes_the_keys_filed_under_its_slug() {
+        use crate::backend::storage::agents::test_agent_def;
+        for via_instance_delete in [false, true] {
+            let store = object_store();
+            for (id, name, slug) in [
+                ("uid-first", "AgentY", "agenty"),
+                ("uid-second", "AGENTY", "agenty-2"),
+            ] {
+                let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+                def.slug = slug.to_string();
+                store.agent_def_insert(&mut def).unwrap();
+            }
+            for name in ["agenty", "agenty-2"] {
+                store.agent_jekt_key_ensure(name).unwrap();
+                store.agent_lan_key_ensure(name).unwrap();
+                store.agent_wan_key_ensure(name).unwrap();
+            }
+            let old_lan = store.agent_lan_key_load("agenty-2").unwrap().unwrap();
+
+            let deleted = if via_instance_delete {
+                store.instance_delete("uid-second").unwrap()
+            } else {
+                store.agent_def_delete("uid-second").unwrap()
+            };
+            assert!(deleted, "instance_delete={via_instance_delete}");
+            assert!(store.agent_jekt_key_load("agenty-2").unwrap().is_none());
+            assert!(store.agent_lan_key_load("agenty-2").unwrap().is_none());
+            assert!(store.agent_wan_key_load("agenty-2").unwrap().is_none());
+            assert!(
+                store.agent_jekt_key_load("agenty").unwrap().is_some(),
+                "the live agent's keys stay"
+            );
+            assert!(store.agent_lan_key_load("agenty").unwrap().is_some());
+            assert!(store.agent_wan_key_load("agenty").unwrap().is_some());
+
+            // A reuser of the name is minted a fresh keypair, not handed the
+            // dead agent's.
+            let reused = store.agent_lan_key_ensure("agenty-2").unwrap();
+            assert_ne!(
+                reused.public_key, old_lan.public_key,
+                "instance_delete={via_instance_delete}"
+            );
+        }
+    }
 }
