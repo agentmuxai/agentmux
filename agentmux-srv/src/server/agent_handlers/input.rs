@@ -287,7 +287,7 @@ pub(crate) struct PersistedAgentIdentity {
 /// A store error is logged and treated as "unknown", never as a spawn
 /// failure: this is disambiguation, not a gate, and spec §10 constraint 1
 /// forbids a store read from making a healthy agent unreachable.
-fn persisted_agent_identity(
+pub(crate) fn persisted_agent_identity(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
 ) -> Option<PersistedAgentIdentity> {
@@ -368,6 +368,28 @@ pub(crate) fn carry_agent_uid_env(
             env_vars.remove(TOKEN);
         }
     }
+}
+
+/// Identity M4b-2 (spec §6.5.8): carry `block_id`'s row UID and token into
+/// the env of a controller that builds its own (App Server, ACP) instead of
+/// going through [`build_persistent_spawn_env`]. Same resolution and the
+/// same reserved-value rules as that builder (stale values are overwritten,
+/// or removed when the block has no row). A synchronous store read and an
+/// idempotent token mint, so on a multi-thread runtime worker it runs under
+/// `block_in_place`, as eager resume does (incident #1782).
+pub(crate) fn carry_block_identity_env(
+    mstore: &crate::backend::storage::store::Store,
+    block_id: &str,
+    env_vars: &mut std::collections::HashMap<String, String>,
+) {
+    let lookup = || persisted_agent_identity(mstore, block_id);
+    let identity = match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(lookup)
+        }
+        _ => lookup(),
+    };
+    carry_agent_uid_env(env_vars, identity.as_ref());
 }
 
 /// The slice of [`AppState`] an agent turn needs in order to be started.
@@ -1770,6 +1792,61 @@ mod tests {
         // for the agent's lifetime (spec §6.3), not re-minted per spawn.
         let a_again = persisted_agent_identity(&store, "block-first").unwrap();
         assert_eq!(a_again.token.as_deref(), Some(tok_a.as_str()));
+    }
+
+    /// Identity M4b-2: the helper App Server and ACP use carries the
+    /// block's row UID and token into their own env, overwriting a stale
+    /// token, and strips both for a block with no row — outside a runtime
+    /// and, through `block_in_place`, on a multi-thread runtime worker.
+    #[test]
+    fn carry_block_identity_env_carries_or_strips() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = agent_def("uid-carry", "Carrier");
+        store.agent_def_insert(&mut def).unwrap();
+        block_with_agent_id(&store, "block-carry", "uid-carry");
+        block_with_agent_id(&store, "block-carry-none", "claude");
+
+        let mut env = std::collections::HashMap::from([(
+            "AGENTMUX_AGENT_TOKEN".to_string(),
+            "stale-token".to_string(),
+        )]);
+        super::carry_block_identity_env(&store, "block-carry", &mut env);
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_UID").map(String::as_str),
+            Some("uid-carry")
+        );
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_TOKEN"),
+            store.agent_token_load("uid-carry").unwrap().as_ref()
+        );
+
+        let mut none = env.clone();
+        super::carry_block_identity_env(&store, "block-carry-none", &mut none);
+        assert!(
+            !none.contains_key("AGENTMUX_AGENT_UID") && !none.contains_key("AGENTMUX_AGENT_TOKEN")
+        );
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+        let store = std::sync::Arc::new(store);
+        let on_worker = rt.block_on({
+            let store = store.clone();
+            async move {
+                tokio::spawn(async move {
+                    let mut env = std::collections::HashMap::new();
+                    super::carry_block_identity_env(&store, "block-carry", &mut env);
+                    env
+                })
+                .await
+                .unwrap()
+            }
+        });
+        assert_eq!(
+            on_worker.get("AGENTMUX_AGENT_UID").map(String::as_str),
+            Some("uid-carry")
+        );
     }
 
     /// A quick-launch pane carries a provider key as `agentId` and has no

@@ -130,7 +130,7 @@ impl AppServerController {
             return Err("App Server command must include app-server arguments".to_string());
         }
         let working_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
-        let env_vars = match block_meta.get("cmd:env") {
+        let mut env_vars = match block_meta.get("cmd:env") {
             Some(serde_json::Value::Object(values)) => values
                 .iter()
                 .filter_map(|(key, value)| {
@@ -139,6 +139,16 @@ impl AppServerController {
                 .collect::<HashMap<_, _>>(),
             _ => HashMap::new(),
         };
+        // Identity M4b-2 (spec §6.5.8): carry the block's row UID + token.
+        // Buys no attribution today — no provider maps to App Server, and
+        // codex is not given agentmux-mcp — but keeps the counters true.
+        if let Some(mstore) = &self.mstore {
+            crate::server::agent_handlers::input::carry_block_identity_env(
+                mstore,
+                &self.block_id,
+                &mut env_vars,
+            );
+        }
         // Identity M4a: record what this process is actually given.
         crate::backend::identity_spawn::record_process_spawn(
             &self.block_id,
@@ -549,6 +559,51 @@ impl Controller for AppServerController {
 
 #[cfg(test)]
 mod tests {
+
+    /// Identity M4b-2 wiring (spec §6.5.8): with a store, the App Server
+    /// command for a row-backed block carries the row's UID + token.
+    #[test]
+    fn an_app_server_command_carries_the_rows_identity() {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let mut def = test_agent_def("uid-appsrv", "AppSrv", "codex", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("uid-appsrv"));
+        let mut block = crate::backend::obj::Block {
+            oid: "block-appsrv".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: meta.clone(),
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        let ctrl = AppServerController::new(
+            "tab".to_string(),
+            "block-appsrv".to_string(),
+            None,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let command = ctrl.command_from_meta(&meta).unwrap();
+        let env: std::collections::HashMap<String, String> = command
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_UID").map(String::as_str),
+            Some("uid-appsrv")
+        );
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_TOKEN"),
+            store.agent_token_load("uid-appsrv").unwrap().as_ref()
+        );
+    }
+
     use super::*;
     use crate::backend::obj::MetaMapType;
 
