@@ -3,7 +3,9 @@
 **Date:** 2026-09-23
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
-work queue and cron, dual-written) in #3550. M2–M5 not started.
+work queue and cron, dual-written) in #3550. M2 designed in §4.4 (revision 4,
+the adversarial pass on §4.1 the retro required), not yet implemented. M3–M5
+not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -300,6 +302,175 @@ tags should embed the UID going forward, but the old ones must keep working
 indefinitely. This also falsifies revision 2's §5.4 claim that non-interactive
 ingress "never holds a name": the muxbus relay resolving a PR-body tag holds
 exactly that, and must go through the alias map rather than §5's resolver.
+
+### 4.4 M2 design — revision 4, measured against `main` after M1
+
+This is the adversarial pass on §4.1 the retro asked for before M2 is
+built. Every "measured" claim below was read from the code at the cited
+site; nothing in this section is inferred from an earlier section.
+
+#### 4.4.1 What registers today, and with what
+
+Four real registration sites (three further `register_agent` callers are
+tests):
+
+| Site | Key registered | Where the key comes from | UID available? |
+|---|---|---|---|
+| `blockcontroller/persistent/spawn.rs` (spawn) | `AGENTMUX_AGENT_ID` from the spawn env, also parked as the alias | env, built by `build_persistent_spawn_env` | **yes, carried** — `AGENTMUX_AGENT_UID` is in that same env since M1a |
+| `agent_handlers/input.rs` Register-tail (every turn) | `block.meta["agentName"]` | block meta | **yes** — the same call already resolved the row for M0/M1a; the UID is in hand, no second read |
+| `server/reactive.rs::handle_reactive_register` (frontend presence) | `req.agent_id` = `agentName` meta (`agent-view.tsx handleAgentIdChange`) | the frontend | **not trusted** (§0.1); resolved server-side by `block_id` — one store read this path did not have before |
+| `shell/lifecycle.rs` (PTY panes) | `cmd:env AGENTMUX_AGENT_ID` | user configuration | **no row, no UID** — name-only, counted |
+
+Two things the four sites share, measured: every one of them keys on a
+*name*, and `register_agent_with_nonce` (`handler.rs:222-281`) evicts both
+the previous holder of that name and the previous name of that block. That
+eviction is the collision bug: two agents, one name, last writer wins.
+
+Delivery inputs are all names today: MCP `SendMessage.to`, cron `target`,
+the cloud re-inject (`cloud_subscriber.rs:945`), PR-tag stable IDs via the
+alias map, `FleetBroadcast`, `record_supervisor_decision`,
+`GetAgentTranscript`. None carries a UID yet. M3 moves resolution to the
+MCP boundary; **M2 must keep every one of these working by name.**
+
+#### 4.4.2 The registry after M2
+
+Identity becomes the key; names become bindings.
+
+```
+uid_to_block:   HashMap<uid, block_id>          // the key, when known
+block_to_uid:   HashMap<block_id, uid>
+name_to_blocks: HashMap<lowercased name, Vec<block_id>>   // display name,
+                                                 // stable AGENTMUX_AGENT_ID
+                                                 // (today's alias map), any
+                                                 // future PR-tag name
+block_to_names: HashMap<block_id, Vec<lowercased name>>
+agent_info:     HashMap<block_id, AgentRegistration>     // keyed by block now
+```
+
+`AgentRegistration` gains `uid: Option<String>` (additive; its twelve
+consumers read `agent_id`/`block_id` and are unaffected).
+
+**Eviction is by identity, never by name.**
+
+- Registering a UID on a new block evicts that UID's old block and all of
+  its bindings — a respawn.
+- Registering a name on a block never evicts another block holding the
+  same name **unless** the two blocks share a UID, or **neither has one**.
+  The no-UID case keeps today's name eviction exactly, and is counted
+  (`registration.no_uid.<site>`).
+- A block with no UID that later registers *with* one (see 4.4.4 Q1) is
+  upgraded in place: same block, bindings kept, UID attached.
+
+The alias map does not disappear (§4.3): the stable `AGENTMUX_AGENT_ID` is
+simply one more name bound to the block, and PR-tag names resolve through
+`name_to_blocks` like any other.
+
+#### 4.4.3 Delivery after M2
+
+`inject_message_inner` resolves `target_agent` in this order:
+
+1. **It is a UID** — `uid_to_block` hit → deliver. New: §5.2's "address one
+   directly by uid" becomes possible.
+2. **It is a name** — `name_to_blocks`:
+   - one block → deliver, counted `delivery.resolved_by_name` (this is the
+     normal case until M3, so the counter is informational, not an M5 gate);
+   - several blocks → **refuse, with the candidates** (uid, block, name).
+     This is the only place a collision is visible and therefore the only
+     place it can be resolved (§5.2). Today: silent delivery to whichever
+     registered last.
+3. **Neither** → "agent not found", unchanged, so Tier 2/2b/LAN forwarding
+   in `handle_reactive_inject` keeps its trigger.
+
+**Identity confirmers move in the same change** (§4.2). `Controller` gains
+`stable_agent_uid()`, set once at spawn from the same env
+`stable_agent_id()` is set from (`persistent/spawn.rs`). When the target
+resolved by UID, the check compares UIDs; when it resolved by name, the two
+existing name confirmers apply as today. Re-keying the registry without this
+rejects every UID-addressed delivery as a mismatch.
+
+`record_supervisor_decision` (`handler.rs:981`) resolves its target through
+the same three steps — it is the site #3520 converted the others around and
+missed (§10 constraint 4).
+
+#### 4.4.4 Adversarial questions, answered from the code
+
+**Q1. "Registration precedes the process" (§4.1) — so can the UID be known
+at registration?** Measured: `launchAgentDefinition` calls
+`ControllerResyncCommand` *before* `CreateAgentInstanceCommand`
+(`agent-model.ts:775` vs `:790`), and the instance create is best-effort.
+So at the moment a persistent controller first registers, the row may not
+exist. Two consequences, both designed in rather than assumed away:
+registration without a UID must be legal (it is: name-only, counted), and a
+later registration of the same block *with* a UID must upgrade in place
+rather than evict-and-replace (4.4.2). The first turn's Register-tail does
+exactly that, because by then the row exists. The spawn itself happens on
+first message ("no-op start — waits for first message"), so in practice the
+env already carries the UID at spawn; the ordering is guarded anyway.
+
+**Q2. Quick-launch panes.** No row (M0's finding), so name-only forever.
+`registration.no_uid.quick_launch` will never read zero until those panes
+get a row or are declared outside jekt addressing. That is the counter
+doing its job (§9.2), not a defect in M2.
+
+**Q3. Pane reuse and the stale `agentInstanceId`.** Not consulted.
+`instance_get_active_for_block` resolves `block.meta.agentId` first
+(`agents.rs:2213-2253`), which the new launch overwrites; the
+`agentInstanceId` field §0.1 warns about is never read.
+
+**Q4. Two live blocks with the same UID.** Launching one named agent twice
+folds both launches into one `db_agents` row (spec §1.2's data check), so
+two panes can share a UID. `uid_to_block` is one-to-one, so the second
+registration evicts the first — which is what the name-keyed registry does
+today for the same case. Not a regression; recorded so nobody discovers it
+as one. A UID-keyed registry that allows a set of blocks per UID is a later
+decision, not M2's.
+
+**Q5. The spawn-path deadlock** (`try_register_agent_with_nonce`, incident
+2026-09-07). Unchanged: the UID comes from the env the spawn already holds,
+so nothing new is looked up under the handler's lock.
+
+**Q6. §7's performance claim, corrected.** Delivery: one more `HashMap`
+probe, no store read — the claim holds. Registration: the Register-tail
+reuses the row M0/M1a already resolved (no new read); `spawn.rs` reads the
+env (no read); **`handle_reactive_register` gains one store read** it did
+not have, on the frontend presence path. §7's "registration unchanged" was
+true of three sites and false of the fourth; this is the honest version.
+
+**Q7. Teardown must not fail closed** (§10 constraint 3). HTTP unregister
+carries only `agent_id` (`reactive.rs:1698-1701`). Under name bindings that
+can be ambiguous. `UnregisterRequest` gains an optional `block_id`, which
+`termagent.ts` already knows (`registeredAgentsByBlock`); with it, teardown
+is by block. Without it: one block → unregister it; several → unregister
+**none**, log at `warn` with the candidates, and count
+`unregister.ambiguous_without_block`. Loud, not silent — the constraint is
+about silent no-ops.
+
+**Q8. What M2 leaves name-keyed on purpose.** The Tier 2/2b file registry
+(`reactive/registry.rs`, moves with the credential path in M4 per §6.3), the
+cloud subscriber's `add_agent`/`remove_agent` (WAN is §8), and the subagent
+watcher. Each keeps receiving the display name it receives today.
+
+#### 4.4.5 The fixture every test uses
+
+Two agents whose names collide under `derive_slug` — `"AgentY"` and
+`"AGENTY"` — with distinct UIDs, on two blocks. Asserted, positive case
+first:
+
+- both stay registered (today: the second evicts the first);
+- delivery by name refuses with both candidates listed;
+- delivery by either UID reaches its own block, and the UID confirmer
+  passes;
+- a respawn of one UID on a new block evicts only that UID's old block;
+- a rename re-binds the display name without dropping the stable name;
+- a block with no UID keeps today's eviction semantics and is counted;
+- a no-UID registration followed by a UID registration of the same block
+  upgrades in place;
+- unregister by block clears every binding; unregister by ambiguous name
+  without a block clears nothing and is counted.
+
+Mutation checks on: eviction-by-name (must fail the "both stay registered"
+test only), the ambiguity refusal (must fail the "refuses with candidates"
+test only), and the in-place upgrade.
 
 ## 5. The one place names are interpreted
 
@@ -617,6 +788,15 @@ changes two things at once.
   one key and reverting any one alone leaves the registry and its confirmers
   disagreeing, which is strictly worse than either state. Atomic here means
   smaller, not larger.
+
+  **Design: §4.4 (revision 4).** Written after M1 landed, measured against
+  the four real registration sites and every delivery input. Names become
+  bindings, identity becomes the key, eviction is by identity, ambiguity is
+  refused with candidates, and the no-UID paths keep today's semantics and
+  are counted. §4.4.4 answers the questions revision 3 left open — in
+  particular that a persistent controller can legally register *before* its
+  row exists and be upgraded in place, and that §7's "registration
+  unchanged" was false for the frontend presence path.
 - **M3 — Work queue and cron.** Columns hold UIDs; one-time backfill of live
   rows. Resolution moves to the MCP boundary so tool arguments stay readable.
 - **M4 — Proven identity.** Per-agent token; authz reads connection identity;
