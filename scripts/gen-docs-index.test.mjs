@@ -392,7 +392,7 @@ describe("--check", () => {
         TIMEOUT
     );
 
-    for (const gen of ["scripts/gen-docs-index.sh", "scripts/gen-docs-index.mjs"]) {
+    for (const gen of ["scripts/gen-docs-index.sh", "scripts/gen-docs-index.mjs", ".gitattributes"]) {
         it(
             `a change to ${gen} alone puts the index in scope`,
             () => {

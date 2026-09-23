@@ -150,8 +150,13 @@ fixture with three specs, one named `Café.md`, produced
 2. **A trailing `\r` is stripped from the Status line and the title** on every
    platform. This matches what Windows already produces and what an LF
    checkout produces, so one committed `INDEX.md` is correct everywhere.
-3. **`scripts/gen-docs-index.mjs` is added to the `--check` scope**, alongside
-   the shell wrapper, so any change to the generator re-asserts the index.
+3. **`scripts/gen-docs-index.mjs` and `.gitattributes` are added to the
+   `--check` scope**, alongside the shell wrapper, so any change to the
+   generator re-asserts the index. `.gitattributes` decides the bytes a
+   checkout hands the generator (an `eol=crlf` rule on `docs/specs` would make
+   the committed index fail on a fresh checkout), so an attributes-only change
+   must re-assert it too (Codex review, #3590). The CI classifier's
+   `docs_index` trigger includes it for the same reason.
 4. **The STALE diff excerpt** is produced by the script itself (an LCS line
    diff in `diff`'s normal `<`/`>` format) instead of by calling `diff(1)`, which
    isn't guaranteed on Windows outside Git Bash. The pass/fail result is

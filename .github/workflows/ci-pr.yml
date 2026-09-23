@@ -517,7 +517,8 @@ jobs:
   #
   # Path-conditional (classify output `docs_index`): the output is a pure
   # function of file bytes, so it can only start to differ by OS when the
-  # generator, its tests, their runtime or this job changes. Specs themselves
+  # generator, its tests, their runtime, this job, or `.gitattributes` (which
+  # decides the bytes a checkout produces) changes. Specs themselves
   # are asserted on every PR by the `docs` job above. A skipped leg counts as
   # passing in `ci-required` (scripts/ci-required-check.mjs), and this job is
   # not a branch-protection context itself, so the #3506 matrix-name trap does

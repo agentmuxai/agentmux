@@ -225,6 +225,8 @@ describe("classifyChanges — docs_index, the cross-platform specs-index job", (
             "package-lock.json",
             "vitest.config.ts",
             "vite.config.ts",
+            // Attributes change the bytes the generator reads (Codex P2, #3590).
+            ".gitattributes",
         ]) {
             expect(classifyChanges([p]).docs_index, p).toBe(true);
         }

@@ -46,6 +46,10 @@ const DOCS_INDEX_PATTERNS = [
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^package(-lock)?\.json$/,
     /^(vite|vitest)\.config\./,
+    // Attributes decide the bytes a checkout gives the generator (eol, text),
+    // so changing them can make a committed INDEX.md unreproducible on some OS
+    // with no spec or generator touched (Codex P2, #3590).
+    /^\.gitattributes$/,
 ];
 
 /**

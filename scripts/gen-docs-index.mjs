@@ -454,8 +454,11 @@ export function build(root, { env = process.env, transformRows } = {}) {
 //
 // The generator itself is in scope too (both files): a change to it can alter
 // the output with no spec touched. INDEX.md itself counts as well, so a
-// hand-edit to it is still caught.
-const IN_SCOPE = /^(docs\/specs\/.*[.]md|scripts\/gen-docs-index\.(sh|mjs))$/;
+// hand-edit to it is still caught. So does `.gitattributes`: it decides the
+// bytes a checkout hands the generator (e.g. `eol=crlf` on docs/specs), so an
+// attributes-only change can make the committed index unreproducible (Codex
+// P2, #3590).
+const IN_SCOPE = /^(docs\/specs\/.*[.]md|scripts\/gen-docs-index\.(sh|mjs)|\.gitattributes)$/;
 
 /** Returns `{ check: boolean, message: string[] }`. */
 export function shouldCheck(root, env) {
