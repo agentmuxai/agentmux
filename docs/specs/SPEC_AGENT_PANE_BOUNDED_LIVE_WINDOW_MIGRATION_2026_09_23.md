@@ -256,8 +256,9 @@ applicable) a CI guardrail.
 8. **Stable identity.** A node's id is a function of its source position and
    file generation only; any parser instance, from any clean boundary, gives
    the same content the same id (§6.3.1).
-9. **No resurrection.** Content at or below an eviction watermark never
-   re-enters the live pane, whatever replays it (§6.3.3).
+9. **No resurrection.** A source line outside the pane's accepted ranges and at
+   or below its high-water mark never re-enters the live pane, whatever replays
+   it; ranges are per generation (§6.3.3).
 10. **Bounded while reading.** Live-pane memory is bounded whether pinned or
     not (§6.3.5).
 
@@ -292,6 +293,25 @@ The streaming buffer holds **the in-flight turn**: every node from the last
 markdown, `running`/`awaiting_answer`/`pending_approval` tool, open shell).
 A hard ceiling (count **and** bytes, e.g. 40 nodes / 512 KB, set from the
 Phase 0 curve) migrates the oldest *finished* nodes of a very long turn early.
+
+**One node bigger than the ceiling** (Codex review, second round): the ceiling
+only moves finished nodes, so a single growing markdown message or tool output
+can exceed it on its own and stay fully mounted. Such a node is windowed
+**inside its row**:
+
+- **Markdown.** Past a threshold (proposed 64 KB), a growing markdown node's
+  frozen prefix — the completed blocks #3559 already keeps as stable DOM — is
+  rendered as block-level sub-rows in a nested virtual region: only the
+  sub-rows in or near the viewport plus the live tail block are mounted.
+  Sub-row heights feed the row's total height the same way rows feed the list
+  (measured, else estimated), so the outer layout and the pin see one row of the
+  right height.
+- **Tool output.** `output-cap.ts` already bounds a body to 1,000 lines / 1 MB
+  of characters. While running, the body is a virtualized line list: only the
+  visible lines plus the latest lines are mounted, however many the cap allows.
+- The row-internal window uses the same pin controller (§6.1) and height
+  handoff (below) as the list, and the fault suite's 1 MB markdown and 5 MB tool
+  output cases are its acceptance tests.
 
 **Migration of finished nodes into the virtualized head**
 
@@ -417,31 +437,51 @@ Codex review: the live pane seeds its dedup from the reducer's id set, so
 dropping evicted ids lets a reconnect replay re-add them — duplicated, and in
 the wrong place.
 
-- **Transcript watermark.** The pane keeps `evictedThroughLine`: every
-  transcript line at or below it belongs to an evicted turn. It only moves
-  forward, and survives eviction (it is pane state, not a node). On replay the
-  stream consumer drops lines at or below it **before parsing**. Because ids are
-  positional (§6.3.1), lines above it that are still in the window dedup by id
-  exactly.
-- **Journal watermark.** The same for `out-of-band.jsonl`
-  (`evictedThroughJournalLine`).
+A single "evicted through line N" watermark is not enough (Codex review, second
+round): the detached window (§6.3.5) evicts from the **middle** — between the
+reading window and the present — and a truncate starts a new generation at
+line 0. So the pane records what it holds as **source ranges keyed by
+generation**:
+
+- **Accepted ranges.** Per source (transcript, `out-of-band.jsonl`), the pane
+  keeps `{ gen, ranges, high }`: `ranges` is the sorted, merged set of line
+  intervals whose nodes the pane currently holds, and `high` is the highest
+  line it has ever consumed in that generation. At most three intervals exist
+  at once (reading window, present, and the in-flight tail when it is not
+  contiguous with the present), so the state stays small.
+- **Replay filter.** Before parsing, a line is kept if it is in `ranges` or
+  above `high` (new content). Anything else — the evicted prefix, the evicted
+  middle gap — is dropped. Because ids are positional (§6.3.1), kept lines
+  that were already present dedup by id exactly.
+- **Eviction and loading update the ranges in the same reduction** that
+  removes or adds the nodes (`EvictRange`, `LoadRange`), so there is no instant
+  where nodes and ranges disagree.
+- **Generation change.** A line or read response carrying a newer generation
+  atomically resets that source's state to `{ gen: new, ranges: [], high: -1 }`
+  in the same reduction that handles the event, so no new-generation line is
+  filtered by an old-generation range. What the pane does with the old
+  generation's nodes follows the existing truncate/session-scope rules. A line
+  from an **older** generation than the current one is dropped.
+- **History tab cursor.** The tab's tail cursor is also `(gen, line)`; a
+  generation change restarts its tail parser at line 0 of the new generation.
 - **Ring replays.** A `shell_node_create` replayed from the backend's 64-event
-  ring for an evicted shell carries its journal position (added to the event),
-  so the journal watermark drops it. Until that field ships, a bounded
+  ring carries its journal position (added to the event), so the journal
+  filter drops it if it is outside `ranges`. Until that field ships, a bounded
   tombstone set of the last 256 evicted out-of-band ids (4× the ring) drops
   them.
-- Both watermarks are part of the pane's persisted state, so a pane remount
-  doesn't reset them.
+- The ranges are part of the pane's persisted state, so a remount doesn't
+  reset them.
 
 #### 6.3.4 Eviction while pinned
 
 - **When:** at turn end (housekeeping priority, §6.5) while pinned.
 - **What:** whole turns from the front, oldest first, whose nodes are all
   durable (§6.3.2), until within budget.
-- **How:** reducer command `EvictThrough { line, journalLine }` removes the
-  turns in one pass (the same shape as `clampToSessionScope`) and advances both
-  watermarks in the same reduction, so there is no window where a node is gone
-  but its replay is still accepted. The layout store prunes ids no longer
+- **How:** reducer command `EvictRange { transcript, journal }` removes the
+  turns in one pass (the same shape as `clampToSessionScope`) and removes their
+  line intervals from the accepted ranges (§6.3.3) in the same reduction, so
+  there is no instant where a node is gone but its replay is still accepted.
+  An eviction slice (§6.5) is one or more whole turns. The layout store prunes ids no longer
   present (`agent-pane-layout/reducer.ts:118`). Evicted rows are virtualized
   and above the viewport; only `totalSize` changes and the pin holds the
   bottom.
@@ -462,7 +502,8 @@ pattern chat apps use.
   exceeds its budget, its oldest turns are dropped from memory (durable, so
   nothing is lost). If the present and the reading window no longer touch, a
   **gap row** between them says "N newer turns — jump to latest" and reports
-  the count from the watermarks.
+  the count from the gap between the two accepted ranges (§6.3.3), which is
+  exactly the evicted middle.
 - Scrolling down into the gap loads the next turns by range read (clean
   boundaries, positional ids), and drops turns from the top of the reading
   window to stay within budget — anchor-preserving: the first visible node and
@@ -529,6 +570,16 @@ with one app-wide scheduler that owns *when* stream work runs:
   Housekeeping never runs in a frame with pending input.
 - **Starvation guard:** every visible pane gets a flush at least every
   100 ms, even under continuous typing.
+- **Housekeeping deadline** (Codex review, second round): "never with pending
+  input" alone would let sustained typing or IME postpone migration and
+  eviction forever, and the bounded-window invariant with them. Each
+  housekeeping job has a deadline (proposed 500 ms after it became due) and
+  runs in **bounded slices** (proposed ≤ 4 ms each, one per frame) once the
+  deadline passes, even with input pending — a cost well inside the key→paint
+  budget. A hard backstop runs it as soon as the live document exceeds 1.5×
+  its budget. Slices are resumable: a migration or eviction is split per turn,
+  and each slice leaves the stores consistent (every invariant holds between
+  slices).
 - **Instrumentation:** per-pane flush cost, deferred-token backlog, and
   budget overruns in the perf HUD.
 
@@ -622,7 +673,7 @@ Every phase:
 | **2 — Scheduler (E)** | §6.5 | key→paint targets met at N=0 with 4 panes streaming; starvation guard verified; no stream content lost (byte-for-byte transcript vs rendered comparison) |
 | **3 — Turn-scoped tail (B)** | §6.2 | Tail DOM independent of N; replaceChild crash repro suite and streaming-buffer tests green; zero invariant-1/3 assertions in soak; frame-by-frame screen recording shows no movement at turn end |
 | **4 — O(log n) stores (D)** | §6.6 | Property tests: 100k random sequences per run in CI, 10M locally, 0 divergences; reducer bench flat from 1k to 100k nodes |
-| **5 — Node identity and durability (C prerequisites)** | §6.3.1–§6.3.3: positional ids with file generation, `src`, `atBoundary()`, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), both watermarks, ring-replay handling | Property test: parsing any line range from any clean boundary, in any page order, yields the same ids and nodes as a parse from line 0 (100k random splits per CI run); replay-after-eviction suite produces zero duplicates; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
+| **5 — Node identity and durability (C prerequisites)** | §6.3.1–§6.3.3: positional ids with file generation, `src`, `atBoundary()`, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range from any clean boundary, in any page order, yields the same ids and nodes as a parse from line 0 (100k random splits per CI run); replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
 | **6 — Bounded live document (C)** | §6.3.4–§6.3.5 | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
 | **7 — History tab follows (C)** | §6.4 | Visible tab shows new turns ≤ 1 s after turn end; appends cost O(new lines) (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
 | **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
@@ -655,7 +706,13 @@ provenance either loses data or resurrects it.
   transcript and the 64-event shell ring: zero duplicates, nothing evicted
   reappears (invariant 9).
 - Output file truncated or replaced mid-session (generation bump): no id
-  reuse across generations (invariant 8).
+  reuse across generations (invariant 8), and no new-generation line dropped by
+  an old-generation range (§6.3.3).
+- Reconnect replay while a middle gap exists (reading window + present):
+  neither the gap nor the evicted prefix reappears; both retained ranges stay.
+- Continuous typing and IME composition for 10 minutes while 4 panes complete
+  turns: housekeeping still runs by its deadline and memory stays within budget
+  (§6.5).
 - Shells and optimistic messages: never evicted before their journal (or echo)
   line is durable; visible in the History tab afterwards.
 - History tab's tail parser discarded mid-run (remount, injected error):
@@ -706,7 +763,10 @@ regression.
 | Scheduler starves a pane or delays IME | starvation guard; IME in the fault suite; HUD backlog counter |
 | New store structures diverge from current behaviour | old implementations kept as oracles; property tests at scale |
 | Eviction before the transcript has the data | line-count precondition (invariant 4); kill-backend test |
-| Evicted content replayed back in as duplicates | positional ids + eviction watermarks + ring tombstones (invariants 8–9); replay-after-eviction suite |
+| Evicted content replayed back in as duplicates | positional ids + generation-keyed accepted source ranges + ring tombstones (invariants 8–9); replay-after-eviction suite incl. middle gaps |
+| A truncate drops new lines through a stale filter | ranges keyed by generation, reset atomically on a newer generation (§6.3.3) |
+| Sustained typing blocks eviction | housekeeping deadline + bounded slices + 1.5× backstop (§6.5) |
+| One huge in-progress node defeats the tail ceiling | row-internal windowing for markdown and tool output (§6.2) |
 | Positional ids break UI state keyed by today's ids | Phase 5 inventory of every persisted id consumer; mapping or explicit reset per consumer |
 | Line numbers restart after a truncate/replace | file generation in every id (§6.3.1); truncate test |
 | Out-of-band node lost (shells, optimistic messages) | provenance rule; `out-of-band.jsonl` before eviction; non-durable nodes pinned and capped (§6.3.2) |
