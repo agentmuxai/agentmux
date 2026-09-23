@@ -98,6 +98,33 @@ describe("findSafeSplitPoint — refuses unsafe cuts", () => {
         }
     });
 
+    /**
+     * rehype-slug resets its dedup namespace per transform run, so two
+     * headings that slug alike in different segments would take the same DOM
+     * id. Refusing the whole document is the conservative answer.
+     */
+    it("refuses when two headings would slug to the same id", () => {
+        expect(findSafeSplitPoint(`## Overview\n\n${PAD}## Overview\n\nTail prose.\n`)).toBe(-1);
+    });
+
+    it("detects collisions across heading styles and punctuation", () => {
+        // "Set-Up" and "Set Up" both slug to the same thing.
+        expect(findSafeSplitPoint(`## Set-Up\n\n${PAD}## Set Up\n\nTail prose.\n`)).toBe(-1);
+        // Setext heading colliding with an ATX one.
+        expect(findSafeSplitPoint(`Results\n=======\n\n${PAD}## Results\n\nTail prose.\n`)).toBe(-1);
+    });
+
+    it("still splits when headings are distinct", () => {
+        expect(findSafeSplitPoint(`## Overview\n\n${PAD}## Details\n\nTail prose.\n`)).toBeGreaterThan(0);
+    });
+
+    it("ignores heading-like lines inside fences when detecting collisions", () => {
+        // Both "## Same" occurrences are fence CONTENT, not real headings, so
+        // they must not suppress splitting.
+        const text = `\`\`\`md\n## Same\n## Same\n\`\`\`\n\n${PAD}## Real Heading\n\nTail prose.\n`;
+        expect(findSafeSplitPoint(text)).toBeGreaterThan(0);
+    });
+
     it("refuses on short documents", () => {
         expect(findSafeSplitPoint("# Title\n\nA paragraph.\n")).toBe(-1);
     });

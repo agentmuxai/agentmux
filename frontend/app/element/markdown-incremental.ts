@@ -50,6 +50,26 @@ const UNSAFE_TAIL_START = /^(?:[-*+>|=]|\d+[.)]|[ \t])/;
 /** Below this, splitting is not worth the bookkeeping. */
 const MIN_PREFIX_CHARS = 512;
 
+/** ATX heading (`## Title`), trailing closing hashes optional. */
+const ATX_HEADING = /^#{1,6}(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$/;
+/** Setext underline (`===` / `---`) — makes the PREVIOUS line a heading. */
+const SETEXT_UNDERLINE = /^(?:=+|-+)[ \t]*$/;
+
+/**
+ * Collapses heading text far more aggressively than `github-slugger` does —
+ * it strips every non-alphanumeric character, where the real slugger keeps
+ * hyphens and underscores.
+ *
+ * That asymmetry is deliberate and load-bearing. Any two headings the real
+ * slugger would collide on also collide here (this is its output with the
+ * separators removed), so collisions are never MISSED — only over-reported.
+ * An over-report costs one skipped optimization; a miss would ship duplicate
+ * DOM ids. See `findSafeSplitPoint`'s duplicate-heading rule.
+ */
+function collisionKey(headingText: string): string {
+    return headingText.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /**
  * Returns the offset at which `text` may be cut into an independently-parseable
  * prefix and tail, or -1 when no such point can be proven safe.
@@ -68,8 +88,22 @@ export function findSafeSplitPoint(text: string): number {
     let inComment = false;
     let lastSafe = -1;
 
+    // Heading-id uniqueness is a WHOLE-DOCUMENT property, but rehype-slug
+    // calls `slugs.reset()` on every transform run, so each parsed segment
+    // gets its own dedup namespace. Two headings that slug the same, landing
+    // in different segments, would therefore both take the same DOM id
+    // instead of `foo` / `foo-1` — and `getElementById` resolves to the first,
+    // so TOC navigation to the second silently scrolls to the wrong heading.
+    //
+    // Rather than reimplement slug generation (and risk diverging from
+    // rehype-slug's ids, which are user-visible anchors), refuse to split any
+    // document whose headings could collide. Caught by ReAgent on PR #3521.
+    const headingKeys = new Set<string>();
+    let headingsCollide = false;
+
     let lineStart = 0;
     let prevLineBlank = false;
+    let prevLineText = "";
 
     while (lineStart <= text.length) {
         let lineEnd = text.indexOf("\n", lineStart);
@@ -125,16 +159,40 @@ export function findSafeSplitPoint(text: string): number {
             }
         } else if (trimmed.startsWith("<!--") && !trimmed.includes("-->")) {
             inComment = true;
-        } else if (prevLineBlank && trimmed.length > 0 && !UNSAFE_TAIL_START.test(line)) {
-            // `lineStart` begins a fresh top-level block and everything
-            // before it is closed — a provably safe cut.
-            if (lineStart >= MIN_PREFIX_CHARS) lastSafe = lineStart;
+        } else {
+            // Heading collision scan. Over-detecting a heading here only costs
+            // a skipped optimization, so setext underlines are accepted
+            // loosely rather than fully disambiguated from list items and
+            // thematic breaks.
+            const atx = ATX_HEADING.exec(trimmed);
+            const headingText = atx
+                ? (atx[1] ?? "")
+                : SETEXT_UNDERLINE.test(trimmed) && !prevLineBlank && prevLineText !== ""
+                  ? prevLineText
+                  : null;
+            if (headingText !== null) {
+                const key = collisionKey(headingText);
+                if (headingKeys.has(key)) headingsCollide = true;
+                headingKeys.add(key);
+            }
+
+            if (prevLineBlank && trimmed.length > 0 && !UNSAFE_TAIL_START.test(line)) {
+                // `lineStart` begins a fresh top-level block and everything
+                // before it is closed — a provably safe cut.
+                if (lineStart >= MIN_PREFIX_CHARS) lastSafe = lineStart;
+            }
         }
 
         prevLineBlank = !inFence && !inComment && trimmed.length === 0;
+        prevLineText = inFence || inComment ? "" : trimmed;
         if (lineEnd === text.length) break;
         lineStart = lineEnd + 1;
     }
+
+    // Checked last, not early-returned: the scan has to see the WHOLE document
+    // before it can know two headings collide, and a collision anywhere makes
+    // every split point in the document unsafe, not just the ones between them.
+    if (headingsCollide) return -1;
 
     return lastSafe;
 }

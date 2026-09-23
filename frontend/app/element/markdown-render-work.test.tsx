@@ -35,6 +35,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { Markdown, __markdownRenderStats, __resetMarkdownRenderStats } from "./markdown";
 
+/**
+ * Long enough to cross the incremental splitter's minimum-prefix threshold, so
+ * these render through the frozen-prefix path rather than the whole-document
+ * fallback.
+ */
+const LONG_FILLER = "Filler prose that pads the document past the split threshold.\n\n".repeat(14);
+
 afterEach(() => {
     cleanup();
 });
@@ -101,6 +108,36 @@ describe("Markdown streaming-render work invariants", () => {
                 `message over ${__markdownRenderStats.commits} commits (${ratio.toFixed(1)}x). ` +
                 `Incremental parsing should keep this near 1x; a full re-parse per commit is ~13x.`,
         ).toBeLessThan(2);
+    });
+
+    /**
+     * Regression, ReAgent P1 round 2 on PR #3521.
+     *
+     * Heading ids must be unique across the WHOLE document, not per parsed
+     * segment. rehype-slug calls `slugs.reset()` on every transform run
+     * (node_modules/rehype-slug/lib/index.js), so once a commit parses the
+     * frozen prefix and the tail as two separate `runSync` calls, each gets
+     * its own dedup namespace. Two headings with the same text landing on
+     * opposite sides of the split would then both get `id="overview"` instead
+     * of `overview` / `overview-1`, producing duplicate DOM ids — and
+     * `getElementById` always resolves to the first, so TOC navigation to the
+     * second heading silently scrolls to the wrong place.
+     *
+     * Asserts the user-visible contract (unique ids in the DOM) rather than
+     * the mechanism, so it stays valid whichever way the split is made safe.
+     */
+    it("keeps heading ids unique across a split boundary", () => {
+        // Streamed, not rendered in one shot: the two headings have to land in
+        // DIFFERENT parsed segments for the per-segment slugger to collide. A
+        // single render puts the whole document in one segment and hides it.
+        const text = `## Overview\n\n${LONG_FILLER}## Overview\n\n${LONG_FILLER}`;
+        const { container } = streamInto(text, 20);
+
+        const ids = [...container.querySelectorAll("[id]")].map((el) => el.id);
+        expect(ids.length, "expected heading ids to exist at all").toBeGreaterThan(1);
+
+        const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
+        expect(duplicates, `duplicate DOM ids: ${JSON.stringify(duplicates)}`).toEqual([]);
     });
 
     /**
