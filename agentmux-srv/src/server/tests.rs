@@ -5207,6 +5207,58 @@ async fn m4a2_a_claims_carried_uid_that_is_not_the_tokens_is_counted() {
     )
     .await;
     assert_eq!(m4a2_count(counter), before + 1);
+
+    // Identity M4c-1 (review of #3597): with a token AND a different carried
+    // `agent_uid`, the token's UID wins — it takes the item addressed to the
+    // token's UID and is what `claimed_by_uid` records. (In this test so the
+    // mismatch counter above is not raced by a parallel test.)
+    let item = crate::backend::storage::work_queue::WorkItem {
+        id: "w-m4c1-precedence".into(),
+        title: "precedence".into(),
+        payload: "do it".into(),
+        kind: "m4c1-precedence".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: crate::backend::storage::work_queue::work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: "uid-m4a2-claim".into(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    state.identity_store.work_queue_enqueue(&item).unwrap();
+    let body = serde_json::json!({
+        "agent_id": "claimer",
+        "agent_uid": "uid-other",
+        "kind": "m4c1-precedence"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/agentmux/work/claim")
+        .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &token)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let stored = state
+        .identity_store
+        .work_queue_get("w-m4c1-precedence")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.claimed_by_uid, "uid-m4a2-claim",
+        "the token's UID, not the carried one"
+    );
 }
 
 // ---- identity M4c-1: the actor's UID is dual-written from the Caller ----
