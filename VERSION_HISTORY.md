@@ -1,5 +1,35 @@
 # AgentMux Version History
 
+## 0.56.12 — 2026-09-22
+
+- fix(release): task release:patch/minor silently dropped '-- --dry-run' and performed a real release
+- fix(release): bump-wrapper's lockfile sync hardcoded 2-space, silently reformatting this repo's 4-space package-lock.json on every release
+- ci: drop the dead @a5af npm auth step from the build workflows
+- fix(statusbar): stop leaked autoUpdate observers throwing on every scroll
+- fix(storage): fail closed when an agent slug resolves to more than one agent
+- feat(memory): reinject Global + Personal memory hidden after context compaction, with a size-band warning and compress/delegate guidance at high usage
+- test(registry): cover the fail-closed slug-collision guard
+- refactor(agents): consolidate the three slug-to-id resolvers into one
+- docs(spec): correct the work-queue authorization claim in 2.5.5
+- ci: fix docs-only PRs being permanently blocked by a skipped matrix job
+- fix(app-api): compare S1 authorization on canonical agent ids
+- fix(term): scroll sensitivity now updates live instead of requiring a pane reload
+- docs(spec): correct 2.5.2's reproduction claim against the 4 data check
+- term: drop the 20ms PTY coalescing window off the keystroke echo path — drain only what is already queued
+- trigger hidden memory reinjection on fresh-session identity continuity, not just compaction
+- fix(agent): persistent controller pane eagerly resumes an existing session after a backend restart
+- ci: make the doc gate actually block, and stop the ratchet reporting false passes
+- fix(storage): collision-resolve the slug on a template launch
+- fix(settings): number inputs commit as you type, not only on blur — plus the remaining terminal live-apply gaps
+- toggle-highlight the Stash icon while open, click again to retract
+- docs(spec): record Phase 0 complete and why Phases 3 and 5 should wait
+- agent-pane: incremental markdown parsing — stop re-parsing the whole streaming message every commit
+- tint the selected Stash icon with the theme accent color instead of a bordered square
+- docs(spec): record that Phase 2's approach cannot fix the defect it targets
+- docs(spec): redesign agent identity as carried, not derived
+- docs(spec): revision 3 — correct 4.1, 4.3, 6.3, 6.4 and the phase order
+- docs(retro): agent-identity redesign and the release-toolchain blocker
+
 ## 0.56.11 — 2026-09-22
 
 - feat(panes): widen the cross-pane Pane Tab drop zone to the whole pane header
