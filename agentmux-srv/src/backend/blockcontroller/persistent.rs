@@ -1349,11 +1349,27 @@ impl PersistentSubprocessController {
                 // respawn if something queued during the attempt (it needs
                 // a live process to go to), otherwise just release the
                 // claim — there's nothing to drain.
-                let has_leftovers = !self.inner.lock().unwrap().pending_send_messages.is_empty();
+                //
+                // Decided under ONE acquisition of the lock
+                // `decide_send_action` also decides under — codex P2 on PR
+                // #3523, the same defect already fixed on the success
+                // branch above and missed here. As two acquisitions, a send
+                // arriving in the gap saw the claim still held, queued its
+                // prompt and returned success, and then this branch cleared
+                // the claim without rechecking or draining — stranding an
+                // accepted prompt until some unrelated later send happened
+                // to become the next spawner.
+                let has_leftovers = {
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.pending_send_messages.is_empty() {
+                        inner.spawning_in_progress = false;
+                        false
+                    } else {
+                        true
+                    }
+                };
                 if has_leftovers {
                     self.respawn_once_for_leftover_queue(retry_config);
-                } else {
-                    self.inner.lock().unwrap().spawning_in_progress = false;
                 }
                 EagerResumeOutcome::DeclinedTo("spawn failed")
             }
@@ -2441,7 +2457,28 @@ impl PersistentSubprocessController {
             // completes when there is no spawn to confirm it. (Caught by
             // this fix's own test, which failed with
             // `[resolved, resolved]` when the publish was unconditional.)
-            if recovered.is_some() {
+            if let Some(recovered_sid) = &recovered {
+                // Keep the recovery candidate — codex P2 on PR #3523. The
+                // failed sid has already been cleared from block meta by
+                // the stderr path's `persist_session_id("")`, and the
+                // recovered one lives only in this call's local `config`.
+                // Resolving without writing it back throws the recovery
+                // away: the next prompt reads `agent:sessionid`, finds it
+                // empty, and starts a genuinely fresh conversation — the
+                // exact continuity loss this whole recovery search exists
+                // to prevent, just reached via the one path that has no
+                // spawn to carry the id forward for it.
+                //
+                // Persisted rather than eagerly spawned: with an empty
+                // batch there is nothing to send, so spawning now would
+                // burn a process to sit idle. The next prompt resumes it
+                // through the ordinary path.
+                core::persist_session_id(
+                    &self.block_id,
+                    recovered_sid,
+                    &self.mstore,
+                    &self.event_bus,
+                );
                 publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
             }
             // A no-op, not a launch, so any held error line must still
@@ -7565,6 +7602,78 @@ mod send_input_tests {
             statuses,
             vec![Some("retrying"), Some("resolved")],
             "an empty batch must still resolve 'Reconnecting...', not strand the pane in it — got: {statuses:?}"
+        );
+    }
+
+    /// codex P2 on PR #3523, the other half of the empty-batch path. The
+    /// recovery search runs before the empty check and can find a real
+    /// on-disk session — but the failed sid has already been cleared from
+    /// block meta by the stderr path's `persist_session_id("")`, and the
+    /// recovered one lives only in the local `config`. Resolving without
+    /// writing it back silently discards the recovery, so the next prompt
+    /// reads an empty `agent:sessionid` and starts a fresh conversation —
+    /// the exact continuity loss the recovery search exists to prevent.
+    #[test]
+    fn retry_after_resume_failure_persists_a_recovered_session_for_an_empty_batch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let block_id = "66666666-6666-6666-6666-666666666666".to_string();
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            Some(store.clone()),
+            Some(filestore),
+        );
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+        let updated: crate::backend::obj::Block = store.get(&block_id).unwrap().unwrap();
+        let persisted = updated
+            .meta
+            .get(core::META_SESSION_ID)
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            !persisted.is_empty() && persisted != "d019e2e4-stale",
+            "the recovered session must be written back so the next prompt resumes it \
+             instead of starting fresh — got {persisted:?}"
         );
     }
 
