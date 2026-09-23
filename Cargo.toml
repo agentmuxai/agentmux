@@ -33,7 +33,7 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # compile against CEF on Linux (`error[E0609]: no field begin_window_drag
 # on type _cef_window_t` at `agentmux-cef/src/ui_tasks.rs:215`).
 #
-# The fork at `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` appends
+# The fork at `agentmuxai/cef-rs@agentmux/fix-links-collision-152` appends
 # the `begin_window_drag` slot to the linux_x86_64 binding — same
 # mechanical edit (888 -> 896 byte struct size) carried for 148 since CEF
 # 146. Also carries a `links` value rename (`cef_dll_wrapper` ->
@@ -47,12 +47,13 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # stays regardless, since it's harmless once collision-free and reverting
 # it buys nothing.
 #
-# `AgentU-asaf/cef-rs#4`/`#5` (the upstream PRs carrying this exact rename,
-# for 148 and 152 respectively) are still unmerged as of this writing — no
-# push access on that repo to merge them directly. This points at
-# `GenericAgentX-asaf/cef-rs`'s identical commit (verified: same
-# begin_window_drag content, same rename) pending that; repoint once
-# either upstream PR lands.
+# `agentmuxai/cef-rs` is the org-owned fork of `tauri-apps/cef-rs`
+# (SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md). It carries the four
+# `agentmux/*` branches byte-for-byte from the personal forks this used to
+# point at (`AgentU-asaf/cef-rs`, then `GenericAgentX-asaf/cef-rs`), so the
+# pinned rev below is the same commit object — only the owner changed. The
+# upstream PRs `AgentU-asaf/cef-rs#4`/`#5` carrying the rename remain open;
+# they no longer gate anything here.
 #
 # Lifecycle: this `[patch.crates-io]` is temporary — when the patches
 # are upstreamed to chromiumembedded/cef and tauri-apps/cef-rs (or when
@@ -60,6 +61,7 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # and the workspace can use the public binding directly.
 #
 # See: docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md §5,
-# docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md
+# docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md,
+# docs/specs/SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md
 [patch.crates-io]
-cef-dll-sys = { git = "https://github.com/GenericAgentX-asaf/cef-rs", rev = "9b0abfe649f4535c2af2a05bebe82681d21e9109" }
+cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "9b0abfe649f4535c2af2a05bebe82681d21e9109" }
