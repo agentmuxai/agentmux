@@ -674,6 +674,24 @@ fn meta_string_map(meta: &super::super::obj::MetaMapType, key: &str) -> HashMap<
     }
 }
 
+impl AcpController {
+    /// The env this block's ACP process is spawned with: `cmd:env` (either
+    /// shape), with the block's row UID + token carried onto it — identity
+    /// M4b-2. Buys no attribution today (ACP agents are not given
+    /// agentmux-mcp) but keeps the counters true.
+    fn spawn_env(&self, block_meta: &super::super::obj::MetaMapType) -> HashMap<String, String> {
+        let mut env_vars = meta_string_map(block_meta, super::META_KEY_CMD_ENV);
+        if let Some(mstore) = &self.mstore {
+            crate::server::agent_handlers::input::carry_block_identity_env(
+                mstore,
+                &self.block_id,
+                &mut env_vars,
+            );
+        }
+        env_vars
+    }
+}
+
 impl Controller for AcpController {
     fn start(
         &self,
@@ -692,17 +710,7 @@ impl Controller for AcpController {
         // object) or as a JSON string — before M4b-2 only the string form was
         // read, so an `agent.open` launch lost both (spec §6.5.8).
         let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
-        let mut env_vars = meta_string_map(&block_meta, super::META_KEY_CMD_ENV);
-        // Identity M4b-2: carry the block's row UID + token, layered onto
-        // that env. Buys no attribution today (ACP agents are not given
-        // agentmux-mcp) but keeps the counters true.
-        if let Some(mstore) = &self.mstore {
-            crate::server::agent_handlers::input::carry_block_identity_env(
-                mstore,
-                &self.block_id,
-                &mut env_vars,
-            );
-        }
+        let env_vars = self.spawn_env(&block_meta);
 
         self.spawn_process(cmd, args, cwd, env_vars)
     }
@@ -891,6 +899,49 @@ mod tests {
     /// Identity M4b-2 (spec §6.5.8): `agent.open` stores `cmd:args` as an
     /// array and `cmd:env` as an object; ACP read only JSON strings, so
     /// such a launch lost both. Both shapes now read the same.
+    /// Identity M4b-2 wiring (spec §6.5.8): an ACP controller with a store
+    /// spawns a row-backed block with `agent.open`'s object `cmd:env` kept
+    /// and the row's UID + token carried onto it.
+    #[test]
+    fn an_acp_spawn_env_keeps_cmd_env_and_carries_the_rows_identity() {
+        use crate::backend::storage::agents::test_agent_def;
+        let store =
+            std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let mut def = test_agent_def("uid-acp", "AcpAgent", "openclaw", "agent", 1, "");
+        store.agent_def_insert(&mut def).unwrap();
+        let mut meta = super::super::super::obj::MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("uid-acp"));
+        meta.insert("cmd:env".to_string(), serde_json::json!({"K": "v"}));
+        let mut block = crate::backend::obj::Block {
+            oid: "block-acp".to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: meta.clone(),
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+        let ctrl = AcpController::new(
+            "tab".to_string(),
+            "block-acp".to_string(),
+            None,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let env = ctrl.spawn_env(&meta);
+        assert_eq!(env.get("K").map(String::as_str), Some("v"));
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_UID").map(String::as_str),
+            Some("uid-acp")
+        );
+        assert_eq!(
+            env.get("AGENTMUX_AGENT_TOKEN"),
+            store.agent_token_load("uid-acp").unwrap().as_ref()
+        );
+    }
+
     #[test]
     fn acp_reads_cmd_args_and_env_as_arrays_objects_or_json_strings() {
         let mut meta = super::super::super::obj::MetaMapType::new();
