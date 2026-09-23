@@ -10,7 +10,93 @@ cited rather than restated.
 solution... the goal is agent id unique... do the most robust solution."*
 **Evidence base:** five review rounds on #3520 (four P1s, one P0), a data check
 across 47 live databases, and direct measurement of `resolve_agent_id`'s real
-behaviour. Every empirical claim below was run, not reasoned.
+behaviour.
+**Revision 2 (2026-09-23).** Revision 1 was reviewed and **four of its
+load-bearing empirical claims were false**. §0 records them; §4, §5, §6, §7 and
+§9 are rewritten. The principle in §2 survived review unchanged; the mechanism
+did not. Read §0 first — its corrections are why the rest looks as it does.
+
+---
+
+## 0. What revision 1 got wrong
+
+Recorded rather than quietly edited, because three of the four errors share one
+cause — **asserting what the code does without running it** — which is the same
+failure that produced the predecessor spec's unworkable Phase 2.
+
+### 0.1 The frontend's UID is known-stale (was §4's central premise)
+
+Revision 1 said the frontend *"already holds the UID"* via
+`block.meta.agentInstanceId` and *"has been carrying the right value all
+along"*. The storage layer explicitly refuses that field
+(`backend/storage/agents.rs:2210-2212`):
+
+> We deliberately do NOT consult `block.meta.agentInstanceId`: codex P1 on PR
+> #1114 round 3 surfaced that pane reuse can leave a stale one behind.
+
+There is a regression test pinning it. Pane reuse is exactly the respawn case
+this spec must handle, so revision 1 proposed keying the registry on a value
+already known to go stale in the case it most needed to be right.
+
+**Consequence:** the frontend is not an identity source, and §4 no longer
+treats it as one.
+
+### 0.2 `AGENTMUX_AGENT_ID` has two different meanings today
+
+Revision 1's table asserted it is the slug. It depends on the launch path:
+
+- `server/agent_handlers/input.rs:341-353` — the **display name**.
+- `frontend/app/view/agent/agent-model.ts:545` — the **slug**.
+
+One variable, two meanings, two launch paths. `AGENTMUX_AGENT_SLUG` also
+already exists in `pane_env.rs:74` and revision 1 never reconciled it. Any plan
+that "keeps its present meaning" is describing a meaning that does not exist.
+
+**Consequence:** reconciling this is now phase M0 — nothing may depend on that
+variable until it means one thing.
+
+### 0.3 `agent_credentials.rs` is cloud machinery, not local
+
+Revision 1 proposed minting a per-agent token at spawn *"reusing
+`agent_credentials.rs`"*. That module is per-agent **Cognito M2M** against
+agentmux-cloud: it provisions via `POST /agents/provision` using the human's
+own PKCE token, and its callers **fall back to the shared `MUXBUS_TOKEN`
+whenever it returns `None`, by design** (module doc, `muxbus/agent_credentials.rs:1-23`).
+
+Building on it would make pane launch depend on cloud reachability and a prior
+human login, and the documented fallback preserves precisely the shared-key
+spoofability §6 exists to remove.
+
+**Consequence:** §6 mints locally and shares nothing with that module.
+
+### 0.4 The performance claim was backwards
+
+Revision 1 claimed hot paths *"lose a database read"*. They have none to lose:
+delivery today is a pure in-memory `HashMap` hit
+(`backend/reactive/handler.rs`), and the only store read on that path was the
+one **#3520 itself introduced**. Registration is separately not free —
+`registry.rs:444-449` documents a synchronous SQLite read serialized on the
+store's single `Mutex<Connection>` — and carrying identity does not remove it.
+
+**Consequence:** §7 now claims only that this design adds no reads to hot
+paths, which is true and sufficient.
+
+### 0.5 Also corrected
+
+- **Slug suffixing must stay.** Revision 1 proposed deleting it. The
+  collision-resolved slug is load-bearing for the agent's working directory
+  (`agent-model.ts:807-814`) and its git identity (`input.rs:366`); removing it
+  would have two same-named agents share a cwd. §3 keeps it.
+- **Identity confirmers compare display names** (`handler.rs:534-560`, fed by
+  `set_agent_id(agent_name)` at `input.rs:820`). Re-keying the registry without
+  migrating them in the same change rejects every message as an identity
+  mismatch. §4 now sequences them together.
+- **Registry files are name-keyed and world-readable** (`reactive/registry.rs:459-473`
+  writes `auth_key` with no `0o600`; only the per-instance path sets a mode).
+  Jekt signing keys are name-derived too. §6 covers both.
+- **§5 ignored every non-interactive ingress** — Slack, Telegram, Discord,
+  WhatsApp, muxbus relay, cron, work queue. "Ask the human" is not available at
+  a webhook at 03:00. §5.4 answers it.
 
 ---
 
@@ -103,36 +189,77 @@ non-template row, already used correctly for CRUD and credential injection.
 Called the **UID** throughout this spec, to keep it unambiguous against the
 existing overloaded term "agent id".
 
-**The slug stops being an identity.** It becomes a display attribute with no
-uniqueness requirement at all: `agent_def_insert`'s `-2`/`-3` suffixing is
-deleted (§7.5), because suffixing only ever existed to fake uniqueness for a
-field that should not have carried it. Two agents may be called the same thing,
-exactly as two people may.
+**The slug stops being an identity — but its suffixing stays.** Revision 1
+proposed deleting `agent_def_insert`'s `-2`/`-3` resolution on the grounds that
+it only faked uniqueness for a field that should not have carried it. That
+reasoning is right about identity and wrong about consequences: the
+collision-resolved slug is load-bearing elsewhere. It names the agent's working
+directory (`agent-model.ts:807-814`) and seeds its git identity
+(`input.rs:366`), so removing it would put two same-named agents in one
+worktree committing as one author.
+
+The slug therefore keeps producing distinct *filesystem and display* values,
+while no longer being consulted for *identity*. Those are separable concerns
+and conflating them is what made the predecessor spec plausible.
 
 `derive_slug` survives for one purpose only: matching in the disambiguation UI
 (§5.2).
 
 ## 4. Carrying it
 
+### 4.1 The agent asserts its own identity; the server verifies it
+
+Revision 1 had the frontend send the UID. §0.1 rules that out: the frontend's
+`block.meta.agentInstanceId` is documented as going stale on pane reuse, which
+is the respawn case this design must survive.
+
+**The process that knows its identity is the agent itself**, because the server
+told it at spawn. So:
+
+- Spawn injects `AGENTMUX_AGENT_UID` (the agent's `db_agents.id`) and
+  `AGENTMUX_AGENT_TOKEN` (§6), both minted by the server that created the row.
+- The agent registers **itself**, presenting the token.
+- The server derives the UID **from the token**, not from the payload. A UID in
+  the body is a hint at most; the token is the identity.
+
+This also answers a defect revision 1 did not know it had: the frontend starts
+the controller *before* `CreateAgentInstanceCommand` completes, inside a
+best-effort `try/catch`, and `instance_create` may legitimately return a
+different id than the caller passed (`storage/agents.rs:1541-1546`). Any
+frontend-asserted UID therefore races and can be absent or wrong. An
+agent-asserted, server-verified one cannot: it does not exist until the row
+does.
+
+The frontend's registration calls become presence/lifecycle signals keyed by
+`block_id` — which it genuinely owns — and stop carrying identity at all.
+
+### 4.2 What moves, and what must move together
+
 | Boundary | Today | Becomes |
 |---|---|---|
-| Spawn env | `AGENTMUX_AGENT_ID` = slug | adds `AGENTMUX_AGENT_UID` = UID |
-| MCP → srv | sends slug | sends UID |
-| Frontend → `/reactive/register` | sends display name | sends UID |
-| `input.rs` re-register | `block.meta["agentName"]` | `block.meta["agentInstanceId"]` |
-| Reactive registry keys | lowercased display name | UID |
-| Work queue `target_agent`/`claimed_by` | slug | UID |
-| Cron `target` | slug | UID |
+| Spawn env | `AGENTMUX_AGENT_ID` (two meanings, §0.2) | `AGENTMUX_AGENT_UID` + `AGENTMUX_AGENT_TOKEN`; name/slug split explicitly |
+| Registration | frontend POSTs a display name | agent POSTs with its token; server resolves token → UID |
+| Registry keys | lowercased display name | UID |
+| **Identity confirmers** | compare display names (`handler.rs:534-560`) | compare UIDs — **same change, or delivery breaks** |
+| **Alias map** | stable display name | UID; the alias concept disappears (§4.3) |
+| Work queue, cron | slug | UID, captured at authoring time (§5.4) |
 | muxbus / WAN | slug | UID (§8) |
 
-Two facts make this tractable, both verified:
+The two bolded rows are why revision 1's §4 would have failed in production:
+re-keying `agent_to_block` while `agent_identity_confirmer` still compares
+display names makes every delivery an `"identity mismatch"`. They are one
+atomic change, not three phases.
 
-- **The frontend already holds the UID.** `agent-model.ts:823` sets
-  `meta: { agentInstanceId: inst.id }` on the block. It has been carrying the
-  right value all along and sending the wrong one.
-- **Per-agent credential machinery already exists.**
-  `muxbus/agent_credentials.rs::ensure_agent_credential` provisions and caches
-  per-agent tokens. §6 builds on it rather than inventing a parallel scheme.
+### 4.3 The alias map disappears, and that is the point
+
+`alias_to_block` exists because the primary key is a *renameable* display name,
+so a second, stable key was bolted alongside it
+(`INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`). Once the primary key is a UID,
+"stable alternative key" is what the primary key already is. The alias map, its
+inverse, and their eviction rules are deleted rather than migrated.
+
+That is the clearest evidence the design is addressing the root cause: a whole
+subsystem that existed only to compensate for the defect stops being needed.
 
 ## 5. The one place names are interpreted
 
@@ -183,51 +310,106 @@ For the overwhelmingly common case — one agent, one name — `SendMessage(to:
 anything a human or model reads or types. The difference is what happens in the
 uncommon case: a question instead of a wrong answer.
 
+### 5.4 Non-interactive ingress never resolves at all
+
+Revision 1 scoped resolution to "MCP, CLI, UI" and ignored Slack, Telegram,
+Discord, WhatsApp, the muxbus relay, cron and the work queue. None of those has
+a human to ask at fire time.
+
+**They do not resolve, because they never hold a name.** Resolution happens
+once, at *authoring* time, when a human or model was present:
+
+- Creating a cron job resolves the typed name **then** and stores the UID. A
+  job firing at 03:00 addresses a UID, so ambiguity is impossible by then.
+- Enqueuing work resolves at enqueue and stores the UID.
+- A chat integration binds a channel to a UID at configuration time, not per
+  message.
+
+This turns "what does a webhook do with `Ambiguous`?" into a question that
+cannot arise, rather than one needing a tie-break rule. Where a UID can still
+fail to resolve — the agent was deleted — the correct behaviour is an explicit,
+logged failure, never a fallback to name matching. Falling back would
+reintroduce §1.1 at the least observable point in the system.
+
+**Corollary:** stored references are UIDs, so renaming an agent cannot break a
+cron job or a queued task. Today it silently does.
+
 ## 6. Identity is proven, not asserted
 
-Closes #3501, and the env-inheritance retro's recommendation 4, together.
+Closes #3501 and the env-inheritance retro's recommendation 4 together.
 
-Today `AGENTMUX_AUTH_KEY` is instance-wide and inherited by every pane
-(`pane_env.rs` says so in its own keep-set comment). It authenticates *"some
-caller on this instance"* and can never answer *"which agent"*. So every
-authorization decision that reads `agent_id` from a request body is
-unenforceable by construction — the work queue's most visibly, but the property
-is general.
+`AGENTMUX_AUTH_KEY` is instance-wide and inherited by every pane
+(`pane_env.rs`'s own keep-set comment says so). It authenticates *"some caller
+on this instance"* and can never answer *"which agent"*, so every authorization
+decision reading `agent_id` from a request body is unenforceable by
+construction.
 
-**Design:**
+### 6.1 Minted locally, not in the cloud
 
-- At spawn, mint a per-agent token bound to the UID, short-lived and renewable,
-  reusing `agent_credentials.rs`.
-- Injected as `AGENTMUX_AGENT_TOKEN`, replacing `AGENTMUX_AUTH_KEY` in
-  `PANE_ENV_KEEP` for agent panes.
-- Server maps token → UID on every request. **That** is the caller's identity.
-- Any `agent_id` in a request body becomes untrusted input: usable to name a
-  *target*, never to assert the *actor*.
-- `check_s1` compares connection-UID against resolved-target-UID. #3508 already
-  made it resolve both sides at one point of comparison; this removes the
-  remaining assumption that `ctx.agent_id` was trustworthy.
+Per §0.3, this shares nothing with `muxbus/agent_credentials.rs`. That module
+is cloud Cognito M2M, requires the human's PKCE token, and deliberately falls
+back to the shared token — all three disqualifying.
 
-An inherited token is scoped to one agent, so the retro's fallback position —
-*"at minimum scope the key so an inherited copy is not omnipotent"* — is
-achieved as a side effect.
+The token here is a local secret the server generates when it creates the
+`db_agents` row, stored server-side against the UID and injected at spawn. No
+network, no login, no fallback. If it is missing the request is refused, which
+is the entire point: a fallback to a shared credential is the property being
+removed.
+
+### 6.2 What it fixes
+
+- The server maps token → UID on every request. **That** is the caller's
+  identity.
+- `agent_id` in a body becomes untrusted input: it may name a *target*, never
+  assert the *actor*.
+- `check_s1` compares connection-UID against target-UID. #3508 already made it
+  resolve both sides at one point of comparison; this removes the remaining
+  assumption that `ctx.agent_id` was trustworthy in the first place.
+
+### 6.3 Two holes revision 1 left open
+
+**Tokens must not be readable by other agents.**
+`backend/reactive/registry.rs:459-473` writes `auth_key` into a **name-keyed**
+file with no mode set, while only the per-instance path applies `0o600`. Put a
+per-agent token there and agent B reads agent A's. Registry entries move to
+UID-keyed paths with `0o600`, and the same applies to jekt signing keys, which
+are name-derived today (`jekt_public_key_for(agent_id)`) — a name-derived
+signing key is a signature anyone sharing that name can forge.
+
+**Expiry must not strand a running agent.** A token that expires mid-task turns
+a healthy agent silent, which is the failure mode #3520's first P1 already
+demonstrated is easy to create and hard to notice. Tokens are therefore
+long-lived for the process lifetime and invalidated on agent deletion, rather
+than short-lived and renewed — renewal is a liveness dependency on the very
+path being secured. Revoking on deletion is sufficient because the UID is never
+reused.
+
+### 6.4 Bootstrapping
+
+The token is injected at spawn by the server that created the row. There is no
+chicken-and-egg: the agent never authenticates to *obtain* it. Its
+confidentiality rests on process environment isolation, which `pane_env.rs`'s
+`PANE_ENV_KEEP` already governs and which this design tightens by replacing an
+instance-wide credential with a per-agent one — an inherited copy stops being
+omnipotent, exactly the retro's stated fallback position.
 
 ## 7. Performance
 
-The predecessor design put a store read on the delivery path; #3520's first P1
-was exactly that, and its fix (pinning) was a workaround for a self-inflicted
-cost. Carrying identity removes the cost rather than caching it.
+Revision 1 claimed hot paths *"lose a database read"*. §0.4: they have none to
+lose. The honest claim is narrower and sufficient.
 
-| Path | Predecessor | This design |
+| Path | Today | This design |
 |---|---|---|
-| Message delivery | store read per lookup, cached | **no lookup** — UID is the key |
-| Registration | store read per registration (every turn) | **none** — UID arrives in the payload |
-| Work claim | string compare on slug | UID equality on an indexed column |
-| Authz | resolve both sides | token→UID map hit, then UID equality |
-| Name → UID | — | store read, but only when a human typed a name |
+| Message delivery | in-memory `HashMap` hit, no store read | **unchanged** — UID is the key, still one hit |
+| Registration | a synchronous SQLite read on the store's single `Mutex<Connection>` (`registry.rs:444-449`) | unchanged; identity arrives with the request |
+| Work claim | string compare on a slug | UID equality on an indexed column |
+| Authz | resolve both sides per call (#3508) | one token→UID map hit, then equality |
+| Name → UID | scattered, per call site | once, at authoring time only (§5.4) |
 
-Net: the hot paths lose a database read they never should have had. The only
-reads are on the cold, human-initiated path, where an extra millisecond is
-irrelevant and correctness is everything.
+**The design adds no read to any hot path.** It removes the one #3520
+introduced, which is a regression this spec must not repeat rather than a win
+it can claim. The remaining registration read pre-exists and is out of scope —
+noted so a future reader does not mistake it for something this design caused.
 
 ## 8. Cross-machine
 
@@ -253,12 +435,19 @@ changes two things at once.
 
 ### 9.1 Phases
 
-- **M1 — Mint and carry.** Add `AGENTMUX_AGENT_UID` to pane env; add UID
-  columns alongside slug columns; dual-write everywhere. **No reader changes.**
-  Zero behaviour change; fully revertible by ignoring the new fields.
-- **M2 — Registration.** Frontend and `input.rs` send the UID; the registry
-  keys by it. Slug fallback retained **with a counter**, so §9.2 can measure
-  whether anything still arrives without a UID.
+- **M0 — Make `AGENTMUX_AGENT_ID` mean one thing.** Per §0.2 it is the display
+  name on one launch path and the slug on the other, and `AGENTMUX_AGENT_SLUG`
+  already exists. Split explicitly into name and slug variables, both set on
+  both paths, before anything depends on either. Pure disambiguation, no new
+  concepts — and nothing below is trustworthy until it lands.
+- **M1 — Mint and carry.** Server mints the UID and token at row creation and
+  injects both at spawn; add UID columns alongside slug columns; dual-write.
+  **No reader changes.** Revertible by ignoring the new fields.
+- **M2 — Registration and delivery, atomically.** The agent registers itself
+  with its token; the server derives the UID from the token; the registry,
+  **both identity confirmers**, and the alias map all move in the *same*
+  change (§4.2). Splitting them rejects every delivery as an identity
+  mismatch. Slug fallback retained **with a counter** (§9.2).
 - **M3 — Work queue and cron.** Columns hold UIDs; one-time backfill of live
   rows. Resolution moves to the MCP boundary so tool arguments stay readable.
 - **M4 — Proven identity.** Per-agent token; authz reads connection identity;
@@ -276,6 +465,14 @@ This is the mechanism the predecessor lacked: it had no way to know whether a
 phase had actually taken effect, which is precisely how Phase 2 could be
 "complete" while being a no-op in production. **A phase that cannot be observed
 to work has not been shown to work.**
+
+**A counter that never reaches zero is itself the finding.** Review of revision
+1 noted that if some launch path can register without a UID, M5 is unreachable
+— or ships and strands those agents. That is the correct behaviour for this
+gate, not a flaw in it: a non-zero counter names a path that still reconstructs
+identity, and M5 must not proceed until that path is fixed or explicitly
+declared unsupported. §4.1 removes the known instance (the frontend's racing,
+stale UID); the counters exist to catch the ones not yet known.
 
 ### 9.3 Guardrails
 
@@ -315,6 +512,14 @@ They should land on their own rather than waiting for this spec:
   (§1.1); the phases here replace that plan rather than continuing it.
 
 ## 12. Confidence
+
+**Revision 2 note.** Revision 1 was reviewed adversarially and four of its
+load-bearing empirical claims were false (§0). Every claim below that begins
+"measured" was re-run against `main` for this revision. The pattern in both the
+predecessor spec and revision 1 is the same — a plausible statement about the
+code, written without running it, load-bearing by the time anyone checks — so
+treat any unmeasured assertion here as suspect rather than as merely
+unverified.
 
 - **Measured, not inferred:** §1.1's resolver behaviour, §1.2's id shapes
   across 202 rows, the frontend already holding `agentInstanceId`, and
