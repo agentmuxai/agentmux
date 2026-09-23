@@ -172,7 +172,12 @@ impl PersistentSubprocessController {
                         Err(e) => {
                             // Drop the entry we just added — this call is
                             // reporting failure, so the caller owns the retry.
-                            // Anything already queued stays put.
+                            // Anything already queued stays put. `pop_back`
+                            // is this call's own push even when the head that
+                            // failed is an older entry: same lock, nothing
+                            // else ran in between. That older head was already
+                            // accepted, and whoever queued it armed the
+                            // watchdog, so it keeps its retry.
                             inner.deferred_deliveries.pop_back();
                             return Err(e);
                         }

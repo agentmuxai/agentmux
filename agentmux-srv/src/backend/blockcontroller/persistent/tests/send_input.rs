@@ -3239,6 +3239,33 @@ async fn the_watchdog_releases_one_message_to_an_idle_agent_and_marks_the_turn_a
     assert!(rx.try_recv().is_err(), "the watchdog must never write mid-turn");
 }
 
+/// Reagent (#3562) asked what a failed fast-path write does when an older
+/// entry is already stuck at the head (a failed boundary flush left it, turn
+/// now idle). The older entry was accepted and must stay, first in line. The
+/// new one was never accepted: it is removed and reported as an error, so its
+/// caller retries. Neither is lost, and FIFO holds.
+#[tokio::test]
+async fn a_failed_fast_path_write_behind_a_stuck_head_keeps_the_head_and_refuses_the_newcomer() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(1);
+    tx.try_send("occupying the only slot".to_string()).unwrap();
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    enqueue_deferred(&c, "older");
+
+    assert!(c.send_user_message("newer".to_string()).is_err());
+
+    {
+        let inner = c.inner.lock().unwrap();
+        assert_eq!(inner.deferred_deliveries.len(), 1);
+        assert!(inner.deferred_deliveries[0].contains("older"), "the accepted head stays");
+    }
+    // Once the channel drains, the watchdog delivers the older entry.
+    rx.try_recv().unwrap();
+    let mut orphaned = 0;
+    c.sweep_deferred_once(&mut orphaned);
+    assert!(rx.try_recv().unwrap().contains("older"));
+}
+
 /// Every reason to wait is honoured, not just `turn_active`.
 #[tokio::test]
 async fn the_watchdog_waits_while_anything_is_in_flight() {
