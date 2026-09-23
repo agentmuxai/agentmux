@@ -1963,6 +1963,15 @@ impl Store {
     /// backs the column, so a future writer, a migration, or hand-edited data
     /// can produce it. Defence in depth: prevent it on write, refuse it on
     /// read, and test both.
+    /// Make every `db_agents` read fail, to test how a caller treats a store
+    /// fault (as opposed to an empty answer).
+    #[cfg(test)]
+    pub(crate) fn test_break_agents_table(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("DROP TABLE db_agents")?;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn test_force_slug(&self, id: &str, slug: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
