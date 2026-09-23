@@ -4086,12 +4086,6 @@
         );
     }
 
-    /// ReAgent P2 on PR #3262: `registry_def_retire` was the last step in
-    /// `instance_delete` still gated on `rows > 0`. Once the dependent purge
-    /// and registry sweep went unconditional, that gate left a genuinely
-    /// incoherent outcome reachable here — a cross-channel agent's records
-    /// swept while its definition stayed ACTIVE, so `agent_def_list`'s
-    /// overlay keeps serving a definition nothing backs.
     /// Identity M4b-4 (spec §6.5.8): a user agent known only from the shared
     /// definition registry (another channel's) gets its local row before
     /// `agent.open` spawns it, so its block can resolve.
@@ -4159,6 +4153,12 @@
             .unwrap());
     }
 
+    /// ReAgent P2 on PR #3262: `registry_def_retire` was the last step in
+    /// `instance_delete` still gated on `rows > 0`. Once the dependent purge
+    /// and registry sweep went unconditional, that gate left a genuinely
+    /// incoherent outcome reachable here — a cross-channel agent's records
+    /// swept while its definition stayed ACTIVE, so `agent_def_list`'s
+    /// overlay keeps serving a definition nothing backs.
     #[test]
     fn instance_delete_tombstones_a_cross_channel_definition_with_no_local_row() {
         let (_tmp, store, _reg) = store_with_registry();
