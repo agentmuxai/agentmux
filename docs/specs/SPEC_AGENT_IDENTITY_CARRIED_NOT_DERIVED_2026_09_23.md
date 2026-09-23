@@ -1034,8 +1034,9 @@ changes two things at once.
     resolver, so an agent registered before its row existed is one
     candidate with that row, not ambiguous with itself.
   - **A resolver that cannot answer refuses** (Codex P1/P2 on #3563,
-    follow-up PR). A store fault is an `Err` (503 from the endpoint), not
-    `None`; the MCP falls back to sending a bare name only when the
+    follow-up PR). A store fault — the channel's `db_agents` or the global
+    definition registry a typed UID is looked up in — is an `Err` (503
+    from the endpoint), not `None`; the MCP falls back to sending a bare name only when the
     endpoint is missing (404/405, an older srv) and fails the tool call on
     any other status, an unreadable body, or an unknown resolution. Sending
     the name on would skip the ambiguity check, and a same-named live agent

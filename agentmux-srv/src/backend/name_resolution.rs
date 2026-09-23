@@ -97,7 +97,7 @@ pub(crate) fn resolve_name_to_uid(
 
     // (1) The typed value is itself a UID.
     let as_uid = store
-        .agent_def_get(typed)
+        .agent_def_get_strict(typed)
         .map_err(|e| store_fault(typed, e))?;
     if let Some(def) = as_uid {
         if def.is_seeded == 0 {
@@ -385,6 +385,20 @@ mod tests {
             let r = resolve_name_to_uid(&store, &reg, typed);
             assert!(r.is_err(), "{typed}: {r:?}");
         }
+    }
+
+    /// A typed UID whose cross-channel definition cannot be read is refused
+    /// too — "not found" there would send the UID string on as a name, and
+    /// the work could never be claimed (Codex P2 on #3568).
+    #[test]
+    fn an_unreadable_global_definition_is_refused_not_answered_as_none() {
+        let store = store_with(&[]);
+        let tmp = tempfile::tempdir().unwrap();
+        let defs = crate::registry::DefinitionStore::open(tmp.path().to_path_buf()).unwrap();
+        std::fs::write(tmp.path().join(format!("{UID_UP}.json")), b"{ not json").unwrap();
+        store.set_def_registry(std::sync::Arc::new(defs));
+        let r = resolve_name_to_uid(&store, &registry(), UID_UP);
+        assert!(r.is_err(), "{r:?}");
     }
 
     /// Templates are prototypes, never targets (spec §1.2): a provider key
