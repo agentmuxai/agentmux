@@ -75,6 +75,37 @@ describe("Markdown streaming-render work invariants", () => {
         expect(__markdownRenderStats.processorBuilds).toBe(1);
     });
 
+    /**
+     * The way MarkdownBlock actually drives this component: `highlight` is
+     * `view().highlight`, a getter over a signal that yields a NEW object on
+     * every streaming commit. The processor memo tracked that signal through
+     * the prop getter, so it re-ran (and rebuilt the whole plugin chain) once
+     * per commit even though the boolean it derives never changed — live
+     * counters read `processorBuilds == commits` under real streaming while
+     * the static-prop test above stayed green. The memo must key off the
+     * resolved boolean, not the getter's upstream signal.
+     */
+    it("does not rebuild the processor when `highlight` is a reactive getter that re-yields the same value", () => {
+        __resetMarkdownRenderStats();
+        const [view, setView] = createSignal({ text: "", highlight: false });
+        render(() => <Markdown text={view().text} highlight={view().highlight} scrollable={false} />);
+        const step = Math.ceil(SAMPLE.length / 20);
+        for (let i = 1; i <= 20; i++) {
+            setView({ text: SAMPLE.slice(0, Math.min(i * step, SAMPLE.length)), highlight: false });
+        }
+
+        expect(__markdownRenderStats.commits).toBeGreaterThan(10);
+        expect(
+            __markdownRenderStats.processorBuilds,
+            `processor was built ${__markdownRenderStats.processorBuilds} times over ` +
+                `${__markdownRenderStats.commits} commits — it must not track the text signal`,
+        ).toBe(1);
+
+        // A genuine flip still rebuilds it — exactly once.
+        setView({ text: SAMPLE, highlight: true });
+        expect(__markdownRenderStats.processorBuilds).toBe(2);
+    });
+
     it("does not rebuild the processor when only the text changes", () => {
         __resetMarkdownRenderStats();
         const [content, setContent] = createSignal("first");

@@ -341,12 +341,23 @@ const Markdown = (props: MarkdownProps) => {
     // text, so it is memoized on those and reused. This matters more, not
     // less, once per-commit parse cost comes down: at ~1ms of parse, a 4ms
     // rebuild would dominate what it is rebuilding.
+    // Resolved ONCE as a boolean memo. Callers pass `highlight` as a getter
+    // over their own signal (MarkdownBlock: `highlight={view().highlight}`,
+    // where `view()` is a new object every streaming commit). Reading
+    // `props.highlight` directly inside the processor memo tracked that
+    // upstream signal, so the whole plugin chain was rebuilt once per commit
+    // even though the boolean never changed — live counters read
+    // `processorBuilds == commits` under real streaming while the static-prop
+    // test stayed green. A memo compares the resolved boolean, so only a real
+    // flip propagates. (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.)
+    const highlightOn = createMemo<boolean>(() => props.highlight ?? true);
+
     const processor = createMemo(() => {
         stats.processorBuilds++;
         const rehypePlugins: any[] = rehype
             ? [
                   rehypeRaw,
-                  ...((props.highlight ?? true) ? [rehypeHighlight] : []),
+                  ...(highlightOn() ? [rehypeHighlight] : []),
                   rehypeAlignToClass,
                   rehypeLinkify,
                   () =>
@@ -411,7 +422,7 @@ const Markdown = (props: MarkdownProps) => {
         blocksRef.clear();
         for (const [k, v] of contentBlocksMap()) blocksRef.set(k, v);
 
-        const highlight = props.highlight ?? true;
+        const highlight = highlightOn();
 
         /**
          * Parse ONE independent segment. `tocRef` is cleared per call, not per
