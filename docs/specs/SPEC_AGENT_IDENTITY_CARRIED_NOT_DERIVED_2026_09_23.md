@@ -1,7 +1,9 @@
 # SPEC: agent identity is carried, never derived
 
 **Date:** 2026-09-23
-**Status:** active — M0 shipped in #3543 (2026-09-23); M1–M5 not started.
+**Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
+carry the UID and token into the process) in #3548; M1b (UID columns on the
+work queue and cron, dual-written), M2–M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -549,6 +551,38 @@ changes two things at once.
 - **M1 — Mint and carry.** Server mints the UID and token at row creation and
   injects both at spawn; add UID columns alongside slug columns; dual-write.
   **No reader changes.** Revertible by ignoring the new fields.
+
+  **Split into two PRs**, so each is independently revertible:
+
+  **M1a — shipped in #3548.** `build_persistent_spawn_env` resolves the
+  block's `db_agents` row once and sets `AGENTMUX_AGENT_UID` (= `id`) and
+  `AGENTMUX_AGENT_TOKEN` (`storage/agent_tokens.rs`, `db_agent_tokens`,
+  schema v37). Both are reserved, server-controlled values: overwritten
+  unconditionally, removed when no row is known — a stale persisted token
+  would be another agent's credential. Decisions §12 left open, now taken:
+  - **Token lifetime.** Process-lifetime, durable server-side, revoked via
+    `purge_agent_dependents` on delete, no rotation. Minted at *first spawn*
+    rather than at row creation, because every existing row predates the
+    table; `agent_token_ensure` is idempotent so the two are equivalent for
+    rows created later.
+  - **The UID is not minted here** — measured: `db_agents.id` is already a
+    server-minted UUID (`instance.rs`, `core.rs` create handlers). "Mint"
+    in this phase's title was already true; only "carry" was missing.
+  - **Quick-launch panes** (M0's finding) still get no row, so no UID and
+    no token. Left for M1b/M2 rather than decided silently.
+  - **Measured constraints honoured:** the env sanitizer runs before the
+    explicit overlay (`blockcontroller/core.rs`), so a nested dev
+    instance's inherited token is stripped while the child's own survives;
+    `.mcp.json` carries neither variable; the container exec spec does
+    carry the token (same user boundary as the docker socket) — stated,
+    not claimed zero, per §6.4.
+
+  **M1b — not started.** UID columns beside `target_agent`/`claimed_by`
+  (work queue) and `target` (cron), dual-written at enqueue/claim/create.
+  The claimer's own UID can be *carried* (it is now in its env); a typed
+  target must be *resolved* at authoring time per §5.4, and an
+  `Ambiguous`/`None` result leaves the UID column empty rather than
+  guessing.
 - **M2 — Registration and delivery, atomically.** Registration stays
   server-side (§4.1) and becomes UID-keyed; the registry, **both identity
   confirmers**, and the **alias map** move in the *same* change (§4.2).
