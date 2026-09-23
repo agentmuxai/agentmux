@@ -258,6 +258,40 @@ retrofitting Toolchain (confirmed non-compliant, §2.3, but a separate,
 standalone task — folding an unrelated pane's CSS rewrite into a Stash
 migration spec would blur scope for both).
 
+### 3.2a Data density — Stash-specific, not the §3.2 general rule
+
+Per direct follow-up: Stash should read as data-dense, low-padding —
+"sort of like the composer" — not with the roomier spacing the modal
+currently uses. Checked directly rather than eyeballed:
+
+**Composer's actual measured density**
+(`frontend/app/view/agent/styles/_composer-strip.scss`): 9-11px font
+sizes throughout (lines 49, 184, 228, 257, 276, 293, 309), 1-2px vertical
+padding (e.g. `padding: 1px var(--space-1-5)` at lines 185, 311, `padding:
+2px var(--space-1-5)` at line 231), row-gaps of 2px (lines 46, 118), and
+horizontal padding capped at `var(--space-2)` (8px, `theme.scss:317`) in
+its tightest rows.
+
+**`AgentStashModal`'s current density, for contrast**
+(`AgentStashModal.scss:59-69`): `padding: var(--space-2) var(--space-4) 0`
+(8px/16px) on the tab strip, `padding: var(--space-2) var(--space-3)`
+(8px/12px) plus `font-size: var(--text-sm)` on the tab panel — noticeably
+roomier than the composer's 1-2px/9-11px scale on every axis measured.
+
+**The target for the ported six tabs** (§3.4): pull toward the
+composer's actual numbers, not just "reduce padding somewhat" —
+`--space-1`/`--space-1-5` (4px/6px) in place of the modal's
+`--space-2`/`--space-3`/`--space-4` (8px/12px/16px) for internal padding
+and gaps, and the composer's 9-11px font-size range in place of
+`--text-sm` for body/label text where legibility at that size is
+verified to hold up (§3.2's phone-width floor and this density target
+compound — a phone-width column with composer-scale padding leaves very
+little margin for error, so this needs verifying together with §3.2, not
+as two independent passes). This is a Stash-specific instruction, NOT an
+extension of §3.2's cross-cutting rule — Settings/Toolchain/Armory keep
+their own existing spacing conventions; only Stash is asked to match the
+composer's density.
+
 ### 3.3 Toggle semantics — now nearly trivial
 
 Compare against the split-pane design's §3.3/§3.4 (removed from this
@@ -277,10 +311,14 @@ No new backend RPCs, no new `LayoutTreeActionType`, no new
 at all; the ported content is a plain component, the same category as
 `AgentShellSubblock`, not a pane's `viewComponent`).
 
-### 3.4 Content porting — unchanged from the first draft, still the real work
+### 3.4 Content porting — largely unchanged from the first draft, now also carrying §3.2a's density target
 
 `AgentNativeMemoryModal` (the `memory` tab's body) is still the one tab
-needing real adaptation (§2.1):
+needing real adaptation (§2.1), and every one of the six ported tabs
+inherits §3.2a's composer-scale padding/font-size target on top of the
+structural changes below — porting the modal's own CSS values unchanged
+would satisfy the "ported" half of this section while missing the
+density ask entirely:
 
 - Its `onClose` prop drives its own footer "Close" button — dropped
   entirely in the drawer, same reasoning as the first draft (nothing
@@ -339,6 +377,13 @@ Left alone (unrelated, out of scope): the two already-dead
   that a phone-width viewport doesn't clip or overflow un-scrollably.
   Toolchain's current zero-compliance (§2.3) means this is the first real
   test coverage that surface would get for this property.
+- **Density** (§3.2a): a manual visual check against the composer's own
+  measured values (9-11px font, 1-2px vertical padding) rather than a
+  vague "feels tighter than before" — the six ported tabs should be
+  compared side-by-side against `_composer-strip.scss`'s actual rendered
+  rows, not just against the OLD modal's spacing (a diff against a roomy
+  baseline can look "denser" while still being nowhere near composer
+  scale).
 - **Toggle round-trip**: open (drawer appears, grows downward from the
   header) → button reads active → close (drawer disappears) → button
   reads inactive — reusing PR #3516's existing toggle-wiring tests as the
@@ -404,6 +449,14 @@ a real phone-width browser viewport.
    to rediscover the rule from this Stash-specific document? Not decided
    here — flagged since "general rule" living inside a feature-specific
    spec is itself a minor inconsistency this spec doesn't fully resolve.
+5. **Does composer-scale density (§3.2a) hold up for every one of the six
+   tabs, or only some of them?** The composer's 9-11px scale was tuned
+   for its own short, high-frequency status text (token counts, model
+   name, cost) — Registration's read-only diagnostic fields or Memory's
+   editable body text may need to stay a size or two above that floor for
+   legibility even while everything else (padding, gaps, row height)
+   matches. Not decided here which, if any, tabs get an exception rather
+   than uniform composer-scale text.
 
 ## 7. Out of scope
 
