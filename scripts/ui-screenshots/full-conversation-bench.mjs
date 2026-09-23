@@ -24,6 +24,10 @@
 //        [--port 9223] [--panes all|<blockId,...>] [--history 0,25,100,200,500]
 //        [--turn-kb 20] [--stream-kb 20] [--secs 10] [--type-into <paneIndex|none>]
 //        [--kps 20] [--out bench.json] [--clear-existing] [--keep]
+//        [--stream-mode pipeline|direct]   (default pipeline: provider NDJSON
+//        through each pane's real output subscription, so the parser, flush
+//        queue and stream scheduler are measured too; direct: into the
+//        document store, isolating store + render cost)
 //
 //   Soak: [--soak <minutes>] [--sample-every <seconds, default 60>] [--soak-turns-per-sample 1]
 //         writes one JSON line per sample to --out (default soak-<time>.jsonl).
@@ -43,6 +47,11 @@ import { processMemory } from "./lib/process-memory.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ── Arguments ───────────────────────────────────────────────────────────────
+
+const streamMode = (m) => {
+    if (m !== "pipeline" && m !== "direct") throw new Error("--stream-mode must be pipeline or direct");
+    return m;
+};
 
 export function parseArgs(argv) {
     const get = (k, d) => {
@@ -86,6 +95,7 @@ export function parseArgs(argv) {
         soakMinutes: has("--soak") ? num("--soak", 0) : null,
         sampleEvery: num("--sample-every", 60),
         soakTurns: num("--soak-turns-per-sample", 1),
+        streamMode: streamMode(get("--stream-mode", "pipeline")),
     };
 }
 
@@ -152,7 +162,9 @@ async function processMemoryByType(browser) {
 
 async function measureWindow(page, browser, opts, typingBlock) {
     const before = await perfMetrics(page);
-    await page.evaluate(`window.__fcb.startWindow(${JSON.stringify({ streamKb: opts.streamKb, secs: opts.secs })})`);
+    await page.evaluate(
+        `window.__fcb.startWindow(${JSON.stringify({ streamKb: opts.streamKb, secs: opts.secs, mode: opts.streamMode })})`
+    );
     let typing = null;
     if (typingBlock) {
         await page.evaluate(`window.__fcb.armTyping(${JSON.stringify(typingBlock)})`);
