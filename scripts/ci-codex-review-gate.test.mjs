@@ -6,7 +6,13 @@
 // could wrongly succeed.
 
 import { describe, expect, it } from "vitest";
-import { CODEX_LOGIN, evaluateCodexGate, reviewedCommit } from "./ci-codex-review-gate.mjs";
+import {
+    CODEX_LOGIN,
+    evaluateCodexGate,
+    isDocsOnlyPath,
+    latestCodexOutput,
+    reviewedCommit,
+} from "./ci-codex-review-gate.mjs";
 
 const HEAD = "4dba2e3755aa00000000000000000000000000bb";
 const OLD = "57c2f24ee2cc00000000000000000000000000dd";
@@ -121,5 +127,82 @@ describe("evaluateCodexGate", () => {
         ]) {
             expect(r.description.length).toBeLessThanOrEqual(140);
         }
+    });
+
+    it("tells the agent how to get a review when waiting", () => {
+        const r = evaluateCodexGate({ headSha: HEAD });
+        expect(r.description).toMatch(/codex re-review/);
+    });
+});
+
+// Mirrors reagent's codex_policy.is_docs_only_path: ReAgent doesn't re-ask
+// Codex for a docs-only diff after an OK, so the gate must carry that OK.
+describe("isDocsOnlyPath", () => {
+    it("accepts the docs tree, changesets and README/CHANGELOG/LICENSE", () => {
+        for (const p of ["docs/specs/SPEC_X.md", ".changesets/1-fix.md", "README.md", "src/README.md",
+            "CHANGELOG.md", "LICENSE", "NOTICE"]) {
+            expect(isDocsOnlyPath(p)).toBe(true);
+        }
+    });
+    it("rejects markdown that agents read, and CI config", () => {
+        for (const p of ["CLAUDE.md", "AGENTS.md", "prompts/review.md", ".github/workflows/README.md",
+            "scripts/README.md", "src/lib.rs"]) {
+            expect(isDocsOnlyPath(p)).toBe(false);
+        }
+    });
+});
+
+describe("latestCodexOutput", () => {
+    it("returns Codex's most recent verdict on any commit", () => {
+        const out = latestCodexOutput({ comments: [okComment(OLD)], reviews: [] });
+        expect(out).toMatchObject({ kind: "ok", sha: OLD.slice(0, 10) });
+    });
+    it("ignores dismissed reviews", () => {
+        expect(latestCodexOutput({ reviews: [{ ...findingsReview(OLD), state: "DISMISSED" }] })).toBeNull();
+    });
+});
+
+describe("carrying an OK across a docs-only diff", () => {
+    it("succeeds when only docs changed since Codex's OK", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(OLD)],
+            filesSinceLatest: ["docs/notes.md", "README.md"],
+        });
+        expect(r.state).toBe("success");
+        expect(r.description).toContain(OLD.slice(0, 10));
+    });
+
+    it("stays pending when code changed since the OK", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(OLD)],
+            filesSinceLatest: ["docs/notes.md", "src/lib.rs"],
+        });
+        expect(r.state).toBe("pending");
+    });
+
+    it("stays pending when the diff is unknown", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [okComment(OLD)], filesSinceLatest: null });
+        expect(r.state).toBe("pending");
+    });
+
+    it("never carries findings forward as an OK", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            reviews: [findingsReview(OLD)],
+            filesSinceLatest: ["docs/notes.md"],
+        });
+        expect(r.state).toBe("pending");
+    });
+
+    it("does not carry an OK that later findings superseded", () => {
+        const r = evaluateCodexGate({
+            headSha: HEAD,
+            comments: [okComment(OLD, "2026-09-23T05:00:00Z")],
+            reviews: [findingsReview(OLD, "2026-09-23T06:00:00Z")],
+            filesSinceLatest: ["docs/notes.md"],
+        });
+        expect(r.state).toBe("pending");
     });
 });
