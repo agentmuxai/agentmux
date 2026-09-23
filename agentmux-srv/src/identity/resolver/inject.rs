@@ -930,6 +930,18 @@ pub fn inject_identity_env_with_broker(
         }
     }
 
+    // #3577, re-checked at the gate's own exit: the instance resolved above,
+    // but the agent can be deleted while this function reads its definition
+    // and bindings — then `def_provider` is `None`, `bindings` is empty, and
+    // the checks above pass vacuously (ReAgent P0 / Codex P1 on #3591). The
+    // only caller, `build_persistent_spawn_env`, re-checks again at its own
+    // last store read; this keeps the gate correct on its own.
+    if mstore.agent_was_deleted(&instance.id) {
+        return Err(SpawnGateError::AgentDeleted {
+            agent_id: instance.id.clone(),
+        });
+    }
+
     Ok(())
 }
 
