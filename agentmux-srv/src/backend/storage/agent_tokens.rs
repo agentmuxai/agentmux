@@ -348,4 +348,108 @@ mod tests {
             "only the deleted agent's own slug"
         );
     }
+
+    /// Identity M4a-3 (spec §6.5.4): deleting an agent deletes the signing
+    /// keys filed under its slug, so a later agent taking the name gets
+    /// fresh ones instead of the dead agent's — through both deletion paths.
+    /// The colliding-names fixture: deleting the second "AgentY" (agenty-2)
+    /// leaves the first one's `agenty` keys alone.
+    #[test]
+    fn deleting_an_agent_deletes_the_keys_filed_under_its_slug() {
+        use crate::backend::storage::agents::test_agent_def;
+        for via_instance_delete in [false, true] {
+            let store = object_store();
+            for (id, name, slug) in [
+                ("uid-first", "AgentY", "agenty"),
+                ("uid-second", "AGENTY", "agenty-2"),
+            ] {
+                let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+                def.slug = slug.to_string();
+                store.agent_def_insert(&mut def).unwrap();
+            }
+            for name in ["agenty", "agenty-2"] {
+                store.agent_jekt_key_ensure(name).unwrap();
+                store.agent_lan_key_ensure(name).unwrap();
+                store.agent_wan_key_ensure(name).unwrap();
+            }
+            let old_lan = store.agent_lan_key_load("agenty-2").unwrap().unwrap();
+
+            let deleted = if via_instance_delete {
+                store.instance_delete("uid-second").unwrap()
+            } else {
+                store.agent_def_delete("uid-second").unwrap()
+            };
+            assert!(deleted, "instance_delete={via_instance_delete}");
+            assert!(store.agent_jekt_key_load("agenty-2").unwrap().is_none());
+            assert!(store.agent_lan_key_load("agenty-2").unwrap().is_none());
+            assert!(store.agent_wan_key_load("agenty-2").unwrap().is_none());
+            assert!(
+                store.agent_jekt_key_load("agenty").unwrap().is_some(),
+                "the live agent's keys stay"
+            );
+            assert!(store.agent_lan_key_load("agenty").unwrap().is_some());
+            assert!(store.agent_wan_key_load("agenty").unwrap().is_some());
+
+            // A reuser of the name is minted a fresh keypair, not handed the
+            // dead agent's.
+            let reused = store.agent_lan_key_ensure("agenty-2").unwrap();
+            assert_ne!(
+                reused.public_key, old_lan.public_key,
+                "instance_delete={via_instance_delete}"
+            );
+        }
+    }
+
+    /// Slug ownership is folded as the key tables fold (`to_lowercase`), not
+    /// with SQLite's ASCII-only `lower()`: agents with slugs `Ä` and `ä`
+    /// share the key filed under `ä`, so deleting one must leave it for the
+    /// other (Codex P2 on #3575).
+    #[test]
+    fn a_non_ascii_slug_held_by_another_agent_keeps_its_keys() {
+        let store = store_with_slugs(&[("uid-upper", "Ä", false), ("uid-lower", "ä", false)]);
+        store.agent_lan_key_ensure("ä").unwrap();
+        assert!(store.agent_def_delete("uid-lower").unwrap());
+        assert!(
+            store.agent_lan_key_load("ä").unwrap().is_some(),
+            "the live `Ä` agent's key stays"
+        );
+    }
+
+    /// The guard, through the real deletion path: a slug another row holds —
+    /// an ordinary row carrying the same slug (the old consolidation left
+    /// such duplicates), or a template, whose `agent.open` launches sign
+    /// under it — keeps its keys (adversarial review of #3575).
+    #[test]
+    fn a_slug_another_row_or_a_template_holds_keeps_its_keys() {
+        for other_is_template in [false, true] {
+            let store = store_with_slugs(&[
+                ("uid-dup-a", "claude", other_is_template),
+                ("uid-dup-b", "claude", false),
+            ]);
+            store.agent_jekt_key_ensure("claude").unwrap();
+            store.agent_lan_key_ensure("claude").unwrap();
+            assert!(store.agent_def_delete("uid-dup-b").unwrap());
+            assert!(
+                store.agent_lan_key_load("claude").unwrap().is_some()
+                    && store.agent_jekt_key_load("claude").unwrap().is_some(),
+                "template={other_is_template}"
+            );
+        }
+    }
+
+    /// Rows with exactly these slugs — forced, since insertion would
+    /// suffix a collision away.
+    fn store_with_slugs(rows: &[(&str, &str, bool)]) -> Store {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = object_store();
+        for (id, slug, template) in rows {
+            let mut def = test_agent_def(id, slug, "claude", "agent", 1, "");
+            if *template {
+                def.is_seeded = 1;
+            }
+            store.agent_def_insert(&mut def).unwrap();
+            store.test_force_slug(id, slug).unwrap();
+        }
+        store
+    }
 }
