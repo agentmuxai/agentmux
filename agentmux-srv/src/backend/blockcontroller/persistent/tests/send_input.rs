@@ -2942,12 +2942,37 @@ async fn teardown_drains_the_queue_rather_than_discarding_it_silently() {
     c.send_user_message("will not make it".to_string()).unwrap();
     assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
 
-    c.report_stranded_deferred_deliveries("test teardown");
+    crate::backend::blockcontroller::Controller::stop(&c, true, "done").unwrap();
 
     assert!(
         c.inner.lock().unwrap().deferred_deliveries.is_empty(),
         "the queue is drained by the report path, not left dangling"
     );
+}
+
+/// Codex P2 on #3562: `stop` used to request the kill, release `inner`, then
+/// drain in a second acquisition. The stdout reader could handle the turn's
+/// `result` in between and flush a deferred message into the process being
+/// killed, leaving the report an empty queue. The interleaving itself cannot
+/// be forced from a single-threaded test; this pins what the one-acquisition
+/// fix guarantees: by the time the kill is observable the queue is already
+/// drained, and a `result` that lands afterwards writes nothing.
+#[tokio::test]
+async fn stop_drains_the_queue_with_the_kill_so_a_late_result_writes_nothing() {
+    let (c, mut rx) = busy_controller();
+    let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel();
+    c.inner.lock().unwrap().kill_tx = Some(kill_tx);
+    c.send_user_message("deferred".to_string()).unwrap();
+    let generation = c.inner.lock().unwrap().spawn_generation;
+
+    crate::backend::blockcontroller::Controller::stop(&c, true, "done").unwrap();
+
+    assert!(matches!(kill_rx.try_recv(), Ok(KillRequest::Force)), "the kill was requested");
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+    // The dying process's final `result` arrives now.
+    let late = boundary(&c, generation).expect("same generation");
+    assert_eq!(late.flushed, DeferredFlush::Empty);
+    assert!(rx.try_recv().is_err(), "nothing written into the process being killed");
 }
 
 /// The §4.2 race, with real threads: concurrent senders hitting a busy

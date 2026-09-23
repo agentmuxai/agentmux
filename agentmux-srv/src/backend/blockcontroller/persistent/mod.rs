@@ -1207,8 +1207,10 @@ impl Controller for PersistentSubprocessController {
     }
 
     fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
-        self.stop_process(true)?;
-        self.report_stranded_deferred_deliveries("controller stopped");
+        // Not `stop_process` then a separate drain: see
+        // `request_stop_draining_deferred` for the race between the two.
+        let stranded = self.request_stop_draining_deferred(KillRequest::Force);
+        Self::log_stranded_deferred(&self.block_id, "controller stopped", &stranded);
         let mut inner = self.inner.lock().unwrap();
         if inner.proc_status != new_status {
             Self::set_status(&mut inner, new_status);
