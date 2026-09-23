@@ -1228,28 +1228,32 @@ impl Controller for PersistentSubprocessController {
         let health = Arc::clone(&self.health_monitor);
         let block_id = self.block_id.clone();
         Box::pin(async move {
-            let (generation, stdin_tx) = {
+            let (running, stranded) = {
                 let mut g = inner.lock().unwrap();
-                if g.current_pid.is_none() {
+                // Drained BEFORE the no-process return: a message deferred
+                // behind a spawn that then failed sits here with no process,
+                // and the watchdog holds only a weak ref, so it dies with this
+                // controller. Returning first discarded the message unreported
+                // (codex P2 on #3562).
+                let stranded: Vec<String> = g.deferred_deliveries.drain(..).collect();
+                let running = if g.current_pid.is_none() {
                     // Never spawned (lazy), or already gone. A spawn still in
                     // flight is killed by the caller's tracker drop.
-                    return StopOutcome::NotRunning;
-                }
-                // Nothing queued may start a new turn after the interrupt.
-                g.pending_send_messages.clear();
-                if !g.deferred_deliveries.is_empty() {
-                    tracing::warn!(
-                        block_id = %block_id,
-                        stranded = g.deferred_deliveries.len(),
-                        "pane shutdown with deferred messages still queued — they were accepted but never delivered"
-                    );
-                    g.deferred_deliveries.clear();
-                }
-                // Before the interrupt: its `is_error` result is our stop,
-                // not a failure (§9.4).
-                g.shutdown_generation = Some(g.spawn_generation);
-                g.stop_exit = None;
-                (g.spawn_generation, g.stdin_tx.clone())
+                    None
+                } else {
+                    // Nothing queued may start a new turn after the interrupt.
+                    g.pending_send_messages.clear();
+                    // Before the interrupt: its `is_error` result is our stop,
+                    // not a failure (§9.4).
+                    g.shutdown_generation = Some(g.spawn_generation);
+                    g.stop_exit = None;
+                    Some((g.spawn_generation, g.stdin_tx.clone()))
+                };
+                (running, stranded)
+            };
+            Self::log_stranded_deferred(&block_id, "pane shutdown", &stranded);
+            let Some((generation, stdin_tx)) = running else {
+                return StopOutcome::NotRunning;
             };
 
             if health.is_active_turn() {
