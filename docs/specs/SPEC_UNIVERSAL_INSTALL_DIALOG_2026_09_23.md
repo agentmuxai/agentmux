@@ -166,7 +166,7 @@ Rules:
   §1.1 item 4, the FitAddon sizing work, and the `ModalLayer`
   mutation-observer churn xterm's DOM renderer causes. A capped buffer of 20,000
   lines with a "trimmed N earlier lines" marker bounds memory; Save log writes
-  the untrimmed file from the backend (§6.4).
+  the untrimmed file the backend streams to disk (§6.5).
 - The user's open or closed choice is remembered per install kind for the
   session.
 
@@ -231,22 +231,27 @@ Keep `install_chunk`, scope `install:<sessionId>`, and add two ops. Old clients
 ignore unknown ops, and existing `line` and `done` events are unchanged.
 
 ```ts
+// Every event below also carries `seq: number`, monotonically increasing per
+// session, so a client can merge live events with a snapshot (§6.4).
+
 // Sent once, right after start, and again if the plan changes.
-{ op: "plan", sessionId, steps: { id: string; label: string }[] }
+{ op: "plan", sessionId, seq,
+  steps: { id: string; label: string; unit: string }[] }  // unit: §7.1
 
 // Sent on every step transition, and optionally for live hints.
-{ op: "step", sessionId, id: string,
-  status: "active" | "done" | "failed" | "skipped",
+{ op: "step", sessionId, seq, id: string,
+  status: "pending" | "active" | "done" | "failed" | "skipped",
   hint?: string,        // right-aligned short text: "214 fetched", "22.11"
   subline?: string,     // live one-liner under the active step
   error?: InstallError }
 
 // Existing, extended: every line now carries the step it belongs to.
-{ sessionId, line, stream: "stdout" | "stderr", step?: string }
+{ sessionId, seq, line, stream: "stdout" | "stderr", step?: string }
 ```
 
 These get real Rust structs and generated TypeScript types. Today the payload
-is untyped JSON and the consumer takes `event: any`.
+is untyped JSON and the consumer takes `event: any`. The `pending` status
+exists so a Retry can visibly reset the steps of a unit being rerun (§7.1).
 
 ### 6.2 Standard plans
 
@@ -295,25 +300,61 @@ spawn code so `resolvecli`, `install.start`, and system installs share it.
 | `network` | `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`, HTTP 5xx | "Couldn't reach the package server." | Retry |
 | `permission` | `EACCES`, `EPERM`, declined UAC or polkit | "AgentMux wasn't allowed to write the files." | Retry, or open Details |
 | `disk` | `ENOSPC` | "The disk is full." | — |
-| `missing_prereq` | spawn fails for `npm`, `brew`, `pkexec` | "Node.js is needed first." | Adds the prereq step and offers to install it |
+| `missing_prereq` | spawn fails for `npm`, `brew`, `pkexec`, `winget` | "<Tool> is needed first." Names the executable that actually failed to spawn, never a hard-coded Node.js. | If AgentMux can install that tool (Node.js, npm), add its step and offer to install it. If it can't, as with Homebrew, pkexec, or winget (see §3), offer "Open download page" for that tool. |
 | `not_on_path` | exit 0 but verify fails to find the binary | "Installed, but AgentMux can't see it yet." | Restart AgentMux |
 | `version_check` | `--version` fails or times out | "Installed, but <Name> didn't start." | Open Details |
 | `cancelled` | user cancel | "Cancelled. Nothing was left behind." | — |
 | `unknown` | anything else | "Something went wrong while <step label>." | Retry, open Details |
 
-`InstallError` is `{ category, message, action?, firstErrorLine?: number }`.
-`firstErrorLine` lets Details open scrolled to the first line the classifier
-marked as an error.
+`InstallError` is
+`{ category, message, action?, missingTool?: string, firstErrorLine?: number }`.
+`missingTool` is set for `missing_prereq`, and the Layer 1 message and action
+are rendered from it. `firstErrorLine` lets Details open scrolled to the first
+line the classifier marked as an error.
 
-### 6.4 Log retention
+### 6.4 Session state snapshot
 
-The backend keeps the full log for each session in memory until the session is
-dismissed, capped at 5 MB. It is written to
-`<data_dir>/logs/install/<provider-or-tool>-<timestamp>.log` on failure, or
-when the user chooses Save log. `persist: 1024` on `install_chunk` stays as the
-replay window for a dialog that remounts.
+A bounded event replay cannot rebuild step state. A Pi install emits thousands
+of line events, so with `persist: 1024` the initial `plan` and the early `step`
+transitions are evicted long before the install ends. A dialog that remounts
+mid-install would get the last lines but no plan and no ticks.
 
-### 6.5 Unifying the three channels
+So step state does not depend on replay:
+
+- The backend keeps an authoritative **session snapshot** for every live or
+  recently finished session:
+  `{ sessionId, state, plan, steps: {id, status, hint?, subline?, error?}[], startedAt, lastSeq, logPath }`.
+- A new RPC, `install.status { sessionId }`, returns that snapshot plus the
+  last 500 log lines.
+- Every `install_chunk` event gains a monotonically increasing `seq`.
+- On mount, `InstallSession` subscribes first, buffering events. It then calls
+  `install.status`, applies the snapshot, and drops buffered events with
+  `seq <= lastSeq`. After that it applies live events. This is correct however
+  many events were evicted.
+- `persist: 1024` stays only as a convenience for the log tail. Nothing
+  correctness-critical relies on it.
+- Snapshots are kept until the session is dismissed, or for 10 minutes after
+  it ends, whichever is later.
+
+### 6.5 Log retention
+
+The full log is **streamed to disk as it arrives**, never reconstructed later
+from memory, so an untrimmed log always exists no matter how much output
+there is:
+
+- Path: `<data_dir>/logs/install/<provider-or-tool>-<timestamp>.log`, opened
+  when the session starts and appended line by line. `logPath` is part of the
+  session snapshot.
+- On failure the file is kept.
+- On success the file is deleted when the session is dismissed, unless the
+  user chose Save log, which copies it to a location they pick.
+- A sweep on startup removes install logs older than 7 days and keeps at most
+  the newest 20.
+- In-memory buffers are for display only. The frontend view is capped at
+  20,000 lines (§4.2), and the backend keeps a 500-line tail for
+  `install.status`. Neither is used to produce a saved log.
+
+### 6.6 Unifying the three channels
 
 - `resolvecli` stops batching output after exit and stops using the separate
   `install_progress` event. It creates an install session, emits the standard
@@ -330,13 +371,30 @@ replay window for a dialog that remounts.
 
 - The failed row shows `✗`, its label, and the category message as a subline.
 - A one-line action area under the list offers the category's action: Retry,
-  Install Node.js, Restart AgentMux, or Open download page.
+  Install <Tool>, Restart AgentMux, or Open download page.
 - Details **opens automatically** on failure, scrolled to `firstErrorLine`.
 - Footer: **Close** and the primary action. **Copy log** is always in the
   Details header, so a user can paste a failure into a bug report.
-- Retry reruns the plan from the failed step when the steps are idempotent,
-  which all npm and package-manager steps are. Otherwise it reruns from the
-  top. Completed steps keep their ticks.
+
+### 7.1 What Retry reruns
+
+Retry resumes only at a real **command boundary**, never at a step derived by
+the classifier.
+
+- Each plan groups its steps into **units**, and each unit is exactly one
+  process. In the npm plan, `download`, `setup`, and `scripts` are phases
+  inside a single `npm install`, so together they form one unit. `verify` is a
+  separate unit. In a chained plan (§8), each prereq install is its own unit.
+- Retry reruns the failed unit **from its start**. For npm that means the
+  whole `npm install` command. The existing rollback deletes the provider's
+  partial directory first, so lifecycle scripts always run against a clean
+  tree. AgentMux never assumes package lifecycle scripts are idempotent.
+- When a unit is rerun, every step inside it resets to pending. Only units that
+  finished before the failed one keep their ticks. For example, if Pi's
+  `scripts` phase fails, "Install Node.js" keeps its tick, while "Download
+  packages", "Set up files", and "Run setup scripts" all go back to pending.
+- A package-manager unit, such as winget, brew, or apt, is rerun as a whole.
+  Those tools are designed to be safely re-invoked after a failed run.
 
 ## 8. Chained plans: prereqs plus product
 
@@ -386,10 +444,11 @@ Each phase ships on its own and is useful alone.
 2. **Shared component.** `InstallSession`, `<InstallProgress>`,
    `<InstallDialog>`, `<InstallConfirm>`, and the virtualised log. Migrate the
    provider modal, the inline system installer, and the Toolchain pane.
-3. **Backend steps.** `plan` and `step` ops, typed payloads, the shared
-   classifier, error categories, `--version` verify in `install.start`,
-   log retention. The frontend classifier from phase 1 becomes a fallback for
-   old backends.
+3. **Backend steps.** `plan` and `step` ops with `seq`, typed payloads, the
+   shared classifier, error categories including `missingTool`, the
+   `install.status` snapshot RPC, logs streamed to disk, unit-based Retry, and
+   the `--version` verify in `install.start`. The frontend classifier from
+   phase 1 becomes a fallback for old backends.
 4. **Chained plans.** `install.plan`, `prereqs` on `install.start`, and removal
    of the prereq-to-install modal hand-off.
 5. **Remaining surfaces.** `resolvecli` streaming, login panels, `/tools
@@ -417,8 +476,21 @@ Each phase ships on its own and is useful alone.
 
 - **Unit.** The line classifier over recorded npm verbose logs, including a
   real Pi install, a network failure, and an `EACCES` failure. Step derivation
-  when patterns are missing. `InstallSession` state transitions and replay from
-  `persist`.
+  when patterns are missing. `InstallSession` state transitions.
+- **Remount after eviction.** Start a session that emits more than 1,024
+  events, mount a fresh `InstallSession` afterwards, and assert that the plan,
+  ticks, and active step match the backend snapshot, with no duplicated or
+  missing lines at the `seq` boundary.
+- **Retry.** Fail the npm unit during its `scripts` phase in a chained plan.
+  Assert that Retry deletes the partial provider directory, reruns
+  `npm install` from the start, resets all three npm steps to pending, and
+  keeps the prereq unit's tick.
+- **Logs.** Produce more than 5 MB of output on a successful install, then
+  Save log, and assert that the saved file is byte-identical to the full
+  stream. Assert that the file is deleted on dismissal when not saved.
+- **Missing prereq.** Simulate a spawn failure for `brew` and for `npm`.
+  Assert that each message names its own tool, that the npm case offers to
+  install Node.js, and that the brew case offers only its download page.
 - **Component.** Default view shows steps with Details collapsed; failure opens
   Details at the first error; stick-to-bottom behaviour; Copy all.
 - **Layout.** Render the dialog in pane-scoped modals at 360×480, 480×600 and

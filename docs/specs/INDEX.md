@@ -413,7 +413,6 @@ partial list.
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
-| [`SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23`](SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md) | SPEC: Universal install dialog — plain-language step list by default, full console under "Details", across every provider and in-app install |
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
 | [`SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22`](SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22.md) | SPEC: WebFetch content view |
 | [`SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12`](SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) | SPEC: Widget bar parent widgets (grouped submenus) |
@@ -655,6 +654,7 @@ partial list.
 | [`SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01`](SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01.md) | SPEC: Window Transparency on macOS and Linux |
 | [`SPEC_UNIFIED_MENU_SYSTEM_2026_05_11`](SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md) | Unified menu system |
 | [`SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13`](SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13.md) | Spec: Unified tool-block hover overlay (no double-popup) |
+| [`SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23`](SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md) | SPEC: Universal install dialog — plain-language steps by default, full console under "Details" |
 | [`SPEC_UPGRADE_PANEL_2026_06_27`](SPEC_UPGRADE_PANEL_2026_06_27.md) | Maintenance Section in InstancePanel |
 | [`SPEC_WEBSEARCH_CARD_FULL_CONTENT_AND_STYLING_2026_08_13`](SPEC_WEBSEARCH_CARD_FULL_CONTENT_AND_STYLING_2026_08_13.md) | Spec: WebSearch tool-card — full (unclamped) content + styling fixes |
 | [`SPEC_WEBSEARCH_RICH_VIEW_2026_06_19`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) | SPEC: Web-search rich result view |
