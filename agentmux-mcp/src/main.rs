@@ -320,6 +320,63 @@ pub(crate) fn agent_slug() -> Result<String> {
     Ok(slug)
 }
 
+/// Identity M3 (spec §5): resolve a typed agent name at the boundary — the
+/// only place a name is turned into a UID — before a tool stores it.
+/// `Ok(Some(uid))` when exactly one identified agent matches; `Ok(None)` when
+/// none does or the match has no UID (the tool then sends the name and the
+/// server records the miss); `Err` with the candidates when the name is
+/// ambiguous, so the model can retry by uid instead of enqueueing something
+/// that can never be delivered unambiguously (§5.2).
+async fn resolve_agent_name_at_boundary(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    name: &str,
+) -> Result<Option<String>> {
+    let url = format!("{}/agentmux/agents/resolve", local_url.trim_end_matches('/'));
+    let resp = client
+        .post(&url)
+        .header("X-AuthKey", auth_key)
+        .json(&serde_json::json!({ "name": name }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("agent name resolve request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        // An older srv without the endpoint: fall back to sending the name.
+        return Ok(None);
+    }
+    let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+    match v.get("resolution").and_then(|r| r.as_str()).unwrap_or("none") {
+        "one" => Ok(v.get("uid").and_then(|u| u.as_str()).map(|u| u.to_string())),
+        "ambiguous" => {
+            let listed: Vec<String> = v
+                .get("candidates")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .map(|c| {
+                            format!(
+                                "  • {} (uid {}{}{})",
+                                c.get("name").and_then(|x| x.as_str()).unwrap_or("?"),
+                                c.get("uid").and_then(|x| x.as_str()).unwrap_or("none"),
+                                c.get("block_id").and_then(|x| x.as_str()).map(|b| format!(", block {b}")).unwrap_or_default(),
+                                if c.get("live").and_then(|x| x.as_bool()).unwrap_or(false) { ", live" } else { "" },
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            anyhow::bail!(
+                "Several agents match \"{name}\":\n{}\nAddress one directly by uid, or rename one.",
+                listed.join("\n")
+            )
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Process-wide counter for `generate_jekt_msgid` — millis-timestamp alone
 /// isn't guaranteed unique if two jekts are sent in the same millisecond.
 static JEKT_MSGID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2596,13 +2653,22 @@ async fn call_tool(
             let payload = arguments.get("payload").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: payload"))?;
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+            let target_agent = arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or("");
+            // Identity M3: resolve the typed target NOW, at the boundary, and
+            // carry its uid; an ambiguous name is handed back with candidates.
+            let target_agent_uid = if target_agent.is_empty() {
+                None
+            } else {
+                resolve_agent_name_at_boundary(&client, local_url, auth_key, target_agent).await?
+            };
 
             let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "title": title,
                 "payload": payload,
                 "kind": arguments.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
-                "target_agent": arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or(""),
+                "target_agent": target_agent,
+                "target_agent_uid": target_agent_uid.unwrap_or_default(),
                 "target_group": arguments.get("target_group").and_then(|v| v.as_str()).unwrap_or(""),
                 "priority": arguments.get("priority").and_then(|v| v.as_i64()).unwrap_or(0),
                 "not_before": arguments.get("not_before").and_then(|v| v.as_i64()),
@@ -2626,17 +2692,20 @@ async fn call_tool(
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set — cannot claim work without an agent identity"))?;
 
-            // Identity M1b: carry this agent's UID (AGENTMUX_AGENT_UID, set by
-            // srv at spawn since M1a) so the claim records WHO claimed by a
-            // key that cannot collide, beside the slug it still matches on.
-            // Empty when absent (pre-M1a spawn, quick-launch pane) — the
-            // server counts that as a fallback rather than guessing.
+            // Identity M1b/M3: carry this agent's UID (AGENTMUX_AGENT_UID, set
+            // by srv at spawn since M1a). It is the only way into a
+            // UID-addressed item. Empty when absent (pre-M1a spawn,
+            // continuation resume, quick-launch pane) — srv then takes the
+            // UID from this block's row, and counts the fallback.
             let self_uid = std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
 
             let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "agent_id": self_id,
                 "agent_uid": self_uid,
+                // Identity M3: when no UID is carried, srv takes it from the
+                // row on this block rather than deriving one from the name.
+                "block_id": block_id,
                 "kind": arguments.get("kind").and_then(|v| v.as_str()),
                 "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
                 // Group membership is resolved server-side-of-this-call by the
@@ -2833,11 +2902,15 @@ async fn call_tool(
             let max_fires = arguments.get("max_fires").and_then(|v| v.as_i64()).filter(|&n| n > 0);
             let max_age_secs = arguments.get("max_age_secs").and_then(|v| v.as_i64()).filter(|&n| n > 0);
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+            // Identity M3 (spec §5.4): resolve the target while the author is
+            // present; the job then fires by uid, never by resolving a name.
+            let target_uid = resolve_agent_name_at_boundary(&client, local_url, auth_key, target).await?;
 
             let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
                 "name": name, "expression": expression, "prompt": prompt,
-                "target": target, "created_by": self_id, "max_fires": max_fires,
+                "target": target, "target_uid": target_uid.unwrap_or_default(),
+                "created_by": self_id, "max_fires": max_fires,
                 "max_age_secs": max_age_secs,
             });
             let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await

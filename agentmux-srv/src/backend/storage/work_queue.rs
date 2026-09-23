@@ -74,15 +74,17 @@ pub struct WorkItem {
     pub state: String,
     #[serde(default)]
     pub claimed_by: String,
-    /// Identity M1b (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// Identity M1b/M3 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
     /// §9.1): the UID (`db_agents.id`) of `target_agent`, resolved once at
-    /// enqueue — spec §5.4, resolution happens at authoring time, never at
-    /// claim time. Empty = unknown (untargeted, or the name did not
-    /// resolve). Dual-written beside the slug; **not read by anything yet**.
+    /// the authoring boundary and carried in — spec §5.4, never at claim
+    /// time. Since M3, an item with a `target_agent_uid` is claimable by that
+    /// identity only. Empty = untargeted, or no UID was carried: the name
+    /// path applies.
     #[serde(default)]
     pub target_agent_uid: String,
-    /// The claimer's UID, carried from its own `AGENTMUX_AGENT_UID`. Same
-    /// phase, same rules: dual-written, empty when unknown, not yet read.
+    /// The claimer's UID — carried from its own `AGENTMUX_AGENT_UID`, else
+    /// its block's row. Recorded, empty when unknown; not read for
+    /// eligibility (holder transitions still match `claimed_by` until M4).
     #[serde(default)]
     pub claimed_by_uid: String,
     /// ms epoch; `None` unless `state == claimed`.
@@ -113,9 +115,10 @@ pub struct ClaimFilter {
     /// The claiming agent's own id. Items targeted at a DIFFERENT agent are
     /// excluded; untargeted items stay eligible.
     pub agent_id: String,
-    /// The claiming agent's UID (identity M1b). Written to `claimed_by_uid`
-    /// on a successful claim; NOT part of the eligibility predicate, which
-    /// still matches on `agent_id` — no reader changes in this phase.
+    /// The claiming agent's UID (identity M1b/M3). Written to
+    /// `claimed_by_uid` on a successful claim. Since M3 it is the ONLY way
+    /// into an item that carries a `target_agent_uid`; the `agent_id` name
+    /// match applies to items with no UID, until M5.
     pub agent_uid: String,
     /// Group ids this agent belongs to. An item with a `target_group` is
     /// eligible only if its group is in this list. Resolved by the caller.
@@ -226,7 +229,16 @@ impl Store {
                        -- an infinite claim/release loop.
                        AND attempts < max_attempts
                        AND (not_before IS NULL OR not_before <= ?3)
-                       AND (target_agent = '' OR target_agent = ?1)
+                       -- Identity M3: an item that carries a target UID is
+                       -- claimable by that identity ONLY — never by a
+                       -- same-named other (ReAgent P1 on PR #3563: the name
+                       -- branch must not short-circuit a UID-addressed item).
+                       -- Items with no UID (pre-M1b rows, names that did not
+                       -- resolve) keep the name path until M5, so a claimer
+                       -- with no UID is not locked out of name-targeted work.
+                       AND ((target_agent_uid <> '' AND target_agent_uid = ?5)
+                            OR (target_agent_uid = ''
+                                AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
                      ORDER BY priority DESC, created_at ASC
@@ -241,7 +253,7 @@ impl Store {
 
         let mut stmt = conn.prepare(&sql)?;
         // Positional binds: ?1 agent_id, ?2 lease expiry, ?3 now, ?4 kind,
-        // ?5 agent_uid (SET only — never in the WHERE, see ClaimFilter),
+        // ?5 agent_uid (SET, and since M3 the uid-target match in WHERE),
         // ?6.. group ids. ?1 and ?3 are each referenced twice in the SQL above
         // (SET + WHERE); numbered parameters make that reuse safe.
         let expires = now_ms + lease_ms;
@@ -487,12 +499,11 @@ mod tests {
         }
     }
 
-    // ---- identity M1b: the UID columns are dual-written, never read ------
+    // ---- identity M1b: the UID columns are written and round-trip --------
 
     /// Positive case first: both UID columns round-trip. `target_agent_uid`
-    /// is what the enqueuer resolved; `claimed_by_uid` is what the claimer
-    /// carried. The claim predicate is unchanged — it still matches on
-    /// `agent_id` — so a claimer with NO uid still claims.
+    /// is what the enqueuer carried; `claimed_by_uid` is what the claimer
+    /// carried.
     #[test]
     fn uid_columns_are_written_at_enqueue_and_claim_and_round_trip() {
         let (s, _d) = store();
@@ -515,6 +526,52 @@ mod tests {
         assert_eq!(claimed.claimed_by, "agenty-2");
         assert_eq!(claimed.claimed_by_uid, "4f3c-a91");
         assert_eq!(claimed.target_agent_uid, "4f3c-a91");
+    }
+
+    /// Identity M3: an item addressed by UID is claimable by the agent with
+    /// that UID even if its name differs from `target_agent` (a rename), and
+    /// NOT by a different agent that happens to carry the same name.
+    #[test]
+    fn a_uid_targeted_item_is_claimable_by_uid_and_not_by_a_same_named_other() {
+        let (s, _d) = store();
+        let mut w = item("w-by-uid", "for agenty-3 specifically");
+        w.target_agent = "AgentY".into();
+        w.target_agent_uid = "4f3c-a91".into();
+        s.work_queue_enqueue(&w).unwrap();
+
+        // The EXACT same display name, different identity: not eligible.
+        // The name branch must not short-circuit a UID-addressed item
+        // (ReAgent P1 on #3563 — an earlier version of this test used a
+        // different-case name, which dodged the case-sensitive `=`).
+        let impostor = ClaimFilter {
+            kind: None,
+            agent_id: "AgentY".into(),
+            agent_uid: "9b2e-7d4".into(),
+            groups: vec![],
+        };
+        assert!(s.work_queue_claim(&impostor, 2000, 60_000).unwrap().is_none());
+        // The exact name with NO uid at all is not enough either: a
+        // UID-addressed item is claimable by identity only. (A claimer that
+        // registered name-only before its row existed is locked out of its
+        // own UID-targeted work until it carries the UID — recorded.)
+        let nameless = ClaimFilter {
+            kind: None,
+            agent_id: "AgentY".into(),
+            agent_uid: String::new(),
+            groups: vec![],
+        };
+        assert!(s.work_queue_claim(&nameless, 2000, 60_000).unwrap().is_none());
+
+        // The right identity under a NEW display name still claims it.
+        let renamed = ClaimFilter {
+            kind: None,
+            agent_id: "Renamed".into(),
+            agent_uid: "4f3c-a91".into(),
+            groups: vec![],
+        };
+        let got = s.work_queue_claim(&renamed, 2000, 60_000).unwrap().unwrap();
+        assert_eq!(got.id, "w-by-uid");
+        assert_eq!(got.claimed_by_uid, "4f3c-a91");
     }
 
     /// No reader changes (spec §9.1 M1): a claimer that carries no UID — a

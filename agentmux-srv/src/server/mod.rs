@@ -20,6 +20,7 @@ mod messagebus;
 // resolve_transcript_request_tier_fields directly — see that function's
 // own doc comment for why.
 pub(crate) mod reactive;
+mod name_resolution;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
@@ -395,6 +396,12 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/agentmux/reactive/unregister",
             post(reactive::handle_reactive_unregister),
+        )
+        // Identity M3 (spec §5): the one place a typed agent name is
+        // interpreted. Called by agentmux-mcp before WorkEnqueue/CronCreate.
+        .route(
+            "/agentmux/agents/resolve",
+            post(name_resolution::handle_resolve_agent_name),
         )
         .route(
             "/agentmux/reactive/ensure-signing-key",

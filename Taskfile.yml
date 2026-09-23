@@ -226,6 +226,14 @@ tasks:
             §6.2). Forces new menus through useMenuPosition.
         cmd: bash scripts/check-menu-positioning.sh
 
+    check:name-resolver-callers:
+        desc: >-
+            Grep gate — fails if resolve_name_to_uid (the one place a typed
+            agent name becomes an identity) is referenced outside the
+            human-boundary layer. SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED
+            §2 rule 1 / §9.3 (identity M3).
+        cmd: bash scripts/check-name-resolver-callers.sh
+
     check:input-handler-layout:
         desc: >-
             Grep gate — fails if a layout-read (scrollHeight, offsetTop,
