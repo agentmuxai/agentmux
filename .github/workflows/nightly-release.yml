@@ -116,7 +116,10 @@ jobs:
           # shared-identity PRs must carry (SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md);
           # squash merges keep it in the subject. Without it v0.56.10-v0.56.12
           # were skipped. Must stay in sync with gh-reporter's
-          # _RELEASE_COMMIT_RE (a5af/shared-infrastructure).
+          # _RELEASE_COMMIT_RE (a5af/shared-infrastructure), which gets the
+          # same prefix in a5af/shared-infrastructure#499. Until that is
+          # merged AND the Lambda redeployed, only this manual workflow
+          # recognizes prefixed release commits.
           match=$(git log HEAD --format='%H%x09%s' | grep -m1 -E $'\t([^:]+@[^:[:space:]]+: )?chore: release v[0-9]+\\.[0-9]+\\.[0-9]+' || true)
           if [ -z "$match" ]; then
             echo "No \`chore: release\` commit found on main at all — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
