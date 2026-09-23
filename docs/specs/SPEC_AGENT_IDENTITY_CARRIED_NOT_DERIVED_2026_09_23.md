@@ -5,7 +5,8 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) implemented. M5 not started.
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) implemented. M5
+not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -1006,6 +1007,11 @@ folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
   agent's slug, where no other row holds that slug. Without it, in the window
   before M4d a new agent reusing the name is handed the dead agent's key by
   `ensure`'s `INSERT OR IGNORE` and signs as it, and peers accept it.
+  **Recorded cost:** a live template stub still signing under a slug it
+  never owned (#3573) loses that key when the slug's owner is deleted, and
+  is minted a fresh one on its next `ensure`; its peers raise the same
+  forgery alarm as for any reuser. That is the correct outcome for a key
+  it should never have held.
 - **Publication carries the UID.** Registry entries and `/reactive/agent`
   gain the UID beside the name in the same step, so new peers can pin
   `(peer, uid)`; the name pin stays as the legacy fallback.
