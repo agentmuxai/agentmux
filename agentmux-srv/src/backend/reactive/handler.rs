@@ -396,10 +396,29 @@ impl Handler {
         }
 
         // 2. This block's effective UID: supplied, else whatever it already
-        //    had (sticky).
+        //    had (sticky). A block that changes UID — rare: a reconfigured
+        //    pane, or a pane reused for a different agent whose spawn env
+        //    now carries the new row's id — drops its OLD `uid_to_block`
+        //    entry here, otherwise a delivery addressed to the old UID would
+        //    still resolve to this block and then fail the UID confirmer as
+        //    a spurious mismatch instead of a clean not-found (ReAgent P2 on
+        //    PR #3560).
         let effective_uid: Option<String> = uid
             .map(str::to_string)
             .or_else(|| self.block_to_uid.get(block_id).cloned());
+        if let (Some(new_uid), Some(old_uid)) = (uid, self.block_to_uid.get(block_id).cloned()) {
+            if old_uid != new_uid {
+                tracing::info!(
+                    block_id = %block_id,
+                    old_uid = %old_uid,
+                    new_uid = %new_uid,
+                    "reactive: block re-registered under a different uid — dropping the old uid mapping (identity M2)"
+                );
+                if self.uid_to_block.get(&old_uid).is_some_and(|b| b == block_id) {
+                    self.uid_to_block.remove(&old_uid);
+                }
+            }
+        }
         if effective_uid.is_none() {
             crate::backend::agent_resolve::record_uid_fallback(no_uid_counter);
         }

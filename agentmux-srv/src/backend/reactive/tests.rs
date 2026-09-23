@@ -3532,6 +3532,23 @@ mod identity_m2 {
         assert_eq!(h.get_agent(UID_Y).unwrap().block_id, "block1");
     }
 
+    /// ReAgent P2 on #3560: a block re-registered under a DIFFERENT uid must
+    /// drop its old `uid_to_block` entry, or a delivery to the old uid still
+    /// resolves to this block and then fails the uid confirmer as a spurious
+    /// mismatch instead of a clean not-found.
+    #[test]
+    fn a_block_that_changes_uid_drops_its_old_uid_mapping() {
+        let mut h = Handler::new();
+        reg(&mut h, "AgentY", "block1", Some(UID_Y));
+        reg(&mut h, "AgentY", "block1", Some(UID_UP));
+        assert_eq!(h.get_agent_by_block("block1").unwrap().uid.as_deref(), Some(UID_UP));
+        assert_eq!(h.get_agent(UID_UP).unwrap().block_id, "block1");
+        assert!(h.get_agent(UID_Y).is_none(), "the old uid must not resolve to the block");
+        let r = inject(&mut h, UID_Y);
+        assert_eq!(r.error.as_deref(), Some(&format!("agent not found: {UID_Y}")[..]));
+        assert_eq!(h.list_agents().len(), 1);
+    }
+
     // `#[tokio::test]`: PTY delivery spawns the delayed-Enter task.
     #[tokio::test]
     async fn a_dead_block_is_swept_and_the_live_one_wins_the_name() {
