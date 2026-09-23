@@ -893,9 +893,9 @@ as 2.2. Where §6.1–§6.4 disagree with the code, this section wins.
 #### 6.5.3 Mechanism
 
 - **`Caller`, derived, never refused.** A middleware maps `X-Agent-Token` to
-  `Caller::Agent(uid)` through a `TokenIndex` **owned by `AppState` and built
-  from `mstore` only** (not every `Store` instance — shared, identity and
-  migration opens must not grow one). It is mutated under the same lock as
+  `Caller::Agent(uid)` through a `TokenIndex` **attached to `mstore` only**
+  (built from its `db_agent_tokens` at boot; the shared, identity and
+  migration-time stores never get one). It is mutated under the same lock as
   the token-row statement itself (ensure's insert, purge's token delete), not
   on an operation's overall result, because purge is a sequence of
   autocommit statements, not a transaction. Anything else is
@@ -993,15 +993,19 @@ and the queue and cron tables are global). Recipients see the creator's
 
 Each step independently revertible (§9):
 
-- **M4a — Caller + counters.** `TokenIndex`, the `Caller` middleware, the
-  MCP sending `X-Agent-Token`, `m4.actor_mismatch` at each actor site, and
-  **spawn-site counters** `spawn.no_token.<path>` (`build_persistent_spawn_env`,
-  `agent_io.rs`, `shell/lifecycle.rs`, the App Server controller) —
+- **M4a — Caller + counters**, in two PRs. **M4a-1:** `TokenIndex`, the
+  `Caller` middleware, the MCP sending `X-Agent-Token`, the purge-time name
+  tombstones, and **spawn-site counters** `spawn.no_token.<path>` (a row but
+  no token — the gap) and `spawn.no_row.<path>` (no row at all), recorded
+  where a process is actually started, never where an environment is merely
+  built (the persistent, subprocess, ACP and App Server controllers' spawn
+  points; a turn delivered to a running process rebuilds its environment
+  without spawning anything) —
   request-side counters cannot gate anything, because they cannot tell an
   Unattributed UI write from a tokenless agent (revision 1's P0). Plus the
-  `live.tokenless_or_unknown` gauge, the purge-time name tombstones
-  (§6.5.4), and a reader for every §9.2 counter and gauge
-  (`GET /agentmux/identity/fallbacks`). No behaviour change.
+  `live.tokenless_or_unknown` gauge over live blocks, and a reader for every
+  §9.2 counter and gauge (`GET /agentmux/identity/fallbacks`). **M4a-2:**
+  `m4.actor_mismatch` at each actor site. No behaviour change in either.
 - **M4b — close the tokenless paths.** `agent.send`, App Server agents and
   terminal-pane agent CLIs carry UID + token when their block has a row;
   template-based continuations **bind** the block to the row they fold into
