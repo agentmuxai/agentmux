@@ -130,7 +130,7 @@ impl AppServerController {
             return Err("App Server command must include app-server arguments".to_string());
         }
         let working_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
-        let env_vars = match block_meta.get("cmd:env") {
+        let mut env_vars = match block_meta.get("cmd:env") {
             Some(serde_json::Value::Object(values)) => values
                 .iter()
                 .filter_map(|(key, value)| {
@@ -139,6 +139,16 @@ impl AppServerController {
                 .collect::<HashMap<_, _>>(),
             _ => HashMap::new(),
         };
+        // Identity M4b-2 (spec §6.5.8): carry the block's row UID + token.
+        // Buys no attribution today — no provider maps to App Server, and
+        // codex is not given agentmux-mcp — but keeps the counters true.
+        if let Some(mstore) = &self.mstore {
+            crate::server::agent_handlers::input::carry_block_identity_env(
+                mstore,
+                &self.block_id,
+                &mut env_vars,
+            );
+        }
         // Identity M4a: record what this process is actually given.
         crate::backend::identity_spawn::record_process_spawn(
             &self.block_id,

@@ -650,6 +650,30 @@ impl AcpController {
     }
 }
 
+/// A meta value that is a string array, or a JSON string encoding one.
+fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<String> {
+    match meta.get(key) {
+        Some(serde_json::Value::Array(values)) => values
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        Some(serde_json::Value::String(s)) => serde_json::from_str(s).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// A meta value that is an object of strings, or a JSON string encoding one.
+fn meta_string_map(meta: &super::super::obj::MetaMapType, key: &str) -> HashMap<String, String> {
+    match meta.get(key) {
+        Some(serde_json::Value::Object(values)) => values
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        Some(serde_json::Value::String(s)) => serde_json::from_str(s).unwrap_or_default(),
+        _ => HashMap::new(),
+    }
+}
+
 impl Controller for AcpController {
     fn start(
         &self,
@@ -660,15 +684,25 @@ impl Controller for AcpController {
         // Extract spawn config from block metadata
         let cmd = super::super::obj::meta_get_string(&block_meta, super::META_KEY_CMD, "");
         let cwd = super::super::obj::meta_get_string(&block_meta, super::META_KEY_CMD_CWD, "");
-        let args_str = super::super::obj::meta_get_string(&block_meta, super::META_KEY_CMD_ARGS, "[]");
-        let env_str = super::super::obj::meta_get_string(&block_meta, super::META_KEY_CMD_ENV, "{}");
-
         if cmd.is_empty() {
             return Err("ACP controller: no cmd specified in block meta".to_string());
         }
 
-        let args: Vec<String> = serde_json::from_str(&args_str).unwrap_or_default();
-        let env_vars: HashMap<String, String> = serde_json::from_str(&env_str).unwrap_or_default();
+        // `cmd:args` / `cmd:env` as `agent.open` stores them (an array and an
+        // object) or as a JSON string — before M4b-2 only the string form was
+        // read, so an `agent.open` launch lost both (spec §6.5.8).
+        let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
+        let mut env_vars = meta_string_map(&block_meta, super::META_KEY_CMD_ENV);
+        // Identity M4b-2: carry the block's row UID + token, layered onto
+        // that env. Buys no attribution today (ACP agents are not given
+        // agentmux-mcp) but keeps the counters true.
+        if let Some(mstore) = &self.mstore {
+            crate::server::agent_handlers::input::carry_block_identity_env(
+                mstore,
+                &self.block_id,
+                &mut env_vars,
+            );
+        }
 
         self.spawn_process(cmd, args, cwd, env_vars)
     }
@@ -853,6 +887,40 @@ impl Controller for AcpController {
 
 #[cfg(test)]
 mod tests {
+
+    /// Identity M4b-2 (spec §6.5.8): `agent.open` stores `cmd:args` as an
+    /// array and `cmd:env` as an object; ACP read only JSON strings, so
+    /// such a launch lost both. Both shapes now read the same.
+    #[test]
+    fn acp_reads_cmd_args_and_env_as_arrays_objects_or_json_strings() {
+        let mut meta = super::super::super::obj::MetaMapType::new();
+        meta.insert("cmd:args".to_string(), serde_json::json!(["--acp", "x"]));
+        meta.insert("cmd:env".to_string(), serde_json::json!({"K": "v"}));
+        assert_eq!(
+            super::meta_string_list(&meta, "cmd:args"),
+            vec!["--acp", "x"]
+        );
+        assert_eq!(
+            super::meta_string_map(&meta, "cmd:env")
+                .get("K")
+                .map(String::as_str),
+            Some("v")
+        );
+
+        meta.insert("cmd:args".to_string(), serde_json::json!("[\"--acp\"]"));
+        meta.insert("cmd:env".to_string(), serde_json::json!("{\"K\":\"w\"}"));
+        assert_eq!(super::meta_string_list(&meta, "cmd:args"), vec!["--acp"]);
+        assert_eq!(
+            super::meta_string_map(&meta, "cmd:env")
+                .get("K")
+                .map(String::as_str),
+            Some("w")
+        );
+
+        assert!(super::meta_string_list(&meta, "absent").is_empty());
+        assert!(super::meta_string_map(&meta, "absent").is_empty());
+    }
+
     use super::*;
 
     fn controller() -> AcpController {
