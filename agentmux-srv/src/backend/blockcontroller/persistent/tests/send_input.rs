@@ -914,6 +914,281 @@ fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_sessi
 /// reader hasn't cleared `inner.session_id` yet, this fallback would
 /// reattach `--resume` to the same dead sid and reproduce the
 /// identical failure, with nothing left to catch the repeat.
+/// Codex P1 on PR #3538: an eager resume (issue #3463) attempts `--resume`
+/// with NOTHING queued, so a stale id reaches `retry_after_resume_failure`
+/// with an empty batch. That is a terminal idle-resume failure, not a
+/// retry: no launch — but the recovery decision must still complete. The
+/// recovered id is adopted for the next message, and the controller
+/// reports `done` rather than sitting in "Reconnecting…" with no status
+/// ever published (the process-waiter hands this path `FireRetry`, not
+/// `PublishDone`, on the assumption a launch follows).
+#[test]
+fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_without_launching() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_dir = tmp.path().to_string_lossy().to_string();
+    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let dir = tmp.path().join("projects").join(&slug);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("d019e2e4-stale".to_string());
+        inner.spawn_generation = 1; // the doomed eager-resume process
+    }
+    let mut env_vars = HashMap::new();
+    env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir,
+        env_vars,
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.session_id,
+        Some("972a6a4f-live".to_string()),
+        "the recovered session is adopted so the NEXT message resumes it"
+    );
+    assert!(
+        inner.stdin_tx.is_none() && !inner.spawning_in_progress,
+        "nothing to send, so nothing is launched"
+    );
+    drop(inner);
+    assert_eq!(
+        c.get_status_snapshot().shellprocstatus,
+        STATUS_DONE,
+        "terminal status, not a silent return that strands the pane"
+    );
+}
+
+/// The no-candidate half of the case above: nothing on disk to recover, so
+/// the next message starts fresh — and the controller still settles `done`.
+#[test]
+fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_fresh_and_done() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("dead-sid".to_string());
+        inner.spawn_generation = 1;
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "dead-sid".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "dead-sid".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id, None, "no candidate: the next message starts fresh");
+    assert!(inner.stdin_tx.is_none(), "nothing launched");
+    drop(inner);
+    assert_eq!(c.get_status_snapshot().shellprocstatus, STATUS_DONE);
+}
+
+/// Codex P1 on PR #3551 (fifth round): a prompt that queued BEHIND the eager
+/// claim was never delivered, so the retry batch is empty even though
+/// accepted work is waiting. The settlement must not treat that as
+/// message-free: it hands the recovery candidate to the leftover respawn
+/// (via `leftover_resume_candidate`) and leaves status/error alone, since
+/// a spawn follows.
+#[test]
+fn retry_after_resume_failure_with_no_entries_hands_a_queued_prompt_and_its_candidate_to_the_leftover_respawn() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_dir = tmp.path().to_string_lossy().to_string();
+    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let dir = tmp.path().join("projects").join(&slug);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("d019e2e4-stale".to_string());
+        inner.spawn_generation = 1;
+        inner.spawning_in_progress = true; // the eager claim, still held
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"behind the eager claim\"}".to_string()));
+    }
+    let mut env_vars = HashMap::new();
+    env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir,
+        env_vars,
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id.as_deref(), Some("972a6a4f-live"), "the candidate is adopted");
+    assert_eq!(
+        inner.leftover_resume_candidate.as_deref(),
+        Some("972a6a4f-live"),
+        "and handed to respawn_once_for_leftover_queue so it resumes rather than clears"
+    );
+    assert_ne!(inner.proc_status, STATUS_DONE, "not a terminal settlement — a spawn follows");
+    assert_eq!(inner.pending_send_messages.len(), 1, "the queued prompt is untouched");
+    assert!(inner.spawning_in_progress, "the eager claim is untouched");
+}
+
+/// The other half: `respawn_once_for_leftover_queue` honours an adopted
+/// candidate instead of its usual clear-to-fresh, and consumes it.
+#[test]
+fn respawn_once_for_leftover_queue_resumes_an_adopted_candidate_instead_of_clearing_to_fresh() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawning_in_progress = true;
+        inner.session_id = Some("972a6a4f-live".to_string());
+        inner.leftover_resume_candidate = Some("972a6a4f-live".to_string());
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string()));
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    c.respawn_once_for_leftover_queue(config);
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.session_id.as_deref(),
+        Some("972a6a4f-live"),
+        "the candidate survives — this respawn resumes it; only a stale id gets cleared"
+    );
+    assert_eq!(inner.leftover_resume_candidate, None, "consumed by the respawn");
+    assert!(!inner.spawning_in_progress, "a failed respawn still releases the claim");
+}
+
+/// Codex P1 on PR #3551 (third round): the eagerly resumed CLI can reject
+/// a stale id fast enough for its waiter to fire while `try_eager_resume`
+/// still holds its own spawn claim. That claim is THIS generation's, not a
+/// newer one's — the settlement must run, and must leave the claim alone
+/// (it is the eager path's to release).
+#[test]
+fn retry_after_resume_failure_with_no_entries_runs_under_this_generations_own_unwinding_eager_claim() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("dead-sid".to_string());
+        inner.spawn_generation = 1;
+        inner.spawning_in_progress = true; // try_eager_resume has not released yet
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "dead-sid".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "dead-sid".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id, None, "the settlement ran: no candidate, so the next message starts fresh");
+    assert_eq!(inner.proc_status, STATUS_DONE, "and published the terminal status the waiter suppressed");
+    assert!(
+        inner.spawning_in_progress,
+        "the eager claim is not this settlement's to touch — it belongs to try_eager_resume"
+    );
+}
+
+/// Codex P1 on PR #3551: a message that arrived after the doomed process
+/// cleared `stdin_tx` but before the empty-batch settlement ran may already
+/// have spawned a NEWER generation with its own live session id. The
+/// settlement for the OLD generation must then touch nothing — not the
+/// session id, not the status — or a later restart resumes the wrong
+/// conversation.
+#[test]
+fn retry_after_resume_failure_with_no_entries_leaves_a_newer_generation_alone() {
+    // Codex's exact scenario (second round): NO recovery candidate, so the
+    // old code would have appended a `Fresh` disclosure — to the history of
+    // a generation that may be resuming a different conversation entirely.
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+    let block_id = "block-superseded-empty-retry".to_string();
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.clone(),
+        Some(broker),
+        None,
+        None,
+        Some(filestore.clone()),
+    );
+    {
+        let mut inner = c.inner.lock().unwrap();
+        // Generation 2 has taken over and installed its own session.
+        inner.spawn_generation = 2;
+        inner.session_id = Some("newer-live".to_string());
+        PersistentSubprocessController::set_status(&mut inner, STATUS_RUNNING);
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(), // no CLAUDE_CONFIG_DIR: nothing to recover
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    // Generation 1's settlement arrives late, with the CLI's error line.
+    c.retry_after_resume_failure(1, config, vec![], Some("stale-resume-error\n".to_string()), "d019e2e4-stale".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.session_id.as_deref(),
+        Some("newer-live"),
+        "a recovery result for a superseded generation must not overwrite the live session"
+    );
+    assert_eq!(inner.proc_status, STATUS_RUNNING, "and must not stamp `done` over a running generation");
+    drop(inner);
+    let appended = filestore.read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT).unwrap();
+    assert!(
+        appended.is_none(),
+        "and must append nothing — no `Fresh` disclosure, no stale error line — to the newer \
+         generation's history; got: {:?}",
+        appended.map(|b| String::from_utf8_lossy(&b).to_string())
+    );
+}
+
 #[test]
 fn respawn_once_for_leftover_queue_clears_inner_session_id_even_when_poison_resume_has_not_run_yet() {
     let c = controller();

@@ -36,6 +36,7 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         shutdown_generation: None,
         stop_exit: None,
         spawn_generation: 0,
+        leftover_resume_candidate: None,
         pending_questions: HashMap::new(),
         pending_permissions: HashMap::new(),
     }

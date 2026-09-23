@@ -202,6 +202,15 @@ impl PersistentSubprocessController {
         held_error_line: Option<String>,
         attempted_sid: String,
     ) {
+        // An empty batch is not a retry at all — see
+        // `settle_empty_resume_retry`. Decided BEFORE the "retrying" publish
+        // and the recovery search below (codex P1, second round on PR
+        // #3551): both are user-visible side effects, and for a superseded
+        // generation they must not happen either.
+        if entries.is_empty() {
+            self.settle_empty_resume_retry(retry_generation, config, held_error_line, attempted_sid);
+            return;
+        }
         // "Reconnecting…" starts here regardless of which branch below is
         // taken — the user-visible gap begins the moment a retry is known
         // to be needed, not once recovery search finishes. See §6.2.
@@ -242,16 +251,8 @@ impl PersistentSubprocessController {
                 )
             }
         }
-        let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
-            // Nothing to retry at all (shouldn't happen in practice —
-            // the batch always has at least the triggering message) —
-            // but if it ever does, this is a no-op, not a launch, so any
-            // held error line must still reach the user.
-            if let Some(line) = held_error_line {
-                self.flush_error_line_now(line);
-            }
-            return;
-        };
+        // Non-empty by the guard at the top.
+        let first = entries.remove(0);
         let rest = entries;
 
         match self.decide_retry_batch_action(retry_generation, &first, &rest) {
@@ -493,5 +494,150 @@ impl PersistentSubprocessController {
             front.append(&mut inner.pending_send_messages);
             inner.pending_send_messages = front;
         }
+    }
+}
+
+impl PersistentSubprocessController {
+    /// `retry_after_resume_failure`'s handling of an EMPTY retry batch:
+    /// `--resume <sid>` was attempted with nothing queued — the eager-resume
+    /// path (issue #3463) — and the CLI rejected the id before any prompt
+    /// arrived. There is no message to re-send, so this is a terminal
+    /// idle-resume failure, not a retry. Codex P1 on PR #3538: returning
+    /// early as the old empty-batch branch did left the pane with no
+    /// controller status ever published, because the process-waiter hands
+    /// `FireRetry` (not `PublishDone`) to the retry path on the assumption
+    /// that a launch follows. Complete the recovery *decision* without a
+    /// launch:
+    ///
+    /// - adopt whatever `find_recovery_session_id` found (or `None`) so the
+    ///   NEXT message resumes it through the same gated, tracked `--resume`
+    ///   a first-time resume gets — its outcome (`Resumed`) is emitted then,
+    ///   by the CLI's actual confirmation, never claimed here (codex P1 on
+    ///   PR #2693); with no candidate, `Fresh` IS decidable now and is
+    ///   disclosed now;
+    /// - publish the same terminal status a `PublishDone` exit would.
+    ///
+    /// No "Reconnecting…" is shown or resolved here, unlike the non-empty
+    /// path: no user turn is in flight, so there is no gap to narrate.
+    ///
+    /// EVERYTHING here is conditioned on this retry's generation still
+    /// owning the controller state (codex P1 on PR #3551, both rounds): a
+    /// message that arrived after the doomed process cleared `stdin_tx` but
+    /// before this ran may already have spawned a newer generation with its
+    /// own live session id — possibly resuming a DIFFERENT conversation.
+    /// Overwriting that id, stamping `done` over it, or appending a `Fresh`
+    /// disclosure to its history would each be wrong. The check runs twice:
+    /// once before the recovery search (which does disk I/O outside the
+    /// lock, and must not even start for a superseded generation), and
+    /// again under the same lock acquisition as the mutation, so nothing
+    /// that raced in during the search can be overwritten either.
+    /// `spawn_generation` is bumped in the same lock acquisition that
+    /// installs a new spawn, and `spawning_in_progress` covers the claim
+    /// window before it — together they say whether anyone has moved on.
+    ///
+    /// The side effects (outcome frame, status publish, error flush) run
+    /// UNDER that same lock acquisition, not after it (reagent P1 and codex
+    /// P1 on PR #3551, rounds three and four). Every scheme that released
+    /// the lock first had a window: a check-then-act with nothing holding
+    /// the state still, or a spawn claim that either this settlement took
+    /// (fine) or someone else already held (the eager path's own unwinding
+    /// claim — whose owner could release it mid-effect and let a send
+    /// become a newer generation while the `Fresh` line was still being
+    /// written). Holding `inner` across the effects makes the window not
+    /// exist: a concurrent `decide_send_action` blocks on the lock and,
+    /// once it gets it, becomes a spawner on the already-adopted session.
+    /// This is safe because nothing below re-enters the controller — the
+    /// broker and event bus are `mpsc` channel sends, the block-file append
+    /// and failure persistence touch the file store and SQLite only — and
+    /// cheap enough for a path taken once per failed eager resume. It is
+    /// the one deliberate exception to the file's convention of dropping
+    /// `inner` before effects, which exists because most effect handlers
+    /// call back into methods that lock it; these three do not.
+    pub(super) fn settle_empty_resume_retry(
+        &self,
+        retry_generation: u64,
+        config: PersistentSpawnConfig,
+        held_error_line: Option<String>,
+        attempted_sid: String,
+    ) {
+        // Ownership is generation + no live process — deliberately NOT
+        // `!spawning_in_progress` (codex P1 on PR #3551, third round). That
+        // flag can still be THIS generation's own eager claim: the eagerly
+        // resumed CLI can reject a stale id fast enough for its waiter to
+        // fire before `try_eager_resume` reaches the arm that releases it.
+        // Treating that as "superseded" dropped the whole settlement while
+        // `FireRetry` had already suppressed the waiter's `PublishDone` —
+        // status stuck on `running`, recovery candidate and `Fresh` lost.
+        // A genuinely newer generation is identified by `spawn_generation`,
+        // which `spawn_process` bumps under the lock before anything of the
+        // new process exists; a newer spawner that has claimed but not yet
+        // bumped has no session of its own yet, and adopting the recovered
+        // id underneath it is exactly what it would then `--resume`.
+        let owns = |inner: &PersistentInner| inner.spawn_generation == retry_generation && inner.stdin_tx.is_none();
+        if !owns(&self.inner.lock().unwrap()) {
+            tracing::debug!(
+                block_id = %self.block_id,
+                retry_generation,
+                "empty resume-retry settlement superseded by a newer generation — nothing to do"
+            );
+            return;
+        }
+        let recovered = self.find_recovery_session_id(&config);
+        // Second check, mutation, and every side effect under ONE lock
+        // acquisition — see the doc comment for why nothing may sit
+        // between them.
+        let mut inner = self.inner.lock().unwrap();
+        if !owns(&inner) {
+            return;
+        }
+        inner.session_id = recovered.clone();
+        // Accepted prompts queued behind the eager spawn claim (codex P1 on
+        // PR #3551, fifth round): they never reached the doomed process, so
+        // they are not in the (empty) retry batch — but they are real work,
+        // and this is NOT a message-free settlement. The eager path's own
+        // drain will find the dead `stdin_tx`, stall, and hand them to
+        // `respawn_once_for_leftover_queue`; leave it the candidate so that
+        // respawn resumes it instead of clearing to fresh, and leave the
+        // terminal status and the held error line alone — a spawn follows
+        // immediately, and the CLI's stale-resume error would otherwise
+        // show as a stale bubble right before a successful reply (reagentx
+        // P1 on PR #2371's reasoning). `Fresh` is still disclosed when
+        // there is nothing to recover: that decision is final either way.
+        let queued_behind_claim = !inner.pending_send_messages.is_empty();
+        if queued_behind_claim {
+            inner.leftover_resume_candidate = recovered.clone();
+        } else {
+            Self::set_status(&mut inner, STATUS_DONE);
+        }
+        if recovered.is_none() {
+            self.emit_session_outcome_now(persistent_resume::SessionOutcome::Fresh, attempted_sid, None);
+        }
+        if queued_behind_claim {
+            drop(inner);
+            return;
+        }
+        // `publish_status` would re-lock `inner`; build the same snapshot
+        // from the guard we already hold.
+        if let Some(ref broker) = self.broker {
+            let status = BlockControllerRuntimeStatus {
+                blockid: self.block_id.clone(),
+                version: inner.status_version,
+                shellprocstatus: inner.proc_status.clone(),
+                shellprocconnname: "local".to_string(),
+                shellprocexitcode: inner.proc_exit_code,
+                shellprocpid: None,
+                shellprocname: String::new(),
+                spawn_ts_ms: None,
+                is_agent_pane: true,
+                turn_active: self.health_monitor.is_active_turn(),
+            };
+            super::super::publish_controller_status(broker, &status);
+        }
+        // Nothing was accepted from the user, but the CLI's own account of
+        // why the resume failed still reaches them (codex P2 on PR #2371).
+        if let Some(line) = held_error_line {
+            self.flush_error_line_now(line);
+        }
+        drop(inner);
     }
 }
