@@ -32,6 +32,11 @@ pub struct CronCreateRequest {
     pub prompt: String,
     /// Target agent id. Required — no implicit self-targeting from HTTP.
     pub target: String,
+    /// Identity M3: the target's UID, resolved at the MCP boundary (spec
+    /// §5.4 — resolution at authoring time) and CARRIED here. Absent → the
+    /// server resolves `target` itself as a counted fallback.
+    #[serde(default)]
+    pub target_uid: String,
     #[serde(default)]
     pub created_by: String,
     pub max_fires: Option<i64>,
@@ -178,15 +183,16 @@ pub(super) async fn handle_cron_create(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
     };
 
-    // Identity M1b: resolve the typed target to its UID NOW, while the
-    // author is present (spec §5.4). Dual-written beside `target`; the job
-    // still fires by `target` in this phase. Empty if it did not resolve —
-    // never guessed, and the miss is counted (spec §9.2).
-    let target_uid = crate::backend::agent_resolve::resolve_uid_for_dual_write(
-        &state.mstore,
-        &req.target,
-        "cron_create.target",
-    );
+    // Identity M3: the target's UID is stored only if the caller CARRIED
+    // one, resolved at the boundary where the name was typed (spec §5.4).
+    // This handler never turns a name into an identity (§2 rule 1): the job
+    // fires by `target_uid` when set, so a server-side guess would deliver
+    // to whichever agent it found, in any channel (review on #3563). A named
+    // target with no carried UID keeps firing by name until M5, counted.
+    let target_uid = req.target_uid.trim().to_string();
+    if target_uid.is_empty() && !req.target.trim().is_empty() {
+        crate::backend::agent_resolve::record_uid_fallback("cron_create.uid_not_carried");
+    }
 
     let job = CronJob {
         id: Uuid::new_v4().to_string(),

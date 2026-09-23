@@ -3,8 +3,8 @@
 **Date:** 2026-09-23
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
-work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3–M5 not
-started.
+work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
+M4–M5 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -907,7 +907,7 @@ changes two things at once.
   (shared store v11, mirrored in the identity store), dual-written and
   read by nothing. Two mechanisms, deliberately: the target is *resolved*
   once at enqueue/create through `agent_resolve::resolve_uid_for_dual_write`
-  (§5.4 — authoring time, never fire time), and the claimer's UID is
+  (§5.4 — authoring time, never fire time; removed in M3, below), and the claimer's UID is
   *carried* — `agentmux-mcp` sends `AGENTMUX_AGENT_UID` on `WorkClaim`,
   with resolution of `agent_id` only as a counted fallback. Measured and
   recorded rather than hidden:
@@ -983,8 +983,81 @@ changes two things at once.
   particular that a persistent controller can legally register *before* its
   row exists and be upgraded in place, and that §7's "registration
   unchanged" was false for the frontend presence path.
-- **M3 — Work queue and cron.** Columns hold UIDs; one-time backfill of live
-  rows. Resolution moves to the MCP boundary so tool arguments stay readable.
+- **M3 — Work queue and cron.** Columns hold UIDs. Resolution moves to the
+  MCP boundary so tool arguments stay readable. (The one-time backfill this
+  bullet originally named was reviewed out; see below.)
+
+  **Shipped in #3563.** §5.1's entry point exists
+  (`backend/name_resolution.rs::resolve_name_to_uid`), reachable only
+  through `POST /agentmux/agents/resolve`, with
+  `scripts/check-name-resolver-callers.sh` as §9.3's grep gate. `agentmux-mcp`
+  resolves `WorkEnqueue.target_agent` and `CronCreate.to` at the boundary,
+  carries the UID, and hands an ambiguous name back to the model with the
+  candidates (§5.2). A cron job with a captured UID fires by UID; a
+  UID-addressed work item is claimable by that identity under any display
+  name. Decisions and deviations, recorded:
+  - **No backfill — neither rewrite nor drain** (§12's open question,
+    answered a third way). The queue and cron tables are global and carry
+    no channel column, while a name can only be resolved against one
+    channel's `db_agents`; a channel-scoped backfill would bind a row to
+    whichever channel happened to run first and had a same-named agent —
+    and once bound, the UID path delivers there even after a rename
+    (ReAgent P1 on #3563; the first cut of this phase shipped exactly that
+    migration and was reviewed out). Pre-M3 rows keep resolving by name
+    through the name paths that stay until M5, counted, and age out as
+    they complete; new rows carry a UID from the boundary. Nothing is
+    guessed and nothing is lost.
+  - **A UID-addressed item is claimable by that identity only** — the name
+    branch of the claim predicate applies to rows with no UID, never as a
+    second way into a UID-addressed one (ReAgent P1 on #3563: the first
+    cut let an exact same-name claimer through, and its test had dodged
+    that case with a different-case name). A claimer that registered
+    name-only before its row existed is therefore locked out of its own
+    UID-targeted work unless srv can find its UID another way — see the
+    next item.
+  - **The server never turns a name into an identity** (§2 rule 1, made
+    load-bearing here). M1b's `resolve_uid_for_dual_write` — tiers that
+    reach the host-wide slug registry and pass template ids through — was
+    harmless while nothing read its output; once the claim predicate and
+    the cron fire read the UID columns, a server-side guess would bind a
+    row to whatever agent the guess found, in any channel (adversarial
+    review on #3563). It is deleted. `handle_work_enqueue` and
+    `handle_cron_create` store a UID only if the caller carried one (the
+    MCP, from the resolve endpoint), counting `*.uid_not_carried`;
+    `handle_work_claim` takes the claimer's UID from its carried env, else
+    from the row on its own `block_id` (`uid_for_block`, the presence
+    path's resolution — identity by block, never by name), counting
+    `work_claim.uid_not_carried`. That covers the launch paths that spawn
+    without `AGENTMUX_AGENT_UID` (continuation resume, App Server agents,
+    `agent.send`) whenever their block has a row.
+  - **A live registration with no UID takes its block's row UID** in the
+    resolver, so an agent registered before its row existed is one
+    candidate with that row, not ambiguous with itself.
+  - **Only outcomes that leave a row on the name path are counted**
+    (`resolve.unidentified`, `resolve.store_error`, `*.uid_not_carried`,
+    `cron.fire_by_name`); `One`, `None` and `Ambiguous` are answers, not
+    fallbacks. A cron fire that reaches nobody (inject's `success:false`)
+    is logged at `warn`.
+  - **Accepted, recorded:** (a) M1b rows authored by the deleted resolver
+    keep their UIDs; no release carries M1b (v0.56.9 predates it), so this
+    touches only dev builds from the day M1b and M3 were both on main.
+    (b) A carried UID is stored unvalidated; until M4 it is an assertion
+    like `agent_id`, and a stale one leaves the item unclaimable rather
+    than misrouted. (c) Heartbeat, complete and release still match
+    `claimed_by` by name — M4's scope. (d) §5.2's candidate format omits
+    "started"; the registry records no start time yet. (e) The §9.2
+    counters have no production reader; one must exist before M5 can read
+    its exit criterion.
+  - **A fourth variant, `Unidentified`.** A live block with no `db_agents`
+    row exists and is reachable by name; returning `None` would say it does
+    not. The spec's three-variant enum did not account for M0's finding.
+  - **The resolver lists, it does not pick** — which is why it *can* match
+    display names case-insensitively where §1.1 showed a picking resolver
+    must not: one match resolves, a collision is refused with candidates,
+    nothing is misrouted.
+  - **Name paths stay** for rows with no UID in the claim predicate and in
+    the cron fire until M5, counted (`cron.fire_by_name`), so a name-only
+    row or target still works.
 - **M4 — Proven identity.** Per-agent token; authz reads connection identity;
   body `agent_id` demoted to untrusted. Closes #3501.
 - **M5 — Remove the scaffolding.** Delete slug fallbacks, delete
@@ -1103,7 +1176,7 @@ unverified.
   shows deriving is impossible.
 - **Medium, deliberately unresolved here:** the per-agent token's lifetime and
   rotation (§6); whether M3's backfill should rewrite live work-queue rows or
-  drain them; whether `AGENTMUX_AGENT_ID` should be repurposed in place or
+  drain them (answered in M3: neither — no backfill, §9.1); whether `AGENTMUX_AGENT_ID` should be repurposed in place or
   retired alongside a new name. Each is a decision for its own phase, flagged
   rather than guessed — the predecessor's habit of resolving such questions in
   prose and discovering the answer in production is what this document exists

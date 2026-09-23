@@ -2025,6 +2025,32 @@ impl Store {
         Ok(matches.pop())
     }
 
+    /// Every non-template, non-hidden agent a typed name could mean (identity
+    /// M3, spec §5): exact slug, or `name`/`instance_name` case-insensitively.
+    /// Lists rather than picks — the caller decides what to do with several.
+    pub fn agents_matching_name(&self, typed: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, slug, instance_name FROM db_agents
+             WHERE is_template = 0 AND user_hidden = 0
+               AND (slug = ?1 OR name = ?1 COLLATE NOCASE OR instance_name = ?1 COLLATE NOCASE)
+             ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![typed], |row| {
+            Ok(AgentNameMatch {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                slug: row.get(2)?,
+                instance_name: row.get(3)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Partial update of an agent's launch state. Only `Some` fields are
     /// written; `None` leaves that column untouched. `Some("")` explicitly
     /// clears (the `updateagentinstance` command contract, and
@@ -2273,6 +2299,15 @@ impl Store {
             Err(e) => Err(e.into()),
         }
     }
+}
+
+/// One row `agents_matching_name` found (identity M3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNameMatch {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub instance_name: String,
 }
 
 /// The `db_agents` columns every instance read selects, in the order

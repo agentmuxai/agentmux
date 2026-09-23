@@ -669,7 +669,7 @@ pub(crate) const WORK_ENQUEUE_TOOL: &str = r#"{
       "title":        { "type": "string",  "description": "Short human-scannable summary (e.g. 'repro the minimize distortion on a 3-pane cross-split')" },
       "payload":      { "type": "string",  "description": "The full instruction injected into whichever agent claims this. Write it as a standalone prompt: the claimant has none of your conversation context." },
       "kind":         { "type": "string",  "description": "Optional free-form tag used to filter claims (e.g. 'review', 'repro', 'triage'). Agents can claim only a kind they handle. Omit for untyped work anyone may take." },
-      "target_agent": { "type": "string",  "description": "Optional: restrict to ONE agent id. Mutually exclusive with target_group. Omit so any agent can claim — that is the normal case and the point of the queue." },
+      "target_agent": { "type": "string",  "description": "Optional: restrict to ONE agent, by name or by uid. Mutually exclusive with target_group. Omit so any agent can claim — that is the normal case and the point of the queue. A name held by several agents is refused with the candidates; retry with the uid." },
       "target_group": { "type": "string",  "description": "Optional: restrict to members of an agent group id. Mutually exclusive with target_agent." },
       "priority":     { "type": "integer", "description": "Higher claims first; ties break oldest-first. Default 0. Use sparingly — everything urgent means nothing is." },
       "not_before":   { "type": "integer", "description": "Unix ms timestamp; the item is not claimable before it. Use for deferred work ('look at this after the release lands'). Omit for immediately claimable." },
@@ -754,7 +754,7 @@ pub(crate) const CRON_CREATE_TOOL: &str = r#"{
       "name":       { "type": "string",  "description": "Human-readable label for the job (e.g. 'daily-standup-check')" },
       "expression": { "type": "string",  "description": "5-field UTC cron expression: 'min hour dom month dow' (e.g. '0 9 * * 1-5' = 9am weekdays). Standard cron syntax; ranges, lists, and step values are supported." },
       "prompt":     { "type": "string",  "description": "The prompt or slash command to inject at each scheduled fire" },
-      "to":         { "type": "string",  "description": "Target agent id to inject into. Required." },
+      "to":         { "type": "string",  "description": "Target agent, by name or by uid. Required. A name held by several agents is refused with the candidates; retry with the uid — the job then fires by uid, so renaming the agent later cannot break it." },
       "max_fires":  { "type": "integer", "description": "Auto-disable after this many fires (the job row stays in DB for audit; use CronDelete to remove it). Omit for unlimited." },
       "max_age_secs": { "type": "integer", "description": "Auto-disable this many seconds after creation, regardless of fire count (a hard staleness/stuck-loop bound, matching the spirit of native CronCreate's 7-day auto-expiry). Omit for no expiry — appropriate for genuinely long-running cross-agent automations; set this when babysitting something that should have a natural end (e.g. 'stop checking this PR after 6 hours even if it's still open')." }
     },

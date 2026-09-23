@@ -69,6 +69,11 @@ pub(super) struct EnqueueRequest {
     pub kind: String,
     #[serde(default)]
     pub target_agent: String,
+    /// Identity M3: the target's UID, resolved at the MCP boundary (spec
+    /// §5) and CARRIED here. When present it is stored as-is; when absent
+    /// the server resolves `target_agent` itself as a counted fallback.
+    #[serde(default)]
+    pub target_agent_uid: String,
     #[serde(default)]
     pub target_group: String,
     #[serde(default)]
@@ -102,18 +107,18 @@ pub(super) async fn handle_work_enqueue(
         );
     }
 
-    // Identity M1b: resolve the typed target to its UID NOW, while the
-    // author is present (spec §5.4) — a claim later must never resolve a
-    // name. Dual-written beside `target_agent`; the claim predicate still
-    // matches on the slug in this phase. Empty if it did not resolve, and
-    // the miss is counted (spec §9.2). Resolution reads the per-channel
-    // object store, so a target that lives in another channel stays empty
-    // here — recorded, not guessed.
-    let target_agent_uid = crate::backend::agent_resolve::resolve_uid_for_dual_write(
-        &state.mstore,
-        &req.target_agent,
-        "work_enqueue.target_agent",
-    );
+    // Identity M3: the target's UID is stored only if the caller CARRIED
+    // one — resolved at the boundary where the name was typed (the MCP, via
+    // `POST /agentmux/agents/resolve`, spec §5). This handler never turns a
+    // name into an identity itself (§2 rule 1): since M3 the UID decides who
+    // may claim the item, and a server-side guess — the host-wide slug
+    // registry, a template id — would bind it to whichever agent the guess
+    // found, in any channel (review on #3563). A named target with no
+    // carried UID keeps the name path until M5, counted (§9.2).
+    let target_agent_uid = req.target_agent_uid.trim().to_string();
+    if target_agent_uid.is_empty() && !req.target_agent.trim().is_empty() {
+        crate::backend::agent_resolve::record_uid_fallback("work_enqueue.uid_not_carried");
+    }
 
     let now = now_ms();
     let item = WorkItem {
@@ -152,12 +157,18 @@ pub(super) struct ClaimRequest {
     /// The claiming agent's id.
     pub agent_id: String,
     /// The claiming agent's UID, carried from its own `AGENTMUX_AGENT_UID`
-    /// (identity M1a). Optional: a pre-M1a spawn or a quick-launch pane has
-    /// none. Written to `claimed_by_uid`; not part of eligibility. Until M4
-    /// verifies it against the agent's token this is an assertion like
-    /// `agent_id` is — recorded, not trusted.
+    /// (identity M1a). Optional: a pre-M1a spawn, a continuation resume, an
+    /// App Server agent or a quick-launch pane has none. Since M3 it decides
+    /// eligibility for UID-addressed items, and is written to
+    /// `claimed_by_uid`. Until M4 verifies it against the agent's token this
+    /// is an assertion like `agent_id` is — recorded, not trusted.
     #[serde(default)]
     pub agent_uid: String,
+    /// The claimer's block, carried from its `AGENTMUX_BLOCKID`. When no UID
+    /// was carried, the UID is taken from the row shown on this block — the
+    /// identity the block already has, never one derived from `agent_id`.
+    #[serde(default)]
+    pub block_id: String,
     #[serde(default)]
     pub kind: Option<String>,
     /// Group ids this agent belongs to. Resolved by the CALLER — group
@@ -167,6 +178,29 @@ pub(super) struct ClaimRequest {
     pub groups: Vec<String>,
     #[serde(default)]
     pub lease_ms: Option<i64>,
+}
+
+/// The claimer's UID: carried, else its block's row, else `""` (name path
+/// only). See `handle_work_claim`.
+async fn claimer_uid(state: &AppState, req: &ClaimRequest) -> String {
+    let carried = req.agent_uid.trim();
+    if !carried.is_empty() {
+        return carried.to_string();
+    }
+    crate::backend::agent_resolve::record_uid_fallback("work_claim.uid_not_carried");
+    let block_id = req.block_id.trim().to_string();
+    if block_id.is_empty() {
+        return String::new();
+    }
+    // A synchronous store read, so off the async worker (incident #1782).
+    let mstore = state.mstore.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::backend::agent_resolve::uid_for_block(&mstore, &block_id)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default()
 }
 
 pub(super) async fn handle_work_claim(
@@ -191,19 +225,14 @@ pub(super) async fn handle_work_claim(
         tracing::warn!(target: "workqueue", error = %e, "reap before claim failed");
     }
 
-    // Identity M1b: prefer the UID the claimer CARRIED. Only if it carried
-    // none, fall back to resolving its `agent_id` — and count that fallback
-    // (spec §9.2), because a non-zero count names a launch path that still
-    // reconstructs identity instead of carrying it.
-    let agent_uid = if !req.agent_uid.trim().is_empty() {
-        req.agent_uid.trim().to_string()
-    } else {
-        crate::backend::agent_resolve::resolve_uid_for_dual_write(
-            &state.mstore,
-            &req.agent_id,
-            "work_claim.agent_id_not_carried",
-        )
-    };
+    // Identity M3: the claimer's UID is the one it CARRIED, else the UID of
+    // the row on its own block (the presence path's resolution, §0.1) —
+    // never one derived from its name (§2 rule 1). Deriving it from the name
+    // reached the host-wide slug registry, so a claimer with no UID in its
+    // env could be locked out of its own UID-addressed work, or handed
+    // another channel's (review on #3563). Each fallback is counted (§9.2):
+    // a non-zero count names a launch path that does not carry its UID.
+    let agent_uid = claimer_uid(&state, &req).await;
 
     let filter = ClaimFilter {
         kind: req.kind.filter(|k| !k.is_empty()),
