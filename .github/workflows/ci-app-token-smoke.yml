@@ -105,7 +105,11 @@ jobs:
       # the @a5af scope lives under a user account. This very likely also
       # explains the standing 403 write_package failure when publishing
       # @a5af/secrets. Fix is to move the scope to an org, or keep one narrow
-      # fine-grained PAT for packages only.
+      # CLASSIC PAT with read:packages only. Not fine-grained: GitHub Packages
+      # accepts only classic PATs, and fine-grained PATs have no packages
+      # permission to grant (docs: "GitHub Packages only supports
+      # authentication using a personal access token (classic)"). Resolved
+      # 2026-09-23 with a classic read:packages-only PAT.
       - name: "PAT #2 — A5AF_PACKAGES_TOKEN: authenticate to GitHub Packages"
         continue-on-error: true
         env:
