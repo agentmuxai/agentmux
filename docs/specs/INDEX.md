@@ -974,6 +974,7 @@ partial list.
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 | [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | TRACKING — Agent availability & automatic backgrounding |
+| [`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23`](TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md) | TRACKING — Agent pane bounded live window (phase progress) |
 | [`TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | TRACKING — Typing & terminal input responsiveness |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions |
 
