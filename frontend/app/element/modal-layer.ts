@@ -26,7 +26,6 @@ export type ModalLayerRequest =
     | BrowserAuthRequest
     | AgentIdentityRequest
     | AgentMemoryRequest
-    | AgentStashRequest
     | BundleImportSelectRequest
     | BundleImportPreviewRequest
     | BundleImportConfirmRequest;
@@ -319,27 +318,20 @@ export interface AgentMemoryRequest {
     workingDirectory: string;
 }
 
-/**
- * Agent Stash modal — opened by the single backpack icon in the agent
- * pane header. Unified tabbed container hosting the former Identity
- * ("Accounts") + native Memory surfaces as tabs; supersedes the separate
- * agent-identity / agent-memory icons. Structured so future primitives
- * (MCP Servers · Skills · Briefs · Bundle) slot in as additional tabs.
- * Named "Stash" (not "Armory") to distinguish it from the global Armory
- * pane — see docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
- * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b.
+/*
+ * `AgentStashRequest` (kind: "agent-stash") used to live here — the unified
+ * tabbed Accounts/Memory/MCP/Skills/Startup/Registration modal opened by the
+ * backpack icon in the agent pane header.
+ *
+ * DELETED, not deprecated-in-place, by
+ * SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.5: Stash is a
+ * top-anchored drawer now (agent-view.tsx), so there is no modal request to
+ * make. This deliberately breaks with the pattern set by the two dead-but-
+ * declared kinds just above (`agent-identity` / `agent-memory`, both kept
+ * "for any future direct callers" when Stash superseded them) — the spec
+ * calls for decommissioning the overlay, and a request kind nothing can
+ * render is worse than no kind at all.
  */
-interface AgentStashRequest {
-    kind: "agent-stash";
-    /** Provider/definition id — used by the Accounts tab (read-only linked-
-     *  accounts view, keyed on agentId alone) and the Memory tab. */
-    agentId: string;
-    agentName: string;
-    /** Agent's working directory — used to compute the memory folder path. */
-    workingDirectory: string;
-    /** Which tab to open on. Defaults to "accounts". */
-    initialTab?: "accounts" | "memory";
-}
 
 /**
  * Armory Bundle Format (ABF) import — Phase 3

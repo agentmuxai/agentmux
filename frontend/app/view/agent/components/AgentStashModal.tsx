@@ -54,7 +54,17 @@ interface AgentStashModalProps {
     agentName: string;
     workingDirectory: string;
     initialTab?: StashTabId;
-    onClose: () => void;
+    /**
+     * Forwarded to the Personal Memory tab's footer Close button — the one
+     * piece of this component that ever needed it. Omitted when hosted
+     * somewhere with no modal to dismiss (the Stash drawer,
+     * SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.4), which hides that
+     * footer rather than rendering a dead button. Everything else here is
+     * already host-agnostic: this component never rendered modal chrome of
+     * its own (`modal-dispatch.tsx` wrapped it), which is what makes
+     * re-hosting it in a drawer a prop change rather than a rewrite.
+     */
+    onClose?: () => void;
 }
 
 interface StashTabDef {

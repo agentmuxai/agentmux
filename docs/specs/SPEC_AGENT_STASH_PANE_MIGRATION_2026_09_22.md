@@ -1,10 +1,21 @@
 # Spec: Promote Agent Stash from a modal to a top-anchored drawer
 
-**Status:** proposed — nothing in this spec is implemented. Follows PR
-#3516 (the backpack icon became a real toggle) and PR #3522 (the toggle's
-active state is now an accent-color tint, not a bordered square), both
-shipped and both reused here unmodified — this revision only changes what
-the toggle opens.
+**Status:** implemented in PR #3540 — the drawer, its reducer state, the
+`ResizableDetailsDrawer` anchor generalization, the §3.2a density pass and
+the §3.5 modal decommissioning all shipped together there. Builds on PR #3516
+(the backpack icon became a real toggle) and PR #3522 (its active state is
+an accent-color tint), both reused unmodified — this spec only changed
+what the toggle opens.
+
+Three §3 details were corrected against the real code during
+implementation and are marked inline below: the open/closed flag is
+pane-reducer state, not an atom (§3.3); the drawer renders outside the
+pane's `zoom` wrapper (§3.1); and porting the content was a prop change
+rather than a rewrite (§3.4). §6's two gating open questions are answered
+(independent drawers; a CSS height cap protects the transcript). What
+remains unshipped: the §3.2 responsive floor is applied to Stash but NOT
+yet enforced for Settings/Toolchain/Armory, and Toolchain's confirmed
+zero-coverage gap (§2.3) is still open.
 
 ## Revision history
 

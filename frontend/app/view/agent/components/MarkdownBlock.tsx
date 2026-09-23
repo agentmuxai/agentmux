@@ -12,6 +12,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { useNodePeek } from "../hooks/useNodePeek";
+import { useAgentDormant } from "../agent-dormancy";
 import type { MarkdownNode } from "../types";
 import { PeekOverlay } from "./PeekOverlay";
 
@@ -59,8 +60,28 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     let lastCommitAt = 0;
     let streaming = false;
     let trailing: ReturnType<typeof setTimeout> | undefined;
+
+    // Keep-alive leaves a backgrounded agent tab MOUNTED (visibility, not
+    // existence — `pane-leaf-chrome.tsx`), so without this gate every
+    // backgrounded-but-streaming pane keeps parsing markdown on the same main
+    // thread as the pane being typed into: four busy agents, four panes' worth
+    // of work, one thread. See
+    // `docs/analysis/ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md` §4.
+    //
+    // Deferred, not dropped. Only the render is skipped — the document store
+    // behind `props.node` stays current, so nothing is lost and off-pane
+    // activity indicators keep updating. Reading `dormant()` inside the effect
+    // keeps it a dependency, so becoming visible re-runs this and commits
+    // whatever arrived meanwhile without needing a further update.
+    const dormant = useAgentDormant();
+
     createEffect(() => {
         const text = props.node.content; // dep: re-runs on each streamed update
+        if (dormant()) {
+            // Don't leave a trailing render armed to paint an invisible pane.
+            if (trailing) clearTimeout(trailing);
+            return;
+        }
         const now = performance.now();
         if (trailing) clearTimeout(trailing);
         if (now - lastCommitAt >= STREAM_RENDER_MS) {

@@ -245,6 +245,9 @@ pub(crate) fn spawn_auth_cli(
                         // (the account's own isolation dir) failed to
                         // resolve at spawn, persist_oauth_success skips
                         // persistence and the session still succeeds.
+                        // Read the email BEFORE finish_success consumes the
+                        // session — see AuthSessionManager::captured_email.
+                        let login_email = mgr_stdout.captured_email(&sid_stdout);
                         let (bundle_id, account_id) = persist_oauth_success(
                             &mstore_stdout,
                             &identity_store_stdout,
@@ -255,6 +258,7 @@ pub(crate) fn spawn_auth_cli(
                             &provider_id_stdout,
                             bundle_dir_stdout.as_deref(),
                             &sid_stdout,
+                            login_email.as_deref(),
                         );
                         mgr_stdout.finish_success(&sid_stdout, bundle_id, account_id);
                         success_transitioned_drain.store(true, Ordering::Release);
@@ -310,6 +314,9 @@ pub(crate) fn spawn_auth_cli(
                     )
                     .await
                     {
+                        // Read the email BEFORE finish_success consumes the session
+                        // — see AuthSessionManager::captured_email.
+                        let login_email = mgr_for_task.captured_email(&session_id_for_task);
                         let (bundle_id, account_id) = persist_oauth_success(
                             &mstore_for_task,
                             &identity_store_for_task,
@@ -320,6 +327,7 @@ pub(crate) fn spawn_auth_cli(
                             &provider_id_for_task,
                             bundle_dir_for_task.as_deref(),
                             &session_id_for_task,
+                            login_email.as_deref(),
                         );
                         mgr_for_task.finish_success(&session_id_for_task, bundle_id, account_id);
                     } else {
@@ -591,6 +599,9 @@ fn spawn_auth_cli_pty(
                             let success_for_detached = Arc::clone(&success_transitioned_drain);
                             let handle = tokio::runtime::Handle::current().spawn(async move {
                                 if confirm_authenticated(&cli, &args, &env).await {
+                                    // Read the email BEFORE finish_success consumes the session
+                                    // — see AuthSessionManager::captured_email.
+                                    let login_email = mgr2.captured_email(&sid2);
                                     let (bundle_id, account_id) = persist_oauth_success(
                                         &mstore2,
                                         &identity_store2,
@@ -601,6 +612,7 @@ fn spawn_auth_cli_pty(
                                         &provider_id2,
                                         bundle_dir2.as_deref(),
                                         &sid2,
+                                        login_email.as_deref(),
                                     );
                                     mgr2.finish_success(&sid2, bundle_id, account_id);
                                     // Atomic set ONLY on confirm-success
@@ -667,6 +679,9 @@ fn spawn_auth_cli_pty(
                     )
                     .await
                     {
+                        // Read the email BEFORE finish_success consumes the session
+                        // — see AuthSessionManager::captured_email.
+                        let login_email = mgr_for_task.captured_email(&session_id_for_task);
                         let (bundle_id, account_id) = persist_oauth_success(
                             &mstore_for_task,
                             &identity_store_for_task,
@@ -677,6 +692,7 @@ fn spawn_auth_cli_pty(
                             &provider_id_for_task,
                             bundle_dir_for_task.as_deref(),
                             &session_id_for_task,
+                            login_email.as_deref(),
                         );
                         mgr_for_task.finish_success(&session_id_for_task, bundle_id, account_id);
                     } else {

@@ -27,7 +27,15 @@ interface AgentNativeMemoryModalProps {
     agentId: string;
     agentName: string;
     workingDirectory: string;
-    onClose: () => void;
+    /**
+     * Omitted when this renders somewhere with no "close me" affordance of
+     * its own to drive — the Stash DRAWER
+     * (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.4), where closing is
+     * the header icon's job and a Close button inside one of six tabs would
+     * be meaningless. The footer is hidden entirely in that case rather than
+     * rendering a dead button.
+     */
+    onClose?: () => void;
 }
 
 /**
@@ -306,11 +314,13 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                 detail={detailView}
             />
 
-            <div class="agent-memory-modal-footer">
-                <button class="agent-memory-modal-btn" data-modal-dismiss onClick={props.onClose}>
-                    Close
-                </button>
-            </div>
+            <Show when={props.onClose}>
+                <div class="agent-memory-modal-footer">
+                    <button class="agent-memory-modal-btn" data-modal-dismiss onClick={() => props.onClose?.()}>
+                        Close
+                    </button>
+                </div>
+            </Show>
         </div>
     );
 };

@@ -40,6 +40,14 @@ export interface SecretRef {
 }
 
 export interface AccountContext {
+    /**
+     * The account's login email, recorded from the provider's own auth output
+     * when it reports one (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md).
+     *
+     * Absent — never empty — when the provider surfaces no email, so "nothing
+     * to show" stays distinguishable from "signed in as ''".
+     */
+    email?: string;
     github_username?: string;
     github_scopes?: string[];
     aws_profile?: string;
