@@ -166,3 +166,47 @@ export function resolveInitialRuntimeConfig(
     const model = overridesModel || providerModels?.find((m) => m.default)?.value || DEFAULT_RUNTIME_CONFIG.model;
     return { ...DEFAULT_RUNTIME_CONFIG, model };
 }
+
+/**
+ * Commit a launch to its block — identity M4b-3
+ * (docs/specs/SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.8).
+ *
+ * Order matters, so it lives here, testable apart from
+ * `launchAgentDefinition`:
+ * 1. Record the launch row (`CreateAgentInstanceCommand`).
+ * 2. One `SetMeta` carrying the block meta **and** the row's id as
+ *    `agentInstanceId` — in the same write as `agentId`, because setting
+ *    `agentId` mounts the agent view, whose own launch flow resyncs. `null`
+ *    when no row was recorded, so a stale stamp from the pane's previous
+ *    launch never survives.
+ * 3. Resync the controller — where a continuation eager-resumes, now bound.
+ *
+ * Recorded after the resync (as before M4b-3), a continuation resumed before
+ * its row was bound to the block and could resolve to a sibling's stale row.
+ * For a template-backed launch — the block names the template, not a row, so
+ * the stamp is the only thing binding the pane to its row — a failed create
+ * aborts before anything is written. For a user agent the block already
+ * names its row, and the create stays best-effort.
+ */
+export async function commitLaunch(opts: {
+    isTemplate: boolean;
+    meta: Record<string, unknown>;
+    createInstance: () => Promise<{ id: string }>;
+    setMeta: (meta: Record<string, unknown>) => Promise<unknown>;
+    resync: () => Promise<unknown>;
+    warn: (msg: string) => void;
+}): Promise<{ ok: true; instanceId: string | null } | { ok: false; error: string }> {
+    let instanceId: string | null = null;
+    try {
+        instanceId = (await opts.createInstance()).id;
+    } catch (e: any) {
+        const detail = e?.message ?? String(e);
+        opts.warn(`agent instance row create failed: ${detail}`);
+        if (opts.isTemplate) {
+            return { ok: false, error: `Could not record this launch, so it was not started: ${detail}` };
+        }
+    }
+    await opts.setMeta({ ...opts.meta, agentInstanceId: instanceId });
+    await opts.resync();
+    return { ok: true, instanceId };
+}
