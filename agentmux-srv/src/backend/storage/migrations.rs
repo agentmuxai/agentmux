@@ -409,7 +409,18 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 10;
 ///        are meant to. One key cannot have both lifecycles. `key_version`
 ///        is reserved for the publish-sync and rotation phases (that spec's
 ///        §3.2/§3.6) and is not yet read by anything.
-pub const OBJECT_SCHEMA_VERSION: i64 = 36;
+///   v37 — db_agent_tokens: per-agent local identity token, keyed by the
+///        agent's UID (`db_agents.id`) — identity M1 of
+///        `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (§6, §9.1).
+///        Minted on first spawn (`agent_token_ensure`), injected into that
+///        one agent's process env as `AGENTMUX_AGENT_TOKEN`, revoked on
+///        delete via `purge_agent_dependents`. Unlike v18's jekt key and the
+///        registry entry files, which are keyed by display name and so are
+///        shared by two same-named agents (spec §6.3), this is keyed by a
+///        `PRIMARY KEY` that is a UUID for every non-template row. Not read
+///        by anything until M4 — mint-and-carry only, revertible by ignoring
+///        the field. See `storage/agent_tokens.rs`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 37;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -993,6 +1004,21 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             private_key TEXT NOT NULL,
             key_version INTEGER NOT NULL DEFAULT 1,
             created_at  INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v37: per-agent local identity token, keyed by the agent's UID
+        -- (db_agents.id) rather than by display name -- identity M1,
+        -- SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6/§9.1.
+        -- Minted on first spawn, injected as AGENTMUX_AGENT_TOKEN into that
+        -- one agent's process, revoked by purge_agent_dependents on delete.
+        -- Not read by anything until M4; see storage/agent_tokens.rs.
+        -- No FOREIGN KEY on purpose: a token must be mintable in the same
+        -- critical section as the row it belongs to without ordering the
+        -- two inserts, and purge_agent_dependents already owns cleanup.
+        CREATE TABLE IF NOT EXISTS db_agent_tokens (
+            agent_id   TEXT PRIMARY KEY,
+            token      TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT 0
         );
 
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key

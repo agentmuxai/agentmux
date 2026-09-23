@@ -2389,6 +2389,8 @@ fn purge_agent_dependents(conn: &rusqlite::Connection, id: &str) -> Result<usize
         "db_agent_native_memory_versions",
         "db_agent_jekt_keys",
         "db_agent_lan_keys",
+        // v37, identity M1: the agent's local identity token dies with it.
+        "db_agent_tokens",
     ];
     let present: std::collections::HashSet<String> = {
         let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;

@@ -253,37 +253,119 @@ pub(crate) fn split_agent_identity_env(
     }
 }
 
-/// `db_agents.slug` for the agent shown on `block_id`, if it has a row.
+/// What the server knows about the agent on a block, read from its
+/// `db_agents` row: the identity that will be carried into the process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PersistedAgentIdentity {
+    /// `db_agents.id` — the UID (spec §3). A UUID for every non-template row.
+    pub uid: String,
+    /// `db_agents.slug`, the collision-resolved value `agent_def_insert`
+    /// minted. `None` if the row's slug is empty.
+    pub slug: Option<String>,
+    /// The agent's local identity token (`storage/agent_tokens.rs`), minted
+    /// on first spawn. `None` only if minting failed — logged, and the
+    /// spawn proceeds without it, because M1 has no reader for it yet.
+    pub token: Option<String>,
+}
+
+/// The `db_agents` row for the agent shown on `block_id`, if it has one,
+/// plus that agent's token.
 ///
 /// Resolves the block → row the same way the identity injector does
 /// (`identity/resolver/inject.rs`): `block.meta.agentId` first, then the
 /// latest active launch on this block. A quick-launch pane (`launchAgent`
 /// in `agent-model.ts`, whose `agentId` is a provider key like `"claude"`)
-/// has no row and gets `None` — it has no slug in the identity sense, and
-/// deriving one from its display name would recreate the lossy path spec
-/// §1.1 measured as the root defect.
+/// has no row and gets `None` — it has no slug or UID in the identity
+/// sense, and deriving either from its display name would recreate the
+/// lossy path spec §1.1 measured as the root defect.
+///
+/// The token is minted here, at spawn, rather than at row creation: every
+/// row that exists today predates the table, so "mint at creation" would
+/// leave them all without one. `agent_token_ensure` is idempotent, so a
+/// row created in the future gets the same token on every spawn.
 ///
 /// A store error is logged and treated as "unknown", never as a spawn
 /// failure: this is disambiguation, not a gate, and spec §10 constraint 1
 /// forbids a store read from making a healthy agent unreachable.
-fn persisted_agent_slug(
+fn persisted_agent_identity(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
-) -> Option<String> {
+) -> Option<PersistedAgentIdentity> {
     let instance = match mstore.instance_get_active_for_block(block_id) {
-        Ok(Some(instance)) => instance,
-        Ok(None) => return None,
+        Ok(Some(instance)) if !instance.id.trim().is_empty() => instance,
+        Ok(_) => return None,
         Err(e) => {
-            tracing::warn!(block_id, error = %e, "spawn env: instance lookup failed — no AGENTMUX_AGENT_SLUG from store");
+            tracing::warn!(block_id, error = %e, "spawn env: instance lookup failed — no persisted identity from store");
             return None;
         }
     };
-    match mstore.agent_def_get(&instance.definition_id) {
+    let slug = match mstore.agent_def_get(&instance.definition_id) {
         Ok(Some(def)) if !def.slug.trim().is_empty() => Some(def.slug),
         Ok(_) => None,
         Err(e) => {
             tracing::warn!(block_id, error = %e, "spawn env: definition lookup failed — no AGENTMUX_AGENT_SLUG from store");
             None
+        }
+    };
+    let token = match mstore.agent_token_ensure(&instance.id) {
+        Ok(token) => Some(token),
+        Err(e) => {
+            tracing::warn!(block_id, uid = %instance.id, error = %e, "spawn env: token mint failed — spawning without AGENTMUX_AGENT_TOKEN");
+            None
+        }
+    };
+    Some(PersistedAgentIdentity {
+        uid: instance.id,
+        slug,
+        token,
+    })
+}
+
+/// Identity M1 — spec §9.1: carry the UID and the token into the process.
+///
+/// `AGENTMUX_AGENT_UID` and `AGENTMUX_AGENT_TOKEN` are RESERVED,
+/// server-controlled values in exactly the sense `AGENTMUX_AUTH_KEY` and
+/// `AGENTMUX_BLOCKID` are at the top of `build_persistent_spawn_env`:
+/// unconditional `insert`, never `entry().or_insert()`. A persisted
+/// `cmd:env` carrying a stale value for either — a pane reused for a
+/// different agent, a copied block — must not survive into this spawn, and
+/// for the token specifically a stale value would be *another agent's*
+/// credential. So when the server knows the identity it overwrites, and
+/// when it does not (no row: quick-launch pane, or a lookup failure) it
+/// **removes** both rather than leaving whatever was there.
+///
+/// Spec §4.1: identity is asserted by whoever minted it. The frontend is
+/// not consulted (its `agentInstanceId` is documented as going stale on
+/// pane reuse), and the agent is not asked. The row is the source.
+///
+/// Descendant inheritance is real and not claimed otherwise (spec §6.4):
+/// the agent's own subprocesses — its shell tool, its MCP servers, build
+/// scripts — inherit the token. That is a smaller blast radius than the
+/// instance-wide `AGENTMUX_AUTH_KEY` they already inherit, not zero. The
+/// `.mcp.json` `agent_config.rs` writes into the working directory carries
+/// neither variable (it copies only `AGENTMUX_AGENT_ID`/`_BUS_ID`), so the
+/// token never lands in a file a human may commit.
+pub(crate) fn carry_agent_uid_env(
+    env_vars: &mut std::collections::HashMap<String, String>,
+    identity: Option<&PersistedAgentIdentity>,
+) {
+    const UID: &str = "AGENTMUX_AGENT_UID";
+    const TOKEN: &str = "AGENTMUX_AGENT_TOKEN";
+    match identity {
+        Some(id) => {
+            env_vars.insert(UID.to_string(), id.uid.clone());
+            match &id.token {
+                Some(token) => {
+                    env_vars.insert(TOKEN.to_string(), token.clone());
+                }
+                None => {
+                    env_vars.remove(TOKEN);
+                }
+            }
+        }
+        None => {
+            env_vars.remove(UID);
+            env_vars.remove(TOKEN);
         }
     }
 }
@@ -469,32 +551,39 @@ pub(crate) async fn build_persistent_spawn_env(
             env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
         }
     }
-    // Identity M0: name and slug as two explicit variables, on this path
-    // too. The frontend's `launchAgentDefinition` already sets both; this
-    // path never did, so a reader could only get at either by guessing
-    // what `AGENTMUX_AGENT_ID` held. See `split_agent_identity_env`.
+    // Identity M0 + M1. M0: name and slug as two explicit variables, on this
+    // path too — the frontend's `launchAgentDefinition` already sets both;
+    // this path never did, so a reader could only get at either by guessing
+    // what `AGENTMUX_AGENT_ID` held (`split_agent_identity_env`). M1: the
+    // UID and the agent's token, from the row the server itself created
+    // (`carry_agent_uid_env`). One store round-trip serves both.
     {
         let display_name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
-        let persisted_slug = {
+        let identity = {
             let mstore = mstore_for_slug.clone();
             let owned_block_id = block_id.to_string();
             match tokio::task::spawn_blocking(move || {
-                persisted_agent_slug(&mstore, &owned_block_id)
+                persisted_agent_identity(&mstore, &owned_block_id)
             })
             .await
             {
-                Ok(slug) => slug,
+                Ok(identity) => identity,
                 Err(e) => {
                     tracing::warn!(
                         block_id = %block_id,
                         error = %e,
-                        "spawn env: persisted-slug lookup task failed — AGENTMUX_AGENT_SLUG falls back to cmd:env"
+                        "spawn env: persisted-identity lookup task failed — no UID/token this spawn; AGENTMUX_AGENT_SLUG falls back to cmd:env"
                     );
                     None
                 }
             }
         };
-        split_agent_identity_env(&mut env_vars, &display_name, persisted_slug.as_deref());
+        split_agent_identity_env(
+            &mut env_vars,
+            &display_name,
+            identity.as_ref().and_then(|i| i.slug.as_deref()),
+        );
+        carry_agent_uid_env(&mut env_vars, identity.as_ref());
     }
     // Per-agent git commit identity -- see git_identity_env_vars() doc
     // comment. Still overridable per the same "user-provided values take
@@ -1485,9 +1574,72 @@ mod tests {
         );
     }
 
-    // ---- identity M0: persisted_agent_slug against a real store ----------
+    // ---- identity M1: carry_agent_uid_env --------------------------------
 
-    use super::persisted_agent_slug;
+    use super::{carry_agent_uid_env, PersistedAgentIdentity};
+
+    fn identity(uid: &str, token: Option<&str>) -> PersistedAgentIdentity {
+        PersistedAgentIdentity {
+            uid: uid.to_string(),
+            slug: Some("agenty-3".to_string()),
+            token: token.map(str::to_string),
+        }
+    }
+
+    /// Positive case first: a known row carries both values into the env.
+    #[test]
+    fn carry_sets_uid_and_token_from_the_row() {
+        let mut e = env(&[("AGENTMUX_AGENT_ID", "AgentY")]);
+        carry_agent_uid_env(&mut e, Some(&identity("4f3c-a91", Some("tok-a"))));
+        assert_eq!(e["AGENTMUX_AGENT_UID"], "4f3c-a91");
+        assert_eq!(e["AGENTMUX_AGENT_TOKEN"], "tok-a");
+        assert_eq!(e["AGENTMUX_AGENT_ID"], "AgentY", "§9.4: untouched");
+    }
+
+    /// Reserved-variable rule: a persisted `cmd:env` carrying ANOTHER
+    /// agent's UID and token (pane reuse, copied block) is overwritten, not
+    /// respected. For the token this is the difference between an agent
+    /// holding its own credential and holding someone else's.
+    #[test]
+    fn carry_overwrites_stale_cmd_env_values_unconditionally() {
+        let mut e = env(&[
+            ("AGENTMUX_AGENT_UID", "9b2e-7d4"),
+            ("AGENTMUX_AGENT_TOKEN", "tok-of-the-other-agent"),
+        ]);
+        carry_agent_uid_env(&mut e, Some(&identity("4f3c-a91", Some("tok-a"))));
+        assert_eq!(e["AGENTMUX_AGENT_UID"], "4f3c-a91");
+        assert_eq!(e["AGENTMUX_AGENT_TOKEN"], "tok-a");
+    }
+
+    /// No row (quick-launch pane, lookup failure): both are REMOVED. Leaving
+    /// a stale token in place would be worse than having none, and the
+    /// server has nothing truthful to put there.
+    #[test]
+    fn carry_removes_both_when_the_server_knows_no_identity() {
+        let mut e = env(&[
+            ("AGENTMUX_AGENT_ID", "AgentY"),
+            ("AGENTMUX_AGENT_UID", "stale"),
+            ("AGENTMUX_AGENT_TOKEN", "stale"),
+        ]);
+        carry_agent_uid_env(&mut e, None);
+        assert!(!e.contains_key("AGENTMUX_AGENT_UID"));
+        assert!(!e.contains_key("AGENTMUX_AGENT_TOKEN"));
+        assert_eq!(e["AGENTMUX_AGENT_ID"], "AgentY");
+    }
+
+    /// A row whose token could not be minted still carries its UID, and a
+    /// stale token is removed rather than kept — never a half-truth.
+    #[test]
+    fn carry_with_uid_but_no_token_sets_uid_and_removes_token() {
+        let mut e = env(&[("AGENTMUX_AGENT_TOKEN", "stale")]);
+        carry_agent_uid_env(&mut e, Some(&identity("4f3c-a91", None)));
+        assert_eq!(e["AGENTMUX_AGENT_UID"], "4f3c-a91");
+        assert!(!e.contains_key("AGENTMUX_AGENT_TOKEN"));
+    }
+
+    // ---- identity M0/M1: persisted_agent_identity against a real store ---
+
+    use super::persisted_agent_identity;
     use crate::backend::storage::agents::AgentDefinition;
     use crate::backend::storage::store::Store;
 
@@ -1549,10 +1701,11 @@ mod tests {
 
     /// The §1.1 scenario end to end: two agents whose names collide under
     /// `derive_slug` get `agenty` and `agenty-2` from `agent_def_insert`, and
-    /// the lookup returns each block's OWN row's slug — the suffixed one for
-    /// the second agent, which no derivation from its name could produce.
+    /// the lookup returns each block's OWN row — its UID, its suffixed slug
+    /// (which no derivation from its name could produce), and a token that
+    /// is that row's and nobody else's.
     #[test]
-    fn persisted_agent_slug_returns_the_rows_collision_resolved_slug() {
+    fn persisted_identity_returns_the_rows_uid_slug_and_own_token() {
         let store = Store::open_in_memory().unwrap();
         let mut first = agent_def("uid-first", "AgentY");
         store.agent_def_insert(&mut first).unwrap();
@@ -1570,25 +1723,76 @@ mod tests {
         block_with_agent_id(&store, "block-first", "uid-first");
         block_with_agent_id(&store, "block-second", "uid-second");
 
+        let a = persisted_agent_identity(&store, "block-first").expect("first resolves");
+        let b = persisted_agent_identity(&store, "block-second").expect("second resolves");
+        assert_eq!(a.uid, "uid-first");
+        assert_eq!(b.uid, "uid-second");
+        assert_eq!(a.slug.as_deref(), Some("agenty"));
+        assert_eq!(b.slug.as_deref(), Some("agenty-2"));
+
+        // The token is the persisted one for that UID, minted on this first
+        // spawn, and distinct between the two colliding agents.
+        let tok_a = a.token.clone().expect("token minted");
+        let tok_b = b.token.clone().expect("token minted");
+        assert_ne!(tok_a, tok_b);
         assert_eq!(
-            persisted_agent_slug(&store, "block-first").as_deref(),
-            Some("agenty")
+            store.agent_token_load("uid-first").unwrap().as_deref(),
+            Some(tok_a.as_str())
         );
         assert_eq!(
-            persisted_agent_slug(&store, "block-second").as_deref(),
-            Some("agenty-2")
+            store.agent_token_load("uid-second").unwrap().as_deref(),
+            Some(tok_b.as_str())
         );
+
+        // A second spawn of the same agent carries the SAME token — long-lived
+        // for the agent's lifetime (spec §6.3), not re-minted per spawn.
+        let a_again = persisted_agent_identity(&store, "block-first").unwrap();
+        assert_eq!(a_again.token.as_deref(), Some(tok_a.as_str()));
     }
 
     /// A quick-launch pane carries a provider key as `agentId` and has no
     /// `db_agents` row; a block that does not exist has nothing either.
-    /// Both are "no slug", never an error and never a derived value.
+    /// Both are "no identity", never an error and never a derived value —
+    /// and, load-bearing for the token: no row means no token is minted.
     #[test]
-    fn persisted_agent_slug_is_none_for_quick_launch_panes_and_missing_blocks() {
+    fn persisted_identity_is_none_for_quick_launch_panes_and_missing_blocks() {
         let store = Store::open_in_memory().unwrap();
         block_with_agent_id(&store, "block-quick", "claude");
-        assert_eq!(persisted_agent_slug(&store, "block-quick"), None);
-        assert_eq!(persisted_agent_slug(&store, "block-missing"), None);
+        assert_eq!(persisted_agent_identity(&store, "block-quick"), None);
+        assert_eq!(persisted_agent_identity(&store, "block-missing"), None);
+        assert_eq!(
+            store.agent_token_load("claude").unwrap(),
+            None,
+            "no token minted for a provider key"
+        );
+    }
+
+    /// Spec §6.3: revoked on deletion. Deleting the agent through either
+    /// deletion entry point takes its token with it, so a later spawn on a
+    /// reused block cannot resurrect the old credential.
+    #[test]
+    fn deleting_the_agent_revokes_its_token() {
+        let store = Store::open_in_memory().unwrap();
+        let mut def = agent_def("uid-del", "Deleted");
+        store.agent_def_insert(&mut def).unwrap();
+        block_with_agent_id(&store, "block-del", "uid-del");
+        let minted = persisted_agent_identity(&store, "block-del").unwrap().token;
+        assert!(minted.is_some());
+
+        assert!(store.agent_def_delete("uid-del").unwrap());
+        assert_eq!(store.agent_token_load("uid-del").unwrap(), None);
+        assert_eq!(persisted_agent_identity(&store, "block-del"), None);
+
+        // …and via the launch-side entry point too.
+        let mut def2 = agent_def("uid-del2", "Deleted2");
+        store.agent_def_insert(&mut def2).unwrap();
+        block_with_agent_id(&store, "block-del2", "uid-del2");
+        assert!(persisted_agent_identity(&store, "block-del2")
+            .unwrap()
+            .token
+            .is_some());
+        assert!(store.instance_delete("uid-del2").unwrap());
+        assert_eq!(store.agent_token_load("uid-del2").unwrap(), None);
     }
 
     #[test]
