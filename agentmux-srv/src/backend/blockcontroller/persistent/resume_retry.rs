@@ -591,9 +591,30 @@ impl PersistentSubprocessController {
             return;
         }
         inner.session_id = recovered.clone();
-        Self::set_status(&mut inner, STATUS_DONE);
+        // Accepted prompts queued behind the eager spawn claim (codex P1 on
+        // PR #3551, fifth round): they never reached the doomed process, so
+        // they are not in the (empty) retry batch — but they are real work,
+        // and this is NOT a message-free settlement. The eager path's own
+        // drain will find the dead `stdin_tx`, stall, and hand them to
+        // `respawn_once_for_leftover_queue`; leave it the candidate so that
+        // respawn resumes it instead of clearing to fresh, and leave the
+        // terminal status and the held error line alone — a spawn follows
+        // immediately, and the CLI's stale-resume error would otherwise
+        // show as a stale bubble right before a successful reply (reagentx
+        // P1 on PR #2371's reasoning). `Fresh` is still disclosed when
+        // there is nothing to recover: that decision is final either way.
+        let queued_behind_claim = !inner.pending_send_messages.is_empty();
+        if queued_behind_claim {
+            inner.leftover_resume_candidate = recovered.clone();
+        } else {
+            Self::set_status(&mut inner, STATUS_DONE);
+        }
         if recovered.is_none() {
             self.emit_session_outcome_now(persistent_resume::SessionOutcome::Fresh, attempted_sid, None);
+        }
+        if queued_behind_claim {
+            drop(inner);
+            return;
         }
         // `publish_status` would re-lock `inner`; build the same snapshot
         // from the guard we already hold.

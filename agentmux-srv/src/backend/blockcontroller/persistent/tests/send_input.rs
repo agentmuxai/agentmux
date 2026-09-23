@@ -1001,6 +1001,98 @@ fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_
     assert_eq!(c.get_status_snapshot().shellprocstatus, STATUS_DONE);
 }
 
+/// Codex P1 on PR #3551 (fifth round): a prompt that queued BEHIND the eager
+/// claim was never delivered, so the retry batch is empty even though
+/// accepted work is waiting. The settlement must not treat that as
+/// message-free: it hands the recovery candidate to the leftover respawn
+/// (via `leftover_resume_candidate`) and leaves status/error alone, since
+/// a spawn follows.
+#[test]
+fn retry_after_resume_failure_with_no_entries_hands_a_queued_prompt_and_its_candidate_to_the_leftover_respawn() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_dir = tmp.path().to_string_lossy().to_string();
+    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let dir = tmp.path().join("projects").join(&slug);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("d019e2e4-stale".to_string());
+        inner.spawn_generation = 1;
+        inner.spawning_in_progress = true; // the eager claim, still held
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"behind the eager claim\"}".to_string()));
+    }
+    let mut env_vars = HashMap::new();
+    env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir,
+        env_vars,
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(inner.session_id.as_deref(), Some("972a6a4f-live"), "the candidate is adopted");
+    assert_eq!(
+        inner.leftover_resume_candidate.as_deref(),
+        Some("972a6a4f-live"),
+        "and handed to respawn_once_for_leftover_queue so it resumes rather than clears"
+    );
+    assert_ne!(inner.proc_status, STATUS_DONE, "not a terminal settlement — a spawn follows");
+    assert_eq!(inner.pending_send_messages.len(), 1, "the queued prompt is untouched");
+    assert!(inner.spawning_in_progress, "the eager claim is untouched");
+}
+
+/// The other half: `respawn_once_for_leftover_queue` honours an adopted
+/// candidate instead of its usual clear-to-fresh, and consumes it.
+#[test]
+fn respawn_once_for_leftover_queue_resumes_an_adopted_candidate_instead_of_clearing_to_fresh() {
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.spawning_in_progress = true;
+        inner.session_id = Some("972a6a4f-live".to_string());
+        inner.leftover_resume_candidate = Some("972a6a4f-live".to_string());
+        let seq = inner.take_next_message_seq();
+        inner
+            .pending_send_messages
+            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"prompt\"}".to_string()));
+    }
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    c.respawn_once_for_leftover_queue(config);
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.session_id.as_deref(),
+        Some("972a6a4f-live"),
+        "the candidate survives — this respawn resumes it; only a stale id gets cleared"
+    );
+    assert_eq!(inner.leftover_resume_candidate, None, "consumed by the respawn");
+    assert!(!inner.spawning_in_progress, "a failed respawn still releases the claim");
+}
+
 /// Codex P1 on PR #3551 (third round): the eagerly resumed CLI can reject
 /// a stale id fast enough for its waiter to fire while `try_eager_resume`
 /// still holds its own spawn claim. That claim is THIS generation's, not a

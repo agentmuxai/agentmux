@@ -428,6 +428,19 @@ struct PersistentInner {
     /// only ever compared for equality; the invariant is "never reused,"
     /// not "no gaps."
     spawn_generation: u64,
+    /// A recovery candidate adopted by `settle_empty_resume_retry` while
+    /// accepted prompts were still queued behind the eager spawn claim
+    /// (codex P1 on PR #3551, fifth round). Those prompts were never
+    /// delivered to the doomed process, so they are not in the retry batch
+    /// — the eager path's own drain will find the dead `stdin_tx`, stall,
+    /// and hand them to `respawn_once_for_leftover_queue`, whose contract
+    /// is otherwise "spawn fresh". This tells that respawn to `--resume`
+    /// the candidate instead, so a recoverable session is not thrown away
+    /// for a prompt that happened to arrive during the eager attempt.
+    /// Consumed by that respawn; invalidated by any spawn (`spawn_process`
+    /// clears it under the generation bump), since a candidate only means
+    /// anything for the spawn that immediately follows its adoption.
+    leftover_resume_candidate: Option<String>,
     /// AskUserQuestion `can_use_tool` control_requests awaiting a user answer:
     /// `tool_use_id -> (request_id, questions JSON)`. Filled by the stdout
     /// reader when the CLI sends a `can_use_tool` control_request for
@@ -968,6 +981,7 @@ impl PersistentSubprocessController {
                 shutdown_generation: None,
                 stop_exit: None,
                 spawn_generation: 0,
+                leftover_resume_candidate: None,
                 pending_questions: HashMap::new(),
                 pending_permissions: HashMap::new(),
             })),
