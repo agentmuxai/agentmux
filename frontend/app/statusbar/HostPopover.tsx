@@ -348,7 +348,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                                 {"🔒"}
                             </span>
                             <span>
-                                Linux will ask for your keyring password after you sign in —
+                                Linux may ask for your keyring password after you sign in —
                                 that's AgentMux securely storing your session.
                             </span>
                         </div>
