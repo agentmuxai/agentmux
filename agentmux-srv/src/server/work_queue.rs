@@ -28,7 +28,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::backend::storage::work_queue::{ClaimFilter, WorkItem};
+use crate::backend::storage::work_queue::{ClaimFilter, HolderMatch, WorkItem};
 use crate::backend::mps::MuxEvent;
 
 use super::AppState;
@@ -301,6 +301,20 @@ pub(super) struct HolderRequest {
     pub lease_ms: Option<i64>,
 }
 
+/// The caller's UID for a holder check (identity M4c-2, spec §6.5.9): the
+/// token's, or `""` when Unattributed — the store then matches by name.
+fn holder_uid(caller: Option<&super::caller::Caller>) -> &str {
+    caller.and_then(super::caller::Caller::uid).unwrap_or("")
+}
+
+/// Count a holder check that matched by name — the row or the caller had no
+/// UID. Each is a holder that M5, which drops the name path, would refuse.
+fn count_holder_match(matched: Option<HolderMatch>) {
+    if matched == Some(HolderMatch::Name) {
+        crate::backend::agent_resolve::record_uid_fallback("m4c.holder_by_name");
+    }
+}
+
 /// Shared shape for the three holder-only transitions. `false` from the store
 /// means the caller is not the current holder OR its fence is stale — both are
 /// CONFLICT, not NOT_FOUND: the row usually still exists, it just moved on
@@ -336,9 +350,12 @@ pub(super) async fn handle_work_heartbeat(
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
     match state
         .identity_store
-        .work_queue_heartbeat(&id, &req.agent_id, req.attempt, now_ms(), lease)
+        .work_queue_heartbeat(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, now_ms(), lease)
     {
-        Ok(ok) => holder_result(ok, &state),
+        Ok(matched) => {
+            count_holder_match(matched);
+            holder_result(matched.is_some(), &state)
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("heartbeat failed: {e}")),
     }
 }
@@ -357,9 +374,12 @@ pub(super) async fn handle_work_complete(
     );
     match state
         .identity_store
-        .work_queue_complete(&id, &req.agent_id, req.attempt, &req.result, now_ms())
+        .work_queue_complete(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
     {
-        Ok(ok) => holder_result(ok, &state),
+        Ok(matched) => {
+            count_holder_match(matched);
+            holder_result(matched.is_some(), &state)
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("complete failed: {e}")),
     }
 }
@@ -382,9 +402,10 @@ pub(super) async fn handle_work_release(
     );
     match state
         .identity_store
-        .work_queue_release(&id, &req.agent_id, req.attempt, &req.result, now_ms())
+        .work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
     {
-        Ok(true) => {
+        Ok(Some(matched)) => {
+            count_holder_match(Some(matched));
             publish_changed(&state);
             // Read back rather than infer: the store owns the
             // attempts-vs-max_attempts decision, and duplicating that rule
@@ -398,7 +419,7 @@ pub(super) async fn handle_work_release(
                 .unwrap_or_default();
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }
-        Ok(false) => holder_result(false, &state),
+        Ok(None) => holder_result(false, &state),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("release failed: {e}")),
     }
 }
