@@ -2465,8 +2465,22 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
     };
     let now = agentmux_common::time::now_secs();
     for n in [slug, name, instance_name] {
+        // Folded as the key tables fold their names (`to_lowercase`); M4d
+        // compares in Rust, never with SQLite's ASCII-only `lower()`.
         let n = n.trim().to_lowercase();
         if n.is_empty() {
+            continue;
+        }
+        // Signing keys are keyed by slug (`AGENTMUX_AGENT_ID`), so a name
+        // another agent holds as its slug is that agent's key, not this
+        // one's: deleting the second "AgentY" must not tombstone the first
+        // one's `agenty` (adversarial review of #3571).
+        let held: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id != ?1 AND is_template = 0 AND lower(slug) = ?2)",
+            params![id, n],
+            |r| r.get(0),
+        )?;
+        if held {
             continue;
         }
         conn.execute(
