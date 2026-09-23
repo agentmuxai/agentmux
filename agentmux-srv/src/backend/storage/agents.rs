@@ -2415,7 +2415,8 @@ impl Store {
                            WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
                              AND b.status IN ('running', 'paused') AND b.started_at > a.started_at)"
                 ))?;
-                return match stmt.query_row(params![block_id, stamped, agent_id], map_instance_row) {
+                return match stmt.query_row(params![block_id, stamped, agent_id], map_instance_row)
+                {
                     Ok(a) => Ok(Some(a)),
                     Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                     Err(e) => Err(e.into()),

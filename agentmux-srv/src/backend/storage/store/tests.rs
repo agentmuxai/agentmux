@@ -1913,10 +1913,15 @@
         for named in ["agent-deleted-b", "claude"] {
             block_showing(&store, "block-stale", Some(named));
             assert!(
-                store.instance_get_active_for_block("block-stale").unwrap().is_none(),
+                store
+                    .instance_get_active_for_block("block-stale")
+                    .unwrap()
+                    .is_none(),
                 "agentId={named} must not resolve to agent-stale-a"
             );
-            store.delete::<crate::backend::obj::Block>("block-stale").ok();
+            store
+                .delete::<crate::backend::obj::Block>("block-stale")
+                .ok();
         }
     }
 
@@ -1939,7 +1944,9 @@
         launch_user_agent_on(&store, &agents_root, "agent-other", "block-tpl-scoped");
 
         block_showing(&store, "block-tpl-scoped", Some("tpl-scoped"));
-        let got = store.instance_get_active_for_block("block-tpl-scoped").unwrap();
+        let got = store
+            .instance_get_active_for_block("block-tpl-scoped")
+            .unwrap();
         assert_eq!(got.map(|a| a.id), Some(from_tpl.id));
     }
 
@@ -1982,7 +1989,10 @@
 
         assert!(store.agent_def_delete(&b).unwrap());
         assert!(
-            store.instance_get_active_for_block("block-sib").unwrap().is_none(),
+            store
+                .instance_get_active_for_block("block-sib")
+                .unwrap()
+                .is_none(),
             "B deleted: must not resolve to its sibling A"
         );
     }
@@ -2001,13 +2011,20 @@
             launch_from_template_on(&store, &agents_root, "tpl-gone", "inst-gone", "block-gone");
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agents WHERE id = 'tpl-gone'", []).unwrap();
+            conn.execute("DELETE FROM db_agents WHERE id = 'tpl-gone'", [])
+                .unwrap();
         }
         for stamped in [None, Some(launched.as_str())] {
             block_showing_stamped(&store, "block-gone", Some("tpl-gone"), stamped);
             let got = store.instance_get_active_for_block("block-gone").unwrap();
-            assert_eq!(got.map(|r| r.id), Some(launched.clone()), "stamped={stamped:?}");
-            store.delete::<crate::backend::obj::Block>("block-gone").ok();
+            assert_eq!(
+                got.map(|r| r.id),
+                Some(launched.clone()),
+                "stamped={stamped:?}"
+            );
+            store
+                .delete::<crate::backend::obj::Block>("block-gone")
+                .ok();
         }
     }
 
@@ -2024,15 +2041,37 @@
         let mut tpl = sample_agent("tpl-promo", "tpl-promo");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let launched =
-            launch_from_template_on(&store, &agents_root, "tpl-promo", "inst-promo", "block-promo");
-        let clone = launch_from_template_on(&store, &agents_root, "tpl-promo", "inst-clone", "block-elsewhere");
-        assert_eq!(store.instance_repoint_definition("tpl-promo", &clone).unwrap(), 1);
+        let launched = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-promo",
+            "inst-promo",
+            "block-promo",
+        );
+        let clone = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-promo",
+            "inst-clone",
+            "block-elsewhere",
+        );
+        assert_eq!(
+            store
+                .instance_repoint_definition("tpl-promo", &clone)
+                .unwrap(),
+            1
+        );
         for stamped in [None, Some(launched.as_str())] {
             block_showing_stamped(&store, "block-promo", Some("tpl-promo"), stamped);
             let got = store.instance_get_active_for_block("block-promo").unwrap();
-            assert_eq!(got.map(|r| r.id), Some(launched.clone()), "stamped={stamped:?}");
-            store.delete::<crate::backend::obj::Block>("block-promo").ok();
+            assert_eq!(
+                got.map(|r| r.id),
+                Some(launched.clone()),
+                "stamped={stamped:?}"
+            );
+            store
+                .delete::<crate::backend::obj::Block>("block-promo")
+                .ok();
         }
     }
 
@@ -2060,15 +2099,35 @@
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
         // A fork of user agent B sits stale on the block; B is deleted.
-        store.agent_def_insert(&mut sample_agent("agent-src-b", "agent-src-b")).unwrap();
-        fork_launched_on(&store, &agents_root, "agent-src-b", "agent-fork-b", "block-fork");
+        store
+            .agent_def_insert(&mut sample_agent("agent-src-b", "agent-src-b"))
+            .unwrap();
+        fork_launched_on(
+            &store,
+            &agents_root,
+            "agent-src-b",
+            "agent-fork-b",
+            "block-fork",
+        );
         assert!(store.agent_def_delete("agent-src-b").unwrap());
         // A fork of an agent launched from template T sits stale on another.
         let mut tpl = sample_agent("tpl-forked", "tpl-forked");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let from_tpl = launch_from_template_on(&store, &agents_root, "tpl-forked", "inst-maks", "block-elsewhere-2");
-        fork_launched_on(&store, &agents_root, &from_tpl, "agent-fork-t", "block-fork-t");
+        let from_tpl = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-forked",
+            "inst-maks",
+            "block-elsewhere-2",
+        );
+        fork_launched_on(
+            &store,
+            &agents_root,
+            &from_tpl,
+            "agent-fork-t",
+            "block-fork-t",
+        );
 
         for (block, names, fork) in [
             ("block-fork", "agent-src-b", "agent-fork-b"),
@@ -2077,7 +2136,10 @@
             for stamped in [None, Some(fork)] {
                 block_showing_stamped(&store, block, Some(names), stamped);
                 assert!(
-                    store.instance_get_active_for_block(block).unwrap().is_none(),
+                    store
+                        .instance_get_active_for_block(block)
+                        .unwrap()
+                        .is_none(),
                     "{block} naming {names}, stamped={stamped:?}: must not resolve to the fork"
                 );
                 store.delete::<crate::backend::obj::Block>(block).ok();
@@ -2096,9 +2158,23 @@
         let mut tpl = sample_agent("tpl-clone-gone", "tpl-clone-gone");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let launched = launch_from_template_on(&store, &agents_root, "tpl-clone-gone", "inst-cg", "block-cg");
-        let clone = launch_from_template_on(&store, &agents_root, "tpl-clone-gone", "inst-cg-clone", "block-cg-elsewhere");
-        store.instance_repoint_definition("tpl-clone-gone", &clone).unwrap();
+        let launched = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-clone-gone",
+            "inst-cg",
+            "block-cg",
+        );
+        let clone = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-clone-gone",
+            "inst-cg-clone",
+            "block-cg-elsewhere",
+        );
+        store
+            .instance_repoint_definition("tpl-clone-gone", &clone)
+            .unwrap();
         assert!(store.agent_def_delete(&clone).unwrap());
 
         block_showing_stamped(&store, "block-cg", Some("tpl-clone-gone"), Some(&launched));
@@ -2116,7 +2192,13 @@
         let mut tpl = sample_agent("tpl-stale", "tpl-stale");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let a = launch_from_template_on(&store, &agents_root, "tpl-stale", "inst-stale-a", "block-stale-stamp");
+        let a = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-stale",
+            "inst-stale-a",
+            "block-stale-stamp",
+        );
         let mut later = make_named_inst("inst-stale-b", "inst-stale-b", &agents_root);
         later.definition_id = "tpl-stale".to_string();
         later.block_id = "block-stale-stamp".to_string();
@@ -2124,7 +2206,10 @@
         store.instance_create(&later).unwrap();
 
         block_showing_stamped(&store, "block-stale-stamp", Some("tpl-stale"), Some(&a));
-        assert!(store.instance_get_active_for_block("block-stale-stamp").unwrap().is_none());
+        assert!(store
+            .instance_get_active_for_block("block-stale-stamp")
+            .unwrap()
+            .is_none());
     }
 
     /// Codex P1 on #3576: an unstamped legacy block with two launches from
@@ -2138,7 +2223,13 @@
         let mut tpl = sample_agent("tpl-order", "tpl-order");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let a = launch_from_template_on(&store, &agents_root, "tpl-order", "inst-order-a", "block-order");
+        let a = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-order",
+            "inst-order-a",
+            "block-order",
+        );
         let mut later = make_named_inst("inst-order-b", "inst-order-b", &agents_root);
         later.definition_id = "tpl-order".to_string();
         later.block_id = "block-order".to_string();
@@ -2150,7 +2241,9 @@
             block_showing(&store, "block-order", names);
             let got = store.instance_get_active_for_block("block-order").unwrap();
             assert_eq!(got.map(|r| r.id), Some(b.clone()), "agentId={names:?}");
-            store.delete::<crate::backend::obj::Block>("block-order").ok();
+            store
+                .delete::<crate::backend::obj::Block>("block-order")
+                .ok();
         }
     }
 
@@ -2165,13 +2258,28 @@
         let mut tpl = sample_agent("tpl-unrel", "tpl-unrel");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let unrelated =
-            launch_from_template_on(&store, &agents_root, "tpl-unrel", "inst-unrel", "block-unrel");
+        let unrelated = launch_from_template_on(
+            &store,
+            &agents_root,
+            "tpl-unrel",
+            "inst-unrel",
+            "block-unrel",
+        );
         // The block names a deleted user agent, whose stamp write failed.
-        store.agent_def_insert(&mut sample_agent("agent-gone-b", "agent-gone-b")).unwrap();
+        store
+            .agent_def_insert(&mut sample_agent("agent-gone-b", "agent-gone-b"))
+            .unwrap();
         assert!(store.agent_def_delete("agent-gone-b").unwrap());
-        block_showing_stamped(&store, "block-unrel", Some("agent-gone-b"), Some(&unrelated));
-        assert!(store.instance_get_active_for_block("block-unrel").unwrap().is_none());
+        block_showing_stamped(
+            &store,
+            "block-unrel",
+            Some("agent-gone-b"),
+            Some(&unrelated),
+        );
+        assert!(store
+            .instance_get_active_for_block("block-unrel")
+            .unwrap()
+            .is_none());
     }
 
     /// Each filter on the stamped row, pinned: moved to another block, or
@@ -2184,7 +2292,8 @@
         let mut tpl = sample_agent("tpl-pin", "tpl-pin");
         tpl.is_seeded = 1;
         store.agent_def_insert(&mut tpl).unwrap();
-        let stamped = launch_from_template_on(&store, &agents_root, "tpl-pin", "inst-pin", "block-pin");
+        let stamped =
+            launch_from_template_on(&store, &agents_root, "tpl-pin", "inst-pin", "block-pin");
         let mut later = make_named_inst("inst-pin-later", "inst-pin-later", &agents_root);
         later.definition_id = "tpl-pin".to_string();
         later.block_id = "block-pin".to_string();
@@ -2194,26 +2303,47 @@
 
         block_showing_stamped(&store, "block-pin", Some("tpl-pin"), Some(&stamped));
         let got = store.instance_get_active_for_block("block-pin").unwrap();
-        assert_eq!(got.map(|r| r.id), Some(stamped.clone()), "a stopped later launch does not outrank it");
+        assert_eq!(
+            got.map(|r| r.id),
+            Some(stamped.clone()),
+            "a stopped later launch does not outrank it"
+        );
 
         // Relaunched in another pane: no longer this block's launch.
         store
-            .instance_update_partial(&stamped, &crate::backend::storage::InstanceUpdate {
-                block_id: Some("block-pin-elsewhere".to_string()),
-                ..Default::default()
-            })
+            .instance_update_partial(
+                &stamped,
+                &crate::backend::storage::InstanceUpdate {
+                    block_id: Some("block-pin-elsewhere".to_string()),
+                    ..Default::default()
+                },
+            )
             .unwrap();
-        assert!(store.instance_get_active_for_block("block-pin").unwrap().is_none(), "moved");
+        assert!(
+            store
+                .instance_get_active_for_block("block-pin")
+                .unwrap()
+                .is_none(),
+            "moved"
+        );
         store
-            .instance_update_partial(&stamped, &crate::backend::storage::InstanceUpdate {
-                block_id: Some("block-pin".to_string()),
-                status: Some("stopped".to_string()),
-                ..Default::default()
-            })
+            .instance_update_partial(
+                &stamped,
+                &crate::backend::storage::InstanceUpdate {
+                    block_id: Some("block-pin".to_string()),
+                    status: Some("stopped".to_string()),
+                    ..Default::default()
+                },
+            )
             .unwrap();
-        assert!(store.instance_get_active_for_block("block-pin").unwrap().is_none(), "stopped");
+        assert!(
+            store
+                .instance_get_active_for_block("block-pin")
+                .unwrap()
+                .is_none(),
+            "stopped"
+        );
     }
-
     /// A block whose meta names no agent at all keeps today's fallback: the
     /// agent whose latest launch is on it (a block from before `agentId`).
     #[test]
