@@ -713,6 +713,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             tracing::info!(pruned, "registry: dropped instance records for deleted agents (startup pass)");
         }
     }
+    // Identity M4a: token → UID for request attribution, on this channel's
+    // object store only (spec §6.5.3).
+    match mstore_raw.attach_token_index() {
+        Ok(_) => tracing::info!("identity: agent token index attached"),
+        Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
+    }
     let mstore = Arc::new(mstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);

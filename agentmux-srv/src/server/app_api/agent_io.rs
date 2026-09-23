@@ -191,7 +191,15 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 )
                 .await
                 {
-                    Ok(env) => env,
+                    Ok(env) => {
+                        // Identity M4a: this path carries no token yet (M4b).
+                        crate::backend::identity_spawn::record_spawn(
+                            &cmd.block_id,
+                            env.contains_key("AGENTMUX_AGENT_TOKEN"),
+                            Some("spawn.no_token.agent_send"),
+                        );
+                        env
+                    }
                     Err(gate) => {
                         let error_frame = serde_json::json!({
                             "type": "result",

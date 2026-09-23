@@ -91,8 +91,23 @@ async fn main() {
         }
     };
 
+    // Identity M4a (spec §6.5.3): every request carries this agent's token,
+    // inherited from the spawn environment (never from `.mcp.json`), so srv
+    // can attribute it to the agent's UID. Attribution only — srv never
+    // refuses a request for lacking it. Absent for a tokenless spawn.
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    if let Some(token) = std::env::var("AGENTMUX_AGENT_TOKEN")
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+        .and_then(|t| reqwest::header::HeaderValue::from_str(t.trim()).ok())
+    {
+        let mut token = token;
+        token.set_sensitive(true);
+        default_headers.insert("X-Agent-Token", token);
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        .default_headers(default_headers)
         .build()
         .expect("http client");
 

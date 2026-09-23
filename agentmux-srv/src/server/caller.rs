@@ -1,0 +1,176 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Who is calling, derived from the request's credential — identity M4a
+//! (`docs/specs/SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md`
+//! §6.5.3).
+//!
+//! A request that carries `X-Agent-Token` for a token this srv minted is
+//! [`Caller::Agent`] with that token's UID. Anything else is
+//! [`Caller::Unattributed`] — the UI, `bashwrap`, `muxsh`, a tokenless agent,
+//! a peer srv. **This is attribution, never authorization:** at the same-user
+//! boundary a request that omits its token cannot be told apart from the UI
+//! (§6.5.1), so nothing here refuses a request. An unknown or foreign-channel
+//! token is counted and treated as absent — an agent deleted while running,
+//! or a token that reached another channel's srv through a forwarded
+//! environment, keeps working exactly as before.
+//!
+//! Derived only for requests that authenticated with the full instance key:
+//! a token on a LAN-key request must not lift it to host trust (§6.5.3).
+
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::Request;
+use axum::middleware::Next;
+use axum::response::Response;
+
+use super::{AppState, ReactiveAuthVia};
+
+/// The request header an agent's MCP sets from its inherited
+/// `AGENTMUX_AGENT_TOKEN`.
+pub(crate) const AGENT_TOKEN_HEADER: &str = "X-Agent-Token";
+
+/// Who a request is attributed to. Inserted into every request's extensions
+/// on the authed and LAN-forward route groups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Caller {
+    /// Carried a token this srv minted for `uid`.
+    Agent { uid: String },
+    /// Anything else. Not an error, and not a lesser principal: most callers
+    /// (the UI among them) are this.
+    Unattributed,
+}
+
+impl Caller {
+    /// The caller's UID, if attributed.
+    pub(crate) fn uid(&self) -> Option<&str> {
+        match self {
+            Caller::Agent { uid } => Some(uid),
+            Caller::Unattributed => None,
+        }
+    }
+}
+
+/// Resolve the request's [`Caller`]. Pure, so the rules are testable without
+/// a router: `token` is the header value, `full_key` whether the request
+/// authenticated with the full instance key, `lookup` the token index.
+pub(crate) fn derive_caller(
+    token: Option<&str>,
+    full_key: bool,
+    lookup: impl FnOnce(&str) -> Option<String>,
+) -> Caller {
+    let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Caller::Unattributed;
+    };
+    if !full_key {
+        crate::backend::agent_resolve::record_uid_fallback("m4.token_on_lan_key");
+        return Caller::Unattributed;
+    }
+    match lookup(token) {
+        Some(uid) => Caller::Agent { uid },
+        None => {
+            crate::backend::agent_resolve::record_uid_fallback("m4.token_unknown");
+            Caller::Unattributed
+        }
+    }
+}
+
+/// Inserts [`Caller`]. Layered *inside* `auth_middleware` /
+/// `lan_or_full_auth_middleware`, so it only ever sees authenticated
+/// requests. On the LAN-forward routes `ReactiveAuthVia` says which key
+/// authenticated; on the authed routes only the full key can have.
+pub(crate) async fn caller_middleware(
+    State(state): State<AppState>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Response {
+    let full_key = req
+        .extensions()
+        .get::<ReactiveAuthVia>()
+        .is_none_or(|via| *via == ReactiveAuthVia::FullAuthKey);
+    let token = req
+        .headers()
+        .get(AGENT_TOKEN_HEADER)
+        .and_then(|v| v.to_str().ok());
+    let caller = derive_caller(token, full_key, |t| {
+        state
+            .mstore
+            .token_index()
+            .and_then(|index| index.uid_for(t))
+    });
+    req.extensions_mut().insert(caller);
+    next.run(req).await
+}
+
+/// `GET /agentmux/identity/fallbacks` — every §9.2 counter and the two
+/// live gauges (§6.5.6). The phase gates read this: M4d and M5 wait for
+/// `live.tokenless_or_unknown` to reach zero and for the fallback counters
+/// to stop moving. Read-only; auth-gated like every loopback route.
+///
+/// Also reports who the request itself was attributed to (`caller`), so an
+/// agent can check that its token is being recognised.
+pub(crate) async fn handle_identity_fallbacks(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<Caller>>,
+) -> axum::Json<serde_json::Value> {
+    let counters: serde_json::Map<String, serde_json::Value> =
+        crate::backend::agent_resolve::uid_fallback_counts()
+            .into_iter()
+            .map(|(site, n)| (site.to_string(), serde_json::json!(n)))
+            .collect();
+    let (tokenless_or_unknown, unidentified) =
+        crate::backend::identity_spawn::live_gauges(&state.reactive_handler.list_agents());
+    let caller_uid = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string));
+    axum::Json(serde_json::json!({
+        "caller": caller_uid,
+        "counters": counters,
+        "gauges": {
+            "live.tokenless_or_unknown": tokenless_or_unknown,
+            "live.unidentified": unidentified,
+        },
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn index(token: &str) -> Option<String> {
+        (token == "tok-y").then(|| "uid-y".to_string())
+    }
+
+    #[test]
+    fn a_known_token_on_the_full_key_is_the_agent() {
+        assert_eq!(
+            derive_caller(Some("tok-y"), true, index),
+            Caller::Agent {
+                uid: "uid-y".into()
+            }
+        );
+    }
+
+    #[test]
+    fn no_token_is_unattributed() {
+        assert_eq!(derive_caller(None, true, index), Caller::Unattributed);
+        assert_eq!(derive_caller(Some("  "), true, index), Caller::Unattributed);
+    }
+
+    /// Never a 401: an unknown token (deleted agent, another channel's srv)
+    /// is treated as absent.
+    #[test]
+    fn an_unknown_token_is_unattributed_not_refused() {
+        assert_eq!(
+            derive_caller(Some("tok-gone"), true, index),
+            Caller::Unattributed
+        );
+    }
+
+    /// A token must not lift a LAN-key request to host trust.
+    #[test]
+    fn a_token_on_a_lan_key_request_is_ignored() {
+        assert_eq!(
+            derive_caller(Some("tok-y"), false, index),
+            Caller::Unattributed
+        );
+    }
+}
