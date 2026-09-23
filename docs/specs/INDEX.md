@@ -264,6 +264,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) | SPEC — Browser pane: replace Chromium's native right-click menu with the app's own |
 | [`SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26`](SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md) | Spec: CEF proprietary codec support (H.264/AAC) across Windows/macOS/Linux |
 | [`SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md) | Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF) |
+| [`SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22`](SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md) | SPEC — Own the `cef-dll-sys` binding fork: `agentmuxai/cef-rs` |
 | [`SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21`](SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md) | SPEC: CI check placement protocol — what runs on a PR, what runs nightly |
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21`](SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md) | SPEC: skip the build on documentation-only PRs, safely |
