@@ -18,11 +18,12 @@
 //   - findings:    a PR REVIEW (state COMMENTED) with the same
 //     "Reviewed commit" line and inline comments.
 //   - out of quota: an ISSUE COMMENT "You have reached your Codex usage
-//     limits for code reviews. ..." naming no commit. It answers the latest
-//     ReAgent trigger ("@codex review" by a5af with
-//     `<!-- reagent:codex-trigger head=<sha> -->`), so it counts for that
-//     head, and passes it: Codex being unavailable must not block merges
-//     (#3562 sat pending). A later real verdict on the head still wins.
+//     limits for code reviews. ..." naming no commit. When it answers the
+//     only outstanding ReAgent trigger ("@codex review" by a5af with
+//     `<!-- reagent:codex-trigger head=<sha> -->`), it counts for that
+//     head and passes it: Codex being unavailable must not block merges
+//     (#3562 sat pending). See quotaHead for the ambiguous case. A later
+//     real verdict on the head still wins.
 //
 // Codex only reviews when asked by a5af, not a bot. ReAgent decides when
 // to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
@@ -66,25 +67,34 @@ export function reviewedCommit(body) {
     return m ? m[1].toLowerCase() : null;
 }
 
-/** The head named by the latest ReAgent trigger posted at or before `at`, or null. */
-function triggeredHeadAt(comments, at) {
-    let head = null;
-    let headAt = "";
-    for (const c of comments) {
-        if (c.user?.login !== TRIGGER_AUTHOR || String(c.created_at) > String(at)) continue;
-        const m = TRIGGER_HEAD.exec(c.body ?? "");
-        if (m && String(c.created_at) >= headAt) {
-            head = m[1].toLowerCase();
-            headAt = String(c.created_at);
-        }
-    }
-    return head;
+/**
+ * The head a quota notice posted at `at` answered, or null when that is
+ * ambiguous. The notice carries no request id, so it is attributed only
+ * when exactly one ReAgent trigger was posted since Codex last said
+ * anything: with two outstanding, a slow reply to the older one would pass
+ * the newer, unreviewed head (Codex P1 on #3589). Ambiguous stays pending
+ * until the next trigger, which the notice then answers alone.
+ */
+function quotaHead({ comments, reviews }, at) {
+    const quotaAt = String(at);
+    const lastAnswer = [
+        ...comments.filter((c) => c.user?.login === CODEX_LOGIN).map((c) => String(c.created_at)),
+        ...reviews.filter((r) => r.user?.login === CODEX_LOGIN).map((r) => String(r.submitted_at)),
+    ]
+        .filter((t) => t < quotaAt)
+        .reduce((a, b) => (b > a ? b : a), "");
+    const outstanding = comments
+        .filter((c) => c.user?.login === TRIGGER_AUTHOR)
+        .filter((c) => String(c.created_at) > lastAnswer && String(c.created_at) <= quotaAt)
+        .map((c) => TRIGGER_HEAD.exec(c.body ?? ""))
+        .filter(Boolean);
+    return outstanding.length === 1 ? outstanding[0][1].toLowerCase() : null;
 }
 
-function commentOutput(c, comments) {
+function commentOutput(c, activity) {
     const body = c.body ?? "";
     if (USAGE_LIMIT.test(body)) {
-        return { kind: "quota", at: c.created_at, sha: triggeredHeadAt(comments, c.created_at) };
+        return { kind: "quota", at: c.created_at, sha: quotaHead(activity, c.created_at) };
     }
     return { kind: NO_MAJOR_ISSUES.test(body) ? "ok" : "other", at: c.created_at, sha: reviewedCommit(body) };
 }
@@ -92,7 +102,9 @@ function commentOutput(c, comments) {
 /** Every Codex verdict that names a commit, oldest first. */
 function codexOutputs({ comments = [], reviews = [] }) {
     return [
-        ...comments.filter((c) => c.user?.login === CODEX_LOGIN).map((c) => commentOutput(c, comments)),
+        ...comments
+            .filter((c) => c.user?.login === CODEX_LOGIN)
+            .map((c) => commentOutput(c, { comments, reviews })),
         // A dismissed findings review no longer counts against a commit. It
         // does not count for it either: only a Codex OK passes.
         ...reviews

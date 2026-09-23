@@ -153,15 +153,39 @@ const quotaComment = (at) => ({
 
 describe("Codex out of review quota", () => {
     it("passes the head the quota notice answered", () => {
+        // #3562's real sequence: Codex answered the OLD trigger (14:36)
+        // before ReAgent asked about HEAD.
         const comments = [
             trigger(OLD, "2026-09-23T14:31:42Z"),
             trigger(HEAD, "2026-09-23T14:46:38Z"),
             quotaComment("2026-09-23T14:46:48Z"),
         ];
-        const r = evaluateCodexGate({ headSha: HEAD, comments });
+        const reviews = [findingsReview(OLD, "2026-09-23T14:36:45Z")];
+        const r = evaluateCodexGate({ headSha: HEAD, comments, reviews });
         expect(r.state).toBe("success");
         expect(r.description).toMatch(/quota/);
         expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("stays pending when two requests are outstanding (Codex P1 on #3589)", () => {
+        // A late reply to the OLD request must not pass the unreviewed HEAD.
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:46:38Z"),
+            quotaComment("2026-09-23T14:46:48Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
+    });
+
+    it("resolves once the next request is answered alone", () => {
+        const comments = [
+            trigger(OLD, "2026-09-23T14:31:42Z"),
+            trigger(HEAD, "2026-09-23T14:46:38Z"),
+            quotaComment("2026-09-23T14:46:48Z"),
+            trigger(HEAD, "2026-09-23T15:00:00Z"),
+            quotaComment("2026-09-23T15:00:09Z"),
+        ];
+        expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("success");
     });
 
     it("does not pass a head pushed after the notice", () => {
