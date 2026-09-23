@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** proposed — no code yet; Phase 0 (measurement) is the first PR.
+**Status:** active — Phase 0 (bench + `main` baseline) in #3593; Phases 1–10 not started.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing
