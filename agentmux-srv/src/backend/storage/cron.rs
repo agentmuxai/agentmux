@@ -19,6 +19,13 @@ pub struct CronJob {
     pub prompt: String,
     /// Target agent id for injection.
     pub target: String,
+    /// Identity M1b (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §9.1): the UID (`db_agents.id`) of `target`, resolved once at create
+    /// time — spec §5.4, a job firing at 03:00 must never resolve a name.
+    /// Empty = the name did not resolve. Dual-written beside `target`;
+    /// **not read by anything yet** — a job still fires by `target`.
+    #[serde(default)]
+    pub target_uid: String,
     pub created_by: String,
     pub enabled: bool,
     pub last_fired: Option<i64>,
@@ -39,8 +46,9 @@ impl Store {
         conn.execute(
             "INSERT INTO db_cron_jobs
                 (id, name, expression, prompt, target, created_by, enabled,
-                 last_fired, fire_count, max_fires, created_at, max_age_secs)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 last_fired, fire_count, max_fires, created_at, max_age_secs,
+                 target_uid)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 job.id,
                 job.name,
@@ -54,6 +62,7 @@ impl Store {
                 job.max_fires,
                 job.created_at,
                 job.max_age_secs,
+                job.target_uid,
             ],
         )?;
         Ok(())
@@ -63,7 +72,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
-                    last_fired, fire_count, max_fires, created_at, max_age_secs
+                    last_fired, fire_count, max_fires, created_at, max_age_secs,
+                    target_uid
              FROM db_cron_jobs ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -74,7 +84,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
-                    last_fired, fire_count, max_fires, created_at, max_age_secs
+                    last_fired, fire_count, max_fires, created_at, max_age_secs,
+                    target_uid
              FROM db_cron_jobs WHERE enabled = 1 ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -85,7 +96,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
-                    last_fired, fire_count, max_fires, created_at, max_age_secs
+                    last_fired, fire_count, max_fires, created_at, max_age_secs,
+                    target_uid
              FROM db_cron_jobs WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_row)?;
@@ -141,5 +153,6 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         max_fires:     row.get(9)?,
         created_at:    row.get(10)?,
         max_age_secs:  row.get(11)?,
+        target_uid:    row.get(12)?,
     })
 }

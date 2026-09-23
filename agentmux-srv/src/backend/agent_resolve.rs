@@ -79,6 +79,74 @@ pub(crate) fn resolve_agent_id(store: &Store, slug_or_id: &str) -> Result<String
     ))
 }
 
+/// Identity M1b (`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md`
+/// §9.1): resolve a typed name to its UID for a **dual-written** column, or
+/// `""` if it does not resolve — never a guess, and every miss counted.
+///
+/// This is the *authoring-time* resolution spec §5.4 requires: the human or
+/// model that typed `name` is present now, so a miss can be surfaced to them
+/// later; a webhook or cron firing at 03:00 has nobody to ask. What is
+/// stored is a UID or nothing.
+///
+/// `""` is a legitimate outcome, not an error, for three measured reasons:
+///
+/// - `name` may be empty (an untargeted work item).
+/// - `resolve_agent_id`'s first tier is an exact-case slug match, so a
+///   *display name* such as `"AgentY"` does not resolve (spec §1.1). That is
+///   the defect this migration exists to remove, and until the MCP boundary
+///   resolves through §5's disambiguating entry point (M3) the honest record
+///   is "unknown".
+/// - It reads the per-channel object store, and the queue is global; a
+///   target living in another channel is not visible here.
+///
+/// Each miss is counted under `site` (spec §9.2): a count that never reaches
+/// zero names a path that still reconstructs identity, and M5 must not
+/// proceed until that path carries it instead.
+pub(crate) fn resolve_uid_for_dual_write(store: &Store, name: &str, site: &'static str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return String::new();
+    }
+    match resolve_agent_id(store, name) {
+        Ok(uid) => uid,
+        Err(reason) => {
+            record_uid_fallback(site);
+            tracing::info!(
+                target: "identity_fallback",
+                site,
+                name,
+                reason,
+                "uid dual-write: name did not resolve — column left empty"
+            );
+            String::new()
+        }
+    }
+}
+
+/// Process-wide fallback counters, keyed by call site (spec §9.2). In-memory
+/// only, same lifecycle as the reactive handler's audit log; a phase's exit
+/// criterion is read from these, not assumed.
+static UID_FALLBACK_COUNTS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<&'static str, u64>>,
+> = std::sync::OnceLock::new();
+
+fn record_uid_fallback(site: &'static str) {
+    let counts = UID_FALLBACK_COUNTS.get_or_init(Default::default);
+    let mut guard = counts.lock().unwrap_or_else(|e| e.into_inner());
+    *guard.entry(site).or_insert(0) += 1;
+}
+
+/// Snapshot of every fallback counter, for the exit-criterion check (spec
+/// §9.2). Sorted by site so output is stable.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn uid_fallback_counts() -> Vec<(&'static str, u64)> {
+    let counts = UID_FALLBACK_COUNTS.get_or_init(Default::default);
+    let guard = counts.lock().unwrap_or_else(|e| e.into_inner());
+    let mut out: Vec<(&'static str, u64)> = guard.iter().map(|(k, v)| (*k, *v)).collect();
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +269,80 @@ mod tests {
                 resolve_agent_id(&store, "collide-me").is_err(),
                 "adding a second row with the same slug must flip resolve to refusal"
             );
+        });
+    }
+
+    // ---- identity M1b: resolve_uid_for_dual_write ------------------------
+    //
+    // Counter sites are unique per test: the counters are process-wide and
+    // the tests in this binary run in parallel.
+
+    fn count_for(site: &str) -> u64 {
+        uid_fallback_counts()
+            .into_iter()
+            .find(|(s, _)| *s == site)
+            .map(|(_, n)| n)
+            .unwrap_or(0)
+    }
+
+    /// Positive case first: a slug that resolves yields the UID and counts
+    /// nothing.
+    #[test]
+    fn dual_write_resolves_a_slug_to_its_uid_without_counting() {
+        with_isolated_home(|| {
+            let store = Store::open_in_memory().unwrap();
+            let mut def = test_agent_def("uid-solo", "Solo Agent", "claude", "agent", 1, "");
+            def.slug = "solo".to_string();
+            store.agent_def_insert(&mut def).unwrap();
+
+            let uid = resolve_uid_for_dual_write(&store, "solo", "test.m1b.resolves");
+            assert_eq!(uid, "uid-solo");
+            assert_eq!(count_for("test.m1b.resolves"), 0);
+        });
+    }
+
+    /// The §1.1 finding, recorded rather than hidden: a DISPLAY name does
+    /// not resolve through the exact-case slug tier, so the column stays
+    /// empty and the miss is counted under its site. This is the number M5's
+    /// exit criterion reads; it must not be zero here, and it must not be a
+    /// guessed UID either.
+    #[test]
+    fn dual_write_leaves_a_display_name_empty_and_counts_the_miss() {
+        with_isolated_home(|| {
+            let store = Store::open_in_memory().unwrap();
+            let mut def = test_agent_def("uid-agenty", "AgentY", "claude", "agent", 1, "");
+            def.slug = "agenty".to_string();
+            store.agent_def_insert(&mut def).unwrap();
+
+            let before = count_for("test.m1b.display_name");
+            let uid = resolve_uid_for_dual_write(&store, "AgentY", "test.m1b.display_name");
+            assert_eq!(
+                uid, "",
+                "a display name must not resolve to anything — never guessed"
+            );
+            assert_eq!(count_for("test.m1b.display_name"), before + 1);
+
+            // …while the slug itself does resolve, so the row IS reachable
+            // by the value the frontend path puts in AGENTMUX_AGENT_ID.
+            assert_eq!(
+                resolve_uid_for_dual_write(&store, "agenty", "test.m1b.display_name.slug"),
+                "uid-agenty"
+            );
+        });
+    }
+
+    /// An untargeted item has no name to resolve: empty in, empty out, and
+    /// that is not a fallback — nothing was reconstructed.
+    #[test]
+    fn dual_write_of_an_empty_name_is_empty_and_uncounted() {
+        with_isolated_home(|| {
+            let store = Store::open_in_memory().unwrap();
+            assert_eq!(resolve_uid_for_dual_write(&store, "", "test.m1b.empty"), "");
+            assert_eq!(
+                resolve_uid_for_dual_write(&store, "   ", "test.m1b.empty"),
+                ""
+            );
+            assert_eq!(count_for("test.m1b.empty"), 0);
         });
     }
 }

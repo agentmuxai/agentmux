@@ -61,7 +61,15 @@ use super::error::StoreError;
 ///        comment for the full rationale
 ///        (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this store
 ///        just needs schema parity, same as v9 above.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 10;
+///   v11 — db_cron_jobs.target_uid: the target agent's UID (`db_agents.id`)
+///        beside the slug column, resolved once at create time and
+///        dual-written; nothing reads it yet, a job still fires by
+///        `target`. Identity M1b of
+///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §9.1 —
+///        spec §5.4: non-interactive ingress never resolves a name at fire
+///        time, so the UID has to be captured while a human or model is
+///        present. Empty when the name did not resolve; never guessed.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 11;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -1437,7 +1445,12 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             fire_count    INTEGER NOT NULL DEFAULT 0,
             max_fires     INTEGER,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            max_age_secs  INTEGER
+            max_age_secs  INTEGER,
+            -- v11 (identity M1b): the target's UID (db_agents.id) beside the
+            -- slug, resolved ONCE at create time (spec §5.4), dual-written,
+            -- not yet read -- a job still fires by `target`. Empty when the
+            -- name did not resolve; never guessed.
+            target_uid    TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_ss_cron_jobs_enabled
             ON db_cron_jobs(enabled);
@@ -1544,6 +1557,8 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         // v9: AgentMux-controlled, highest-priority Global Bundle tier —
         // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
+        // v11: identity M1b — the cron target's UID beside its slug.
+        "ALTER TABLE db_cron_jobs ADD COLUMN target_uid TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1653,7 +1668,17 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        as v3 above — this store's copy is not an actively-written
 ///        duplicate either). See
 ///        docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 9;
+///   v10 — db_work_queue.target_agent_uid / claimed_by_uid, and
+///        db_cron_jobs.target_uid (parity with SHARED_STORE_SCHEMA_VERSION
+///        v11): the UID (`db_agents.id`) beside each slug column, dual-written
+///        and not yet read. Identity M1b of
+///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §9.1.
+///        `target_agent_uid` is resolved ONCE at enqueue (spec §5.4);
+///        `claimed_by_uid` is CARRIED from the claimer's own
+///        `AGENTMUX_AGENT_UID` (M1a, #3548), falling back to resolving its
+///        `agent_id` with the fallback counted (spec §9.2). Empty when
+///        unknown; never guessed.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 10;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1787,7 +1812,11 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             fire_count    INTEGER NOT NULL DEFAULT 0,
             max_fires     INTEGER,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            max_age_secs  INTEGER
+            max_age_secs  INTEGER,
+            -- v10 (identity M1b): UID beside the slug, resolved at create
+            -- time, dual-written, not yet read. Parity with the shared-store
+            -- copy of this table, which is the one the handlers use today.
+            target_uid    TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_ids_cron_jobs_enabled
             ON db_cron_jobs(enabled);
@@ -1832,7 +1861,15 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0,
             not_before    INTEGER,
-            result        TEXT NOT NULL DEFAULT ''
+            result        TEXT NOT NULL DEFAULT '',
+            -- v10 (identity M1b): the UID (db_agents.id) beside each slug
+            -- column, dual-written, not yet read. target_agent_uid is
+            -- resolved ONCE at enqueue (spec §5.4: resolution happens at
+            -- authoring time, when a human or model was present, never at
+            -- claim time); claimed_by_uid is CARRIED from the claimer's own
+            -- AGENTMUX_AGENT_UID. Empty when unknown -- never guessed.
+            target_agent_uid TEXT NOT NULL DEFAULT '',
+            claimed_by_uid   TEXT NOT NULL DEFAULT ''
         );
         -- The claim query's exact predicate: state + readiness, ordered by
         -- priority then age. Without this the claim UPDATE degrades to a table
@@ -1948,15 +1985,21 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
 
-    // Additive column added after this store's tables were first created —
+    // Additive columns added after this store's tables were first created —
     // same idempotent pattern as run_shared_store_schema's own ALTER loop.
-    // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
-    if let Err(e) = conn.execute_batch(
+    for stmt in &[
+        // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
-    ) {
-        let msg = e.to_string();
-        if !msg.contains("duplicate column") {
-            return Err(e.into());
+        // v10: identity M1b — UID columns beside the slug columns, dual-written.
+        "ALTER TABLE db_work_queue ADD COLUMN target_agent_uid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_work_queue ADD COLUMN claimed_by_uid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_cron_jobs ADD COLUMN target_uid TEXT NOT NULL DEFAULT ''",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(e.into());
+            }
         }
     }
 

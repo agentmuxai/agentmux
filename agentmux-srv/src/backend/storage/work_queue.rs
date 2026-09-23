@@ -74,6 +74,17 @@ pub struct WorkItem {
     pub state: String,
     #[serde(default)]
     pub claimed_by: String,
+    /// Identity M1b (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §9.1): the UID (`db_agents.id`) of `target_agent`, resolved once at
+    /// enqueue — spec §5.4, resolution happens at authoring time, never at
+    /// claim time. Empty = unknown (untargeted, or the name did not
+    /// resolve). Dual-written beside the slug; **not read by anything yet**.
+    #[serde(default)]
+    pub target_agent_uid: String,
+    /// The claimer's UID, carried from its own `AGENTMUX_AGENT_UID`. Same
+    /// phase, same rules: dual-written, empty when unknown, not yet read.
+    #[serde(default)]
+    pub claimed_by_uid: String,
     /// ms epoch; `None` unless `state == claimed`.
     #[serde(default)]
     pub claim_expires: Option<i64>,
@@ -102,6 +113,10 @@ pub struct ClaimFilter {
     /// The claiming agent's own id. Items targeted at a DIFFERENT agent are
     /// excluded; untargeted items stay eligible.
     pub agent_id: String,
+    /// The claiming agent's UID (identity M1b). Written to `claimed_by_uid`
+    /// on a successful claim; NOT part of the eligibility predicate, which
+    /// still matches on `agent_id` — no reader changes in this phase.
+    pub agent_uid: String,
     /// Group ids this agent belongs to. An item with a `target_group` is
     /// eligible only if its group is in this list. Resolved by the caller.
     pub groups: Vec<String>,
@@ -118,6 +133,8 @@ fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
         priority: row.get("priority")?,
         state: row.get("state")?,
         claimed_by: row.get("claimed_by")?,
+        target_agent_uid: row.get("target_agent_uid")?,
+        claimed_by_uid: row.get("claimed_by_uid")?,
         claim_expires: row.get("claim_expires")?,
         attempts: row.get("attempts")?,
         max_attempts: row.get("max_attempts")?,
@@ -131,7 +148,8 @@ fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
 
 const COLS: &str = "id, title, payload, kind, target_agent, target_group, priority, state, \
                     claimed_by, claim_expires, attempts, max_attempts, created_by, \
-                    created_at, updated_at, not_before, result";
+                    created_at, updated_at, not_before, result, \
+                    target_agent_uid, claimed_by_uid";
 
 impl Store {
     /// Insert a new `open` item. `id` is caller-supplied so an enqueue can be
@@ -143,13 +161,15 @@ impl Store {
             "INSERT INTO db_work_queue
                 (id, title, payload, kind, target_agent, target_group, priority, state,
                  claimed_by, claim_expires, attempts, max_attempts, created_by,
-                 created_at, updated_at, not_before, result)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+                 created_at, updated_at, not_before, result,
+                 target_agent_uid, claimed_by_uid)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'')",
             params![
                 item.id, item.title, item.payload, item.kind, item.target_agent,
                 item.target_group, item.priority, work_state::OPEN, "",
                 None::<i64>, 0i64, if item.max_attempts > 0 { item.max_attempts } else { 3 },
                 item.created_by, item.created_at, item.updated_at, item.not_before, "",
+                item.target_agent_uid,
             ],
         )?;
         Ok(())
@@ -182,7 +202,7 @@ impl Store {
             String::new()
         } else {
             let marks: Vec<String> = (0..filter.groups.len())
-                .map(|i| format!("?{}", i + 5))
+                .map(|i| format!("?{}", i + 6))
                 .collect();
             format!(" OR target_group IN ({})", marks.join(","))
         };
@@ -191,6 +211,7 @@ impl Store {
             "UPDATE db_work_queue
                 SET state = '{claimed}',
                     claimed_by = ?1,
+                    claimed_by_uid = ?5,
                     claim_expires = ?2,
                     attempts = attempts + 1,
                     updated_at = ?3
@@ -220,12 +241,18 @@ impl Store {
 
         let mut stmt = conn.prepare(&sql)?;
         // Positional binds: ?1 agent_id, ?2 lease expiry, ?3 now, ?4 kind,
-        // ?5.. group ids. ?1 and ?3 are each referenced twice in the SQL above
+        // ?5 agent_uid (SET only — never in the WHERE, see ClaimFilter),
+        // ?6.. group ids. ?1 and ?3 are each referenced twice in the SQL above
         // (SET + WHERE); numbered parameters make that reuse safe.
         let expires = now_ms + lease_ms;
         let kind_filter = filter.kind.clone().unwrap_or_default();
-        let mut binds: Vec<&dyn rusqlite::ToSql> =
-            vec![&filter.agent_id, &expires, &now_ms, &kind_filter];
+        let mut binds: Vec<&dyn rusqlite::ToSql> = vec![
+            &filter.agent_id,
+            &expires,
+            &now_ms,
+            &kind_filter,
+            &filter.agent_uid,
+        ];
         for g in &filter.groups {
             binds.push(g);
         }
@@ -319,7 +346,7 @@ impl Store {
                 "UPDATE db_work_queue
                     SET state = CASE WHEN attempts >= max_attempts
                                      THEN '{failed}' ELSE '{open}' END,
-                        claimed_by = '', claim_expires = NULL,
+                        claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
                         result = ?4, updated_at = ?5
                   WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
                     AND state = '{c}'",
@@ -345,7 +372,7 @@ impl Store {
         let failed = conn.execute(
             &format!(
                 "UPDATE db_work_queue
-                    SET state = '{failed}', claimed_by = '', claim_expires = NULL,
+                    SET state = '{failed}', claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
                         result = CASE WHEN result = '' THEN 'lease expired; max_attempts exhausted' ELSE result END,
                         updated_at = ?1
                   WHERE state = '{c}' AND claim_expires IS NOT NULL
@@ -358,7 +385,7 @@ impl Store {
         let reopened = conn.execute(
             &format!(
                 "UPDATE db_work_queue
-                    SET state = '{open}', claimed_by = '', claim_expires = NULL, updated_at = ?1
+                    SET state = '{open}', claimed_by = '', claimed_by_uid = '', claim_expires = NULL, updated_at = ?1
                   WHERE state = '{c}' AND claim_expires IS NOT NULL
                     AND claim_expires <= ?1",
                 open = work_state::OPEN,
@@ -375,7 +402,7 @@ impl Store {
         let n = conn.execute(
             &format!(
                 "UPDATE db_work_queue
-                    SET state = '{cancelled}', claimed_by = '', claim_expires = NULL,
+                    SET state = '{cancelled}', claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
                         result = ?2, updated_at = ?3
                   WHERE id = ?1 AND state IN ('{open}','{c}')",
                 cancelled = work_state::CANCELLED,
@@ -438,6 +465,8 @@ mod tests {
             priority: 0,
             state: work_state::OPEN.into(),
             claimed_by: String::new(),
+            target_agent_uid: String::new(),
+            claimed_by_uid: String::new(),
             claim_expires: None,
             attempts: 0,
             max_attempts: 3,
@@ -450,7 +479,108 @@ mod tests {
     }
 
     fn any(agent: &str) -> ClaimFilter {
-        ClaimFilter { kind: None, agent_id: agent.into(), groups: vec![] }
+        ClaimFilter {
+            kind: None,
+            agent_id: agent.into(),
+            agent_uid: String::new(),
+            groups: vec![],
+        }
+    }
+
+    // ---- identity M1b: the UID columns are dual-written, never read ------
+
+    /// Positive case first: both UID columns round-trip. `target_agent_uid`
+    /// is what the enqueuer resolved; `claimed_by_uid` is what the claimer
+    /// carried. The claim predicate is unchanged — it still matches on
+    /// `agent_id` — so a claimer with NO uid still claims.
+    #[test]
+    fn uid_columns_are_written_at_enqueue_and_claim_and_round_trip() {
+        let (s, _d) = store();
+        let mut w = item("w-uid", "targeted");
+        w.target_agent = "agenty-2".into();
+        w.target_agent_uid = "4f3c-a91".into();
+        s.work_queue_enqueue(&w).unwrap();
+
+        let stored = s.work_queue_get("w-uid").unwrap().unwrap();
+        assert_eq!(stored.target_agent_uid, "4f3c-a91");
+        assert_eq!(stored.claimed_by_uid, "", "unclaimed: no claimer uid");
+
+        let filter = ClaimFilter {
+            kind: None,
+            agent_id: "agenty-2".into(),
+            agent_uid: "4f3c-a91".into(),
+            groups: vec![],
+        };
+        let claimed = s.work_queue_claim(&filter, 2000, 60_000).unwrap().unwrap();
+        assert_eq!(claimed.claimed_by, "agenty-2");
+        assert_eq!(claimed.claimed_by_uid, "4f3c-a91");
+        assert_eq!(claimed.target_agent_uid, "4f3c-a91");
+    }
+
+    /// No reader changes (spec §9.1 M1): a claimer that carries no UID — a
+    /// pre-M1a spawn, a quick-launch pane — is still eligible exactly as
+    /// before, and the column simply stays empty.
+    #[test]
+    fn a_claimer_without_a_uid_still_claims_and_leaves_the_column_empty() {
+        let (s, _d) = store();
+        s.work_queue_enqueue(&item("w-nouid", "open to all"))
+            .unwrap();
+        let claimed = s
+            .work_queue_claim(&any("agentx"), 2000, 60_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.claimed_by, "agentx");
+        assert_eq!(claimed.claimed_by_uid, "");
+    }
+
+    /// Every path that clears `claimed_by` clears `claimed_by_uid` with it —
+    /// release, reap, cancel. A UID left behind on an `open` row would be a
+    /// stale claim of a claimer that no longer holds it, which is exactly the
+    /// "derive state from what was previously stored" defect spec §10
+    /// constraint 2 forbids.
+    #[test]
+    fn release_reap_and_cancel_clear_the_claimer_uid_with_the_claimer() {
+        let (s, _d) = store();
+        let filter = ClaimFilter {
+            kind: None,
+            agent_id: "a1".into(),
+            agent_uid: "uid-a1".into(),
+            groups: vec![],
+        };
+
+        // release
+        s.work_queue_enqueue(&item("w-rel", "release me")).unwrap();
+        let c = s.work_queue_claim(&filter, 2000, 60_000).unwrap().unwrap();
+        assert_eq!(c.claimed_by_uid, "uid-a1");
+        assert!(s
+            .work_queue_release("w-rel", "a1", c.attempts, "later", 3000)
+            .unwrap());
+        assert_eq!(
+            s.work_queue_get("w-rel").unwrap().unwrap().claimed_by_uid,
+            ""
+        );
+        // Out of the pool, so the next section's claim cannot pick it up
+        // (released rows return to `open` with their original created_at).
+        assert!(s.work_queue_cancel("w-rel", "section done", 3100).unwrap());
+
+        // reap (lease expired)
+        s.work_queue_enqueue(&item("w-reap", "reap me")).unwrap();
+        let c = s.work_queue_claim(&filter, 4000, 10).unwrap();
+        assert_eq!(c.unwrap().id, "w-reap");
+        s.work_queue_reap(5000).unwrap();
+        let reaped = s.work_queue_get("w-reap").unwrap().unwrap();
+        assert_eq!(reaped.claimed_by, "");
+        assert_eq!(reaped.claimed_by_uid, "");
+        assert!(s.work_queue_cancel("w-reap", "section done", 5100).unwrap());
+
+        // cancel
+        s.work_queue_enqueue(&item("w-can", "cancel me")).unwrap();
+        s.work_queue_claim(&filter, 6000, 60_000).unwrap().unwrap();
+        assert!(s.work_queue_cancel("w-can", "operator", 7000).unwrap());
+        assert_eq!(
+            s.work_queue_get("w-can").unwrap().unwrap().claimed_by_uid,
+            ""
+        );
     }
 
     #[test]
@@ -531,10 +661,18 @@ mod tests {
         g.target_group = "reviewers".into();
         s.work_queue_enqueue(&g).unwrap();
 
-        let outsider =
-            ClaimFilter { kind: None, agent_id: "a1".into(), groups: vec!["writers".into()] };
-        let member =
-            ClaimFilter { kind: None, agent_id: "a2".into(), groups: vec!["reviewers".into()] };
+        let outsider = ClaimFilter {
+            kind: None,
+            agent_id: "a1".into(),
+            agent_uid: String::new(),
+            groups: vec!["writers".into()],
+        };
+        let member = ClaimFilter {
+            kind: None,
+            agent_id: "a2".into(),
+            agent_uid: String::new(),
+            groups: vec!["reviewers".into()],
+        };
 
         assert!(s.work_queue_claim(&outsider, 2000, 60_000).unwrap().is_none());
         assert_eq!(s.work_queue_claim(&member, 2000, 60_000).unwrap().unwrap().id, "g");
@@ -560,7 +698,12 @@ mod tests {
         s.work_queue_enqueue(&review).unwrap();
         s.work_queue_enqueue(&repro).unwrap();
 
-        let f = ClaimFilter { kind: Some("repro".into()), agent_id: "a".into(), groups: vec![] };
+        let f = ClaimFilter {
+            kind: Some("repro".into()),
+            agent_id: "a".into(),
+            agent_uid: String::new(),
+            groups: vec![],
+        };
         assert_eq!(s.work_queue_claim(&f, 2000, 60_000).unwrap().unwrap().id, "p");
     }
 
