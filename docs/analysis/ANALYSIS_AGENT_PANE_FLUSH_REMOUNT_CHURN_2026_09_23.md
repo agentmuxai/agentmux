@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-23
 **Author:** Manoz
-**Status:** measured, fixed (this PR), verified live — §5. Two smaller residual
+**Status:** analysis — measured, fixed (this PR), verified live — §5. Two smaller residual
 costs are named in §6 and left open with numbers attached.
 **Symptom (user-reported):** with four agents streaming in four visible panes,
 typing in a composer is "quite slow" and the agents' output "appears laggy".
