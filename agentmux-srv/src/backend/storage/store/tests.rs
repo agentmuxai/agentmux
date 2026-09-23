@@ -2148,9 +2148,9 @@
     }
 
     /// Codex P1 on #3576: the promoted clone a launch was repointed to is
-    /// deleted afterwards (`agent_def_delete` keeps derived rows), so no
-    /// lineage reaches the template any more. A stamped block still resolves
-    /// its launch — the stamp is the evidence, not the lineage.
+    /// deleted afterwards (`agent_def_delete` keeps derived rows). Deleting
+    /// it re-parents its children to its own parent (the template), so the
+    /// launch keeps its lineage and still resolves, stamped or not.
     #[test]
     fn a_stamped_launch_resolves_after_its_promoted_clone_is_deleted() {
         let (tmp, store, _reg) = store_with_registry();
@@ -2177,9 +2177,12 @@
             .unwrap();
         assert!(store.agent_def_delete(&clone).unwrap());
 
-        block_showing_stamped(&store, "block-cg", Some("tpl-clone-gone"), Some(&launched));
-        let got = store.instance_get_active_for_block("block-cg").unwrap();
-        assert_eq!(got.map(|r| r.id), Some(launched));
+        for stamped in [Some(launched.as_str()), None] {
+            block_showing_stamped(&store, "block-cg", Some("tpl-clone-gone"), stamped);
+            let got = store.instance_get_active_for_block("block-cg").unwrap();
+            assert_eq!(got.map(|r| r.id), Some(launched.clone()), "stamped={stamped:?}");
+            store.delete::<crate::backend::obj::Block>("block-cg").ok();
+        }
     }
 
     /// A stale stamp — pane reuse left A's id while B, launched from the
@@ -2357,6 +2360,28 @@
         assert!(store.agent_def_delete("agent-plain-b").unwrap());
         block_showing_stamped(&store, "block-plain", Some("agent-plain-b"), Some("agent-plain-a"));
         assert!(store.instance_get_active_for_block("block-plain").unwrap().is_none());
+    }
+
+    /// ReAgent P1 on #3576: a stamped row whose ancestor is gone does not
+    /// resolve on that alone — it must relate to what the block names. The
+    /// block names template A; the stamp names C, launched from template B,
+    /// since removed. Resolves to nothing.
+    #[test]
+    fn a_stamped_row_from_an_unrelated_removed_template_resolves_to_nothing() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        for id in ["tpl-named-a", "tpl-removed-b"] {
+            let mut tpl = sample_agent(id, id);
+            tpl.is_seeded = 1;
+            store.agent_def_insert(&mut tpl).unwrap();
+        }
+        let c = launch_from_template_on(&store, &agents_root, "tpl-removed-b", "inst-unrel-c", "block-unrel-tpl");
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM db_agents WHERE id = 'tpl-removed-b'", []).unwrap();
+        }
+        block_showing_stamped(&store, "block-unrel-tpl", Some("tpl-named-a"), Some(&c));
+        assert!(store.instance_get_active_for_block("block-unrel-tpl").unwrap().is_none());
     }
 
     /// A block whose meta names no agent at all keeps today's fallback: the
