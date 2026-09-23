@@ -178,12 +178,23 @@ pub(super) async fn handle_cron_create(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
     };
 
+    // Identity M1b: resolve the typed target to its UID NOW, while the
+    // author is present (spec §5.4). Dual-written beside `target`; the job
+    // still fires by `target` in this phase. Empty if it did not resolve —
+    // never guessed, and the miss is counted (spec §9.2).
+    let target_uid = crate::backend::agent_resolve::resolve_uid_for_dual_write(
+        &state.mstore,
+        &req.target,
+        "cron_create.target",
+    );
+
     let job = CronJob {
         id: Uuid::new_v4().to_string(),
         name: req.name.clone(),
         expression: req.expression.clone(),
         prompt: req.prompt.clone(),
         target: req.target.clone(),
+        target_uid,
         created_by: req.created_by.clone(),
         enabled: true,
         last_fired: None,
@@ -288,6 +299,7 @@ mod tests {
             expression: "0 9 * * *".to_string(),
             prompt: "run the build".to_string(),
             target: "target-agent".to_string(),
+            target_uid: String::new(),
             created_by: "creator-agent".to_string(),
             enabled,
             last_fired: Some(1_700_000_000),

@@ -102,6 +102,19 @@ pub(super) async fn handle_work_enqueue(
         );
     }
 
+    // Identity M1b: resolve the typed target to its UID NOW, while the
+    // author is present (spec §5.4) — a claim later must never resolve a
+    // name. Dual-written beside `target_agent`; the claim predicate still
+    // matches on the slug in this phase. Empty if it did not resolve, and
+    // the miss is counted (spec §9.2). Resolution reads the per-channel
+    // object store, so a target that lives in another channel stays empty
+    // here — recorded, not guessed.
+    let target_agent_uid = crate::backend::agent_resolve::resolve_uid_for_dual_write(
+        &state.mstore,
+        &req.target_agent,
+        "work_enqueue.target_agent",
+    );
+
     let now = now_ms();
     let item = WorkItem {
         id: Uuid::new_v4().to_string(),
@@ -113,6 +126,8 @@ pub(super) async fn handle_work_enqueue(
         priority: req.priority,
         state: String::new(), // set by the store
         claimed_by: String::new(),
+        target_agent_uid,
+        claimed_by_uid: String::new(),
         claim_expires: None,
         attempts: 0,
         max_attempts: req.max_attempts.unwrap_or(3),
@@ -136,6 +151,13 @@ pub(super) async fn handle_work_enqueue(
 pub(super) struct ClaimRequest {
     /// The claiming agent's id.
     pub agent_id: String,
+    /// The claiming agent's UID, carried from its own `AGENTMUX_AGENT_UID`
+    /// (identity M1a). Optional: a pre-M1a spawn or a quick-launch pane has
+    /// none. Written to `claimed_by_uid`; not part of eligibility. Until M4
+    /// verifies it against the agent's token this is an assertion like
+    /// `agent_id` is — recorded, not trusted.
+    #[serde(default)]
+    pub agent_uid: String,
     #[serde(default)]
     pub kind: Option<String>,
     /// Group ids this agent belongs to. Resolved by the CALLER — group
@@ -169,9 +191,24 @@ pub(super) async fn handle_work_claim(
         tracing::warn!(target: "workqueue", error = %e, "reap before claim failed");
     }
 
+    // Identity M1b: prefer the UID the claimer CARRIED. Only if it carried
+    // none, fall back to resolving its `agent_id` — and count that fallback
+    // (spec §9.2), because a non-zero count names a launch path that still
+    // reconstructs identity instead of carrying it.
+    let agent_uid = if !req.agent_uid.trim().is_empty() {
+        req.agent_uid.trim().to_string()
+    } else {
+        crate::backend::agent_resolve::resolve_uid_for_dual_write(
+            &state.mstore,
+            &req.agent_id,
+            "work_claim.agent_id_not_carried",
+        )
+    };
+
     let filter = ClaimFilter {
         kind: req.kind.filter(|k| !k.is_empty()),
         agent_id: req.agent_id.clone(),
+        agent_uid,
         groups: req.groups.clone(),
     };
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
