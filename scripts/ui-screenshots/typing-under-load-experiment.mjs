@@ -1,16 +1,22 @@
 // Hands-free A/B: same streaming load, LoAF-attributed frames WITHOUT typing
-// vs WITH synthetic key-repeat typing. Optionally kicks off the load by sending
-// a prompt into every agent composer in the page first.
+// (A) vs WITH synthetic key-repeat typing (B). Optionally kicks off the load by
+// sending a prompt into every EMPTY agent composer in the page first.
 //
 //   node scripts/ui-screenshots/typing-under-load-experiment.mjs <port> <targetIdSubstr> \
-//        [--send "<prompt>"] [--ramp 40] [--secs 15] [--kps 20] [--typeInto "Maka"]
+//        [--send "<prompt>"] [--ramp 40] [--secs 15] [--kps 20] [--cycles 2] --typeInto <paneIndex|agentName>
+//
+// Windows are counterbalanced (A B, then B A, ...), each exactly `secs` long,
+// because the load itself drifts — streams grow and agents finish — so a fixed
+// A-then-B order would credit that drift to typing. Totals are pooled per
+// condition; `windows` shows each window so drift is visible.
 import WebSocket from "ws";
 
 const args = process.argv.slice(2);
 const port = args[0] ?? "9223", targetSel = args[1] ?? "";
 const opt = (k, d) => { const i = args.indexOf(k); return i > 0 ? args[i + 1] : d; };
 const prompt = opt("--send", null), ramp = Number(opt("--ramp", "40")), secs = Number(opt("--secs", "15"));
-const kps = Number(opt("--kps", "20")), typeInto = opt("--typeInto", "Maka"), ch = "f";
+const kps = Number(opt("--kps", "20")), typeInto = opt("--typeInto", null), cycles = Number(opt("--cycles", "2")), ch = "f";
+if (typeInto == null) { console.error("--typeInto <paneIndex|agentName> is required"); process.exit(1); }
 
 const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
 const page = targets.find((t) => t.type === "page" && (t.id.includes(targetSel) || t.url.includes(targetSel)));
@@ -31,13 +37,30 @@ const log = (...a) => console.error(new Date().toISOString().slice(11, 19), ...a
 const vis = await evalIn(`document.visibilityState`);
 if (vis !== "visible") { console.error(`page is ${vis} — restore the window first`); process.exit(2); }
 
-// --- optional: send the prompt into every composer ---
-const focusComposer = (name) => evalIn(`(()=>{const tas=[...document.querySelectorAll(".agent-view textarea, textarea")];const ta=tas.find(t=>t.placeholder.includes(${JSON.stringify(name)}));if(!ta)return false;ta.focus();return document.activeElement===ta})()`);
+// Composers in document order. A pane is addressed by its index, or by an agent
+// name that must match EXACTLY one "Send message to <name>..." placeholder —
+// never a substring (`Maka` must not select `Makashi`). Placeholders turn into
+// next-prompt suggestions once an agent has run, so the index is the reliable form.
+const composers = await evalIn(`[...document.querySelectorAll("textarea")].map((t,i)=>({i,name:(t.placeholder.match(/^Send message to (.+)\\.\\.\\.$/)||[])[1]||null,placeholder:t.placeholder.slice(0,40),hasDraft:t.value.length>0}))`);
+log("composers:", composers.map((c) => `${c.i}:${c.name ?? `"${c.placeholder}"`}${c.hasDraft ? " (draft)" : ""}`).join(", "));
+const resolveComposer = (sel) => {
+  if (/^\d+$/.test(String(sel))) return composers[Number(sel)] ? Number(sel) : null;
+  const hits = composers.filter((c) => c.name === sel);
+  return hits.length === 1 ? hits[0].i : null;
+};
+const focusComposerAt = (i) => evalIn(`(()=>{const ta=document.querySelectorAll("textarea")[${i}];if(!ta)return false;ta.focus();return document.activeElement===ta})()`);
+const typeIdx = resolveComposer(typeInto);
+if (typeIdx == null) { console.error(`--typeInto ${typeInto} matches no single composer (see list above)`); process.exit(3); }
+
+// --- optional: send the prompt into every EMPTY composer ---
 if (prompt) {
-  const names = await evalIn(`[...document.querySelectorAll("textarea")].map(t=>t.placeholder.replace("Send message to ","").replace("...",""))`);
-  log("composers:", names.join(", "));
-  for (const n of names) {
-    if (!(await focusComposer(n))) { log("could not focus", n); continue; }
+  for (const c of composers) {
+    // Input.insertText edits whatever is there and Enter submits the whole
+    // textarea, which the composer then clears — never do that to a real draft.
+    const hasDraft = await evalIn(`(document.querySelectorAll("textarea")[${c.i}]?.value.length ?? 1) > 0`);
+    if (hasDraft) { log(`skipped composer ${c.i}: it holds an unsent draft`); continue; }
+    if (!(await focusComposerAt(c.i))) { log("could not focus composer", c.i); continue; }
+    const n = c.i;
     await send("Input.insertText", { text: prompt });
     await sleep(150);
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r" });
@@ -60,43 +83,67 @@ const READ = `(()=>{const P=window.__exp;P.raf=false;P.po.disconnect();P.mo.disc
   const L=P.loafs; const scr=l=>l.scripts.reduce((a,s)=>a+s.dur,0); const sum=f=>+L.reduce((a,l)=>a+f(l),0).toFixed(0);
   const q=(arr,p)=>{if(!arr.length)return null;const s=[...arr].sort((x,y)=>x-y);return +s[Math.min(s.length-1,Math.floor(p*s.length))].toFixed(1)};
   const byInv=new Map(); for(const l of L) for(const s of l.scripts){const k=s.inv+" | "+s.fn+" @ "+s.url+":"+s.line; const v=byInv.get(k)||{n:0,dur:0,fl:0}; v.n++; v.dur+=s.dur; v.fl+=s.fl; byInv.set(k,v)}
-  return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydowns:P.keys,mutations:P.mut,frames:P.gaps.length,
+  return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydowns:P.keys,mutations:P.mut,frames:P.gaps.length,gaps:P.gaps.map(g=>+g.toFixed(1)),loafDurs:L.map(l=>l.dur),
     rafGapMs:{p50:q(P.gaps,.5),p95:q(P.gaps,.95),max:q(P.gaps,1),over50:P.gaps.filter(g=>g>50).length},
     loaf:{count:L.length,totalMs:sum(l=>l.dur),blockingMs:sum(l=>l.blocking),scriptMs:sum(scr),forcedLayoutInScriptsMs:sum(l=>l.scripts.reduce((a,s)=>a+s.fl,0)),renderPhaseMs:sum(l=>l.render),ofWhichStyleLayoutMs:sum(l=>l.styleLayout),maxMs:L.length?Math.max(...L.map(l=>l.dur)):0},
     topScripts:[...byInv].map(([k,v])=>({k,n:v.n,ms:+v.dur.toFixed(0),forcedLayoutMs:+v.fl.toFixed(0)})).sort((a,b)=>b.ms-a.ms).slice(0,16),
     worst3:[...L].sort((a,b)=>b.dur-a.dur).slice(0,3).map(l=>({dur:l.dur,blocking:l.blocking,scriptMs:+scr(l).toFixed(0),renderMs:l.render,styleLayoutMs:l.styleLayout,top:[...l.scripts].sort((a,b)=>b.dur-a.dur).slice(0,3).map(s=>s.inv.slice(0,32)+"|"+s.fn+"@"+s.url.slice(-26)+" "+s.dur+"ms fl="+s.fl)}))}})()`;
 
-const results = {};
-// A: no typing
-log(`A) ${secs}s streaming, NO typing`);
-await evalIn(ARM); await sleep(secs * 1000); results.A_streaming_only = await evalIn(READ);
+// One window of exactly `secs`. B types into composer `typeIdx`; if it can't be
+// focused, keystrokes would land wherever focus happens to be and the window
+// would measure the wrong workload — so that aborts the run instead.
+const kc = ch.toUpperCase().charCodeAt(0), interval = 1000 / kps;
+async function runWindow(typed) {
+  if (typed) {
+    if (!(await focusComposerAt(typeIdx))) throw new Error(`could not focus composer ${typeIdx}`);
+    // Snapshot draft + selection so cleanup restores it exactly.
+    await evalIn(`(()=>{const a=document.activeElement;window.__expDraft={el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd};return true})()`);
+  }
+  await evalIn(ARM);
+  const t0 = Date.now();
+  if (typed) {
+    for (let i = 0; i < secs * kps; i++) {
+      const w = t0 + i * interval - Date.now(); if (w > 0) await sleep(w);
+      send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 });
+      send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc });
+    }
+  }
+  const remaining = t0 + secs * 1000 - Date.now();
+  if (remaining > 0) await sleep(remaining);
+  const r = await evalIn(READ);
+  if (typed) await evalIn(`(()=>{const d=window.__expDraft;if(d&&d.el){d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}))}delete window.__expDraft;return true})()`);
+  return r;
+}
 
-// B: synthetic typing into the chosen composer. If that composer can't be
-// focused, keystrokes would land wherever focus happens to be, and phase B would
-// silently measure the wrong workload — report A and stop instead.
-if (!(await focusComposer(typeInto))) {
-  log(`could not focus composer ${typeInto} — skipping phase B`);
+// Pool a condition's windows: totals summed, percentiles over the pooled samples.
+function pool(ws_) {
+  const q = (arr, p) => { if (!arr.length) return null; const s = [...arr].sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(1); };
+  const sum = (f) => ws_.reduce((a, w) => a + f(w), 0);
+  const gaps = ws_.flatMap((w) => w.gaps), durs = ws_.flatMap((w) => w.loafDurs);
+  const byInv = new Map();
+  for (const w of ws_) for (const s of w.topScripts) { const v = byInv.get(s.k) || { k: s.k, n: 0, ms: 0, forcedLayoutMs: 0 }; v.n += s.n; v.ms += s.ms; v.forcedLayoutMs += s.forcedLayoutMs; byInv.set(s.k, v); }
+  return {
+    windows: ws_.length, totalMs: sum((w) => w.elapsedMs), keydowns: sum((w) => w.keydowns), mutations: sum((w) => w.mutations), frames: gaps.length,
+    rafGapMs: { p50: q(gaps, .5), p95: q(gaps, .95), max: q(gaps, 1), over50: gaps.filter((g) => g > 50).length },
+    loaf: { count: durs.length, totalMs: sum((w) => w.loaf.totalMs), blockingMs: sum((w) => w.loaf.blockingMs), scriptMs: sum((w) => w.loaf.scriptMs), forcedLayoutInScriptsMs: sum((w) => w.loaf.forcedLayoutInScriptsMs), maxMs: durs.length ? Math.max(...durs) : 0 },
+    topScripts: [...byInv.values()].sort((a, b) => b.ms - a.ms).slice(0, 12),
+  };
+}
+
+const order = []; for (let c = 0; c < cycles; c++) order.push(...(c % 2 === 0 ? ["A", "B"] : ["B", "A"]));
+const got = { A: [], B: [] }, windows = [];
+try {
+  for (const [k, label] of order.entries()) {
+    log(`${label}${k}) ${secs}s streaming${label === "B" ? ` + synthetic typing into composer ${typeIdx} at ${kps}/s` : ", NO typing"}`);
+    const r = await runWindow(label === "B");
+    got[label].push(r);
+    windows.push({ window: k, label, frames: r.frames, mutations: r.mutations, keydowns: r.keydowns, loafCount: r.loaf.count, loafTotalMs: r.loaf.totalMs });
+  }
+} catch (e) {
+  log(`aborted: ${e.message}`);
   ws.close();
-  console.log(JSON.stringify(results, null, 1));
+  console.log(JSON.stringify({ aborted: e.message, windows }, null, 1));
   process.exit(3);
 }
-log(`B) ${secs}s streaming + synthetic typing into ${typeInto} at ${kps}/s`);
-// Snapshot the composer's draft + selection so cleanup restores it exactly,
-// rather than guessing which trailing characters were ours.
-await evalIn(`(()=>{const a=document.activeElement;window.__expDraft=a&&a.tagName==="TEXTAREA"?{el:a,value:a.value,start:a.selectionStart,end:a.selectionEnd}:null;return true})()`);
-await evalIn(ARM);
-const n = secs * kps, interval = 1000 / kps, kc = ch.toUpperCase().charCodeAt(0), t0 = Date.now();
-for (let i = 0; i < n; i++) {
-  const w = t0 + i * interval - Date.now(); if (w > 0) await sleep(w);
-  send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 });
-  send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc });
-}
-// Close B's window at exactly `secs`, like A's: the reported values are totals,
-// not rates, so a longer B window would inflate every one of them.
-const remaining = t0 + secs * 1000 - Date.now();
-if (remaining > 0) await sleep(remaining);
-results.B_streaming_plus_typing = await evalIn(READ);
-// Restore the composer's original draft and selection exactly.
-await evalIn(`(()=>{const d=window.__expDraft;if(d&&d.el){d.el.value=d.value;d.el.setSelectionRange(d.start,d.end);d.el.dispatchEvent(new Event("input",{bubbles:true}))}delete window.__expDraft;return true})()`);
 ws.close();
-console.log(JSON.stringify(results, null, 1));
+console.log(JSON.stringify({ A_streaming_only: pool(got.A), B_streaming_plus_typing: pool(got.B), windows }, null, 1));

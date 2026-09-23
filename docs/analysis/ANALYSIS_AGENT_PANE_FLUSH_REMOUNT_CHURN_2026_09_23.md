@@ -207,7 +207,7 @@ length, which is exactly why this run reads worse than the first.
 ```
 # find the dev page target, then (window must be restored, not minimized):
 node scripts/ui-screenshots/typing-under-load-experiment.mjs 9223 <targetId> \
-  --send "<long unique-heading markdown prompt>" --ramp 40 --secs 15 --kps 20 --typeInto <pane>
+  --send "<long unique-heading markdown prompt>" --ramp 40 --secs 15 --kps 20 --cycles 2 --typeInto <paneIndex>
 node scripts/ui-screenshots/cpu-profile.mjs 9223 <targetId> 15 out.cpuprofile
 ```
 
