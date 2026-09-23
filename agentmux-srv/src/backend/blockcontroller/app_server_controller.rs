@@ -139,6 +139,12 @@ impl AppServerController {
                 .collect::<HashMap<_, _>>(),
             _ => HashMap::new(),
         };
+        // Identity M4a: record what this process is actually given.
+        crate::backend::identity_spawn::record_process_spawn(
+            &self.block_id,
+            crate::backend::identity_spawn::SpawnPath::AppServer,
+            &env_vars,
+        );
         let mut command = crate::server::cli_handlers::make_cli_cmd(&executable);
         command.args(args);
         core::apply_working_dir(&mut command, &self.block_id, &working_dir, &env_vars);

@@ -41,6 +41,9 @@ pub struct Store {
     /// in one channel is visible in every channel (cross-channel agent
     /// persistence, `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
     def_registry: Mutex<Option<Arc<DefinitionStore>>>,
+    /// token → UID for attributing requests (identity M4a). `None` except on
+    /// the channel's object store at runtime; see `attach_token_index`.
+    pub(super) token_index: Mutex<Option<Arc<super::agent_tokens::TokenIndex>>>,
     /// Base directory that named-instance `working_directory` values are
     /// expressed **relative to** in the instance registry (write side:
     /// `registry_mirror`; read side: the `listnamedagents` handler).
@@ -102,6 +105,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            token_index: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -160,6 +164,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            token_index: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -195,6 +200,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            token_index: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -219,6 +225,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            token_index: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })
@@ -295,6 +302,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            token_index: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
         })

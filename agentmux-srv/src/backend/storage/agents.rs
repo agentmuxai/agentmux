@@ -1281,6 +1281,8 @@ impl Store {
             // Read BEFORE the DELETE — afterwards there is no row to ask.
             // See `scope_for_row` for what this decides and why.
             let scope = Self::scope_for_row(&conn, id);
+            // Identity M4a: also read before the DELETE.
+            tombstone_key_names(&conn, id)?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed
@@ -1290,7 +1292,7 @@ impl Store {
             // permanently, with no UI path left to try again. Every
             // statement in the purge is an idempotent DELETE, so running it
             // for an id with no rows costs a few no-op statements.
-            purge_agent_dependents(&conn, id)?;
+            purge_agent_dependents(&conn, id, self.token_index().as_deref())?;
             (rows, scope)
         };
         // Tombstone the global definition record so another channel's stale
@@ -1375,7 +1377,7 @@ impl Store {
     /// serves both stores. Returns rows removed.
     pub fn agent_dependents_purge(&self, id: &str) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
-        purge_agent_dependents(&conn, id)
+        purge_agent_dependents(&conn, id, self.token_index().as_deref())
     }
 
     /// The non-SQLite half of deleting an agent row: observations keyed to
@@ -2207,6 +2209,8 @@ impl Store {
             if Self::scope_for_row(&conn, id) == RecordScope::FileKeyOnly {
                 return Ok(false);
             }
+            // Identity M4a: read the names before the row goes.
+            tombstone_key_names(&conn, id)?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and
@@ -2214,7 +2218,7 @@ impl Store {
             // arriving from the launch side, and an agent deleted through
             // this name used to keep its credentials and signing keys on
             // disk purely because the cleanup lived in the other function.
-            purge_agent_dependents(&conn, id)?;
+            purge_agent_dependents(&conn, id, self.token_index().as_deref())?;
             rows
         };
         // Unconditional, for the reason `agent_def_delete`'s own sweep is
@@ -2439,7 +2443,80 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
 /// `db_work_queue.target_agent` is deliberately absent: releasing work
 /// claimed against a deleted agent is a state change, not a row to drop —
 /// open question §8.3 of the spec above.
-fn purge_agent_dependents(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
+/// Record the lowercased names `id` is known by — the keys its legacy
+/// name-keyed signing keys may sit under — in `db_agent_key_tombstones`,
+/// before its row is deleted (identity M4a, spec §6.5.4). A template row is
+/// skipped: templates are never deleted through here as agents, and their
+/// names are shared by design. Idempotent; a missing row records nothing.
+fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), StoreError> {
+    let names: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            e => Err(e),
+        })?;
+    let Some((slug, name, instance_name)) = names else {
+        return Ok(());
+    };
+    let now = agentmux_common::time::now_secs();
+    for n in [slug, name, instance_name] {
+        // Folded as the key tables fold their names (`to_lowercase`); M4d
+        // compares in Rust, never with SQLite's ASCII-only `lower()`.
+        let n = n.trim().to_lowercase();
+        if n.is_empty() {
+            continue;
+        }
+        // Signing keys are keyed by slug (`AGENTMUX_AGENT_ID`), so a name
+        // another agent holds as its slug is that agent's key, not this
+        // one's: deleting the second "AgentY" must not tombstone the first
+        // one's `agenty` (adversarial review of #3571).
+        let held: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id != ?1 AND is_template = 0 AND lower(slug) = ?2)",
+            params![id, n],
+            |r| r.get(0),
+        )?;
+        if held {
+            continue;
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO db_agent_key_tombstones (name, deleted_uid, deleted_at) VALUES (?1, ?2, ?3)",
+            params![n, id, now],
+        )?;
+    }
+    Ok(())
+}
+
+/// Tombstoned names, for tests (M4d is the production reader).
+#[cfg(test)]
+pub(super) fn key_tombstones_for_tests(conn: &rusqlite::Connection) -> Vec<(String, String)> {
+    let mut stmt = conn
+        .prepare("SELECT name, deleted_uid FROM db_agent_key_tombstones ORDER BY name")
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn purge_agent_dependents_for_tests(
+    conn: &rusqlite::Connection,
+    id: &str,
+    tokens: Option<&super::agent_tokens::TokenIndex>,
+) -> Result<usize, StoreError> {
+    purge_agent_dependents(conn, id, tokens)
+}
+
+fn purge_agent_dependents(
+    conn: &rusqlite::Connection,
+    id: &str,
+    tokens: Option<&super::agent_tokens::TokenIndex>,
+) -> Result<usize, StoreError> {
     const BY_AGENT_ID: &[&str] = &[
         "db_agent_content",
         "db_agent_skills",
@@ -2468,6 +2545,13 @@ fn purge_agent_dependents(conn: &rusqlite::Connection, id: &str) -> Result<usize
         // Table names are compile-time constants from the list above, never
         // caller input — the id itself is still bound as a parameter.
         removed += conn.execute(&format!("DELETE FROM {table} WHERE agent_id=?1"), params![id])?;
+        // Identity M4a: the index follows the token row's own delete, not
+        // the purge's overall result (spec §6.5.3).
+        if *table == "db_agent_tokens" {
+            if let Some(tokens) = tokens {
+                tokens.forget_uid(id);
+            }
+        }
     }
     // The two that key on the agent differently.
     if present.contains("db_conversation_trust_grants") {
