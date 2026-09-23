@@ -21,6 +21,7 @@ mod messagebus;
 // own doc comment for why.
 pub(crate) mod reactive;
 mod name_resolution;
+pub(crate) mod caller;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
@@ -376,6 +377,12 @@ pub fn build_router(state: AppState) -> Router {
             "/agentmux/reactive/agent-names",
             get(reactive::handle_reactive_agent_names),
         )
+        // Identity M4a: inner to the auth layer (route_layer order: the
+        // last one added runs first), so it sees which key authenticated.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            caller::caller_middleware,
+        ))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             lan_or_full_auth_middleware,
@@ -687,6 +694,10 @@ pub fn build_router(state: AppState) -> Router {
         // sibling (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
         // Same auth gate as the cron routes above.
         .route("/agentmux/work", post(work_queue::handle_work_enqueue))
+        .route(
+            "/agentmux/identity/fallbacks",
+            get(caller::handle_identity_fallbacks),
+        )
         .route("/agentmux/work", get(work_queue::handle_work_list))
         .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
@@ -695,6 +706,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))
         .merge(bus_routes)
         .merge(reactive_routes)
+        // Identity M4a: attribute the (already authenticated) request.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            caller::caller_middleware,
+        ))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -2824,7 +2840,7 @@ async fn handle_window_focus(
 /// Auth middleware matching Go pkg/authkey/authkey.go:18-42.
 async fn auth_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     if req.method() == Method::OPTIONS {
@@ -2857,7 +2873,12 @@ async fn auth_middleware(
     });
 
     match auth_key {
-        Some(key) if key == state.auth_key => next.run(req).await,
+        Some(key) if key == state.auth_key => {
+            // Identity M4a: `caller_middleware` derives a `Caller` only for a
+            // request marked as full-key authenticated — never by default.
+            req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
+            next.run(req).await
+        }
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "unauthorized"})),

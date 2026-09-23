@@ -4765,3 +4765,96 @@ async fn plain_terminal_pane_shell_receives_the_instance_auth_key() {
 
     blockcontroller::delete_controller("test-authkey-shell");
 }
+
+// ---- identity M4a: the Caller middleware, end to end through the router ----
+
+async fn fallbacks_as(state: AppState, headers: &[(&str, &str)]) -> serde_json::Value {
+    let mut req = Request::builder()
+        .uri("/agentmux/identity/fallbacks")
+        .method("GET");
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let resp = build_router(state)
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// A request carrying a token this srv minted is attributed to that UID;
+/// the same request without it, or with an unknown one, is unattributed and
+/// still served — attribution, never refusal (spec §6.5.3).
+#[tokio::test]
+async fn m4a_a_minted_token_attributes_the_request_and_nothing_is_refused() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-agenty").unwrap();
+
+    let v = fallbacks_as(
+        state.clone(),
+        &[("X-AuthKey", "test-secret-key"), ("X-Agent-Token", &token)],
+    )
+    .await;
+    assert_eq!(v["caller"], "uid-agenty", "{v}");
+
+    let v = fallbacks_as(state.clone(), &[("X-AuthKey", "test-secret-key")]).await;
+    assert!(v["caller"].is_null(), "{v}");
+
+    let v = fallbacks_as(
+        state,
+        &[
+            ("X-AuthKey", "test-secret-key"),
+            ("X-Agent-Token", "not-a-token"),
+        ],
+    )
+    .await;
+    assert!(
+        v["caller"].is_null(),
+        "unknown token: unattributed, not 401 — {v}"
+    );
+}
+
+/// The token never stands in for the instance key.
+#[tokio::test]
+async fn m4a_a_token_without_the_auth_key_is_still_unauthorized() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-agenty").unwrap();
+    let req = Request::builder()
+        .uri("/agentmux/identity/fallbacks")
+        .header("X-Agent-Token", &token)
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// Through the real LAN-forward route group: a valid token on a LAN-key
+/// request is ignored (counted), never lifted to host trust.
+#[tokio::test]
+async fn m4a_a_token_on_a_lan_key_request_is_not_attributed() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-agenty").unwrap();
+    let count = || {
+        crate::backend::agent_resolve::uid_fallback_counts()
+            .into_iter()
+            .find(|(s, _)| *s == "m4.token_on_lan_key")
+            .map_or(0, |(_, n)| n)
+    };
+    let before = count();
+    let req = Request::builder()
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .header("X-Agent-Token", &token)
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(count() > before);
+}

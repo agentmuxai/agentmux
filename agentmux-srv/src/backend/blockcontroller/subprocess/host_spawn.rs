@@ -153,6 +153,12 @@ impl SubprocessController {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
         core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);
+        // Identity M4a: record what this process is actually given.
+        crate::backend::identity_spawn::record_process_spawn(
+            &self.block_id,
+            crate::backend::identity_spawn::SpawnPath::Subprocess,
+            &config.env_vars,
+        );
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
