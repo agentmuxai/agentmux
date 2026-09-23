@@ -91,14 +91,14 @@ describe("shouldReinject", () => {
 
 describe("composeReinjectionMessage", () => {
     it("wraps content in <system-reminder> tags — §3.1", () => {
-        const msg = composeReinjectionMessage([globalEntry("g1", "global body")]);
+        const msg = composeReinjectionMessage([globalEntry("g1", "global body")], "compaction");
         expect(msg.startsWith("<system-reminder>")).toBe(true);
         expect(msg.trimEnd().endsWith("</system-reminder>")).toBe(true);
     });
 
     it("includes every entry's full body verbatim — never truncated, per the 'has to read it all' requirement", () => {
         const longBody = "x".repeat(5000);
-        const msg = composeReinjectionMessage([personalEntry("big", longBody)]);
+        const msg = composeReinjectionMessage([personalEntry("big", longBody)], "compaction");
         expect(msg).toContain(longBody);
     });
 
@@ -107,7 +107,7 @@ describe("composeReinjectionMessage", () => {
             globalEntry("g1", "gbody1"),
             globalEntry("g2", "gbody2"),
             personalEntry("p1", "pbody1"),
-        ]);
+        ], "compaction");
         expect(msg).toMatch(/Global Memory \(2 entr(y|ies)\)/);
         expect(msg).toMatch(/Personal Memory \(1 entr(y|ies)\)/);
     });
@@ -117,8 +117,33 @@ describe("composeReinjectionMessage", () => {
         // Memory" generally — the fixed intro prose also legitimately
         // mentions "Personal Memory" by name, so a bare substring check
         // would fail even when the section itself is correctly omitted.
-        const msg = composeReinjectionMessage([globalEntry("g1", "gbody")]);
+        const msg = composeReinjectionMessage([globalEntry("g1", "gbody")], "compaction");
         expect(msg).not.toMatch(/# Personal Memory \(/);
+    });
+
+    // §3.3 "fresh session" addendum: a persistent identity whose prior
+    // session couldn't be resumed loses ALL prior context, not just a
+    // compacted summary — worth telling the model, since it changes what
+    // the model should assume it still knows.
+    describe("reason wording", () => {
+        it("mentions compaction specifically for reason: compaction", () => {
+            const msg = composeReinjectionMessage([globalEntry("g1", "gbody")], "compaction");
+            expect(msg).toMatch(/compacted into a summary/);
+        });
+
+        it("mentions the fresh-session cause specifically for reason: fresh_session", () => {
+            const msg = composeReinjectionMessage([globalEntry("g1", "gbody")], "fresh_session");
+            expect(msg).toMatch(/fresh one was started/);
+            expect(msg).not.toMatch(/compacted into a summary/);
+        });
+
+        it("both reasons share the exact same leading signature sentence — the detection anchor", () => {
+            const compaction = composeReinjectionMessage([globalEntry("g1", "gbody")], "compaction");
+            const freshSession = composeReinjectionMessage([globalEntry("g1", "gbody")], "fresh_session");
+            const signature = "Your memory was reinjected because your working context was just reset.";
+            expect(compaction).toContain(signature);
+            expect(freshSession).toContain(signature);
+        });
     });
 });
 
@@ -215,7 +240,12 @@ describe("buildMemoryReinjectionNode", () => {
 
 describe("isMemoryReinjectionMessage / parseReinjectionMessage — the replay-recognition half of §3.2", () => {
     it("recognizes a real composeReinjectionMessage output", () => {
-        const msg = composeReinjectionMessage([globalEntry("g1", "body one"), personalEntry("p1", "body two")]);
+        const msg = composeReinjectionMessage([globalEntry("g1", "body one"), personalEntry("p1", "body two")], "compaction");
+        expect(isMemoryReinjectionMessage(msg)).toBe(true);
+    });
+
+    it("recognizes a fresh_session-reason output too — same shared signature", () => {
+        const msg = composeReinjectionMessage([globalEntry("g1", "body one")], "fresh_session");
         expect(isMemoryReinjectionMessage(msg)).toBe(true);
     });
 
@@ -233,7 +263,7 @@ describe("isMemoryReinjectionMessage / parseReinjectionMessage — the replay-re
             globalEntry("g1", "gbody1"),
             globalEntry("g2", "gbody2"),
             personalEntry("p1", "pbody1"),
-        ]);
+        ], "compaction");
         const parsed = parseReinjectionMessage(msg);
         expect(parsed?.globalMemoryCount).toBe(2);
         expect(parsed?.personalMemoryCount).toBe(1);
@@ -241,14 +271,14 @@ describe("isMemoryReinjectionMessage / parseReinjectionMessage — the replay-re
     });
 
     it("handles a message with only one source present (the other section omitted)", () => {
-        const msg = composeReinjectionMessage([globalEntry("g1", "gbody1")]);
+        const msg = composeReinjectionMessage([globalEntry("g1", "gbody1")], "compaction");
         const parsed = parseReinjectionMessage(msg);
         expect(parsed?.globalMemoryCount).toBe(1);
         expect(parsed?.personalMemoryCount).toBe(0);
     });
 
     it("recovered entries use synthetic labels and text-length sizeBytes — documented approximation, not the originals", () => {
-        const msg = composeReinjectionMessage([globalEntry("real-label", "xxxx")]);
+        const msg = composeReinjectionMessage([globalEntry("real-label", "xxxx")], "compaction");
         const parsed = parseReinjectionMessage(msg);
         expect(parsed?.perEntryTokens[0].label).toBe("Entry 1");
         expect(parsed?.perEntryTokens[0].label).not.toBe("real-label");
@@ -263,7 +293,7 @@ describe("buildMemoryReinjectionNodeFromReplay", () => {
     });
 
     it("builds a full node from a real composed message, keyed on the event's own timestamp", () => {
-        const msg = composeReinjectionMessage([globalEntry("g1", "gbody"), personalEntry("p1", "pbody")]);
+        const msg = composeReinjectionMessage([globalEntry("g1", "gbody"), personalEntry("p1", "pbody")], "compaction");
         const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 1_758_534_000_000 });
         expect(node).not.toBeNull();
         expect(node?.type).toBe("memory_reinjection");
@@ -280,13 +310,13 @@ describe("buildMemoryReinjectionNodeFromReplay", () => {
         // small personal body instead to confirm "low" against the large
         // fallback window (the behavior actually being tested: it doesn't
         // crash or default to some other number when contextWindow is omitted).
-        const msg = composeReinjectionMessage([personalEntry("p1", "short")]);
+        const msg = composeReinjectionMessage([personalEntry("p1", "short")], "compaction");
         const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 0 });
         expect(node?.sizeBand).toBe("low");
     });
 
     it("respects an explicit contextWindow override when supplied", () => {
-        const msg = composeReinjectionMessage([personalEntry("p1", "x".repeat(3800))]);
+        const msg = composeReinjectionMessage([personalEntry("p1", "x".repeat(3800))], "compaction");
         // 950 estimated tokens against a 10_000-token window at the default
         // 0.10 fraction -> threshold 1000 -> 95% -> critical.
         const node = buildMemoryReinjectionNodeFromReplay(msg, { eventTimestamp: 0, contextWindow: 10_000 });

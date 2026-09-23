@@ -82,7 +82,7 @@
  */
 
 import { buildMemoryReinjectionNode, composeReinjectionMessage, shouldReinject } from "./memory-reinjection";
-import type { MemoryEntryInput } from "./memory-reinjection";
+import type { MemoryEntryInput, ReinjectionReason } from "./memory-reinjection";
 import type { MemoryReinjectionNode } from "./types";
 
 /**
@@ -113,15 +113,22 @@ export interface MemoryReinjectionController {
     /** True for the entire duration of a hidden turn — from `trigger()`'s successful send until `onSessionEnd()` observes its completion. Read this to gate the hiding queue wrapper. */
     isHiding: () => boolean;
     /**
-     * Call once per real `CompactionBoundary`. If the pane is idle, fetches
-     * current memory and sends it hidden immediately. If a real turn is
-     * already in flight (the common auto-compaction case), DEFERS instead
-     * — see doc comment fix 1 — and does nothing else until
-     * `maybeFireDeferred()` is called. No-ops entirely (does not fetch,
-     * does not defer) if a hidden turn is already in flight — re-entrancy
-     * guard, never stacks two.
+     * Call once per real `CompactionBoundary` (`reason: "compaction"`) or
+     * per fresh-session `agentmux_session_outcome` (`reason: "fresh_session"`
+     * — a persistent identity whose prior session could not be resumed, so
+     * the model has none of its prior context at all; see
+     * SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3's
+     * "fresh session" addendum, §3.3a). If the pane is idle, fetches current
+     * memory and sends it hidden immediately. If a real turn is already in
+     * flight (the common case for BOTH triggers — auto-compaction lands
+     * mid-turn, and a fresh-session outcome is typically discovered while
+     * processing the very turn the user just sent), DEFERS instead — see
+     * doc comment fix 1 — and does nothing else until `maybeFireDeferred()`
+     * is called. No-ops entirely (does not fetch, does not defer) if a
+     * hidden turn is already in flight — re-entrancy guard, never stacks
+     * two.
      */
-    trigger: (frameTimestamp: string | null) => Promise<void>;
+    trigger: (frameTimestamp: string | null, reason: ReinjectionReason) => Promise<void>;
     /**
      * Call at every `session_end`, unconditionally — including for
      * perfectly ordinary, unrelated turns. Returns the completed
@@ -141,12 +148,17 @@ export interface MemoryReinjectionController {
     maybeFireDeferred: () => void;
 }
 
+interface DeferredTrigger {
+    frameTimestamp: string | null;
+    reason: ReinjectionReason;
+}
+
 export function createMemoryReinjectionController(opts: MemoryReinjectionControllerOpts): MemoryReinjectionController {
     let hiding = false;
     let pendingNode: MemoryReinjectionNode | null = null;
-    let deferredFrameTimestamp: string | null | undefined = undefined; // undefined = nothing deferred; null is a valid frameTimestamp value
+    let deferred: DeferredTrigger | undefined = undefined; // undefined = nothing deferred
 
-    async function doTrigger(frameTimestamp: string | null): Promise<void> {
+    async function doTrigger(frameTimestamp: string | null, reason: ReinjectionReason): Promise<void> {
         let entries: MemoryEntryInput[];
         try {
             entries = await opts.fetchEntries();
@@ -176,7 +188,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // matters, not scattered across multiple call sites that could
         // drift out of sync.
         if (opts.isPaneWorking()) {
-            deferredFrameTimestamp = frameTimestamp;
+            deferred = { frameTimestamp, reason };
             return;
         }
 
@@ -185,7 +197,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             now: opts.now(),
             contextWindow: opts.contextWindow(),
         });
-        const message = composeReinjectionMessage(entries);
+        const message = composeReinjectionMessage(entries, reason);
 
         // Mirrors the real send path's own optimistic-TurnStart-before-RPC
         // ordering (agent-view.tsx's handleSendMessage) — turnPhase must
@@ -214,9 +226,9 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         }
     }
 
-    async function trigger(frameTimestamp: string | null): Promise<void> {
+    async function trigger(frameTimestamp: string | null, reason: ReinjectionReason): Promise<void> {
         if (hiding) return; // re-entrancy guard — see doc comment
-        if (deferredFrameTimestamp !== undefined) return; // already have one queued — first wins, arbitrary but simple
+        if (deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
 
         // Early-exit OPTIMIZATION only — skips an unnecessary fetchEntries()
         // round trip when the pane is obviously already busy right now.
@@ -224,11 +236,11 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // isPaneWorking() itself, immediately before dispatching, which is
         // what actually closes the race a stale check here could reopen.
         if (opts.isPaneWorking()) {
-            deferredFrameTimestamp = frameTimestamp;
+            deferred = { frameTimestamp, reason };
             return;
         }
 
-        await doTrigger(frameTimestamp);
+        await doTrigger(frameTimestamp, reason);
     }
 
     function onSessionEnd(): MemoryReinjectionNode | null {
@@ -241,10 +253,10 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
 
     function maybeFireDeferred(): void {
         if (hiding) return; // shouldn't be reachable (trigger() already guards), but never stack regardless
-        if (deferredFrameTimestamp === undefined) return;
-        const ts = deferredFrameTimestamp;
-        deferredFrameTimestamp = undefined;
-        void doTrigger(ts);
+        if (deferred === undefined) return;
+        const { frameTimestamp, reason } = deferred;
+        deferred = undefined;
+        void doTrigger(frameTimestamp, reason);
     }
 
     return {

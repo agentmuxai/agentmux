@@ -260,6 +260,149 @@ pub enum TurnRegistration {
     Skip,
 }
 
+/// Builds the full spawn environment for a persistent-controller CLI
+/// process: `cmd:env` base → Layer 3 identity/credential gate → MuxBus
+/// cloud token → the two RESERVED wrapper variables (unconditionally
+/// overwritten — `AGENTMUX_AUTH_KEY`/`AGENTMUX_BLOCKID`) → the two agent-
+/// identity variables and per-agent git identity (all user-overridable via
+/// `cmd:env`) → bundled/user tools PATH.
+///
+/// Shared by every real spawn of a persistent-controller CLI — this
+/// function's own logic used to live inline in `run_agent_turn` below, and
+/// only there. `PersistentSubprocessController::start()`'s eager-resume
+/// path (`SPEC_PERSISTENT_CONTROLLER_EAGER_RESUME_ON_RECONNECT_2026_09_20.md`)
+/// built its own second, independent copy of a SUBSET of this — codex P1 on
+/// PR #3513 found it had already drifted from this one: missing PATH and
+/// MuxBus-token injection entirely, and using `entry().or_insert()` instead
+/// of an unconditional overwrite for the two reserved wrapper variables
+/// (meaning a stale persisted `cmd:env` value for either would silently
+/// survive across an eager resume, unlike a live message send). One
+/// function, not two copies kept in sync by hand.
+///
+/// `Err(SpawnGateError)` means the caller must NOT spawn — same contract as
+/// `inject_identity_env_async` itself, which this wraps.
+pub(crate) async fn build_persistent_spawn_env(
+    mstore: Arc<crate::backend::storage::store::Store>,
+    id_store: Arc<crate::backend::storage::store::Store>,
+    identity_store: Arc<crate::backend::storage::store::Store>,
+    broker: Option<Arc<crate::backend::mps::Broker>>,
+    block_meta: &crate::backend::obj::MetaMapType,
+    block_id: &str,
+    auth_key: &str,
+    base_env_vars: std::collections::HashMap<String, String>,
+) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
+    // Identity injection: look up the active AgentInstance for this block,
+    // resolve its identity_id's bindings, and merge each per-provider env
+    // var into the spawn map. Api-key-class failures are logged and
+    // skipped — the agent CLI launches with whatever resolved cleanly plus
+    // the static cmd:env block. Oauth-class resolution failures are
+    // BLOCKING unless the agent opted into ambient login (layer-3 spawn
+    // gate, SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.2).
+    let mut env_vars = crate::identity::resolver::inject_identity_env_async(
+        mstore,
+        id_store.clone(),
+        identity_store,
+        broker,
+        block_id.to_string(),
+        base_env_vars,
+    )
+    .await?;
+
+    // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN if
+    // the user has authenticated via muxbus.login. No-op if no credentials
+    // are stored. Auto-refreshes if token is nearly expired.
+    crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars).await;
+
+    // Streaming-bash wrapper auth + discovery
+    // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
+    //
+    // 1. AGENTMUX_AUTH_KEY — config.rs:42 removed it from the process env
+    //    at startup (security PR #801). Re-inject for this spawn so the
+    //    wrapper (running inside Claude's bash subprocess tree) can
+    //    authenticate against the auth_middleware-gated
+    //    /agentmux/wps/publish endpoint via X-AuthKey.
+    // 2. PATH — prepend the bundled tools/bin dir so `agentmux-bashwrap.exe`
+    //    resolves when the PreToolUse hook (auto-injected by
+    //    agent_config.rs) rewrites the command to invoke it.
+    //    AGENTMUX_LOCAL_URL is already in the inherited process env
+    //    (main.rs:498).
+    //
+    // Unconditional `insert`, NOT `entry().or_insert()` — these two are
+    // RESERVED, server-controlled values (the current key, the real block
+    // id), not user configuration. A persisted `cmd:env` carrying a stale
+    // value for either (e.g. from a prior server restart with a different
+    // key) must not survive into this spawn.
+    env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.to_string());
+    // Block id so the wrapper can scope its MPS publishes to `block:<id>`.
+    // Without this, chunks publish without a scope and the frontend's
+    // per-block subscription doesn't receive them.
+    env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.to_string());
+
+    // Agent display name for MuxBus self-identification. AGENTMUX_AGENT_ID
+    // is the canonical, app-wide agent-identity variable (used far beyond
+    // muxbus -- MCP tool routing, native memory, shell OSC titling, jekt
+    // auto-registration, etc; see this repo's CLAUDE.md Naming Conventions
+    // table). MUXBUS_AGENT_ID mirrors the same value so muxbus-client picks
+    // it up under the MUXBUS_* prefix it already checks first (alongside
+    // MUXBUS_TOKEN/MUXBUS_COGNITO_DOMAIN injected above) -- this does NOT
+    // make MUXBUS_AGENT_ID a second source of truth for agent identity
+    // app-wide, it's scoped to this one muxbus hand-off point (ARCH-002,
+    // 2026-07-28 architecture analyst report). Only set if not already
+    // present in cmd:env — user-provided values take precedence, unlike the
+    // two reserved variables above.
+    if !env_vars.contains_key("AGENTMUX_AGENT_ID") {
+        let agent_display_name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
+        if !agent_display_name.is_empty() {
+            env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
+        }
+    }
+    if !env_vars.contains_key("MUXBUS_AGENT_ID") {
+        if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
+            env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
+        }
+    }
+    // Per-agent git commit identity -- see git_identity_env_vars() doc
+    // comment. Still overridable per the same "user-provided values take
+    // precedence" rule as every other var here.
+    if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
+        for (key, value) in git_identity_env_vars(&agent_id) {
+            if !env_vars.contains_key(key) {
+                env_vars.insert(key.to_string(), value);
+            }
+        }
+    }
+    // PATH includes BOTH bundled tools dir (portable builds,
+    // runtime/tools/bin/) AND user tools dir (~/.agentmux/tools/bin/).
+    // bundled is None in dev mode (target/debug exclusion in tool_store), so
+    // without user_tools_dir the wrapper wouldn't be on the agent's PATH
+    // during `task dev`.
+    {
+        let existing = env_vars
+            .get("PATH")
+            .cloned()
+            .or_else(|| std::env::var("PATH").ok())
+            .unwrap_or_default();
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let mut extras: Vec<String> = Vec::new();
+        if let Some(d) = crate::backend::tool_store::bundled_tools_dir() {
+            if d.exists() {
+                extras.push(d.to_string_lossy().into_owned());
+            }
+        }
+        if let Some(d) = crate::backend::tool_store::user_tools_dir() {
+            if d.exists() {
+                extras.push(d.to_string_lossy().into_owned());
+            }
+        }
+        if !extras.is_empty() {
+            let new_path = format!("{}{}{}", extras.join(sep), sep, existing);
+            env_vars.insert("PATH".to_string(), new_path);
+        }
+    }
+
+    Ok(env_vars)
+}
+
 pub async fn run_agent_turn(
     deps: &AgentTurnDeps,
     block_id: String,
@@ -303,34 +446,26 @@ pub async fn run_agent_turn(
         ],
     };
     let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
-    let mut env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
+    let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
         Some(serde_json::Value::Object(obj)) => obj
             .iter()
             .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
             .collect(),
         _ => std::collections::HashMap::new(),
     };
-    // Identity injection: look up the active AgentInstance for
-    // this block, resolve its identity_id's bindings, and merge
-    // each per-provider env var into the spawn map. Api-key-class
-    // failures are logged and skipped — the agent CLI launches
-    // with whatever resolved cleanly plus the static cmd:env
-    // block. Oauth-class resolution failures are BLOCKING unless
-    // the agent opted into ambient login (layer-3 spawn gate,
-    // SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.2):
-    // surface the error in the agent pane (same
-    // `error_during_execution` frame the container spawn-failure
-    // path uses below) and abort before the CLI is created.
-    // See agentmux-srv/src/identity/resolver.rs. Broker
-    // hand-in lets the OAuth expiry probe (PR D, spec §4.4)
-    // publish `identitybundlebindings:changed:<bundle_id>`
-    // when it flips a token's status valid→expired etc.
-    env_vars = match crate::identity::resolver::inject_identity_env_async(
+    // Identity gate, MuxBus token, reserved wrapper vars, agent identity,
+    // git identity, tools PATH — see `build_persistent_spawn_env`'s own doc
+    // comment. Broker hand-in lets the OAuth expiry probe (PR D, spec §4.4)
+    // publish `identitybundlebindings:changed:<bundle_id>` when it flips a
+    // token's status valid→expired etc.
+    let mut env_vars = match build_persistent_spawn_env(
         mstore.clone(),
         id_store.clone(),
         identity_store.clone(),
         Some(broker.clone()),
-        block_id.clone(),
+        &block.meta,
+        &block_id,
+        &auth_key,
         env_vars,
     )
     .await
@@ -385,93 +520,6 @@ pub async fn run_agent_turn(
             return Err(format!("identity spawn gate: {gate}"));
         }
     };
-    // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN
-    // if the user has authenticated via muxbus.login. No-op if no
-    // credentials are stored. Auto-refreshes if token is nearly expired.
-    crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars).await;
-    // Streaming-bash wrapper auth + discovery
-    // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
-    //
-    // 1. AGENTMUX_AUTH_KEY — config.rs:42 removed it from
-    //    the process env at startup (security PR #801).
-    //    Re-inject for this spawn so the wrapper (running
-    //    inside Claude's bash subprocess tree) can
-    //    authenticate against the auth_middleware-gated
-    //    /agentmux/wps/publish endpoint via X-AuthKey.
-    // 2. PATH — prepend the bundled tools/bin dir so
-    //    `agentmux-bashwrap.exe` resolves when the
-    //    PreToolUse hook (auto-injected by agent_config.rs)
-    //    rewrites the command to invoke it. AGENTMUX_LOCAL_URL
-    //    is already in the inherited process env (main.rs:498).
-    env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.clone());
-    // Block id so the wrapper can scope its MPS publishes
-    // to `block:<id>`. Without this, chunks publish without
-    // a scope and the frontend's per-block subscription
-    // doesn't receive them.
-    env_vars.insert("AGENTMUX_BLOCKID".to_string(), block_id.clone());
-    // Agent display name for MuxBus self-identification.
-    // AGENTMUX_AGENT_ID is the canonical, app-wide agent-identity
-    // variable (used far beyond muxbus -- MCP tool routing, native
-    // memory, shell OSC titling, jekt auto-registration, etc; see
-    // this repo's CLAUDE.md Naming Conventions table). MUXBUS_AGENT_ID
-    // is set below too, mirroring the same value, purely so
-    // muxbus-client picks it up under the MUXBUS_* prefix it already
-    // checks first (alongside MUXBUS_TOKEN/MUXBUS_COGNITO_DOMAIN
-    // injected above) -- this does NOT make MUXBUS_AGENT_ID a second
-    // source of truth for agent identity app-wide, it's scoped to
-    // this one muxbus hand-off point (ARCH-002, 2026-07-28
-    // architecture analyst report).
-    // Only set if not already present in cmd:env — user-provided values take precedence.
-    if !env_vars.contains_key("AGENTMUX_AGENT_ID") {
-        let agent_display_name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
-        if !agent_display_name.is_empty() {
-            env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
-        }
-    }
-    if !env_vars.contains_key("MUXBUS_AGENT_ID") {
-        if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
-            env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
-        }
-    }
-    // Per-agent git commit identity -- see git_identity_env_vars()
-    // doc comment. Still overridable per the same "user-provided
-    // values take precedence" rule as every other var here.
-    if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
-        for (key, value) in git_identity_env_vars(&agent_id) {
-            if !env_vars.contains_key(key) {
-                env_vars.insert(key.to_string(), value);
-            }
-        }
-    }
-    // PATH includes BOTH bundled tools dir (portable
-    // builds, runtime/tools/bin/) AND user tools dir
-    // (~/.agentmux/tools/bin/). bundled is None in dev
-    // mode (target/debug exclusion in tool_store), so
-    // without user_tools_dir the wrapper wouldn't be on
-    // the agent's PATH during `task dev`.
-    {
-        let existing = env_vars
-            .get("PATH")
-            .cloned()
-            .or_else(|| std::env::var("PATH").ok())
-            .unwrap_or_default();
-        let sep = if cfg!(windows) { ";" } else { ":" };
-        let mut extras: Vec<String> = Vec::new();
-        if let Some(d) = crate::backend::tool_store::bundled_tools_dir() {
-            if d.exists() {
-                extras.push(d.to_string_lossy().into_owned());
-            }
-        }
-        if let Some(d) = crate::backend::tool_store::user_tools_dir() {
-            if d.exists() {
-                extras.push(d.to_string_lossy().into_owned());
-            }
-        }
-        if !extras.is_empty() {
-            let new_path = format!("{}{}{}", extras.join(sep), sep, existing);
-            env_vars.insert("PATH".to_string(), new_path);
-        }
-    }
 
     let session_id_field =
         crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");

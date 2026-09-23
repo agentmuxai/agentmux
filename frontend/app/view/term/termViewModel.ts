@@ -40,6 +40,7 @@ import type { NodeModel } from "@/layout/index";
 const [nowMinute, setNowMinute] = createSignal(Math.floor(Date.now() / 60_000));
 if ((globalThis as any).__nowMinuteInterval != null) clearInterval((globalThis as any).__nowMinuteInterval);
 (globalThis as any).__nowMinuteInterval = setInterval(() => setNowMinute(Math.floor(Date.now() / 60_000)), 60_000);
+import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { computeTheme, DefaultTermTheme } from "./termutil";
 import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
@@ -79,6 +80,7 @@ class TermViewModel implements ViewModel {
     termZoomAtom: () => number;
     termThemeNameAtom: () => string;
     termTransparencyAtom: () => number;
+    scrollSensitivityAtom: () => number;
     noPadding: SignalAtom<boolean>;
     endIconButtons: () => IconButtonDecl[];
     shellProcFullStatus: SignalAtom<BlockControllerRuntimeStatus>;
@@ -230,6 +232,17 @@ class TermViewModel implements ViewModel {
                 let value = getOverrideConfigAtom(this.blockId, "term:transparency")() ?? 0.5;
                 return boundNumber(value, 0, 1);
             })
+        );
+
+        // term:scrollsensitivity has no per-block override (unlike
+        // transparency/fontSize above) — it's intentionally global-only
+        // (SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md §4.1), so
+        // this reads the plain setting, not getOverrideConfigAtom. Resolved
+        // through the same shared function termwrap.ts's constructor and
+        // AgentShellSubblock.tsx's own atom use, so a configured value means
+        // the same thing everywhere (REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md).
+        this.scrollSensitivityAtom = useBlockAtom(blockId, "scrollsensitivityatom", () =>
+            createMemo<number>(() => resolveTermScrollSensitivity(getSettingsKeyAtom("term:scrollsensitivity")()))
         );
 
         this.blockBg = createMemo(() => {

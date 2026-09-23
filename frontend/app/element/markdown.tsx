@@ -4,6 +4,28 @@
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { createContentBlockPlugin } from "@/app/element/markdown-contentblock-plugin";
 import { transformBlocks } from "@/app/element/markdown-util";
+import { findSafeSplitPoint } from "@/app/element/markdown-incremental";
+
+/**
+ * Deterministic work counters for the streaming-render invariants. Not a
+ * profiler: these exist so a test can assert the SHAPE of the work (does
+ * per-commit parse input stay bounded? is the processor built once?) without
+ * measuring time. Reset via `__resetMarkdownRenderStats()` in tests.
+ */
+export const __markdownRenderStats = {
+    /** Render-memo runs — one per committed text change. */
+    commits: 0,
+    /** Total characters handed to `processor.parse` across all commits. */
+    parsedChars: 0,
+    /** Times the unified processor + plugin chain has been constructed. */
+    processorBuilds: 0,
+};
+
+export function __resetMarkdownRenderStats(): void {
+    __markdownRenderStats.commits = 0;
+    __markdownRenderStats.parsedChars = 0;
+    __markdownRenderStats.processorBuilds = 0;
+}
 import { ALIGN_CLASS_REGEX, rehypeAlignToClass } from "@/app/element/rehype-align-to-class";
 import remarkMermaidToTag from "@/app/element/remark-mermaid-to-tag";
 import { TableBlock } from "@/app/element/table-block";
@@ -221,12 +243,51 @@ const Markdown = (props: MarkdownProps) => {
         },
     };
 
-    const renderedMarkdown = createMemo(() => {
-        const txt = transformedText();
-        markStart("markdown-render");
-        const tocRef: TocItem[] = [];
-        const tocRefObj = { current: tocRef };
+    // Counts WORK, not milliseconds — deliberately.
+    //
+    // The regression these guard against is algorithmic (re-parsing the whole
+    // message per streaming commit, and rebuilding the plugin chain to do it).
+    // A wall-clock assertion for that is flaky on shared CI runners to the
+    // point of being theater — the position this repo already took in
+    // Discussion #1161, and the reason these are counters instead. Counts are
+    // deterministic, machine-independent, and fail for a comprehensible
+    // reason. See docs/analysis/ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md
+    // and markdown-render-work.test.tsx, which asserts on them.
+    //
+    // Cost when nobody is looking: three integer adds per render.
+    // eslint-disable-next-line
+    const stats = __markdownRenderStats;
 
+    // Stable across commits, deliberately: the processor below closes over
+    // these once, and each render run refreshes their CONTENTS rather than
+    // rebinding them. That is what lets one processor outlive a commit.
+    const tocRef: TocItem[] = [];
+    const blocksRef = new Map<string, any>();
+
+    /**
+     * Already-parsed prefix of the current message: the part far enough from
+     * the end that no further streamed text can change how it parses. Holds
+     * the hast children and toc entries it produced, so growth only ever costs
+     * a parse of the NEW bytes. Null means "nothing frozen — parse it whole".
+     */
+    let frozen: {
+        end: number;
+        source: string;
+        highlight: boolean;
+        children: any[];
+        toc: TocItem[];
+    } | null = null;
+
+    // The unified processor used to be constructed INSIDE the render memo, so
+    // the entire plugin chain was rebuilt on every streaming commit — ~11x a
+    // second per streaming pane, measured at roughly 4ms of the per-commit
+    // cost (docs/analysis/ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md
+    // §6.5). It depends only on `highlight` and the slug prefix, never on the
+    // text, so it is memoized on those and reused. This matters more, not
+    // less, once per-commit parse cost comes down: at ~1ms of parse, a 4ms
+    // rebuild would dominate what it is rebuilding.
+    const processor = createMemo(() => {
+        stats.processorBuilds++;
         const rehypePlugins: any[] = rehype
             ? [
                   rehypeRaw,
@@ -271,32 +332,104 @@ const Markdown = (props: MarkdownProps) => {
         const remarkPlugins: any[] = [
             remarkMermaidToTag,
             remarkGfm,
-            [RemarkFlexibleToc, { tocRef: tocRefObj.current }],
-            [createContentBlockPlugin, { blocks: contentBlocksMap() }],
+            [RemarkFlexibleToc, { tocRef }],
+            [createContentBlockPlugin, { blocks: blocksRef }],
         ];
 
-        const processor = unified()
+        return unified()
             .use(remarkParse)
             .use(remarkPlugins as any)
             .use(remarkRehype as any, { allowDangerousHtml: true })
             .use(rehypePlugins as any);
+    });
+
+    const renderedMarkdown = createMemo(() => {
+        const txt = transformedText();
+        stats.commits++;
+        markStart("markdown-render");
+
+        // Refresh the contents the memoized processor's plugins read at
+        // transform time. `tocRef` must be CLEARED, not replaced — it is now
+        // shared with the processor, and carrying entries across runs would
+        // reintroduce the duplicate/stale-heading accumulation fixed in
+        // issue #789.
+        blocksRef.clear();
+        for (const [k, v] of contentBlocksMap()) blocksRef.set(k, v);
+
+        const highlight = props.highlight ?? true;
+
+        /**
+         * Parse ONE independent segment. `tocRef` is cleared per call, not per
+         * commit, because a commit may now run this more than once and each
+         * segment's headings have to be collected separately before the next
+         * call wipes them.
+         */
+        const runSegment = (src: string): { children: any[]; toc: TocItem[] } => {
+            tocRef.length = 0;
+            stats.parsedChars += src.length;
+            const hast: any = processor().runSync(processor().parse(src));
+            return { children: hast.children ?? [], toc: tocRef.slice() };
+        };
 
         try {
-            const mdast = processor.parse(txt);
-            const hast = processor.runSync(mdast);
-            const element = toJsxRuntime(hast as any, {
+            // Incremental path: freeze the part of the message that can no
+            // longer change meaning and parse only the trailing open block, so
+            // each byte is parsed once instead of once per commit. Falls back
+            // to a whole-document parse whenever a split cannot be PROVEN safe
+            // (see markdown-incremental.ts) — that fallback is just today's
+            // behavior, so the worst case is unchanged.
+            const splitAt = findSafeSplitPoint(txt);
+
+            let children: any[];
+            let toc: TocItem[];
+
+            if (splitAt <= 0) {
+                frozen = null;
+                const whole = runSegment(txt);
+                children = whole.children;
+                toc = whole.toc;
+            } else {
+                // The cache is only valid if this really is the same document
+                // growing. A non-append edit (history restore, switching
+                // messages) or a highlight flip invalidates it — the frozen
+                // hast was produced by a different processor in that case.
+                if (frozen && (frozen.highlight !== highlight || !txt.startsWith(frozen.source))) {
+                    frozen = null;
+                }
+                if (!frozen || splitAt > frozen.end) {
+                    const from = frozen ? frozen.end : 0;
+                    const seg = runSegment(txt.slice(from, splitAt));
+                    frozen = {
+                        end: splitAt,
+                        source: txt.slice(0, splitAt),
+                        highlight,
+                        children: frozen ? frozen.children.concat(seg.children) : seg.children,
+                        toc: frozen ? frozen.toc.concat(seg.toc) : seg.toc,
+                    };
+                }
+                const tail = runSegment(txt.slice(splitAt));
+                children = frozen.children.concat(tail.children);
+                toc = frozen.toc.concat(tail.toc);
+            }
+
+            const element = toJsxRuntime({ type: "root", children } as any, {
                 jsx: jsx as any,
                 jsxs: jsxs as any,
                 Fragment: Fragment as any,
                 passKeys: false,
                 components: markdownComponents as any,
             }) as JSX.Element;
-            // `tocRef` is local to this memo run, so the toc reflects only the
-            // current text — it no longer accumulates stale/duplicate headings
-            // across re-renders (issue #789).
-            return { element, toc: tocRefObj.current };
+            // `toc` is assembled from per-segment copies above, never the live
+            // `tocRef` — that array is cleared on the next `runSegment` call,
+            // so handing it out would let a consumer observe it empty later.
+            // Assembling per segment is also what preserves issue #789's
+            // guarantee that the toc reflects only the current text.
+            return { element, toc };
         } catch (e) {
             console.error("Markdown render error:", e);
+            // A failed incremental parse must not leave a poisoned cache
+            // behind for the next commit to build on.
+            frozen = null;
             return { element: <pre>{txt}</pre>, toc: [] as TocItem[] };
         } finally {
             markEnd("markdown-render", `len=${txt.length}`);

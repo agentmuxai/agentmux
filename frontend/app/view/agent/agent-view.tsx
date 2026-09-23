@@ -573,9 +573,20 @@ const AgentPresentationView = ({
                 initialTab: agent ? "accounts" : "memory",
             });
         };
+        // Second click on the Stash button retracts it — the button is now
+        // a real toggle (agent-model.ts's ToggleIconButtonDecl), not an
+        // always-opens button.
+        model._closeAgentStashModal = () => modalLayer.close();
+        // Read fresh at call time (agent-model.ts's endIconButtons() reads
+        // this inside blockframe.tsx's createMemo, so the signal read
+        // inside modalLayer.current() is tracked) — reflects every close
+        // path (X button, Escape, backdrop click), not just this button.
+        model._isAgentStashOpen = () => modalLayer.current()?.kind === "agent-stash";
     });
     onCleanup(() => {
         model._openAgentStashModal = null;
+        model._closeAgentStashModal = null;
+        model._isAgentStashOpen = null;
     });
 
     const agentAtoms = createMemo(() => createAgentAtoms());

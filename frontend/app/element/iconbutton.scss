@@ -38,12 +38,9 @@
     }
 
     &.toggle {
-        border-radius: 0;
-        padding: 1px;
         &.active {
             opacity: 1;
-            border: 1px solid var(--accent-color);
-            padding: 0;
+            color: var(--accent-color);
         }
         &:hover {
             background: var(--highlight-bg-color);

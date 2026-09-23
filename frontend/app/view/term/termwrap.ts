@@ -27,6 +27,7 @@ import { handleOsc7Command, handleOsc16162Command, handleOscTitleCommand, handle
 import { markStart, markEnd } from "@/perf";
 import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
+import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 
 const dlog = debug("wave:termwrap");
 
@@ -145,11 +146,11 @@ export class TermWrap {
         // (default 1). This is the only scroll-speed knob in the app — AgentMux
         // never reads the OS "lines per scroll" setting, so this is independent
         // of it. See SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md.
-        const scrollSensitivitySetting = getSettingsKeyAtom("term:scrollsensitivity")();
-        const scrollSensitivity =
-            typeof scrollSensitivitySetting === "number" && scrollSensitivitySetting > 0
-                ? scrollSensitivitySetting
-                : 1;
+        // Only the INITIAL value for this Terminal instance — resolved through
+        // the same shared function termViewModel.ts/AgentShellSubblock.tsx use
+        // to keep it live-updating afterward (termscrollsensitivity.ts's own
+        // header comment; REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md).
+        const scrollSensitivity = resolveTermScrollSensitivity(getSettingsKeyAtom("term:scrollsensitivity")());
         this.terminal = new Terminal({
             ...options,
             cursorBlink: false,
