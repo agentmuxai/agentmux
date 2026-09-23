@@ -947,7 +947,6 @@ async fn sync_agent_reactive(
             source_agent: inj.source_agent.clone(),
             request_id: Some(inj.id.clone()),
             priority: inj.priority.clone(),
-            wait_for_idle: false,
             jekt_tier: None,       // auto-detected from keywords
             delivery_tier: Some("wan".to_string()),
             forward_hops: 0,
