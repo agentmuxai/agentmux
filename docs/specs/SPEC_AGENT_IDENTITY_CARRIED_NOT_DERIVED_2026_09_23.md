@@ -3,10 +3,8 @@
 **Date:** 2026-09-23
 **Status:** active — M0 shipped in #3543 (2026-09-23); M1a (mint and
 carry the UID and token into the process) in #3548; M1b (UID columns on the
-work queue and cron, dual-written) in #3550. M2 designed in §4.4 (revision 4.1:
-revision 4.0 plus the thirteen findings of its own adversarial pass), not yet
-implemented. M3–M5
-not started.
+work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3–M5 not
+started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
@@ -945,7 +943,18 @@ changes two things at once.
   disagreeing, which is strictly worse than either state. Atomic here means
   smaller, not larger.
 
-  **Design: §4.4 (revision 4).** Written after M1 landed, measured against
+  **Shipped in #3560**, implemented from §4.4 revision 4.1 with no
+  deviations from it: identity-keyed registry, typed name bindings,
+  eviction by identity, ambiguity refused with candidates, liveness sweep
+  at resolution, sticky UID, a separate UID confirmer whose `None` is
+  unverifiable, HTTP 409 on ambiguous unregister, per-site counters. Three
+  of the mutation checks §4.4.5 names were run: eviction-by-name (both
+  guards removed) fails six fixture tests, UID-confirmer-None-as-mismatch
+  and non-sticky-UID each fail exactly one. Left name-keyed as §4.4.4 Q8
+  says: the Tier-2 file registry (M4), the cloud subscriber (§8), the
+  subagent watcher.
+
+  **Design: §4.4 (revision 4.1).** Written after M1 landed, measured against
   the four real registration sites and every delivery input. Names become
   bindings, identity becomes the key, eviction is by identity, ambiguity is
   refused with candidates, and the no-UID paths keep today's semantics and
