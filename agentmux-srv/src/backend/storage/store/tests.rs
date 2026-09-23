@@ -2344,6 +2344,21 @@
             "stopped"
         );
     }
+    /// ReAgent P0 on #3576: two plain user agents share a pane — A, then B,
+    /// whose stamp write failed — and B is deleted. The block names deleted
+    /// B with A's stale stamp; A has no ancestor (`parent_template_id` is
+    /// empty), which is not "an ancestor since deleted". Resolves to nothing.
+    #[test]
+    fn a_stale_stamp_naming_a_plain_agent_is_not_an_orphan() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        launch_user_agent_on(&store, &agents_root, "agent-plain-a", "block-plain");
+        store.agent_def_insert(&mut sample_agent("agent-plain-b", "agent-plain-b")).unwrap();
+        assert!(store.agent_def_delete("agent-plain-b").unwrap());
+        block_showing_stamped(&store, "block-plain", Some("agent-plain-b"), Some("agent-plain-a"));
+        assert!(store.instance_get_active_for_block("block-plain").unwrap().is_none());
+    }
+
     /// A block whose meta names no agent at all keeps today's fallback: the
     /// agent whose latest launch is on it (a block from before `agentId`).
     #[test]
