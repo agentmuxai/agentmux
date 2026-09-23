@@ -4092,6 +4092,73 @@
     /// incoherent outcome reachable here — a cross-channel agent's records
     /// swept while its definition stayed ACTIVE, so `agent_def_list`'s
     /// overlay keeps serving a definition nothing backs.
+    /// Identity M4b-4 (spec §6.5.8): a user agent known only from the shared
+    /// definition registry (another channel's) gets its local row before
+    /// `agent.open` spawns it, so its block can resolve.
+    #[test]
+    fn agent_row_ensure_local_backfills_a_cross_channel_agent() {
+        let (_tmp, store, _reg) = store_with_registry();
+        let def_store =
+            crate::registry::DefinitionStore::open(_tmp.path().join("definitions")).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "elsewhere-open".to_string(),
+                    name: "ElsewhereOpen".to_string(),
+                    provider: "claude".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(Arc::new(def_store));
+        assert!(store.instance_get("elsewhere-open").unwrap().is_none());
+        assert!(store.agent_row_ensure_local("elsewhere-open").unwrap());
+        assert!(store.instance_get("elsewhere-open").unwrap().is_some());
+        assert!(!store.agent_row_ensure_local("exists-nowhere").unwrap());
+    }
+
+    /// Identity M4b-4: `agent.open`'s launch record is lifecycle-only — it
+    /// moves the block, status and launch time, and leaves the account,
+    /// bundle, name and workspace a fold from a fresh record would blank. A
+    /// template has no row to record on.
+    #[test]
+    fn instance_record_launch_moves_only_the_lifecycle() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        store
+            .agent_def_insert(&mut sample_agent("agent-rec", "agent-rec"))
+            .unwrap();
+        let mut inst = make_named_inst("inst-rec", "RecNamed", &agents_root);
+        inst.definition_id = "agent-rec".to_string();
+        inst.block_id = "block-rec-a".to_string();
+        inst.identity_id = "acct-rec".to_string();
+        inst.memory_id = "bundle-rec".to_string();
+        let before = store.instance_create(&inst).unwrap();
+
+        assert!(store
+            .instance_record_launch("agent-rec", "block-rec-b", 99_999)
+            .unwrap());
+        let after = store.instance_get("agent-rec").unwrap().unwrap();
+        assert_eq!(after.block_id, "block-rec-b");
+        assert_eq!(after.status, "running");
+        assert_eq!(after.started_at, 99_999);
+        assert_eq!(after.identity_id, before.identity_id);
+        assert_eq!(after.memory_id, before.memory_id);
+        assert_eq!(after.instance_name, before.instance_name);
+        assert_eq!(after.working_directory, before.working_directory);
+
+        assert!(
+            !store
+                .instance_record_launch("def-mirror", "block-rec-b", 1)
+                .unwrap(),
+            "a template"
+        );
+        assert!(!store
+            .instance_record_launch("no-such-agent", "block-rec-b", 1)
+            .unwrap());
+    }
+
     #[test]
     fn instance_delete_tombstones_a_cross_channel_definition_with_no_local_row() {
         let (_tmp, store, _reg) = store_with_registry();
