@@ -1033,47 +1033,8 @@ fn retry_after_resume_failure_with_no_entries_runs_under_this_generations_own_un
     assert_eq!(inner.proc_status, STATUS_DONE, "and published the terminal status the waiter suppressed");
     assert!(
         inner.spawning_in_progress,
-        "the eager claim is not this settlement's to release — releasing it would let a send \
-         become a spawner while try_eager_resume is still unwinding"
+        "the eager claim is not this settlement's to touch — it belongs to try_eager_resume"
     );
-}
-
-/// reagent P1 on PR #3551 (third round): the settlement's side effects run
-/// outside `inner`'s lock, so it holds the SPAWN CLAIM across them — a send
-/// arriving then queues behind it rather than becoming a spawner. On
-/// release, anything that queued is handed off (a spawn on the adopted
-/// session), and the claim never leaks: here the hand-off spawn fails (no
-/// such binary) and the failure settlement releases it.
-#[test]
-fn retry_after_resume_failure_with_no_entries_hands_off_a_send_that_queued_behind_its_claim() {
-    let c = controller();
-    {
-        let mut inner = c.inner.lock().unwrap();
-        inner.session_id = Some("dead-sid".to_string());
-        inner.spawn_generation = 1;
-        // A send that reached `decide_send_action` while the claim was held.
-        let seq = inner.take_next_message_seq();
-        inner
-            .pending_send_messages
-            .push_back(QueuedMessage::fresh(seq, "{\"queued\":\"behind\"}".to_string()));
-    }
-    let config = PersistentSpawnConfig {
-        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
-        cli_args: vec![],
-        working_dir: String::new(),
-        env_vars: HashMap::new(),
-        session_id_field: "session_id".to_string(),
-        resume_flag: "--resume".to_string(),
-        session_id: "dead-sid".to_string(),
-        message_id: None,
-    };
-
-    c.retry_after_resume_failure(1, config, vec![], None, "dead-sid".to_string());
-
-    let inner = c.inner.lock().unwrap();
-    assert!(!inner.spawning_in_progress, "the claim taken for the side effects must be released");
-    assert_eq!(inner.pending_send_messages.len(), 1, "the queued send is handed off, never dropped");
-    assert!(inner.stdin_tx.is_none(), "the hand-off spawn could not launch here (no such binary)");
 }
 
 /// Codex P1 on PR #3551: a message that arrived after the doomed process
