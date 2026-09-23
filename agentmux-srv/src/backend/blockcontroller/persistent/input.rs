@@ -482,17 +482,12 @@ impl PersistentSubprocessController {
         WatchdogStep::Continue
     }
 
-    /// Drain the deferred-delivery queue during teardown and report every
-    /// stranded entry, so a message this controller accepted is never quietly
-    /// discarded (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5).
-    pub(super) fn report_stranded_deferred_deliveries(&self, reason: &str) {
-        let stranded: Vec<String> = {
-            let mut inner = self.inner.lock().unwrap();
-            inner.deferred_deliveries.drain(..).collect()
-        };
-        Self::log_stranded_deferred(&self.block_id, reason, &stranded);
-    }
-
+    /// Report every stranded deferred entry, so a message this controller
+    /// accepted is never quietly discarded
+    /// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5). Callers drain the
+    /// queue in the same `inner` acquisition that ends delivery (`stop`,
+    /// `shutdown`, the watchdog), so no flush can take an entry first.
+    ///
     /// **Known gap:** reporting is currently a loud structured log, not a
     /// failure routed back to the original sender. The queue stores encoded
     /// stdin lines with no sender identity attached, so there is nothing to
