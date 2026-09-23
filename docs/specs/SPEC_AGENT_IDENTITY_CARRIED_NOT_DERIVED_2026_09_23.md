@@ -1193,7 +1193,7 @@ env builder read from it (ReAgent P1 on #3578).
 
 #### 6.5.9 M4c design — attribution by UID
 
-Measured against main as of #3591 (merged 2026-09-24); an adversarial pass
+Measured against main as of #3591 (merged 2026-09-23); an adversarial pass
 on the first draft found one P1 (cron would look forged) and three P2s,
 folded in. Every actor field
 is stored under a **name** today; the only `*_uid` columns are M1b's target
