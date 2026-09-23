@@ -70,7 +70,21 @@ fn now_unix_secs() -> i64 {
 /// future own-pane-resolving handler) — the identity-verification mechanism
 /// isn't UI-automation-specific, just first built for it. See
 /// docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md §5.0.
-pub(crate) fn verified_block_id(state: &AppState, auth: &UiAutomationAuth) -> Result<String, String> {
+///
+/// Identity M4a-2: `caller` is the request's [`Caller`](crate::server::caller::Caller);
+/// `auth.agent_id` is counted against it (`m4.actor_*.ui_auth`), never refused
+/// on it — M4d moves this check onto `Caller` (spec §6.5.4).
+pub(crate) fn verified_block_id(
+    state: &AppState,
+    caller: Option<&crate::server::caller::Caller>,
+    auth: &UiAutomationAuth,
+) -> Result<String, String> {
+    crate::server::actor::check_actor(
+        state,
+        caller,
+        crate::server::actor::ActorSite::UiAuth,
+        Some(&auth.agent_id),
+    );
     if auth.ts_secs <= 0 || (now_unix_secs() - auth.ts_secs).abs() > UI_AUTOMATION_SIG_MAX_AGE_SECS
     {
         return Err("signature timestamp missing or outside the freshness window".to_string());
@@ -190,9 +204,10 @@ fn prune_old_screenshots(dir: &std::path::Path) {
 /// path (openable via `OpenMedia`) and the base64 bytes inline.
 pub(crate) async fn handle_ui_screenshot(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiScreenshotRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -282,9 +297,10 @@ pub(crate) async fn handle_ui_screenshot(
 /// pane subtree.
 pub(crate) async fn handle_ui_click(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiClickRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -327,9 +343,10 @@ pub(crate) async fn handle_ui_click(
 /// subtree — the same shape `browser_api::types::QueryData` returns.
 pub(crate) async fn handle_ui_query(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiQueryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -396,9 +413,10 @@ async fn proxy_ack(
 /// only, and only when it's a dedicated browser pane (checked host-side).
 pub(crate) async fn handle_ui_browser_navigate(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserNavigateRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -426,9 +444,10 @@ pub(crate) async fn handle_ui_browser_navigate(
 /// `POST /api/v1/ui/browser/back` — backs `BrowserBack`.
 pub(crate) async fn handle_ui_browser_back(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserHistoryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -446,9 +465,10 @@ pub(crate) async fn handle_ui_browser_back(
 /// `POST /api/v1/ui/browser/forward` — backs `BrowserForward`.
 pub(crate) async fn handle_ui_browser_forward(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserHistoryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -466,9 +486,10 @@ pub(crate) async fn handle_ui_browser_forward(
 /// `POST /api/v1/ui/browser/reload` — backs `BrowserReload`.
 pub(crate) async fn handle_ui_browser_reload(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserHistoryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -495,9 +516,10 @@ pub(crate) async fn handle_ui_browser_reload(
 /// passthrough pattern `handle_ui_query` uses for `matches`.
 pub(crate) async fn handle_ui_browser_eval(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserEvalRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -539,9 +561,10 @@ pub(crate) async fn handle_ui_browser_eval(
 /// `POST /api/v1/ui/browser/dispatch_key` — backs `BrowserDispatchKey`.
 pub(crate) async fn handle_ui_browser_dispatch_key(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserDispatchKeyRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -571,9 +594,10 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
 /// `POST /api/v1/ui/browser/focus_element` — backs `BrowserFocusElement`.
 pub(crate) async fn handle_ui_browser_focus_element(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserFocusElementRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -602,9 +626,10 @@ pub(crate) async fn handle_ui_browser_focus_element(
 /// the host's `{focused}` shape verbatim under `data`.
 pub(crate) async fn handle_ui_browser_focus_info(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserFocusInfoRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, &req.auth) {
+    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };

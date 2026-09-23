@@ -22,6 +22,7 @@ mod messagebus;
 pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
+pub(crate) mod actor;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
@@ -45,7 +46,7 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Query, Request, State},
+    extract::{Extension, Query, Request, State},
     http::{header, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
@@ -2134,8 +2135,15 @@ struct AgentMemoryListQuery {
 /// native-memory markdown files. Backs the `MemoryList` MCP tool.
 async fn handle_agent_memory_list(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryListQuery>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::MemoryList,
+        Some(&q.agent_id),
+    );
     app_api_response(app_api::memory_list_impl(&state, &q.agent_id))
 }
 
@@ -2149,8 +2157,15 @@ struct AgentMemoryReadQuery {
 /// the agent's own memory files. Backs the `MemoryRead` MCP tool.
 async fn handle_agent_memory_read(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryReadQuery>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::MemoryRead,
+        Some(&q.agent_id),
+    );
     app_api_response(app_api::memory_read_impl(&state, &q.agent_id, &q.filename))
 }
 
@@ -2189,8 +2204,15 @@ struct AgentMemoryWriteRequest {
 /// WebSocket RPC's `agent:memory:write_file`.
 async fn handle_agent_memory_write(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentMemoryWriteRequest>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::MemoryWrite,
+        Some(&req.agent_id),
+    );
     let mut detail_str = String::new();
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
@@ -2248,8 +2270,15 @@ struct AgentMemoryHistoryQuery {
 /// `MemoryHistory` MCP tool.
 async fn handle_agent_memory_history(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryHistoryQuery>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::MemoryHistory,
+        Some(&q.agent_id),
+    );
     app_api_response(app_api::memory_history_impl(&state, &q.agent_id, &q.filename))
 }
 
@@ -2266,8 +2295,15 @@ struct AgentMemoryDiffQuery {
 /// why). Backs the `MemoryDiff` MCP tool.
 async fn handle_agent_memory_diff(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentMemoryDiffQuery>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::MemoryDiff,
+        Some(&q.agent_id),
+    );
     app_api_response(app_api::memory_diff_impl(&state, &q.agent_id, &q.from_version_id, &q.to_version_id))
 }
 
@@ -2284,8 +2320,15 @@ struct AgentMemoryRevertRequest {
 /// `MemoryRevert` MCP tool.
 async fn handle_agent_memory_revert(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentMemoryRevertRequest>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::MemoryRevert,
+        Some(&req.agent_id),
+    );
     app_api_response(app_api::memory_revert_impl(&state, &req.agent_id, &req.filename, &req.target_version_id))
 }
 
@@ -2319,8 +2362,15 @@ struct AgentGlobalMemoryWriteRequest {
 /// comment for the full invariant. Backs the `GlobalMemoryWrite` MCP tool.
 async fn handle_agent_globalmemory_write(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryWriteRequest>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::GlobalMemoryWrite,
+        Some(&req.agent_id),
+    );
     let mut detail_str = String::new();
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
@@ -2425,8 +2475,15 @@ struct AgentGlobalMemoryRevertRequest {
 /// `GlobalMemoryRevert` MCP tool.
 async fn handle_agent_globalmemory_revert(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryRevertRequest>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::GlobalMemoryRevert,
+        Some(&req.agent_id),
+    );
     app_api_response(app_api::global_memory_revert_impl(&state, &req.agent_id, &req.id, &req.version_id))
 }
 
@@ -2476,8 +2533,15 @@ struct AgentIdentityAccountsQuery {
 /// `IdentityAccounts` MCP tool.
 async fn handle_agent_identity_accounts(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Query(q): Query<AgentIdentityAccountsQuery>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::IdentityAccounts,
+        Some(&q.agent_id),
+    );
     app_api_response(app_api::identity_self_accounts_impl(&state, &q.agent_id).await)
 }
 
@@ -2492,8 +2556,15 @@ struct AgentIdentityValidateRequest {
 /// secret). Backs the `IdentityValidate` MCP tool.
 async fn handle_agent_identity_validate(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentIdentityValidateRequest>,
 ) -> impl IntoResponse {
+    actor::check_actor(
+        &state,
+        caller.as_deref(),
+        actor::ActorSite::IdentityValidate,
+        Some(&req.agent_id),
+    );
     app_api_response(
         app_api::identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await,
     )

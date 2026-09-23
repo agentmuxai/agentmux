@@ -444,6 +444,7 @@ pub(super) fn resolve_placement(
 /// is never anonymous the way `FleetBulkStop`'s existing calls are today.
 pub(crate) async fn handle_close_pane(
     axum::extract::State(state): axum::extract::State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
     axum::Json(req): axum::Json<agentmux_common::api_types::ClosePaneRequest>,
 ) -> impl axum::response::IntoResponse {
     use axum::http::StatusCode;
@@ -451,7 +452,7 @@ pub(crate) async fn handle_close_pane(
     use axum::Json;
 
     let caller_agent_id = req.auth.agent_id.clone();
-    let verified_own_block_id = match crate::server::ui_handlers::verified_block_id(&state, &req.auth) {
+    let verified_own_block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
         Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
     };
@@ -600,6 +601,7 @@ mod close_pane_tests {
 
         let resp = handle_close_pane(
             axum::extract::State(state.clone()),
+            None,
             axum::Json(ClosePaneRequest { auth, block_id: None, reason: None }),
         )
         .await
@@ -626,6 +628,7 @@ mod close_pane_tests {
 
         let resp = handle_close_pane(
             axum::extract::State(state.clone()),
+            None,
             axum::Json(ClosePaneRequest {
                 auth,
                 block_id: Some(target_block.clone()),
@@ -703,6 +706,7 @@ mod close_pane_tests {
 
         let resp = handle_close_pane(
             axum::extract::State(state.clone()),
+            None,
             axum::Json(ClosePaneRequest { auth, block_id: Some(background.clone()), reason: None }),
         )
         .await
@@ -734,6 +738,7 @@ mod close_pane_tests {
 
         let resp = handle_close_pane(
             axum::extract::State(state.clone()),
+            None,
             axum::Json(ClosePaneRequest { auth, block_id: None, reason: None }),
         )
         .await

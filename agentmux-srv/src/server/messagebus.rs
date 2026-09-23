@@ -102,8 +102,15 @@ pub(super) async fn handle_register(
 /// POST /api/bus/send
 pub(super) async fn handle_send(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<SendRequest>,
 ) -> Json<Value> {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::BusSend,
+        Some(&req.from),
+    );
     let priority = parse_priority(&req.priority);
     let msg = BusMessage::new(&req.from, &req.to, MessageType::Send, &req.payload, priority);
     let msg_id = msg.id.clone();
@@ -127,8 +134,15 @@ pub(super) async fn handle_send(
 /// Falls back to MessageBus WebSocket push if agent has no block_id registered.
 pub(super) async fn handle_inject(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<InjectRequest>,
 ) -> Json<Value> {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::BusInject,
+        Some(&req.from),
+    );
     // Try direct PTY injection via ReactiveHandler (agent has registered block_id)
     let mut reactive_req = InjectionRequest {
         target_agent: req.target.clone(),
@@ -186,8 +200,15 @@ pub(super) async fn handle_inject(
 /// POST /api/bus/broadcast
 pub(super) async fn handle_broadcast(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<BroadcastRequest>,
 ) -> Json<Value> {
+    super::actor::check_actor(
+        &state,
+        caller.as_deref(),
+        super::actor::ActorSite::BusBroadcast,
+        Some(&req.from),
+    );
     let priority = parse_priority(&req.priority);
 
     match state.messagebus.broadcast(&req.from, &req.payload, priority) {
