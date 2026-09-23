@@ -11,18 +11,24 @@ use crate::backend::obj::RuntimeOpts;
 /// PTY read buffer size (matches Go's 4096).
 pub(super) const PTY_READ_BUF_SIZE: usize = 4096;
 
-/// How long the PTY output flusher waits, after the first chunk of a new
-/// batch, for more chunks to arrive before broadcasting — see
-/// `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md`.
-/// A fast producer (a build, a verbose test run, a busy agent) delivers
-/// output across many separate `read()` returns in quick succession; without
-/// this window, each one fired its own file write + WebSocket broadcast +
-/// OSC/translation pass, and the aggregate IPC/wakeup rate was measurably
-/// costing real CPU in the renderer and GPU-helper processes. 20ms is well
-/// under human-perceptible latency (and under round-trip costs already
-/// elsewhere in this pipeline), so a single short burst — a keystroke echo,
-/// a one-line response — still appears with no felt delay.
-pub(super) const PTY_COALESCE_WINDOW: std::time::Duration = std::time::Duration::from_millis(20);
+// There is deliberately no PTY_COALESCE_WINDOW here any more.
+//
+// It used to be 20ms: how long the output flusher waited, after the first
+// chunk of a batch, for more chunks to arrive before broadcasting — added to
+// cut the IPC/wakeup rate under a fast producer, per
+// `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md`. Its
+// own doc comment argued "20ms is well under human-perceptible latency, so a
+// keystroke echo still appears with no felt delay". That was wrong on the
+// path that matters: a keystroke into an idle pane echoes exactly one chunk,
+// so the window was never satisfied early and every echo paid the full 20ms
+// — more than a 60Hz frame — before it was even broadcast.
+//
+// The flusher now drains only what is already queued (see
+// `run_pty_output_flusher`), which keeps the batching the report asked for
+// under real bursts while adding nothing when idle. Reintroducing a timed
+// wait here would re-break typing; if one is ever genuinely needed for the
+// Windows-10 DWM flash that PR #208 originally chased, the bound set by
+// SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30 is ~2-4ms, not 20ms.
 
 /// Hard cap on how many bytes one coalesced batch accumulates before it is
 /// flushed regardless of the time window — bounds both broadcast latency and
@@ -62,7 +68,7 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// forever, for a case that must never block them. 10s mirrors
 /// `persistent.rs`'s identical stdout-reader bound for the same
 /// descendant-held-descriptor scenario: generous enough that normal
-/// flushing (bounded by `PTY_COALESCE_WINDOW`, milliseconds) never trips
+/// flushing (one already-queued drain plus a write, milliseconds) never trips
 /// it, but a hard ceiling so a genuinely stuck descendant can't hang pane
 /// teardown. Unlike `persistent.rs`'s bound, expiry does NOT abort the
 /// flusher (reagentx P1 on PR #3206, same round): there, one combined async
@@ -94,8 +100,9 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// until an EOF that may never come — which is exactly why expiry detaches
 /// rather than aborts), while costing the full ceiling of dead UI time on
 /// every single exit. 1s keeps ~50x headroom over the legitimate case this
-/// bound exists for (a final flush is bounded by `PTY_COALESCE_WINDOW`'s
-/// 20ms plus one FileStore write and broadcast) and cuts the pathological
+/// bound exists for (a final flush is bounded by one drain of what is
+/// already queued, plus one FileStore write and broadcast) and cuts the
+/// pathological
 /// case's user-visible cost by 10x. Nothing else about the behavior
 /// changes: expiry still detaches the flusher and its read loop to keep
 /// running in the background, so late output is still never lost.
