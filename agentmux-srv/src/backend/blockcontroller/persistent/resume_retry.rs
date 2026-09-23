@@ -202,6 +202,15 @@ impl PersistentSubprocessController {
         held_error_line: Option<String>,
         attempted_sid: String,
     ) {
+        // An empty batch is not a retry at all — see
+        // `settle_empty_resume_retry`. Decided BEFORE the "retrying" publish
+        // and the recovery search below (codex P1, second round on PR
+        // #3551): both are user-visible side effects, and for a superseded
+        // generation they must not happen either.
+        if entries.is_empty() {
+            self.settle_empty_resume_retry(retry_generation, config, held_error_line, attempted_sid);
+            return;
+        }
         // "Reconnecting…" starts here regardless of which branch below is
         // taken — the user-visible gap begins the moment a retry is known
         // to be needed, not once recovery search finishes. See §6.2.
@@ -242,62 +251,8 @@ impl PersistentSubprocessController {
                 )
             }
         }
-        let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
-            // Nothing to retry: `--resume <sid>` was attempted with nothing
-            // queued — the eager-resume path (issue #3463) — and the CLI
-            // rejected the id before any prompt arrived. There is no
-            // message to re-send, so this is a terminal idle-resume
-            // failure, not a retry. Codex P1 on PR #3538: returning here
-            // as before left the pane in "Reconnecting…" for good and never
-            // published a controller status, because the process-waiter
-            // hands `FireRetry` (not `PublishDone`) to this function on the
-            // assumption that a launch follows. Complete the recovery
-            // *decision* without a launch:
-            //
-            // - adopt whatever `find_recovery_session_id` found (or `None`)
-            //   so the NEXT message resumes it through the same gated,
-            //   tracked `--resume` a first-time resume gets — its outcome
-            //   (`Resumed`/`Fresh`) is emitted then, by the CLI's actual
-            //   confirmation, never claimed here (codex P1 on PR #2693);
-            // - resolve "Reconnecting…" now, since nothing downstream will;
-            // - publish the same terminal status a `PublishDone` exit would.
-            //
-            // ALL of that is conditioned on this retry's generation still
-            // owning the controller state (codex P1 on PR #3551): a message
-            // that arrived after the doomed process cleared `stdin_tx` but
-            // before this ran may already have spawned a newer generation
-            // and installed its own live session id. Overwriting that with
-            // an old recovery-search result would make a later restart
-            // resume the wrong conversation. `spawn_generation` is bumped
-            // in the same lock acquisition that installs a new spawn, and
-            // `spawning_in_progress` covers the claim window before it —
-            // together they say whether anyone has moved on from
-            // `retry_generation`. If someone has, that generation's own
-            // lifecycle owns every one of these updates, and this one does
-            // nothing at all.
-            let still_owner = {
-                let mut inner = self.inner.lock().unwrap();
-                let still_owner = inner.spawn_generation == retry_generation
-                    && !inner.spawning_in_progress
-                    && inner.stdin_tx.is_none();
-                if still_owner {
-                    inner.session_id = recovered.clone();
-                    Self::set_status(&mut inner, STATUS_DONE);
-                }
-                still_owner
-            };
-            if still_owner {
-                if recovered.is_some() {
-                    // The `None` arm above already resolved it alongside `Fresh`.
-                    publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
-                }
-                self.publish_status();
-            }
-            if let Some(line) = held_error_line {
-                self.flush_error_line_now(line);
-            }
-            return;
-        };
+        // Non-empty by the guard at the top.
+        let first = entries.remove(0);
         let rest = entries;
 
         match self.decide_retry_batch_action(retry_generation, &first, &rest) {
@@ -538,6 +493,86 @@ impl PersistentSubprocessController {
             }
             front.append(&mut inner.pending_send_messages);
             inner.pending_send_messages = front;
+        }
+    }
+}
+
+impl PersistentSubprocessController {
+    /// `retry_after_resume_failure`'s handling of an EMPTY retry batch:
+    /// `--resume <sid>` was attempted with nothing queued — the eager-resume
+    /// path (issue #3463) — and the CLI rejected the id before any prompt
+    /// arrived. There is no message to re-send, so this is a terminal
+    /// idle-resume failure, not a retry. Codex P1 on PR #3538: returning
+    /// early as the old empty-batch branch did left the pane with no
+    /// controller status ever published, because the process-waiter hands
+    /// `FireRetry` (not `PublishDone`) to the retry path on the assumption
+    /// that a launch follows. Complete the recovery *decision* without a
+    /// launch:
+    ///
+    /// - adopt whatever `find_recovery_session_id` found (or `None`) so the
+    ///   NEXT message resumes it through the same gated, tracked `--resume`
+    ///   a first-time resume gets — its outcome (`Resumed`) is emitted then,
+    ///   by the CLI's actual confirmation, never claimed here (codex P1 on
+    ///   PR #2693); with no candidate, `Fresh` IS decidable now and is
+    ///   disclosed now;
+    /// - publish the same terminal status a `PublishDone` exit would.
+    ///
+    /// No "Reconnecting…" is shown or resolved here, unlike the non-empty
+    /// path: no user turn is in flight, so there is no gap to narrate.
+    ///
+    /// EVERYTHING here is conditioned on this retry's generation still
+    /// owning the controller state (codex P1 on PR #3551, both rounds): a
+    /// message that arrived after the doomed process cleared `stdin_tx` but
+    /// before this ran may already have spawned a newer generation with its
+    /// own live session id — possibly resuming a DIFFERENT conversation.
+    /// Overwriting that id, stamping `done` over it, or appending a `Fresh`
+    /// disclosure to its history would each be wrong. The check runs twice:
+    /// once before the recovery search (which does disk I/O outside the
+    /// lock, and must not even start for a superseded generation), and
+    /// again under the same lock acquisition as the mutation, so nothing
+    /// that raced in during the search can be overwritten either.
+    /// `spawn_generation` is bumped in the same lock acquisition that
+    /// installs a new spawn, and `spawning_in_progress` covers the claim
+    /// window before it — together they say whether anyone has moved on.
+    pub(super) fn settle_empty_resume_retry(
+        &self,
+        retry_generation: u64,
+        config: PersistentSpawnConfig,
+        held_error_line: Option<String>,
+        attempted_sid: String,
+    ) {
+        let owns = |inner: &PersistentInner| {
+            inner.spawn_generation == retry_generation && !inner.spawning_in_progress && inner.stdin_tx.is_none()
+        };
+        if !owns(&self.inner.lock().unwrap()) {
+            tracing::debug!(
+                block_id = %self.block_id,
+                retry_generation,
+                "empty resume-retry settlement superseded by a newer generation — nothing to do"
+            );
+            return;
+        }
+        let recovered = self.find_recovery_session_id(&config);
+        let still_owner = {
+            let mut inner = self.inner.lock().unwrap();
+            let still_owner = owns(&inner);
+            if still_owner {
+                inner.session_id = recovered.clone();
+                Self::set_status(&mut inner, STATUS_DONE);
+            }
+            still_owner
+        };
+        if !still_owner {
+            return;
+        }
+        if recovered.is_none() {
+            self.emit_session_outcome_now(persistent_resume::SessionOutcome::Fresh, attempted_sid, None);
+        }
+        self.publish_status();
+        // Nothing was accepted from the user, but the CLI's own account of
+        // why the resume failed still reaches them (codex P2 on PR #2371).
+        if let Some(line) = held_error_line {
+            self.flush_error_line_now(line);
         }
     }
 }
