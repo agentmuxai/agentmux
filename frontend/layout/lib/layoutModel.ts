@@ -577,6 +577,18 @@ export class LayoutModel {
      * @param action The action to perform.
      */
     treeReducer(action: LayoutTreeAction, setState = true) {
+        // ReAgent P0 on PR #3519: focusManager.requestNodeFocus() used to be
+        // called INLINE inside the switch below, before localTreeStateAtom
+        // ever committed (that happens later, at the bottom of this
+        // function). requestNodeFocus() -> refocusNode() reads the focused
+        // node via a memo keyed off localTreeStateAtom(), so calling it
+        // synchronously mid-switch resolved to the PREVIOUSLY-focused node —
+        // stale by exactly one selection — and focusNode() no-op'd for the
+        // same reason (focusedNodeIdStack hadn't been updated yet either).
+        // Every pane click/arrow-key-nav/Cmd+1..9 would have re-focused the
+        // OLD pane instead of the newly selected one. Deferred to after
+        // state actually commits (below) instead of firing per-case.
+        let shouldRequestFocus = false;
         switch (action.type) {
             case LayoutTreeActionType.ComputeMove:
                 this.pendingTreeAction.throttledValueAtom._set(
@@ -589,13 +601,13 @@ export class LayoutModel {
             case LayoutTreeActionType.InsertNode:
                 insertNode(this.treeState, action as LayoutTreeInsertNodeAction);
                 if ((action as LayoutTreeInsertNodeAction).focused) {
-                    focusManager.requestNodeFocus();
+                    shouldRequestFocus = true;
                 }
                 break;
             case LayoutTreeActionType.InsertNodeAtIndex:
                 insertNodeAtIndex(this.treeState, action as LayoutTreeInsertNodeAtIndexAction);
                 if ((action as LayoutTreeInsertNodeAtIndexAction).focused) {
-                    focusManager.requestNodeFocus();
+                    shouldRequestFocus = true;
                 }
                 break;
             case LayoutTreeActionType.DeleteNode: {
@@ -633,11 +645,11 @@ export class LayoutModel {
             }
             case LayoutTreeActionType.FocusNode:
                 focusNode(this.treeState, action as LayoutTreeFocusNodeAction);
-                focusManager.requestNodeFocus();
+                shouldRequestFocus = true;
                 break;
             case LayoutTreeActionType.MagnifyNodeToggle:
                 magnifyNodeToggle(this.treeState, action as LayoutTreeMagnifyNodeToggleAction);
-                focusManager.requestNodeFocus();
+                shouldRequestFocus = true;
                 break;
             case LayoutTreeActionType.ClearTree:
                 clearTree(this.treeState);
@@ -673,6 +685,14 @@ export class LayoutModel {
             }
             this.localTreeStateAtom._set({ ...this.treeState });
             this.persistToBackend();
+        }
+        // Fires only once state has actually committed above — see this
+        // function's leading comment. Gated on setState too: with
+        // setState=false, treeState was mutated in-place but never
+        // committed to localTreeStateAtom at all, so there is nothing
+        // fresh for refocusNode() to read yet.
+        if (shouldRequestFocus && setState) {
+            focusManager.requestNodeFocus();
         }
     }
 

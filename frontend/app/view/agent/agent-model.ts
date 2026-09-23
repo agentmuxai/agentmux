@@ -101,6 +101,12 @@ export class AgentViewModel implements ViewModel {
         setInterim: (text: string) => this.voiceTargetRef.current?.setInterim(text),
     });
 
+    // Same shape as voiceTargetRef above: AgentFooter populates this on
+    // mount with the live composer textarea and clears it on unmount.
+    // giveFocus() below is a no-op until then, which is correct — there's
+    // nothing to focus yet.
+    focusTargetRef: { current: HTMLTextAreaElement | null } = { current: null };
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -920,7 +926,10 @@ export class AgentViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
-        return false;
+        const ta = this.focusTargetRef.current;
+        if (ta == null) return false;
+        ta.focus();
+        return true;
     }
 
     dispose(): void {}

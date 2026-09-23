@@ -19,6 +19,8 @@ import brainLogoSvg from "@/app/asset/logo-brain.svg?raw";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
+import { focusManager } from "@/app/store/focusManager";
+import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorViewModel } from "./editor-model";
 import { EditorTabStrip } from "./editor-tab-strip";
 import { FileTree } from "./file-tree";
@@ -336,6 +338,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         if (cmView) {
             cmView.destroy();
             cmView = null;
+            model.cmViewRef.current = null;
         }
 
         const extensions: Extension[] = [
@@ -410,6 +413,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         if (cmView) {
             cmView.destroy();
             cmView = null;
+            model.cmViewRef.current = null;
         }
 
         cmView = new EditorView({
@@ -420,6 +424,25 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             parent: container,
         });
         setLiveDoc(content); // seed preview from the freshly-built doc
+        // giveFocus() (focusManager.ts's shared pane-selection contract)
+        // was a stub returning false until this ref existed — see
+        // SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §3a. Runs on every
+        // (re)build, not just the pane's initial mount, so switching the
+        // in-pane file-tab strip re-lands the caret too, not only opening
+        // the pane fresh.
+        //
+        // But "every rebuild" includes the external-file-reload path — the
+        // effect below is reactive on model.contentAtom() on purpose — and
+        // claimFocusOnMount() only knows block-level focus, which stays true
+        // while the user types in this pane's OWN file tree. Without the
+        // guard, a reload landing mid-keystroke there yanked the caret into
+        // CodeMirror (ReAgent P1 on PR #3519; the spec's §5 constraint 1).
+        // Focus that was in the now-destroyed CodeMirror has already fallen
+        // back to <body>, so the guard never blocks restoring it.
+        model.cmViewRef.current = cmView;
+        if (!userIsTypingElsewhereIn(rootRef, document.activeElement)) {
+            focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
+        }
     };
 
     onMount(() => {
@@ -604,6 +627,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         cmStates.clear();
         cmView?.destroy();
         cmView = null;
+        model.cmViewRef.current = null;
     });
 
     // Empty-editor state — faded brain mark + the best few shortcuts. Shown

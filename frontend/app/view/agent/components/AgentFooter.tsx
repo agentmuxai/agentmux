@@ -10,6 +10,7 @@ import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
 import { atoms } from "@/app/store/global";
+import { focusManager } from "@/app/store/focusManager";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
@@ -776,6 +777,31 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 vm.voiceTargetRef.current = null;
             }
         });
+    });
+
+    // ── Focus handle ──────────────────────────────────────────────────
+    // Registers the live textarea on the AgentViewModel so giveFocus() (the
+    // shared pane-selection focus contract — see focusManager.ts) can
+    // actually focus it instead of the `return false` stub it used to be.
+    // SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §3a: same ref-handoff shape
+    // as the voice handle above, which is the precedent this follows.
+    //
+    // Also claims focus immediately if this pane is ALREADY the active
+    // tab's selected pane at the moment the textarea becomes available —
+    // covers a freshly created agent pane (mounts after already being
+    // marked focused) and switching into a tab whose agent pane wasn't
+    // mounted yet, neither of which `focusManager.refocusNode()`'s own
+    // one-shot attempt can reach.
+    onMount(() => {
+        const vm = props.viewModel;
+        if (!vm || !textareaRef) return;
+        vm.focusTargetRef.current = textareaRef;
+        onCleanup(() => {
+            if (vm.focusTargetRef.current === textareaRef) {
+                vm.focusTargetRef.current = null;
+            }
+        });
+        focusManager.claimFocusOnMount(vm.blockId, () => vm.giveFocus());
     });
 
     // Draft cleared by Esc, held for Undo. Plain (non-reactive) — read

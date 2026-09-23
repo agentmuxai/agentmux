@@ -16,9 +16,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 let mockActiveTabId = "tab-original";
 const mockWorkspace = { oid: "ws-1" } as any;
 
+// tab-actions.ts now imports focusManager.ts (for the tab-switch auto-focus
+// wiring — SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md), which transitively
+// imports global.ts, which destructures ALL of these off window-identity at
+// module load. vi.mock's returned object is exact — global.ts throws at
+// import time on any name missing here, even one this suite never exercises.
 vi.mock("./window-identity", () => ({
     workspace: () => mockWorkspace,
     activeTabId: () => mockActiveTabId,
+    windowId: () => "",
+    setWindowId: () => {},
+    clientId: () => "",
+    setClientId: () => {},
+    staticTabId: () => "",
+    setStaticTabId: () => {},
+    client: () => ({}) as any,
+    muxWindow: () => ({}) as any,
+    tabAtom: () => ({}) as any,
+    uiContext: () => ({}) as any,
 }));
 
 // Typed with an explicit `(...args: unknown[])` signature on the mock
