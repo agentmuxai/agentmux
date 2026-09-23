@@ -5,42 +5,22 @@
 // and Memory (native memory) panels. The inner panels keep their own styling
 // (_identity-panel.scss / AgentNativeMemoryModal.scss); this file only styles
 // the top tab bar + panel wrapper.
-
-// This modal opens through the shared ModalLayer with `size="fit"` (the
-// same host every other modal kind uses), so `.modal-panel` is deliberately
-// `width: auto; max-width: 100%` (modal.scss:116) — shrink-to-fit, sized BY
-// its content, not a definite box. Two earlier attempts tried to size
-// *this* element (a CHILD of that shrink-to-fit panel) directly:
-//   - `min(780px, 100%)` — the % has no definite containing block to
-//     resolve against (the parent's own width depends on OUR width — a
-//     circular dependency), so Chromium collapsed both this element and
-//     .modal-panel to ~0. Confirmed live via CDP DOM inspection: modal
-//     fully rendered (all tabs/content present) but computed width: 0px —
-//     invisible, not broken.
-//   - `min(780px, 100cqw)` — container query units resolve against the
-//     nearest `container-type` ancestor (.modal-layer-mount, "modal-mount"
-//     — modal.scss:30-38) instead of the immediate parent, which fixed the
-//     collapse-to-zero — but that mount tracks the full pane, which is
-//     WIDER than .modal-panel's own shrink-wrapped, backdrop-clamped box.
-//     Result: this element asserted a width bigger than its actual parent,
-//     re-overflowing past .modal-panel's edge (confirmed via CDP: child
-//     595px inside a 547px parent).
 //
-// The fix instead sizes `.modal-panel` itself, via `:has()` scoped to when
-// it's hosting us — exactly the pattern modal.scss's own `[data-size]`
-// rules already use (min(Npx, 100%), resolving against `.modal-panel`'s
-// own parent `.modal-root`, which is `position: fixed|absolute; inset: 0`
-// — genuinely definite, unlike `.modal-panel` itself). This element then
-// just fills whatever `.modal-panel` resolves to.
-// See docs/specs/SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.1
-// (written when this modal was still named AgentSetupModal — class names
-// below were renamed by docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md,
-// the underlying layout logic is unchanged).
-.modal-panel:has(.agent-stash-modal) {
-    width: min(780px, 100%);
-    height: 560px;
-    max-height: 85vh;
-}
+// NO LONGER RENDERED IN A MODAL. This is the Stash DRAWER's content now
+// (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.5) — the file keeps its
+// name only because the component did. Drawer-specific layout (height cap,
+// bottom-edge resize handle) and the §3.2a density pass live in
+// styles/_stash-drawer.scss, scoped under `.agent-stash-drawer`, so this
+// file stays host-agnostic.
+//
+// A `.modal-panel:has(.agent-stash-modal)` sizing rule used to sit here,
+// with a long note about two failed attempts to size this element inside
+// ModalLayer's shrink-to-fit panel (the `min(780px,100%)` collapse-to-zero
+// and the `100cqw` overflow). Deleted with the modal host itself: a drawer
+// has a definite height the user drags, so there is no shrink-to-fit box to
+// size around. The reasoning is preserved in git history and in
+// SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.1 if a future modal
+// host ever needs it again.
 
 .agent-stash-modal {
     display: flex;
@@ -105,21 +85,14 @@
     }
 }
 
-// Same min-width:0 rescue modal.scss's Layer C already provides for
-// .modal-panel-body descendants (@container modal-mount, modal.scss:141-146)
-// — scoped to our own classes instead of adopting that shared class, which
-// also carries generic .modal-panel-body padding/font-size we don't want
-// here. .modal-layer-mount (ModalLayer.tsx) is the ancestor that establishes
-// the `modal-mount` container, so this fires correctly regardless of the
-// `agent-stash` container above (flex children default to min-width:auto,
-// which this overrides once the real mount node — the pane, ultimately —
-// is this narrow).
-@container modal-mount (max-width: 400px) {
-    .agent-stash-modal-tabs,
-    .agent-stash-modal-panel {
-        min-width: 0;
-    }
-}
+// A `@container modal-mount (max-width: 400px)` min-width:0 rescue used to
+// sit here. It keyed off the `modal-mount` container ModalLayer.tsx's own
+// mount node establishes — an ancestor that no longer exists now that this
+// content lives in a drawer, so the rule could never fire again. Replaced by
+// an UNCONDITIONAL `min-width: 0` in styles/_stash-drawer.scss: flex children
+// default to `min-width: auto`, and there is no width at which these two
+// should refuse to shrink, so the container gate was only ever a way to scope
+// a fix that is safe everywhere.
 
 .agent-stash-modal-panel {
     display: flex;

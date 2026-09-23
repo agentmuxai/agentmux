@@ -324,6 +324,23 @@ export interface AgentPaneState {
      */
     detailsOpen: boolean;
     /**
+     * Whether the Stash drawer (the per-agent Accounts/Memory/MCP/Skills/
+     * Startup/Registration surface) is open, top-anchored under the pane
+     * header — SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.3.
+     *
+     * A SEPARATE axis from `detailsOpen` (the bottom-anchored shell
+     * drawer), deliberately: the two are independent surfaces a user can
+     * have open at once, and mutual exclusion would silently close a live
+     * shell holding real terminal state (§6 open question 1, answered in
+     * favor of independence). The transcript is protected from being
+     * squeezed by a CSS max-height on the Stash drawer, not by forcing
+     * one of the two closed.
+     *
+     * Like `detailsOpen`, NOT auto-collapsed on `TurnStart` — sending a
+     * message must not yank a surface the user deliberately opened.
+     */
+    stashOpen: boolean;
+    /**
      * Input-token count from the most recent message_start — the full
      * context fill sent to the model on that turn. Unlike `turnTokens`,
      * this field is NOT cleared at TurnEnd so the context-window bar
@@ -434,6 +451,13 @@ export const initialState = (agentId: string): AgentPaneState => ({
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
+    // MUST be present here, not just in the state type: the pane view's
+    // per-field signals are built by iterating `initialState`'s own keys
+    // (agent-pane-state-store.ts's createFieldSignals), so a field absent
+    // from this object gets no signal and reads of it never become
+    // reactive — which would silently break the Stash button's
+    // toggle-highlight (agent-model.ts's endIconButtons memo).
+    stashOpen: false,
     failure: null,
     compacting: null,
     attachedTask: null,
@@ -758,6 +782,14 @@ export type AgentPaneCommand =
     | { type: "DetailsExpand" }
     /** Explicitly close the log panel. Idempotent if already closed. */
     | { type: "DetailsCollapse" }
+
+    // ── Stash drawer (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.3) ──
+    /** Toggle the Stash drawer open/closed. Drives the header icon's own toggle. */
+    | { type: "StashToggle" }
+    /** Explicitly open the Stash drawer. Idempotent if already open. */
+    | { type: "StashExpand" }
+    /** Explicitly close the Stash drawer. Idempotent if already closed. */
+    | { type: "StashCollapse" }
 
     // ── Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) ──
     /**

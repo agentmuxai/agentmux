@@ -1514,6 +1514,30 @@ export function update(
             };
         }
 
+        // Stash drawer — a separate axis from detailsOpen above, never
+        // touching it. See `stashOpen`'s doc comment (types.ts) for why the
+        // two drawers are independent rather than mutually exclusive.
+        case "StashToggle": {
+            return {
+                state: { ...state, stashOpen: !state.stashOpen },
+                events: [],
+            };
+        }
+        case "StashExpand": {
+            if (state.stashOpen) return { state, events: [] };
+            return {
+                state: { ...state, stashOpen: true },
+                events: [],
+            };
+        }
+        case "StashCollapse": {
+            if (!state.stashOpen) return { state, events: [] };
+            return {
+                state: { ...state, stashOpen: false },
+                events: [],
+            };
+        }
+
         // ── Attached task axis (SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) ──
         case "AttachedTaskObserved": {
             if (state.attachedTask) return { state, events: [] };
