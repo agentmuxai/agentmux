@@ -162,6 +162,9 @@ impl PersistentSubprocessController {
             // again. Cleared unconditionally rather than only when set: any
             // spawn ends the window by definition, whatever opened it.
             inner.restart_pending = false;
+            // Same for a stop request: it targeted the process this spawn
+            // replaces.
+            inner.stop_pending = false;
             // …and any deferred restart is moot now, for the same reason: this
             // spawn read `cmd:args` fresh from block meta, so the new config is
             // already applied and there is nothing left to restart FOR.

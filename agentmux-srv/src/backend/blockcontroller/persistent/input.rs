@@ -52,6 +52,11 @@ impl PersistentSubprocessController {
         if inner.restart_pending {
             return Err("persistent process is restarting for a config change — try again shortly".to_string());
         }
+        // Likewise once a kill has been requested: the process is going down
+        // and a line written now dies with it (see `stop_pending`).
+        if inner.stop_pending {
+            return Err("persistent process is stopping — try again shortly".to_string());
+        }
         let tx = inner
             .stdin_tx
             .as_ref()

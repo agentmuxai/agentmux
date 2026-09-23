@@ -91,6 +91,7 @@ impl PersistentSubprocessController {
             // the user explicitly asked to stop.
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
+            inner.stop_pending = true;
             let drained = if drain_deferred {
                 inner.deferred_deliveries.drain(..).collect()
             } else {
