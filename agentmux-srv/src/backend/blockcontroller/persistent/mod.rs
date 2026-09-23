@@ -863,6 +863,22 @@ pub(super) enum DeferredFlush {
     Failed,
 }
 
+/// What a current-generation `result` frame decided — see
+/// [`PersistentSubprocessController::turn_boundary_locked`].
+#[derive(Debug, PartialEq)]
+pub(super) struct TurnBoundary {
+    pub(super) flushed: DeferredFlush,
+    pub(super) apply_deferred_restart: bool,
+}
+
+impl TurnBoundary {
+    /// `Released` started a turn; `Held` means an earlier writer's prompt is
+    /// still running or about to. Either way the turn is not over.
+    pub(super) fn turn_still_active(&self) -> bool {
+        matches!(self.flushed, DeferredFlush::Released(_) | DeferredFlush::Held)
+    }
+}
+
 /// Whether the deferred-delivery watchdog keeps running after a tick.
 #[derive(Debug, PartialEq)]
 pub(super) enum WatchdogStep {

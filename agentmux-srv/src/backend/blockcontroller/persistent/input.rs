@@ -285,6 +285,63 @@ impl PersistentSubprocessController {
         }
     }
 
+    /// The turn-boundary decision for a `result` frame, under `inner`: release
+    /// at most one deferred message, decide whether the turn is over, and
+    /// whether a deferred runtime-config restart may now apply.
+    ///
+    /// Returns `None`, touching nothing, when `generation` is no longer the
+    /// current one. A fallback respawn can install a new process before the
+    /// old reader drains a buffered `result`. That `result` ends nothing the
+    /// new process is doing, and `flush_one_deferred_locked` writes to the
+    /// CURRENT `stdin_tx`, so acting on it would inject into the replacement's
+    /// running turn, mark it idle, or restart it (codex P1 on #3562).
+    ///
+    /// The turn stays active on `Released` (the message just started a turn)
+    /// and on `Held`: an earlier writer's prompt (a retry-batch replay or a
+    /// queued human message) is running or about to, and the drain that wrote
+    /// it does not re-mark the turn active. Going idle here would let the
+    /// watchdog write the moment that writer released its claim, mid-turn
+    /// (codex P1 on #3562). The turn only goes idle on `Empty` or `Failed`.
+    ///
+    /// **Residual:** a `Held` boundary whose writer then writes nothing
+    /// further leaves the turn marked active until the next `result`, i.e.
+    /// until the next input. It needs a `result` to land in the instant
+    /// between a drain's last write and its claim release. Staying active too
+    /// long is the safe failure: a deferred message waits, and none is ever
+    /// written mid-turn.
+    ///
+    /// The deferred restart applies only on `Empty`. Killing the process with
+    /// an entry still queued, or just written, would strand it.
+    pub(super) fn turn_boundary_locked(
+        inner: &mut PersistentInner,
+        health: &TurnActivityTracker,
+        block_id: &str,
+        generation: u64,
+    ) -> Option<TurnBoundary> {
+        if inner.spawn_generation != generation {
+            tracing::debug!(
+                block_id = %block_id,
+                reader_generation = generation,
+                current_generation = inner.spawn_generation,
+                "result from a replaced process — not a boundary for the current one"
+            );
+            return None;
+        }
+        let flushed = Self::flush_one_deferred_locked(inner, block_id);
+        let boundary = TurnBoundary {
+            apply_deferred_restart: flushed == DeferredFlush::Empty
+                && std::mem::replace(&mut inner.restart_when_idle, false),
+            flushed,
+        };
+        if !boundary.turn_still_active() {
+            health.set_active_turn(false);
+        }
+        if boundary.apply_deferred_restart {
+            inner.restart_pending = true;
+        }
+        Some(boundary)
+    }
+
     /// Make sure a watchdog task is looking after a non-empty deferred queue.
     ///
     /// The `result`-frame flush is the primary path, but it only fires when a
