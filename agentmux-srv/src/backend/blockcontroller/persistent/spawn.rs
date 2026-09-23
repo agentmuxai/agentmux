@@ -171,6 +171,9 @@ impl PersistentSubprocessController {
             // requested it, which is the only one it ever meant anything for.
             inner.restart_when_idle = false;
             inner.spawn_generation += 1;
+            // Any spawn consumes or invalidates an adopted leftover
+            // candidate — it only ever meant "for the very next spawn".
+            inner.leftover_resume_candidate = None;
             let generation = inner.spawn_generation;
             let effects = match (attempted_resume_sid.clone(), resume_retry_payload) {
                 (Some(sid), Some(retry_json)) => {

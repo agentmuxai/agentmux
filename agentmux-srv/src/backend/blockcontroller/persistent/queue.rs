@@ -505,7 +505,28 @@ impl PersistentSubprocessController {
         // fresh spawn generation, making every existing generation's
         // capture stale to `try_capture_session_id`'s currency gate (see
         // `clear_session_id_for_fresh_spawn`'s own doc comment).
-        self.clear_session_id_for_fresh_spawn();
+        // An adopted recovery candidate (`leftover_resume_candidate`, set by
+        // `settle_empty_resume_retry` when prompts were queued behind the
+        // eager claim — codex P1 on PR #3551, fifth round) is the ONE case
+        // this respawn does not start fresh: it resumes the candidate,
+        // through the same tracked `--resume` an eager resume gets, so a
+        // stale candidate cascades into the normal retry path rather than
+        // being trusted. The generation is still reserved here, exactly as
+        // the fresh clear does, so a late capture from the doomed process
+        // cannot overwrite the candidate before `spawn_process` reads it.
+        let candidate = {
+            let mut inner = self.inner.lock().unwrap();
+            let candidate = inner.leftover_resume_candidate.take();
+            if let Some(ref sid) = candidate {
+                inner.spawn_generation += 1;
+                inner.session_id = Some(sid.clone());
+            }
+            candidate
+        };
+        match candidate {
+            Some(sid) => config.session_id = sid,
+            None => self.clear_session_id_for_fresh_spawn(),
+        }
         let retry_config = config.clone();
         let spawn_result = self.spawn_process(config, None);
         match &spawn_result {
