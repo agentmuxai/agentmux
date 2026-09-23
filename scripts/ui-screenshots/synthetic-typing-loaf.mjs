@@ -25,6 +25,9 @@ const evalIn = async (expression) => {
 const focus = await evalIn(`(()=>{const a=document.activeElement;return {tag:a&&a.tagName,placeholder:a&&a.placeholder,len:a&&a.value?a.value.length:0,vis:document.visibilityState}})()`);
 console.error("focused:", JSON.stringify(focus));
 if (focus.tag !== "TEXTAREA") { console.error("no textarea focused — click into the composer first"); process.exit(2); }
+// A minimized/backgrounded page throttles rAF and timers: the capture would
+// measure visibility throttling, not typing responsiveness.
+if (focus.vis !== "visible") { console.error(`page is ${focus.vis} — restore the window first`); process.exit(2); }
 
 // 2. Arm the recorder. Snapshot the focused composer's draft + selection so the
 // cleanup below restores it exactly rather than guessing which suffix was ours.

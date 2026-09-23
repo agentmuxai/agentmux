@@ -41,14 +41,18 @@ if (vis !== "visible") { console.error(`page is ${vis} — restore the window fi
 // name that must match EXACTLY one "Send message to <name>..." placeholder —
 // never a substring (`Maka` must not select `Makashi`). Placeholders turn into
 // next-prompt suggestions once an agent has run, so the index is the reliable form.
-const composers = await evalIn(`[...document.querySelectorAll("textarea")].map((t,i)=>({i,name:(t.placeholder.match(/^Send message to (.+)\\.\\.\\.$/)||[])[1]||null,placeholder:t.placeholder.slice(0,40),hasDraft:t.value.length>0}))`);
+// Only agent composers (`textarea.agent-input`) — decision/question panels and
+// modals have textareas too — captured ONCE as elements, so a textarea mounted
+// or removed later can't shift an index onto a different pane.
+const composers = await evalIn(`(()=>{window.__expComposers=[...document.querySelectorAll("textarea.agent-input")];return window.__expComposers.map((t,i)=>({i,name:(t.placeholder.match(/^Send message to (.+)\\.\\.\\.$/)||[])[1]||null,placeholder:t.placeholder.slice(0,40),hasDraft:t.value.length>0}))})()`);
 log("composers:", composers.map((c) => `${c.i}:${c.name ?? `"${c.placeholder}"`}${c.hasDraft ? " (draft)" : ""}`).join(", "));
 const resolveComposer = (sel) => {
   if (/^\d+$/.test(String(sel))) return composers[Number(sel)] ? Number(sel) : null;
   const hits = composers.filter((c) => c.name === sel);
   return hits.length === 1 ? hits[0].i : null;
 };
-const focusComposerAt = (i) => evalIn(`(()=>{const ta=document.querySelectorAll("textarea")[${i}];if(!ta)return false;ta.focus();return document.activeElement===ta})()`);
+// Refuses an element that has left the DOM since capture (pane closed/remounted).
+const focusComposerAt = (i) => evalIn(`(()=>{const ta=window.__expComposers[${i}];if(!ta||!ta.isConnected)return false;ta.focus();return document.activeElement===ta})()`);
 const typeIdx = resolveComposer(typeInto);
 if (typeIdx == null) { console.error(`--typeInto ${typeInto} matches no single composer (see list above)`); process.exit(3); }
 
@@ -57,7 +61,7 @@ if (prompt) {
   for (const c of composers) {
     // Input.insertText edits whatever is there and Enter submits the whole
     // textarea, which the composer then clears — never do that to a real draft.
-    const hasDraft = await evalIn(`(document.querySelectorAll("textarea")[${c.i}]?.value.length ?? 1) > 0`);
+    const hasDraft = await evalIn(`(window.__expComposers[${c.i}]?.value.length ?? 1) > 0`);
     if (hasDraft) { log(`skipped composer ${c.i}: it holds an unsent draft`); continue; }
     if (!(await focusComposerAt(c.i))) { log("could not focus composer", c.i); continue; }
     const n = c.i;
