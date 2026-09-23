@@ -368,13 +368,35 @@ removed.
 
 ### 6.3 Two holes revision 1 left open
 
-**Tokens must not be readable by other agents.**
-`backend/reactive/registry.rs:459-473` writes `auth_key` into a **name-keyed**
-file with no mode set, while only the per-instance path applies `0o600`. Put a
-per-agent token there and agent B reads agent A's. Registry entries move to
-UID-keyed paths with `0o600`, and the same applies to jekt signing keys, which
-are name-derived today (`jekt_public_key_for(agent_id)`) — a name-derived
-signing key is a signature anyone sharing that name can forge.
+**Tokens must not be readable by other agents — and file permissions cannot
+deliver that.**
+
+Revision 2 first claimed `registry.rs:459-473` wrote `auth_key` with no mode
+set. That was wrong: the write goes through `write_entry_file`, which sets
+`opts.mode(0o600)` (`registry.rs:702`) and documents it. Corrected here rather
+than deleted, because checking it surfaced the sharper problem.
+
+`0o600` restricts by **user**, and every agent on a host runs as the *same*
+user. That function's own doc comment says as much — *"same auth_key exposure
+boundary as the per-channel registry: same-user trust boundary, not
+cross-user"*. Against the threat this spec cares about, agent B reading agent
+A's credential, the mode bits do nothing at all.
+
+Two consequences:
+
+- A per-agent token **cannot** be protected by dropping it in a file, whatever
+  its permissions. It is held in server memory against the UID and injected
+  into the agent's process environment at spawn; process isolation, not
+  filesystem permissions, is the boundary (§6.4).
+- The entry file is keyed by **name** (`shared_agent_dir(shared_dir,
+  agent_id)`), so two agents sharing a name already share one file and one
+  `auth_key` entry — a live instance of this spec's root defect in the
+  credential path specifically. Entries move to UID-keyed paths regardless of
+  what they contain.
+
+The same applies to jekt signing keys, which are name-derived today
+(`jekt_public_key_for(agent_id)`): a name-derived signing key is one that
+anyone sharing that name can forge, and no file mode changes that.
 
 **Expiry must not strand a running agent.** A token that expires mid-task turns
 a healthy agent silent, which is the failure mode #3520's first P1 already
@@ -515,7 +537,14 @@ They should land on their own rather than waiting for this spec:
 
 **Revision 2 note.** Revision 1 was reviewed adversarially and four of its
 load-bearing empirical claims were false (§0). Every claim below that begins
-"measured" was re-run against `main` for this revision. The pattern in both the
+"measured" was re-run against `main` for this revision.
+
+Revision 2 then repeated the mistake once, which is worth recording precisely
+because it happened *inside* the correction: §6.3's original permissions claim
+was taken from that review and written in without being checked, and it was
+false. Reviewers are not a substitute for running the code — including
+reviewers who are right about everything else. Verify what you propagate, not
+just what you author. The pattern in both the
 predecessor spec and revision 1 is the same — a plausible statement about the
 code, written without running it, load-bearing by the time anyone checks — so
 treat any unmeasured assertion here as suspect rather than as merely
