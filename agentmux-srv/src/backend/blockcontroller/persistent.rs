@@ -2414,10 +2414,38 @@ impl PersistentSubprocessController {
             }
         }
         let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
-            // Nothing to retry at all (shouldn't happen in practice —
-            // the batch always has at least the triggering message) —
-            // but if it ever does, this is a no-op, not a launch, so any
-            // held error line must still reach the user.
+            // Nothing to retry at all. This USED to be unreachable — "the
+            // batch always has at least the triggering message" — and the
+            // comment here said so. Eager resume (issue #3463) made it
+            // reachable: it starts `AwaitingOutcome` tracking with an
+            // deliberately EMPTY batch, because it revives a session with
+            // nothing queued rather than in response to a message. If that
+            // `--resume` turns out to be stale before any prompt arrives,
+            // we land here with no entries.
+            //
+            // codex P2 on PR #3523: this path must still RESOLVE the
+            // "Reconnecting…" state published at the top of this function.
+            // Returning without it left the pane showing "Reconnecting…"
+            // forever — there is no spawn below to eventually emit an
+            // outcome, precisely because there is no first entry to trigger
+            // one.
+            //
+            // ONLY when a recovery candidate was found. The no-recovery arm
+            // above already published "resolved" synchronously, and
+            // publishing a second one here is not harmless: the event is
+            // `persist: 2`, so the duplicate evicts "retrying" from history
+            // and a pane subscribing just afterwards sees no record that a
+            // retry ever happened. The recovery-found arm is the one that
+            // deliberately DEFERS "resolved" to whichever `EmitSessionOutcome`
+            // site confirms the recovered id — a deferral that never
+            // completes when there is no spawn to confirm it. (Caught by
+            // this fix's own test, which failed with
+            // `[resolved, resolved]` when the publish was unconditional.)
+            if recovered.is_some() {
+                publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
+            }
+            // A no-op, not a launch, so any held error line must still
+            // reach the user.
             if let Some(line) = held_error_line {
                 self.flush_error_line_now(line);
             }
@@ -7468,6 +7496,75 @@ mod send_input_tests {
         assert!(
             !content.contains("agentmux_session_outcome"),
             "must not claim any outcome until the CLI actually confirms the recovered id — got: {content:?}"
+        );
+    }
+
+    /// codex P2 on PR #3523. An empty retry batch used to be unreachable —
+    /// "the batch always has at least the triggering message". Eager resume
+    /// (issue #3463) made it reachable: it starts `AwaitingOutcome` tracking
+    /// with a deliberately empty batch, since it revives a session with
+    /// nothing queued. If that `--resume` is stale and NO prompt has arrived
+    /// yet, this runs with no entries.
+    ///
+    /// Scoped to the recovery-FOUND case on purpose, because that is the only
+    /// one that hangs: that arm defers "resolved" to whichever
+    /// `EmitSessionOutcome` site confirms the recovered id, and with no first
+    /// entry there is no spawn to ever confirm it, so the pane sits on
+    /// "Reconnecting…" forever. The no-recovery arm resolves synchronously and
+    /// was never broken — an earlier cut of this fix published unconditionally
+    /// and regressed it to `[resolved, resolved]`, evicting "retrying" from
+    /// this `persist: 2` event's history.
+    #[test]
+    fn retry_after_resume_failure_resolves_an_empty_batch_instead_of_hanging() {
+        // Same on-disk fixture the recovery-found test uses: a live session
+        // file big enough to be picked as a recovery candidate.
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-reconnecting-empty-batch".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker.clone()),
+            None,
+            None,
+            Some(filestore),
+        );
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+        // The eager-resume shape: unconfirmed `--resume`, nothing queued.
+        c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+        let history = broker.read_event_history(
+            crate::backend::mps::EVENT_AGENT_RESUME_RETRY,
+            &format!("block:{block_id}"),
+            10,
+        );
+        let statuses: Vec<Option<&str>> = history
+            .iter()
+            .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("retrying"), Some("resolved")],
+            "an empty batch must still resolve 'Reconnecting...', not strand the pane in it — got: {statuses:?}"
         );
     }
 
