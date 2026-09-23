@@ -1,6 +1,6 @@
 # SPEC — Service Supervision & Recovery
 
-**Status:** Draft / for design review
+**Status:** Draft / for design review — except §8.1 (renderer responsiveness), active and implemented 2026-09-23
 **Date:** 2026-05-20
 **Author:** AgentA
 **Tracking:** to get a long-lived GitHub Discussion thread (sibling of #707 for
@@ -268,6 +268,33 @@ Health = **two** independent signals:
 Rules to avoid false-positive kills (§10-C): generous timeouts, **multiple**
 consecutive missed pings before action, and never confuse *slow* (GC pause,
 legit long op) with *dead*.
+
+### 8.1 Renderer responsiveness — active (2026-09-23)
+
+Promoted from draft by the 2026-09-22 freeze
+(`docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md`):
+the renderer was alive but stuck, srv/host/launcher stayed healthy, and the
+window never came back. The liveness half already existed (the launcher's
+UI-thread probe, and `SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md` for a renderer
+that *exits*); the responsiveness half did not.
+
+**Host-side, implemented** in `agentmux-cef/src/client/unresponsive.rs`. The
+ping is Chromium's own hang monitor: CEF calls
+`RequestHandler::on_render_process_unresponsive` after ~15 s of unacknowledged
+input. For an app-UI renderer (a registered `TopLevel` or `Floater` browser),
+the first report calls `wait()` and the second consecutive report calls
+`terminate()`, so the kill comes after ~30 s of input going unacknowledged
+(two missed signals, per the rule above). The kill lands in
+`on_render_process_terminated`, so a hang goes through the same crash budget
+and recovery page as a crash, with the reason "renderer stopped responding".
+`on_render_process_responsive` resets the count. Browser panes, auth popups
+and unregistered browsers (DevTools) keep CEF's default, which under Alloy is
+to wait.
+
+**Remaining gap:** Chromium only measures while input is pending, so a hang
+nobody interacts with is never reported. That needs an srv-side
+stalled-frontend signal: N consecutive seconds of `ws egress lane full` on a
+connection → event to the host → the same terminate. Not built yet.
 
 ---
 
