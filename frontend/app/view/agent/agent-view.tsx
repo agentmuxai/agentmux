@@ -2239,38 +2239,53 @@ const AgentPresentationView = ({
                 `.agent-view` so the transcript below still shrinks to make
                 room for it. */}
             <Show when={paneModel.state.stashOpen}>
-                <div class="agent-stash-drawer" id={`agent-stash-drawer-${model.blockId}`}>
-                    <ResizableDetailsDrawer
-                        blockId={model.blockId}
-                        anchor="top"
-                        classPrefix="agent-stash-drawer"
-                        persistMetaKey="agent:stashheight"
-                        persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
-                    >
-                        <AgentStashModal
-                            agentId={agentId}
-                            agentName={agentName()}
-                            // Prefer cmd:cwd (the actual launch cwd, set by
-                            // launchAgentDefinition) over
-                            // AgentDefinition.working_directory, which is often
-                            // empty or a stale default for template-launched and
-                            // continuation agents.
-                            workingDirectory={
-                                (block()?.meta?.["cmd:cwd"] as string) ||
-                                currentAgent()?.working_directory ||
-                                ""
-                            }
-                            // No loadable definition (quick-launch pane) → default
-                            // to the Memory tab; the Accounts tab works from
-                            // agentId alone but Memory is the more useful default
-                            // for a pane with no saved definition yet.
-                            initialTab={currentAgent() ? "accounts" : "memory"}
-                            // No `onClose` — closing is the header icon's job, so
-                            // the Memory tab hides its footer Close button rather
-                            // than rendering a dead one (§3.4).
-                        />
-                    </ResizableDetailsDrawer>
-                </div>
+                {/* Rendered as a DIRECT flex child of `.agent-view`, with no
+                    wrapper div, and that placement is load-bearing rather
+                    than incidental (reagentx P1 on PR #3540). The 50% height
+                    cap lives on `.agent-stash-drawer-resizable` — the same
+                    element that holds BOTH the content body and the resize
+                    handle — and a percentage `max-height` only resolves
+                    against a containing block whose height is definite.
+                    `.agent-view` is `height: 100%` (agent-view.scss), so it
+                    qualifies; an intermediate auto-height wrapper would NOT,
+                    and the percentage would compute to `none`. The first cut
+                    had exactly that wrapper, which let the inner element
+                    render at its full dragged height while the wrapper
+                    clipped it — carrying the bottom-edge handle into the
+                    clipped-away region, where it was invisible and
+                    unreachable, so a drawer dragged past 50% could never be
+                    shrunk again. See _stash-drawer.scss for the flex
+                    compression that keeps the handle on screen instead. */}
+                <ResizableDetailsDrawer
+                    blockId={model.blockId}
+                    anchor="top"
+                    classPrefix="agent-stash-drawer"
+                    persistMetaKey="agent:stashheight"
+                    persistedHeight={block()?.meta?.["agent:stashheight"] as number | undefined}
+                >
+                    <AgentStashModal
+                        agentId={agentId}
+                        agentName={agentName()}
+                        // Prefer cmd:cwd (the actual launch cwd, set by
+                        // launchAgentDefinition) over
+                        // AgentDefinition.working_directory, which is often
+                        // empty or a stale default for template-launched and
+                        // continuation agents.
+                        workingDirectory={
+                            (block()?.meta?.["cmd:cwd"] as string) ||
+                            currentAgent()?.working_directory ||
+                            ""
+                        }
+                        // No loadable definition (quick-launch pane) → default
+                        // to the Memory tab; the Accounts tab works from
+                        // agentId alone but Memory is the more useful default
+                        // for a pane with no saved definition yet.
+                        initialTab={currentAgent() ? "accounts" : "memory"}
+                        // No `onClose` — closing is the header icon's job, so
+                        // the Memory tab hides its footer Close button rather
+                        // than rendering a dead one (§3.4).
+                    />
+                </ResizableDetailsDrawer>
             </Show>
             <div class="agent-view-zoomed" style={{ zoom: zoomFactor() }}>
             {/* Gradient progress bar — marching-ants shimmer traced around

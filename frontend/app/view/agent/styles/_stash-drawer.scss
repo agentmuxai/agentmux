@@ -9,33 +9,47 @@
 // independently — the shell's handle sits on its top edge, this one's on its
 // bottom edge, and their content has opposite density needs.
 
-.agent-stash-drawer {
-    display: flex;
-    flex-direction: column;
-    flex: 0 0 auto;
-    min-height: 0;
-    overflow: hidden;
-    border-bottom: 1px solid var(--border-color);
-
-    // §6 open question 1/2, answered: the Stash and shell drawers are
-    // INDEPENDENT (either, both, or neither open — mutual exclusion would
-    // silently close a live shell holding real terminal state). This cap is
-    // what keeps that independence from squeezing the transcript to nothing:
-    // whatever the user drags to, and whatever the shell is also taking,
-    // Stash never occupies more than half the pane. Resolves against
-    // `.agent-view`'s definite `height: 100%` (agent-view.scss).
-    max-height: 50%;
-}
-
+// The component's own root — carries the JS-dragged inline `height`, and is
+// a DIRECT flex child of `.agent-view` (agent-view.tsx renders it with no
+// wrapper, deliberately).
 .agent-stash-drawer-resizable {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    // Fills whatever the capped wrapper above allows, rather than forcing its
-    // dragged inline height through it.
-    flex: 1 1 auto;
+    // Sized by its own dragged height, not by available space.
+    flex: 0 0 auto;
     min-height: 0;
-    max-height: 100%;
+    border-bottom: 1px solid var(--border-color);
+
+    // §6 open questions 1/2, answered: the Stash and shell drawers are
+    // INDEPENDENT (either, both, or neither open — mutual exclusion would
+    // silently close a live shell holding real terminal state). This cap is
+    // what keeps that independence from squeezing the transcript to nothing:
+    // whatever the user drags to, Stash never takes more than half the pane.
+    //
+    // THE CAP IS ON THIS ELEMENT ON PURPOSE (reagentx P1, PR #3540). It must
+    // sit on the element that contains BOTH the body and the resize handle,
+    // for two reasons:
+    //
+    //   1. A percentage `max-height` resolves only against a containing block
+    //      with a DEFINITE height. `.agent-view` is `height: 100%`, so as its
+    //      direct child this resolves. The first cut put the cap on an
+    //      intermediate auto-height wrapper and gave this element
+    //      `max-height: 100%`, which per spec computed to `none` — so this
+    //      element rendered at its full dragged height (up to the JS clamp of
+    //      600px) while the wrapper clipped it with `overflow: hidden`.
+    //   2. Because the handle renders AFTER the body for `anchor="top"`, that
+    //      clipping cut off the handle itself — invisible and unreachable, so
+    //      a drawer dragged past 50% could never be shrunk again.
+    //
+    // With the cap here, flex does the right thing instead of clipping:
+    // `-body` is `flex: 1 1 auto; min-height: 0` so it absorbs the
+    // compression, while `-resize-handle` is `flex-shrink: 0` and keeps its
+    // 5px at the bottom edge — always on screen, always grabbable.
+    //
+    // Fails safe: if the percentage ever did fail to resolve, the result is
+    // simply no cap (drawer can reach the JS max), NOT a trapped handle.
+    max-height: 50%;
 }
 
 // Bottom-edge handle — the mirror of the shell drawer's top-edge one
@@ -72,10 +86,10 @@
 // from _composer-strip.scss: 9-11px fonts, 1-2px vertical padding, 2px gaps,
 // horizontal padding topping out at --space-2 (8px).
 //
-// Scoped under .agent-stash-drawer so the same component keeps its roomier
+// Scoped under .agent-stash-drawer-resizable so the same component keeps its roomier
 // proportions anywhere else it is ever hosted — this is a host-specific
 // density, not a change to the component's own defaults.
-.agent-stash-drawer {
+.agent-stash-drawer-resizable {
     .agent-stash-modal-tabs {
         gap: 2px;
         padding: 2px var(--space-1-5) 0;
