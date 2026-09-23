@@ -1281,7 +1281,31 @@ impl PersistentSubprocessController {
                     // the identical "spawned with nothing of our own, but
                     // the queue might not be empty" shape. Everything in
                     // that batch is covered by the single publish above.
-                    self.drain_queue_after_successful_spawn(retry_config, false);
+                    // `true`, not `false` — codex P2 on PR #3523. The spawn
+                    // can succeed at the OS level and the process still exit
+                    // before this drain ever obtains `stdin_tx` (a stale
+                    // `--resume` that dies immediately is exactly that
+                    // shape, and is the case eager resume is most likely to
+                    // hit). The drain's stalled branch then only releases
+                    // the claim and publishes status unless fallback is
+                    // allowed, stranding a prompt that `send_message`
+                    // already reported as accepted and that is not yet in
+                    // the resume retry batch either.
+                    //
+                    // `false` is for `respawn_once_for_leftover_queue`'s own
+                    // recursive call, where it bounds the retry to one hop;
+                    // every ordinary entry point passes `true` (see
+                    // `release_spawn_claim_and_drain_queue`). This is an
+                    // ordinary entry point and was simply the odd one out.
+                    // Safe here because the fallback clears `session_id`
+                    // before respawning, so it starts a fresh process rather
+                    // than re-attempting the `--resume` that just died.
+                    //
+                    // Only reachable with work to do at all since the
+                    // emptiness fix above: this drain now runs only when the
+                    // queue is non-empty, which is precisely when a stall
+                    // has something to strand.
+                    self.drain_queue_after_successful_spawn(retry_config, true);
                 }
                 EagerResumeOutcome::Spawned
             }
