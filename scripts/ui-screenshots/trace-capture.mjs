@@ -26,7 +26,7 @@ ws.on("message", (m) => {
   if (j.method === "Tracing.dataCollected") chunks.push(...j.params.value);
   if (j.method === "Tracing.tracingComplete") done();
 });
-const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
 
 const cats = [
   "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame",

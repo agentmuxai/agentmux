@@ -28,7 +28,7 @@ const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false, 
 await new Promise((r, e) => { ws.once("open", r); ws.once("error", e); });
 let id = 0; const pending = new Map();
 ws.on("message", (m) => { const j = JSON.parse(m); if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); } });
-const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
 const evalIn = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || JSON.stringify(r.result.exceptionDetails));
@@ -93,6 +93,7 @@ const READ = `(()=>{const P=window.__exp;P.raf=false;P.po.disconnect();P.mo.disc
   return {elapsedMs:+(performance.now()-P.t0).toFixed(0),keydowns:P.keys,mutations:P.mut,frames:P.gaps.length,gaps:P.gaps.map(g=>+g.toFixed(1)),loafDurs:L.map(l=>l.dur),
     rafGapMs:{p50:q(P.gaps,.5),p95:q(P.gaps,.95),max:q(P.gaps,1),over50:P.gaps.filter(g=>g>50).length},
     loaf:{count:L.length,totalMs:sum(l=>l.dur),blockingMs:sum(l=>l.blocking),scriptMs:sum(scr),forcedLayoutInScriptsMs:sum(l=>l.scripts.reduce((a,s)=>a+s.fl,0)),renderPhaseMs:sum(l=>l.render),ofWhichStyleLayoutMs:sum(l=>l.styleLayout),maxMs:L.length?Math.max(...L.map(l=>l.dur)):0},
+    allScripts:[...byInv].map(([k,v])=>({k,n:v.n,ms:+v.dur.toFixed(0),forcedLayoutMs:+v.fl.toFixed(0)})),
     topScripts:[...byInv].map(([k,v])=>({k,n:v.n,ms:+v.dur.toFixed(0),forcedLayoutMs:+v.fl.toFixed(0)})).sort((a,b)=>b.ms-a.ms).slice(0,16),
     worst3:[...L].sort((a,b)=>b.dur-a.dur).slice(0,3).map(l=>({dur:l.dur,blocking:l.blocking,scriptMs:+scr(l).toFixed(0),renderMs:l.render,styleLayoutMs:l.styleLayout,top:[...l.scripts].sort((a,b)=>b.dur-a.dur).slice(0,3).map(s=>s.inv.slice(0,32)+"|"+s.fn+"@"+s.url.slice(-26)+" "+s.dur+"ms fl="+s.fl)}))}})()`;
 
@@ -111,8 +112,8 @@ async function runWindow(typed) {
   if (typed) {
     for (let i = 0; i < secs * kps; i++) {
       const w = t0 + i * interval - Date.now(); if (w > 0) await sleep(w);
-      send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 });
-      send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc });
+      send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc, text: ch, unmodifiedText: ch, autoRepeat: i > 0 }).catch((e) => console.error(String(e)));
+      send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: kc, nativeVirtualKeyCode: kc }).catch((e) => console.error(String(e)));
     }
   }
   const remaining = t0 + secs * 1000 - Date.now();
@@ -128,7 +129,9 @@ function pool(ws_) {
   const sum = (f) => ws_.reduce((a, w) => a + f(w), 0);
   const gaps = ws_.flatMap((w) => w.gaps), durs = ws_.flatMap((w) => w.loafDurs);
   const byInv = new Map();
-  for (const w of ws_) for (const s of w.topScripts) { const v = byInv.get(s.k) || { k: s.k, n: 0, ms: 0, forcedLayoutMs: 0 }; v.n += s.n; v.ms += s.ms; v.forcedLayoutMs += s.forcedLayoutMs; byInv.set(s.k, v); }
+  // Complete per-window totals, so a script that is expensive in every window
+  // but never top-16 in any single one still ranks correctly once pooled.
+  for (const w of ws_) for (const s of w.allScripts) { const v = byInv.get(s.k) || { k: s.k, n: 0, ms: 0, forcedLayoutMs: 0 }; v.n += s.n; v.ms += s.ms; v.forcedLayoutMs += s.forcedLayoutMs; byInv.set(s.k, v); }
   return {
     windows: ws_.length, totalMs: sum((w) => w.elapsedMs), keydowns: sum((w) => w.keydowns), mutations: sum((w) => w.mutations), frames: gaps.length,
     rafGapMs: { p50: q(gaps, .5), p95: q(gaps, .95), max: q(gaps, 1), over50: gaps.filter((g) => g > 50).length },

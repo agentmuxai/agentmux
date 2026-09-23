@@ -17,7 +17,7 @@ const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false, 
 await new Promise((r, e) => { ws.once("open", r); ws.once("error", e); });
 let id = 0; const pending = new Map();
 ws.on("message", (m) => { const j = JSON.parse(m); if (j.id && pending.has(j.id)) { pending.get(j.id)(j); pending.delete(j.id); } });
-const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (j) => (j.error ? rej(new Error(`${method}: ${j.error.message}`)) : res(j))); ws.send(JSON.stringify({ id: i, method, params })); });
 const evalIn = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails));
@@ -55,8 +55,8 @@ for (let i = 0; i < n; i++) {
   const due = tStart + i * interval;
   const wait = due - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   // fire-and-forget so slow frames don't throttle our input rate (that's what the OS does)
-  send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, text: ch, unmodifiedText: ch, autoRepeat: i > 0 });
-  send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode });
+  send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, text: ch, unmodifiedText: ch, autoRepeat: i > 0 }).catch((e) => console.error(String(e)));
+  send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: `Key${ch.toUpperCase()}`, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode }).catch((e) => console.error(String(e)));
 }
 await new Promise((r) => setTimeout(r, 800)); // let the tail settle
 
