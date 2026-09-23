@@ -1860,6 +1860,93 @@
     /// that row's latest launch onto the new block. So the spawn counters
     /// and the live gauge, which ask `uid_for_block`, count a continuation as
     /// row-backed — the gap it is — not as a row-less pane.
+    fn block_showing(store: &Store, block_id: &str, agent_id: Option<&str>) {
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 0,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                if let Some(id) = agent_id {
+                    m.insert("agentId".to_string(), serde_json::json!(id));
+                }
+                m
+            },
+            subblockids: None,
+        };
+        store.insert(&mut block).unwrap();
+    }
+
+    /// A user agent launched on `block_id` — its row stays `running` with
+    /// `last_block_id` on the block until it is launched elsewhere or the
+    /// pane's close saga stops it; switching the pane to another agent
+    /// changes neither.
+    fn launch_user_agent_on(store: &Store, agents_root: &Path, id: &str, block_id: &str) {
+        store.agent_def_insert(&mut sample_agent(id, id)).unwrap();
+        let mut inst = make_named_inst(&format!("inst-{id}"), id, agents_root);
+        inst.definition_id = id.to_string();
+        inst.block_id = block_id.to_string();
+        store.instance_create(&inst).unwrap();
+    }
+
+    /// A pane that showed agent A, went back to the picker and launched B,
+    /// whose row was then deleted from another window (the pane survives:
+    /// `MyAgentsList.tsx`'s known limitation), must resolve to nothing — not
+    /// fall back to A's still-`running` row and hand the pane A's UID, token,
+    /// slug and provider credentials. Likewise a block naming something that
+    /// is no row at all.
+    #[test]
+    fn a_block_naming_a_missing_agent_does_not_fall_back_to_a_stale_row() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        launch_user_agent_on(&store, &agents_root, "agent-stale-a", "block-stale");
+        for named in ["agent-deleted-b", "claude"] {
+            block_showing(&store, "block-stale", Some(named));
+            assert!(
+                store.instance_get_active_for_block("block-stale").unwrap().is_none(),
+                "agentId={named} must not resolve to agent-stale-a"
+            );
+            store.delete::<crate::backend::obj::Block>("block-stale").ok();
+        }
+    }
+
+    /// A block naming a template still falls back — that is how a
+    /// template launch or continuation finds its row — but only to a row
+    /// launched from *that* template, never to another agent's stale row on
+    /// the same block, however recently updated.
+    #[test]
+    fn a_template_block_falls_back_only_to_a_row_launched_from_that_template() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        let mut tpl = sample_agent("tpl-scoped", "tpl-scoped");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut launched = make_named_inst("inst-from-tpl", "FromTpl", &agents_root);
+        launched.definition_id = "tpl-scoped".to_string();
+        launched.block_id = "block-tpl-scoped".to_string();
+        let from_tpl = store.instance_create(&launched).unwrap();
+        // Another agent's row on the same block, updated after it.
+        launch_user_agent_on(&store, &agents_root, "agent-other", "block-tpl-scoped");
+
+        block_showing(&store, "block-tpl-scoped", Some("tpl-scoped"));
+        let got = store.instance_get_active_for_block("block-tpl-scoped").unwrap();
+        assert_eq!(got.map(|a| a.id), Some(from_tpl.id));
+    }
+
+    /// A block whose meta names no agent at all keeps today's fallback: the
+    /// agent whose latest launch is on it (a block from before `agentId`).
+    #[test]
+    fn a_block_naming_no_agent_keeps_the_latest_launch_fallback() {
+        let (tmp, store, _reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+        launch_user_agent_on(&store, &agents_root, "agent-unnamed", "block-unnamed");
+        block_showing(&store, "block-unnamed", None);
+        let got = store.instance_get_active_for_block("block-unnamed").unwrap();
+        assert_eq!(got.map(|a| a.id).as_deref(), Some("agent-unnamed"));
+    }
+
     #[test]
     fn a_template_continuation_block_resolves_to_the_row_it_folds_into() {
         let (tmp, store, _reg) = store_with_registry();
