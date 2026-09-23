@@ -2999,7 +2999,8 @@ async fn a_turn_boundary_releases_exactly_one_message() {
         PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
     };
 
-    assert!(flushed.expect("one message released").contains("first"));
+    let DeferredFlush::Released(flushed) = flushed else { panic!("one message released, got {flushed:?}") };
+    assert!(flushed.contains("first"));
     let line = rx.try_recv().expect("it reached stdin");
     assert!(line.contains("first"));
     assert!(
@@ -3037,7 +3038,10 @@ async fn an_empty_queue_releases_nothing_at_a_boundary() {
     let (c, _rx) = busy_controller();
 
     let mut inner = c.inner.lock().unwrap();
-    assert!(PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block").is_none());
+    assert_eq!(
+        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block"),
+        DeferredFlush::Empty
+    );
 }
 
 /// A dead process must not silently eat the queue: the entries stay put so
@@ -3054,7 +3058,7 @@ async fn a_failed_flush_leaves_the_queue_intact_for_teardown() {
         PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
     };
 
-    assert!(flushed.is_none());
+    assert_eq!(flushed, DeferredFlush::Failed, "a failed write is not an empty queue");
     assert_eq!(
         c.inner.lock().unwrap().deferred_deliveries.len(),
         1,
@@ -3154,8 +3158,8 @@ async fn a_flushed_deferred_message_is_tracked_into_an_unconfirmed_resume_retry_
     let flushed = {
         let mut inner = c.inner.lock().unwrap();
         PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
-    }
-    .expect("the boundary releases it");
+    };
+    let DeferredFlush::Released(flushed) = flushed else { panic!("the boundary releases it, got {flushed:?}") };
     assert_eq!(rx.try_recv().unwrap(), flushed);
 
     let inner = c.inner.lock().unwrap();
@@ -3166,4 +3170,187 @@ async fn a_flushed_deferred_message_is_tracked_into_an_unconfirmed_resume_retry_
         }
         other => panic!("expected AwaitingOutcome, got {other:?}"),
     }
+}
+
+// ── Deferred-delivery watchdog (codex P1s on #3562) ─────────────────
+//
+// The `result`-frame flush only fires when a turn ends. These cover the
+// cases with no turn boundary coming, where an accepted message would
+// otherwise sit in the queue indefinitely.
+
+fn idle_controller() -> (PersistentSubprocessController, mpsc::Receiver<String>) {
+    let (c, rx) = busy_controller();
+    c.health_monitor.set_active_turn(false);
+    (c, rx)
+}
+
+fn enqueue_deferred(c: &PersistentSubprocessController, text: &str) {
+    c.inner
+        .lock()
+        .unwrap()
+        .deferred_deliveries
+        .push_back(PersistentSubprocessController::encode_user_message(text));
+}
+
+/// Codex P1: a failed boundary write used to be indistinguishable from an
+/// empty queue, so the turn went idle with no retry scheduled.
+#[tokio::test]
+async fn a_full_stdin_channel_is_a_failed_flush_not_an_empty_queue() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(1);
+    tx.try_send("occupying the only slot".to_string()).unwrap();
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    enqueue_deferred(&c, "waiting");
+
+    let flushed = {
+        let mut inner = c.inner.lock().unwrap();
+        PersistentSubprocessController::flush_one_deferred_locked(&mut inner, "block")
+    };
+    assert_eq!(flushed, DeferredFlush::Failed);
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "the entry stays queued");
+
+    // Once the channel has room, the watchdog's next tick delivers it.
+    rx.try_recv().unwrap();
+    let mut orphaned = 0;
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    assert!(rx.try_recv().unwrap().contains("waiting"));
+    assert!(c.inner.lock().unwrap().deferred_deliveries.is_empty());
+}
+
+/// An idle agent with a live process and a queued message: release ONE and
+/// mark the turn active inside the same critical section, exactly like the
+/// idle fast path. This is the eager-resume case — a spawn that succeeded
+/// with nothing to say, so no `result` frame is ever coming.
+#[tokio::test]
+async fn the_watchdog_releases_one_message_to_an_idle_agent_and_marks_the_turn_active() {
+    let (c, mut rx) = idle_controller();
+    enqueue_deferred(&c, "one");
+    enqueue_deferred(&c, "two");
+
+    let mut orphaned = 0;
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+
+    assert!(rx.try_recv().unwrap().contains("one"));
+    assert!(rx.try_recv().is_err(), "one per boundary applies to the watchdog too");
+    assert!(c.health_monitor.is_active_turn(), "the released message started a turn");
+
+    // The turn is running now, so the next tick must hold "two" back.
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    assert!(rx.try_recv().is_err(), "the watchdog must never write mid-turn");
+}
+
+/// Every reason to wait is honoured, not just `turn_active`.
+#[tokio::test]
+async fn the_watchdog_waits_while_anything_is_in_flight() {
+    let (c, mut rx) = idle_controller();
+    enqueue_deferred(&c, "waiting");
+    let mut orphaned = 0;
+
+    let cases: [(&str, fn(&mut PersistentInner, bool)); 3] = [
+        ("spawn in flight", |i, on| i.spawning_in_progress = on),
+        ("retry batch being replayed", |i, on| i.drain_claim = on),
+        ("human messages queued", |i, on| {
+            if on {
+                i.pending_send_messages.push_back(QueuedMessage::fresh(1, "human".to_string()));
+            } else {
+                i.pending_send_messages.clear();
+            }
+        }),
+    ];
+    for (why, set) in cases {
+        set(&mut c.inner.lock().unwrap(), true);
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+        assert!(rx.try_recv().is_err(), "must wait: {why}");
+        set(&mut c.inner.lock().unwrap(), false);
+    }
+}
+
+/// The idle fast path shares the watchdog's definition of "must wait": a
+/// stale-resume retry batch being replayed must not be overtaken.
+#[tokio::test]
+async fn the_idle_fast_path_does_not_overtake_a_retry_batch_replay() {
+    let (c, mut rx) = idle_controller();
+    c.inner.lock().unwrap().drain_claim = true;
+
+    c.send_user_message("automated".to_string()).unwrap();
+
+    assert!(rx.try_recv().is_err());
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1);
+}
+
+/// Codex P1: a message deferred behind a spawn that then FAILS has no turn
+/// and no teardown coming. After the grace window with no process and no
+/// respawn, it is reported stranded (spec §4.5) and the watchdog exits —
+/// not before, so a respawn that is about to start still gets it.
+#[tokio::test]
+async fn a_message_deferred_behind_a_failed_spawn_is_reported_after_the_grace_window() {
+    let c = controller();
+    c.inner.lock().unwrap().spawning_in_progress = true;
+    c.send_user_message("behind a doomed spawn".to_string()).unwrap();
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "deferred, not refused");
+
+    // The spawn fails: claim released, no process.
+    c.inner.lock().unwrap().spawning_in_progress = false;
+
+    let mut orphaned = 0;
+    for _ in 1..DEFERRED_ORPHAN_GRACE_TICKS {
+        assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+    }
+    assert_eq!(
+        c.inner.lock().unwrap().deferred_deliveries.len(),
+        1,
+        "still held inside the grace window"
+    );
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Exit);
+    let inner = c.inner.lock().unwrap();
+    assert!(inner.deferred_deliveries.is_empty(), "reported, not held forever");
+    assert!(!inner.deferred_watchdog_armed);
+}
+
+/// A respawn inside the grace window resets it: the message is delivered,
+/// not reported.
+#[tokio::test]
+async fn a_respawn_inside_the_grace_window_delivers_instead_of_stranding() {
+    let c = controller();
+    enqueue_deferred(&c, "patient");
+    let mut orphaned = 0;
+    for _ in 1..DEFERRED_ORPHAN_GRACE_TICKS {
+        c.sweep_deferred_once(&mut orphaned);
+    }
+
+    let (tx, mut rx) = mpsc::channel::<String>(4);
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Continue);
+
+    assert!(rx.try_recv().unwrap().contains("patient"));
+}
+
+/// The real task, end to end: armed by the enqueue, it delivers once the
+/// in-flight spawn finishes without ever producing a turn, then disarms.
+#[tokio::test]
+async fn the_watchdog_task_delivers_after_a_spawn_that_never_starts_a_turn() {
+    let c = Arc::new(controller());
+    c.set_self_ref();
+    let (tx, mut rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.spawning_in_progress = true;
+    }
+    c.send_user_message("arrived during startup".to_string()).unwrap();
+    assert!(c.inner.lock().unwrap().deferred_watchdog_armed);
+
+    // Eager resume: the spawn completes with nothing to send.
+    c.inner.lock().unwrap().spawning_in_progress = false;
+
+    let line = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("the watchdog must deliver without any turn boundary")
+        .unwrap();
+    assert!(line.contains("arrived during startup"));
+
+    // Next tick finds the queue empty and disarms.
+    c.health_monitor.set_active_turn(false);
+    tokio::time::sleep(DEFERRED_WATCHDOG_TICK * 3).await;
+    assert!(!c.inner.lock().unwrap().deferred_watchdog_armed);
 }

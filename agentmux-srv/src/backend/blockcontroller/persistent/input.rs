@@ -113,10 +113,10 @@ impl PersistentSubprocessController {
         // `publish_status`/`spawn_status_heartbeat` must NOT be called while
         // this guard is held — `publish_status` takes `inner` itself and would
         // deadlock. They run after the guard drops, below.
-        let delivered = {
+        let (delivered, still_queued) = {
             let mut inner = self.inner.lock().unwrap();
 
-            if policy == DeliverPolicy::Immediate {
+            let delivered = if policy == DeliverPolicy::Immediate {
                 Self::try_write_stdin_locked(&mut inner, &json_str)?;
                 Some((json_str.clone(), self.mark_turn_active_locked()))
             } else {
@@ -136,13 +136,12 @@ impl PersistentSubprocessController {
                 // senders actually sent in.
                 inner.deferred_deliveries.push_back(json_str);
 
-                // `spawning_in_progress` counts as busy rather than as an
-                // error. This is the startup race that used to drop jekts
-                // outright (spec §3.2.1): a spawn always ends in either a turn
-                // (whose `result` frame flushes this queue) or a teardown
-                // (whose drain reports it), so deferring here strands nothing.
-                let busy = self.health_monitor.is_active_turn() || inner.spawning_in_progress;
-                if busy {
+                // A spawn in flight counts as busy rather than as an error.
+                // This is the startup race that used to drop jekts outright
+                // (spec §3.2.1). Not every spawn ends in a turn boundary — it
+                // can fail, or (eager resume) succeed with nothing to say — so
+                // anything left queued here is the watchdog's to finish, below.
+                if self.deferred_must_wait_locked(&inner) {
                     None
                 } else {
                     let head = inner
@@ -170,8 +169,16 @@ impl PersistentSubprocessController {
                         }
                     }
                 }
-            }
+            };
+            (delivered, !inner.deferred_deliveries.is_empty())
         };
+
+        // Anything still queued needs a guaranteed way out even if no turn
+        // boundary ever comes. Called after EVERY enqueue that leaves the queue
+        // non-empty, so it cannot miss a watchdog that exited just before.
+        if still_queued {
+            self.ensure_deferred_watchdog();
+        }
 
         let Some((sent_line, was_active)) = delivered else {
             tracing::info!(
@@ -210,8 +217,24 @@ impl PersistentSubprocessController {
         self.health_monitor.mark_turn_active_returning_was_active()
     }
 
-    /// Release at most ONE deferred message at a turn boundary, returning the
-    /// line written (`None` if the queue was empty or the write failed).
+    /// Whether a deferred message must keep waiting rather than be written
+    /// now. The ONE definition shared by the idle fast path and the watchdog,
+    /// so the two can never disagree about what "idle" means.
+    ///
+    /// - a turn is running — writing now is the interrupt this exists to stop;
+    /// - a spawn is in flight — its own seed message and drain go first, and
+    ///   `try_write_stdin_locked` would refuse anyway;
+    /// - a stale-resume retry batch is being replayed (`drain_claim`) — those
+    ///   messages were accepted earlier and must not be overtaken;
+    /// - human messages are queued behind a spawn — same ordering reason.
+    pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
+        self.health_monitor.is_active_turn()
+            || inner.spawning_in_progress
+            || inner.drain_claim
+            || !inner.pending_send_messages.is_empty()
+    }
+
+    /// Release at most ONE deferred message.
     ///
     /// Exactly one, never the whole queue: writing to stdin starts a new turn,
     /// so a burst drain would write message #2 while #1's turn was already
@@ -220,46 +243,159 @@ impl PersistentSubprocessController {
     /// goes out on that new turn's own boundary.
     ///
     /// The caller holds `inner` across this, and must leave `turn_active` set
-    /// when this returns `Some` — the released message just started a turn.
-    /// A failed write leaves the queue intact for teardown to report rather
-    /// than dropping it.
+    /// on [`DeferredFlush::Released`] — the released message just started a
+    /// turn. A failed write leaves the queue intact; it is reported as
+    /// [`DeferredFlush::Failed`], distinct from an empty queue, because the
+    /// caller must arrange a retry for it rather than treat it as idle.
     pub(super) fn flush_one_deferred_locked(
         inner: &mut PersistentInner,
         block_id: &str,
-    ) -> Option<String> {
-        let head = inner.deferred_deliveries.front()?.clone();
+    ) -> DeferredFlush {
+        let Some(head) = inner.deferred_deliveries.front().cloned() else {
+            return DeferredFlush::Empty;
+        };
         match Self::try_write_stdin_locked(inner, &head) {
             Ok(()) => {
                 inner.deferred_deliveries.pop_front();
-                Some(head)
+                DeferredFlush::Released(head)
             }
             Err(e) => {
                 tracing::warn!(
                     block_id = %block_id,
                     error = %e,
                     queued = inner.deferred_deliveries.len(),
-                    "turn-boundary flush failed; leaving the queue for teardown to report"
+                    "deferred flush failed; leaving the queue for the watchdog to retry"
                 );
-                None
+                DeferredFlush::Failed
             }
         }
+    }
+
+    /// Make sure a watchdog task is looking after a non-empty deferred queue.
+    ///
+    /// The `result`-frame flush is the primary path, but it only fires when a
+    /// turn ends. Three cases have no such boundary coming (codex P1s on
+    /// #3562, plus one found alongside them):
+    ///
+    /// - a boundary flush whose write failed (e.g. the bounded stdin channel
+    ///   was momentarily full) — the turn went idle with the entry still queued;
+    /// - a message deferred behind a spawn that then FAILED — no process, so
+    ///   no turn and no `result`;
+    /// - a message deferred behind a spawn that succeeded with nothing to say
+    ///   (eager resume spawns with no seed message) — idle, no turn.
+    ///
+    /// Idempotent: at most one watchdog per controller. A no-op for an
+    /// instance without `set_self_ref` (only tests construct those) or outside
+    /// a Tokio runtime.
+    pub(super) fn ensure_deferred_watchdog(&self) {
+        let Some(ctrl) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.deferred_watchdog_armed {
+                return;
+            }
+            inner.deferred_watchdog_armed = true;
+        }
+        let weak = Arc::downgrade(&ctrl);
+        drop(ctrl);
+        runtime.spawn(async move {
+            let mut orphaned_ticks = 0u32;
+            loop {
+                tokio::time::sleep(DEFERRED_WATCHDOG_TICK).await;
+                // Hold no strong reference across the sleep, so the watchdog
+                // never keeps a torn-down controller alive.
+                let Some(ctrl) = weak.upgrade() else { return };
+                if ctrl.sweep_deferred_once(&mut orphaned_ticks) == WatchdogStep::Exit {
+                    return;
+                }
+            }
+        });
+    }
+
+    /// One watchdog tick. Split out of the task so tests can drive it
+    /// directly, without a real process or real time.
+    pub(super) fn sweep_deferred_once(&self, orphaned_ticks: &mut u32) -> WatchdogStep {
+        let (released, stranded) = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.deferred_deliveries.is_empty() {
+                // Disarm under the same lock that guards enqueue: any message
+                // pushed after this point is followed by its own
+                // `ensure_deferred_watchdog`, which will see "disarmed".
+                inner.deferred_watchdog_armed = false;
+                return WatchdogStep::Exit;
+            }
+            if self.deferred_must_wait_locked(&inner) {
+                // Something in flight will reach a boundary (or fail into a
+                // state this watchdog sees on a later tick).
+                *orphaned_ticks = 0;
+                return WatchdogStep::Continue;
+            }
+            if inner.stdin_tx.is_none() {
+                // No process and nothing starting one. Give a respawn the
+                // grace window to begin, then stop pretending these will be
+                // delivered (spec §4.5).
+                *orphaned_ticks += 1;
+                if *orphaned_ticks < DEFERRED_ORPHAN_GRACE_TICKS {
+                    return WatchdogStep::Continue;
+                }
+                inner.deferred_watchdog_armed = false;
+                (None, inner.deferred_deliveries.drain(..).collect::<Vec<_>>())
+            } else {
+                *orphaned_ticks = 0;
+                match Self::flush_one_deferred_locked(&mut inner, &self.block_id) {
+                    // Flip inside the lock, exactly as the idle fast path does.
+                    DeferredFlush::Released(line) => (Some((line, self.mark_turn_active_locked())), Vec::new()),
+                    // Transient; the next tick tries again.
+                    DeferredFlush::Failed => return WatchdogStep::Continue,
+                    DeferredFlush::Empty => unreachable!("checked non-empty under this same lock"),
+                }
+            }
+        };
+
+        if !stranded.is_empty() {
+            self.log_stranded_deferred(
+                "no process and no spawn in flight for the whole grace window",
+                &stranded,
+            );
+            return WatchdogStep::Exit;
+        }
+        if let Some((line, was_active)) = released {
+            tracing::info!(
+                block_id = %self.block_id,
+                "agent idle with no turn boundary pending — watchdog released one deferred message"
+            );
+            if !was_active {
+                self.spawn_status_heartbeat();
+            }
+            self.publish_status();
+            self.append_delivered_message(&line);
+        }
+        WatchdogStep::Continue
     }
 
     /// Drain the deferred-delivery queue during teardown and report every
     /// stranded entry, so a message this controller accepted is never quietly
     /// discarded (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5).
-    ///
+    pub(super) fn report_stranded_deferred_deliveries(&self, reason: &str) {
+        let stranded: Vec<String> = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.deferred_deliveries.drain(..).collect()
+        };
+        self.log_stranded_deferred(reason, &stranded);
+    }
+
     /// **Known gap:** reporting is currently a loud structured log, not a
     /// failure routed back to the original sender. The queue stores encoded
     /// stdin lines with no sender identity attached, so there is nothing to
     /// address a reply to; carrying that identity through is Phase 3. Until
     /// then a stranded message is visible in the logs rather than in the
     /// sender's response — better than silence, short of the spec's intent.
-    pub(super) fn report_stranded_deferred_deliveries(&self, reason: &str) {
-        let stranded: Vec<String> = {
-            let mut inner = self.inner.lock().unwrap();
-            inner.deferred_deliveries.drain(..).collect()
-        };
+    fn log_stranded_deferred(&self, reason: &str, stranded: &[String]) {
         if stranded.is_empty() {
             return;
         }
@@ -269,7 +405,7 @@ impl PersistentSubprocessController {
             stranded = stranded.len(),
             "deferred messages were accepted but never delivered"
         );
-        for line in &stranded {
+        for line in stranded {
             tracing::warn!(block_id = %self.block_id, message = %line, "stranded deferred message");
         }
     }

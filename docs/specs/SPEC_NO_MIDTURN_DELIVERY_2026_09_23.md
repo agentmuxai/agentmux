@@ -180,6 +180,38 @@ At the `result` frame (`persistent/spawn.rs:626`), under the `inner` lock:
 writes to live stdin while #1's turn is running — precisely the bug being fixed. The next queued
 message is sent only in response to *that new turn's own* completion event.
 
+**Record `result(N)` before `user(N+1)`.** The stdin write happens at the boundary, atomically with
+the idle decision, but the released prompt's blockfile append waits until the `result` line that
+ended turn N has itself been appended. Otherwise a reopened pane shows the next prompt ahead of the
+previous turn's result, and a live consumer can take turn N's `result` as the end of the turn the
+released prompt just started (codex P1 on #3562).
+
+**A failed write is not an empty queue.** The flush reports one of three outcomes: `Released`,
+`Empty` and `Failed` (e.g. the bounded stdin channel was momentarily full). `Failed` still ends the
+turn, since nothing new started, but the entry stays queued and the watchdog (§4.4.1) retries it.
+A deferred runtime-config restart applies only on `Empty`, since killing the process with an
+entry still queued would strand it.
+
+#### 4.4.1 The watchdog: when no turn boundary is coming
+
+The `result` frame is the primary flush, but some states never produce one (codex P1s on #3562):
+
+- a boundary flush whose write **failed**, leaving the turn idle with the entry still queued;
+- a message deferred behind a spawn that then **fails**, so there is no process, turn or `result`;
+- a message deferred behind a spawn that **succeeds with nothing to say** (eager resume spawns with
+  no seed message), leaving the agent idle with no turn.
+
+Any enqueue that leaves the queue non-empty arms a per-controller watchdog task (at most one; it
+disarms itself under the `inner` lock once the queue is empty). Each tick, under the lock:
+
+- **must wait** (a turn is running, a spawn is in flight, a stale-resume retry batch is being
+  replayed, or human messages are queued): do nothing. The idle fast path (§4.3) uses this *same*
+  predicate, so the two can never disagree about what "idle" means;
+- **idle with a live process**: release ONE entry and mark the turn active inside the same
+  critical section, exactly as the fast path does;
+- **no process and nothing starting one** for a grace window (~10s, which rides out the gap before
+  a stale-resume retry or fallback respawn): report the queue stranded (§4.5) and exit.
+
 ### 4.5 Termination — nothing is accepted and then silently lost
 
 - **Deliberate stop** (`Controller::stop`, the only intentional teardown): drain `pending` and
