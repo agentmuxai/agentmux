@@ -54,7 +54,23 @@ use_static_angle=false
 alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
 clang_use_chrome_plugins=false
 enable_background_mode=false
-enable_backup_ref_ptr_instance_tracer=true
+# MUST stay false. This is a test-only diagnostic ("use a global table to
+# track all live raw_ptr/raw_ref instances to help debug dangling pointers
+# at test end", per //base/allocator/partition_allocator/partition_alloc.gni)
+# that upstream CEF's tools/gn_args.py switches on for EVERY non-debug
+# Windows build, and this file inherited `=true` from a generated args.gn
+# on 2026-07-27 (#2308). It wraps every raw_ptr construct/destruct in one
+# process-global non-recursive std::mutex, and the tracer's own table
+# insertion allocates: when GWP-ASan samples that allocation and its lock
+# is contended, base::Lock's LockMetricsRecorder timer (a raw_ptr) re-enters
+# the tracer on the same thread and deadlocks it, then every thread in the
+# renderer piles up behind it. Live-diagnosed from a full dump on
+# 2026-09-22: docs/incident/INCIDENT_2026_09_22_RENDERER_MAIN_THREAD_DEADLOCK_ON_CHROMIUM_LOCK.md.
+# Chromium itself never ships with this on. Any Windows runtime built with
+# `true` (every agentmuxai/cef Windows release up to and including
+# cef-windows-x86_64-152.0.7977.83, and every stock CEF Windows binary) can
+# freeze a window permanently at random under allocation-heavy load.
+enable_backup_ref_ptr_instance_tracer=false
 enable_cdm_host_verification=true
 enable_cdm_storage_id=true
 enable_downgrade_processing=false
