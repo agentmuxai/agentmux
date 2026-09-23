@@ -5,6 +5,11 @@
 **Status:** analysis — **§2 measured and confirmed** (see §6, `tools/tests/bench-markdown-parse.mjs`). §4's pane multiplier is still code-reading only and needs the in-app check in §6.4.
 **Symptom (user-reported):** "when there is a lot of activity in the agent pane, typing becomes extremely slow."
 **Umbrella:** Discussion #1161 · `TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md`
+**Follow-up (2026-09-23):** §2 and §4 shipped as #3521 / #3536 and hold under
+load. The next layer — finished tool results rebuilt on every flush, the
+dominant cost once these two were gone — is measured and fixed in
+`ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md`, which also supersedes
+this doc's "§4 is code-reading only" caveat with live 4-pane numbers.
 
 ---
 

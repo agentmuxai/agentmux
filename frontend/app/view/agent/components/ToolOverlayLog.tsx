@@ -503,8 +503,17 @@ function renderRead(node: ToolNode): JSX.Element {
                             meaningless in rendered markdown and actively
                             corrupts it (a "1\t# Title" line is not a heading).
                             SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1 flagged
-                            this in August and deferred it; this is the fix. */}
-                        <Markdown text={preview!.body} />
+                            this in August and deferred it; this is the fix.
+
+                            scrollable={false}, same as MarkdownBlock: this
+                            preview lives inside the virtualized document,
+                            which owns the scroll. `scrollable` defaults to
+                            true, and each mount then constructs an
+                            OverlayScrollbars instance — getComputedStyle +
+                            scrollLeft probes that each force a layout of the
+                            whole pane. Measured at 46% of `flushPendingNodes`
+                            under load (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2). */}
+                        <Markdown text={preview!.body} scrollable={false} />
                     </div>
                 </Show>
                 <Show when={capped!.hiddenLines > 0}>
@@ -561,7 +570,8 @@ function renderWrite(node: ToolNode): JSX.Element {
                     }
                 >
                     <div class="agent-tool-write-content agent-tool-write-md">
-                        <Markdown text={markdownText} />
+                        {/* scrollable={false} — see renderRead's markdown branch. */}
+                        <Markdown text={markdownText} scrollable={false} />
                     </div>
                 </Show>
                 <Show when={capped!.hiddenLines > 0}>

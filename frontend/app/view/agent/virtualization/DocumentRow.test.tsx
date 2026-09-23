@@ -17,6 +17,7 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentRow } from "./DocumentRow";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import type {
     AgentErrorNode,
     CompactionStartedNode,
@@ -28,9 +29,73 @@ import type {
     MemoryReinjectionNode,
     SectionNode,
     SessionOutcomeNode,
+    ToolNode,
 } from "../types";
 
 afterEach(() => cleanup());
+
+/**
+ * DocumentRow — a finished tool result must not be rebuilt on every stream
+ * flush (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2).
+ *
+ * `dispatchMatches` is a memo over the WHOLE document array, so it yields a
+ * new Map identity on every flush. Reading it through an inline prop getter
+ * (`dispatchMatch={props.dispatchMatches?.().get(id)}`) subscribed every
+ * ToolOverlayResult to that identity, so `renderToolResultBody` re-ran — and
+ * rebuilt the whole result subtree (for `.md` Read previews: a full markdown
+ * parse plus an OverlayScrollbars construction with its forced layouts) —
+ * for every finished tool in the streaming buffer, every flush. Measured at
+ * 46% + 38% of `flushPendingNodes` under 4-pane load.
+ */
+describe("DocumentRow — finished tool results survive dispatchMatches identity churn", () => {
+    const readNode = (filePath: string): ToolNode => ({
+        type: "tool",
+        id: "t-read-1",
+        tool: "Read",
+        params: { file_path: filePath },
+        status: "success",
+        result: { content: "# Title\n\nSome body text.\n" },
+        timestamp: 1,
+    } as ToolNode);
+
+    const renderToolRow = (node: ToolNode) => {
+        const [n] = createSignal<DocumentNode>(node);
+        const [state] = createSignal<DocumentState>(emptyState());
+        const [matches, setMatches] = createSignal<Map<string, AgentDispatch>>(new Map());
+        const r = render(() => (
+            <DocumentRow
+                node={n}
+                documentState={state}
+                onToggleCollapse={() => {}}
+                onTogglePin={() => {}}
+                dispatchMatches={matches}
+            />
+        ));
+        return { ...r, setMatches };
+    };
+
+    it("keeps the rendered result DOM when dispatchMatches is replaced by an equal (empty) Map", () => {
+        const { container, setMatches } = renderToolRow(readNode("C:/repo/src/index.ts"));
+        const before = container.querySelector(".agent-tool-read");
+        expect(before).not.toBeNull();
+
+        // Simulate what every stream flush does: a new Map identity with no
+        // change for this tool.
+        setMatches(new Map());
+        setMatches(new Map());
+
+        const after = container.querySelector(".agent-tool-read");
+        expect(after).toBe(before);
+    });
+
+    it("renders a .md Read preview as non-scrollable markdown (no per-block OverlayScrollbars)", () => {
+        const { container } = renderToolRow(readNode("C:/repo/docs/notes.md"));
+        const md = container.querySelector(".agent-tool-read-md");
+        expect(md).not.toBeNull();
+        expect(md!.querySelector(".content.non-scrollable")).not.toBeNull();
+        expect(md!.querySelector("[data-overlayscrollbars-initialize]")).toBeNull();
+    });
+});
 
 const emptyState = (): DocumentState => ({
     collapsedNodes: new Set(),
