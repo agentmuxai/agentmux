@@ -4922,6 +4922,12 @@ fn m4a2_actor_requests(actor: &str) -> Vec<(&'static str, Method, String, serde_
             json!({"agent_id": actor, "id": "m4a2-none", "version_id": "m4a2-none"}),
         ),
         (
+            "preset_get",
+            Method::GET,
+            q("/api/v1/agent/preset/get", ""),
+            json!(null),
+        ),
+        (
             "identity_accounts",
             Method::GET,
             q("/api/v1/agent/identity/accounts", ""),
@@ -5097,20 +5103,43 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
         m4a2_send(&state, Some(&token), method, &uri, &body).await;
         assert_eq!(m4a2_site_counts(site), before, "{site}: its own slug");
     }
-}
 
-/// An attributed request that names no actor is counted as absent; a token
-/// whose row is gone is counted as unchecked, never as a mismatch.
-#[tokio::test]
-async fn m4a2_an_absent_actor_and_an_unreadable_row_are_counted_apart() {
-    let state = test_state();
-    state.mstore.attach_token_index().unwrap();
-    let token = state.mstore.agent_token_ensure("uid-m4a2-norow").unwrap();
+    // A "Claude" made from the "Claude" template is `claude-2`, but a stub
+    // launch has its MCP send `claude` (#3573) — the template's slug. That
+    // is ambiguous, not the caller's own name, even though it is the
+    // caller's display name.
+    let mut tpl = test_agent_def("tpl-m4a2-claude", "Claude", "claude", "agent", 1, "");
+    tpl.slug = "claude".to_string();
+    tpl.is_seeded = 1;
+    state.mstore.agent_def_insert(&mut tpl).unwrap();
+    let mut stub = test_agent_def("uid-m4a2-claude", "Claude", "claude", "agent", 2, "");
+    stub.slug = "claude-2".to_string();
+    state.mstore.agent_def_insert(&mut stub).unwrap();
+    let stub_token = state.mstore.agent_token_ensure("uid-m4a2-claude").unwrap();
+    let before = m4a2_site_counts("memory_list");
+    m4a2_send(
+        &state,
+        Some(&stub_token),
+        Method::GET,
+        "/api/v1/agent/memory/list?agent_id=claude",
+        &serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        m4a2_site_counts("memory_list")[1],
+        before[1] + 1,
+        "template stub: ambiguous"
+    );
+
+    // An attributed request that names no actor is counted as absent; a
+    // token whose row is gone is counted as unchecked, never as a mismatch.
+    // In this test, not its own, so no parallel test moves these counters.
+    let norow = state.mstore.agent_token_ensure("uid-m4a2-norow").unwrap();
     let inject = serde_json::json!({"target_agent": "m4a2-nobody", "message": "hi"});
     let before = m4a2_site_counts("inject");
     m4a2_send(
         &state,
-        Some(&token),
+        Some(&norow),
         Method::POST,
         "/agentmux/reactive/inject",
         &inject,
@@ -5123,7 +5152,7 @@ async fn m4a2_an_absent_actor_and_an_unreadable_row_are_counted_apart() {
     let before = m4a2_site_counts("inject");
     m4a2_send(
         &state,
-        Some(&token),
+        Some(&norow),
         Method::POST,
         "/agentmux/reactive/inject",
         &named,
