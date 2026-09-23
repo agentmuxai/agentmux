@@ -399,4 +399,57 @@ mod tests {
             );
         }
     }
+
+    /// Slug ownership is folded as the key tables fold (`to_lowercase`), not
+    /// with SQLite's ASCII-only `lower()`: agents with slugs `Ä` and `ä`
+    /// share the key filed under `ä`, so deleting one must leave it for the
+    /// other (Codex P2 on #3575).
+    #[test]
+    fn a_non_ascii_slug_held_by_another_agent_keeps_its_keys() {
+        let store = store_with_slugs(&[("uid-upper", "Ä", false), ("uid-lower", "ä", false)]);
+        store.agent_lan_key_ensure("ä").unwrap();
+        assert!(store.agent_def_delete("uid-lower").unwrap());
+        assert!(
+            store.agent_lan_key_load("ä").unwrap().is_some(),
+            "the live `Ä` agent's key stays"
+        );
+    }
+
+    /// The guard, through the real deletion path: a slug another row holds —
+    /// an ordinary row carrying the same slug (the old consolidation left
+    /// such duplicates), or a template, whose `agent.open` launches sign
+    /// under it — keeps its keys (adversarial review of #3575).
+    #[test]
+    fn a_slug_another_row_or_a_template_holds_keeps_its_keys() {
+        for other_is_template in [false, true] {
+            let store = store_with_slugs(&[
+                ("uid-dup-a", "claude", other_is_template),
+                ("uid-dup-b", "claude", false),
+            ]);
+            store.agent_jekt_key_ensure("claude").unwrap();
+            store.agent_lan_key_ensure("claude").unwrap();
+            assert!(store.agent_def_delete("uid-dup-b").unwrap());
+            assert!(
+                store.agent_lan_key_load("claude").unwrap().is_some()
+                    && store.agent_jekt_key_load("claude").unwrap().is_some(),
+                "template={other_is_template}"
+            );
+        }
+    }
+
+    /// Rows with exactly these slugs — forced, since insertion would
+    /// suffix a collision away.
+    fn store_with_slugs(rows: &[(&str, &str, bool)]) -> Store {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = object_store();
+        for (id, slug, template) in rows {
+            let mut def = test_agent_def(id, slug, "claude", "agent", 1, "");
+            if *template {
+                def.is_seeded = 1;
+            }
+            store.agent_def_insert(&mut def).unwrap();
+            store.test_force_slug(id, slug).unwrap();
+        }
+        store
+    }
 }
