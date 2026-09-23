@@ -1,0 +1,71 @@
+name: Codex review gate
+
+# Sets the `Codex review` commit status on a PR's head commit: success only
+# once Codex has said "Didn't find any major issues" about that exact commit.
+# Make it a required check on main to stop merges ahead of Codex (#3513 merged
+# while Codex was still finding bugs; three fixes were orphaned into #3538).
+# Logic and rationale: scripts/ci-codex-review-gate.mjs.
+#
+# Codex only reviews when a5af asks. reagent posts that request once per head
+# commit (a5af/reagent#241); this workflow only reads and sets a status.
+#
+# Triggers:
+#   pull_request_target  a push resets the new head to pending
+#   issue_comment        Codex's "no major issues" comment
+#   pull_request_review  Codex's findings review
+#   workflow_dispatch    re-evaluate one PR by hand (e.g. PRs opened before
+#                        this workflow existed)
+#
+# pull_request_target and issue_comment run main's copy of this workflow
+# with a write token, so a PR cannot edit the gate that judges it. Nothing
+# here checks out or runs PR code; keep it that way. Only main's copy of the
+# script is checked out, whatever the trigger.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to re-evaluate
+        required: true
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  # Every run re-reads the PR's current state, so only the latest matters.
+  group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        github.event.comment.user.login == 'chatgpt-codex-connector[bot]') ||
+      (github.event_name == 'pull_request_review' &&
+        github.event.review.user.login == 'chatgpt-codex-connector[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts/ci-codex-review-gate.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Set Codex review status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+        run: node scripts/ci-codex-review-gate.mjs
