@@ -1,7 +1,8 @@
 # Selecting a pane should focus its input — not just opening one
 
-**Status:** implemented. See §10 for how each open question was actually
-resolved during implementation (some differ from the recommendation below).
+**Status:** implemented — PR #3519. See §10 for how each open question was
+actually resolved during implementation (some differ from the recommendation
+below).
 **Date:** 2026-09-22.
 **Severity:** Medium — no data is lost, but every pane switch or pane open costs
 the user a mouse trip before they can type, on the app's most-used, most
