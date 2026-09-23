@@ -17,8 +17,12 @@
 //   - findings:    a PR REVIEW (state COMMENTED) with the same
 //     "Reviewed commit" line and inline comments.
 //
-// Codex only reviews when asked by a5af, not a bot; reagent posts that
-// request once per head commit (a5af/reagent#241). This gate only reads.
+// Codex only reviews when asked by a5af, not a bot. ReAgent decides when
+// to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
+// then again only when a push touches a file Codex flagged, or when a
+// write-access commenter says "@reagentx-workflow codex re-review". After an
+// OK it does NOT re-ask for a docs-only diff, so this gate carries an OK
+// across exactly that diff. This gate only reads.
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
@@ -27,45 +31,89 @@ const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 // Straight or curly apostrophe.
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
 
+// Mirrors is_docs_only_path in reagent's codex_policy.py; keep them in step.
+// Narrower than ci-classify-changes.mjs's rule on purpose: CLAUDE.md, AGENTS.md
+// and prompt files are markdown that agents act on, so changing them is a
+// behavior change Codex should see.
+const NEVER_DOCS_PREFIXES = [".github/", "scripts/", "tools/", "prompts/"];
+// Both changeset spellings, matching reagent: plural here, singular upstream.
+const DOCS_PREFIXES = ["docs/", ".changesets/", ".changeset/"];
+const DOCS_NAMES = /^(README|CHANGELOG)(\.[a-z]+)?$|^(LICENSE|NOTICE)$/i;
+
+export function isDocsOnlyPath(rawPath) {
+    let p = String(rawPath ?? "").trim().replace(/\\/g, "/");
+    if (p.startsWith("./")) p = p.slice(2);
+    if (p === "" || NEVER_DOCS_PREFIXES.some((x) => p.startsWith(x))) return false;
+    if (DOCS_PREFIXES.some((x) => p.startsWith(x))) return true;
+    return DOCS_NAMES.test(p.split("/").at(-1));
+}
+
 export function reviewedCommit(body) {
     const m = REVIEWED_COMMIT.exec(body ?? "");
     return m ? m[1].toLowerCase() : null;
+}
+
+/** Every Codex verdict that names a commit, oldest first. */
+function codexOutputs({ comments = [], reviews = [] }) {
+    return [
+        ...comments
+            .filter((c) => c.user?.login === CODEX_LOGIN)
+            .map((c) => ({
+                kind: NO_MAJOR_ISSUES.test(c.body ?? "") ? "ok" : "other",
+                at: c.created_at,
+                sha: reviewedCommit(c.body),
+            })),
+        // A dismissed findings review no longer counts against a commit. It
+        // does not count for it either: only a Codex OK passes.
+        ...reviews
+            .filter((r) => r.user?.login === CODEX_LOGIN && r.state !== "DISMISSED")
+            .map((r) => ({ kind: "findings", at: r.submitted_at, sha: reviewedCommit(r.body) })),
+    ]
+        .filter((o) => o.sha !== null)
+        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+/** Codex's most recent verdict on any commit of the PR, or null. */
+export function latestCodexOutput({ comments = [], reviews = [] }) {
+    return codexOutputs({ comments, reviews }).at(-1) ?? null;
 }
 
 /**
  * Decide the status for `headSha` from the PR's issue comments and reviews
  * (GitHub REST shapes). The latest Codex output naming this head wins, so a
  * spontaneous findings review after an OK takes the OK back.
+ *
+ * With nothing on the head, an OK carries over when Codex's latest verdict
+ * is that OK and `filesSinceLatest` (the diff from its commit to the head,
+ * null if unknown) is docs-only.
  */
-export function evaluateCodexGate({ headSha, comments = [], reviews = [] }) {
+export function evaluateCodexGate({ headSha, comments = [], reviews = [], filesSinceLatest = null }) {
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
-    const outputs = [
-        ...comments.map((c) => ({ kind: "comment", at: c.created_at, body: c.body, login: c.user?.login })),
-        // A dismissed findings review no longer counts against the head. It
-        // does not count for it either: only a Codex OK passes.
-        ...reviews
-            .filter((r) => r.state !== "DISMISSED")
-            .map((r) => ({ kind: "review", at: r.submitted_at, body: r.body, login: r.user?.login })),
-    ]
-        .filter((o) => o.login === CODEX_LOGIN)
-        .filter((o) => {
-            const sha = reviewedCommit(o.body);
-            return sha !== null && head.startsWith(sha);
-        })
-        .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    const all = codexOutputs({ comments, reviews });
+    const onHead = all.filter((o) => head.startsWith(o.sha)).at(-1);
 
-    const latest = outputs.at(-1);
-    if (!latest) {
-        return { state: "pending", description: `Waiting for Codex to review ${short}` };
-    }
-    if (latest.kind === "comment" && NO_MAJOR_ISSUES.test(latest.body ?? "")) {
+    if (onHead?.kind === "ok") {
         return { state: "success", description: `Codex found no major issues in ${short}` };
     }
-    if (latest.kind === "review") {
-        return { state: "failure", description: `Codex left findings on ${short}; push a fix to get a fresh review` };
+    if (onHead?.kind === "findings") {
+        return {
+            state: "failure",
+            description: `Codex left findings on ${short}; ReAgent re-asks once a push touches a flagged file`,
+        };
     }
-    return { state: "pending", description: `Codex commented on ${short} without an OK` };
+    if (onHead) {
+        return { state: "pending", description: `Codex commented on ${short} without an OK` };
+    }
+
+    const latest = all.at(-1);
+    if (latest?.kind === "ok" && Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath)) {
+        return { state: "success", description: `Codex OK on ${latest.sha}; only docs changed since` };
+    }
+    return {
+        state: "pending",
+        description: `Waiting for Codex on ${short}: ReAgent asks after approving, or comment '@reagentx-workflow codex re-review'`,
+    };
 }
 
 async function gh(path, token, init = {}) {
@@ -94,6 +142,22 @@ async function ghAll(path, token) {
     }
 }
 
+// The compare API lists at most 300 files; a list that long may be cut short.
+const COMPARE_FILE_CAP = 300;
+
+/** Files changed base...head, or null when that can't be known completely. */
+async function changedFiles(repo, base, head, token) {
+    try {
+        const cmp = await (await gh(`/repos/${repo}/compare/${base}...${head}`, token)).json();
+        const files = (cmp.files ?? []).map((f) => f.filename);
+        return files.length >= COMPARE_FILE_CAP ? null : files;
+    } catch (err) {
+        // A force-push can orphan the reviewed commit; treat as unknown.
+        console.log(`compare ${base}...${head.slice(0, 10)} failed: ${err.message}`);
+        return null;
+    }
+}
+
 async function main() {
     const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repo, PR_NUMBER: pr, DRY_RUN } = process.env;
     if (!token || !repo || !pr) {
@@ -105,7 +169,13 @@ async function main() {
         ghAll(`/repos/${repo}/issues/${pr}/comments`, token),
         ghAll(`/repos/${repo}/pulls/${pr}/reviews`, token),
     ]);
-    const result = evaluateCodexGate({ headSha, comments, reviews });
+    // Only an OK on an earlier commit can carry, so only then is the diff worth fetching.
+    const latest = latestCodexOutput({ comments, reviews });
+    const filesSinceLatest =
+        latest?.kind === "ok" && !headSha.toLowerCase().startsWith(latest.sha)
+            ? await changedFiles(repo, latest.sha, headSha, token)
+            : null;
+    const result = evaluateCodexGate({ headSha, comments, reviews, filesSinceLatest });
     console.log(`#${pr} ${headSha.slice(0, 10)}: ${result.state} — ${result.description}`);
     if (DRY_RUN) return;
     await gh(`/repos/${repo}/statuses/${headSha}`, token, {
