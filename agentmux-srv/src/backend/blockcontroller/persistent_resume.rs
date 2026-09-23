@@ -60,6 +60,24 @@ pub(super) struct RetryPayload {
     pub messages: Vec<QueuedRetryEntry>,
 }
 
+impl RetryPayload {
+    /// Grow the batch keeping it in `seq` order, not arrival order.
+    ///
+    /// `seq` is assigned when a message is ACCEPTED, so seq order is the
+    /// order the user actually sent things. Arrival order at this batch is
+    /// not: the message that becomes the spawner seeds the batch first, and
+    /// the drain appends everything else afterwards — so a backlog retained
+    /// across a refused spawn (an eager resume whose credential gate failed,
+    /// `try_eager_resume`) would replay BEHIND the newer prompt that finally
+    /// spawned, reversing their delivery order (codex P2 on PR #3551).
+    /// Inserting by seq makes the replay order independent of which message
+    /// happened to seed.
+    pub fn append_in_seq_order(&mut self, entry: QueuedRetryEntry) {
+        let at = self.messages.iter().position(|m| m.seq > entry.seq).unwrap_or(self.messages.len());
+        self.messages.insert(at, entry);
+    }
+}
+
 /// One spawn attempt's resume/error-line lifecycle.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum ResumeState {
@@ -142,7 +160,14 @@ impl ResumeState {
             | ResumeState::ConfirmedRetry { generation: g, retry, .. }
                 if *g == generation =>
             {
-                retry.messages.first().map(|e| e.seq) == Some(delivered_seq)
+                // By seq, not by position: the seed used to be identified
+                // as `messages.first()`, which stopped being true once
+                // `append_in_seq_order` (codex P2 on PR #3551) started
+                // placing an older backlog entry AHEAD of a newer seed —
+                // the drain then failed to recognise the seed and appended
+                // it a second time. "Already in the batch" is the property
+                // the drain actually needs, and it is position-free.
+                retry.messages.iter().any(|e| e.seq == delivered_seq)
             }
             _ => false,
         }
@@ -393,7 +418,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             ResumeState::AwaitingOutcome { generation, attempted_sid, mut retry, held_error_line, stop_requested },
             ResumeEvent::MessageAppendedToRetryBatch { generation: g, entry },
         ) if generation == g => {
-            retry.messages.push(entry);
+            retry.append_in_seq_order(entry);
             (
                 ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
                 vec![],
@@ -403,7 +428,7 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             ResumeState::ConfirmedRetry { generation, attempted_sid, mut retry, held_error_line, stop_requested },
             ResumeEvent::MessageAppendedToRetryBatch { generation: g, entry },
         ) if generation == g => {
-            retry.messages.push(entry);
+            retry.append_in_seq_order(entry);
             (ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested }, vec![])
         }
 
@@ -856,6 +881,34 @@ mod tests {
             ResumeState::AwaitingOutcome { retry, .. } => {
                 assert_eq!(retry.messages, vec![qentry(1, "{}"), qentry(2, "{\"m\":2}")])
             }
+            other => panic!("expected AwaitingOutcome, got {other:?}"),
+        }
+    }
+
+    /// Codex P2 on PR #3551: a backlog retained across a refused spawn has
+    /// OLDER seqs than the prompt that eventually seeds the next spawn, but
+    /// reaches the batch AFTER it (the seed is first, the drain appends the
+    /// rest). Replay must follow seq — acceptance — order, not arrival.
+    #[test]
+    fn a_backlog_appended_behind_a_newer_seed_replays_in_acceptance_order() {
+        let (state, _) = update(
+            ResumeState::default(),
+            ResumeEvent::SpawnedWithResume {
+                generation: 1,
+                attempted_sid: "dead-sid".to_string(),
+                retry: RetryPayload { config: dummy_config(), messages: vec![qentry(3, "{\"m\":3}")] },
+            },
+        );
+        let (state, _) =
+            update(state, ResumeEvent::MessageAppendedToRetryBatch { generation: 1, entry: qentry(1, "{\"m\":1}") });
+        let (state, _) =
+            update(state, ResumeEvent::MessageAppendedToRetryBatch { generation: 1, entry: qentry(2, "{\"m\":2}") });
+        match state {
+            ResumeState::AwaitingOutcome { retry, .. } => assert_eq!(
+                retry.messages,
+                vec![qentry(1, "{\"m\":1}"), qentry(2, "{\"m\":2}"), qentry(3, "{\"m\":3}")],
+                "older backlog entries must replay ahead of the newer seed"
+            ),
             other => panic!("expected AwaitingOutcome, got {other:?}"),
         }
     }

@@ -93,15 +93,7 @@ impl PersistentSubprocessController {
         });
         if let Some(sid) = requested_sid.as_deref() {
             if let Some((other, closing)) = self.session_held_elsewhere(sid) {
-                return Err(if closing {
-                    format!(
-                        "This conversation's previous process (block {other}) is still shutting down. Try again in a few seconds."
-                    )
-                } else {
-                    format!(
-                        "This conversation is already open in another pane (block {other}). Close it there, or switch to it, instead of opening a second copy."
-                    )
-                });
+                return Err(held_elsewhere_error(&other, closing));
             }
         }
         {

@@ -933,7 +933,11 @@ fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_witho
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
 
     let c = controller();
-    c.inner.lock().unwrap().session_id = Some("d019e2e4-stale".to_string());
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("d019e2e4-stale".to_string());
+        inner.spawn_generation = 1; // the doomed eager-resume process
+    }
     let mut env_vars = HashMap::new();
     env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
     let config = PersistentSpawnConfig {
@@ -972,7 +976,11 @@ fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_witho
 #[test]
 fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_fresh_and_done() {
     let c = controller();
-    c.inner.lock().unwrap().session_id = Some("dead-sid".to_string());
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.session_id = Some("dead-sid".to_string());
+        inner.spawn_generation = 1;
+    }
     let config = PersistentSpawnConfig {
         cli_command: "definitely-not-a-real-binary-xyz".to_string(),
         cli_args: vec![],
@@ -991,6 +999,60 @@ fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_
     assert!(inner.stdin_tx.is_none(), "nothing launched");
     drop(inner);
     assert_eq!(c.get_status_snapshot().shellprocstatus, STATUS_DONE);
+}
+
+/// Codex P1 on PR #3551: a message that arrived after the doomed process
+/// cleared `stdin_tx` but before the empty-batch settlement ran may already
+/// have spawned a NEWER generation with its own live session id. The
+/// settlement for the OLD generation must then touch nothing — not the
+/// session id, not the status — or a later restart resumes the wrong
+/// conversation.
+#[test]
+fn retry_after_resume_failure_with_no_entries_leaves_a_newer_generation_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_dir = tmp.path().to_string_lossy().to_string();
+    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let dir = tmp.path().join("projects").join(&slug);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+    let c = controller();
+    {
+        let mut inner = c.inner.lock().unwrap();
+        // Generation 2 has taken over and installed its own session.
+        inner.spawn_generation = 2;
+        inner.session_id = Some("newer-live".to_string());
+        Self_set_running(&mut inner);
+    }
+    let mut env_vars = HashMap::new();
+    env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+    let config = PersistentSpawnConfig {
+        cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+        cli_args: vec![],
+        working_dir,
+        env_vars,
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: "d019e2e4-stale".to_string(),
+        message_id: None,
+    };
+
+    // Generation 1's settlement arrives late.
+    c.retry_after_resume_failure(1, config, vec![], None, "d019e2e4-stale".to_string());
+
+    let inner = c.inner.lock().unwrap();
+    assert_eq!(
+        inner.session_id.as_deref(),
+        Some("newer-live"),
+        "a recovery result for a superseded generation must not overwrite the live session"
+    );
+    assert_eq!(inner.proc_status, STATUS_RUNNING, "and must not stamp `done` over a running generation");
+}
+
+/// Stand-in for the running-generation bookkeeping `spawn_process` does.
+fn Self_set_running(inner: &mut PersistentInner) {
+    PersistentSubprocessController::set_status(inner, STATUS_RUNNING);
 }
 
 #[test]

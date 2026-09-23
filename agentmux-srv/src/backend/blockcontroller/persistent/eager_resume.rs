@@ -309,33 +309,65 @@ impl PersistentSubprocessController {
                     error = %e,
                     "eager-resume declined: spawn failed — falling back to lazy"
                 );
-                // Mirrors `release_spawn_claim_and_drain_queue`'s
-                // `!spawn_succeeded` branch: hand off to the fallback
-                // respawn if something queued during the attempt (it needs
-                // a live process to go to), otherwise just release the
-                // claim — there's nothing to drain.
-                //
-                // Decided under ONE acquisition, same as the success branch
-                // above and for the same reason (codex P2 on PR #3523): as
-                // two, a send arriving in the gap saw the claim still held,
-                // queued its prompt and returned success, and this branch
-                // then cleared the claim without rechecking or draining —
-                // stranding an accepted prompt until some unrelated later
-                // send happened to become the next spawner.
-                let has_leftovers = {
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.pending_send_messages.is_empty() {
-                        inner.spawning_in_progress = false;
-                        false
-                    } else {
-                        true
-                    }
-                };
-                if has_leftovers {
-                    self.respawn_once_for_leftover_queue(retry_config);
-                }
+                self.settle_eager_spawn_failure(&e, retry_config);
                 EagerResumeOutcome::DeclinedTo("spawn failed")
             }
         }
+    }
+}
+
+impl PersistentSubprocessController {
+    /// `try_eager_resume`'s spawn-failure settlement, split out so the
+    /// decision is unit-testable without a real child process.
+    ///
+    /// Mirrors `release_spawn_claim_and_drain_queue`'s `!spawn_succeeded`
+    /// branch: if something queued during the attempt it needs a live
+    /// process to go to, so hand off to the fallback respawn; otherwise just
+    /// release the claim — there's nothing to drain. Decided under ONE lock
+    /// acquisition, same as the success branch and for the same reason
+    /// (codex P2 on PR #3523): as two, a send arriving in the gap saw the
+    /// claim still held, queued its prompt and returned success, and the
+    /// release then never rechecked — stranding an accepted prompt until
+    /// some unrelated later send happened to become the next spawner.
+    ///
+    /// One failure class is exempt from the fallback (codex P1 on PR
+    /// #3551): `session_held_elsewhere` refusing the `--resume` because the
+    /// same conversation is open — or still closing — in another pane. A
+    /// fresh spawn there would deliver the accepted prompt to a blank
+    /// conversation, bypassing the very guard `spawn_process` just applied.
+    /// Instead: release the claim, keep the queue (the same shape as the
+    /// credential-gate decline — the user's next send is the next chance,
+    /// and goes through the guard again), and tell them why nothing is
+    /// running.
+    pub(super) fn settle_eager_spawn_failure(&self, err: &str, retry_config: PersistentSpawnConfig) {
+        let ownership_refusal = is_held_elsewhere_error(err);
+        let stranded = {
+            let mut inner = self.inner.lock().unwrap();
+            let n = inner.pending_send_messages.len();
+            if n == 0 || ownership_refusal {
+                inner.spawning_in_progress = false;
+            }
+            n
+        };
+        if stranded == 0 {
+            return;
+        }
+        if !ownership_refusal {
+            // Claim still held: `respawn_once_for_leftover_queue` owns its
+            // release on either outcome.
+            self.respawn_once_for_leftover_queue(retry_config);
+            return;
+        }
+        let frame = serde_json::json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": {
+                "message": format!(
+                    "[AgentMux] {stranded} queued prompt(s) are waiting: this agent was not resumed. {err}"
+                )
+            }
+        });
+        self.flush_error_line_now(format!("{frame}\n"));
     }
 }

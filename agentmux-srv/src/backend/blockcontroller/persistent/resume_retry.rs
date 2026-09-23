@@ -260,24 +260,37 @@ impl PersistentSubprocessController {
             //   (`Resumed`/`Fresh`) is emitted then, by the CLI's actual
             //   confirmation, never claimed here (codex P1 on PR #2693);
             // - resolve "Reconnecting…" now, since nothing downstream will;
-            // - publish the same terminal status a `PublishDone` exit would,
-            //   unless a newer generation already raced in — then that
-            //   process owns the status and this one must not stamp `done`
-            //   over it.
-            let publish_done = {
+            // - publish the same terminal status a `PublishDone` exit would.
+            //
+            // ALL of that is conditioned on this retry's generation still
+            // owning the controller state (codex P1 on PR #3551): a message
+            // that arrived after the doomed process cleared `stdin_tx` but
+            // before this ran may already have spawned a newer generation
+            // and installed its own live session id. Overwriting that with
+            // an old recovery-search result would make a later restart
+            // resume the wrong conversation. `spawn_generation` is bumped
+            // in the same lock acquisition that installs a new spawn, and
+            // `spawning_in_progress` covers the claim window before it —
+            // together they say whether anyone has moved on from
+            // `retry_generation`. If someone has, that generation's own
+            // lifecycle owns every one of these updates, and this one does
+            // nothing at all.
+            let still_owner = {
                 let mut inner = self.inner.lock().unwrap();
-                inner.session_id = recovered.clone();
-                let idle = inner.stdin_tx.is_none() && !inner.spawning_in_progress;
-                if idle {
+                let still_owner = inner.spawn_generation == retry_generation
+                    && !inner.spawning_in_progress
+                    && inner.stdin_tx.is_none();
+                if still_owner {
+                    inner.session_id = recovered.clone();
                     Self::set_status(&mut inner, STATUS_DONE);
                 }
-                idle
+                still_owner
             };
-            if recovered.is_some() {
-                // The `None` arm above already resolved it alongside `Fresh`.
-                publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
-            }
-            if publish_done {
+            if still_owner {
+                if recovered.is_some() {
+                    // The `None` arm above already resolved it alongside `Fresh`.
+                    publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
+                }
                 self.publish_status();
             }
             if let Some(line) = held_error_line {
