@@ -1,8 +1,8 @@
 # Typing should go into a pane the moment it opens (editor + terminal)
 
-**Status:** active — terminal pane creation implemented in #TBD (§9), using a
-narrower fix than the shared-contract Option B this spec recommends. Editor,
-agent, and tab-switching (§4's "probably in") remain unimplemented.
+**Status:** active — terminal pane creation implemented in #3539 (§9), using
+a narrower fix than the shared-contract Option B this spec recommends.
+Editor, agent, and tab-switching (§4's "probably in") remain unimplemented.
 **Date:** 2026-09-16
 **Severity:** Medium — no data is lost, but every new editor or terminal pane
 costs the user a mouse trip before it can be typed into, on the app's two most
