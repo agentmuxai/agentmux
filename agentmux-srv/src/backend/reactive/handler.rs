@@ -1142,7 +1142,21 @@ impl Handler {
         source_agent: Option<&str>,
     ) -> Result<InjectionResponse, String> {
         let now = now_unix_millis();
-        let target_key = target_agent.to_lowercase();
+        // `lookup_key`, not `to_lowercase()` — with a resolver installed
+        // `agent_to_block`/`agent_info` are keyed by canonical id, so the raw
+        // slug missed every time for any resolvable agent (ReAgent P1 on
+        // #3520). That silently defaulted `block_id` to "" and `current_nonce`
+        // to 0, which made both respawn-staleness checks below meaningless,
+        // wrote an empty block_id into every nudge/decline audit entry, and
+        // keyed `nudge_counters` by the slug — so two agents sharing one would
+        // have shared a nudge ceiling, the exact conflation this phase removes.
+        // Delivery still worked, because `inject_message_inner` resolves
+        // separately; only the ceiling, audit and staleness logic was wrong.
+        //
+        // Empty on an ambiguous slug, so every lookup below misses and the
+        // decision degrades to a no-op — the same fail-closed posture delivery
+        // takes, rather than nudging an arbitrary one of the two.
+        let target_key = self.lookup_key(target_agent).unwrap_or_default();
         let block_id = self
             .agent_to_block
             .get(&target_key)
