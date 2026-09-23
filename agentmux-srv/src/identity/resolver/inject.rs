@@ -418,17 +418,6 @@ pub fn resolve_bound_oauth_config_dir(
     }
 }
 
-/// **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
-/// this module is where `SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s INV-A
-/// ("never the user's global `~/.<P>` dir") is enforced — or, once already,
-/// silently stopped being enforced. Read
-/// `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
-/// first. Short version: an unbound oauth-class provider used to
-/// auto-route to an AgentMux-owned isolated dir (no user action, no global
-/// exposure); a 2026-07-08 refactor orphaned that path without meaning to,
-/// and it was never restored — today's gate only chooses between "block"
-/// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
-/// isolated-auto-provision option that used to exist implicitly.
 /// The agent a block names (`agentId`, or legacy `agent:id`), if any.
 fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
     let block: crate::backend::obj::Block = mstore.get(block_id).ok().flatten()?;
@@ -442,6 +431,17 @@ fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
+/// this module is where `SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s INV-A
+/// ("never the user's global `~/.<P>` dir") is enforced — or, once already,
+/// silently stopped being enforced. Read
+/// `docs/retro/retro-auth-isolation-invariant-silently-orphaned-2026-07-14.md`
+/// first. Short version: an unbound oauth-class provider used to
+/// auto-route to an AgentMux-owned isolated dir (no user action, no global
+/// exposure); a 2026-07-08 refactor orphaned that path without meaning to,
+/// and it was never restored — today's gate only chooses between "block"
+/// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
+/// isolated-auto-provision option that used to exist implicitly.
 pub fn inject_identity_env_with_broker(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
