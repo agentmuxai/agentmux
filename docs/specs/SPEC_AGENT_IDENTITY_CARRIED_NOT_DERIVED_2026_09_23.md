@@ -1007,11 +1007,20 @@ folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
   agent's slug, where no other row holds that slug. Without it, in the window
   before M4d a new agent reusing the name is handed the dead agent's key by
   `ensure`'s `INSERT OR IGNORE` and signs as it, and peers accept it.
-  **Recorded cost:** a live template stub still signing under a slug it
-  never owned (#3573) loses that key when the slug's owner is deleted, and
-  is minted a fresh one on its next `ensure`; its peers raise the same
-  forgery alarm as for any reuser. That is the correct outcome for a key
-  it should never have held.
+  A slug any other row holds is left alone, **templates included**:
+  `agent.open` of a template and template-based continuations sign under
+  the template's slug, and the old consolidation copied template slugs onto
+  ordinary rows. Ownership is folded in Rust as the key tables fold, never
+  with SQLite's ASCII-only `lower()`. **Recorded cost:** an agent signing
+  under a slug its own row does not have — a template stub (#3573), or a
+  cross-channel agent whose local backfill was collision-suffixed while the
+  frontend signs with the registry's slug — loses that key when the slug's
+  owner is deleted. It is minted a fresh one only at its next launch
+  (`ensure` runs at config write); until then no key is on file for that
+  name, so its jekts are not verified, and an unsigned jekt claiming the
+  name is not forced to `sensitive`. Its peers then raise the same forgery
+  alarm as for any reuser. That is the correct outcome for a key it should
+  never have held.
 - **Publication carries the UID.** Registry entries and `/reactive/agent`
   gain the UID beside the name in the same step, so new peers can pin
   `(peer, uid)`; the name pin stays as the legacy fallback.

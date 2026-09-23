@@ -2530,12 +2530,7 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         // another agent holds as its slug is that agent's key, not this
         // one's: deleting the second "AgentY" must not tombstone the first
         // one's `agenty` (adversarial review of #3571).
-        let held: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id != ?1 AND is_template = 0 AND lower(slug) = ?2)",
-            params![id, n],
-            |r| r.get(0),
-        )?;
-        if held {
+        if slug_held_by_another(conn, id, &n)? {
             continue;
         }
         conn.execute(
@@ -2544,6 +2539,31 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         )?;
     }
     Ok(())
+}
+
+/// Whether any row other than `id` holds `folded` as its slug, folded as the
+/// key tables fold their names (`to_lowercase`).
+///
+/// - **Templates count.** `agent.open` of a template, and template-based
+///   continuations, sign under the template's slug, and the old
+///   consolidation copied a template's slug verbatim onto ordinary rows —
+///   so deleting the last such row must not purge keys the template's live
+///   launches use (adversarial review of #3575).
+/// - **Folded in Rust**, not with SQLite's `lower()`, which folds ASCII only:
+///   slugs `Ä` and `ä` share the key filed under `ä` (Codex P2 on #3575).
+fn slug_held_by_another(
+    conn: &rusqlite::Connection,
+    id: &str,
+    folded: &str,
+) -> Result<bool, StoreError> {
+    let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE id != ?1")?;
+    let slugs = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+    for slug in slugs {
+        if slug?.to_lowercase() == folded {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Delete the signing keys filed under `id`'s slug — its jekt HMAC key and
@@ -2567,18 +2587,14 @@ fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize,
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             e => Err(e),
         })?;
+    // Not trimmed: the key tables file the name exactly as sent, folded.
     let Some(name) = slug
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .filter(|s| !s.trim().is_empty())
     else {
         return Ok(0);
     };
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id != ?1 AND is_template = 0 AND lower(slug) = ?2)",
-        params![id, name],
-        |r| r.get(0),
-    )?;
-    if held {
+    if slug_held_by_another(conn, id, &name)? {
         return Ok(0);
     }
     let mut removed = 0;
