@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584. M4c designed in §6.5.9. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -1114,8 +1114,9 @@ Each step independently revertible (§9):
   (`live.tokenless_or_unknown`). M4d, and M5's removal of any name-keyed
   fallback, wait for that gauge to read zero — not for a counter that stops
   moving.
-- **M4c — attribution by UID**: dual-write `*_uid` beside every actor field
-  in §6.5.2 item 4, then switch readers; cron per §6.5.5.
+- **M4c — attribution by UID** (designed in §6.5.9): dual-write `*_uid`
+  beside every actor field in §6.5.2 item 4, then switch readers; cron per
+  §6.5.5.
 - **M4d — signing keys, registry UID and signed `source_uid`** (§6.5.4,
   §6.5.3), gated on M4b's counters and the live drain.
 - **M5** removes the name-keyed rows, the tokenless HMAC path and `.mcp.json`
@@ -1189,6 +1190,87 @@ existing user-agent row carrying an account, bundle and workspace, then
 asserts the row's bindings are unchanged **and** the spawn resolves that row
 — its UID + token, and the account and working directory the spawn gate and
 env builder read from it (ReAgent P1 on #3578).
+
+#### 6.5.9 M4c design — attribution by UID
+
+Measured against main after M4b (#3581–#3585) and #3591; an adversarial pass
+on the first draft found one P1 (cron would look forged) and three P2s,
+folded in. Every actor field
+is stored under a **name** today; the only `*_uid` columns are M1b's target
+and claimer ones (`db_work_queue.target_agent_uid`, `claimed_by_uid`,
+`db_cron_jobs.target_uid`). Of the actor sites (§6.5.2 item 4), four
+persist the actor; the rest keep it in memory or only in delivered text.
+
+**Rules.** The UID comes from the request's `Caller::Agent` — never from a
+body field, which is an assertion (§2). An Unattributed request writes an
+empty UID (`''` = unknown, never guessed, as M1b). Names are never rewritten
+or replaced (§6.5.3: signatures and display read names). Each step is its
+own PR and independently revertible.
+
+| Actor field | Persisted | M4c-1 (write) | M4c-2 (read) |
+|---|---|---|---|
+| work `created_by` | `db_work_queue` (identity store) | new `created_by_uid` | exposed in `WorkItem`; nothing branches on it |
+| work `claimed_by` | `db_work_queue.claimed_by` + `claimed_by_uid` (M1b) | `claimed_by_uid` from `Caller` when attributed (the carried `agent_uid` stays the fallback, counted; disagreement is counted by M4a-2). **One UID** serves both the column written and M3's eligibility match (`target_agent_uid = ?5`), so this is a small reader change inside M4c-1 — harmless, since the carried UID and the token are set together from one row | **the holder checks** (below) |
+| cron `created_by` | `db_cron_jobs` (shared store; identity-store parity copy, as M1b) | new `created_by_uid` in both | M4c-3 (below); the Swarm view's creator lookup resolves by UID when set |
+| global memory `written_by` | `db_bundle_versions` (shared store; objects and identity parity copies) | new `written_by_uid` | returned beside `written_by` in history/revert; the operator-config seeder keeps comparing the **name** `agentmux-operator-config-seed`, which is not an agent |
+| personal memory owner | versions and the mirror are keyed by the owner's UID, derived from the slug every call (`resolve_agent_id`); the files themselves are found through slug → working directory | — | **owner = the `Caller` UID** when attributed; files found by id (`memory_dir_for_agent_by_id`, which walks the same branches but has no registry-by-slug fallback — a miss is an **error**, never an empty list, the #2901 class); the slug path stays for Unattributed callers, counted. Closes the ambiguous-name case M4a-2 counts (`m4.actor_ambiguous.memory_*`). Recorded: memory an agent wrote under a slug that resolved to *another* agent (#3573 stubs, collision-suffixed backfills) stays where it was written — not migrated |
+| inject / supervisor `source_agent` | in-memory audit ring (`AuditLogEntry`) | new `audit_source_uid` field, **server-set only** (`skip_deserializing`) and distinct from the `source_uid` wire field §6.5.3 reserves for the MCP to set and sign — a srv-written value must never ride a forwarding hop | the Warden audit view shows it; trust and the jekt tier stay name-keyed until M4d |
+| bus `from` | in-memory `BusMessage` | new `from_uid` field | exposed on read |
+| identity accounts/validate, history search, preset get (self) — owner = actor | not persisted; the owner is resolved from the slug each call | — | **owner = the `Caller` UID** when attributed, as for memory — the same colliding-name defect (`IdentityValidate` would live-probe the *other* agent's stored secret); slug path for Unattributed, counted |
+| UI automation `auth.agent_id` | not persisted | — | M4d |
+
+**The holder checks (M4c-2).** `work_queue_heartbeat`, `_complete` and
+`_release` authorize by `WHERE claimed_by = <request agent_id>`. With two
+same-named agents either can drive the other's item. M4c-2: when the row's
+`claimed_by_uid` **and** the caller's UID are both known, the check compares
+UIDs (a mismatch is the existing "not the current holder" 409); otherwise it
+keeps the name comparison, counted (`m4c.holder_by_name`). This is not a new
+refusal — the check exists today; it only stops matching on a name two
+agents share. A tokenless holder keeps working by name, as M4 promises.
+UIDs are global (a backfill keeps the id), so the same agent has the same
+UID in every channel. **Recorded, one path:** a continuation reattached
+from a legacy registry record whose `definition_id` is a template gets a
+**new row on every reattach** (§6.5.8), so the same named agent changes UID
+— a claim taken before a reattach and completed after it, which passes by
+name today, becomes a 409, and its personal-memory versions split by UID
+(the files, found by working directory, survive). The path is rare (only
+legacy records reach it) and is the one M4b-3 already flags.
+
+**Cron (M4c-3, §6.5.5).** `created_by_uid` is captured at create (M4c-1).
+The fire path stops POSTing an unattributed `/agentmux/reactive/inject` and
+calls a shared in-process `deliver(state, req, attribution)` factored out of
+the inject handler (an explicit tier argument in place of the
+`ReactiveAuthVia` extension; the scheduler, built before `AppState`, gets a
+late-bound handle as `install_agent_turn_delivery` does), so the
+cross-channel and LAN tiers are kept. **The sender name stays `"cron"`,
+exactly as today** (P1 on the first draft): showing the creator's name
+unsigned would make every fire of an agent-created job look forged — the
+recipient's `verify_jekt_signature` finds that agent's key under its name
+and forces `TIER=sensitive` / `SIG=invalid`, on the local tier and again on
+every forwarded hop's own srv — and would echo each fire into the creator's
+pane. The creator's UID is carried as attribution **on the local tier only**
+(`audit_source_uid`); a forwarded hop cannot carry it as attribution until
+M4d signs `source_uid` (§6.5.3). A job with no captured UID fires as today,
+counted.
+
+**Schema.** Additive `TEXT NOT NULL DEFAULT ''` columns via each store's
+idempotent `ALTER TABLE` loop and a version bump: identity store v11
+(`db_work_queue.created_by_uid`, `db_cron_jobs.created_by_uid`,
+`db_bundle_versions.written_by_uid` parity), shared store v12
+(`db_cron_jobs.created_by_uid`, `db_bundle_versions.written_by_uid`),
+objects v39 (`db_bundle_versions.written_by_uid` — not only parity: when
+the shared store is unavailable `id_store` falls back to the object store
+and writes it). **Recorded:** `store.db` and `identity-store.db` are shared
+across channels and `check_schema_compat` refuses a newer database; an
+older build then silently degrades — it falls back off the shared stores,
+which disables cron and leaves the work queue unavailable — the same cost
+M1b accepted.
+
+**Rollout.** M4c-1 schema + dual-write (no reader changes); M4c-2 reader
+switches (holder checks, personal memory owner, UIDs exposed); M4c-3 cron's
+in-process delivery. **Gate for switching a reader:** the corresponding
+write has shipped and the `m4.actor_*` counters for that site are
+understood (#3573's stub-slug noise is expected).
 
 ## 7. Performance
 
