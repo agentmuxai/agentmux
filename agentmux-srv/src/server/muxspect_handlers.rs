@@ -1413,6 +1413,18 @@ mod tests {
             "host_spawn"
         );
         assert_eq!(classify_last_error_source("something nobody wrote yet"), "unknown");
+        // #3577: SpawnGateError::AgentDeleted — its Display starts
+        // "this agent's", so it files under identity with the other gate
+        // refusals.
+        assert_eq!(
+            classify_last_error_source(
+                &crate::identity::resolver::SpawnGateError::AgentDeleted {
+                    agent_id: "uid-x".to_string()
+                }
+                .to_string()
+            ),
+            "identity"
+        );
     }
 
     #[test]

@@ -100,7 +100,8 @@ declare global {
             | "killed"
             | "no_output"
             | "spawn_failure"
-            | "unknown_non_zero";
+            | "unknown_non_zero"
+            | "agent_deleted";
         title: string;
         detail: string;
         exitCode?: number;
