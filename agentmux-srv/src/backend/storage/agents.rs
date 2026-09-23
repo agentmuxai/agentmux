@@ -2081,6 +2081,30 @@ impl Store {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// The names row `id` answers to — the by-id counterpart of
+    /// [`Self::agents_matching_name`], for checking a body's actor name
+    /// against the calling agent's own row (identity M4a-2, spec §6.5.3).
+    /// Any row, template or hidden: the caller's token already names it.
+    pub fn agent_names_by_id(&self, id: &str) -> Result<Option<AgentNameMatch>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row(
+            "SELECT id, name, slug, instance_name FROM db_agents WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(AgentNameMatch {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    slug: row.get(2)?,
+                    instance_name: row.get(3)?,
+                })
+            },
+        ) {
+            Ok(m) => Ok(Some(m)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Partial update of an agent's launch state. Only `Some` fields are
     /// written; `None` leaves that column untouched. `Some("")` explicitly
     /// clears (the `updateagentinstance` command contract, and
