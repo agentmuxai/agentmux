@@ -2320,9 +2320,11 @@ impl Store {
     /// whose latest launch is on this block and still active, which is what
     /// a block from before the block meta carried `agentId` needs.
     ///
-    /// We deliberately do NOT consult `block.meta.agentInstanceId`: codex
-    /// P1 on PR #1114 round 3 surfaced that pane reuse can leave a stale
-    /// one behind.
+    /// `block.meta.agentInstanceId` never overrides `agentId`: codex P1 on
+    /// PR #1114 round 3 surfaced that pane reuse can leave a stale one
+    /// behind. It is consulted only for a block whose `agentId` names no
+    /// agent row, and only within what that block names, while it is still
+    /// the block's latest launch (see the fallback below).
     pub fn instance_get_active_for_block(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let block: crate::backend::obj::Block = match self.get(block_id)? {
             Some(b) => b,
@@ -2350,12 +2352,111 @@ impl Store {
                 Err(rusqlite::Error::QueryReturnedNoRows) => {}
                 Err(e) => return Err(e.into()),
             }
+            // The block names something that is not an agent row: a
+            // template (a template launch or continuation finds the row it
+            // created or folded into this way), a template since removed
+            // from the manifest (its launched agents are kept, and their
+            // blocks still name it), a deleted agent whose pane survived, or
+            // a provider key. Fall back only to a row *launched from* what
+            // the block names (`parent_template_id`), and — when the frontend
+            // has stamped the launched row (`agentInstanceId`) — only to that
+            // row. Row status is never corrected when a pane is switched or
+            // a process exits, so the latest launch on the block can be
+            // another agent's stale `running` row, including a sibling
+            // launched from the same template; resolving to it handed the
+            // pane that agent's UID, token, slug and provider credentials.
+            // A stamped row that no longer exists resolves to nothing.
+            // "Launched from" reaches one hop: the template-promotion
+            // migration repointed launch rows' `parent_template_id` from the
+            // seeded template to its promoted clone (itself launched from
+            // the template), while pre-migration blocks still name the
+            // template (Codex P1 on #3576). Neither the row nor the hop may
+            // be a fork: `forkagentdefinition` also stores its source in
+            // `parent_template_id`, and `branch_label` (always set on a
+            // fork, never on a template launch) is what tells them apart
+            // (`template.rs`; Codex P1 on #3576).
+            let stamped = block
+                .meta
+                .get("agentInstanceId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string();
+            if !stamped.is_empty() {
+                // The stamp is the frontend's own record of the row it
+                // launched on this block — stronger evidence than lineage,
+                // which migrations and deletions rewrite (a removed
+                // template, a promoted clone deleted after the repoint).
+                // Accepted only while it is still the block's latest launch
+                // (by `started_at`, which only a launch or fold moves; a tie
+                // with another active launch is undecided and rejected —
+                // Codex P2 on #3576): a
+                // stale stamp left by pane reuse, with a newer launch since
+                // folded onto the block, resolves to nothing rather than to
+                // the older row. Never a fork: a fork is launched under its
+                // own row id, so a fork reached here is a stale stamp. And
+                // the row must still relate to what the block names —
+                // launched from it, or one hop from it — so a stale stamp
+                // naming an unrelated agent cannot select it (ReAgent P0/P1
+                // on #3576). Recorded, fail-safe: a launch the promotion
+                // migration repointed to a clone that was later deleted has
+                // no lineage left and resolves to nothing until relaunched;
+                // and `started_at` is wall-clock, so a backward clock step
+                // between two launches on one block makes the stamped row
+                // look older — it then resolves to nothing, never to another
+                // row. (Only an unstamped legacy block, reused, across such a
+                // step could pick the older launch.)
+                // Recorded: a legacy continuation stamp naming an id that
+                // never had a row (m0025 keyed chains to their root) resolves
+                // to nothing, not to the root — nothing distinguishes it from
+                // a deleted launch, and no identity is safer than a wrong one.
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {INSTANCE_COLUMNS} FROM db_agents a
+                     WHERE a.id = ?2 AND a.last_block_id = ?1 AND a.is_template = 0
+                       AND a.status IN ('running', 'paused') AND a.branch_label = ''
+                       AND (a.parent_template_id = ?3
+                            OR a.parent_template_id IN (
+                                SELECT id FROM db_agents
+                                WHERE parent_template_id = ?3 AND is_template = 0 AND branch_label = '')
+                            )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM db_agents b
+                           WHERE b.last_block_id = ?1 AND b.is_template = 0 AND b.id != a.id
+                             AND b.status IN ('running', 'paused') AND b.started_at >= a.started_at)"
+                ))?;
+                return match stmt.query_row(params![block_id, stamped, agent_id], map_instance_row)
+                {
+                    Ok(a) => Ok(Some(a)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e.into()),
+                };
+            }
+            // Unstamped (a block from before `agentInstanceId`): lineage.
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {INSTANCE_COLUMNS} FROM db_agents
+                 WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
+                   AND branch_label = ''
+                   AND (parent_template_id = ?2
+                        OR parent_template_id IN (
+                            SELECT id FROM db_agents
+                            WHERE parent_template_id = ?2 AND is_template = 0 AND branch_label = ''))
+                 ORDER BY started_at DESC, updated_at DESC, id DESC
+                 LIMIT 1"
+            ))?;
+            return match stmt.query_row(params![block_id, agent_id], map_instance_row) {
+                Ok(a) => Ok(Some(a)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.into()),
+            };
         }
+        // A block whose meta names no agent (from before `agentId`): the
+        // agent whose latest launch is on it — by launch time, which a
+        // rename or lifecycle write does not move (Codex P1 on #3576).
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(
             "SELECT {INSTANCE_COLUMNS} FROM db_agents
              WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
-             ORDER BY updated_at DESC
+             ORDER BY started_at DESC, updated_at DESC, id DESC
              LIMIT 1"
         ))?;
         match stmt.query_row(params![block_id], map_instance_row) {
