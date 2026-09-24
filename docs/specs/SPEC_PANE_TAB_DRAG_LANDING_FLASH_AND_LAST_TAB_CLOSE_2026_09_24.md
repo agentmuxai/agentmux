@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Status:** active — §8 (remove `pane:tabstrip = "multi-only"`) implemented
-in PR C. §3 (flash, PR A) and §4 (last-tab close, PR B) not started yet. Design
+in PR #3692 (PR C). §3 (flash, PR A) and §4 (last-tab close, PR B) not started yet. Design
 decisions in §6 are confirmed by the repo owner.
 **Author:** Camper
 **Trigger:** direct repo-owner request after live use of the shipped Pane Tab
