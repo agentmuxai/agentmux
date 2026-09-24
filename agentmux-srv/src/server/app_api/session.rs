@@ -21,6 +21,8 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
     // `preflight_input_from_meta`.
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
+    // The pane's own transcript, for the session its rendered history belongs to.
+    let filestore = state.filestore.clone();
 
     engine.register_typed(
         COMMAND_SESSION_RESUME_PREFLIGHT,
@@ -28,6 +30,7 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
             let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
+            let filestore = filestore.clone();
             async move {
 
                 let block = mstore
@@ -40,15 +43,29 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                     &identity_store,
                     &cmd.block_id,
                 );
-                let input = preflight_input_from_meta(&block.meta, bound_config_dir);
+                let mut input = preflight_input_from_meta(&block.meta, bound_config_dir);
+                let session_id_field = obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
+                let block_id = cmd.block_id.clone();
 
-                // Blocking file I/O (one `is_file`, at most one `read_dir` of a
-                // single directory) off the async runtime's worker threads —
-                // small, but a pane open shouldn't be able to stall the
-                // reactor on a cold or network-backed home directory.
-                let result = tokio::task::spawn_blocking(move || crate::backend::resume_preflight::preflight(&input))
-                    .await
-                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+                // Blocking I/O (a transcript tail read, one `is_file`, at most
+                // one `read_dir` of a single directory) off the async runtime's
+                // worker threads — small, but a pane open shouldn't be able to
+                // stall the reactor on a cold or network-backed home directory.
+                let result = tokio::task::spawn_blocking(move || {
+                    if input.session_id.is_empty() {
+                        input.history_session_id =
+                            crate::backend::blockcontroller::persistent::pane_history_session_id(
+                                Some(&filestore),
+                                Some(&mstore),
+                                &block_id,
+                                &session_id_field,
+                            )
+                            .unwrap_or_default();
+                    }
+                    crate::backend::resume_preflight::preflight(&input)
+                })
+                .await
+                .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
                 tracing::info!(
                     block_id = %cmd.block_id,
@@ -138,6 +155,7 @@ fn preflight_input_from_meta(
         session_id: obj::meta_get_string(meta, "agent:sessionid", ""),
         working_dir: obj::meta_get_string(meta, "cmd:cwd", ""),
         config_dir,
+        history_session_id: String::new(),
     }
 }
 
