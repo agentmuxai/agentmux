@@ -1453,6 +1453,19 @@ colliding-names fixture shows `AGENTY` (`agenty-2`) answering to
    unrelated grants. *Cost, recorded:* a live agent that signs under a name
    another deleted agent also answered to (a name that is not its own slug)
    loses that key (M4a-3's cost, widened to fallback names).
+   *As built (#3633):* former display and instance names are recorded by
+   SQLite trigger on every rename path (`db_agent_former_names`, uncapped,
+   cascade-deleted), both fallback forms (`agent.open`'s and the frontend's
+   UTF-16 one) are derived from every name, and one "another agent may sign
+   under it" rule governs purge and tombstone. *Residual, recorded (Codex on
+   #3633):* renames made **before** this release left no history, so a key
+   under a pre-upgrade name is not purged at delete. It is **not** cleaned
+   up retroactively: a key row whose name no current row derives cannot be
+   told apart from one a live agent signs with (a #3573 stub, a
+   registry-slug backfill, a `WriteAgentConfig` id), and deleting those
+   would break live signing. The same limit §6.5.4 records for pre-M4a
+   deletions; M4d-2's ownership evidence keeps such keys off UIDs, and M5
+   removes name-keyed keys.
 2. **M4d-2 — UID-keyed keys, copied on ownership evidence.** New tables
    `db_agent_lan_keys_by_uid`, `db_agent_wan_keys_by_uid` (object schema
    v40: `uid` PK, `public_key`, `private_key`, `created_at` seconds,
