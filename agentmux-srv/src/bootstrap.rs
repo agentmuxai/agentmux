@@ -2048,6 +2048,30 @@ pub fn spawn_wal_checkpoint_loop(
     });
 }
 
+/// Deliver cron fires in process, through the server's shared inject path
+/// (`server::reactive::deliver`) on the instance-key tier — identity M4c-3
+/// (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9). The fire
+/// keeps every tier the route has (this instance, cross-instance,
+/// cross-channel, LAN, cloud) and audits the job's creator UID here only.
+///
+/// Must run AFTER `build_app_state` and BEFORE `cron_scheduler.start()`, so
+/// no fire takes the HTTP fallback.
+pub fn install_cron_delivery(state: &AppState) {
+    let st = state.clone();
+    state.cron_scheduler.install_delivery(Arc::new(move |req, creator_uid| {
+        let st = st.clone();
+        Box::pin(async move {
+            crate::server::reactive::deliver(
+                &st,
+                crate::server::ReactiveAuthVia::FullAuthKey,
+                &creator_uid,
+                req,
+            )
+            .await
+        })
+    }));
+}
+
 /// Give the reactive handler a delivery route to `SubprocessController` agents.
 ///
 /// `spawn_background_subsystems` installs a message sender that can only reach

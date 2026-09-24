@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) in #3602. M4c-2c (identity, preset and history owners are the Caller) in #3605. M4c-2d (the sender's UID audited and carried) implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) in #3602. M4c-2c (identity, preset and history owners are the Caller) in #3605. M4c-2d (the sender's UID audited and carried) in #3608. M4c-3 (cron fires in process) implemented. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -1295,6 +1295,15 @@ pane. The creator's UID is carried as attribution **on the local tier only**
 (`audit_source_uid`); a forwarded hop cannot carry it as attribution until
 M4d signs `source_uid` (§6.5.3). A job with no captured UID fires as today,
 counted.
+*(Implemented in M4c-3: `server::reactive::deliver` is the inject route's
+body, shared; the route is a thin wrapper that checks the actor and passes
+its tier and its `Caller`'s UID. `bootstrap::install_cron_delivery` installs
+it on the scheduler (`CronScheduler::install_delivery`, a `OnceLock`)
+before `cron_scheduler.start()`, with the instance-key tier and the job's
+`created_by_uid`, which lands in `AuditLogEntry::audit_source_uid` on this
+instance only. A fire before installation still POSTs, counted
+`m4c.cron_fire_http`; a job with no creator UID is counted
+`m4c.cron_fire_unattributed`.)*
 
 **Schema.** Additive `TEXT NOT NULL DEFAULT ''` columns via each store's
 idempotent `ALTER TABLE` loop and a version bump: identity store v11

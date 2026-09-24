@@ -5798,3 +5798,34 @@ async fn m4c2d_the_senders_uid_is_audited_and_carried() {
     assert_eq!(uid_of("attributed").as_deref(), Some("uid-m4c2d"), "{messages:?}");
     assert_eq!(uid_of("unattributed").as_deref(), Some(""), "{messages:?}");
 }
+
+// ---- identity M4c-3: cron fires in process ----
+
+/// Through the real installed delivery: a fire reaches the local inject path
+/// as `"cron"` and is audited with its creator's UID.
+#[tokio::test]
+async fn m4c3_a_cron_fire_is_delivered_in_process_and_audited_with_its_creator() {
+    let state = test_state();
+    crate::bootstrap::install_cron_delivery(&state);
+    let target = format!("m4c3-target-{}", uuid::Uuid::new_v4());
+    state.reactive_handler.register_agent(&target, &format!("{target}-block"), None).unwrap();
+
+    // The reactive handler, its audit ring (100) and its rate limiter (10/s)
+    // are shared by every test: fire until this target's entry appears.
+    let mut entry = None;
+    for _ in 0..25 {
+        state.cron_scheduler.fire("m4c3-job", "tick", &target, "", "uid-m4c3-creator").await;
+        entry = state
+            .reactive_handler
+            .get_audit_log(100)
+            .into_iter()
+            .find(|e| e.target_agent == target);
+        if entry.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let entry = entry.expect("the fire was audited");
+    assert_eq!(entry.source_agent.as_deref(), Some("cron"));
+    assert_eq!(entry.audit_source_uid, "uid-m4c3-creator");
+}
