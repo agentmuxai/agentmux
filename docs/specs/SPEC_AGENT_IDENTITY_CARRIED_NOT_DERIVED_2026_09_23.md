@@ -1387,15 +1387,19 @@ forged.
   published under that name; `channel_verified == Some(false)` is not
   escalated yet. `verified_block_id` (11 UI routes, pane close, dev-server
   register) **refuses** when no key is on file or the signature is bad.
-- **The MCP's signing name is not always the row's slug.** `agent.open`
-  writes `AGENTMUX_AGENT_ID` into `.mcp.json` from the **display name**
-  (lowercased, non-alphanumerics to `-`, `agent_open.rs:497-499`) and injects
-  keys under it, while the pane env gets the row slug (`agent_open.rs:579`);
-  the MCP signs every jekt and the UI-automation proof as its `.mcp.json`
-  id. The two differ whenever an `agent.open` agent was renamed, got a
-  collision suffix, or has a name that does not slugify to its slug. The
-  M4a-2 counters do not see it: a name matching the row's display name and
-  no other row is not counted (`actor.rs:99-127`).
+- **The MCP's signing name is not always the row's slug.** The MCP signs
+  every jekt and the UI-automation proof as the `AGENTMUX_AGENT_ID` in its
+  `.mcp.json`. `agent.open` writes one `routing_id` to both the pane env and
+  `.mcp.json` — the definition's slug, or a display-derived slug only when
+  that is empty (`agent_open.rs:579`, `:856`) — but the definition comes
+  from the registry overlay, whose slug wins over a collision-suffixed local
+  backfill (§6.5.8, M4b-4 recorded: `aria` beside a row `aria-2`), and a
+  `WriteAgentConfig` config names whatever id its content carries (#3573
+  stubs). In those cases the signing name is not the row's slug. The M4a-2
+  counters do not always see it: a name matching the row's display name
+  and no other row is not counted (`actor.rs:99-127`). *(A second
+  adversarial pass claimed `agent.open` writes a display-derived id in
+  general; ReAgent showed that `routing_id` is shared — corrected here.)*
 - **Wire.** No `source_uid` field exists; neither request struct denies
   unknown fields, so a new field is ignored by older receivers.
 - **Publication.** Per-channel and shared registry `AgentEntry` carry a name
@@ -1420,7 +1424,10 @@ pass on the first draft found three P1s and one latent P1 (UID pins weaker
 than name pins; publishing a UID key before its agent signs with it; name
 drift between `AGENTMUX_AGENT_ID` and the row's slug; a slug match that was
 not exact); a second pass on the revision found two more (fetched name keys
-used under a different signing name; an "ungated" `/reactive/agent` change
+used under a different signing name — its premise that `agent.open` signs
+under a display-derived id was wrong, ReAgent showed, but the drift it
+guards against is real for backfills and #3573 stubs; an "ungated"
+`/reactive/agent` change
 that would have broken LAN verification) and P2s (a channel-tier HMAC skip
 that weakened checks, LAN UID pins that could be squatted, no keys at all
 when the token index is down). All are folded in below.
@@ -1436,16 +1443,16 @@ colliding-names fixture shows `AGENTY` (`agenty-2`) answering to
 1. **M4d-1 — purge finishes the job by name.** *Ungated* (no token logic).
    Extends M4a-3's key delete to every name the tombstone records (slug,
    display name, `instance_name`), trimmed and folded as the tombstone folds
-   them **and in `agent.open`'s id form** (lowercased, non-alphanumerics to
-   `-`: `Zed Bot` is keyed `zed-bot`, not `zed bot`), in all three key
+   them **and in `agent.open`'s fallback id form** (lowercased,
+   non-alphanumerics to `-`: `Zed Bot` is keyed `zed-bot`, not `zed bot` —
+   used when the definition has no slug), in all three key
    tables — each only where no other row holds the name as its slug. **Trust
    grants are not touched:** there is no production writer of
    `db_conversation_trust_grants` today, and its `granted_peer_agent_id`
    names a *remote* requester, so a delete by local names would revoke
    unrelated grants. *Cost, recorded:* a live agent that signs under a name
-   another deleted agent also answered to — any `agent.open` agent whose
-   display-derived id is not its slug, not only fallback names — loses that
-   key (M4a-3's cost, widened).
+   another deleted agent also answered to (a name that is not its own slug)
+   loses that key (M4a-3's cost, widened to fallback names).
 2. **M4d-2 — UID-keyed keys, copied on ownership evidence.** New tables
    `db_agent_lan_keys_by_uid`, `db_agent_wan_keys_by_uid` (object schema
    v40: `uid` PK, `public_key`, `private_key`, `created_at` seconds,
@@ -1475,9 +1482,9 @@ colliding-names fixture shows `AGENTY` (`agenty-2`) answering to
    only** (ensured as injection ensures them) **together with that slug**,
    and the UID-keyed LAN/WAN keys (M4d-2). The MCP uses the fetched name
    keys **only when the served slug equals its own `AGENTMUX_AGENT_ID`
-   exactly**, and its env keys otherwise (an `agent.open` agent signing as
-   its display-derived id with its slug's keys would fail every HMAC check
-   and UI automation). It fetches lazily with retry and re-fetches the jekt
+   exactly**, and its env keys otherwise (an agent signing as a name its row
+   does not have — a collision-suffixed backfill, a #3573 stub — would fail
+   every HMAC check and UI automation with its slug's keys). It fetches lazily with retry and re-fetches the jekt
    key after 20 h or when a signature it sent is rejected (the 24 h
    rotation runs at each fetch); it keeps signing every v1 signature with
    name keys (rule i), and UI automation signs with the jekt key it uses
@@ -1543,9 +1550,12 @@ colliding-names fixture shows `AGENTY` (`agenty-2`) answering to
 
 **Gating per step.** M4d-1 contains no token logic and may ship before the
 gate; every other step waits for it. M4d-3 also waits for its own signal,
-since the M4a-2 counters cannot see display-derived drift: a count of
-`agent.open` configs whose `AGENTMUX_AGENT_ID` is not the row's slug (added
-with M4d-3, zero before it stops injecting), or #3573 fixed.
+since the M4a-2 counters do not always see signing-name drift: a count of
+configs written (by `agent.open` or `WriteAgentConfig`) whose
+`AGENTMUX_AGENT_ID` is not their row's slug — added with M4d-3, in counting
+mode, and zero before it stops injecting — or #3573 fixed. The exact-match
+rule already keeps a drifted agent on injection, so the signal gates only
+how much of the fleet M4d-3 reaches, not its safety.
 
 ##### Recorded costs
 
