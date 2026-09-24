@@ -37,12 +37,15 @@ vi.mock("@/util/clipboard", () => ({ writeText: vi.fn() }));
 // Stub xterm.js entirely — jsdom has no canvas/ResizeObserver support xterm
 // needs for real construction. The fake records what was written (with its
 // ANSI colour codes) and where it was scrolled, so tests can check both.
-const { terminals, FakeTerminal } = vi.hoisted(() => {
+// Its buffer wraps each line at `fake.cols` columns like xterm does,
+// flagging continuation rows `isWrapped`.
+const { terminals, FakeTerminal, fake } = vi.hoisted(() => {
     const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+    const fake = { cols: 80 };
     const terminals: InstanceType<typeof FakeTerminal>[] = [];
     class FakeTerminal {
         options: Record<string, unknown> = {};
-        cols = 80;
+        cols = fake.cols;
         written: string[] = [];
         scrolledTo: number | null = null;
         constructor() {
@@ -63,13 +66,19 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
         clear(): void {}
         dispose(): void {}
         get buffer() {
-            const rows = this.written;
+            const rows: { text: string; isWrapped: boolean }[] = [];
+            for (const line of this.written) {
+                const plain = line.replace(ANSI_SGR, "");
+                for (let at = 0; at === 0 || at < plain.length; at += this.cols) {
+                    rows.push({ text: plain.slice(at, at + this.cols), isWrapped: at > 0 });
+                }
+            }
             return {
                 active: {
                     length: rows.length,
                     getLine: (i: number) =>
                         i < rows.length
-                            ? { isWrapped: false, translateToString: () => rows[i].replace(ANSI_SGR, "") }
+                            ? { isWrapped: rows[i].isWrapped, translateToString: () => rows[i].text }
                             : null,
                 },
             };
@@ -78,7 +87,7 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
             return "";
         }
     }
-    return { terminals, FakeTerminal };
+    return { terminals, FakeTerminal, fake };
 });
 vi.mock("@xterm/xterm", () => ({ Terminal: FakeTerminal }));
 vi.mock("@xterm/addon-fit", () => ({
@@ -123,6 +132,7 @@ afterEach(() => {
     cleanup();
     vi.clearAllMocks();
     terminals.length = 0;
+    fake.cols = 80;
 });
 
 const ts = () => 1_700_000_000_000;
@@ -336,6 +346,34 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
         send({ op: "done", ok: false, error: "npm exited Some(1)" });
         await waitFor(() => expect(terminals[0].scrolledTo).not.toBeNull());
 
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+    });
+
+    it("finds a first error that xterm wrapped across rows in a narrow pane", async () => {
+        fake.cols = 24;
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        render(() => <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />);
+        const send = await startAndSubscribe();
+        for (let i = 0; i < 5; i++) send({ line: `npm http fetch GET 200 https://registry.npmjs.org/pkg${i}`, stream: "stderr" });
+        send({ line: "npm error code ENOTFOUND while fetching https://registry.npmjs.org/some-long-package-name", stream: "stderr" });
+        for (let i = 0; i < 5; i++) send({ line: `npm error network trailing line ${i}`, stream: "stderr" });
+        send({ op: "done", ok: false, error: "npm exited Some(1)" });
+
+        await waitFor(() => expect(terminals[0]?.scrolledTo).not.toBeNull());
+        // Every earlier line fills whole rows; the error starts right after them.
+        const rows = terminals[0].buffer.active;
+        let errorRow = -1;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows.getLine(i)?.translateToString().startsWith("npm error code")) {
+                errorRow = i;
+                break;
+            }
+        }
+        expect(errorRow).toBeGreaterThan(0);
+        expect(terminals[0].scrolledTo).toBe(Math.max(0, errorRow - 2));
+
+        const details = document.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
         details.open = false;
         fireEvent(details, new Event("toggle"));
     });

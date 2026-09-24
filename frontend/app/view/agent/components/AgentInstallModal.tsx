@@ -194,7 +194,10 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     // Scroll Details so the first error line sits near the top. Waits
     // for xterm to finish parsing pending writes, then searches the
     // buffer for the line's text — row indices change whenever the
-    // terminal reflows, so a remembered row would drift.
+    // terminal reflows, so a remembered row would drift. A long line
+    // wraps across several rows in a narrow pane, so each logical line
+    // is rebuilt from its continuation rows before matching (codex P2
+    // on #3661).
     const scrollToFirstError = () => {
         const index = failure()?.firstErrorLine;
         if (!terminal || index == null) return;
@@ -207,7 +210,14 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             for (let i = 0; i < buf.length; i++) {
                 const row = buf.getLine(i);
                 if (!row || row.isWrapped) continue;
-                if (row.translateToString(true).startsWith(needle)) {
+                const rows = [row];
+                for (let next = buf.getLine(i + 1); next?.isWrapped; next = buf.getLine(i + rows.length)) {
+                    rows.push(next);
+                }
+                // Every row but the last is full width, so its trailing
+                // spaces are content; only the last row is trimmed.
+                const text = rows.map((r, k) => r.translateToString(k === rows.length - 1)).join("");
+                if (text.startsWith(needle)) {
                     terminal?.scrollToLine(Math.max(0, i - 2));
                     return;
                 }
