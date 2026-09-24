@@ -340,6 +340,55 @@ fn init_gives_up_when_an_older_build_replaces_the_file_during_the_scan() {
 }
 
 #[test]
+fn a_file_mid_write_by_an_older_build_is_not_counted_and_its_fill_bumps_rev() {
+    // Codex P1 on #3631: an older build's write_file on an empty file raises
+    // `size` first and inserts part 0 after, in separate statements.
+    let fs = mem();
+    uncounted(&fs, b"");
+    let content: &[u8] = b"a\nb\nc\n";
+    fs.conn()
+        .lock()
+        .unwrap()
+        .execute("UPDATE db_wave_file SET size = ?1, modts = modts + 1 WHERE zoneid = ?2 AND name = ?3", params![content.len() as i64, ZONE, NAME])
+        .unwrap();
+    // Between the two statements: bytes claimed but not stored are never
+    // counted (they would read as zeros).
+    assert_eq!(fs.init_line_counter(ZONE, NAME).unwrap(), None);
+    let before = rev(&fs);
+    fs.conn()
+        .lock()
+        .unwrap()
+        .execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, 0, ?3)", params![ZONE, NAME, content])
+        .unwrap();
+    // Filling bytes the file already claimed is a rewrite, not an append.
+    assert_eq!(rev(&fs), before + 1);
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()).1, 3);
+}
+
+#[test]
+fn an_older_builds_append_order_does_not_bump_rev() {
+    // Older builds append by writing the parts, then raising `size` — the
+    // new part starts at the old size, so it is an append, not a fill.
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"a\n").unwrap();
+    old_build_append(&fs, b"b\n");
+    {
+        // A new part: starts exactly at the file's size.
+        let conn = fs.conn().lock().unwrap();
+        conn.execute("UPDATE db_wave_file SET size = 65536, modts = modts + 1 WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME]).unwrap();
+        conn.execute("REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, 0, ?3)", params![ZONE, NAME, vec![b'x'; 65536]]).unwrap();
+    }
+    let rev_before = rev(&fs);
+    {
+        let conn = fs.conn().lock().unwrap();
+        conn.execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, 1, ?3)", params![ZONE, NAME, b"y\n".to_vec()]).unwrap();
+        conn.execute("UPDATE db_wave_file SET size = 65538 WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME]).unwrap();
+    }
+    assert_eq!(rev(&fs), rev_before, "a new part at the old size is an append");
+}
+
+#[test]
 fn init_counts_a_file_larger_than_one_scan_window() {
     let fs = mem();
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();

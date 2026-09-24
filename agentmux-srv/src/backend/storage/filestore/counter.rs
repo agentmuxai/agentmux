@@ -177,12 +177,40 @@ pub(super) fn read_bytes(
     offset: i64,
     len: i64,
 ) -> Result<Vec<u8>, StoreError> {
+    Ok(read_bytes_covered(conn, zone_id, name, offset, len)?.0)
+}
+
+/// [`read_bytes`], but `None` if any byte of the range is not actually
+/// stored — a part missing inside the size the file claims. That is a file
+/// mid-write by a build without transactions (it raises `size` before
+/// inserting parts, Codex on #3631); the counter must never count bytes that
+/// read as zeros only because they aren't there yet.
+pub(super) fn read_bytes_exact(
+    conn: &Connection,
+    zone_id: &str,
+    name: &str,
+    offset: i64,
+    len: i64,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    let (bytes, covered) = read_bytes_covered(conn, zone_id, name, offset, len)?;
+    Ok((covered == len.max(0) as usize).then_some(bytes))
+}
+
+/// The bytes, and how many of them came from stored parts.
+fn read_bytes_covered(
+    conn: &Connection,
+    zone_id: &str,
+    name: &str,
+    offset: i64,
+    len: i64,
+) -> Result<(Vec<u8>, usize), StoreError> {
     if len <= 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
     let pds = PART_DATA_SIZE as i64;
     let (first, last) = ((offset / pds) as i32, ((offset + len - 1) / pds) as i32);
     let mut out = vec![0u8; len as usize];
+    let mut covered = 0usize;
     let mut stmt = conn.prepare_cached(
         "SELECT partidx, data FROM db_file_data
          WHERE zoneid = ?1 AND name = ?2 AND partidx BETWEEN ?3 AND ?4",
@@ -199,9 +227,10 @@ pub(super) fn read_bytes(
         if from < to {
             out[(from - offset) as usize..(to - offset) as usize]
                 .copy_from_slice(&data[(from - part_start) as usize..(to - part_start) as usize]);
+            covered += (to - from) as usize;
         }
     }
-    Ok(out)
+    Ok((out, covered))
 }
 
 /// `data` as complete, non-blank lines, each ending in `\n`; prefixed with a
@@ -259,10 +288,13 @@ impl FileStore {
 
             // The counter needs the unterminated last line before the append
             // (normally empty: transcript lines end in `\n`).
+            // If those bytes aren't all stored (a build without transactions
+            // is mid-write), the count can't be advanced: the epoch is
+            // dropped below, like any write it can't vouch for.
             let counted_before = match &counter {
                 Some((gen, c)) => {
-                    let open = read_bytes(tx, zone_id, name, c.tail_start as i64, size - c.tail_start as i64)?;
-                    Some((gen.clone(), *c, open))
+                    read_bytes_exact(tx, zone_id, name, c.tail_start as i64, size - c.tail_start as i64)?
+                        .map(|open| (gen.clone(), *c, open))
                 }
                 None => None,
             };
@@ -328,7 +360,7 @@ impl FileStore {
                     if row.has_epoch_columns() {
                         tracing::warn!(
                             zone = %zone_id, name = %name,
-                            "line counter dropped: the file was written by a build that doesn't maintain it"
+                            "line counter dropped: the file was written, or is mid-write, by a build that doesn't maintain it"
                         );
                         tx.execute(
                             &format!(
@@ -409,8 +441,10 @@ impl FileStore {
             let len = INIT_SCAN_WINDOW.min(scan_to - pos);
             let chunk = {
                 let conn = self.conn.lock().unwrap();
-                read_bytes(&conn, zone_id, name, pos, len)?
+                read_bytes_exact(&conn, zone_id, name, pos, len)?
             };
+            // Bytes the file claims but doesn't store yet: not countable.
+            let Some(chunk) = chunk else { return Ok(InitScan::Done(None)) };
             count = count_append(count, &open, pos as u64, &chunk);
             match chunk.iter().rposition(|&b| b == b'\n') {
                 Some(nl) => open = chunk[nl + 1..].to_vec(),
@@ -421,8 +455,9 @@ impl FileStore {
         let fp_len = INIT_FINGERPRINT_BYTES.min(scan_to);
         let fingerprint = {
             let conn = self.conn.lock().unwrap();
-            read_bytes(&conn, zone_id, name, scan_to - fp_len, fp_len)?
+            read_bytes_exact(&conn, zone_id, name, scan_to - fp_len, fp_len)?
         };
+        let Some(fingerprint) = fingerprint else { return Ok(InitScan::Done(None)) };
         Ok(InitScan::Scanned(ScanResult {
             scan_to,
             count,
@@ -454,11 +489,13 @@ impl FileStore {
             if row.incarnation != incarnation
                 || row.rev != rev
                 || row.size < scan_to
-                || read_bytes(tx, zone_id, name, scan_to - fp_len, fp_len)? != fingerprint
+                || read_bytes_exact(tx, zone_id, name, scan_to - fp_len, fp_len)?.as_ref() != Some(&fingerprint)
             {
                 return Ok(None);
             }
-            let appended = read_bytes(tx, zone_id, name, scan_to, row.size - scan_to)?;
+            let Some(appended) = read_bytes_exact(tx, zone_id, name, scan_to, row.size - scan_to)? else {
+                return Ok(None);
+            };
             let count = count_append(count, &open, scan_to as u64, &appended);
             let gen = new_gen();
             tx.execute(

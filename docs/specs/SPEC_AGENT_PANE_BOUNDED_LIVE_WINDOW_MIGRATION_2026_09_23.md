@@ -678,9 +678,14 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      NULL, i.e. not counted.
      - **Detecting their writes.** Older builds can't avoid the database's
        own triggers, which fire for every connection. Any write that changes
-       bytes already in a file bumps `rev`: a part deleted, or overwritten
-       with anything but a pure extension. Appends extend the last part, so
-       they don't bump it.
+       bytes already in a file bumps `rev`: a part deleted, overwritten with
+       anything but a pure extension, or inserted inside the size the file
+       already claims (an older build's `write_file` raises the size before
+       inserting parts). Appends extend the last part, or add parts at or
+       past the size, so they don't bump it.
+     - **Bytes must be stored.** The counter never counts a byte that the
+       size claims but no part holds yet. A missing part makes init give up,
+       and makes an append drop the epoch.
      - **Validity.** An epoch records the `rev` and size it was counted at,
        so an append by someone else (size moved) or a rewrite (`rev` moved)
        invalidates it.
