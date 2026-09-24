@@ -611,13 +611,40 @@ pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> R
     }
 }
 
+/// When a message may be written to a running agent's live input.
+///
+/// The distinction exists because "deliver this to the agent" means two
+/// different things depending on who is asking. A human typing into their own
+/// agent's pane is deliberately interrupting it, and that is correct. An
+/// automated sender — a GitHub/ReAgent notification, a CI result, another
+/// agent's coordination ping — is not asking to interrupt anything, and
+/// writing it mid-turn makes the agent abandon whatever it was explaining.
+///
+/// Spec: `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.1. This
+/// replaces `InjectionRequest::wait_for_idle`, which named this distinction
+/// but was never read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeliverPolicy {
+    /// Write to live stdin now, even mid-turn. Reserved for the human
+    /// operator's own deliberate action.
+    Immediate,
+    /// Queue if a turn is in flight; deliver at the next turn boundary, one
+    /// message per boundary. The default for every automated sender.
+    #[default]
+    NextIdle,
+}
+
 /// How a controller-aware agent message was delivered.
 #[derive(Debug)]
 pub enum AgentDelivery {
-    /// Delivered on the controller's structured input channel — a persistent
+    /// Accepted on the controller's structured input channel — a persistent
     /// stream-json stdin line or an ACP `session/prompt`. No PTY keystrokes are
-    /// needed, and the message lands on the live channel so the agent picks it up
-    /// mid-turn (steering) instead of only when idle.
+    /// needed.
+    ///
+    /// "Accepted", not necessarily "already written": under
+    /// [`DeliverPolicy::NextIdle`] a message arriving mid-turn is held and
+    /// released at the next turn boundary. This variant means the controller
+    /// has taken responsibility for it, not that the agent has seen it yet.
     Structured,
     /// The controller is PTY/terminal-based (shell/term) or otherwise has no
     /// structured input channel. The caller should fall back to keystroke
@@ -628,8 +655,16 @@ pub enum AgentDelivery {
 /// Deliver an inter-agent / muxbus message to a running agent the way its controller
 /// expects.
 ///
+/// Callers of this function are automated senders by definition — muxbus, the
+/// reactive/jekt handler, MCP `SendMessage`, the messaging bridges. Delivery is
+/// therefore [`DeliverPolicy::NextIdle`]: if the agent is mid-turn the message
+/// waits for the next turn boundary instead of cutting its explanation in half.
+/// Spec: `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`. The human
+/// operator's own input does not come through here — it goes via the
+/// `agentinput` RPC — so it is unaffected.
+///
 /// - **Persistent** (stream-json) agents have no PTY: the message is written as a
-///   `{type:"user",…}` line on the live stdin, which steers the agent mid-turn.
+///   `{type:"user",…}` line on the live stdin, queued behind any in-flight turn.
 /// - **ACP** agents receive the message as a `session/prompt` (the ACP controller's
 ///   `send_input` already wraps raw input that way).
 /// - **App Server** (Codex) agents have no PTY either: the message is queued/dispatched
