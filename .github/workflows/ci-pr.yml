@@ -499,6 +499,13 @@ jobs:
       - name: cef-verify self-test
         run: bash scripts/cef-verify.test.sh
 
+      # bundle:windows refuses a CEF runtime that isn't the pinned tracer-off
+      # build (a tracer-on libcef.dll deadlocks the app at a random later
+      # moment). These are the ways that guard could wrongly pass.
+      # docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md
+      - name: Windows CEF runtime guard self-test
+        run: bash scripts/cef-build/verify-cef-runtime-windows.test.sh
+
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
 

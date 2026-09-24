@@ -32,16 +32,21 @@
 set -uo pipefail
 
 # Pin explicitly, don't resolve "latest" -- must match the CEF major linked in
-# Cargo.lock (currently 152, see scripts/verify-cef-version.sh). Bump this
-# when a new patched build is cut per build-patched-cef-windows.md's
-# "Package + upload as a GitHub release" section.
+# Cargo.lock (currently 152, see scripts/verify-cef-version.sh). Bump the pin
+# in windows-runtime-pin.sh when a new patched build is cut per
+# build-patched-cef-windows.md's "Package + upload as a GitHub release" section.
 # Codex P1 on PR #3231: this was still pinned to 148 after agentmux-cef's
 # Cargo 152 collapse landed -- `task dev`/`task package` on a machine with no
 # existing ~/cef-build tree would auto-fetch the WRONG runtime and fail
 # Taskfile.yml's version guard.
 RELEASE_REPO="agentmuxai/cef"
-RELEASE_TAG="cef-windows-x86_64-152.0.7977.83-r2"
-ASSET_PATTERN="cef-windows-x86_64-152.0.7977.83-r2.zip"
+# The pin lives in windows-runtime-pin.sh, shared with
+# verify-cef-runtime-windows.sh so what is fetched and what bundle:windows
+# accepts can't disagree.
+# shellcheck source=windows-runtime-pin.sh
+source "$(dirname "${BASH_SOURCE[0]}")/windows-runtime-pin.sh"
+RELEASE_TAG="$CEF_WINDOWS_RELEASE_TAG"
+ASSET_PATTERN="$CEF_WINDOWS_ASSET"
 
 target_dir="${1:?usage: fetch-patched-cef-windows.sh <target-dir>}"
 
