@@ -1218,9 +1218,11 @@ prerequisites shrink to what already shipped:
 
 Each point schedules one roll-off pass off the input path
 (`requestIdleCallback`, 1 s timeout — the stream scheduler,
-`frontend/app/view/agent/stream-scheduler.ts`, has no housekeeping lane yet; skipped and retried at the next point if
-the user typed in the last 150 ms and the timeout hasn't passed). A pass is a
-single reducer command, O(nodes kept).
+`frontend/app/view/agent/stream-scheduler.ts`, has no housekeeping lane yet).
+If the user typed in the last 150 ms the pass is **re-queued**, never dropped:
+it runs at the latest at the 1 s deadline, even with input pending, so a fast
+last turn can't leave overdue turns resident waiting for a next trigger
+(Codex review). A pass is a single reducer command, O(nodes kept).
 
 **Which turns may go.**
 
@@ -1228,11 +1230,14 @@ single reducer command, O(nodes kept).
   front of the feed except what is on screen; a short turn still visible at
   the top stays until new content scrolls it out. Removing rows above the
   viewport while pinned moves nothing on screen (the pin holds the bottom).
-- **While the reader is scrolled up in the feed** roll-off waits. Backstop:
-  past K + 10 finished turns it rolls off turns wholly above the viewport —
-  still only turns that may go (next bullet) — and keeps the first visible row
-  at the same offset (the anchor mechanism the virtual list already uses for
-  prepends, applied to a front removal).
+- **While the reader is scrolled up in the feed**, the feed keeps the turns
+  intersecting the viewport, the newest K finished turns, the turn in flight
+  and blocked turns; every other eligible turn rolls off at the usual points —
+  those **below** the viewport (between what is being read and the newest K)
+  move nothing on screen, and those **above** it keep the first visible row at
+  the same offset (the anchor mechanism the virtual list already uses for
+  prepends, applied to a front removal). A reader parked at the top therefore
+  holds their slice plus K turns, not everything since (Codex review).
 - **Only turns whose content is reproducible from the transcript.** A turn
   holding any of these is **blocked**:
   - `shell` nodes (AgentMux's in-pane shell runs, `useShellNodeStream.ts` —
@@ -1240,9 +1245,7 @@ single reducer command, O(nodes kept).
     ring only, §6.3.2),
   - AskUserQuestion tools whose answer text was set optimistically
     (`answerText` / `questionText` / `timeoutNote`; replay can't rebuild them),
-  - an optimistic `user_message` not yet paired with its echo, or from a
-    provider whose user messages never reach the transcript (Codex, Kimi,
-    ACP — §6.3.6's durability table).
+  - an optimistic `user_message` not yet paired with its echo.
 - **A blocked turn is never rolled off — and does not stop the others.** It
   stays where it is; durable finished turns before and after it still roll
   off. Removing from the middle is as safe as removing a prefix here: the
@@ -1261,6 +1264,12 @@ single reducer command, O(nodes kept).
   never shown by History. They roll off with their turn; invariant 4 and its
   runtime assertion apply to content, and `ephemeral` is outside it by
   definition (Codex review).
+- **Providers whose user messages never reach the transcript** (Codex, Kimi,
+  ACP — §6.3.6's durability table) would have every turn blocked by its first
+  node. For them roll-off is **off** until the journal (PR 4) records user
+  messages: they keep today's behaviour exactly, which is no regression.
+  Claude and the Gemini family (whose echo shipped in #3620) are covered from
+  PR 3 (Codex review).
 
 **How.** Reducer command `RollOff { ranges }`
 (`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as
@@ -1332,6 +1341,11 @@ goal):
 - `loadOlder` keeps today's wholesale reparse, and the reparse becomes the new
   incremental parser, so appends continue from it.
 - Truncate / replace / delete of the stream: reload from scratch.
+- **A parser error is not a silent skip** (Codex review): the cursor advances
+  past a record before delivering it and only logs a throw, so History catches
+  a `HistoryParser` failure itself and treats it like a skipped gap (the
+  recovery above), rather than showing a range with the failed records
+  missing.
 
 **Deferred by this plan:** Phase 4 (n is now small;
 `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md` §3.8 measured the
