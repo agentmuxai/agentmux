@@ -132,6 +132,13 @@ fn accounts_linked_to_several_agents(
         .collect())
 }
 
+/// How old the index may be before a search refreshes it.
+const SEARCH_STALE_AFTER_MS: i64 = 30_000;
+
+/// A search's answer while the first index build after srv start is running.
+pub const HISTORY_INDEX_BUILDING: &str = "history index is still being built after AgentMux started \
+     (it reads every transcript once) — this is not an empty history; retry in a minute";
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
@@ -158,6 +165,49 @@ impl HistoryService {
         HistoryService { index: Arc::new(index) }
     }
 
+    /// Build the index off-thread at srv start, so the first search doesn't
+    /// pay for parsing every transcript on the machine inside the MCP's 10 s
+    /// timeout (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.5).
+    pub fn warm_in_background(&self) -> std::thread::JoinHandle<()> {
+        let index = self.index.clone();
+        std::thread::Builder::new()
+            .name("history-index-warm".into())
+            .spawn(move || {
+                let started = std::time::Instant::now();
+                let (discovered, _, _) = index.refresh();
+                tracing::info!(
+                    discovered,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "history: index built"
+                );
+            })
+            .expect("spawn history-index-warm thread")
+    }
+
+    /// Build the index if it never has been. Blocking; for callers without a
+    /// tight deadline.
+    fn ensure_built(&self) {
+        if self.index.refreshed_at_ms() == 0 {
+            self.index.refresh();
+        }
+    }
+
+    /// Make the index current enough for a search without ever waiting on a
+    /// refresh another thread is running — the MCP caller gives up after 10 s.
+    /// Refreshes (incrementally) when older than [`SEARCH_STALE_AFTER_MS`], so
+    /// sessions started since srv start are found.
+    fn fresh_enough_for_search(&self) -> Result<(), String> {
+        let built_at = self.index.refreshed_at_ms();
+        let now = chrono::Utc::now().timestamp_millis();
+        if built_at != 0 && now - built_at < SEARCH_STALE_AFTER_MS {
+            return Ok(());
+        }
+        if self.index.try_refresh().is_some() || built_at != 0 {
+            return Ok(());
+        }
+        Err(HISTORY_INDEX_BUILDING.to_string())
+    }
+
     /// List sessions with pagination and filters.
     /// Lazy-initializes the index on first call.
     pub fn list(
@@ -170,9 +220,7 @@ impl HistoryService {
         sort_dir: &str,
     ) -> serde_json::Value {
         // Lazy init: scan on first request
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
 
         let (sessions, total, has_more) =
             self.index.list(provider, project, offset, limit, sort_by, sort_dir);
@@ -227,8 +275,10 @@ impl HistoryService {
         sort_dir: &str,
         force_refresh: bool,
     ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
-        if force_refresh || self.index.is_empty() {
+        if force_refresh {
             self.index.refresh();
+        } else {
+            self.ensure_built();
         }
 
         let links = store
@@ -324,6 +374,7 @@ impl HistoryService {
         until_secs: Option<i64>,
         max_sessions: usize,
     ) -> Result<index::HistorySearchOutcome, String> {
+        self.fresh_enough_for_search()?;
         let (all, _total, _has_more) = self.sessions_for_owner(
             store,
             owner,
@@ -379,9 +430,7 @@ impl HistoryService {
     /// Get full conversation for a session.
     pub fn get(&self, session_id: &str) -> serde_json::Value {
         // Lazy init
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
 
         match self.index.get_full(session_id) {
             Ok(Some(session)) => serde_json::json!({ "session": session }),
@@ -402,9 +451,7 @@ impl HistoryService {
 
     /// Delete a single session's on-disk transcript and drop it from the index.
     pub fn delete(&self, session_id: &str) -> serde_json::Value {
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
         match self.index.delete(session_id) {
             Ok(true) => serde_json::json!({ "deleted": true }),
             Ok(false) => serde_json::json!({ "deleted": false, "error": "session not found" }),
@@ -414,11 +461,53 @@ impl HistoryService {
 
     /// Bulk-clear sessions matching the optional provider/project filter.
     pub fn clear(&self, provider: Option<&str>, project: Option<&str>) -> serde_json::Value {
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
         let deleted = self.index.clear(provider, project);
         serde_json::json!({ "deleted": deleted })
+    }
+}
+
+#[cfg(test)]
+mod search_freshness_tests {
+    use super::*;
+
+    fn empty_service() -> HistoryService {
+        HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]))
+    }
+
+    /// The MCP gives a search 10 s; a cold build over every transcript on
+    /// the machine takes far longer. While it runs, a search must answer at
+    /// once — and say the index is building, never "no history".
+    #[test]
+    fn a_search_during_the_first_build_says_so_instead_of_waiting() {
+        let svc = empty_service();
+        let _building = svc.index.refresh_lock.lock().unwrap();
+        let err = svc.fresh_enough_for_search().unwrap_err();
+        assert!(err.contains("still being built"), "{err}");
+    }
+
+    #[test]
+    fn a_search_on_a_never_built_idle_index_builds_it() {
+        let svc = empty_service();
+        assert!(svc.fresh_enough_for_search().is_ok());
+        assert!(svc.index.refreshed_at_ms() > 0);
+    }
+
+    /// Once built, a refresh in progress elsewhere doesn't block a search:
+    /// it reads the previous snapshot.
+    #[test]
+    fn a_search_during_a_later_refresh_uses_the_last_snapshot() {
+        let svc = empty_service();
+        svc.index.refresh();
+        let _refreshing = svc.index.refresh_lock.lock().unwrap();
+        assert!(svc.fresh_enough_for_search().is_ok());
+    }
+
+    #[test]
+    fn warm_in_background_builds_the_index() {
+        let svc = empty_service();
+        svc.warm_in_background().join().unwrap();
+        assert!(svc.index.refreshed_at_ms() > 0);
     }
 }
 

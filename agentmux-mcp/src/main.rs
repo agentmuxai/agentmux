@@ -1767,7 +1767,19 @@ async fn call_tool(
                 .query(&query_params)
                 .send()
                 .await
-                .map_err(|e| anyhow::anyhow!("history search request failed: {e}"))?;
+                .map_err(|e| {
+                    // reqwest's Display for a timeout is only "error sending
+                    // request for url (…)", which hid the cause of every cold-
+                    // index failure. Say what happened.
+                    if e.is_timeout() {
+                        anyhow::anyhow!(
+                            "history search timed out — the history index may still be building after an \
+                             AgentMux start; this is not an empty history, retry in a minute"
+                        )
+                    } else {
+                        anyhow::anyhow!("history search request failed: {e}")
+                    }
+                })?;
             let status = resp.status();
             let body: Value = resp
                 .json()
