@@ -5,7 +5,7 @@
 // pane-selection focus path consults before moving the caret.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { eventBelongsToPaneOf, userCaretInBlock } from "./focusutil";
+import { eventBelongsToBlock, eventBelongsToPaneOf, userCaretInBlock } from "./focusutil";
 
 function mountBlock(blockId: string, inner: string): HTMLElement {
     const block = document.createElement("div");
@@ -107,5 +107,47 @@ describe("eventBelongsToPaneOf", () => {
         document.body.appendChild(loose);
         const b = mountBlock("B", `<textarea id="composer"></textarea>`);
         expect(eventBelongsToPaneOf(keydownFrom(b.querySelector("#composer")!), loose)).toBe(true);
+    });
+});
+
+describe("eventBelongsToBlock", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+        document.getSelection()?.removeAllRanges();
+    });
+
+    const keydownFrom = (target: EventTarget): KeyboardEvent => {
+        const e = new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true });
+        Object.defineProperty(e, "target", { value: target });
+        return e;
+    };
+
+    it("belongs to the pane the key came from", () => {
+        mountBlock("A", `<textarea id="a"></textarea>`);
+        const b = mountBlock("B", `<textarea id="b"></textarea>`);
+        const e = keydownFrom(b.querySelector("#b")!);
+        expect(eventBelongsToBlock(e, "B")).toBe(true);
+        expect(eventBelongsToBlock(e, "A")).toBe(false);
+    });
+
+    it("ignores a text selection left in ANOTHER pane — the caret's pane wins (Ctrl+F bug)", () => {
+        const a = mountBlock("A", `<p id="txt">selected transcript text</p>`);
+        const b = mountBlock("B", `<textarea id="b"></textarea>`);
+        const range = document.createRange();
+        range.selectNodeContents(a.querySelector("#txt")!);
+        document.getSelection()!.addRange(range);
+
+        const e = keydownFrom(b.querySelector("#b")!);
+        expect(eventBelongsToBlock(e, "A")).toBe(false);
+        expect(eventBelongsToBlock(e, "B")).toBe(true);
+    });
+
+    it("a key from outside every pane (body) belongs to the SELECTED pane — including via its chrome's block id", () => {
+        mountBlock("A", ``);
+        const b = mountBlock("B", ``);
+        b.classList.add("block-focused");
+        const e = keydownFrom(document.body);
+        expect(eventBelongsToBlock(e, "A")).toBe(false);
+        expect(eventBelongsToBlock(e, "B")).toBe(true);
     });
 });
