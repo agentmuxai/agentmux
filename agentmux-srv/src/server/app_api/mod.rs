@@ -1011,8 +1011,10 @@ pub(crate) async fn bundle_self_get_impl(
 pub(crate) enum SelfOwner<'a> {
     /// The calling agent's own row, by its token's UID. Versions are keyed by
     /// it as they are; the files are found by id
-    /// (`memory_dir_for_agent_by_id`), and a miss is an error — never another
-    /// agent's directory, never an empty list (the #2901 class).
+    /// (`memory_dir_for_agent_by_id`), and a UID with no row or no directory
+    /// is an error — never another agent's directory (the #2901 class). A
+    /// directory that resolves but does not exist still lists as empty, as
+    /// on the slug path.
     Uid(&'a str),
     /// A slug, resolved as before M4c-2b (`memory_dir_for_agent`,
     /// `resolve_agent_uuid`): an Unattributed HTTP caller, and the WS RPC.
@@ -1087,7 +1089,6 @@ pub(crate) fn memory_list_impl<'o>(
     owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
     let owner = owner.into();
-    let agent_id = owner.label();
     let memory_dir = owner.dir(&state.mstore).map_err(|e| format!("memory.list: {e}"))?;
 
     let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
@@ -1141,7 +1142,6 @@ pub(crate) fn memory_read_impl<'o>(
     filename: &str,
 ) -> Result<serde_json::Value, String> {
     let owner = owner.into();
-    let agent_id = owner.label();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.read: {e}"))?;
     let path = owner.dir(&state.mstore).map_err(|e| format!("memory.read: {e}"))?.join(filename);
@@ -1208,8 +1208,8 @@ pub(crate) fn memory_write_impl<'o>(
     // Hard-fails on resolution failure — reagent P2 (re-review): this used
     // to silently fall back to the raw slug via `unwrap_or_else`, while
     // memory_history_impl/memory_diff_impl/memory_revert_impl all hard-fail
-    // on the identical call. `memory_dir_for_agent` above already succeeded
-    // (proving `agent_id` resolves via at least one lookup path), so a
+    // on the identical call. The owner's directory above already resolved
+    // (proving it resolves via at least one lookup path), so a
     // failure here is very likely transient (e.g. a registry-file I/O
     // hiccup) rather than "unknown agent" — but silently keying this
     // version by the raw slug on that failure would reintroduce the exact
@@ -2107,7 +2107,6 @@ pub(crate) fn memory_history_impl<'o>(
     filename: &str,
 ) -> Result<serde_json::Value, String> {
     let owner = owner.into();
-    let agent_id = owner.label();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.history: {e}"))?;
     // See memory_write_impl's own comment — must key by the same resolved
