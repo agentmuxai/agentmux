@@ -309,6 +309,13 @@ pub struct SettingsType {
     #[serde(rename = "notify:tooltones:scope", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_scope: Option<String>,
 
+    // Visual twin of each tone: a brief fade on the source's window tab
+    // (or its pane-header pill, when that tab is active). Fires exactly
+    // when a tone passes the gates above. Absence = on.
+    // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
+    #[serde(rename = "notify:tooltones:flash", default, skip_serializing_if = "Option::is_none")]
+    pub notify_tooltones_flash: Option<bool>,
+
     // -- Messaging bridge settings --
 
     /// Master enable for the Discord messaging bridge.

@@ -22,8 +22,20 @@ function resetSettings(): void {
 
 const focusState = { focusedBlockId: null as string | null, windowFocused: true };
 
+// Active window tab + its members, for the activity-flash router.
+const tabState = { activeTabId: "tab-A" as string | null, blockids: {} as Record<string, string[]> };
+
 vi.mock("@/app/store/global", () => ({
     getSettingsKeyAtom: (key: string) => () => settings[key],
+    atoms: { activeTabId: () => tabState.activeTabId },
+    MOS: {
+        makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
+        getObjectValue: (oref: string) => {
+            const id = oref.replace(/^tab:/, "");
+            const blockids = tabState.blockids[id];
+            return blockids ? { oid: id, blockids } : null;
+        },
+    },
 }));
 
 vi.mock("@/app/store/focusManager", () => ({
@@ -65,6 +77,7 @@ import {
     setReplayMode,
 } from "../sound-service";
 import { __resetSoundListeners } from "../sound-events";
+import { __resetActivityFlash, onActivityFlash, type FlashTarget } from "../../activity-flash";
 
 describe("sound-service policy", () => {
     let playSpy: ReturnType<typeof vi.spyOn>;
@@ -317,5 +330,91 @@ describe("sound-service tool-tones policy", () => {
         attachedSpy.mockReturnValueOnce(false);
         fireToolStarted("blk-1", "Read");
         expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Activity flash — the visual twin of a tool tone.
+// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2. The player is left
+// UNPRIMED here on purpose: the flash must not depend on audio.
+// ──────────────────────────────────────────────────────────────────────
+describe("sound-service activity flash", () => {
+    let flashes: FlashTarget[];
+    let unsubscribe: () => void;
+    let cleanup: () => void;
+
+    beforeEach(() => {
+        resetSettings();
+        focusState.focusedBlockId = null;
+        focusState.windowFocused = true;
+        tabState.activeTabId = "tab-A";
+        tabState.blockids = { "tab-A": ["blk-A1", "blk-A2"], "tab-B": ["blk-B1"] };
+        __resetSoundService();
+        __resetSoundListeners();
+        __resetActivityFlash();
+        captured = null;
+        flashes = [];
+        unsubscribe = onActivityFlash((t) => flashes.push(t));
+        cleanup = installSoundService();
+    });
+
+    afterEach(() => {
+        cleanup();
+        unsubscribe();
+        setReplayMode(false);
+    });
+
+    function fireToolStarted(blockId: string): void {
+        if (!captured) throw new Error("multicast listener was never installed");
+        captured(blockId, { type: "tool-started", name: "Read" });
+    }
+
+    it("a pane in a background tab flashes its window tab — even before audio is primed", () => {
+        fireToolStarted("blk-B1");
+        expect(flashes).toEqual([{ kind: "tab", blockId: "blk-B1" }]);
+    });
+
+    it("an unfocused pane in the active tab flashes its pill", () => {
+        focusState.focusedBlockId = "blk-A1";
+        fireToolStarted("blk-A2");
+        expect(flashes).toEqual([{ kind: "pane-tab", blockId: "blk-A2" }]);
+    });
+
+    it("the focused pane in a focused window does not flash", () => {
+        focusState.focusedBlockId = "blk-A1";
+        fireToolStarted("blk-A1");
+        expect(flashes).toEqual([]);
+    });
+
+    it("the focused pane flashes its pill when the window is blurred", () => {
+        focusState.focusedBlockId = "blk-A1";
+        focusState.windowFocused = false;
+        fireToolStarted("blk-A1");
+        expect(flashes).toEqual([{ kind: "pane-tab", blockId: "blk-A1" }]);
+    });
+
+    it("notify:tooltones:flash=false removes the flash", () => {
+        setSetting("notify:tooltones:flash", false);
+        fireToolStarted("blk-B1");
+        expect(flashes).toEqual([]);
+    });
+
+    it("follows the tone's gates: master off, tool tones off, focused scope", () => {
+        setSetting("notify:sounds:enabled", false);
+        fireToolStarted("blk-B1");
+        resetSettings();
+        setSetting("notify:tooltones:enabled", false);
+        fireToolStarted("blk-B1");
+        resetSettings();
+        setSetting("notify:tooltones:scope", "focused");
+        focusState.focusedBlockId = "blk-A1";
+        fireToolStarted("blk-B1");
+        expect(flashes).toEqual([]);
+    });
+
+    it("replay mode drops the flash with the tone", () => {
+        setReplayMode(true);
+        fireToolStarted("blk-B1");
+        expect(flashes).toEqual([]);
     });
 });

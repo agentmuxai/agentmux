@@ -86,6 +86,13 @@ export const SOUNDS_SETTINGS = {
         section: "sounds",
         keywords: ["tool tone scope", "focused only", "all panes", "notify:tooltones:scope"],
     },
+    toolTonesFlash: {
+        id: "sounds.tool_tones_flash",
+        label: "Flash source tab",
+        description: "Briefly highlight the tab (or pane tab) each tone came from",
+        section: "sounds",
+        keywords: ["activity flash", "tab flash", "highlight tab", "which pane", "notify:tooltones:flash"],
+    },
     waitingToneEnabled: {
         id: "sounds.waiting_tone_enabled",
         label: "Enable",
@@ -237,6 +244,18 @@ export function SoundsSection(): JSX.Element {
                             <option value="all">All panes</option>
                             <option value="focused">Focused pane only</option>
                         </select>
+                    }
+                />
+                <SettingRow
+                    id={SOUNDS_SETTINGS.toolTonesFlash.id}
+                    indent
+                    label={SOUNDS_SETTINGS.toolTonesFlash.label}
+                    description={SOUNDS_SETTINGS.toolTonesFlash.description}
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:tooltones:flash"] !== false}
+                            onChange={(v) => set("notify:tooltones:flash", v)}
+                        />
                     }
                 />
             </Show>

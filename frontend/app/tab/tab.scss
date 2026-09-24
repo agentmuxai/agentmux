@@ -57,6 +57,28 @@
         // `.tab` is allowed by flex sizing (basis → min on shrink).
         min-width: 0;
         width: 100%;
+        // Own stacking context so the activity-flash overlay below can sit
+        // at z-index -1: above this element's background (including a
+        // `.tab-colored` fill, which is `!important` and would beat any
+        // background-based flash) but under the name and close button.
+        isolation: isolate;
+
+        // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
+        // Rests invisible; activity-flash.ts animates its opacity (compositor-
+        // only, no layout/paint of the tab). `::after` is the active stripe.
+        &::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: var(--zindex-activity-flash);
+            background: var(--accent-color);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        &.activity-flash-static::before {
+            opacity: 0.22;
+        }
     }
 
     &.animate {

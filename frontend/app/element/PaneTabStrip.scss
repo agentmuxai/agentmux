@@ -224,6 +224,28 @@
     font-size: 11px;
     overflow: hidden;
     transition: background 80ms ease, color 80ms ease;
+    // Positioning + own stacking context for the activity-flash overlay
+    // below, which sits at z-index -1: over the pill's (pane-colored)
+    // background, under its icon/label/×.
+    position: relative;
+    isolation: isolate;
+
+    // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
+    // Only strips with `flashOnActivity` (a Pane's own header) ever animate
+    // it; everywhere else it stays at opacity 0.
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: var(--zindex-activity-flash);
+        background: var(--accent-color);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    &.activity-flash-static::before {
+        opacity: 0.22;
+    }
 
     &:hover {
         // The white tint is layered ON TOP of the resting neutral
