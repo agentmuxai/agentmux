@@ -37,17 +37,20 @@
 //! | sid held, transcript present | `--resume <sid>` succeeds | [`Verdict::Resume`] |
 //! | sid held, transcript missing, another session on disk | rejected → `retry_after_resume_failure` → `find_recovery_session_id` resumes that one | [`Verdict::Recover`] |
 //! | sid held, transcript missing, nothing else on disk | rejected → retry finds nothing → blank | [`Verdict::Fresh`] |
-//! | no sid at all | spawns with no `--resume`; **no recovery scan runs on this path** | [`Verdict::Fresh`] |
+//! | no sid, pane renders history whose session is reachable | first spawn continues it (`find_continuation_session_id`) | [`Verdict::Resume`] |
+//! | no sid otherwise | spawns with no `--resume`; **no disk scan runs on this path** | [`Verdict::Fresh`] |
 //! | provider has no resume flag | resume isn't a concept here | [`Verdict::Unknown`] |
 //!
-//! The fourth row is the one worth stating explicitly, because it's the case
+//! The no-sid rows are the case
 //! `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
-//! recorded and the one this whole module is aimed at: a spawn with no sid
-//! does **not** consult the on-disk transcripts. A session may well be sitting
-//! right there — [`Preflight::recoverable_session_id`] reports it when so —
-//! but nothing in the current spawn path will reach for it, so the honest
-//! verdict is `Fresh`. Reporting `Recover` here would describe a rehydrate
-//! step that doesn't exist yet (that spec's Part B).
+//! recorded: a pane opened in a new channel or version shows the agent's
+//! whole prior conversation, but its spawn held no id. Since
+//! SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §5 P0a the spawn continues
+//! the session of that rendered history. It still never scans the provider's
+//! dir for some other session: one may be sitting there —
+//! [`Preflight::recoverable_session_id`] reports it when so — but "largest
+//! on disk" can be an archived conversation or a subagent's, so it stays
+//! evidence, not a verdict.
 
 use std::time::Instant;
 
@@ -126,6 +129,10 @@ pub struct PreflightInput {
     pub working_dir: String,
     /// `CLAUDE_CONFIG_DIR` out of `cmd:env`.
     pub config_dir: String,
+    /// The session of the history this pane renders
+    /// (`persistent::pane_history_session_id`). A first spawn with no
+    /// `session_id` continues it when reachable. Empty when there is none.
+    pub history_session_id: String,
 }
 
 fn step(id: &'static str, label: &str, ok: bool, detail: impl Into<String>, started: Instant) -> Step {
@@ -173,8 +180,25 @@ pub fn preflight(input: &PreflightInput) -> Preflight {
     let t = Instant::now();
     if input.session_id.is_empty() {
         steps.push(step("session-id", "Resolving session id", false, "none recorded", t));
+        // The first spawn continues the conversation this pane renders when
+        // `--resume` can reach it (module doc, fourth row).
+        if !input.history_session_id.is_empty() {
+            let t = Instant::now();
+            let sid = input.history_session_id.clone();
+            if session_backfill::session_is_reachable(&input.config_dir, &input.working_dir, &sid) {
+                steps.push(step("history", "Continuing this pane's conversation", true, sid.clone(), t));
+                return finish(Verdict::Resume, Some(sid), None, steps);
+            }
+            steps.push(step(
+                "history",
+                "Continuing this pane's conversation",
+                false,
+                format!("{sid} not under this config dir"),
+                t,
+            ));
+        }
         // Report what's on disk, but don't let it change the verdict — the
-        // no-sid spawn path never looks (module doc, fourth row).
+        // spawn only continues the pane's own history, never a disk scan.
         let t = Instant::now();
         let on_disk = session_backfill::find_largest_session_for_working_dir(
             &input.config_dir,
@@ -248,6 +272,7 @@ mod tests {
             session_id: session_id.to_string(),
             working_dir: working_dir.to_string(),
             config_dir: config_dir.to_string_lossy().to_string(),
+            history_session_id: String::new(),
         }
     }
 
@@ -299,8 +324,9 @@ mod tests {
 
     /// The cross-channel open this module exists for: no pointer at all, but
     /// the real conversation is right there on disk. The verdict is still
-    /// `Fresh` — the no-resume spawn path never scans — and the reachable
-    /// session is reported separately as evidence, not as a promise.
+    /// `Fresh` when the pane renders no history of its own — the spawn never
+    /// scans the provider's dir — and the reachable session is reported
+    /// separately as evidence, not as a promise.
     #[test]
     fn no_session_id_is_fresh_even_when_a_session_exists_on_disk() {
         let cfg = config_dir_with(WORK_DIR, &[("sid-orphaned", 2_000_000)]);
@@ -312,6 +338,33 @@ mod tests {
             Some("sid-orphaned"),
             "the orphaned session must be reported so the UI can say history exists",
         );
+    }
+
+    /// The 2026-09-23 incident: a pane in a new version renders the agent's
+    /// prior conversation but holds no id. The spawn now continues it.
+    #[test]
+    fn no_session_id_but_reachable_rendered_history_resumes_it() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-rendered", 500), ("sid-bigger", 2_000_000)]);
+        let mut inp = input(cfg.path(), WORK_DIR, "");
+        inp.history_session_id = "sid-rendered".to_string();
+        let out = preflight(&inp);
+        assert_eq!(out.verdict, Verdict::Resume);
+        assert_eq!(
+            out.session_id.as_deref(),
+            Some("sid-rendered"),
+            "the rendered history's session wins, not the largest on disk",
+        );
+    }
+
+    #[test]
+    fn no_session_id_and_unreachable_rendered_history_is_fresh() {
+        let cfg = config_dir_with(WORK_DIR, &[("sid-orphaned", 2_000_000)]);
+        let mut inp = input(cfg.path(), WORK_DIR, "");
+        inp.history_session_id = "sid-other-account".to_string();
+        let out = preflight(&inp);
+        assert_eq!(out.verdict, Verdict::Fresh);
+        assert_eq!(out.recoverable_session_id.as_deref(), Some("sid-orphaned"));
+        assert!(out.steps.iter().any(|s| s.id == "history" && !s.ok));
     }
 
     #[test]

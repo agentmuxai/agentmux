@@ -175,6 +175,25 @@ fn fresh_start_needs_disclosure(attempted_resume_sid: Option<&str>, generation: 
     attempted_resume_sid.is_none() && generation == 1
 }
 
+/// How much of a transcript's tail `find_continuation_session_id` reads. The
+/// provider stamps its session id on every stream event, so the last few
+/// events suffice; a long-lived agent's transcript runs to many MB.
+const CONTINUATION_TAIL_BYTES: i64 = 256 * 1024;
+
+/// The last non-empty `field` on a complete JSON line of `tail`.
+/// `starts_mid_line`: `tail` was cut from a longer file, so its first line is
+/// a fragment and is dropped.
+fn last_session_id_in_stream(tail: &[u8], starts_mid_line: bool, field: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(tail);
+    let skip = usize::from(starts_mid_line);
+    let lines: Vec<&str> = text.split('\n').skip(skip).collect();
+    lines.into_iter().rev().find_map(|line| {
+        let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+        let sid = v.get(field)?.as_str()?.trim();
+        (!sid.is_empty()).then(|| sid.to_string())
+    })
+}
+
 /// Publish a `mps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
 /// (not a method) for the same reason `session_outcome_line` above is one:
 /// callable from the stdout-reader/process-waiter match arms, which only
@@ -1471,6 +1490,7 @@ mod input;
 mod lifecycle;
 mod queue;
 mod resume_retry;
+pub(crate) use resume_retry::pane_history_session_id;
 mod spawn;
 mod status;
 

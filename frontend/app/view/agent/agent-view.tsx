@@ -1947,11 +1947,11 @@ const AgentPresentationView = ({
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
-        // context_exceeded recovery — drop the over-full session and return to
-        // the picker for a clean relaunch (resuming would only re-fail).
+        // context_exceeded recovery — archive the over-full session and return
+        // to the picker for a clean relaunch (resuming would only re-fail).
         onNewSession: () => {
-            log("agent", "New session — clearing the over-full context and returning to the picker");
-            void model.backToPicker();
+            log("agent", "New session — archiving the over-full context and returning to the picker");
+            void model.startNewSession();
         },
         // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
         // (e.g. claude's subscription OAuth expired), not an Armory
