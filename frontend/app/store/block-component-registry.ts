@@ -197,7 +197,7 @@ export async function openOrFocusPaneByView(viewType: string, blockDef?: BlockDe
                 if (node?.id != null) {
                     // Block is in the active tab — focus it.
                     layoutModel.focusNode(node.id);
-                    bcm.viewModel.giveFocus?.();
+                    giveBlockFocus(blockId);
                     return;
                 }
                 // Block exists on another tab; fall through and open a fresh one here.
