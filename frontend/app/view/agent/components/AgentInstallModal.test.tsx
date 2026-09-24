@@ -392,4 +392,23 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
         details.open = false;
         fireEvent(details, new Event("toggle"));
     });
+
+    it("shows why the install couldn't start when the start RPC itself fails", async () => {
+        vi.mocked(RpcApi.InstallStartCommand).mockRejectedValueOnce(new Error("provider codex install already in progress"));
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+        fireEvent.click(await screen.findByText("Install now"));
+
+        await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        await waitFor(() => expect(details.open).toBe(true));
+        // No npm output exists, so the reason has to reach Details itself.
+        await waitFor(() =>
+            expect(terminals[0]?.written.some((l) => l.includes("provider codex install already in progress"))).toBe(true),
+        );
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+    });
 });

@@ -322,6 +322,13 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             tickHandle = null;
         }
         setError(err);
+        // The backend's own reason goes into Details as a final error line.
+        // When the start RPC itself fails (another install of this provider
+        // is running, transport error) npm never ran, so without this
+        // Details would be empty and the cause invisible (codex P2 on
+        // #3661). Appended after every npm line, so the tracker's
+        // first-error index still points at npm's own first error.
+        if (typeof err === "string" && err !== "cancelled") appendLog(`Install failed: ${err}`, "error");
         if (tracker) {
             setFailure(tracker.fail(err));
             syncSteps();
