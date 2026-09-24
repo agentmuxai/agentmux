@@ -51,6 +51,8 @@ pub(crate) mod notify_menu;
 mod windows;
 #[cfg(target_os = "macos")]
 pub(crate) mod macos;
+#[cfg(target_os = "linux")]
+mod linux;
 
 /// What the user picked from the tray menu. Platform backends translate their
 /// native click/menu events into these; everything downstream is
@@ -280,11 +282,10 @@ pub fn start_if_enabled(
     let started = windows::spawn(_data_dir, _dir_hash).map(|rx| ("windows", rx));
     #[cfg(target_os = "macos")]
     let started = macos::spawn(_data_dir, _dir_hash).map(|rx| ("macos", rx));
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    let started = linux::spawn(_data_dir, _dir_hash).map(|rx| ("linux", rx));
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     let started: Result<(&str, mpsc::Receiver<TrayAction>), String> =
-        // Linux (`ksni`) is the remaining backend. Wire it here and call
-        // `spawn_action_loop` from `supervisor/unix.rs` — already done for
-        // macOS, so only this arm and the backend module are missing.
         Err("no backend on this platform yet".to_string());
 
     match started {
