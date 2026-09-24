@@ -27,6 +27,20 @@ was verified against code and accepted.
   - identity links are written only by a host-channel command (§2.5);
   - the relay rejects sender ids that aren't agent ids (§2.3);
   - residuals are listed (§4).
+- **Review 3** (1 P1, 4 P2, 3 P3):
+  - the host-gated window and the host channel protect against MCP tools,
+    not against a same-user process, until GHSA-6726-q276-g6f6 is fixed.
+    The trust toggle therefore ships only in builds that include that fix
+    (§2.1, §2.5, §2.8, §4);
+  - the consent flow was made buildable on Cognito: a confidential
+    client, relay-side code exchange, relay-checked `auth_time` and `sub`,
+    and the system browser only (§2.2);
+  - holding integration rows gets its own entry point (§2.4);
+  - claims live in a claims table keyed by canonical slug (§2.4);
+  - the rollout gains a data source and real shadow rows (§3);
+  - the source-id check covers every send route (§2.3);
+  - `grants.write` is on its own resource server (§2.2);
+  - revokes are announced (§2.2).
 
 **Trigger:** the repo owner, 2026-09-24:
 > "we need generic github integrations. nothing hard coded … ideally the
@@ -84,7 +98,8 @@ was verified against code and accepted.
   - The account's desktops resolve the recipient locally and render the
     stamp generically.
   - Whether an integration's messages count as trusted is a local
-    decision, made in a host window that agents can't reach.
+    decision, made in a host window that MCP tools can't reach. Full
+    isolation from agent processes depends on GHSA-6726-q276-g6f6 (§4).
 - **Services own their logic.**
   - ReAgent notifies about its own reviews with its own credential.
   - Generic GitHub events (CI, merges, human reviews) come from a GitHub
@@ -270,6 +285,10 @@ involved.
      §2.8).
    - The routing decision — which agent receives a message — is made on
      the desktop (§2.4).
+   - **Limit:** until GHSA-6726-q276-g6f6 is fixed, the host-gated
+     window protects against MCP tools, not against a same-user process
+     (§4). Anything whose misuse would relax a safety stop waits for that
+     fix (§2.8).
 4. **Accounts grant; integrations don't self-enroll.** In v1 the
    operator must also approve every account an integration may serve
    (§2.6).
@@ -327,36 +346,67 @@ ReAgent stores it in its own secret, not `services/infra`.
 There is no `trusted` flag in the cloud (§2.8).
 
 **The consent flow, human-only.** An agent's `MUXBUS_TOKEN` comes from the
-same public `DesktopClient` (`muxbus-cognito.ts:272-330`) a step-up token
-would. Refreshing keeps the original `auth_time`, and an agent can run the
-PKCE flow itself, so neither `auth_time` nor the desktop client can prove
-a human is present. Instead:
+same public `DesktopClient` (`muxbus-cognito.ts:272-330`) that a desktop
+login uses. Refreshing keeps the original `auth_time`, and
+`verifyRequest`'s user path ignores `client_id` (`auth.ts:170-182`). So
+nothing about an ordinary account token proves a human is present.
+Instead:
+
 1. **The desktop creates a pending grant request** with its ordinary
    account token: `POST /account/v1/integration-grants/requests`, with
-   `{integration_id, scopes, resource_scopes}`. The relay returns a
-   `request_id`. A pending request grants nothing.
-2. **The desktop opens the relay's consent page** in the system browser,
-   through a dedicated **consent app client**:
-   - it is a separate `client_id`;
-   - its only scope is `grants.write`;
-   - it issues **no refresh token**;
-   - its tokens are rejected on every route except the consent callback;
-   - the `request_id` rides in `state`.
+   `{integration_id, scopes, resource_scopes}`.
+   - The relay stores the request with `created_at` and the requesting
+     account.
+   - It returns only an opaque `request_id`.
+   - A pending request grants nothing.
+2. **The desktop opens the relay's consent URL in the system browser.**
+   Never in an AgentMux pane: panes share one cookie store
+   (`browser_pane/creation.rs:192`) that agent tooling can drive.
+   - **The relay generates the Cognito `state`** and keeps the mapping
+     from `state` to `request_id` on the server.
+   - **The consent app client is confidential** (`generateSecret: true`),
+     and its only callback is on the relay. The relay exchanges the code
+     server-side and **revokes the refresh token immediately**
+     (`enableTokenRevocation`). Cognito always issues a refresh token for
+     the authorization-code grant, so revocation is the control.
+   - The client's only scope is `grants.write`, on its **own resource
+     server**, which no integration or desktop client can ever be given.
+   - Nothing parks a code or token where anyone can poll for it. The
+     unauthenticated `/api/login-relay` park-and-poll is never used for
+     consent.
+3. **The relay checks the consent login itself:**
+   - `auth_time ≥ request.created_at`, so the human logged in *for this
+     request*, whatever the hosted UI's `prompt` handling does;
+   - the consent token's `sub` equals the request's account. A Google
+     identity and a native identity with the same email have different
+     subs.
+4. **The human confirms on the relay-hosted page.** It shows the
+   integration and the exact repositories.
+   - The confirm route is pre-auth, like `/desktop-callback`
+     (`index.ts:176`), and protected by an HttpOnly session the relay set
+     after the code exchange, plus a CSRF token.
+   - The grant commits only on Confirm.
+5. **Consent tokens never work as Bearer credentials.** The consent
+   `client_id` is classified first and refused as a Bearer token on every
+   route, including `$connect`.
 
-   The login forces re-authentication: `prompt=login` if Cognito's managed
-   login supports it, otherwise `max_age=0`. **Verify which one works
-   before building.** If neither does, fall back to requiring MFA on the
-   consent client.
-3. **After login, the relay-hosted page shows the integration and the
-   exact repositories.** It commits the grant only when the human
-   presses Confirm on that page.
+**Re-authentication strength.** Both Cognito domains use the default
+(classic) hosted UI (`muxbus-cognito.ts:218-239`). Moving to managed login
+v2 is domain-wide, so it would also change the desktop login pages.
+- **Native Cognito sign-in:** the relay's `auth_time` check forces a real
+  login; passkeys are available on the ESSENTIALS tier (line 164).
+- **Google-only owners:** re-authentication happens at Google, and is
+  silent if the human is already signed in there.
+- Per-client MFA isn't possible, because Cognito MFA is set per pool and
+  doesn't apply to federated users.
 
-The desktop never holds a `grants.write` token.
-- **What an agent can do:** create pending requests.
-- **What it can't do:** complete one without the human's credentials and
-  a click on a page served by the relay.
-- **Revoking** needs no step-up. Any account token may revoke, because
-  revoking only reduces access.
+The resulting residual is recorded in §4, and the choice is open question
+4.
+
+**Revoking** accepts any account token, because it only reduces access.
+But an agent could use it to silently drop grants and so suppress
+notices, so every revoke is audited and announced to the operator, and
+§4 records it.
 
 **How an integration learns its grants.** `GET /integrations/v1/grants`
 returns, for the calling integration only, each active grant's
@@ -425,10 +475,13 @@ resolve to (§2.4), so one agent never receives the same notice twice.
    `accountUserId ?? userId` for user tokens too, so an account-scoped
    wake (`broadcast.ts`) reaches the account's desktops.
 
-**Also in I1: a source-id check on the relay.** `/reactive/inject` rejects
-an `X-Agent-ID` that fails the agent-id rule (`validate_agent_id`'s
-charset, lowercase), keeping `github-consumer` as-is until I5. No
-agent-to-agent message can then carry an `integration:` source (§2.7).
+**Also in I1: a source-id check on the relay.** Every route that creates
+an injection from `X-Agent-ID` rejects a source that fails the agent-id
+rule after the relay's own normalisation (lowercase, then
+`validate_agent_id`'s charset). That covers `/reactive/inject`,
+`/api/messages` (`index.ts:286-334`) and `/mcp` send (`index.ts:780`).
+`github-consumer` is kept as-is until I5. With the check in place, no
+agent-to-agent message can carry an `integration:` source (§2.7).
 
 ### 2.4 Delivery: account inbox, resolved and claimed on the desktop
 
@@ -440,10 +493,19 @@ agent-to-agent message can then carry an `integration:` source (§2.7).
 - It returns rows created after the cursor, plus rows still pending.
 - `POST /account/v1/integration-inbox/claim` and `/release` check
   `inbox_account`.
-- **Claim is atomic,** a conditional pending→claimed update with the
-  claiming desktop's id, exactly like `/reactive/ack` (`store.ts:343-379`).
-  A claim is per `(row, resolved agent)`, so a row with candidates that
-  resolve to two different agents can be claimed once for each.
+- **Claims.** `/reactive/ack` is a single-status update
+  (`store.ts:365-372`), so it doesn't fit. Claims live in a
+  `muxbus-integration-claims-<env>` table:
+  - **PK** row id, **SK** the **canonical slug** of the resolved agent
+    (after alias resolution, never a raw alias);
+  - written with `attribute_not_exists`, which makes each claim atomic and
+    lets one row be claimed once per distinct agent;
+  - two desktops resolving through different aliases therefore collide on
+    the same key.
+- **Release** carries the claimant and the claim time, like
+  `releaseInjection`.
+- **"Pending"** means every row within its TTL: the relay never knows how
+  many agents a row resolves to.
 
 **Resolution.** For each row, each desktop resolves the candidates
 **locally**, in order:
@@ -460,7 +522,9 @@ agent:
 - **Live here** (registered and present): claim at once and deliver.
 - **Known here but not live:** wait a **grace period** (60 s) so a
   desktop where the agent is live can claim first. Then claim and hold it
-  as a durable jekt with its stamp (§2.8).
+  through a **separate hold entry point** for inbox rows (§2.8). Today's
+  `hold_for_absent_target` only runs for full-key host-tier HTTP
+  injections (`reactive.rs:1346-1358`).
 - **Two desktops each have a live agent of that name** (two seats or two
   hosts): the atomic claim picks one. This is the same "one row, one
   delivery" behaviour as agent-to-agent WAN delivery today.
@@ -471,8 +535,8 @@ agent registers, an alias changes, or a link is added. A bump
 re-evaluates every pending row, so a new link or agent picks up
 notifications that are still pending.
 
-**Unclaimed rows** expire at their TTL. The relay counts them as
-`inbox.expired_unclaimed` per integration.
+**Unclaimed rows** expire at their TTL. A row with **no claims at
+expiry** counts as `inbox.expired_unclaimed`, per integration.
 
 **Integration rows are never forwarded** between srvs (channels, LAN
 peers, same-host siblings). Each srv of the account pulls the inbox
@@ -501,7 +565,10 @@ provider accounts):
   `host_ipc.rs`);
 - that command runs after the human confirms in a CEF-host window.
   `UIClick` is limited to the caller's own pane
-  (`ui_handlers.rs:295-298`), so agents can't reach that window.
+  (`ui_handlers.rs:295-298`), so MCP tools can't reach that window.
+  Isolation from a same-user process depends on GHSA-6726-q276-g6f6
+  (§4). Until that fix ships, a misused link can reroute notices but
+  can't relax a stop.
 
 Every change is audited and announced to the operator.
 
@@ -603,6 +670,10 @@ a **desktop-local** setting, `trusted_integrations`:
   the CEF-host window (§2.5).
 - It is **off by default**.
 - The relay has no say in it.
+- **It ships enabled only in builds that include the fix for
+  GHSA-6726-q276-g6f6.** Until then the host-gated path doesn't isolate
+  it from a same-user process (§4), and turning it on would relax a
+  safety stop. In earlier builds no integration is ever trusted.
 
 **Sender trust is not content trust.** A trusted integration's notice
 can quote attacker-written PR text. Trusting an integration relaxes the
@@ -613,10 +684,25 @@ Removing `reagent-v1` signing (I5) drops the relaxation for **every**
 GitHub notice, because the consumer signs them all (§1.1). An operator who
 wants it back marks `github-notifier` or `reagent` as trusted.
 
-**Held delivery.** `db_jekt_held` gains stamp columns (`integration_id`,
-`integration_name`, `kind`, subject and links JSON; additive). Held
-replay keeps `VIA=integration`, and re-reads the trust setting at
-delivery time. There is no forwarding (§2.4).
+**Held delivery.** Inbox rows get their own hold entry point. `db_jekt_held`
+gains, as additive columns:
+- the **stored delivery tier**;
+- the stamp: `integration_id`, `integration_name`, `kind`, and the
+  subject and links as JSON.
+
+`request_from_held` restores the stored tier instead of hard-coding
+`"host"` (`jekt_held.rs:131`), so a replayed notice is never treated as
+more trusted than WAN. Replay keeps `VIA=integration` and re-reads the
+trust setting at delivery time.
+
+A held row expires at the earlier of the row's own expiry and
+`HELD_TTL_MS`.
+
+**Known limit:** once a desktop has claimed and held a notice, it stays
+there. If the agent comes back on a different desktop, it won't get the
+notice.
+
+There is no forwarding (§2.4).
 
 **Removed in I5:**
 - the pinned keys and the `verify_*reagent*` functions;
@@ -689,13 +775,22 @@ Each step keeps notifications flowing; no step needs a flag day.
 
 **Preconditions for I3 and I4.** These have to be true before either
 flag is flipped:
-- **Grants.** The accounts that receive these notices today are
-  identified (from agent-ownership rows and the logs of pending callers),
-  added to `allowed_accounts`, and granted through the consent flow.
+- **Grants.** Identify the accounts that receive these notices today.
+  Existing data can't answer that: desktops pull with user tokens,
+  `checkAgentBinding` returns early without `accountUserId`
+  (`agent-binding.ts:31-33`), and the pending route logs nothing.
+  - **I1 therefore counts `(sub, agent_id, auth mode)` on
+    `/reactive/pending`,** for at least one release.
+  - From those counts, list the subs, including Google and native
+    duplicates. Move any legacy-key pullers to Cognito, since they have no
+    account.
+  - Add the accounts to `allowed_accounts`, and grant through the consent
+    flow.
 - **Desktops.** Every desktop running a notified agent is on I2 or later,
   with its links seeded and confirmed.
-- **Dry run.** A shadow run matches: the notifier resolves and counts
-  without storing, next to the consumer.
+- **Dry run.** Integrations send **shadow rows**, flagged as such. Desktops
+  resolve them and report "would deliver" without claiming or delivering.
+  Those reports must match the consumer's deliveries for the same events.
 - **Rollback.** Flip the flags back.
 
 **Old desktops.** After I4 a desktop older than I2 receives no GitHub
@@ -715,9 +810,20 @@ release cycle after I2.
   the resources the integration lists (§2.3). A dishonest or buggy
   integration could omit a fork's head repo. v1 integrations are
   operator-approved, so this is accepted.
-- **The consent flow needs human credentials, not a separate device.** An
-  agent with the human's password and MFA could complete it. Requiring
-  MFA on the consent client is open question 4.
+- **Re-authentication strength.** The consent flow needs the human's own
+  login, but for Google-only owners that login is silent if they are
+  already signed in at Google (§2.2).
+- **Same-user processes and GHSA-6726-q276-g6f6.** Until that advisory's
+  fix ships:
+  - the host-gated window and host channel protect against MCP tools, not
+    against a process running as the same OS user;
+  - external-identity links can be rewritten by such a process, which
+    reroutes notices;
+  - `trusted_integrations` stays disabled (§2.8), so no safety stop can be
+    relaxed this way.
+- **Revoke as suppression.** Any account token can revoke a grant, and so
+  suppress an integration's notices. Revokes are audited and announced
+  (§2.2).
 
 **Open questions:**
 1. **Registration:** operator-only now, a developer console later?
@@ -726,9 +832,10 @@ release cycle after I2.
    conflict).
 3. **`SPEC_CONNECT_WITH_GITHUB_ARMORY_2026_09_23`**: find it and reconcile
    §2.5.
-4. **Consent re-authentication:** `prompt=login` vs `max_age=0`, and
-   whether to require MFA on the consent client (verify Cognito managed
-   login behaviour first).
+4. **Consent re-authentication:** move the domains to managed login v2,
+   which changes the desktop login pages too? And restrict the consent
+   client to native sign-in with passkeys, or accept weak re-auth for
+   Google-only owners?
 5. **Where an `operator` target goes:** the default agent, every agent
    watching the subject, or a desktop notification (#3662)?
 6. **Replies to integrations.** Out of scope for v1.
@@ -749,12 +856,18 @@ release cycle after I2.
     route and on `$connect`;
   - account tokens are rejected on `/integrations/v1`;
   - an M2M token without its read or write scope is rejected;
-  - a non-agent-id `X-Agent-ID` is rejected on `/reactive/inject`.
+  - a non-agent-id source is rejected on `/reactive/inject`,
+    `/api/messages` and `/mcp` send.
 - Grants and consent:
   - a pending request grants nothing;
-  - consent tokens are accepted only on the callback, and never get a
-    refresh token;
+  - the consent `client_id` is refused as a Bearer token on every route,
+    including `$connect`;
+  - the refresh token is revoked after the code exchange;
+  - the confirm route needs the relay session plus CSRF;
+  - a commit is refused when `auth_time` is older than the request, or when
+    `sub` differs from the requesting account;
   - a grant commits only on Confirm;
+  - revokes are announced;
   - notify is rejected for an account not in `allowed_accounts`.
 - Notify:
   - a resource that isn't an exact scope match (including a fork head
@@ -763,7 +876,8 @@ release cycle after I2.
   - more than 8 targets → 400;
   - a duplicate `dedupe_key` → the same id.
 - Inbox:
-  - claim is atomic, per `(row, agent)`;
+  - a claim is atomic, per `(row, canonical slug)`, and two aliases of one
+    agent collide;
   - only the owning account can pull, claim or release;
   - inbox rows never appear in `/reactive/pending`;
   - the account-scoped wake reaches the account's desktops.
@@ -786,7 +900,10 @@ release cycle after I2.
 - Trust:
   - trusted plus a sensitive message → `ESCALATE=none`;
   - a forced transcript request escalates.
-- Held replay keeps the stamp.
+- Held replay keeps the stamp and the stored tier (never `host`), and
+  expires at the earlier of the row's expiry and the held TTL.
+- Before the GHSA-6726-q276-g6f6 fix, `trusted_integrations` can't be
+  enabled.
 - After I5, `git grep` finds no ReAgent identifiers in code, as a CI
   check.
 
