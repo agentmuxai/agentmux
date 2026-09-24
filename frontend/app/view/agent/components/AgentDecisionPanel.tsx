@@ -18,6 +18,7 @@
  */
 
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { PermissionRequestEvent, ToolNode } from "../types";
@@ -203,8 +204,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         // pane A would react to keys from pane B (Esc, Enter, etc.)
         // and multiple open prompts in different panes would all
         // dispatch on the same keystroke. Codex P1 on PR #556.
-        const paneRoot = rootRef?.closest(".agent-view") as HTMLElement | null;
-        if (paneRoot && target && !paneRoot.contains(target)) return;
+        if (!eventBelongsToPaneOf(e, rootRef)) return;
 
         const inPanel = !!rootRef && !!target && rootRef.contains(target);
         const editable = isEditableTarget(target);

@@ -5,7 +5,7 @@
 
 import { getBlockComponentModel } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
-import { focusedBlockId } from "@/util/focusutil";
+import { focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 class FocusManager {
@@ -50,13 +50,7 @@ class FocusManager {
         const lnode = layoutModel?.focusedNode?.();
         if (lnode == null || lnode.data?.blockId == null) return;
         layoutModel.focusNode(lnode.id);
-        const blockId = lnode.data.blockId;
-        const bcm = getBlockComponentModel(blockId);
-        const ok = bcm?.viewModel?.giveFocus?.();
-        if (!ok) {
-            const inputElem = document.getElementById(`${blockId}-dummy-focus`);
-            inputElem?.focus();
-        }
+        giveBlockFocus(lnode.data.blockId);
     }
 
     /**
@@ -77,7 +71,29 @@ class FocusManager {
         const layoutModel = getLayoutModelForStaticTab();
         const lnode = layoutModel?.focusedNode?.();
         if (lnode?.data?.blockId !== blockId) return;
+        // A pane that finishes mounting after the user already clicked into
+        // one of its inputs must not take the caret back.
+        if (userCaretInBlock(blockId)) return;
         giveFocus();
+    }
+}
+
+/**
+ * Put the caret in `blockId`'s default focus target — the view's
+ * `giveFocus()`, else the block's hidden dummy input — UNLESS the user
+ * already put it in a text-entry control inside that block. The single
+ * implementation behind every "focus this pane" path (`refocusNode()` above,
+ * block-component-registry's `refocusNode(blockId)`, block.tsx's click
+ * handler) so they can't drift apart again: the reducer-driven path added by
+ * #3519 was missing the "already focused within" check the click handler
+ * had, and ate the first click on any input in an unselected pane
+ * (SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md).
+ */
+export function giveBlockFocus(blockId: string): void {
+    if (userCaretInBlock(blockId)) return;
+    const ok = getBlockComponentModel(blockId)?.viewModel?.giveFocus?.();
+    if (!ok) {
+        document.getElementById(`${blockId}-dummy-focus`)?.focus({ preventScroll: true });
     }
 }
 

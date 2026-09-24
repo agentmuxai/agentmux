@@ -49,6 +49,7 @@ import {
     type JSX,
 } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { TransitionGroup } from "solid-transition-group";
 
 import { pushNotification, prefersReducedMotionAtom } from "@/app/store/global";
@@ -563,8 +564,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         if (target?.closest?.(".agent-row-menu, .agent-recent-sessions-menu-toggle")) return;
         setOpenMenuId(null);
     };
+    let rootRef: HTMLDivElement | undefined;
     const onDocumentKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") setOpenMenuId(null);
+        // Escape in another pane must not close this pane's row menu.
+        if (e.key === "Escape" && eventBelongsToPaneOf(e, rootRef)) setOpenMenuId(null);
     };
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     document.addEventListener("keydown", onDocumentKeyDown);
@@ -851,7 +854,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     });
 
     return (
-        <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
+        <div class="agent-recent-sessions" data-testid="agent-my-agents-list" ref={rootRef}>
             <div class="agent-recent-sessions-header">
                 <span class="agent-recent-sessions-title">My Agents</span>
                 {/* No `!isLoading()` guard here (reagent P2 on PR #2328):
