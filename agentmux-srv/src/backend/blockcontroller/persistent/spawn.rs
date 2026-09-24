@@ -479,6 +479,14 @@ impl PersistentSubprocessController {
             .map(|u| u.trim().to_string())
             .filter(|u| !u.is_empty());
         *self.stable_agent_uid.lock().unwrap() = agent_uid_for_registry.clone();
+        // This process is one segment of the agent's conversation
+        // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.1, P1). The
+        // stdout reader records its provider session id, the waiter its end.
+        let segment: super::segments::SegmentRef = agent_uid_for_registry.as_deref().and_then(|uid| {
+            self.record_segment_start(uid, &config, attempted_resume_sid.as_deref(), continuation.is_some())
+        });
+        let segment_read = segment.clone();
+        let segment_wait = segment;
         // Defaults to this spawn's own nonce; overridden below if
         // registration is skipped (reagent P1 on PR #3084 — see the `Err`
         // arm just below for why `my_registration_nonce` alone is wrong
@@ -958,6 +966,7 @@ impl PersistentSubprocessController {
                                     "persistent session ID captured"
                                 );
                                 core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
+                                super::segments::record_segment_session(&segment_read, &sid_string);
                             }
                             // reagentx P0 on PR #2373: resolving tracking
                             // here can legitimately flush a held-back
@@ -1294,6 +1303,11 @@ impl PersistentSubprocessController {
             tokio::select! {
                 status = child.wait() => {
                     let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+                    super::segments::record_segment_end(
+                        &segment_wait,
+                        crate::backend::continuity_segments::exit_reason(exit_code),
+                        global_output_zone_wait.as_deref(),
+                    );
                     tracing::info!(
                         block_id = %block_id_wait,
                         exit_code = exit_code,
@@ -1696,6 +1710,16 @@ impl PersistentSubprocessController {
                         KillRequest::Force => None,
                         KillRequest::Graceful(deadline) => Some(deadline),
                     };
+                    // Why it's going away, read before the kill changes
+                    // anything: `shutdown` marks a pane close for this
+                    // generation; `restart_pending` a runtime-config restart.
+                    let segment_end_reason = {
+                        let inner = inner_wait.lock().unwrap();
+                        crate::backend::continuity_segments::kill_reason(
+                            inner.shutdown_generation == Some(my_generation_wait),
+                            inner.restart_pending,
+                        )
+                    };
                     tracing::info!(
                         block_id = %block_id_wait,
                         force = graceful_deadline.is_none(),
@@ -1744,6 +1768,11 @@ impl PersistentSubprocessController {
                         let _ = child.kill().await;
                         inner_wait.lock().unwrap().stop_exit = Some((my_generation_wait, true));
                     }
+                    super::segments::record_segment_end(
+                        &segment_wait,
+                        segment_end_reason,
+                        global_output_zone_wait.as_deref(),
+                    );
 
                     // reagentx P1 on PR #2371: mirror the child.wait() arm's
                     // bounded await+abort of both reader tasks (above,
