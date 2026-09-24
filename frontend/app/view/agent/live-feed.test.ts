@@ -144,6 +144,10 @@ describe("settings and providers", () => {
         expect(liveFeedSupported("codex-json")).toBe(true);
         expect(liveFeedSupported("kimi-stream-json")).toBe(true);
         expect(liveFeedSupported("acp")).toBe(false);
+        // The Codex app-server controller keeps codex-json but never writes
+        // the user's message to the transcript.
+        expect(liveFeedSupported("codex-json", "app-server")).toBe(false);
+        expect(liveFeedSupported("codex-json", "subprocess")).toBe(true);
         expect(liveFeedSupported(undefined)).toBe(false);
     });
 });
