@@ -170,9 +170,11 @@ fn accept_state(raw: &str) -> Option<String> {
     if !text.contains(REQUIRED_HEADING) {
         return None;
     }
-    let text = without_trailing_chatter(text);
-    let capped: String = text.chars().take(STATE_MAX_CHARS).collect();
-    Some(defuse_delimiters(&redact_secrets(&capped)))
+    // Redact before capping: a cut through a secret could leave a fragment
+    // too short for `redact_secrets` to recognize (ReAgent P1 on #3673).
+    let redacted = redact_secrets(without_trailing_chatter(text));
+    let capped: String = redacted.chars().take(STATE_MAX_CHARS).collect();
+    Some(defuse_delimiters(&capped))
 }
 
 /// `text` without a closing paragraph addressed to the reader. Despite the
@@ -504,6 +506,17 @@ mod tests {
     fn secrets_in_the_turns_never_reach_the_summarizer() {
         let p = summarizer_prompt(None, &[Turn::User("token ghp_abcdefghijklmnopqrstuvwxyz0123".into())]);
         assert!(!p.contains("ghp_abcdef"));
+    }
+
+    /// ReAgent P1 on #3673: redact, then cap, so the cap can't leave a
+    /// fragment of a secret too short to recognize.
+    #[test]
+    fn a_secret_straddling_the_state_cap_is_still_redacted() {
+        let lead = format!("## Current goal\n{REQUIRED_HEADING}\n");
+        let pad = "z".repeat(STATE_MAX_CHARS - lead.chars().count() - 6);
+        let raw = format!("{lead}{pad}ghp_abcdefghijklmnopqrstuvwxyz0123 tail");
+        let s = accept_state(&raw).unwrap();
+        assert!(!s.contains("ghp_"), "a fragment of the token leaked: {}", &s[s.len() - 40..]);
     }
 
     #[test]

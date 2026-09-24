@@ -145,12 +145,19 @@ pub(crate) fn is_relayed(text: &str) -> bool {
     text.starts_with("[JEKT:")
 }
 
+/// `text` redacted, then cut to `TURN_CAP_CHARS`. In that order: a cut
+/// through a secret could leave a fragment too short for `redact_secrets` to
+/// recognize (ReAgent P1 on #3673).
+fn capped_turn_text(text: &str) -> String {
+    cap(&redact_secrets(text), TURN_CAP_CHARS)
+}
+
 pub(crate) fn render(turn: &Turn) -> String {
     match turn {
-        Turn::User(t) if is_relayed(t) => format!("[agent message, historical]\n{}", cap(t, TURN_CAP_CHARS)),
-        Turn::User(t) => format!("[user]\n{}", cap(t, TURN_CAP_CHARS)),
+        Turn::User(t) if is_relayed(t) => format!("[agent message, historical]\n{}", capped_turn_text(t)),
+        Turn::User(t) => format!("[user]\n{}", capped_turn_text(t)),
         Turn::Assistant { text, tools } => {
-            let body = if text.is_empty() { "(no reply text)".to_string() } else { cap(text, TURN_CAP_CHARS) };
+            let body = if text.is_empty() { "(no reply text)".to_string() } else { capped_turn_text(text) };
             if tools.is_empty() {
                 format!("[you]\n{body}")
             } else {
@@ -233,7 +240,7 @@ pub(crate) fn build_continuation_packet(
          ## Last request from the user ({status})\n{}\n\n\
          ## Recent exchange, oldest first{omitted_note}\n\n{}\n\
          {PACKET_CLOSE}",
-        defuse_delimiters(&cap(last_request, TURN_CAP_CHARS)),
+        defuse_delimiters(&capped_turn_text(last_request)),
         defuse_delimiters(&kept.join("\n\n")),
     );
     Some(redact_secrets(&packet))
@@ -519,6 +526,18 @@ mod tests {
             let token = format!("{prefix}1234567890-abcdefghijklmnop");
             assert_eq!(redact_secrets(&format!("t {token} t")), "t [redacted secret] t", "{prefix}");
         }
+    }
+
+    /// ReAgent P1 on #3673: `cap` keeps the first two thirds of a long turn.
+    /// A secret straddling that cut must not survive as a fragment too short
+    /// to recognize, so redaction runs before the cut.
+    #[test]
+    fn a_secret_straddling_a_turn_cut_is_still_redacted() {
+        let head = TURN_CAP_CHARS * 2 / 3 - 6;
+        let long = format!("{}ghp_abcdefghijklmnopqrstuvwxyz0123{}", "a".repeat(head), "b".repeat(5_000));
+        let p = packet(&[user(&long), say("ok")]);
+        assert!(!p.contains("ghp_ab"), "a fragment of the token leaked");
+        assert!(p.contains("[redacted"), "{}", &p[..200]);
     }
 
     #[test]
