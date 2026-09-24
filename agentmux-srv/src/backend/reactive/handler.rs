@@ -906,6 +906,18 @@ impl Handler {
     ) -> InjectionResponse {
         let now = now_unix_millis();
 
+        // Only the trusted production key makes a verified reagent sender.
+        // The verifiers already apply this; enforce it here too for any
+        // caller that sets `reagent_verified` directly.
+        if req.reagent_verified == Some(true)
+            && !req
+                .reagent_key_id
+                .as_deref()
+                .is_some_and(agentmux_common::jekt_sign::is_reagent_trusted_signing_key)
+        {
+            req.reagent_verified = Some(false);
+        }
+
         // Generate request ID if missing
         if req.request_id.is_none() || req.request_id.as_deref() == Some("") {
             req.request_id = Some(uuid::Uuid::new_v4().to_string());
@@ -1162,17 +1174,13 @@ impl Handler {
         //      key (`reagent_verified == Some(true)`) → NOT forced to
         //      SENSITIVE by delivery tier alone. As of the 2026-08-15
         //      narrowing this is NOT a distinct check anymore — it's simply
-        //      rule 1 not matching (`Some(true)` isn't `Some(false)`), so a
-        //      message verified under the trusted `reagent-v1` key and one
-        //      verified only under the known-exposed `reagent-v1-dev`
-        //      placeholder now get IDENTICAL tier treatment: neither is
-        //      forced sensitive. `is_reagent_trusted_signing_key`
-        //      (agentmux-common::jekt_sign) is NOT consulted here at all —
-        //      unlike before this narrowing, key trust no longer gates
-        //      TIER in any way; it still exists for other verification
-        //      bookkeeping, just not this decision. Rules 3/4 below still
-        //      apply on top: a verified reagent message that declares
-        //      SENSITIVE or matches the keyword scan still escalates.
+        //      rule 1 not matching (`Some(true)` isn't `Some(false)`).
+        //      `Some(true)` only ever means the trusted `reagent-v1` key:
+        //      the verifiers use `verify_trusted_reagent_jekt`, and
+        //      `deliver_audited` downgrades any other key to `Some(false)`.
+        //      Rules 3/4 below still apply on top: a verified reagent
+        //      message that declares SENSITIVE or matches the keyword scan
+        //      still escalates.
         //   2. Host delivery, sender identity checkable but signature missing
         //      or wrong → always SENSITIVE (host-tier senders can now be
         //      verified when the claimed source_agent has a signing key —
@@ -1195,9 +1203,10 @@ impl Handler {
         // forge it. `reagent_verified` is WAN-only by construction
         // (`sync_agent_reactive`/`verify_reagent_signature` never compute it
         // off the WAN tier, so it's always `None` for LAN — reagent is a
-        // WAN-only service sender, this never applied to LAN) — absence of a
-        // signature attempt (`None`), or a signature that verified but only
-        // under the known-exposed dev key, is NOT this case; both fall
+        // WAN-only service sender, this never applied to LAN). A signature
+        // that verified only under a key other than the trusted production
+        // key IS this case (it arrives as `Some(false)`, see
+        // `deliver_audited`); absence of a signature attempt (`None`) falls
         // through to rule 5 like any other self-declared sender.
         let is_network_tier_sig_invalid = is_network_tier && req.reagent_verified == Some(false);
         // A lan_sig that was PRESENT, whose claimed sender's public key WAS
