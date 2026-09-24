@@ -67,8 +67,15 @@ senders, idempotency — are folded in too).*
    name (a `candidate_seen` flag set wherever a tier finds one). A target
    that is alive elsewhere but refused — rate limit, queue full, a restarting
    peer — keeps today's error rather than being held here and never replayed
-   there. A sender signed in to muxbus never reaches this point for an
+   there. A same-host entry whose process is dead is **not** a candidate —
+   every entry after an srv restart is (the port changes), and counting it
+   refused the first message after a restart instead of holding it (review
+   of #3632). A sender signed in to muxbus never reaches this point for an
    absent name: the cloud relay takes it as QUEUED first (recorded).
+5. **Not running under another name:** if the resolved UID has a live
+   registration (the handler binds only the display and stable names, so
+   another of the row's names can miss it), the message is delivered by
+   UID at once instead of held.
 4. **Not a periodic sender:** `source_agent == "cron"` is never held — a job
    fires again on its schedule, and a stale backlog of fires would each start
    a turn.
@@ -96,6 +103,7 @@ instance (channel) within 24 h.`
 | `target_agent` TEXT | as addressed, for display |
 | `source_agent`, `audit_source_uid` TEXT | the sender's claimed name and attributed UID (M4c-2d) |
 | `message`, `priority`, `jekt_tier`, `delivery_tier` | the request as delivered |
+| `is_transcript_request`, `transcript_request_escalate_forced` INTEGER | the accept-time transcript-request fields, restored as they were — the replay addresses the target by UID, and the slug-keyed recompute would lose a forced escalation (review of #3632) |
 | `sig_verified`, `reagent_verified`, `lan_verified`, `channel_verified` INTEGER NULL | the **verdicts** computed at accept time, as explicit columns: on `InjectionRequest` they are `skip_deserializing` (so a client can never set them), so they would not survive a JSON round-trip — a forged message would come back as merely unsigned |
 | `sent_at_ms`, `expires_at_ms` INTEGER | accept time; `+ 24 h` |
 | `attempts`, `last_error` | replay bookkeeping |
@@ -119,13 +127,17 @@ as a sweep, and once at srv start:
    attempt counted.
 3. Present → rebuild the request from the columns: set the stored verdicts
    directly (never re-verify — a signature is valid for 5 minutes), restore
-   `audit_source_uid`, recompute the transcript-request fields
-   (`resolve_transcript_request_tier_fields`, as the cloud subscriber does),
-   set `held_sent_at_ms`, and deliver through the handler's local path with
-   audit outcome `held_delivered`. At most 8 deliveries per pass.
-   - success → delete the row (`jekt.held_delivered`);
-   - rate limit, queue full, spawn in flight → leave it, **no attempt
-     counted** (transient);
+   `audit_source_uid` and the transcript-request fields, set
+   `held_sent_at_ms`, and deliver through the handler's local path with
+   audit outcome `held_delivered`. At most 8 deliveries or failures per
+   pass; a deferral ends that target's turn and spends no budget, so one
+   stuck target cannot starve the others (targets are taken longest-waiting
+   first).
+   - success → delete the row (`jekt.held_delivered`); a crash between
+     delivery and delete delivers it again — **at-least-once**;
+   - still absent, rate limit, queue full, or the agent starting,
+     restarting or stopping ("… try again shortly") → leave it, **no
+     attempt counted** (transient); a store fault never drops a row;
    - any other error → `attempts += 1`; after 20 the row is dropped
      (`jekt.held_failed`).
 
@@ -135,8 +147,10 @@ Delivered with exactly the verdicts it was accepted with — never raised, and
 a forged one stays forced-sensitive. The recipient must not mistake a late
 message for a current one: `InjectionRequest` gains a server-set
 `held_sent_at_ms` (`#[serde(skip)]` both ways), and the delivered header
-renders `TS=` as the **original** send time plus `DELIVERY=held` and
-`HELD_FOR=<duration>`. The audit entry's outcome is `held_delivered`.
+renders `TS=` as the **original** send time plus `HELD_FOR=<seconds>`
+(`DELIVERY=` keeps the tier it was accepted on, `host`). The audit entry's
+outcome is `held_delivered`. The header's `TO=` is the target's UID (the
+replay addresses it by UID).
 
 ### 2.5 Residuals, recorded
 

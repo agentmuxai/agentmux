@@ -1118,6 +1118,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             reagent_verified INTEGER,
             lan_verified     INTEGER,
             channel_verified INTEGER,
+            is_transcript_request              INTEGER NOT NULL DEFAULT 0,
+            transcript_request_escalate_forced INTEGER NOT NULL DEFAULT 0,
             sent_at_ms       INTEGER NOT NULL,
             expires_at_ms    INTEGER NOT NULL,
             attempts         INTEGER NOT NULL DEFAULT 0,

@@ -1098,9 +1098,11 @@ pub(crate) async fn deliver(
     let mut same_host_req = forwarded_req.clone();
     same_host_req.delivery_tier = Some(same_host_tier.to_string());
 
-    // Whether any forwarding tier found an entry for the target. A target
-    // alive elsewhere that refused is not "absent" and is never held here
-    // (durable jekt spec §2.1, condition 3).
+    // Whether any forwarding tier found the target alive elsewhere. A target
+    // that is alive but refused is not "absent" and is never held here
+    // (durable jekt spec §2.1, condition 3); a same-host entry whose process
+    // is dead — every entry after an srv restart, which changes its port —
+    // is not a candidate, so the first message after a restart is held.
     let mut candidate_seen = false;
     if is_not_found {
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
@@ -1108,7 +1110,6 @@ pub(crate) async fn deliver(
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url {
-                candidate_seen = true;
                 match forward_inject_to_peer(
                     &state,
                     &req,
@@ -1160,6 +1161,9 @@ pub(crate) async fn deliver(
                             );
                             agent_registry::remove(&data_dir, &req.target_agent);
                         } else {
+                            // Alive but did not take it: the target exists
+                            // elsewhere, so it is not held here.
+                            candidate_seen = true;
                             tracing::warn!(
                                 target = %req.target_agent,
                                 pid = entry.pid,
@@ -1167,8 +1171,9 @@ pub(crate) async fn deliver(
                             );
                         }
                     }
-                    // Says nothing about this entry's liveness — leave it be.
-                    ForwardOutcome::Inconclusive => {}
+                    // Says nothing about this entry's liveness — leave it be,
+                    // and do not treat the target as absent.
+                    ForwardOutcome::Inconclusive => candidate_seen = true,
                 }
             }
         }
@@ -1193,7 +1198,6 @@ pub(crate) async fn deliver(
                 if !is_loopback || entry.local_url == state.local_web_url {
                     continue;
                 }
-                candidate_seen = true;
 
                 match forward_inject_to_peer(
                     &state,
@@ -1235,6 +1239,7 @@ pub(crate) async fn deliver(
                             );
                             agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
                         } else {
+                            candidate_seen = true;
                             tracing::warn!(
                                 target = %req.target_agent,
                                 channel = %entry.channel,
@@ -1243,7 +1248,7 @@ pub(crate) async fn deliver(
                             );
                         }
                     }
-                    ForwardOutcome::Inconclusive => {}
+                    ForwardOutcome::Inconclusive => candidate_seen = true,
                 }
             }
         }
@@ -1359,6 +1364,8 @@ async fn hold_for_absent_target(
         reagent_verified: req.reagent_verified,
         lan_verified: req.lan_verified,
         channel_verified: req.channel_verified,
+        is_transcript_request: req.is_transcript_request,
+        transcript_request_escalate_forced: req.transcript_request_escalate_forced,
         sent_at_ms: now,
         expires_at_ms: now + HELD_TTL_MS,
         attempts: 0,
@@ -1375,11 +1382,24 @@ async fn hold_for_absent_target(
             },
         }?;
         held.target_uid = uid;
-        Some(mstore.jekt_held_insert(&held))
+        Some(held)
     })
     .await
     .ok()
     .flatten()?;
+    // Registered under another of its names (the handler binds only the
+    // display and stable ones): it is running, so deliver by UID now rather
+    // than tell the sender it is not.
+    if state.reactive_handler.has_uid_registration(&outcome.target_uid) {
+        let mut by_uid = req.clone();
+        by_uid.target_agent = outcome.target_uid.clone();
+        let resp = state.reactive_handler.inject_message(by_uid);
+        return Some(serde_json::to_value(&resp).unwrap_or_default());
+    }
+    let mstore = state.mstore.clone();
+    let outcome = tokio::task::spawn_blocking(move || mstore.jekt_held_insert(&outcome))
+        .await
+        .ok()?;
     let target = &req.target_agent;
     match outcome {
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
