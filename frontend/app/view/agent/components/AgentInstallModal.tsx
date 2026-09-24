@@ -2,26 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentInstallModalPanel — modal that runs an agent's install recipe
- * and shows live output in an xterm.js terminal. Opens when the user
- * picks an agent whose CLI isn't already in the per-version cache.
- * Sibling to `AgentLaunchModalPanel`.
+ * AgentInstallModalPanel — modal that runs an agent's install recipe.
+ * Opens when the user picks an agent whose CLI isn't already in the
+ * per-version cache. Sibling to `AgentLaunchModalPanel`.
  *
  * Phase α (SPEC_AGENT_INSTALL_STAGE_2026_05_17.md §11): single-step
  * recipe (just `npm install <package>`) streamed line-by-line via the
  * `install.start` RPC. Cancel kills the install + removes the partial
  * dir.
  *
- * UX: modal opens in `idle` state with a "Click to install" CTA at the
- * bottom-right. Clicking starts the install; the CTA goes away and the
- * xterm renders npm's output (ANSI colors preserved).
+ * Two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4, phase 1):
+ * the default view is a short list of plain-language steps derived from
+ * npm's output by `NpmStepTracker`; the raw console sits in a collapsed
+ * "Details" panel (xterm.js, ANSI colours preserved) that opens by itself
+ * on failure at the first error line.
  */
 
-import { Show, createEffect, createResource, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createResource, createSignal, onCleanup, type JSX } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 import { Button } from "@/element/button";
+import { InstallSteps } from "@/element/install/InstallSteps";
+import { NpmStepTracker, type InstallFailure, type InstallStep, type LineTone } from "@/element/install/npm-steps";
 import { ErrorBanner } from "@/app/errors/ErrorBanner";
 import { atoms, getSettingsKeyAtom } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -54,6 +57,38 @@ interface AgentInstallModalPanelProps {
     onInstalled: (continueToLaunch: boolean) => void;
 }
 
+// Frontend view cap (spec §4.2). The backend keeps the complete log.
+const MAX_LOG_LINES = 20_000;
+const TRIM_CHUNK = 1_000;
+
+// ANSI colour per tone. Only real errors and warnings are coloured —
+// npm writes all of its verbose chatter to stderr, so painting stderr
+// red made a healthy install look like a wall of failures (spec §1.1).
+const TONE_SGR: Record<LineTone, string> = {
+    normal: "",
+    command: "\x1b[90m",
+    warning: "\x1b[33m",
+    error: "\x1b[31m",
+};
+
+// The user's open/closed choice for Details, remembered for the session
+// (spec §4.2). Collapsed by default.
+let detailsOpenPref = false;
+
+interface LogLine {
+    text: string;
+    tone: LineTone;
+}
+
+/** An `install_chunk` event payload: a log line, or the final `done`. */
+interface InstallChunk {
+    line?: string;
+    stream?: "stdout" | "stderr";
+    op?: "done";
+    ok?: boolean;
+    error?: unknown;
+}
+
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
     // Resolve through the agent's bound bundle rather than the possibly-
     // drifted `agent.provider` column directly — #2594, same "gate vs.
@@ -81,19 +116,35 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     // `AgentMuxError` object the backend now emits for typed errors.
     // `<ErrorBanner>` + `translateError()` handle both shapes.
     const [error, setError] = createSignal<unknown>(null);
+    const [failure, setFailure] = createSignal<InstallFailure | null>(null);
     const [sessionId, setSessionId] = createSignal<string | null>(null);
     const [elapsedMs, setElapsedMs] = createSignal(0);
+    const [detailsOpen, setDetailsOpen] = createSignal(detailsOpenPref);
+
+    // Layer 1. Before the first run the plan is shown with every step
+    // pending, so the user sees what will happen before clicking.
+    let tracker: NpmStepTracker | null = null;
+    const [runSteps, setRunSteps] = createSignal<InstallStep[] | null>(null);
+    const steps = (): InstallStep[] => runSteps() ?? new NpmStepTracker(displayName()).snapshot();
+    const syncSteps = () => {
+        if (tracker) setRunSteps(tracker.snapshot());
+    };
+
+    // Layer 2's source of truth. The terminal is created lazily the
+    // first time Details opens and is then fed from here, so a
+    // collapsed Details costs no xterm rendering and a terminal opened
+    // late still shows everything.
+    let log: LogLine[] = [];
+    let trimmedLines = 0;
+    let fedLines = 0;
 
     let unsub: (() => void) | null = null;
     let termRef: HTMLDivElement | undefined;
+    let detailsRef: HTMLDetailsElement | undefined;
     let terminal: Terminal | null = null;
     let fitAddon: FitAddon | null = null;
+    let terminalFitted = false;
     let resizeObserver: ResizeObserver | null = null;
-    // Details wrapper around the terminal (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_
-    // AUTOSCROLL_2026_09_10.md §5) — defaults open (see the JSX below for
-    // why this differs from SystemToolInstallInline's default-closed
-    // panel), but still individually collapsible.
-    let detailsRef: HTMLDetailsElement | undefined;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
     // Hoisted so onCleanup can cancel the pending copy-on-select
@@ -109,13 +160,50 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     // Codex P2 on PR #895.
     let notifiedDone = false;
 
-    const writeTerm = (line: string, stream: "stdout" | "stderr") => {
-        if (!terminal) return;
-        if (stream === "stderr") {
-            terminal.write(`\x1b[31m${line}\x1b[0m\r\n`);
-        } else {
-            terminal.write(`${line}\r\n`);
+    const pumpTerminal = () => {
+        if (!terminal || !terminalFitted || fedLines >= log.length) return;
+        let chunk = "";
+        for (let i = fedLines; i < log.length; i++) {
+            const { text, tone } = log[i];
+            const sgr = TONE_SGR[tone];
+            chunk += sgr ? `${sgr}${text}\x1b[0m\r\n` : `${text}\r\n`;
         }
+        fedLines = log.length;
+        terminal.write(chunk);
+    };
+
+    const appendLog = (text: string, tone: LineTone) => {
+        log.push({ text, tone });
+        if (log.length > MAX_LOG_LINES) {
+            log = log.slice(TRIM_CHUNK);
+            trimmedLines += TRIM_CHUNK;
+            fedLines = Math.max(0, fedLines - TRIM_CHUNK);
+        }
+        pumpTerminal();
+    };
+
+    // Scroll Details so the first error line sits near the top. Waits
+    // for xterm to finish parsing pending writes, then searches the
+    // buffer for the line's text — row indices change whenever the
+    // terminal reflows, so a remembered row would drift.
+    const scrollToFirstError = () => {
+        const index = failure()?.firstErrorLine;
+        if (!terminal || index == null) return;
+        const target = log[index - trimmedLines]?.text;
+        if (!target) return;
+        const needle = target.slice(0, 60);
+        terminal.write("", () => {
+            const buf = terminal?.buffer?.active;
+            if (!buf) return;
+            for (let i = 0; i < buf.length; i++) {
+                const row = buf.getLine(i);
+                if (!row || row.isWrapped) continue;
+                if (row.translateToString(true).startsWith(needle)) {
+                    terminal?.scrollToLine(Math.max(0, i - 2));
+                    return;
+                }
+            }
+        });
     };
 
     const startInstall = async () => {
@@ -145,13 +233,22 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             clearInterval(tickHandle);
             tickHandle = null;
         }
-        if (terminal) {
-            terminal.clear();
-        }
+        log = [];
+        trimmedLines = 0;
+        fedLines = 0;
+        terminal?.clear();
+        tracker = new NpmStepTracker(getCliCatalogEntry(prov.id)?.displayName ?? displayName());
+        tracker.start();
+        syncSteps();
+        setFailure(null);
         setPhase("installing");
         setError(null);
         startedAt = Date.now();
-        tickHandle = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
+        tickHandle = setInterval(() => {
+            setElapsedMs(Date.now() - startedAt);
+            tracker?.tick(Date.now());
+            syncSteps();
+        }, 250);
         try {
             const r = await RpcApi.InstallStartCommand(TabRpcClient, {
                 providerId: prov.id,
@@ -171,30 +268,49 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             unsub = muxEventSubscribe({
                 eventType: "install_chunk",
                 scope: `install:${r.sessionId}`,
-                handler: (event: any) => {
+                handler: (event: { data?: InstallChunk }) => {
                     const data = event?.data;
                     if (!data || typeof data !== "object") return;
                     if (typeof data.line === "string") {
-                        writeTerm(data.line, data.stream === "stderr" ? "stderr" : "stdout");
+                        const tone = tracker?.line(data.line, Date.now()) ?? "normal";
+                        appendLog(data.line, tone);
+                        syncSteps();
                     } else if (data.op === "done") {
+                        if (tickHandle != null) {
+                            clearInterval(tickHandle);
+                            tickHandle = null;
+                        }
                         if (data.ok) {
+                            tracker?.succeed();
+                            syncSteps();
                             // Don't auto-chain — the user clicks
-                            // "Continue to Launch" in the footer so
-                            // they have a moment to read the install
-                            // log and confirm the operation
-                            // succeeded.
+                            // "Continue to Launch" in the footer.
                             setPhase("done");
                         } else {
-                            setError(data.error ?? "install failed");
-                            setPhase("failed");
+                            fail(data.error ?? "install failed");
                         }
                     }
                 },
             });
         } catch (e) {
-            setError((e as Error)?.message ?? String(e));
-            setPhase("failed");
+            fail((e as Error)?.message ?? String(e));
         }
+    };
+
+    const fail = (err: unknown) => {
+        if (tickHandle != null) {
+            clearInterval(tickHandle);
+            tickHandle = null;
+        }
+        setError(err);
+        if (tracker) {
+            setFailure(tracker.fail(err));
+            syncSteps();
+        }
+        setPhase("failed");
+        // Spec §7: Details opens by itself on failure, at the first error.
+        // A failure doesn't change the remembered preference.
+        setDetailsOpen(true);
     };
 
     const cancel = async () => {
@@ -209,20 +325,26 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         props.onCancel();
     };
 
-    onMount(() => {
-        // Lazy-create the terminal so it doesn't render before the
-        // container has a layout size (FitAddon needs a real rect).
-        if (!termRef) return;
+    const tryFit = () => {
+        try {
+            fitAddon?.fit();
+            if (terminal && terminal.cols > 2) {
+                terminalFitted = true;
+                pumpTerminal();
+            }
+        } catch {
+            /* container still 0×0 — wait for next resize */
+        }
+    };
+
+    const ensureTerminal = () => {
+        if (terminal || !termRef) return;
         // Resolve the project's monospace font at runtime — xterm.js
         // doesn't parse CSS variables, so passing a literal `var(...)`
         // string would silently fall back to xterm's default (Courier),
         // which renders wider than the rest of the app's terminals.
         const cs = getComputedStyle(termRef);
-        // Reads --font-mono, the canonical family token (PR #3252). This
-        // previously read --termfontfamily, which was never defined anywhere
-        // in the codebase — so this lookup always returned "" and silently
-        // used the hardcoded fallback instead of the app's actual font.
-        // The fallback is kept as a belt, but it should now be unreachable.
+        // Reads --font-mono, the canonical family token (PR #3252).
         const termFont = cs.getPropertyValue("--font-mono").trim()
             || `"Hack", Consolas, Menlo, monospace`;
         // Bind to the same theme source the regular term pane uses
@@ -230,16 +352,11 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         const [initialTheme] = computeTermThemeFromSettings(atoms.fullConfigAtom());
         // Layer D1 of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7:
         // construct at the smallest viable size (2×2) instead of the
-        // xterm.js default of 80×24. In a narrow agent pane, default
-        // cols=80 paints a ~600px-wide canvas BEFORE FitAddon's first
-        // ResizeObserver tick can fire — the modal-panel locks in to
-        // that width, `.modal-panel { overflow: auto }` reserves a
-        // horizontal scrollbar, and the user sees an unshrunk modal
-        // even though the parent CSS has `min-width: 0`. Starting at
-        // 2×2 means the initial paint is tiny; the synchronous
-        // `fitAddon.fit()` after `terminal.open(termRef)` then sizes
-        // to the actual container width on the same frame.
-        terminal = new Terminal({
+        // xterm.js default of 80×24, so the first paint can't widen the
+        // panel before FitAddon sizes it. Nothing is written until the
+        // first successful fit (`terminalFitted`), so no line is ever
+        // wrapped into 2-column rows and pushed out of scrollback.
+        const term = new Terminal({
             cursorBlink: false,
             scrollback: 5000,
             fontSize: 12,
@@ -247,44 +364,32 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
             theme: initialTheme,
             convertEol: false,
             scrollOnUserInput: false,
+            disableStdin: true,
             cols: 2,
             rows: 2,
         });
-        // Live theme swap — mirrors TermThemeUpdater so settings changes
-        // while the modal is open take effect without remount.
-        createEffect(() => {
-            const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
-            if (terminal) terminal.options.theme = t;
-        });
+        terminal = term;
         // Clipboard wiring — phase α of SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
-        // Mirrors the regular term pane's three paths (copy-on-select,
-        // Ctrl+Shift+C, context menu Copy) so users can pull npm output
-        // out of the install log.
+        // Mirrors the regular term pane's copy-on-select and Ctrl+Shift+C.
         const copyOnSelect = getSettingsKeyAtom("term:copyonselect");
-        // Debounce matches termwrap.ts:205 — fires once per drag burst
-        // instead of once per tick. `selectionDebounce` is hoisted to
-        // component scope so onCleanup can cancel it.
-        terminal.onSelectionChange(() => {
+        // Debounce matches termwrap.ts:205 — fires once per drag burst.
+        term.onSelectionChange(() => {
             if (!copyOnSelect()) return;
             if (selectionDebounce != null) clearTimeout(selectionDebounce);
             selectionDebounce = setTimeout(() => {
                 const sel = terminal?.getSelection() ?? "";
                 if (sel.length > 0) {
-                    clipboardWriteText(sel).catch((e) =>
-                        console.log("clipboard write failed", e),
-                    );
+                    clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
                 }
             }, 50);
         });
-        terminal.attachCustomKeyEventHandler((ev) => {
+        term.attachCustomKeyEventHandler((ev) => {
             // Ctrl+Shift+C → manual copy. Return false stops xterm from
             // also routing the keystroke as input.
             if (ev.type === "keydown" && ev.ctrlKey && ev.shiftKey && ev.key === "C") {
                 const sel = terminal?.getSelection() ?? "";
                 if (sel.length > 0) {
-                    clipboardWriteText(sel).catch((e) =>
-                        console.log("clipboard write failed", e),
-                    );
+                    clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
                 }
                 return false;
             }
@@ -292,25 +397,15 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         });
 
         fitAddon = new FitAddon();
-        terminal.loadAddon(fitAddon);
-        terminal.open(termRef);
-        const tryFit = () => {
-            try {
-                fitAddon?.fit();
-            } catch {
-                /* container still 0×0 — wait for next resize */
-            }
-        };
-        // Force-load the term font BEFORE the first fit so cell-width
+        term.loadAddon(fitAddon);
+        term.open(termRef);
+        // Force-load the term font BEFORE refitting so cell-width
         // measurement uses real glyph metrics, not fallback (Courier).
         // Same race as termwrap.ts — see
         // docs/archive/terminal-jumbled-startup-investigation.md "Follow-up".
-        // fonts.load() actively requests the face and resolves when ready;
-        // fonts.ready alone is vacuous because the WOFF/WOFF2 isn't
-        // requested until something measures a glyph.
         const FIT_FONT_TIMEOUT_MS = 1000;
         const fontSpec = (variant: string) => `${variant}12px ${termFont}`;
-        const fontsReady = (async () => {
+        void (async () => {
             try {
                 await Promise.race([
                     Promise.all([
@@ -318,38 +413,34 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         document.fonts?.load(fontSpec("bold ")) ?? Promise.resolve(),
                         document.fonts?.load(fontSpec("italic ")) ?? Promise.resolve(),
                     ]),
-                    new Promise<void>((resolve) =>
-                        setTimeout(resolve, FIT_FONT_TIMEOUT_MS),
-                    ),
+                    new Promise<void>((resolve) => setTimeout(resolve, FIT_FONT_TIMEOUT_MS)),
                 ]);
-            } catch (_) { /* font API unavailable — fall through */ }
+            } catch { /* font API unavailable — fall through */ }
+            if (!disposed) tryFit();
         })();
-        void fontsReady.then(() => {
-            if (disposed) return;
-            tryFit();
-        });
         tryFit(); // best-effort initial fit (often fallback metrics on cold cache)
-        // Refit on container resize. The modal may animate in from
-        // 0×0; without an observer the terminal stays at the default
-        // 80×24 indefinitely.
         resizeObserver = new ResizeObserver(() => tryFit());
         resizeObserver.observe(termRef);
-        terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
+    };
 
-        // Re-fit when the Details panel around the terminal opens. A closed
-        // <details> doesn't lay out its children, so FitAddon can't size
-        // correctly until the container has real dimensions — the same
-        // "no layout while hidden" problem SystemToolInstallInline.tsx's
-        // scroll-sync solves for scrollTop, hitting xterm's sizing here
-        // instead. The existing ResizeObserver above may or may not fire
-        // reliably on a <details> open transition depending on how the
-        // browser handles that layout change, so don't rely on it alone.
-        const detailsEl = detailsRef;
-        if (detailsEl) {
-            const onToggle = () => { if (detailsEl.open) tryFit(); };
-            detailsEl.addEventListener("toggle", onToggle);
-            onCleanup(() => detailsEl.removeEventListener("toggle", onToggle));
-        }
+    // Live theme swap — mirrors TermThemeUpdater so settings changes
+    // while the modal is open take effect without remount.
+    createEffect(() => {
+        const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
+        if (terminal) terminal.options.theme = t;
+    });
+
+    // Opening Details creates or refits the terminal. A closed <details>
+    // doesn't lay out its children, so FitAddon can't size until it's
+    // open. Runs after the `open` attribute is applied to the element.
+    createEffect(() => {
+        if (!detailsOpen()) return;
+        queueMicrotask(() => {
+            if (disposed || !detailsRef?.open) return;
+            ensureTerminal();
+            tryFit();
+            if (phase() === "failed") scrollToFirstError();
+        });
     });
 
     onCleanup(() => {
@@ -396,14 +487,29 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         return `${mm}:${ss}`;
     };
 
+    const copyAll = () => {
+        const lines = log.map((l) => l.text);
+        if (trimmedLines > 0) lines.unshift(`[${trimmedLines} earlier lines trimmed]`);
+        const all = lines.join("\n");
+        if (all.length === 0) return;
+        void clipboardWriteText(all).catch((err) => console.log("clipboard write failed", err));
+    };
+
+    // Typed backend errors (e.g. disk full while creating the install
+    // directory) carry a friendlier message than the category line.
+    const typedError = () => {
+        const e = error();
+        return e != null && typeof e !== "string" ? e : null;
+    };
+
     return (
-        <>
+        <div class="agent-install-modal">
             <header class="modal-panel-header">
                 <h2 class="modal-panel-title">
                     <span class="agent-install-modal-icon" aria-hidden="true">
                         {catalog()?.icon ?? "📦"}
                     </span>
-                    Install {displayName()}
+                    {phase() === "done" ? `${displayName()} is installed` : `Install ${displayName()}`}
                     <Show when={version()}>
                         <span class="agent-install-modal-version">
                             {version() === "latest" ? "latest" : `v${version()}`}
@@ -411,101 +517,73 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     </Show>
                 </h2>
                 <p class="modal-panel-description">
-                    <Show when={phase() === "idle"}>not installed — click below to install</Show>
-                    <Show when={phase() === "installing"}>
-                        <span class="agent-install-modal-spinner">⏳</span> Installing… {elapsedLabel()}
-                    </Show>
-                    <Show when={phase() === "done"}>
-                        <span class="agent-install-modal-ok">✓</span> Installed
-                    </Show>
-                    <Show when={phase() === "failed"}>
-                        <span class="agent-install-modal-fail">✗</span> Failed
+                    <Show when={phase() === "failed"} fallback="Needs an internet connection.">
+                        The install didn't finish.
                     </Show>
                 </p>
-                <Show when={phase() === "installing"}>
-                    <div class="install-progress" aria-hidden="true">
-                        <div class="install-progress-bar" />
-                    </div>
-                </Show>
             </header>
             <div class="modal-panel-body agent-install-modal-body">
-                {/* Defaults OPEN, unlike SystemToolInstallInline's Details
-                    panel — this modal's entire visible body is the
-                    terminal, so collapsing it by default would leave a
-                    user who opened "Install X" staring at a bare progress
-                    bar with nothing else visible. Still individually
-                    collapsible if a user wants the compact view.
-                    SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5. */}
-                <details class="agent-install-modal-details" open ref={detailsRef}>
-                <summary>Details</summary>
-                <div
-                    class="agent-install-modal-term"
-                    ref={termRef}
-                    onContextMenu={(e) => {
-                        // Right-click → Copy (selection) / Copy All. Mirrors
-                        // the regular term pane's menu. Phase α of
-                        // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
-                        // preventDefault stops Chromium's native right-click
-                        // menu from firing alongside our custom one
-                        // (reagent P1 + codex P2 on PR #899).
-                        e.preventDefault();
-                        const sel = terminal?.getSelection() ?? "";
-                        // Lazy-walk the scrollback inside the click
-                        // handler so we don't pay for it on every
-                        // right-click + dismiss (reagent P2). For
-                        // long install logs this is non-trivial work.
-                        const collectAll = (): string => {
-                            // Reassemble logical lines from xterm's visual
-                            // rows. `isWrapped` on row N+1 means row N's
-                            // logical line continues onto N+1, so emit a
-                            // newline only when the next row starts a fresh
-                            // logical line. Codex P2 on PR #899 v3 — naive
-                            // join inserted artificial breaks into long
-                            // URLs / stack traces / npm command echoes.
-                            const buf = terminal?.buffer?.active;
-                            if (!buf) return "";
-                            let out = "";
-                            for (let i = 0; i < buf.length; i++) {
-                                const line = buf.getLine(i);
-                                if (!line) continue;
-                                out += line.translateToString(true);
-                                const next = buf.getLine(i + 1);
-                                if (!next?.isWrapped) out += "\n";
-                            }
-                            return out;
-                        };
-                        ContextMenuModel.showContextMenu(
-                            [
-                                {
-                                    label: "Copy",
-                                    enabled: sel.length > 0,
-                                    click: () => void clipboardWriteText(sel).catch((err) =>
-                                        console.log("clipboard write failed", err)),
-                                },
-                                {
-                                    label: "Copy All",
-                                    enabled: !!terminal?.buffer?.active?.length,
-                                    click: () => {
-                                        const all = collectAll();
-                                        if (all.length === 0) return;
-                                        void clipboardWriteText(all).catch((err) =>
-                                            console.log("clipboard write failed", err));
-                                    },
-                                },
-                            ],
-                            e,
-                        );
-                    }}
-                />
-                </details>
-                <Show when={error()}>
+                <InstallSteps steps={steps()} />
+                <Show when={phase() === "failed" && !failure() && typeof error() === "string"}>
+                    {/* Failed before a step plan existed (e.g. unknown provider). */}
                     <ErrorBanner error={error()} />
                 </Show>
+                <Show when={typedError()}>
+                    <ErrorBanner error={typedError()} />
+                </Show>
+                <details
+                    class="agent-install-modal-details"
+                    open={detailsOpen()}
+                    ref={detailsRef}
+                    onToggle={(e) => {
+                        const open = e.currentTarget.open;
+                        if (open === detailsOpen()) return;
+                        setDetailsOpen(open);
+                        detailsOpenPref = open;
+                    }}
+                >
+                    <summary>Details</summary>
+                    <div
+                        class="agent-install-modal-term"
+                        ref={termRef}
+                        onContextMenu={(e) => {
+                            // Right-click → Copy (selection) / Copy All. Mirrors
+                            // the regular term pane's menu. Phase α of
+                            // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
+                            // preventDefault stops Chromium's native right-click
+                            // menu from firing alongside our custom one
+                            // (reagent P1 + codex P2 on PR #899).
+                            e.preventDefault();
+                            const sel = terminal?.getSelection() ?? "";
+                            ContextMenuModel.showContextMenu(
+                                [
+                                    {
+                                        label: "Copy",
+                                        enabled: sel.length > 0,
+                                        click: () => void clipboardWriteText(sel).catch((err) =>
+                                            console.log("clipboard write failed", err)),
+                                    },
+                                    {
+                                        label: "Copy All",
+                                        enabled: log.length > 0,
+                                        click: copyAll,
+                                    },
+                                ],
+                                e,
+                            );
+                        }}
+                    />
+                </details>
             </div>
             <footer class="modal-panel-footer">
+                <Show when={phase() !== "idle"}>
+                    <span class="agent-install-modal-elapsed" aria-label="Elapsed time">
+                        {elapsedLabel()}
+                    </span>
+                </Show>
                 <Show when={phase() === "idle"}>
                     <Button onClick={() => props.onCancel()} data-modal-dismiss>Cancel</Button>
-                    <Button onClick={() => void startInstall()} className="green solid">
+                    <Button onClick={() => void startInstall()} className="green solid" data-modal-initial-focus>
                         Install now
                     </Button>
                 </Show>
@@ -525,7 +603,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                     </Button>
                 </Show>
             </footer>
-        </>
+        </div>
     );
 };
 

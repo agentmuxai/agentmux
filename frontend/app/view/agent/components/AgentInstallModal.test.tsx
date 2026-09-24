@@ -34,26 +34,53 @@ vi.mock("@/app/view/term/termutil", () => ({
 }));
 vi.mock("@/util/clipboard", () => ({ writeText: vi.fn() }));
 
-// Stub xterm.js entirely — this test exercises provider resolution, not
-// terminal rendering, and jsdom has no canvas/ResizeObserver support xterm
-// needs for real construction.
-vi.mock("@xterm/xterm", () => ({
-    Terminal: class {
+// Stub xterm.js entirely — jsdom has no canvas/ResizeObserver support xterm
+// needs for real construction. The fake records what was written (with its
+// ANSI colour codes) and where it was scrolled, so tests can check both.
+const { terminals, FakeTerminal } = vi.hoisted(() => {
+    const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+    const terminals: InstanceType<typeof FakeTerminal>[] = [];
+    class FakeTerminal {
         options: Record<string, unknown> = {};
+        cols = 80;
+        written: string[] = [];
+        scrolledTo: number | null = null;
+        constructor() {
+            terminals.push(this);
+        }
         onSelectionChange(): void {}
         attachCustomKeyEventHandler(): void {}
         loadAddon(): void {}
         open(): void {}
         writeln(): void {}
-        write(): void {}
+        write(data: string, cb?: () => void): void {
+            if (data) this.written.push(...data.split("\r\n").filter(Boolean));
+            cb?.();
+        }
+        scrollToLine(n: number): void {
+            this.scrolledTo = n;
+        }
         clear(): void {}
         dispose(): void {}
-        buffer = { active: { length: 0, getLine: () => null } };
+        get buffer() {
+            const rows = this.written;
+            return {
+                active: {
+                    length: rows.length,
+                    getLine: (i: number) =>
+                        i < rows.length
+                            ? { isWrapped: false, translateToString: () => rows[i].replace(ANSI_SGR, "") }
+                            : null,
+                },
+            };
+        }
         getSelection(): string {
             return "";
         }
-    },
-}));
+    }
+    return { terminals, FakeTerminal };
+});
+vi.mock("@xterm/xterm", () => ({ Terminal: FakeTerminal }));
 vi.mock("@xterm/addon-fit", () => ({
     FitAddon: class {
         fit(): void {}
@@ -89,11 +116,13 @@ class FakeResizeObserver {
 
 import { AgentInstallModalPanel } from "./AgentInstallModal";
 import { RpcApi } from "@/app/store/rpc-api";
+import { muxEventSubscribe } from "@/app/store/mps";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    terminals.length = 0;
 });
 
 const ts = () => 1_700_000_000_000;
@@ -177,55 +206,112 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
     });
 });
 
-describe("AgentInstallModal — progress bar + Details chrome (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5)", () => {
-    it("shows the progress bar only while phase is 'installing', matching the existing spinner's gating", async () => {
+/** Clicks "Install now" and returns a function that delivers install_chunk events. */
+async function startAndSubscribe(): Promise<(data: Record<string, unknown>) => void> {
+    fireEvent.click(await screen.findByText("Install now"));
+    await waitFor(() => expect(muxEventSubscribe).toHaveBeenCalled());
+    const { handler } = vi.mocked(muxEventSubscribe).mock.calls[0][0] as { handler: (e: unknown) => void };
+    return (data) => handler({ data: { sessionId: "sess-1", ...data } });
+}
+
+const stepStatus = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(".install-step")).map((li) => [
+        li.querySelector(".install-step-label")?.textContent,
+        li.dataset.status,
+    ]);
+
+describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md phase 1)", () => {
+    it("shows the plan with every step pending before the install starts", async () => {
         const agent = baseAgent({ provider: "codex", memory_id: "" });
         const { container } = render(() => (
             <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
         ));
-
         await screen.findByText("Install now");
-        expect(container.querySelector(".install-progress")).toBeNull();
-
-        fireEvent.click(screen.getByText("Install now"));
-        // `setPhase("installing")` runs synchronously in startInstall,
-        // before the InstallStartCommand RPC is even awaited — the same
-        // point the existing "⏳ Installing…" spinner already appears at.
-        await waitFor(() => expect(container.querySelector(".install-progress")).not.toBeNull());
-        expect(container.querySelector(".install-progress-bar")).not.toBeNull();
+        expect(stepStatus(container)).toEqual([
+            ["Check requirements", "pending"],
+            ["Download packages", "pending"],
+            ["Set up files", "pending"],
+            ["Run setup scripts", "pending"],
+            ["Check Codex is installed", "pending"],
+        ]);
     });
 
-    it("the Details panel wrapping the terminal defaults to open, unlike SystemToolInstallInline's default-closed panel", async () => {
+    it("marks the primary button as the modal's initial focus, so the console never gets it", async () => {
         const agent = baseAgent({ provider: "codex", memory_id: "" });
-        const { container } = render(() => (
-            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
-        ));
-
-        await screen.findByText("Install now");
-        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
-        expect(details).not.toBeNull();
-        expect(details.open).toBe(true);
+        render(() => <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />);
+        const btn = await screen.findByText("Install now");
+        expect(btn.closest("button")?.hasAttribute("data-modal-initial-focus")).toBe(true);
     });
 
-    it("re-fits the terminal when the Details panel is (re)opened", async () => {
-        const { FitAddon } = await import("@xterm/addon-fit");
-        const fitSpy = vi.spyOn(FitAddon.prototype, "fit");
+    it("keeps Details collapsed by default and doesn't create the terminal until it opens", async () => {
         const agent = baseAgent({ provider: "codex", memory_id: "" });
         const { container } = render(() => (
             <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
         ));
-        await screen.findByText("Install now");
+        const send = await startAndSubscribe();
+        send({ line: "npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms", stream: "stderr" });
 
         const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
-        const callsBeforeToggle = fitSpy.mock.calls.length;
+        expect(details.open).toBe(false);
+        expect(terminals).toHaveLength(0);
 
-        // Real click on <summary> flips `.open` before dispatching
-        // "toggle" — set it explicitly, same as a real collapse/reopen.
-        details.open = false;
-        fireEvent(details, new Event("toggle"));
+        // Opening it creates the terminal and replays everything so far.
         details.open = true;
         fireEvent(details, new Event("toggle"));
+        await waitFor(() => expect(terminals).toHaveLength(1));
+        await waitFor(() => expect(terminals[0].written.some((l) => l.includes("chalk-4.1.2.tgz"))).toBe(true));
 
-        expect(fitSpy.mock.calls.length).toBeGreaterThan(callsBeforeToggle);
+        // Close again so the remembered preference doesn't leak into later tests.
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+    });
+
+    it("advances the steps from npm output and does not paint healthy stderr red", async () => {
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+        const send = await startAndSubscribe();
+        await waitFor(() => expect(stepStatus(container)[0]).toEqual(["Check requirements", "active"]));
+
+        send({ line: "npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms", stream: "stderr" });
+        await waitFor(() => expect(stepStatus(container)[1]).toEqual(["Download packages", "active"]));
+        expect(container.querySelector(".install-step-hint")?.textContent).toBe("1 fetched");
+
+        send({ line: "added 1 package in 1s", stream: "stdout" });
+        send({ op: "done", ok: true });
+        await waitFor(() => expect(screen.getByText("Codex is installed")).toBeInTheDocument());
+        expect(stepStatus(container).map(([, st]) => st)).toEqual(["done", "done", "done", "skipped", "done"]);
+
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        details.open = true;
+        fireEvent(details, new Event("toggle"));
+        await waitFor(() => expect(terminals[0]?.written.length).toBeGreaterThan(0));
+        const fetchLine = terminals[0].written.find((l) => l.includes("chalk-4.1.2.tgz"))!;
+        expect(fetchLine.startsWith("\x1b[31m")).toBe(false);
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+    });
+
+    it("on failure explains it in the step list and opens Details at the first error", async () => {
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+        const send = await startAndSubscribe();
+        send({ line: "npm http fetch GET https://registry.npmjs.org/npm attempt 1 failed with ENOTFOUND", stream: "stderr" });
+        send({ line: "npm error code ENOTFOUND", stream: "stderr" });
+        send({ line: "npm error network This is a problem related to network connectivity.", stream: "stderr" });
+        send({ op: "done", ok: false, error: "npm exited Some(1)" });
+
+        await waitFor(() => expect(screen.getByText("Couldn't reach the package server.")).toBeInTheDocument());
+        expect(stepStatus(container)[1]).toEqual(["Download packages", "failed"]);
+        expect(screen.getByText("Retry")).toBeInTheDocument();
+
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        await waitFor(() => expect(details.open).toBe(true));
+        await waitFor(() => expect(terminals[0]?.scrolledTo).not.toBeNull());
+        const errorLine = terminals[0].written.find((l) => l.includes("npm error code ENOTFOUND"))!;
+        expect(errorLine.startsWith("\x1b[31m")).toBe(true);
     });
 });
