@@ -28,7 +28,7 @@
 | 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | #3700, #3701 | **merged**, on by default; kill switch `agent:livefeed`, K = `agent:livefeedturns` (§2.2d). Every pane but ACP and app-server Codex; turns holding an in-pane shell stay until the journal |
 | 7 | History tab follows the transcript (spec §6.9) | #3695 | merged |
 | 8 | Off-main-thread markdown (decision) | — | not started |
-| 9 | Default on | — | not started |
+| 9 | Remove the kill switches once each phase has soaked (the flags themselves are already on by default) | — | not started |
 | 10 | `content-visibility` experiment | — | not started |
 
 ## 2. Measurements
@@ -407,11 +407,10 @@ resolving the thunks inside the segment's root; regression tests in
 - **Renderer memory after large loads** (§3.8): a resident high-water mark
   from peak loads, not an agent-pane leak. Phase 6 (bounded live document)
   bounds the peak; the 8 h soak verifies it.
-- ~~**Next phase: 5 (stable node identity and durability)**, the prerequisite
-  for Phase 6 eviction~~ — superseded by spec §6.9: the live feed shipped
-  (#3700, #3701) on 5a alone; 5b, 5c and 5e are deferred until scroll-back in
-  the feed or History anchored to a turn is wanted. What remains is listed
-  under "Live feed follow-ups" below.
+- **Phases 5b, 5c, 5e are deferred** (spec §6.9): the live feed shipped
+  (#3700, #3701) on 5a alone. They come back only if scroll-back in the feed
+  or History anchored to a turn is wanted. What remains is listed under
+  "Live feed follow-ups" below.
 - ~~**The growing last message's DOM is replaced on every commit**~~ —
   looked at (§3.9): an in-place update was built and measured, no gain on
   current `main`; not shipped. The look found a real bug instead, fixed
