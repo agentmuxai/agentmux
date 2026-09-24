@@ -111,6 +111,14 @@ also turns a future pin drift into a failure. If someone publishes a new Windows
 runtime or bumps `WIN_TAG` without updating `windows-runtime-pin.sh`, CI fails
 at bundle time instead of shipping an unverified runtime.
 
+> **Correction (2026-09-24):** "Both pass unchanged" was wrong, as was local
+> `task dev` from the default `~/cef-build`. The guard hashed with
+> `sha256sum "$libcef"`. For any path containing a backslash, coreutils then
+> prefixes the hash with `\`, so the correct r2 runtime was refused. That covers
+> CI's `${{ github.workspace }}/…` (`D:\a\…`) and Task's `$HOME`
+> (`C:\Users\…`). Fixed by hashing from stdin, see
+> `SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md`.
+
 **Bumping the runtime** is therefore one change, in one PR: `windows-runtime-pin.sh`
 (tag, asset, libcef hash) plus `release.yml`'s `WIN_TAG`. The libcef hash comes
 from the release zip's `libcef.dll`, not from the zip's own `SHA256SUMS.txt`
