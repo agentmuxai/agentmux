@@ -55,3 +55,28 @@ describe("GeminiTranslator", () => {
         });
     });
 });
+
+describe("GeminiTranslator — user message echo", () => {
+    // The Gemini CLI echoes each prompt into the transcript as
+    // {"type":"message","role":"user"}. Live, the pane already shows the
+    // message optimistically, so the echo must not add a second copy; on
+    // replay (history restore) the echo is the only record of what the user
+    // said, and dropping it made every user message vanish on reload.
+    it("live: the echo produces nothing (the optimistic node is already shown)", () => {
+        const t = new GeminiTranslator();
+        expect(t.translate({ type: "message", role: "user", content: "hello" })).toEqual([]);
+    });
+
+    it("replay: the echo becomes a user_message", () => {
+        const t = new GeminiTranslator({ replay: true });
+        const out = t.translate({ type: "message", role: "user", content: "hello" });
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ type: "user_message", message: "hello" });
+    });
+
+    it("replay: an empty or non-string echo produces nothing", () => {
+        const t = new GeminiTranslator({ replay: true });
+        expect(t.translate({ type: "message", role: "user", content: "" })).toEqual([]);
+        expect(t.translate({ type: "message", role: "user" })).toEqual([]);
+    });
+});
