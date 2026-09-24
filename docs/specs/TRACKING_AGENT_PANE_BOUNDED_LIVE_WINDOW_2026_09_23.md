@@ -18,7 +18,8 @@
 | 0b | Bench streams through the real pipeline (`--stream-mode pipeline`, default) | #3598 | merged |
 | 1 | Pin-to-bottom without forced layout | #3599 (together with Phase 2 — see §3.1) | merged |
 | 2 | Cross-pane stream scheduler, input first | #3599 | merged |
-| 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | open |
+| 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | merged |
+| 2c | Tool logs measure height only when their branch changes (§3.4, §2.2a) | #3607 | open |
 | 3 | Tail holds only the turn in flight | — | not started |
 | 4 | O(batch + log n) stores | — | not started |
 | 5 | Node identity and durability | — | not started |
@@ -83,6 +84,32 @@ N = 0, B 35.0–36.0). Script time — not layout — was the cost: it fell ~4×
 while layout moved only as much as the shorter run. Raw:
 `md-{A,M}-r{1,2,3}.json` from `md-ab.sh` (dev worktree harness, not
 committed).
+
+### 2.2a Phase 2c (tool logs measure only on a branch change)
+
+A = Phase 1 + 2 + 2b, B = A + 2c; both on the bench with #3606's settle
+(§3.6), interleaved ×3.
+
+**Mounting history** — `inject(25 turns)` into 3 panes, timed in the page,
+3 cycles per round (`probe-inject.mjs`):
+
+| | A | + 2c |
+|---|---|---|
+| synchronous mount task (9 cycles each) | 8.3–9.4 s (median 8.8 s) | **5.7–6.4 s (median 6.1 s), −31 %** |
+| until the page is quiet again | 10.2–12.2 s (median 11.2 s) | 10.3–11.5 s (median 10.7 s) |
+
+Every B mount task was shorter than every A one. This is the longest single
+main-thread block in the bench — the same shape as opening or restoring a
+pane with history. The follow-on work until quiet (trailing markdown renders
+and the like) barely moved.
+
+**Streaming window** — no measurable change: N = 25 fps 22.0 vs 21.4, typing
+p95 112 vs 112 ms, forced layout 253 vs 253 ms. In the bench the history tools
+are collapsed, so each `isMeasurable` walk stopped at the hidden panel after
+a couple of ancestors; a real conversation with open tool panels walks the
+whole chain. N = 0 mounts no tool log at all, so its A/B difference (fps 32
+vs 27.4 median) is noise — a useful floor: consecutive runs of identical code
+paths differ by up to ~15 % fps.
 
 ### 2.3 `main` baseline, direct mode (Phase 0)
 
@@ -156,7 +183,14 @@ rendered once, at final quality, so a streaming ↔ settled flip re-renders the
 tail and nothing else — now < 2.5× in the same test, and the settled DOM
 matches a from-scratch render. Measured effect: §2.2.
 
-Still open from this profile: `isMeasurable` (§4).
+The other named cost, `isMeasurable`, was the tool-log height FLIP
+re-baselining on every node update: every flush hands each mounted tool log a
+new node object, and each baseline was `getComputedStyle` up the ancestor
+chain plus `scrollHeight`/`offsetHeight`. Phase 2c measures only when the
+rendered branch changes, capturing the "from" height in a `createComputed`
+(pure computations run before Solid's render effects, so the DOM still shows
+the old branch). Measured effect: §2.2a — mostly on mounting history, where
+it had been 3.1 s of a 10 s injection.
 
 ### 3.5 Rejected: the streaming buffer's flex layout
 
@@ -189,10 +223,12 @@ A/B.
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
   numbers were taken with it.
-- **`isMeasurable` per chunk** (§3.4): `ToolOverlayLog` re-baselines its
-  height FLIP on every streamed chunk, and each baseline walks every ancestor
-  with `getComputedStyle` and reads `scrollHeight`/`offsetHeight` — forced
-  style and layout inside a Solid effect. Next target.
+- **Mounting history is one multi-second synchronous task** (§2.2a): 25
+  turns × 3 panes still blocks the main thread ~6 s, then ~5 s more until
+  quiet. Opening or restoring a pane with a long conversation has this shape.
+  Phase 3 (turn-scoped tail) and Phase 6 (bounded live document) shrink what
+  is mounted; chunking the mount across frames is worth measuring before
+  then.
 - **macOS and Linux baselines** (spec §7 Phase 0).
 - **Fault-suite runner** (spec §8) — a later Phase 0 PR.
 - **Residual nodes after a clear:** a cleared pane can refill with a few
