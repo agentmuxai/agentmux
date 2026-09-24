@@ -53,7 +53,7 @@ import {
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
-import { inFlowState } from "@/app/store/agent-pane-layout/types";
+import { inFlowState, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
     partitionForVirtualization,
@@ -391,15 +391,27 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // reading the rect there forces nothing. ÷zoom to stay in unzoomed CSS px,
     // exactly like the head's measure RO. Phase 3 of
     // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2.
-    const tailHeights = new Map<string, number>();
+    //
+    // Each height is stored with WHAT it measured: the node object the row
+    // was rendering (nodes are immutable, so a content or status change is a
+    // new object) and its in-flow expansion state. The handoff uses it only if
+    // both still match — a row whose content or expansion changes in the same
+    // update that migrates it is disposed before the RO can report its new
+    // size, and that stale height would stay in the layout for good if the
+    // node is above the viewport (never mounted in the head, never
+    // re-measured). Codex P2 on #3610.
+    const tailHeights = new Map<string, { px: number; node: DocumentNode; state: ExpansionState }>();
+    const tailRowNode = new WeakMap<Element, () => DocumentNode>();
     const tailRO = typeof ResizeObserver !== "undefined"
         ? new ResizeObserver((entries) => {
             const zoom = props.zoomFactor?.() ?? 1;
+            const docState = untrack(props.documentState);
             for (const entry of entries) {
-                const id = (entry.target as HTMLElement).dataset.nodeId;
-                if (!id) continue;
+                const node = untrack(() => tailRowNode.get(entry.target)?.());
+                if (!node) continue;
                 const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1); // perf:allow-layout-read — tail ResizeObserver callback (layout clean)
-                if (Number.isFinite(cssPx) && cssPx > 0) tailHeights.set(id, cssPx);
+                if (!Number.isFinite(cssPx) || cssPx <= 0) continue;
+                tailHeights.set(node.id, { px: cssPx, node, state: inFlowState(currentExpansion(node, docState)) });
             }
         })
         : undefined;
@@ -491,13 +503,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 // for everything below. Consumed once: a later head
                 // measurement is never overwritten by a stale buffer height.
                 for (const node of handoff) {
-                    const cssPx = tailHeights.get(node.id)!;
+                    const measured = tailHeights.get(node.id)!;
                     tailHeights.delete(node.id);
+                    const state = inFlowState(currentExpansion(node, docState));
+                    // Measured something else (older content, other expansion):
+                    // keep the estimate; the head's measure RO corrects it if
+                    // the row is ever mounted.
+                    if (measured.node !== node || measured.state !== state) continue;
                     dispatchLayoutIfRegistered(blockId, {
                         type: "RowMeasured",
                         nodeId: node.id,
-                        state: inFlowState(currentExpansion(node, docState)),
-                        cssPx,
+                        state,
+                        cssPx: measured.px,
                     });
                 }
             });
@@ -1316,7 +1333,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         onAgentErrorLogin={props.onAgentErrorLogin}
                                         onOpenHistory={props.onOpenHistory}
                                         dispatchMatches={props.dispatchMatches}
-                                        ref={(el) => { rowEl = el; tailRO?.observe(el); }}
+                                        ref={(el) => { rowEl = el; tailRowNode.set(el, nodeAccessor); tailRO?.observe(el); }}
                                     />
                                 );
                             }}

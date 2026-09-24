@@ -21,12 +21,13 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { batch, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dispatch, registerPane, unregisterPane } from "@/app/store/agent-pane-layout-store";
 import type { LayoutView } from "@/app/store/agent-pane-layout/reducer";
-import { ROW_GAP_PX } from "@/app/store/agent-pane-layout/types";
+import { inFlowState, ROW_GAP_PX } from "@/app/store/agent-pane-layout/types";
+import { currentExpansion } from "./expansion-source";
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { createAgentViewState } from "./state";
 import { STREAMING_BUFFER_SIZE } from "./streaming-buffer";
@@ -137,6 +138,60 @@ describe("height handoff from the streaming buffer to the virtualized head", () 
         expect(v?.rows.map((r) => r.nodeId)).toEqual(["md0"]);
         expect(v?.rows[0].height).toBeGreaterThan(0);
         expect(v?.rows[0].height).not.toBe(77);
+    });
+
+    it("a height measured for an older version of the node is not handed off (Codex P2, #3610)", () => {
+        // The node's content changes in the SAME update that migrates it: its
+        // buffer row is disposed before the RO can report the new size, so the
+        // cached height describes content that no longer exists.
+        const s = setup(STREAMING_BUFFER_SIZE);
+        const rows = s.bufferRows();
+        for (const el of rows) rowPx.set(el.dataset.nodeId!, 77);
+        resize(rows);
+
+        s.setNodes((n) => [{ ...n[0], content: "a much longer text now" } as DocumentNode, ...n.slice(1), md(STREAMING_BUFFER_SIZE)]);
+
+        const v = s.view();
+        expect(v?.rows.map((r) => r.nodeId)).toEqual(["md0"]);
+        expect(v?.rows[0].height).not.toBe(77); // the estimate, not the stale measurement
+    });
+
+    it("a height measured in a different expansion state is not handed off", () => {
+        // Same hazard through documentState: a completed tool held open
+        // (expandedTools) is released — collapses — in the update that
+        // migrates it.
+        const heldTool = { type: "tool", id: "md0", tool: "Bash", params: {}, status: "success", collapsed: true, summary: "t" } as DocumentNode;
+        const [nodes, setNodes] = createSignal<DocumentNode[]>(
+            Array.from({ length: STREAMING_BUFFER_SIZE }, (_, i) => (i === 0 ? heldTool : md(i))),
+        );
+        const [view, setView] = createSignal<LayoutView | undefined>(undefined);
+        registerPane(BID, { layout: setView, zoom: () => {} });
+        const [docState, setDocState] = createSignal({ ...emptyDocumentState(), expandedTools: new Set<string>(["md0"]) });
+        const utils = render(() => (
+            <AgentDocumentVirtualList
+                blockId={BID}
+                viewState={createAgentViewState(nodes)}
+                documentState={docState}
+                layoutView={view}
+                zoomFactor={() => 1}
+                onToggleCollapse={() => {}}
+                onTogglePin={() => {}}
+            />
+        ));
+        const rows = [...utils.container.querySelectorAll(".agent-document-streaming-buffer [data-node-id]")] as HTMLElement[];
+        for (const el of rows) rowPx.set(el.dataset.nodeId!, 77);
+        resize(rows);
+        const before = inFlowState(currentExpansion(nodes()[0], docState()));
+
+        batch(() => {
+            setDocState(emptyDocumentState()); // released: collapses
+            setNodes((n) => [...n, md(STREAMING_BUFFER_SIZE)]);
+        });
+
+        expect(before).toBe("expanded");
+        expect(inFlowState(currentExpansion(nodes()[0], docState()))).toBe("collapsed");
+        expect(view()?.rows.map((r) => r.nodeId)).toEqual(["md0"]);
+        expect(view()?.rows[0].height).not.toBe(77);
     });
 
     it("a height handed off once is not re-applied over a later head measurement", () => {
