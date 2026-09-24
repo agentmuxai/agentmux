@@ -1,0 +1,95 @@
+err| npm verbose cli /home/user/.nvm/versions/node/v24.16.0/bin/node /home/user/.nvm/versions/node/v24.16.0/bin/npm
+err| npm info using npm@11.13.0
+err| npm info using node@v24.16.0
+err| npm verbose title npm install @mariozechner/pi-coding-agent@0.73.1
+err| npm verbose argv "install" "@mariozechner/pi-coding-agent@0.73.1" "--prefix" "/home/user/.agentmux/cli/pi/prefix2" "--cache" "/home/user/.agentmux/cli/pi/cache" "--no-audit" "--no-fund" "--progress" "false" "--loglevel" "verbose"
+err| npm verbose logfile logs-max:10 dir:/home/user/.agentmux/cli/pi/cache/_logs/2026-09-24T12_11_02_777Z-
+err| npm verbose logfile /home/user/.agentmux/cli/pi/cache/_logs/2026-09-24T12_11_02_777Z-debug-0.log
+err| npm http fetch GET 200 https://registry.npmjs.org/@mariozechner%2fpi-coding-agent 199ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/npm 238ms
+err| npm http fetch GET 200 https://registry.npmjs.org/diff 45ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/marked 59ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/ignore 122ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/chalk 128ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/yaml 132ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/uuid 136ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/jiti 140ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/glob 143ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/typebox 51ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/cli-highlight 40ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/strip-ansi 49ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/extract-zip 50ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/file-type 62ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/undici 90ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/minimatch 75ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/proper-lockfile 36ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/hosted-git-info 47ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/@silvia-odwyer%2fphoton-node 52ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/@mariozechner%2fpi-ai 73ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/@mariozechner%2fpi-tui 73ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/@mariozechner%2fclipboard 61ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/@mariozechner%2fpi-agent-core 86ms (cache miss)
+err| npm http fetch GET 200 https://registry.npmjs.org/@mariozechner%2fclipboard-linux-arm64-musl 52ms (cache miss)
+err| npm http cache has-flag@https://registry.npmjs.org/has-flag/-/has-flag-4.0.0.tgz 0ms (cache hit)
+err| npm http cache supports-color@https://registry.npmjs.org/supports-color/-/supports-color-7.2.0.tgz 0ms (cache hit)
+err| npm http cache fd-slicer@https://registry.npmjs.org/fd-slicer/-/fd-slicer-1.1.0.tgz 0ms (cache hit)
+err| npm http cache color-name@https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz 0ms (cache hit)
+err| npm http cache color-convert@https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz 0ms (cache hit)
+err| npm http cache ansi-styles@https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz 0ms (cache hit)
+err| npm http cache is-fullwidth-code-point@https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz 0ms (cache hit)
+err| npm http cache pend@https://registry.npmjs.org/pend/-/pend-1.2.0.tgz 0ms (cache hit)
+err| npm http cache buffer-crc32@https://registry.npmjs.org/buffer-crc32/-/buffer-crc32-0.2.13.tgz 0ms (cache hit)
+err| npm http cache emoji-regex@https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz 0ms (cache hit)
+err| npm http cache wrap-ansi@https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-7.0.0.tgz 0ms (cache hit)
+err| npm http cache require-directory@https://registry.npmjs.org/require-directory/-/require-directory-2.1.1.tgz 0ms (cache hit)
+err| npm http cache yargs-parser@https://registry.npmjs.org/yargs-parser/-/yargs-parser-20.2.9.tgz 0ms (cache hit)
+err| npm http cache y18n@https://registry.npmjs.org/y18n/-/y18n-5.0.8.tgz 0ms (cache hit)
+err| npm http cache escalade@https://registry.npmjs.org/escalade/-/escalade-3.2.0.tgz 0ms (cache hit)
+err| npm http cache get-caller-file@https://registry.npmjs.org/get-caller-file/-/get-caller-file-2.0.5.tgz 0ms (cache hit)
+err| npm http cache thenify@https://registry.npmjs.org/thenify/-/thenify-3.3.1.tgz 0ms (cache hit)
+err| npm http cache @borewit/text-codec@https://registry.npmjs.org/@borewit/text-codec/-/text-codec-0.2.2.tgz 0ms (cache hit)
+err| npm http cache ieee754@https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz 0ms (cache hit)
+err| npm http cache string-width@https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz 0ms (cache hit)
+err| npm http cache @tokenizer/token@https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz 0ms (cache hit)
+err| npm http cache ansi-regex@https://registry.npmjs.org/ansi-regex/-/ansi-regex-6.3.0.tgz 0ms (cache hit)
+err| npm http cache socks@https://registry.npmjs.org/socks/-/socks-2.8.10.tgz 0ms (cache hit)
+err| npm http cache smart-buffer@https://registry.npmjs.org/smart-buffer/-/smart-buffer-4.2.0.tgz 0ms (cache hit)
+err| npm http cache cliui@https://registry.npmjs.org/cliui/-/cliui-7.0.4.tgz 0ms (cache hit)
+err| npm http cache ip-address@https://registry.npmjs.org/ip-address/-/ip-address-10.7.2.tgz 0ms (cache hit)
+err| npm http cache wrappy@https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz 0ms (cache hit)
+err| npm http cache once@https://registry.npmjs.org/once/-/once-1.4.0.tgz 0ms (cache hit)
+err| npm http cache source-map@https://registry.npmjs.org/source-map/-/source-map-0.6.1.tgz 0ms (cache hit)
+err| npm http cache esutils@https://registry.npmjs.org/esutils/-/esutils-2.0.3.tgz 0ms (cache hit)
+err| npm http cache estraverse@https://registry.npmjs.org/estraverse/-/estraverse-5.3.0.tgz 0ms (cache hit)
+err| npm http cache escodegen@https://registry.npmjs.org/escodegen/-/escodegen-2.1.0.tgz 0ms (cache hit)
+err| npm http cache end-of-stream@https://registry.npmjs.org/end-of-stream/-/end-of-stream-1.4.5.tgz 0ms (cache hit)
+err| npm http cache esprima@https://registry.npmjs.org/esprima/-/esprima-4.0.1.tgz 0ms (cache hit)
+err| npm http cache ast-types@https://registry.npmjs.org/ast-types/-/ast-types-0.13.4.tgz 0ms (cache hit)
+err| npm http cache pac-resolver@https://registry.npmjs.org/pac-resolver/-/pac-resolver-7.0.1.tgz 0ms (cache hit)
+err| npm http cache get-uri@https://registry.npmjs.org/get-uri/-/get-uri-6.0.5.tgz 0ms (cache hit)
+err| npm http cache netmask@https://registry.npmjs.org/netmask/-/netmask-2.1.1.tgz 0ms (cache hit)
+err| npm http cache basic-ftp@https://registry.npmjs.org/basic-ftp/-/basic-ftp-5.3.1.tgz 0ms (cache hit)
+err| npm http cache @tootallnate/quickjs-emscripten@https://registry.npmjs.org/@tootallnate/quickjs-emscripten/-/quickjs-emscripten-0.23.0.tgz 0ms (cache hit)
+err| npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+err| npm warn deprecated @mariozechner/pi-agent-core@0.73.1: please use @earendil-works/pi-agent-core instead going forward
+err| npm warn deprecated @mariozechner/pi-tui@0.73.1: please use @earendil-works/pi-tui instead going forward
+err| npm warn deprecated @mariozechner/pi-ai@0.73.1: please use @earendil-works/pi-ai instead going forward
+err| npm warn deprecated @mariozechner/pi-coding-agent@0.73.1: please use @earendil-works/pi-coding-agent instead going forward
+err| npm info run @google/genai@1.52.0 preinstall node_modules/@google/genai echo 'preinstall: no-op'
+err| npm info run @google/genai@1.52.0 preinstall { code: 0, signal: null }
+err| npm info run koffi@2.16.3 install node_modules/koffi node src/cnoke/cnoke.js -P . -D src/koffi --prebuild
+err| npm info run koffi@2.16.3 install { code: 0, signal: null }
+err| npm info run protobufjs@7.6.6 postinstall node_modules/protobufjs node scripts/postinstall
+err| npm info run protobufjs@7.6.6 postinstall { code: 0, signal: null }
+err| npm verbose cwd /home/user/.agentmux/cli/pi
+err| npm verbose os Darwin 25.5.0
+err| npm verbose node v24.16.0
+err| npm verbose npm  v11.13.0
+err| npm notice
+err| npm notice New major version of npm available! 11.13.0 -> 12.1.0
+err| npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.1.0
+err| npm notice To update run: npm install -g npm@12.1.0
+err| npm notice
+out| added 189 packages in 7s
+err| npm verbose exit 0
+err| npm info ok

@@ -1,0 +1,32 @@
+err| npm verbose cli /home/user/.nvm/versions/node/v24.16.0/bin/node /home/user/.nvm/versions/node/v24.16.0/bin/npm
+err| npm info using npm@11.13.0
+err| npm info using node@v24.16.0
+err| npm verbose title npm install @mariozechner/pi-coding-agent@0.73.1
+err| npm verbose argv "install" "@mariozechner/pi-coding-agent@0.73.1" "--prefix" "/home/user/.agentmux/cli/pi/p3" "--cache" "/home/user/.agentmux/cli/pi/c3" "--registry" "http://registry.nonexistent.invalid/" "--fetch-retries" "0" "--no-audit" "--no-fund" "--progress" "false" "--loglevel" "verbose"
+err| npm verbose logfile logs-max:10 dir:/home/user/.agentmux/cli/pi/c3/_logs/2026-09-24T12_12_56_018Z-
+err| npm verbose logfile /home/user/.agentmux/cli/pi/c3/_logs/2026-09-24T12_12_56_018Z-debug-0.log
+err| npm http fetch GET http://registry.nonexistent.invalid/npm attempt 1 failed with ENOTFOUND
+err| npm http fetch GET http://registry.nonexistent.invalid/@mariozechner%2fpi-coding-agent attempt 1 failed with ENOTFOUND
+err| npm verbose type system
+err| npm verbose stack FetchError: request to http://registry.nonexistent.invalid/@mariozechner%2fpi-coding-agent failed, reason: getaddrinfo ENOTFOUND registry.nonexistent.invalid
+err| npm verbose stack     at ClientRequest.<anonymous> (/home/user/.nvm/versions/node/v24.16.0/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)
+err| npm verbose stack     at ClientRequest.emit (node:events:509:28)
+err| npm verbose stack     at emitErrorEvent (node:_http_client:109:11)
+err| npm verbose stack     at _destroy (node:_http_client:993:9)
+err| npm verbose stack     at onSocketNT (node:_http_client:1014:5)
+err| npm verbose stack     at process.processTicksAndRejections (node:internal/process/task_queues:91:21)
+err| npm error code ENOTFOUND
+err| npm error syscall getaddrinfo
+err| npm error errno ENOTFOUND
+err| npm error network request to http://registry.nonexistent.invalid/@mariozechner%2fpi-coding-agent failed, reason: getaddrinfo ENOTFOUND registry.nonexistent.invalid
+err| npm error network This is a problem related to network connectivity.
+err| npm error network In most cases you are behind a proxy or have bad network settings.
+err| npm error network
+err| npm error network If you are behind a proxy, please make sure that the 'proxy' config is set properly.  See: 'npm help config'
+err| npm verbose cwd /home/user/.agentmux/cli/pi
+err| npm verbose os Darwin 25.5.0
+err| npm verbose node v24.16.0
+err| npm verbose npm  v11.13.0
+err| npm verbose exit 1
+err| npm verbose code 1
+err| npm error A complete log of this run can be found in: /home/user/.agentmux/cli/pi/c3/_logs/2026-09-24T12_12_56_018Z-debug-0.log

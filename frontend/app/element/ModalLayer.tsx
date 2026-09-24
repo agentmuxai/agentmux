@@ -13,6 +13,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Component, type JSX } from "solid-js";
 
 import { Modal, PaneModalScope, TabModalScope } from "@/element/modal";
+import { initialFocusTarget } from "./modal-focus-trap";
 import { ModalLayerContext, type ModalLayerApi, type ModalLayerRequest } from "./modal-layer";
 import { renderRequest, requestLabel } from "./modal-dispatch";
 import "./modal-layer.scss";
@@ -125,6 +126,28 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
         return kind != null && BACKDROP_DISMISSIBLE_KINDS.has(kind) && !hasOpenForm();
     });
 
+    // Set by `replace` so the next content mount also moves focus —
+    // `<Modal>` only resolves initial focus when it opens, and a replace
+    // keeps it open.
+    let replacing = false;
+
+    // Every content mount starts at the top of the panel. `.modal-panel`
+    // is the scroll container and survives a `replace`, so without this
+    // the new content inherits the old content's scroll position — e.g.
+    // a prereq modal scrolled down to "Launch anyway" handed the install
+    // modal an already-scrolled panel
+    // (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §1.1 item 2, §4.3 rule 4).
+    const onContentMount = (el: HTMLDivElement) => {
+        const moveFocus = replacing;
+        replacing = false;
+        requestAnimationFrame(() => {
+            const panel = el.closest<HTMLElement>(".modal-panel");
+            if (!panel) return;
+            panel.scrollTop = 0;
+            if (moveFocus) initialFocusTarget(panel)?.focus();
+        });
+    };
+
     const api: ModalLayerApi = {
         open: (req) => { setSubmitting(false); setCurrent(req); },
         replace: (next) => {
@@ -134,6 +157,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
             // stays true), and the keyed inner <Show> remounts only the
             // panel content, firing the content-fade keyframe.
             setSubmitting(false);
+            replacing = current() != null;
             setCurrent(next);
         },
         close: safeClose,
@@ -184,6 +208,9 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                         closeOnBackdropClick={closeOnBackdropClick()}
                         rootRef={setModalRootEl}
                         size="fit"
+                        // Per-kind hook for panel-level layout, e.g. the
+                        // install dialog's fixed header and footer.
+                        panelClass={current() ? `modal-panel--${current()!.kind}` : undefined}
                         ariaLabel={modalLabel()}
                     >
                         {/* Keyed on the request identity so each
@@ -198,7 +225,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                             unrelated `current()` read. */}
                         <Show keyed when={current()}>
                             {(req) => (
-                                <div class="modal-layer-content">
+                                <div class="modal-layer-content" ref={onContentMount}>
                                     {renderRequest(req, api, setSubmitting).panel}
                                 </div>
                             )}
