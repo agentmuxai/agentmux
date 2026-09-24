@@ -41,6 +41,8 @@ enum Internal {
     /// is shared by every AppState), so drop blocks this Router's store
     /// doesn't know.
     Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
+    /// Raw question text — redacted by `emit` like a renderer report.
+    InputWaiting { block_id: String, question: Option<String> },
 }
 
 const AGENT_NAME_MAX: usize = 32;
@@ -158,6 +160,12 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                             return;
                         }
                         r.emit_fixed(kind, &block_id, body)
+                    })
+                    .await;
+                }
+                Internal::InputWaiting { block_id, question } => {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref())
                     })
                     .await;
                 }
@@ -409,6 +417,13 @@ impl Router {
     /// BLOCKING on a name-cache miss, like `emit`.
     pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
         self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
+    }
+
+    /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
+    /// from the controller's stdout reader thread. Coalesces with the
+    /// renderer's own report for the same block (same `input:` group).
+    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>) {
+        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question });
     }
 
     pub fn resolve(&self, block_id: &str, family: Family) {
