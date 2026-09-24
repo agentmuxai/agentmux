@@ -51,6 +51,8 @@ use super::{Notification, Presenter, UserAction};
 pub const AUMID: &str = "AgentMuxCorp.AgentMux";
 const GROUP: &str = "agentmux";
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/favicon-150x150.png");
+/// Upper bound on waiting for the WinRT thread at startup (see `spawn`).
+const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 enum Cmd {
     Show(Notification),
@@ -77,8 +79,17 @@ impl WindowsPresenter {
             .name("agentmux-notify".into())
             .spawn(move || thread_main(rx, actions, ready_tx))
             .map_err(|e| e.to_string())?;
-        ready_rx.recv().map_err(|e| e.to_string())??;
-        Ok(Self { tx })
+        // Bounded: this runs on the supervisor's startup path before the host
+        // is spawned. If WinRT wedges (RoInitialize / notifier creation never
+        // returns), fall back to "no toasts" rather than hang the launcher.
+        match ready_rx.recv_timeout(READY_TIMEOUT) {
+            Ok(Ok(())) => Ok(Self { tx }),
+            Ok(Err(e)) => Err(e),
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                Err(format!("toast backend not ready after {READY_TIMEOUT:?}; continuing without toasts"))
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
