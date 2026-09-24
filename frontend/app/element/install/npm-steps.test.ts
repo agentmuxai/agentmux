@@ -6,7 +6,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { DOWNLOAD_IDLE_MS, NpmStepTracker, type LineTone } from "./npm-steps";
+import type { LineTone } from "./install-types";
+import { DOWNLOAD_IDLE_MS, NpmStepTracker } from "./npm-steps";
 
 // Real `npm install @mariozechner/pi-coding-agent@0.73.1 --loglevel=verbose`
 // runs (npm 11.13, cold cache), trimmed and with home paths scrubbed. Each

@@ -29,13 +29,25 @@ vi.mock("@/app/store/mps", () => ({
         return () => { chunkHandler = null; };
     },
 }));
+vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
+vi.mock("@/util/clipboard", () => ({ writeText: vi.fn().mockResolvedValue(undefined) }));
+
+import { resetInstallDetailsPrefs } from "@/element/install/InstallProgress";
 
 afterEach(() => {
     cleanup();
     resolveMock.mockReset();
     installMock.mockReset();
     chunkHandler = null;
+    resetInstallDetailsPrefs();
 });
+
+const logRows = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(".install-log-line")).map((el) => el.textContent);
+const stepStatus = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(".install-step")).map(
+        (li) => `${li.querySelector(".install-step-label")?.textContent}:${li.dataset.status}`,
+    );
 
 describe("SystemToolInstallInline", () => {
     it("renders nothing when the backend reports no installable command", async () => {
@@ -123,7 +135,7 @@ describe("SystemToolInstallInline", () => {
         await screen.findByText(/system permission prompt/);
     });
 
-    it("streams install_chunk lines and calls onInstalled on a successful done event", async () => {
+    it("streams install_chunk lines into Details and calls onInstalled on a successful done event", async () => {
         resolveMock.mockResolvedValue({
             available: true,
             program: "brew",
@@ -134,22 +146,29 @@ describe("SystemToolInstallInline", () => {
         installMock.mockResolvedValue({ sessionId: "sysinstall-1" });
         const onInstalled = vi.fn();
         const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
-        render(() => <SystemToolInstallInline toolId="git" onInstalled={onInstalled} />);
+        const { container } = render(() => <SystemToolInstallInline toolId="git" onInstalled={onInstalled} />);
         await screen.findByText("brew install git");
 
         fireEvent.click(screen.getByText("Install"));
         await waitFor(() => expect(installMock).toHaveBeenCalledWith({}, { toolId: "git" }));
         await waitFor(() => expect(chunkHandler).not.toBeNull());
 
+        chunkHandler!({ data: { line: "$ brew install git", stream: "stdout" } });
         chunkHandler!({ data: { line: "==> Installing git", stream: "stdout" } });
-        await screen.findByText("==> Installing git");
+        await waitFor(() => expect(logRows(container)).toContain("==> Installing git"));
+        // Layer 1 shows the plain step, with the latest output as its subline.
+        expect(stepStatus(container)).toEqual(["Get ready:done", "Install Git:active", "Check Git is available:pending"]);
+        expect(container.querySelector(".install-step-subline")?.textContent).toBe("Installing git");
+        // Details stays collapsed by default.
+        expect((container.querySelector(".install-details") as HTMLDetailsElement).open).toBe(false);
 
         chunkHandler!({ data: { op: "done", ok: true } });
         await screen.findByText("Installed");
+        expect(stepStatus(container)).toEqual(["Get ready:done", "Install Git:done", "Check Git is available:done"]);
         expect(onInstalled).toHaveBeenCalledTimes(1);
     });
 
-    it("shows the error + a Retry button on a failed done event, without calling onInstalled", async () => {
+    it("explains a failed done event on the step, opens Details with the reason, and offers Retry", async () => {
         resolveMock.mockResolvedValue({
             available: true,
             program: "brew",
@@ -160,20 +179,78 @@ describe("SystemToolInstallInline", () => {
         installMock.mockResolvedValue({ sessionId: "sysinstall-2" });
         const onInstalled = vi.fn();
         const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
-        render(() => <SystemToolInstallInline toolId="git" onInstalled={onInstalled} />);
+        const { container } = render(() => <SystemToolInstallInline toolId="git" onInstalled={onInstalled} />);
         await screen.findByText("brew install git");
 
         fireEvent.click(screen.getByText("Install"));
         await waitFor(() => expect(chunkHandler).not.toBeNull());
 
-        chunkHandler!({ data: { op: "done", ok: false, error: "brew: command failed" } });
+        chunkHandler!({ data: { line: "$ brew install git", stream: "stdout" } });
+        chunkHandler!({ data: { line: "Error: git: no bottle available!", stream: "stderr" } });
+        chunkHandler!({ data: { op: "done", ok: false, error: "brew exited Some(1)" } });
         await screen.findByText("Failed");
-        await screen.findByText("brew: command failed");
+        await screen.findByText('Something went wrong while running "Install Git".');
+        await waitFor(() => expect((container.querySelector(".install-details") as HTMLDetailsElement).open).toBe(true));
+        expect(logRows(container)).toContain("Install failed: brew exited Some(1)");
         await screen.findByText("Retry");
         expect(onInstalled).not.toHaveBeenCalled();
     });
 
-    it("shows the node.js brand icon for toolId=node, in both the consent and installing-header views", async () => {
+    it("adds the permission step when the command needs elevation, and maps a dismissed prompt to it", async () => {
+        resolveMock.mockResolvedValue({
+            available: true,
+            program: "pkexec",
+            args: ["apt-get", "install", "-y", "git"],
+            needsElevation: true,
+            commandPreview: "pkexec apt-get install -y git",
+        });
+        installMock.mockResolvedValue({ sessionId: "sysinstall-pk" });
+        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
+        const { container } = render(() => <SystemToolInstallInline toolId="git" onInstalled={() => {}} />);
+        await screen.findByText("pkexec apt-get install -y git");
+        fireEvent.click(screen.getByText("Install"));
+        await waitFor(() => expect(chunkHandler).not.toBeNull());
+
+        chunkHandler!({ data: { line: "$ pkexec apt-get install -y git", stream: "stdout" } });
+        await waitFor(() => expect(stepStatus(container)[1]).toBe("Ask for permission:active"));
+        chunkHandler!({ data: { op: "done", ok: false, error: "pkexec exited Some(126)" } });
+        await screen.findByText("AgentMux wasn't allowed to write the files.");
+        expect(stepStatus(container)[1]).toBe("Ask for permission:failed");
+    });
+
+    it("shows a restart step instead of a free-text note when AgentMux can't see the new tool yet", async () => {
+        resolveMock.mockResolvedValue({
+            available: true,
+            program: "winget",
+            args: ["install", "--id", "Git.Git", "-e"],
+            needsElevation: false,
+            commandPreview: "winget install --id Git.Git -e",
+        });
+        installMock.mockResolvedValue({ sessionId: "sysinstall-path" });
+        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
+        const { container } = render(() => <SystemToolInstallInline toolId="git" onInstalled={() => {}} />);
+        await screen.findByText("winget install --id Git.Git -e");
+        fireEvent.click(screen.getByText("Install"));
+        await waitFor(() => expect(chunkHandler).not.toBeNull());
+
+        chunkHandler!({ data: { line: "$ winget install --id Git.Git -e", stream: "stdout" } });
+        chunkHandler!({
+            data: {
+                line: 'Note: winget finished successfully, but AgentMux\'s current session doesn\'t see "git" yet — restart AgentMux to pick up the updated PATH.',
+                stream: "stdout",
+            },
+        });
+        chunkHandler!({ data: { op: "done", ok: true } });
+        await screen.findByText("Restart AgentMux to finish");
+        expect(stepStatus(container)).toEqual([
+            "Get ready:done",
+            "Install Git:done",
+            "Check Git is available:failed",
+            "Restart AgentMux to finish:pending",
+        ]);
+    });
+
+    it("shows the node.js brand icon for toolId=node, in both the consent and installing views", async () => {
         resolveMock.mockResolvedValue({
             available: true,
             program: "winget",
@@ -185,11 +262,11 @@ describe("SystemToolInstallInline", () => {
         const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
         const { container } = render(() => <SystemToolInstallInline toolId="node" onInstalled={() => {}} />);
         await screen.findByText("winget install --id OpenJS.NodeJS.LTS -e");
-        expect(container.querySelector(".system-tool-install-brand-icon.fa-brands.fa-node-js")).not.toBeNull();
+        expect(container.querySelector(".install-confirm-brand-icon.fa-brands.fa-node-js")).not.toBeNull();
 
         fireEvent.click(screen.getByText("Install"));
         await waitFor(() => expect(chunkHandler).not.toBeNull());
-        expect(container.querySelector(".system-tool-install-log-header .fa-brands.fa-node-js")).not.toBeNull();
+        expect(container.querySelector(".system-tool-install-status .fa-brands.fa-node-js")).not.toBeNull();
     });
 
     it("shows no brand icon for a tool with no Font Awesome brand glyph (uv)", async () => {
@@ -203,141 +280,10 @@ describe("SystemToolInstallInline", () => {
         const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
         const { container } = render(() => <SystemToolInstallInline toolId="uv" onInstalled={() => {}} />);
         await screen.findByText("curl -LsSf https://astral.sh/uv/install.sh | sh");
-        expect(container.querySelector(".system-tool-install-brand-icon")).toBeNull();
-    });
-});
-
-describe("SystemToolInstallInline — Details auto-scroll (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §3-§4)", () => {
-    /** jsdom has no real layout engine — scrollHeight/clientHeight are
-     *  always 0 unless stubbed, matching ToolOverlayLog.test.tsx's own
-     *  approach to the identical problem. */
-    function stubScrollHeight(px: number) {
-        return vi.spyOn(HTMLPreElement.prototype, "scrollHeight", "get").mockReturnValue(px);
-    }
-    function stubClientHeight(px: number) {
-        return vi.spyOn(HTMLPreElement.prototype, "clientHeight", "get").mockReturnValue(px);
-    }
-
-    async function startInstalling() {
-        resolveMock.mockResolvedValue({
-            available: true,
-            program: "brew",
-            args: ["install", "git"],
-            needsElevation: false,
-            commandPreview: "brew install git",
-        });
-        installMock.mockResolvedValue({ sessionId: "sysinstall-scroll" });
-        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
-        const { container } = render(() => <SystemToolInstallInline toolId="git" onInstalled={() => {}} />);
-        await screen.findByText("brew install git");
-        fireEvent.click(screen.getByText("Install"));
-        await waitFor(() => expect(chunkHandler).not.toBeNull());
-        const pre = container.querySelector(".system-tool-install-log-body") as HTMLPreElement;
-        return { pre, container };
-    }
-
-    it("scrolls to the newest line as it streams in, while at the bottom", async () => {
-        stubClientHeight(50);
-        const scrollStub = stubScrollHeight(100);
-        const { pre } = await startInstalling();
-        pre.scrollTop = 50; // at the bottom for a 100px-tall, 50px-viewport box
-
-        chunkHandler!({ data: { line: "line 1", stream: "stdout" } });
-        scrollStub.mockReturnValue(120); // content grew
-        chunkHandler!({ data: { line: "line 2", stream: "stdout" } });
-        await vi.waitFor(() => expect(pre.scrollTop).toBe(120));
+        expect(container.querySelector(".install-confirm-brand-icon")).toBeNull();
     });
 
-    it("stops auto-scrolling once the user scrolls away from the bottom", async () => {
-        stubClientHeight(50);
-        stubScrollHeight(200);
-        const { pre } = await startInstalling();
-        pre.scrollTop = 0; // scrolled all the way up — 150px short of the bottom
-        fireEvent.scroll(pre);
-
-        chunkHandler!({ data: { line: "line 1", stream: "stdout" } });
-        await new Promise((r) => setTimeout(r, 20));
-        expect(pre.scrollTop).toBe(0);
-    });
-
-    it("does not force-scroll if the user scrolls away in the gap between a scheduled frame and its execution (codex P2, PR #3165)", async () => {
-        // A plain `fireEvent.scroll` + waiting for the real rAF to fire
-        // can't reliably land IN that gap — the frame may already have run
-        // by the time the scroll event is dispatched. Stub
-        // requestAnimationFrame to capture (not auto-run) the callback, so
-        // the scroll-away can be forced to land strictly between
-        // scheduling and execution, deterministically.
-        const rafCallbacks: FrameRequestCallback[] = [];
-        const rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
-            rafCallbacks.push(cb);
-            return rafCallbacks.length;
-        });
-        try {
-            stubClientHeight(50);
-            stubScrollHeight(200);
-            const { pre } = await startInstalling();
-            // The log-lines effect also runs once, unconditionally, on its
-            // own initial setup (Solid effects fire at least once
-            // immediately) — so a frame is already queued from mount
-            // before this test's own chunk arrives. Measure the delta,
-            // not an absolute count.
-            const callsBeforeChunk = rafCallbacks.length;
-            pre.scrollTop = 200; // at the bottom
-
-            // Line arrives while at the bottom — schedules (but, per the
-            // stub, does not yet run) another auto-scroll frame.
-            chunkHandler!({ data: { line: "line 1", stream: "stdout" } });
-            expect(rafCallbacks.length).toBe(callsBeforeChunk + 1);
-
-            // User scrolls away BEFORE that frame executes.
-            pre.scrollTop = 0;
-            fireEvent.scroll(pre);
-
-            // Now let the newly-queued frame run.
-            rafCallbacks[rafCallbacks.length - 1](0);
-            expect(pre.scrollTop).toBe(0); // must NOT have been yanked back to the bottom
-        } finally {
-            // A leaked requestAnimationFrame stub — e.g. if an assertion
-            // above throws before reaching an unconditional restore —
-            // silently breaks every later test in this file that depends
-            // on a real rAF actually firing, with no direct link back to
-            // this test in the failure output. Cost real debugging time
-            // once already; `finally` makes that impossible to repeat.
-            rafSpy.mockRestore();
-        }
-    });
-
-    it("resumes auto-scroll once the user scrolls back within the forgiving threshold", async () => {
-        stubClientHeight(50);
-        const scrollStub = stubScrollHeight(200);
-        const { pre } = await startInstalling();
-        pre.scrollTop = 0;
-        fireEvent.scroll(pre); // unstick
-
-        pre.scrollTop = 155; // within 40px of the bottom (200 - 50 - 155 = -5, clamps to "at bottom")
-        fireEvent.scroll(pre);
-
-        scrollStub.mockReturnValue(240);
-        chunkHandler!({ data: { line: "line 2", stream: "stdout" } });
-        await vi.waitFor(() => expect(pre.scrollTop).toBe(240));
-    });
-
-    it("re-syncs to the bottom when the <details> panel is (re)opened while stuck to bottom", async () => {
-        stubClientHeight(50);
-        stubScrollHeight(300);
-        const { pre, container } = await startInstalling();
-        const details = container.querySelector(".system-tool-install-details") as HTMLDetailsElement;
-        pre.scrollTop = 0; // simulate whatever stale position was left while collapsed
-
-        // A real click on <summary> flips `.open` BEFORE the browser
-        // dispatches "toggle" — a bare synthetic event doesn't do that for
-        // us, so set it explicitly to match real behavior.
-        details.open = true;
-        fireEvent(details, new Event("toggle"));
-        await vi.waitFor(() => expect(pre.scrollTop).toBe(300));
-    });
-
-    it("resets stickToBottom on Retry, regardless of prior scroll-away state", async () => {
+    it("starts Retry from a clean log and step list", async () => {
         resolveMock.mockResolvedValue({
             available: true,
             program: "brew",
@@ -346,27 +292,19 @@ describe("SystemToolInstallInline — Details auto-scroll (SPEC_SYSTEM_TOOL_INST
             commandPreview: "brew install git",
         });
         installMock.mockResolvedValue({ sessionId: "sysinstall-retry" });
-        stubClientHeight(50);
-        const scrollStub = stubScrollHeight(200);
         const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
         const { container } = render(() => <SystemToolInstallInline toolId="git" onInstalled={() => {}} />);
         await screen.findByText("brew install git");
         fireEvent.click(screen.getByText("Install"));
         await waitFor(() => expect(chunkHandler).not.toBeNull());
-
-        const pre = container.querySelector(".system-tool-install-log-body") as HTMLPreElement;
-        pre.scrollTop = 0;
-        fireEvent.scroll(pre); // unstick
-
+        chunkHandler!({ data: { line: "first run", stream: "stdout" } });
         chunkHandler!({ data: { op: "done", ok: false, error: "failed" } });
         await screen.findByText("Retry");
 
         chunkHandler = null;
         fireEvent.click(screen.getByText("Retry"));
         await waitFor(() => expect(chunkHandler).not.toBeNull());
-
-        scrollStub.mockReturnValue(400);
-        chunkHandler!({ data: { line: "retry line", stream: "stdout" } });
-        await vi.waitFor(() => expect(pre.scrollTop).toBe(400));
+        expect(logRows(container)).toEqual([]);
+        expect(stepStatus(container)[0]).toBe("Get ready:active");
     });
 });

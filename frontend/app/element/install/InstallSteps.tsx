@@ -13,7 +13,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import type { InstallStep, InstallStepStatus } from "./npm-steps";
+import type { InstallStep, InstallStepStatus } from "./install-types";
 import "./install-steps.scss";
 
 const ICON: Record<InstallStepStatus, string> = {
