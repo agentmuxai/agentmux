@@ -1227,9 +1227,10 @@ single reducer command, O(nodes kept).
   the top stays until new content scrolls it out. Removing rows above the
   viewport while pinned moves nothing on screen (the pin holds the bottom).
 - **While the reader is scrolled up in the feed** roll-off waits. Backstop:
-  past K + 10 finished turns it rolls off turns wholly above the viewport and
-  keeps the first visible row at the same offset (the anchor mechanism the
-  virtual list already uses for prepends, applied to a front removal).
+  past K + 10 finished turns it rolls off turns wholly above the viewport —
+  still only turns that may go (next bullet) — and keeps the first visible row
+  at the same offset (the anchor mechanism the virtual list already uses for
+  prepends, applied to a front removal).
 - **Only turns whose nodes are all reproducible from the transcript.**
   Roll-off stops at the first turn holding one that is not:
   - `shell` nodes (backend memory ring only; §6.3.2),
@@ -1240,8 +1241,13 @@ single reducer command, O(nodes kept).
   Live-only decoration rows — stderr, system notifications, "Interrupted",
   heuristic compaction markers, `compaction_started` — **do** roll off: a
   reload drops them today anyway, and History never showed them.
-  The blocked case gets the same K + 10 backstop, logged with what was lost,
-  until the journal (§6.3.2, step 4 below) makes shells and answers durable.
+  **A blocked turn is never forced out** — no backstop applies to it, since
+  its nodes could not be rebuilt anywhere (invariant 4; Codex review of this
+  revision). The feed may then hold more than K turns: everything from the
+  blocked turn on stays. The dev HUD shows the count of turns held by a
+  blocker, so a session that grows this way is visible. The journal (§6.3.2,
+  PR 4 below) makes shells and answers durable and removes the blocked case;
+  it is scheduled right after PR 3.
 
 **How.** Reducer command `RollOff { beforeIndex }`
 (`frontend/app/store/agent-document/reducer.ts`): the same prefix cut as
