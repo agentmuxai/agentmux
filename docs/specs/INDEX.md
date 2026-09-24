@@ -862,6 +862,7 @@ partial list.
 | [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14`](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | SPEC: Internal-event → frontend WaveObjUpdate bridge |
 | [`SPEC_OPENCLAW_AGENT_2026_05_17`](SPEC_OPENCLAW_AGENT_2026_05_17.md) | SPEC: OpenClaw integration — shared interfaces, distinct flavor |
 | [`SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16`](SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md) | SPEC: OpenEditor — collapsed file-tree + floating-pane support |
+| [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md) | SPEC: OS-level activity indicator when an agent is busy |
 | [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30`](SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md) | SPEC: Pane Icon and Text Visibility Pass |
