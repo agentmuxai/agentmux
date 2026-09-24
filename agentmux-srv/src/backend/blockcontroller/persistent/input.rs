@@ -7,118 +7,551 @@
 use super::*;
 
 impl PersistentSubprocessController {
-    /// Deliver a user message to the **already-running** persistent process,
-    /// without a spawn config. Unlike `send_message`, this never spawns — it errors
-    /// if the process is not running. Used for controller-aware muxbus/reactive
-    /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
-    /// and we have no `PersistentSpawnConfig` to hand. Writing on the live stdin lets
-    /// the message land mid-turn (steering) instead of waiting for idle.
-    /// Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
-    pub fn send_user_message(&self, message: String) -> Result<(), String> {
-        // Whether the process was busy or idle, delivering this message
-        // (re)starts an active turn — see the comment in `send_message`,
-        // including the heartbeat re-arm-only-if-was-idle rationale and why
-        // this must be the atomic read-and-set (send_message and
-        // send_user_message can race on the same block).
-        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
-        if !was_active {
-            self.spawn_status_heartbeat();
-        }
-        self.publish_status();
-
-        let json_msg = serde_json::json!({
+    /// Encode a message as the stream-json stdin line the CLI expects.
+    pub(super) fn encode_user_message(message: &str) -> String {
+        serde_json::json!({
             "type": "user",
             "message": {
                 "role": "user",
                 "content": message
             }
-        });
-        let json_str = json_msg.to_string();
+        })
+        .to_string()
+    }
 
+    /// Write an already-encoded stdin line, given a held `inner` guard.
+    ///
+    /// Callers must hold the lock across the turn-state check and this write —
+    /// that is the whole point of `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+    /// §4.2's single-mutex requirement.
+    ///
+    /// On success the line is also tracked into the current generation's
+    /// resume retry batch, so every write site (immediate, idle fast path and
+    /// turn-boundary flush) gets it without having to remember to.
+    pub(super) fn try_write_stdin_locked(
+        inner: &mut PersistentInner,
+        line: &str,
+    ) -> Result<(), String> {
+        // reagentx P1 on PR #2360 (sixth review pass, round 7):
+        // `spawn_process` sets `stdin_tx` synchronously, well before the
+        // queued message that triggered the spawn is actually delivered by
+        // the background drain task (`drain_queue_after_successful_spawn`).
+        // Gating purely on `stdin_tx.is_some()` let a message land in that
+        // window and `try_send` straight to the live channel, jumping ahead
+        // of whatever was still queued. Checked in the SAME acquisition as
+        // `stdin_tx`, so nothing slips between two checks.
+        if inner.spawning_in_progress {
+            return Err("persistent process is still starting up — try again shortly".to_string());
+        }
+        // A committed deferred restart leaves `stdin_tx` live until the process
+        // actually exits, and a line written into a process about to be killed
+        // is lost, even though its caller was told it was delivered. The human
+        // path (`decide_send_action`) already refuses DeliverDirect here (codex
+        // P1 on PR #2858); this is the same rule for every write through this
+        // helper (codex P1 on #3562).
+        if inner.restart_pending {
+            return Err("persistent process is restarting for a config change — try again shortly".to_string());
+        }
+        // Likewise once a kill has been requested: the process is going down
+        // and a line written now dies with it (see `stop_pending`). Once it
+        // has exited, "not running" below is the accurate answer.
+        if inner.stop_pending && inner.stdin_tx.is_some() {
+            return Err("persistent process is stopping — try again shortly".to_string());
+        }
+        let tx = inner
+            .stdin_tx
+            .as_ref()
+            .ok_or("persistent process not running")?;
+        tx.try_send(line.to_string())
+            .map_err(|e| format!("stdin send failed: {e}"))?;
+        // codex P1 + reagent P1 on PR #3523, found independently by both:
+        // track this into the CURRENT generation's retry batch, exactly as
+        // `send_message`'s `DeliverDirect` branch does. That fix covered the
+        // typed-in-the-UI path and missed this one — the MuxBus/reactive
+        // injection path (`deliver_agent_message`).
+        //
+        // The gap matters most for eager resume, which spawns with an
+        // unconfirmed `--resume` and NO seed message, so the retry batch
+        // starts empty. An injected prompt written straight to stdin and never
+        // appended leaves it empty, so when the resumed sid turns out to be
+        // stale the retry fires with nothing to redeliver — and the prompt is
+        // gone, even though the caller was told it was delivered and the live
+        // blockfile append already rendered it to the operator.
+        //
+        // Read the generation and apply under the caller's SAME lock
+        // acquisition (already held for `try_send`) — a separate one risks a
+        // concurrent respawn bumping `spawn_generation` in between, making the
+        // event carry a stale generation that `update()`'s catch-all silently
+        // ignores. A no-op when no unconfirmed resume is in flight.
+        let generation = inner.spawn_generation;
+        let seq = inner.take_next_message_seq();
+        inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
+            generation,
+            entry: persistent_resume::QueuedRetryEntry { seq, json: line.to_string() },
+        });
+        Ok(())
+    }
+
+    /// Deliver a user message to the **already-running** persistent process,
+    /// without a spawn config. Unlike `send_message`, this never spawns — it errors
+    /// if the process is not running. Used for controller-aware muxbus/reactive
+    /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
+    /// and we have no `PersistentSpawnConfig` to hand.
+    ///
+    /// Defaults to [`DeliverPolicy::NextIdle`]: if a turn is in flight the
+    /// message is queued and delivered at the next turn boundary, so an
+    /// automated sender never cuts the agent's explanation in half.
+    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`.
+    pub fn send_user_message(&self, message: String) -> Result<(), String> {
+        self.send_user_message_with_policy(message, DeliverPolicy::NextIdle)
+    }
+
+    /// [`send_user_message`] with an explicit delivery policy.
+    ///
+    /// `Immediate` preserves the pre-2026-09-23 behavior (write to live stdin
+    /// regardless of turn state, steering the agent). It exists for the human
+    /// operator's own deliberate interruption and should not be used for
+    /// automated traffic — see [`DeliverPolicy`].
+    pub fn send_user_message_with_policy(
+        &self,
+        message: String,
+        policy: DeliverPolicy,
+    ) -> Result<(), String> {
+        let json_str = Self::encode_user_message(&message);
+
+        // ONE lock acquisition covers the turn-state read, the enqueue and the
+        // idle fast-path send (§4.2/§4.3). Because the turn-end flush in
+        // `spawn.rs` takes this same lock, there is no window in which a
+        // message is enqueued against a queue a concurrent flush has already
+        // finished draining.
+        //
+        // `publish_status`/`spawn_status_heartbeat` must NOT be called while
+        // this guard is held — `publish_status` takes `inner` itself and would
+        // deadlock. They run after the guard drops, below.
+        let (delivered, still_queued) = {
+            let mut inner = self.inner.lock().unwrap();
+
+            let delivered = if policy == DeliverPolicy::Immediate {
+                Self::try_write_stdin_locked(&mut inner, &json_str)?;
+                Some((json_str.clone(), self.mark_turn_active_locked()))
+            } else {
+                if inner.deferred_deliveries.len() >= MAX_DEFERRED_DELIVERIES {
+                    // §4.5: an explicit error, never a false success. The
+                    // caller treats this like any other transient delivery
+                    // failure and retries.
+                    return Err(format!(
+                        "deferred-delivery queue is full ({MAX_DEFERRED_DELIVERIES} messages \
+                         waiting on this agent's current turn) — retry shortly"
+                    ));
+                }
+                // Always enqueue first, then decide whether to drain the head
+                // immediately. Sending directly while a backlog exists would
+                // reorder this message ahead of older ones — FIFO is what
+                // makes "one message per turn boundary" produce the order the
+                // senders actually sent in.
+                inner.deferred_deliveries.push_back(json_str);
+
+                // A spawn in flight counts as busy rather than as an error.
+                // This is the startup race that used to drop jekts outright
+                // (spec §3.2.1). Not every spawn ends in a turn boundary — it
+                // can fail, or (eager resume) succeed with nothing to say — so
+                // anything left queued here is the watchdog's to finish, below.
+                if self.deferred_must_wait_locked(&inner) {
+                    None
+                } else {
+                    let head = inner
+                        .deferred_deliveries
+                        .front()
+                        .expect("just pushed")
+                        .clone();
+                    match Self::try_write_stdin_locked(&mut inner, &head) {
+                        Ok(()) => {
+                            inner.deferred_deliveries.pop_front();
+                            // The flip MUST happen before this guard drops.
+                            // Deferred to after the lock, a second caller
+                            // arriving in the gap would still read "idle" and
+                            // an empty queue, take this same fast path, and
+                            // write a second message with no turn boundary
+                            // between them — the exact thing this PR forbids.
+                            Some((head, self.mark_turn_active_locked()))
+                        }
+                        Err(e) => {
+                            // Drop the entry we just added — this call is
+                            // reporting failure, so the caller owns the retry.
+                            // Anything already queued stays put. `pop_back`
+                            // is this call's own push even when the head that
+                            // failed is an older entry: same lock, nothing
+                            // else ran in between. That older head was already
+                            // accepted, and whoever queued it armed the
+                            // watchdog, so it keeps its retry.
+                            inner.deferred_deliveries.pop_back();
+                            return Err(e);
+                        }
+                    }
+                }
+            };
+            (delivered, !inner.deferred_deliveries.is_empty())
+        };
+
+        // Anything still queued needs a guaranteed way out even if no turn
+        // boundary ever comes. Called after EVERY enqueue that leaves the queue
+        // non-empty, so it cannot miss a watchdog that exited just before.
+        if still_queued {
+            self.ensure_deferred_watchdog();
+        }
+
+        let Some((sent_line, was_active)) = delivered else {
+            tracing::info!(
+                block_id = %self.block_id,
+                "delivery deferred — a turn is in flight; will flush at the next turn boundary"
+            );
+            return Ok(());
+        };
+
+        // Everything below needs the `inner` lock released: `publish_status`
+        // takes it, and `spawn_status_heartbeat`'s task does too. The turn was
+        // already marked active inside the critical section above; these are
+        // only the observable side effects of that.
+        //
+        // The heartbeat is re-armed only when resuming from idle — a mid-turn
+        // steering send already has one running, and re-spawning per call would
+        // leak duplicate heartbeat tasks.
+        if !was_active {
+            self.spawn_status_heartbeat();
+        }
+        self.publish_status();
+        self.append_delivered_message(&sent_line);
+        Ok(())
+    }
+
+    /// Mark the turn active while the caller already holds `inner`.
+    ///
+    /// Exists to make the lock discipline explicit at the call sites: the flip
+    /// belongs *inside* the critical section that decided to send, so no
+    /// concurrent caller can observe "idle with an empty queue" between the
+    /// write and the flip and take the idle fast path a second time. Lock
+    /// order is `inner` → `health_monitor`, matching the turn-end handler in
+    /// `spawn.rs`; `health_monitor` never takes `inner`, so this cannot
+    /// deadlock. Returns the pre-call value.
+    fn mark_turn_active_locked(&self) -> bool {
+        self.health_monitor.mark_turn_active_returning_was_active()
+    }
+
+    /// Whether a deferred message must keep waiting rather than be written
+    /// now: a turn is running (writing now is the interrupt this exists to
+    /// stop), or another writer owns stdin — see
+    /// [`Self::stdin_owned_by_another_writer`]. Shared by the idle fast path
+    /// and the watchdog, so the two can never disagree about what "idle" means.
+    ///
+    /// A committed config restart (`restart_pending`) also means wait. The
+    /// process is about to be killed, and it stays down until the next message
+    /// respawns it. The queue is kept for that replacement, and the watchdog
+    /// must not count this window toward reporting it stranded.
+    ///
+    /// A requested kill (`stop_pending`) means wait too, but only while the
+    /// dying process still holds `stdin_tx`: writes are refused then, and a
+    /// refusal must not reach an automated caller as an error (reagent P1 on
+    /// #3562). Once it exits, the ordinary no-process rules apply. A send
+    /// fails into the caller's respawn fallback, and the watchdog's grace
+    /// window runs, so nothing parks unreported behind a stop.
+    pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
+        self.health_monitor.is_active_turn()
+            || inner.restart_pending
+            || (inner.stop_pending && inner.stdin_tx.is_some())
+            || Self::stdin_owned_by_another_writer(inner)
+    }
+
+    /// Another writer is feeding stdin, and messages it carries were accepted
+    /// earlier than anything in the deferred queue, so they must not be
+    /// overtaken:
+    ///
+    /// - a spawn is in flight — its seed message and drain go first;
+    /// - a stale-resume retry batch is being replayed (`drain_claim`), possibly
+    ///   into this same live process by a background task writing to the same
+    ///   channel;
+    /// - human messages are queued behind a spawn.
+    ///
+    /// Queued messages count only while a process exists to drain them. A
+    /// drain's "second stall" (`drain_queue_with_claim`) releases its claim
+    /// with leftovers queued and no process. Nothing owns that backlog, and
+    /// treating it as a writer made a send defer instead of failing into
+    /// the no-process fallback, and kept the watchdog resetting its orphan
+    /// timer forever (codex P1 on #3562).
+    ///
+    /// Checked inside [`Self::flush_one_deferred_locked`] itself, so EVERY
+    /// release path honours it, the turn-boundary flush included (reagent P1
+    /// on #3562: the boundary flush used to skip it).
+    fn stdin_owned_by_another_writer(inner: &PersistentInner) -> bool {
+        inner.spawning_in_progress
+            || inner.drain_claim
+            || (!inner.pending_send_messages.is_empty() && inner.stdin_tx.is_some())
+    }
+
+    /// Release at most ONE deferred message.
+    ///
+    /// Exactly one, never the whole queue: writing to stdin starts a new turn,
+    /// so a burst drain would write message #2 while #1's turn was already
+    /// running — the mid-turn write this whole mechanism exists to prevent
+    /// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.4). The next queued message
+    /// goes out on that new turn's own boundary.
+    ///
+    /// The caller holds `inner` across this, and must leave `turn_active` set
+    /// on [`DeferredFlush::Released`] — the released message just started a
+    /// turn. A failed write leaves the queue intact; it is reported as
+    /// [`DeferredFlush::Failed`], distinct from an empty queue, because the
+    /// caller must arrange a retry for it rather than treat it as idle. The
+    /// same holds for [`DeferredFlush::Held`], returned without writing when
+    /// another writer owns stdin.
+    pub(super) fn flush_one_deferred_locked(
+        inner: &mut PersistentInner,
+        block_id: &str,
+    ) -> DeferredFlush {
+        let Some(head) = inner.deferred_deliveries.front().cloned() else {
+            return DeferredFlush::Empty;
+        };
+        if Self::stdin_owned_by_another_writer(inner) {
+            return DeferredFlush::Held;
+        }
+        match Self::try_write_stdin_locked(inner, &head) {
+            Ok(()) => {
+                inner.deferred_deliveries.pop_front();
+                DeferredFlush::Released(head)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    error = %e,
+                    queued = inner.deferred_deliveries.len(),
+                    "deferred flush failed; leaving the queue for the watchdog to retry"
+                );
+                DeferredFlush::Failed
+            }
+        }
+    }
+
+    /// The turn-boundary decision for a `result` frame, under `inner`: release
+    /// at most one deferred message, decide whether the turn is over, and
+    /// whether a deferred runtime-config restart may now apply.
+    ///
+    /// Returns `None`, touching nothing, when `generation` is no longer the
+    /// current one. A fallback respawn can install a new process before the
+    /// old reader drains a buffered `result`. That `result` ends nothing the
+    /// new process is doing, and `flush_one_deferred_locked` writes to the
+    /// CURRENT `stdin_tx`, so acting on it would inject into the replacement's
+    /// running turn, mark it idle, or restart it (codex P1 on #3562).
+    ///
+    /// The turn stays active on `Released` (the message just started a turn)
+    /// and on `Held`: an earlier writer's prompt (a retry-batch replay or a
+    /// queued human message) is running or about to, and the drain that wrote
+    /// it does not re-mark the turn active. Going idle here would let the
+    /// watchdog write the moment that writer released its claim, mid-turn
+    /// (codex P1 on #3562). The turn only goes idle on `Empty` or `Failed`.
+    ///
+    /// **Residual:** a `Held` boundary whose writer then writes nothing
+    /// further leaves the turn marked active until the next `result`, i.e.
+    /// until the next input. It needs a `result` to land in the instant
+    /// between a drain's last write and its claim release. Staying active too
+    /// long is the safe failure: a deferred message waits, and none is ever
+    /// written mid-turn.
+    ///
+    /// The deferred restart applies only on `Empty`. Killing the process with
+    /// an entry still queued, or just written, would strand it.
+    pub(super) fn turn_boundary_locked(
+        inner: &mut PersistentInner,
+        health: &TurnActivityTracker,
+        block_id: &str,
+        generation: u64,
+    ) -> Option<TurnBoundary> {
+        if inner.spawn_generation != generation {
+            tracing::debug!(
+                block_id = %block_id,
+                reader_generation = generation,
+                current_generation = inner.spawn_generation,
+                "result from a replaced process — not a boundary for the current one"
+            );
+            return None;
+        }
+        let flushed = Self::flush_one_deferred_locked(inner, block_id);
+        let boundary = TurnBoundary {
+            apply_deferred_restart: flushed == DeferredFlush::Empty
+                && std::mem::replace(&mut inner.restart_when_idle, false),
+            flushed,
+        };
+        if !boundary.turn_still_active() {
+            health.set_active_turn(false);
+        }
+        if boundary.apply_deferred_restart {
+            inner.restart_pending = true;
+        }
+        Some(boundary)
+    }
+
+    /// Make sure a watchdog task is looking after a non-empty deferred queue.
+    ///
+    /// The `result`-frame flush is the primary path, but it only fires when a
+    /// turn ends. Three cases have no such boundary coming (codex P1s on
+    /// #3562, plus one found alongside them):
+    ///
+    /// - a boundary flush whose write failed (e.g. the bounded stdin channel
+    ///   was momentarily full) — the turn went idle with the entry still queued;
+    /// - a message deferred behind a spawn that then FAILED — no process, so
+    ///   no turn and no `result`;
+    /// - a message deferred behind a spawn that succeeded with nothing to say
+    ///   (eager resume spawns with no seed message) — idle, no turn.
+    ///
+    /// Idempotent: at most one watchdog per controller. A no-op for an
+    /// instance without `set_self_ref` (only tests construct those) or outside
+    /// a Tokio runtime.
+    pub(super) fn ensure_deferred_watchdog(&self) {
+        let Some(ctrl) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
         {
             let mut inner = self.inner.lock().unwrap();
-            // reagentx P1 on PR #2360 (sixth review pass, round 7):
-            // `spawn_process` sets `stdin_tx` synchronously, well before
-            // the queued message that triggered the spawn is actually
-            // delivered by the background drain task
-            // (`drain_queue_after_successful_spawn`). Gating purely on
-            // `stdin_tx.is_some()` (as `decide_send_action` used to,
-            // before round 4) let a message land in that exact window and
-            // `try_send` straight to the live channel, jumping ahead of
-            // whatever's still queued — the same reordering bug fixed for
-            // `send_message`'s own delivery path. Unlike `send_message`,
-            // this function has no spawn config and its persistence is a
-            // LIVE, visible append (see below), not the silent persist
-            // the generic queue drain performs — there's no safe way to
-            // queue behind that drain without either bypassing its
-            // ordering guarantee or losing the visibility requirement, so
-            // this errors instead of reordering; the caller (muxbus/jekt
-            // delivery) can retry shortly. Checked in the SAME lock
-            // acquisition as `stdin_tx` below, not a separate one, so
-            // nothing can slip through the gap between two checks.
-            if inner.spawning_in_progress {
-                return Err(
-                    "persistent process is still starting up — try again shortly".to_string(),
-                );
+            if inner.deferred_watchdog_armed {
+                return;
             }
-            let tx = inner
-                .stdin_tx
-                .as_ref()
-                .ok_or("persistent process not running")?;
-            tx.try_send(json_str.clone())
-                .map_err(|e| format!("stdin send failed: {e}"))?;
-            // codex P1 + reagent P1 on PR #3523, found independently by
-            // both: track this into the CURRENT generation's retry batch,
-            // exactly as `send_message`'s `DeliverDirect` branch does. That
-            // fix covered the typed-in-the-UI path and missed this one — the
-            // MuxBus/reactive injection path (`deliver_agent_message`).
-            //
-            // The gap matters most for eager resume, which spawns with an
-            // unconfirmed `--resume` and NO seed message, so the retry batch
-            // starts empty. An injected prompt written straight to stdin and
-            // never appended leaves it empty, so when the resumed sid turns
-            // out to be stale the retry fires with nothing to redeliver —
-            // and the prompt is gone, even though the caller was returned
-            // `AgentDelivery::Structured` and the live blockfile append
-            // below already rendered it to the operator. Silent loss of a
-            // message we acknowledged.
-            //
-            // Read the generation and apply in this SAME lock acquisition
-            // (already held for `try_send`) — a separate one risks a
-            // concurrent respawn bumping `spawn_generation` in between,
-            // making the event carry a stale generation that `update()`'s
-            // catch-all silently ignores.
-            //
-            // A no-op when no unconfirmed resume is in flight, so it costs
-            // nothing on the ordinary path.
-            let generation = inner.spawn_generation;
-            let seq = inner.take_next_message_seq();
-            inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
-                generation,
-                entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
-            });
+            inner.deferred_watchdog_armed = true;
         }
+        let weak = Arc::downgrade(&ctrl);
+        drop(ctrl);
+        runtime.spawn(async move {
+            let mut orphaned_ticks = 0u32;
+            loop {
+                tokio::time::sleep(DEFERRED_WATCHDOG_TICK).await;
+                // Hold no strong reference across the sleep, so the watchdog
+                // never keeps a torn-down controller alive.
+                let Some(ctrl) = weak.upgrade() else { return };
+                if ctrl.sweep_deferred_once(&mut orphaned_ticks) == WatchdogStep::Exit {
+                    return;
+                }
+            }
+        });
+    }
 
-        // Persist the injected message to the blockfile WITH a live event —
-        // unlike `send_message`, there is no `agent-message-accepted` pending
-        // echo to pair with (nothing was typed in the UI), so without this the
-        // injection is invisible to the human operator: a silent injection,
-        // which SPEC_JEKT_SECURITY_AND_VISIBILITY §3.1/G1 forbids. The live
-        // blockfile append renders it in the open pane; the persisted line lets
-        // `parseHistoryLines` rebuild the node on reopen.
-        if let Some(ref broker) = self.broker {
-            let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
-            let line_with_newline = format!("{json_str}\n");
-            super::super::shell::handle_append_block_file(
-                broker,
+    /// One watchdog tick. Split out of the task so tests can drive it
+    /// directly, without a real process or real time.
+    pub(super) fn sweep_deferred_once(&self, orphaned_ticks: &mut u32) -> WatchdogStep {
+        let (released, stranded) = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.deferred_deliveries.is_empty() {
+                // Disarm under the same lock that guards enqueue: any message
+                // pushed after this point is followed by its own
+                // `ensure_deferred_watchdog`, which will see "disarmed".
+                inner.deferred_watchdog_armed = false;
+                return WatchdogStep::Exit;
+            }
+            if self.deferred_must_wait_locked(&inner) {
+                // Something in flight will reach a boundary (or fail into a
+                // state this watchdog sees on a later tick).
+                *orphaned_ticks = 0;
+                return WatchdogStep::Continue;
+            }
+            if inner.stdin_tx.is_none() {
+                // No process and nothing starting one. Give a respawn the
+                // grace window to begin, then stop pretending these will be
+                // delivered (spec §4.5).
+                *orphaned_ticks += 1;
+                if *orphaned_ticks < DEFERRED_ORPHAN_GRACE_TICKS {
+                    return WatchdogStep::Continue;
+                }
+                inner.deferred_watchdog_armed = false;
+                (None, inner.deferred_deliveries.drain(..).collect::<Vec<_>>())
+            } else {
+                *orphaned_ticks = 0;
+                match Self::flush_one_deferred_locked(&mut inner, &self.block_id) {
+                    // Flip inside the lock, exactly as the idle fast path does.
+                    DeferredFlush::Released(line) => (Some((line, self.mark_turn_active_locked())), Vec::new()),
+                    // Transient; the next tick tries again. (`Held` can't
+                    // happen here — `deferred_must_wait_locked` above already
+                    // returned — but it means the same thing if it did.)
+                    DeferredFlush::Failed | DeferredFlush::Held => return WatchdogStep::Continue,
+                    DeferredFlush::Empty => unreachable!("checked non-empty under this same lock"),
+                }
+            }
+        };
+
+        if !stranded.is_empty() {
+            Self::log_stranded_deferred(
                 &self.block_id,
-                crate::backend::agent_session::OUTPUT_FILE,
-                line_with_newline.as_bytes(),
-                self.filestore.as_ref(),
-                global_zone.as_deref(),
+                "no process and no spawn in flight for the whole grace window",
+                &stranded,
             );
+            return WatchdogStep::Exit;
         }
-        Ok(())
+        if let Some((line, was_active)) = released {
+            tracing::info!(
+                block_id = %self.block_id,
+                "agent idle with no turn boundary pending — watchdog released one deferred message"
+            );
+            if !was_active {
+                self.spawn_status_heartbeat();
+            }
+            self.publish_status();
+            self.append_delivered_message(&line);
+        }
+        WatchdogStep::Continue
+    }
+
+    /// Report every stranded deferred entry, so a message this controller
+    /// accepted is never quietly discarded
+    /// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5). Callers drain the
+    /// queue in the same `inner` acquisition that ends delivery (`stop`,
+    /// `shutdown`, the watchdog), so no flush can take an entry first.
+    ///
+    /// **Known gap:** reporting is currently a loud structured log, not a
+    /// failure routed back to the original sender. The queue stores encoded
+    /// stdin lines with no sender identity attached, so there is nothing to
+    /// address a reply to; carrying that identity through is Phase 3. Until
+    /// then a stranded message is visible in the logs rather than in the
+    /// sender's response — better than silence, short of the spec's intent.
+    ///
+    /// Takes `block_id` rather than `&self` so `shutdown`'s `'static` future,
+    /// which holds no controller reference, can report through it too.
+    pub(super) fn log_stranded_deferred(block_id: &str, reason: &str, stranded: &[String]) {
+        if stranded.is_empty() {
+            return;
+        }
+        tracing::warn!(
+            block_id = %block_id,
+            reason = %reason,
+            stranded = stranded.len(),
+            "deferred messages were accepted but never delivered"
+        );
+        for line in stranded {
+            tracing::warn!(block_id = %block_id, message = %line, "stranded deferred message");
+        }
+    }
+
+    /// Persist a delivered injection to the blockfile WITH a live event.
+    ///
+    /// Unlike `send_message` there is no `agent-message-accepted` pending echo
+    /// to pair with (nothing was typed in the UI), so without this the
+    /// injection is invisible to the human operator: a silent injection, which
+    /// SPEC_JEKT_SECURITY_AND_VISIBILITY §3.1/G1 forbids. The live append
+    /// renders it in the open pane; the persisted line lets `parseHistoryLines`
+    /// rebuild the node on reopen.
+    ///
+    /// Called at *delivery* time, not enqueue time, so the transcript shows the
+    /// message where the agent actually received it. A queued message is
+    /// therefore not yet visible — surfacing "N waiting" is a UI question
+    /// tracked as spec §8 Q3.
+    pub(super) fn append_delivered_message(&self, json_str: &str) {
+        let Some(ref broker) = self.broker else { return };
+        let global_zone =
+            super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let line_with_newline = format!("{json_str}\n");
+        super::super::shell::handle_append_block_file(
+            broker,
+            &self.block_id,
+            crate::backend::agent_session::OUTPUT_FILE,
+            line_with_newline.as_bytes(),
+            self.filestore.as_ref(),
+            global_zone.as_deref(),
+        );
     }
 
     /// Answer a parked AskUserQuestion via the Agent SDK **control protocol**.
