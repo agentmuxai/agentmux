@@ -41,7 +41,8 @@ import { ObjectService } from "@/app/store/services";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
-import { closeNode } from "./layoutMagnify";
+import { focusNode } from "./layoutFocus";
+import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { effectiveStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 
 export { effectiveStack };
@@ -259,21 +260,37 @@ export function moveBlockInStack(
         console.error("moveBlockInStack: source or target block is in no pane", blockId, targetBlockId);
         return false;
     }
-    const applied =
-        sourceNode.id === targetNode.id
-            ? moveMemberInStack(sourceNode.data, blockId, targetBlockId, position, activate)
-            : moveMemberAcrossStacks(sourceNode.data, targetNode.data, blockId, activate);
-    if (!applied) {
+    const crossPane = sourceNode.id !== targetNode.id;
+    const result = crossPane
+        ? moveMemberAcrossStacks(sourceNode.data, targetNode.data, blockId, activate)
+        : moveMemberInStack(sourceNode.data, blockId, targetBlockId, position, activate);
+    if (!result) {
         console.error(
-            "moveBlockInStack: could not apply — blockId is not a member of its resolved pane, or is that pane's only member",
+            "moveBlockInStack: could not apply — blockId is not a member of its resolved pane",
             blockId,
             targetBlockId
         );
         return false;
     }
+    // Moving a pane's only tab out empties that pane, so the pane goes —
+    // as a move, never a close (removeLeafEmptiedByMove's own comment).
+    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.
+    if (result === "emptied") {
+        removeLeafEmptiedByMove(model, sourceNode.id);
+    }
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
+
+    // A tab dragged into another pane is where the user's attention now is:
+    // focus that pane. Re-resolved by block id AFTER the edit, not the
+    // `targetNode` reference from before it — removing the source leaf can
+    // collapse a single-child parent and re-home the destination's id/data
+    // (the same hazard closeBlockInStack's comment cites, reagent P1 on #3422).
+    if (crossPane) {
+        const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, blockId);
+        if (landedIn) focusNode(model, landedIn.id);
+    }
 
     TabRpcClient.rpcCall(
         "pane.moveTab",

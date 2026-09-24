@@ -1667,17 +1667,105 @@ fn move_stack_member_cross_leaf_promotes_a_single_block_destination_into_a_stack
     assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("b", "b"), "activate: true");
 }
 
+// ── moving a pane's ONLY tab removes the emptied pane
+// (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.3) ──
+
 #[test]
-fn move_stack_member_refuses_to_strip_the_source_leaf_to_zero_members() {
+fn move_stack_member_last_member_moves_and_removes_the_source_leaf() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![
+            leaf("src", "a", 1.0),
+            leaf_with_stack("dst", "c", &["c", "d"], 1.0),
+            leaf("other", "z", 1.0),
+        ],
+    );
+    assert!(move_stack_member(&mut root, "a", "d", StackMovePosition::After, true));
+    let ids: Vec<&str> = root.children.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, vec!["dst", "other"], "the emptied source pane is gone, the others untouched");
+    let dst = root.children[0].data.clone().unwrap();
+    assert_eq!(dst.block_stack, strings(&["c", "d", "a"]), "placed after the target");
+    assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("a", "a"), "activate: true");
+    assert!(validate_layout_invariants(&Some(root)).is_empty());
+}
+
+#[test]
+fn move_stack_member_last_member_collapses_a_single_child_parent() {
+    // src and dst are the only two children: deleting src leaves the root
+    // with one child, which delete_node collapses by copying that child's
+    // id/data up into the root. Placement is by block id, so the moved tab
+    // still ends up in (what is now) the root.
     let mut root = group(
         "root",
         FlexDirection::Row,
         10.0,
         vec![leaf("src", "a", 1.0), leaf_with_stack("dst", "c", &["c", "d"], 1.0)],
     );
+    assert!(move_stack_member(&mut root, "a", "c", StackMovePosition::End, false));
+    assert!(root.children.is_empty(), "collapsed to a single leaf: {root:?}");
+    assert_eq!(root.id, "dst", "the root absorbed the surviving leaf");
+    let data = root.data.clone().unwrap();
+    assert_eq!(data.block_stack, strings(&["c", "d", "a"]));
+    assert_eq!(data.block_id, "c", "not activated");
+    assert!(validate_layout_invariants(&Some(root)).is_empty());
+}
+
+#[test]
+fn move_stack_member_last_member_into_a_single_block_destination_promotes_it_to_a_stack() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("src", "a", 1.0), leaf("dst", "c", 1.0), leaf("other", "z", 1.0)],
+    );
+    assert!(move_stack_member(&mut root, "a", "c", StackMovePosition::Before, true));
+    let dst = root.children[0].data.clone().unwrap();
+    assert_eq!(root.children[0].id, "dst");
+    assert_eq!(dst.block_stack, strings(&["a", "c"]));
+    assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("a", "a"));
+    assert!(validate_layout_invariants(&Some(root)).is_empty());
+}
+
+#[test]
+fn move_stack_member_last_member_with_missing_target_leaves_tree_untouched() {
+    let mut root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("src", "a", 1.0), leaf("dst", "c", 1.0)],
+    );
     let before = root.clone();
-    assert!(!move_stack_member(&mut root, "a", "d", StackMovePosition::After, false));
-    assert_eq!(root, before, "a leaf's only member can't be moved out from under it — that's closing the pane");
+    assert!(!move_stack_member(&mut root, "a", "missing", StackMovePosition::End, true));
+    assert_eq!(root, before, "no partial mutation when the destination doesn't exist");
+}
+
+#[test]
+fn move_stack_member_root_leaf_only_tab_has_nowhere_to_go() {
+    // A lone root leaf has nowhere else to go: the "target" can only be the
+    // block itself (a self-target no-op) or a block that isn't in the tree.
+    let mut root = leaf("solo", "a", 1.0);
+    let before = root.clone();
+    assert!(!move_stack_member(&mut root, "a", "missing", StackMovePosition::End, false));
+    assert_eq!(root, before);
+}
+
+#[test]
+fn source_leaf_emptied_by_move_reports_only_the_emptying_case() {
+    let root = group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("src", "a", 1.0), leaf_with_stack("dst", "c", &["c", "d"], 1.0)],
+    );
+    assert_eq!(source_leaf_emptied_by_move(&root, "a", "d"), Some("src".to_string()), "lone tab to another pane");
+    assert_eq!(source_leaf_emptied_by_move(&root, "c", "a"), None, "multi-member source survives");
+    assert_eq!(source_leaf_emptied_by_move(&root, "c", "d"), None, "same-pane reorder");
+    assert_eq!(source_leaf_emptied_by_move(&root, "a", "a"), None, "self-target");
+    assert_eq!(source_leaf_emptied_by_move(&root, "a", "missing"), None, "no destination");
+    assert_eq!(source_leaf_emptied_by_move(&root, "missing", "c"), None, "no source");
+    assert_eq!(source_leaf_emptied_by_move(&leaf("solo", "a", 1.0), "a", "x"), None, "root leaf");
 }
 
 #[test]
