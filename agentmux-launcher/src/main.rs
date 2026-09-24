@@ -36,6 +36,10 @@ mod ipc;
 mod job_object;
 mod logging;
 mod mem_supervisor;
+// OS toast presenter. Only the Windows supervisor starts it today; the macOS /
+// Linux backends are Phase 3 of SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod notify;
 mod other_instances;
 mod reducer;
 mod saga;

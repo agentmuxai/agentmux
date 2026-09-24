@@ -56,6 +56,11 @@ serde_json = "1"
 # enum keeps the SQLite + serde_json + io error wrapping clean. Same
 # pin as srv so any cross-crate refactor stays trivial.
 thiserror = "1"
+# OS notification presenter (src/notify/): the launcher's WebSocket client to
+# srv's /ws event bus. Same versions srv/cef already use — no new crates in the
+# graph. Plain ws:// to 127.0.0.1, so no TLS features.
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -80,6 +85,17 @@ windows-sys = { version = "0.59", features = [
     # Pre-splash: BeginPaint/EndPaint, CreateSolidBrush, FillRect,
     # DeleteObject, GetClientRect for the layered popup window.
     "Win32_Graphics_Gdi",
+    # HKCU AppUserModelId registration for OS toasts (src/notify/windows.rs).
+    "Win32_System_Registry",
+] }
+# WinRT toast notifications (src/notify/windows.rs). 0.61 is already in the
+# lockfile via sysinfo; windows-sys has no WinRT projections.
+windows = { version = "0.61", features = [
+    "UI_Notifications",
+    "Data_Xml_Dom",
+    "Foundation",
+    "Win32_System_WinRT",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
