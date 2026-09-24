@@ -264,6 +264,38 @@ pub fn redact_body(raw: &str, preview: Preview) -> Option<String> {
     Some(out)
 }
 
+/// `notify:quiethours` = `"HH:MM-HH:MM"` in local time. If `now` is inside
+/// the window, return when it ends (epoch ms); `None` outside it or on a
+/// malformed/empty value. A window whose end is before its start spans
+/// midnight ("22:00-08:00"). Equal start and end means "off".
+pub fn quiet_hours_until(spec: &str, now: chrono::DateTime<chrono::Local>) -> Option<i64> {
+    use chrono::{NaiveTime, TimeZone};
+    let (a, b) = spec.trim().split_once('-')?;
+    let start = NaiveTime::parse_from_str(a.trim(), "%H:%M").ok()?;
+    let end = NaiveTime::parse_from_str(b.trim(), "%H:%M").ok()?;
+    if start == end {
+        return None;
+    }
+    let t = now.time();
+    let today = now.date_naive();
+    let end_date = if start < end {
+        if !(t >= start && t < end) {
+            return None;
+        }
+        today
+    } else if t >= start {
+        today + chrono::Days::new(1)
+    } else if t < end {
+        today
+    } else {
+        return None;
+    };
+    chrono::Local
+        .from_local_datetime(&end_date.and_time(end))
+        .earliest()
+        .map(|dt| dt.timestamp_millis())
+}
+
 fn setting_bool(extra: &std::collections::HashMap<String, serde_json::Value>, key: &str, default: bool) -> bool {
     extra.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
@@ -289,6 +321,9 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         kind_enabled: Default::default(),
         pause_until_ms: extra.get("notify:pause:until").and_then(|v| v.as_i64()).unwrap_or(0),
         pause_allow_attention: setting_bool(extra, "notify:pause:allowattention", false),
+        quiet_until_ms: setting_str(extra, "notify:quiethours")
+            .and_then(|spec| quiet_hours_until(spec, chrono::Local::now()))
+            .unwrap_or(0),
     };
     for kind in [
         NotifyKind::InputWaiting,
@@ -495,6 +530,26 @@ mod tests {
         assert_eq!(sanitize_name("a\nb\tc"), "abc");
         assert_eq!(sanitize_name("   "), "An agent");
         assert_eq!(sanitize_name(&"x".repeat(100)).chars().count(), AGENT_NAME_MAX);
+    }
+
+    #[test]
+    fn quiet_hours_windows() {
+        use chrono::TimeZone;
+        let at = |h, m| chrono::Local.with_ymd_and_hms(2026, 9, 24, h, m, 0).unwrap();
+        let ms = |d: u32, h, m| chrono::Local.with_ymd_and_hms(2026, 9, d, h, m, 0).unwrap().timestamp_millis();
+        // Spans midnight.
+        assert_eq!(quiet_hours_until("22:00-08:00", at(23, 30)), Some(ms(25, 8, 0)));
+        assert_eq!(quiet_hours_until("22:00-08:00", at(6, 0)), Some(ms(24, 8, 0)));
+        assert_eq!(quiet_hours_until("22:00-08:00", at(12, 0)), None);
+        assert_eq!(quiet_hours_until("22:00-08:00", at(8, 0)), None, "end is exclusive");
+        // Same-day window.
+        assert_eq!(quiet_hours_until("12:00-13:30", at(12, 45)), Some(ms(24, 13, 30)));
+        assert_eq!(quiet_hours_until("12:00-13:30", at(14, 0)), None);
+        // Off / malformed.
+        assert_eq!(quiet_hours_until("", at(12, 0)), None);
+        assert_eq!(quiet_hours_until("09:00-09:00", at(9, 0)), None);
+        assert_eq!(quiet_hours_until("nonsense", at(12, 0)), None);
+        assert_eq!(quiet_hours_until("25:00-08:00", at(1, 0)), None);
     }
 
     #[test]
