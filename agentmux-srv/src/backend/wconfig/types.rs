@@ -193,8 +193,9 @@ pub struct SettingsType {
 
     /// Keep inactive window tabs laid out (`visibility: hidden`) instead of
     /// skipping their layout (`content-visibility: hidden`), so switching
-    /// back has nothing to catch up on. Opt-in while measured; see
-    /// docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md.
+    /// back has nothing to catch up on. On unless `false` (the frontend
+    /// treats unset as on); see
+    /// docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md §7.
     #[serde(rename = "window:keepinactivetabslaidout", default, skip_serializing_if = "Option::is_none")]
     pub window_keep_inactive_tabs_laid_out: Option<bool>,
 
