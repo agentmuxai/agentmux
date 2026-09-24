@@ -64,32 +64,34 @@ what is actually on disk, whichever tier or override put it there.
 
 ### 3.2 The guard: `scripts/cef-build/verify-cef-runtime-windows.sh <dir>`
 
-Accepts the runtime and exits 0 when either:
-
-1. `sha256(<dir>/libcef.dll) == CEF_WINDOWS_LIBCEF_SHA256`, or
-2. `<dir>` is a local Chromium build tree whose `args.gn` sets
-   `enable_backup_ref_ptr_instance_tracer=false` **exactly once, to exactly
-   `false`**, which **has a `build.ninja`** (it's a real `gn gen` tree), and
-   whose `libcef.dll` is **newer than `args.gn` and `build.ninja`**. `args.gn`
-   is configuration, not proof of what the DLL contains (Codex and ReAgent on
-   #3615):
-   - `args.gn` alone, next to a DLL copied in afterwards, ties nothing to that
-     config. Without `build.ninja`, only the pinned hash is accepted;
-   - a tree reconfigured with the fixed args but not yet, or not
-     successfully, rebuilt still holds the old tracer-on DLL. `gn gen`
-     rewrites `build.ninja` on every args change, so an older DLL is refused;
-   - `falsey_nonsense`, a second assignment, or a conditional reassignment
-     elsewhere in the file is refused.
-
-Otherwise it exits 1 and prints: what was found (hash and tier), why it matters
-(the incident, one line), and how to fix it. The fixes are `gh auth login` or
-`GH_TOKEN=… task package` so the fetch can install the pinned runtime; point
-`AGENTMUX_CEF_RUNTIME_DIR_WINDOWS` at the pinned runtime; or rebuild CEF with
-`scripts/cef-build/args-windows.gn`.
+Accepts the runtime, exit 0, **only** when
+`sha256(<dir>/libcef.dll) == CEF_WINDOWS_LIBCEF_SHA256`. Otherwise it exits 1 and
+prints what it found (the hash), why it matters (the incident, in one line), and
+how to fix it:
+- `gh auth login`, or `GH_TOKEN=… task package`, so the fetch can install the
+  pinned runtime;
+- point `AGENTMUX_CEF_RUNTIME_DIR_WINDOWS` at the pinned runtime;
+- when testing your own CEF build, use the escape hatch, then pin its hash once
+  it's published.
 
 **Escape hatch:** `AGENTMUX_ALLOW_UNVERIFIED_CEF=1` turns the failure into a
-loud warning and exit 0, for a deliberate experiment with another runtime. It is
-never set by CI.
+loud warning and exit 0. It's for trying a local CEF build before its hash is
+pinned, or another deliberate experiment. CI never sets it.
+
+**Why there is no "local CEF build" exception.** An earlier revision of #3615
+accepted a build tree whose `args.gn` set the tracer off. Review (Codex,
+ReAgent) broke it five ways, each with a tracer-on DLL:
+- a malformed value (`falsey_nonsense`);
+- a second or conditional assignment;
+- a tree reconfigured but not rebuilt;
+- `args.gn` without its `gn gen` tree;
+- an `import()`ed `.gni` reassigning the flag.
+
+GN's effective value (`gn args <dir> --list=…`) would settle it, but it needs
+the full CEF build environment. On the build machine that produced r2 it errors
+out (`import("//build/gn_logs.gni")`), so a build-time check can't rely on it.
+Only the DLL's bytes prove it. The tests keep every one of those shapes as a
+must-fail case.
 
 ### 3.3 Wiring
 
@@ -127,11 +129,9 @@ Synthetic runtime dirs:
 
 - pinned hash → pass; any other content → fail with the hash and the fix in the message;
 - missing `libcef.dll` → fail;
-- local build tree with `args.gn` tracer `=false` → pass (spacing, trailing comment, CRLF);
-- `args.gn` with the tracer `=true`, not mentioning it, commented out,
-  `=falsey_nonsense`, or assigned twice (one conditional) → fail;
-- `libcef.dll` older than `args.gn` or `build.ninja` (reconfigured, not rebuilt) → fail;
-  newer than both → pass; `args.gn` without `build.ninja` → fail;
+- local build tree with a non-pinned DLL → fail, under every configuration an
+  earlier revision was fooled by (§3.2);
+- local build tree whose DLL *is* the pinned build → pass, on its hash;
 - `AGENTMUX_ALLOW_UNVERIFIED_CEF=1` on a bad runtime → exit 0 with a warning;
 - the fetch script and the guard read the same pin;
 - `bundle:windows` calls the guard after the version check.

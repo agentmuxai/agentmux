@@ -61,27 +61,22 @@ out="$(bash "$GUARD" "$TMP/rt-stale" 2>&1)"
 case "$out" in *"gh auth login"*"AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"*"args-windows.gn"*) ok "failure names every fix";; *) bad "failure names every fix" "$out";; esac
 case "$out" in *"sha256 $(sha256sum "$TMP/stale.dll" | cut -c1-12)"*) ok "failure shows the hash it found";; *) bad "failure shows the hash it found" "$out";; esac
 
-expect 0 "local build with tracer=false passes" "$(runtime lb-off "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
-expect 0 "local build tolerates spacing" "$(runtime lb-sp "$TMP/stale.dll" '  enable_backup_ref_ptr_instance_tracer = false')"
-expect 1 "local build with tracer=true fails" "$(runtime lb-on "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=true')"
-expect 1 "local build not mentioning the tracer fails (upstream default is on)" "$(runtime lb-none "$TMP/stale.dll" 'is_official_build=true')"
-expect 1 "a commented-out tracer=false doesn't count" "$(runtime lb-cmt "$TMP/stale.dll" '# enable_backup_ref_ptr_instance_tracer=false')"
-expect 0 "tracer=false with a trailing comment passes" "$(runtime lb-tc "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer = false  # 09-22 incident')"
-expect 1 "tracer=falsey_nonsense fails (reagentx P2 on #3615)" "$(runtime lb-fy "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=falsey_nonsense')"
-expect 1 "a second, conditional assignment fails (Codex on #3615)" "$(runtime lb-2 "$TMP/stale.dll" "$(printf 'enable_backup_ref_ptr_instance_tracer=false\nif (is_win) {\n  enable_backup_ref_ptr_instance_tracer=true\n}')")"
-expect 0 "CRLF args.gn (Windows gn output) passes" "$(runtime lb-crlf "$TMP/stale.dll" "$(printf 'enable_backup_ref_ptr_instance_tracer=false\r')")"
-# Codex on #3615: args fixed and regenerated, rebuild not finished -> the old DLL is still there.
-d="$(runtime lb-stale "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
-touch -d '2025-06-01 00:00' "$d/libcef.dll"
-expect 1 "libcef.dll older than args.gn fails (reconfigured, not rebuilt)" "$d"
-d="$(runtime lb-ninja "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
-touch -d '2026-02-01 00:00' "$d/libcef.dll"; : > "$d/build.ninja"
-expect 1 "libcef.dll older than build.ninja fails" "$d"
-expect 0 "libcef.dll newer than args.gn and build.ninja passes" "$(runtime lb-done "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
-# Codex on #3615: args.gn alone, with an old DLL copied in after it, is not a build tree.
-d="$(runtime lb-nobn "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
-rm "$d/build.ninja"
-expect 1 "args.gn without build.ninja fails (copied-in DLL, no gn tree)" "$d"
+# No local-build exception: args.gn text can't prove what the DLL contains.
+# Each shape below was accepted by an earlier revision and broken in review
+# (Codex, reagentx on #3615); a non-pinned DLL must fail under all of them.
+lb_bypass() {  # lb_bypass <name> <args.gn content>
+  expect 1 "local build tree with a non-pinned DLL fails: $1" "$(runtime "lb-$1" "$TMP/stale.dll" "$2")"
+}
+lb_bypass "tracer=false" 'enable_backup_ref_ptr_instance_tracer=false'
+lb_bypass "tracer=false, trailing comment" 'enable_backup_ref_ptr_instance_tracer = false  # 09-22'
+lb_bypass "tracer=falsey_nonsense" 'enable_backup_ref_ptr_instance_tracer=falsey_nonsense'
+lb_bypass "conditional reassignment" "$(printf 'enable_backup_ref_ptr_instance_tracer=false\nif (is_win) {\n  enable_backup_ref_ptr_instance_tracer=true\n}')"
+lb_bypass "import of a .gni reassigning it" "$(printf 'enable_backup_ref_ptr_instance_tracer=false\nimport("//tracer_on.gni")')"
+d="$(runtime lb-reconf "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"; touch -d '2025-06-01 00:00' "$d/libcef.dll"
+expect 1 "local build tree with a non-pinned DLL fails: reconfigured, not rebuilt" "$d"
+d="$(runtime lb-nobn "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"; rm "$d/build.ninja"
+expect 1 "local build tree with a non-pinned DLL fails: args.gn without build.ninja" "$d"
+expect 0 "a local build tree whose DLL is the pinned build passes, on its hash" "$(runtime lb-pinned "$TMP/good.dll" 'is_official_build=true')"
 
 expect 0 "AGENTMUX_ALLOW_UNVERIFIED_CEF=1 overrides a failure" "$TMP/rt-stale" AGENTMUX_ALLOW_UNVERIFIED_CEF=1
 out="$(AGENTMUX_ALLOW_UNVERIFIED_CEF=1 bash "$GUARD" "$TMP/rt-stale" 2>&1)"

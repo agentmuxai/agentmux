@@ -9,12 +9,10 @@
 # AgentMux runtime before r2 have it on. A build that bundles one succeeds and
 # then hangs at some later moment, so bundle:windows checks here instead.
 #
-# Accepts when:
-#   1. libcef.dll's SHA-256 is the pinned tracer-off build
-#      (windows-runtime-pin.sh), or
-#   2. <runtime-dir> is a local Chromium build tree whose args.gn sets
-#      enable_backup_ref_ptr_instance_tracer=false.
-# AGENTMUX_ALLOW_UNVERIFIED_CEF=1 downgrades a failure to a warning.
+# Accepts only when libcef.dll's SHA-256 is the pinned tracer-off build
+# (windows-runtime-pin.sh). AGENTMUX_ALLOW_UNVERIFIED_CEF=1 downgrades a
+# failure to a warning -- the way to try a local CEF build before its hash is
+# pinned.
 #
 # Exit: 0 = accepted (or overridden), 1 = refused.
 # Spec: docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md
@@ -35,7 +33,8 @@ refuse() {
   echo "   Expected $CEF_WINDOWS_RELEASE_TAG (libcef.dll sha256 ${CEF_WINDOWS_LIBCEF_SHA256:0:12}…). Fix one of:" >&2
   echo "     - let the build fetch it: 'gh auth login', or run with GH_TOKEN=<token>" >&2
   echo "     - point AGENTMUX_CEF_RUNTIME_DIR_WINDOWS at that runtime" >&2
-  echo "     - rebuild CEF with scripts/cef-build/args-windows.gn (tracer off)" >&2
+  echo "     - testing your own CEF build (args-windows.gn, tracer off)? use the opt-out below," >&2
+  echo "       and pin its libcef.dll hash in scripts/cef-build/windows-runtime-pin.sh once published" >&2
   if [ "${AGENTMUX_ALLOW_UNVERIFIED_CEF:-}" = "1" ]; then
     echo "   ⚠️  AGENTMUX_ALLOW_UNVERIFIED_CEF=1 — continuing with this runtime anyway." >&2
     echo "" >&2
@@ -54,29 +53,13 @@ if [ "$actual" = "$CEF_WINDOWS_LIBCEF_SHA256" ]; then
   exit 0
 fi
 
-# A local Chromium compile. args.gn is configuration, not proof of what the
-# DLL contains, so accept only when (Codex + reagentx on #3615):
-#   - the flag is assigned exactly once, to exactly `false` (a trailing
-#     comment is fine; `falsey`, a second or conditional assignment is not);
-#   - it is a real gn build tree (build.ninja present -- args.gn alone next to
-#     a copied-in DLL ties nothing to that config), and
-#   - libcef.dll is newer than args.gn and build.ninja (which `gn gen`
-#     rewrites on every args change): a tree reconfigured with the fixed args
-#     but not yet (or not successfully) rebuilt still holds the old DLL.
-if [ -f "$dir/args.gn" ]; then
-  [ -f "$dir/build.ninja" ] || refuse "args.gn without build.ninja isn't a gn build tree — only the pinned build is accepted here"
-  args="$(tr -d '\r' < "$dir/args.gn")"
-  mentions="$(grep -Ec '^[^#]*enable_backup_ref_ptr_instance_tracer' <<<"$args")"
-  if [ "$mentions" != 1 ] || ! grep -Eq '^[[:space:]]*enable_backup_ref_ptr_instance_tracer[[:space:]]*=[[:space:]]*false[[:space:]]*(#.*)?$' <<<"$args"; then
-    refuse "local CEF build whose args.gn doesn't set enable_backup_ref_ptr_instance_tracer=false exactly once"
-  fi
-  for cfg in args.gn build.ninja; do
-    if [ "$dir/$cfg" -nt "$libcef" ]; then
-      refuse "local CEF build reconfigured after libcef.dll was built ($cfg is newer) — finish the rebuild"
-    fi
-  done
-  echo "CEF runtime is a local build with enable_backup_ref_ptr_instance_tracer=false, built after its config — accepted"
-  exit 0
-fi
-
+# Deliberately no "local CEF build" exception. An earlier revision accepted
+# a build tree whose args.gn set the tracer off; review (Codex, reagentx on
+# #3615) found four ways that text can disagree with the DLL: a malformed
+# value, a second or conditional assignment, a tree reconfigured but not
+# rebuilt, an args.gn without its gn tree, and an import()ed .gni reassigning
+# the flag. GN's own effective value (`gn args --list`) needs the full CEF
+# build environment, which a build-time check can't count on. Only the bytes
+# prove it: a local build is accepted once its hash is pinned, or knowingly via
+# AGENTMUX_ALLOW_UNVERIFIED_CEF=1 while testing it.
 refuse "libcef.dll is not the pinned tracer-off build (sha256 ${actual:0:12}…)"
