@@ -19,8 +19,10 @@ const IDX: &str = "output.idx";
 
 /// `output`'s size and valid generation, from the database — never this
 /// process's `stat` cache, which another srv instance's append makes stale.
+/// A counter only behind (an older build appended since) is caught up first,
+/// so its generation holds across those appends (`filestore/counter.rs`).
 pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<String>)> {
-    let state = fs.line_state(zone, "output").ok()??;
+    let state = fs.catch_up_line_counter(zone, "output").ok()??;
     Some((state.size.max(0) as u64, state.counted.map(|c| c.gen)))
 }
 
@@ -166,6 +168,7 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
 /// Returns the number of indexed (non-blank) lines on success, or `None` if
 /// `output` is unreadable, was replaced during the scan, or the index write
 /// fails (caller falls back to slow path).
+#[cfg(test)]
 pub(crate) fn rebuild_output_idx(
     fs: &FileStore,
     block_id: &str,
@@ -196,6 +199,11 @@ pub(crate) fn rebuild_output_idx(
 /// P1 on PR #2838. The count has to stay exact; only the cost of keeping it
 /// exact is negotiable.
 pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
+    // A counter merely behind (an older build appended) is caught up first:
+    // otherwise the snapshot below sees no generation, the index is published
+    // unlabelled, and the next reader — once the counter has caught up —
+    // rejects it and rebuilds the whole index.
+    let _ = fs.catch_up_line_counter(block_id, "output");
     // `output` and the whole existing index in one snapshot: the seed entries,
     // the covered size, the label and the output state all describe the same
     // moment, and the guarded write below refuses if `output` has since been
@@ -206,8 +214,13 @@ pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
     let full = || build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen.clone());
 
     let Some(idx) = snap.derived else { return full() };
-    // An index built for another generation of `output` is no base at all.
-    if !labelled_for(&idx.meta, output_gen.as_deref()) {
+    // Extending reuses every entry but the last, so it needs proof that the
+    // index describes a prefix of THIS `output`: a valid generation, and the
+    // index labelled with it. An uncounted `output` has no such proof — an
+    // older build may have rewritten it (its `rev` moved, the epoch with it)
+    // to something longer than the index covers (Codex on #3663) — and an
+    // index built for another generation is no base at all. Both rebuild.
+    if output_gen.is_none() || !labelled_for(&idx.meta, output_gen.as_deref()) {
         return full();
     }
     let Some(bytes) = idx.bytes else { return full() };

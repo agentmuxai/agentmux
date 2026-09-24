@@ -121,13 +121,6 @@ export class TranscriptCursor {
     private queue: Item[] = [];
     private draining = false;
     private disposed = false;
-    /**
-     * Unpositioned records delivered since the pin last moved. After one,
-     * the cursor can't tell which of the stream's lines it has already
-     * shown, so a new generation is joined at the event, not gap-filled
-     * from `next` (which could repeat those records).
-     */
-    private unpositionedSincePin = 0;
     readonly stats: TranscriptCursorStats = {
         delivered: 0,
         duplicates: 0,
@@ -229,7 +222,6 @@ export class TranscriptCursor {
             // The stream starts again from nothing.
             this.pin = null;
             this.unpinned = "empty";
-            this.unpositionedSincePin = 0;
             return;
         }
         if (ev.fileop === "replace") {
@@ -238,7 +230,6 @@ export class TranscriptCursor {
             const p = this.pick(ev.pos);
             this.pin = p ? { stream: p.stream, gen: p.gen, next: p.lines } : null;
             this.unpinned = "unknown";
-            this.unpositionedSincePin = 0;
             return;
         }
         if (ev.fileop !== "append" || !ev.data64) return;
@@ -246,7 +237,6 @@ export class TranscriptCursor {
         let p = this.pick(ev.pos);
         if (!p) {
             this.stats.unpositioned++;
-            if (this.pin) this.unpositionedSincePin++;
             if (ev.echo) {
                 this.stats.echoes++;
                 this.deps.echo(decode(ev.data64));
@@ -258,26 +248,21 @@ export class TranscriptCursor {
 
         if (!this.pin) {
             this.pin = { stream: p.stream, gen: p.gen, next: this.unpinned === "empty" ? 0 : p.line };
-            this.unpositionedSincePin = 0;
         } else {
             p = this.migrate(ev.pos!, p);
             if (p.gen !== this.pin.gen) {
-                // Re-counted after an older build's write (same lines, new
-                // generation), or replaced / deleted and recreated by a writer
-                // whose event this pane didn't get — `agent:session:archive`
-                // deletes a shared zone with no block to announce it on. A
-                // re-count keeps every line's index and only grows the file,
-                // so `next` is kept when the event starts at or past it and no
-                // unpositioned record (which could be repeated) came between.
-                // Anything else is a different file: join at the event.
+                // Another file, as far as the cursor can tell: replaced or
+                // rewritten by a writer whose event this pane didn't get
+                // (`agent:session:archive` deletes a shared zone with no block
+                // to announce it on). An older build's appends no longer
+                // change the generation (the counter is caught up, not
+                // re-counted), and generation and position alone can't tell a
+                // rare re-count from a replacement (Codex on #3663) — so
+                // nothing is carried across: the cursor joins at this event,
+                // and never fills from the new file at the old one's line.
                 this.stats.genChanges++;
-                const keep = this.unpositionedSincePin === 0 && p.line >= this.pin.next;
-                this.deps.log(
-                    `transcript cursor: ${p.stream} generation changed ${this.pin.gen} → ${p.gen}` +
-                        (keep ? ` (keeping line ${this.pin.next})` : ` (joining at line ${p.line})`),
-                );
-                this.pin = { stream: p.stream, gen: p.gen, next: keep ? this.pin.next : p.line };
-                this.unpositionedSincePin = 0;
+                this.deps.log(`transcript cursor: ${p.stream} generation changed ${this.pin.gen} → ${p.gen} (joining at line ${p.line})`);
+                this.pin = { stream: p.stream, gen: p.gen, next: p.line };
             }
         }
 
@@ -295,6 +280,8 @@ export class TranscriptCursor {
 
     private handleCount(item: { count: number; stream: string; gen: string }): Promise<void> | void {
         const pin = this.pin;
+        // A count in another generation is another file's: the next event
+        // joins it (handleEvent). Only the pinned file's lines are filled.
         if (!pin || item.stream !== pin.stream || item.gen !== pin.gen) return;
         if (item.count <= pin.next) return;
         return this.fill(pin.next, item.count);
@@ -413,7 +400,6 @@ export class TranscriptCursor {
         if (!g) return p;
         this.deps.log(`transcript cursor: following ${g.stream} from line ${g.line} (was ${pin.stream})`);
         this.pin = { stream: g.stream, gen: g.gen, next: g.line };
-        this.unpositionedSincePin = 0;
         return g;
     }
 }

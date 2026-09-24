@@ -21,13 +21,23 @@
 //! triggers (`run_filestore_migrations`): any write that changes bytes
 //! already in a file — by any connection, any build — bumps `rev`, while
 //! appends don't. An epoch records the `rev` it was counted at
-//! (`lines_rev`) and the size it covers (`lines_size`), so an append by
-//! someone else (size moved) or any rewrite (rev moved) makes it invalid.
-//! It is then dropped (NULL), never patched, so the next epoch gets a new
-//! `gen` and no line index is ever reused for different content. That costs
-//! a reader a resync, only while builds are mixed. (`lines_modts` is kept as
-//! an extra, conservative signal; timestamps alone can't be trusted — two
-//! writes can share a millisecond, Codex on #3631.)
+//! (`lines_rev`) and the size it covers (`lines_size`):
+//!
+//! - **Rewritten** (`rev` moved): the counted bytes may have changed. The
+//!   epoch is dropped (NULL), never patched, so the next one gets a new `gen`
+//!   and no line index is ever reused for different content.
+//! - **Only appended to** (`rev` unchanged, the size grew; or just `modts`
+//!   moved): the counted bytes are provably the same — anything else would
+//!   have bumped `rev` — so the epoch is **caught up**: only the bytes from
+//!   the start of its last open line are counted, and `gen` is kept. Every
+//!   line keeps its index. This is the normal case while builds are mixed:
+//!   an agent running in an older build appends to its shared zone all the
+//!   time, and without catching up each of its appends cost a newer reader a
+//!   re-count of the whole file and a new `gen` (its index rebuilt with it).
+//!
+//! (`lines_modts` alone can't prove anything — two writes can share a
+//! millisecond, Codex on #3631 — so it only marks an epoch as needing a
+//! check.)
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
@@ -127,6 +137,22 @@ impl Row {
         Some((gen, LineCount { lines: lines as u64, tail_start: tail as u64 }))
     }
 
+    /// An epoch that is behind but still describes the file's start: nothing
+    /// rewrote a byte since it was counted (`rev` unchanged), and the file
+    /// only grew past `lines_size`. Such an epoch is caught up, not dropped
+    /// (see the module doc). `None` for a missing, torn or rewritten epoch.
+    pub fn behind(&self) -> Option<Behind> {
+        let gen = self.gen.clone()?;
+        let (lines, tail, lines_size) = (self.lines?, self.lines_tail?, self.lines_size?);
+        if self.lines_rev != Some(self.rev) {
+            return None;
+        }
+        if lines < 0 || tail < 0 || tail > lines_size || lines_size > self.size {
+            return None;
+        }
+        Some(Behind { gen, count: LineCount { lines: lines as u64, tail_start: tail as u64 }, lines_size })
+    }
+
     /// Whether any counter column is set — an epoch to drop when invalid.
     pub fn has_epoch_columns(&self) -> bool {
         self.gen.is_some()
@@ -144,6 +170,45 @@ impl Row {
         }
     }
 }
+
+/// An epoch that can be caught up ([`Row::behind`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Behind {
+    pub gen: String,
+    /// The count at `lines_size`.
+    pub count: LineCount,
+    pub lines_size: i64,
+}
+
+/// Whether catching an epoch up over `appended` bytes keeps every counted
+/// line's content, so it may keep its generation. Not when the counted
+/// prefix ends in an unterminated, counted line that the bytes continue: that
+/// line's index would name different content (`abc` → `abcdef`), and if the
+/// continuation makes it blank (a split UTF-8 sequence completed into
+/// whitespace) the line vanishes and its index is reused for a later record
+/// (Codex on #3663). The count is still caught up — under a new generation.
+fn catch_up_keeps_gen(open: &[u8], appended: bool) -> bool {
+    !appended || open.is_empty() || is_blank_line(open)
+}
+
+/// The epoch `behind` caught up to `row`'s size, counting only the bytes from
+/// its last open line on, and whether it may keep its generation
+/// ([`catch_up_keeps_gen`]). `None` if some of those bytes aren't stored yet
+/// (a build without transactions is mid-write): nothing is counted from bytes
+/// that would only read as zeros.
+fn catch_up(conn: &Connection, zone_id: &str, name: &str, row: &Row, behind: &Behind) -> Result<Option<(LineCount, bool)>, StoreError> {
+    let tail = behind.count.tail_start as i64;
+    let Some(bytes) = read_bytes_exact(conn, zone_id, name, tail, row.size - tail)? else { return Ok(None) };
+    let (open, appended) = bytes.split_at((behind.lines_size - tail) as usize);
+    let keeps_gen = catch_up_keeps_gen(open, !appended.is_empty());
+    Ok(Some((count_append(behind.count, open, behind.lines_size as u64, appended), keeps_gen)))
+}
+
+/// Most bytes an append catches an epoch up by inline, in its own write
+/// transaction. More than this (an older build appended a lot since this
+/// build last counted) is left to [`FileStore::init_line_counter`], which
+/// scans outside the lock.
+const INLINE_CATCH_UP_MAX: i64 = 1 << 20;
 
 pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<Option<Row>, StoreError> {
     Ok(conn
@@ -296,7 +361,33 @@ impl FileStore {
     ) -> Result<(AppendPos, i64), StoreError> {
         let row = read_row(tx, zone_id, name)?.ok_or(StoreError::NotFound)?;
         let size = row.size;
-        let counter = row.counter();
+        // An epoch another build only appended past is caught up here, in
+        // this transaction, and keeps its generation (module doc).
+        // Further behind than that is left for `init_line_counter`: this
+        // append leaves such an epoch alone (it stays behind, not invalid),
+        // rather than dropping what a later scan can still catch up.
+        let mut keep_behind = false;
+        let counter = match row.counter() {
+            Some(c) => Some(c),
+            None => match row.behind() {
+                Some(b) if size - b.lines_size <= INLINE_CATCH_UP_MAX => match catch_up(tx, zone_id, name, &row, &b)? {
+                    Some((count, true)) => Some((b.gen.clone(), count)),
+                    // It needs a new generation: left behind for
+                    // `init_line_counter`, which starts one — this append
+                    // stays uncounted rather than extend the old epoch.
+                    Some((_, false)) => {
+                        keep_behind = true;
+                        None
+                    }
+                    None => None,
+                },
+                Some(_) => {
+                    keep_behind = true;
+                    None
+                }
+                None => None,
+            },
+        };
 
         let normalized;
         let (data, records_offset): (&[u8], i64) = match mode {
@@ -385,7 +476,7 @@ impl FileStore {
                 Some(CountedAppend { gen, first_line, lines: after.lines })
             }
             None => {
-                if row.has_epoch_columns() {
+                if row.has_epoch_columns() && !keep_behind {
                     tracing::warn!(
                         zone = %zone_id, name = %name,
                         "line counter dropped: the file was written, or is mid-write, by a build that doesn't maintain it"
@@ -490,20 +581,68 @@ impl FileStore {
         }
     }
 
-    /// Phase 1 of [`Self::init_line_counter`]: the windowed scan.
+    /// A file's size and epoch, catching up an epoch that is only behind
+    /// (another build appended since it was counted; cheap — the appended
+    /// bytes) but never starting one from byte 0: a file without a usable
+    /// epoch is returned uncounted. For read paths that must not pay a
+    /// whole-file scan, but should see the generation an append by an older
+    /// build didn't change.
+    pub fn catch_up_line_counter(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
+        // The scan decides on the row it reads under its own lock: a separate
+        // check first could see an epoch behind, then a rewrite land before
+        // the scan reads the row again, and the scan would count from byte 0
+        // (ReAgent on #3663).
+        match self.init_scan_from(zone_id, name, ScanFrom::CatchUpOnly)? {
+            InitScan::Done(state) => Ok(state),
+            InitScan::Scanned(scan) => match self.init_finish(zone_id, name, scan)? {
+                Some(state) => Ok(Some(state)),
+                // Moved or rewritten during the scan: as it is now, uncounted
+                // if it can't be caught up.
+                None => self.line_state(zone_id, name),
+            },
+        }
+    }
+
+    /// Phase 1 of [`Self::init_line_counter`]: the windowed scan — from byte 0,
+    /// or, for an epoch that is only behind, from the start of its last open
+    /// line.
     pub(super) fn init_scan(&self, zone_id: &str, name: &str) -> Result<InitScan, StoreError> {
-        let row = {
+        self.init_scan_from(zone_id, name, ScanFrom::Anywhere)
+    }
+
+    /// [`Self::init_scan`], or with [`ScanFrom::CatchUpOnly`] only an epoch
+    /// that is behind is scanned; anything else is returned as it is,
+    /// uncounted, without reading the file.
+    pub(super) fn init_scan_from(&self, zone_id: &str, name: &str, from: ScanFrom) -> Result<InitScan, StoreError> {
+        let (row, base, open) = {
             let conn = self.conn.lock().unwrap();
             let Some(row) = read_row(&conn, zone_id, name)? else { return Ok(InitScan::Done(None)) };
             if row.counter().is_some() {
                 return Ok(InitScan::Done(Some(row.state())));
             }
-            row
+            let behind = row.behind();
+            if behind.is_none() && from == ScanFrom::CatchUpOnly {
+                return Ok(InitScan::Done(Some(row.state())));
+            }
+            // The open line's bytes, which the appended ones continue.
+            let open = match &behind {
+                Some(b) => {
+                    let tail = b.count.tail_start as i64;
+                    read_bytes_exact(&conn, zone_id, name, tail, b.lines_size - tail)?
+                }
+                None => Some(Vec::new()),
+            };
+            let Some(open) = open else { return Ok(InitScan::Done(None)) };
+            (row, behind, open)
         };
+        // Kept to decide, once the final size is known, whether the epoch may
+        // keep its generation (`catch_up_keeps_gen`).
+        let base_open = open.clone();
         let scan_to = row.size;
-        let mut count = LineCount { lines: 0, tail_start: 0 };
-        let mut open: Vec<u8> = Vec::new();
-        let mut pos = 0i64;
+        let (mut count, mut open, mut pos) = match &base {
+            Some(b) => (b.count, open, b.lines_size),
+            None => (LineCount { lines: 0, tail_start: 0 }, open, 0i64),
+        };
         while pos < scan_to {
             let len = INIT_SCAN_WINDOW.min(scan_to - pos);
             let chunk = {
@@ -532,6 +671,8 @@ impl FileStore {
             fingerprint,
             incarnation: row.incarnation,
             rev: row.rev,
+            base,
+            base_open,
         }))
     }
 
@@ -539,7 +680,7 @@ impl FileStore {
     /// row as it is now, count what was appended since, and start the epoch,
     /// all in one transaction.
     pub(super) fn init_finish(&self, zone_id: &str, name: &str, scan: ScanResult) -> Result<Option<LineState>, StoreError> {
-        let ScanResult { scan_to, count, open, fingerprint, incarnation, rev } = scan;
+        let ScanResult { scan_to, count, open, fingerprint, incarnation, rev, base, base_open } = scan;
         let fp_len = fingerprint.len() as i64;
         self.write_txn(|tx| {
             let Some(row) = read_row(tx, zone_id, name)? else { return Ok(None) };
@@ -560,11 +701,25 @@ impl FileStore {
             {
                 return Ok(None);
             }
+            // Catching up: the epoch scanned from must still be the row's —
+            // another instance may have dropped it, or started or caught up
+            // one of its own, meanwhile.
+            if let Some(b) = &base {
+                if row.behind().as_ref() != Some(b) {
+                    return Ok(None);
+                }
+            }
             let Some(appended) = read_bytes_exact(tx, zone_id, name, scan_to, row.size - scan_to)? else {
                 return Ok(None);
             };
             let count = count_append(count, &open, scan_to as u64, &appended);
-            let gen = new_gen();
+            // A caught-up epoch keeps its generation when every counted line
+            // kept its content (`catch_up_keeps_gen`); otherwise, and for a
+            // count from byte 0, a new one.
+            let gen = match base {
+                Some(b) if catch_up_keeps_gen(&base_open, row.size > b.lines_size) => b.gen,
+                _ => new_gen(),
+            };
             tx.execute(
                 "UPDATE db_wave_file SET gen = ?1, lines = ?2, lines_size = ?3, lines_tail = ?4, lines_modts = ?5,
                      lines_rev = COALESCE(rev, 0)
@@ -574,6 +729,16 @@ impl FileStore {
             Ok(Some(LineState { size: row.size, counted: Some(Counted { gen, lines: count.lines }) }))
         })
     }
+}
+
+/// Where [`FileStore::init_scan_from`] may start counting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScanFrom {
+    /// From byte 0 if need be ([`FileStore::init_line_counter`]).
+    Anywhere,
+    /// Only by catching up an epoch that is behind
+    /// ([`FileStore::catch_up_line_counter`]): never a whole-file scan.
+    CatchUpOnly,
 }
 
 /// Outcome of [`FileStore::init_scan`].
@@ -591,4 +756,8 @@ pub(super) struct ScanResult {
     fingerprint: Vec<u8>,
     incarnation: Option<Vec<u8>>,
     rev: i64,
+    /// The epoch the scan caught up from, if it didn't start at byte 0.
+    base: Option<Behind>,
+    /// That epoch's open (unterminated) last line, as counted.
+    base_open: Vec<u8>,
 }

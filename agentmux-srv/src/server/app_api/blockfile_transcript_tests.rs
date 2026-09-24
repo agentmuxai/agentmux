@@ -120,3 +120,83 @@ async fn the_agents_global_zone_is_named_as_its_own_stream() {
     assert_eq!(r["stream"], serde_json::json!(format!("g:{zone}")));
     assert_eq!(r["lines"], serde_json::json!(["{\"x\":1}", "{\"y\":2}"]));
 }
+
+/// An older build's append: the part extended and `size` raised, with none of
+/// the counter columns touched (it doesn't know them).
+fn old_build_append(fs: &FileStore, zone: &str, data: &[u8]) {
+    let conn = fs.conn().lock().unwrap();
+    let size: i64 = conn
+        .query_row("SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = 'output'", [zone], |r| r.get(0))
+        .unwrap();
+    let mut part: Vec<u8> = conn
+        .query_row("SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = 'output' AND partidx = 0", [zone], |r| r.get(0))
+        .unwrap();
+    part.truncate(size as usize);
+    part.extend_from_slice(data);
+    conn.execute("REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, 'output', 0, ?2)", rusqlite::params![zone, part])
+        .unwrap();
+    conn.execute(
+        "UPDATE db_wave_file SET size = ?1, modts = modts + 1 WHERE zoneid = ?2 AND name = 'output'",
+        rusqlite::params![size + data.len() as i64, zone],
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn an_older_builds_append_keeps_the_generation_reads_are_served_in() {
+    // Builds mixed on one transcript: an agent running in an older build
+    // appends to it all the time. Each of its appends used to cost the next
+    // read a whole-file re-count, a new generation (so a reader expecting the
+    // one it pinned got a mismatch) and a full index rebuild.
+    let state = crate::server::tests::test_state();
+    let block = "blk-rpc-mixed";
+    seed_lines(&state.filestore, block, b"{\"a\":1}\n{\"b\":2}\n");
+    let g = gen(&state.filestore, block);
+    let r = call(&state, COMMAND_BLOCKFILE_READ_RANGE, read(block, 0, Some(&g))).await;
+    assert_eq!(r["lines"].as_array().unwrap().len(), 2);
+
+    old_build_append(&state.filestore, block, b"{\"c\":3}\n");
+    let count = call(&state, COMMAND_BLOCKFILE_LINE_COUNT, serde_json::json!({"block_id": block, "filename": "output"})).await;
+    assert_eq!(count, serde_json::json!({"count": 3, "stream": "b:blk-rpc-mixed", "gen": g}));
+
+    old_build_append(&state.filestore, block, b"{\"d\":4}\n");
+    let r = call(&state, COMMAND_BLOCKFILE_READ_RANGE, read(block, 2, Some(&g))).await;
+    assert_eq!(r["lines"], serde_json::json!(["{\"c\":3}", "{\"d\":4}"]));
+    assert_eq!(r["total"], serde_json::json!(4));
+    assert_eq!(r["gen"], serde_json::json!(g));
+    assert!(r.get("gen_mismatch").is_none());
+    // The index was extended for the same generation, so it is current.
+    let view = crate::backend::blockcontroller::shell::output_index(&state.filestore, block).unwrap();
+    assert_eq!((view.output_gen.as_deref(), view.fresh_lines), (Some(g.as_str()), Some(4)));
+}
+
+#[tokio::test]
+async fn an_older_builds_rewrite_is_read_through_a_rebuilt_index_not_an_extended_one() {
+    // Codex on #3663: a rewrite by a build that doesn't maintain the counter
+    // leaves `output` uncounted; an index covering a shorter, older version
+    // must not be extended onto the new bytes.
+    let state = crate::server::tests::test_state();
+    let block = "blk-rpc-rewrite";
+    seed_lines(&state.filestore, block, b"{\"a\":1}\n{\"b\":2}\n");
+    let r = call(&state, COMMAND_BLOCKFILE_READ_RANGE, read(block, 0, None)).await;
+    assert_eq!(r["lines"].as_array().unwrap().len(), 2);
+    {
+        // The older build's write_file: parts replaced, size raised — longer
+        // than the index covers, with different line boundaries.
+        let conn = state.filestore.conn().lock().unwrap();
+        // Leading blank lines: the old index's entry for byte 8 lands inside
+        // the new first record, which an extension would keep as a line.
+        let content: &[u8] = b"\n\n\n{\"x\":1}\n{\"y\":2}\n{\"z\":3}\n";
+        conn.execute("DELETE FROM db_file_data WHERE zoneid = ?1 AND name = 'output'", [block]).unwrap();
+        conn.execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, 'output', 0, ?2)", rusqlite::params![block, content])
+            .unwrap();
+        conn.execute(
+            "UPDATE db_wave_file SET size = ?1, modts = modts + 1 WHERE zoneid = ?2 AND name = 'output'",
+            rusqlite::params![content.len() as i64, block],
+        )
+        .unwrap();
+    }
+    let r = call(&state, COMMAND_BLOCKFILE_READ_RANGE, read(block, 0, None)).await;
+    assert_eq!(r["lines"], serde_json::json!(["{\"x\":1}", "{\"y\":2}", "{\"z\":3}"]));
+    assert_eq!(r["total"], serde_json::json!(3));
+}

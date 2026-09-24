@@ -695,6 +695,28 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      - **Recovery.** The epoch is dropped, never patched, and the next one
        gets a new `gen`, so no line index is reused for different content.
        The cost is a resync while builds are mixed.
+     - **Amended after 5a-4: an epoch that is only behind is caught up.**
+       - **Measured on a live dev instance:** a 1M-line agent zone that the
+         production (older) build appends to all the time. Every one of those
+         appends made the next reader:
+         - re-count the whole file: 1.4 s;
+         - mint a new `gen`: the pane's poll never matched it, and every
+           `expectGen` read failed;
+         - rebuild `output.idx` in full, since the index is labelled with the
+           generation. A 200-line `read_range` took 2.6–3.3 s.
+       - **The triggers already prove the prefix unchanged.** `rev` moves on
+         any rewrite of existing bytes and never on an append. So when `rev`
+         matches and the size only grew, the counted bytes are unchanged.
+       - **Catch-up.** Such an epoch is counted from the start of its last
+         open line and keeps its `gen`:
+         - inline in an append, up to 1 MiB;
+         - in `init_line_counter`, windowed like the full scan;
+         - via `catch_up_line_counter` on the read paths, which never starts
+           a full count.
+       - **A rewrite still drops the epoch.**
+       - **`read_range` extends `output.idx`** from its last line instead of
+         rebuilding it. That's what `line_count` did before it answered from
+         the counter in 5a-3b.
    - **Legacy rows.** 5a-3 calls `init_line_counter` from the line-count path
      (off the runtime) the first time a pane opens a legacy row. That costs
      one read of the file per epoch. Until then, events for that stream carry
@@ -880,17 +902,20 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      record of such a node (its echo event was lost in a socket drop) is
      dropped rather than becoming a second bubble. 5b replaces the text match
      with positional ids.
-   - **Generation change without an event.** Two cases:
-     - A re-count after an older build's write keeps every line's index and
-       only grows the file.
-     - `agent:session:archive` deletes a shared zone and has no block to
-       announce it on. The next session's first record is line 0 of a new
-       file.
-
-     So the cursor keeps `next` only when the event starts at or past it and
-     no unpositioned record came in between. Otherwise it joins the new
-     generation at the event. This is also how the agent-level archive
-     reaches an open pane, so it needs no event of its own.
+   - **Generation change without an event.** The cursor joins the new
+     generation at the event's own line and never fills from the new file at
+     the old one's line. A poll count in another generation is ignored until
+     an event arrives.
+     - **Why (amended in #3663):** as first built, a larger new generation
+       kept `next` on the theory that it was a re-count. Codex showed that
+       generation and position can't tell a re-count from a replacement, so
+       that rule could splice another history into the pane.
+     - **What's left:** older builds' appends no longer change the generation
+       (the counter is caught up, item 3), so a new generation now means a
+       rewrite or a new file.
+     - **The agent-level archive:** `agent:session:archive` deletes a shared
+       zone and has no block to announce it on. It reaches an open pane this
+       way too: the next session's first record joins it.
    - **Resets.**
      - `truncate` keeps today's reducer-gated `StreamTruncate`.
      - `replace` (restore) and `delete` (archive) only move the cursor, and
