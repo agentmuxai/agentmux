@@ -5088,6 +5088,11 @@ async fn m4a2_send(
         .status()
 }
 
+/// Serializes the tests that move the per-site `m4.actor_*` counters with a
+/// token: M4a-2's test asserts their exact values, so another test's
+/// attributed request to the same site in parallel would break it.
+static M4_ACTOR_COUNTERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The colliding-names fixture ("AgentY" agenty, "AGENTY" agenty-2) plus a
 /// third agent, "AgentZ"; the caller is the second agent. At every actor
 /// site: naming AgentZ is a mismatch; naming `agenty` or `AGENTY` — which
@@ -5097,6 +5102,7 @@ async fn m4a2_send(
 /// request is served the same with or without the token.
 #[tokio::test]
 async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
     use crate::backend::storage::agents::test_agent_def;
     let state = test_state();
     for (id, name, slug) in [
@@ -5609,6 +5615,7 @@ async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
 /// not the first agent's; Unattributed, the slug decides, counted.
 #[tokio::test]
 async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
     use crate::backend::storage::agents::test_agent_def;
     let state = test_state();
     let (tmp_y, tmp_y2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -5678,7 +5685,13 @@ async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
 /// request Unattributed resolves the slug as before and is counted.
 #[tokio::test]
 async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
-    let state = test_state();
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let mut state = test_state();
+    // An empty index: the Unattributed search below must not scan the
+    // developer's real transcripts.
+    state.history_service = std::sync::Arc::new(crate::backend::history::HistoryService::from_index(
+        crate::backend::history::index::SessionIndex::new(vec![]),
+    ));
     state.mstore.attach_token_index().unwrap();
     let gone = state.mstore.agent_token_ensure("uid-m4c2c-gone").unwrap();
     let get = |uri: &'static str, token: Option<String>| {
