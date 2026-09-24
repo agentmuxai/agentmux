@@ -16,6 +16,8 @@ mod offset_ops;
 mod types;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_atomic;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};
