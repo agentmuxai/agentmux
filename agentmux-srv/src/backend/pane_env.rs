@@ -61,8 +61,9 @@ pub const PANE_ENV_KEEP: &[&str] = &[
     // Prompt hook + `muxlog` banner (bash.sh/zsh.sh/fish.fish/pwsh.ps1).
     "AGENTMUX_VERSION",
     "AGENTMUX_LOG_DIR",
-    // Agent identity: the OSC-16162 prompt hook, `gh-agent.sh` credential
-    // selection, and bashwrap's per-instance cwd-state file key.
+    // Agent identity: the OSC-16162 prompt hook, external tooling that
+    // selects credentials per agent, and bashwrap's per-instance cwd-state
+    // file key.
     //
     // AGENTMUX_AGENT_COLOR/AGENTMUX_AGENT_TEXT_COLOR decommissioned
     // 2026-09-20 (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) — the

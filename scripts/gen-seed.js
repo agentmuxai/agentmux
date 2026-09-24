@@ -22,55 +22,13 @@
 //   is_global: true  — injected into every agent's CLAUDE.md at launch
 //   is_global: false — available in the manager but not auto-injected
 
-const STARTUP = `## Verification Round
-
-Run each check below. Fix failures before proceeding. Report results in a table.
-
-### 1. Identity
-\`\`\`bash
-gh auth status
-git config user.name && git config user.email
-\`\`\`
-If \`gh auth status\` fails, run \`gh auth login\`.
-
-### 2. Dev Tools
-Install if missing, then verify:
-\`\`\`bash
-npm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health
-\`\`\`
-Verify key tools:
-\`\`\`bash
-secrets --version && deploy --version && reagent --version
-\`\`\`
-
-### 3. Secrets Access
-\`\`\`bash
-secrets health services/infra services/prod
-\`\`\`
-
-### 4. MCP Servers
-Check AgentBus connectivity — list available peer agents.
-
-### Report
-
-| Check | Status | Details |
-|-------|--------|--------|
-| GitHub | OK/FAIL | username |
-| Git Identity | OK/FAIL | name, email |
-| Dev Tools | OK/FAIL | count installed |
-| Secrets | OK/FAIL | accessible secrets |
-| MCP AgentBus | OK/FAIL | peer count |
-
-If all pass: "Verification complete — ready to work."
-If any FAIL: attempt fix. If unfixable, report and ask.`;
-
 const SKILL = {
     name: "Startup Verification",
     trigger: "startup",
     skill_type: "prompt",
     description: "Re-run tool verification checks and report status table",
     content:
-        "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+        "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
 };
 
 // Catalog-aligned seed. Keep in lockstep with

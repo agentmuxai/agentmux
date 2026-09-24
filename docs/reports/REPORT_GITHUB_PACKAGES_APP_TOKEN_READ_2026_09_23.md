@@ -24,7 +24,8 @@ the token type.
 ## 2. Evidence
 
 Every command below was run against live infrastructure on 2026-09-23. Tokens
-are minted by `scripts/github-app-token.py <agent> <org>`.
+were minted by the fleet's App-token minter (`github-app-token.py <agent> <org>`,
+then under `scripts/`; that tooling has since moved out of this repository).
 
 ### 2.1 The permission is already granted
 
@@ -143,7 +144,8 @@ Ranked by robustness, not by effort.
 **A. Classic PAT with `read:packages`, stored in `services/infra`.**
 Mirrors `gh-agent.sh`'s existing tier-3 PAT fallback, so the shape is already
 familiar here. Cost: a long-lived credential, which is exactly what
-`SPEC_GITHUB_APP_IDENTITY_MIGRATION_2026_09_18.md` moved away from — worth
+the GitHub App identity migration (now in the private shared-infrastructure
+repo) moved away from — worth
 scoping to `read:packages` only and nothing else.
 
 **B. Make the consuming repo's own Actions token sufficient.**
