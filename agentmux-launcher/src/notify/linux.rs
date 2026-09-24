@@ -122,9 +122,15 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
         }
     };
 
+    // Only the notification server's own signals: without `sender`, any
+    // session-bus client could emit a forged ActionInvoked for one of our
+    // server ids (ReAgent P2 on #3668). The bus resolves the well-known name
+    // to its current owner when matching.
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
-        .interface(IFACE)
+        .sender(DEST)
+        .and_then(|b| b.path(PATH))
+        .and_then(|b| b.interface(IFACE))
         .map(|b| b.build());
     let mut signals = match rule {
         Ok(rule) => zbus::MessageStream::for_match_rule(rule, &conn, None).await.ok(),
