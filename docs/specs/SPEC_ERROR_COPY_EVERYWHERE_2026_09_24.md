@@ -249,7 +249,7 @@ logs (CEF `data:` pages, §4.6). **P** = phase (§7).
 | 6 | "Launch aborted" (picker) | `components/AgentPicker.tsx:1074-1084` | E | Inline icon | 1 |
 | 7 | Host crash / hang page "AgentMux hit a problem" | `agentmux-cef/src/client/crash_recovery.rs:415-418` | D- | In `.actions`, §4.6 | 2 |
 | 8 | Crash loop, low memory | `agentmux-cef/src/client/recovery_pages.rs:26,155` | D- | Next to their actions, §4.6 | 2 |
-| 9 | Pane crash panel "This pane crashed" | `block/BlockErrorBoundary.tsx:214-233` | D | "Copy details" in the footer: name, message, stack, block id, view type, render trail (already assembled at :57). Keep copy on highlight | 2 |
+| 9 | Pane crash panel "This pane crashed" | `block/BlockErrorBoundary.tsx:214-233` | D | "Copy details" in the footer: name, message, stack, block id, view type, render trail (already assembled at :57). Keep copy on highlight, but route it through `redact.ts` too (Codex P1 on #3689) | 2 |
 | 10 | Generic `ErrorBoundary` fallback (workspace, tab, block, header) | `element/errorboundary.tsx:21-22` | D | Button overlaid on the `<pre>`, like `markdown-codeblock.tsx:65` | 2 |
 | 11 | Backend "Offline" popover | `statusbar/BackendStatus.tsx:~205-245` | D | "Copy diagnostics" next to Restart Backend | 2 |
 | 12 | Pane header render error icon | `block/blockframe.tsx:772-782` | E | Already copies on click; make that visible, not `disabled`-styled, and confirm it | 2 |
@@ -274,7 +274,9 @@ Already have copy, but **move them to the redacted path** (Codex P1 on
   Copy / Copy All (`LogView.tsx:165-181`), which copy `logText()` or the
   selection as-is;
 - the LSP install banner (`editor-view.tsx:955`);
-- `CopyableErrorMessage`'s own two uses.
+- `CopyableErrorMessage`'s own two uses;
+- `BlockErrorBoundary`'s copy-on-highlight (`BlockErrorBoundary.tsx:160-181`),
+  which copies the raw selection of a crash message or stack.
 
 Each goes through `redact.ts` (or `<CopyErrorButton>`, where the §4.1 format
 fits). A copy of the user's own *selection* in an ordinary text view (the
@@ -303,10 +305,17 @@ These make sure there's something worth copying:
    - It cleared on its own. Twenty minutes later, the same `GetClientData`
      call from the same stuck window returned 200.
    - AgentMux's part: one transient OS-level socket failure left the window
-     on the connection-lost card with no retry. The initial srv calls in
-     `initHostMux` should retry network-level failures (`TypeError` from
+     on the connection-lost card with no retry.
+   - **Retry only idempotent reads:** `GetClientData`, `GetWindow`,
+     `GetWorkspace`. Retry network-level failures (`TypeError` from
      `fetch`) with a short backoff, for example 250 ms, 500 ms and 1 s,
      before showing the card. HTTP errors (4xx/5xx) stay fatal.
+   - **Never retry the mutations** (`CreateWindow`, `CloseWindow`). A network
+     failure can land after srv has already applied the request, and
+     duplicate `CreateWindow` calls are already known to strand unregistered
+     window rows (Codex P2 on #3689). A lost-response mutation goes to the
+     card as today. Making those calls idempotent (a client request id) is
+     the only safe way to retry them, and is out of scope here.
    - What follows is the investigation that led here:
    - An earlier draft read that as the renderer outrunning srv. That doesn't
      hold (Codex P2 on #3689). The launcher waits for srv's
@@ -359,12 +368,20 @@ P1 alone covers the errors users hit most, and it's one PR.
 - **Placement.** A class-name lint alone would miss error surfaces that use
   other primitives (Codex P2 on #3689), so the check has two parts:
   1. **An audited registry,** `frontend/app/errors/error-surfaces.ts`: one
-     entry per §5 surface (id, component file, kind). Each component
-     references its entry's id where it renders `<CopyErrorButton>` or
-     `CopyableErrorMessage`. A test fails if an entry's file doesn't contain
-     that reference.
-  2. **A primitive scan,** `scripts/check-error-copy.mjs`. It fails on any
-     file that renders one of these without appearing in the registry:
+     entry per §5 surface (id, kind). Registration is **per surface, not per
+     file** (Codex P2 on #3689). Every error primitive carries its own id: a
+     `data-error-surface="<id>"` attribute on the element, or for a Rust page
+     builder, an `// error-surface: <id>` comment on the builder function. The
+     `<CopyErrorButton>` or `CopyableErrorMessage` for that surface carries
+     the same id.
+  2. **A primitive scan,** `scripts/check-error-copy.mjs`. It checks each
+     occurrence, so a second surface in an already-registered file still
+     needs its own id. It fails on any single occurrence of these that:
+     - has no id;
+     - has an id missing from the registry;
+     - has an id no copy control in the same component shares.
+
+     The primitives are:
      - an `*-error` class, `ErrorBanner` or an `ErrorBoundary` fallback;
      - a toast or flash with an error level (`pushNotification` /
        `pushFlashError`);
