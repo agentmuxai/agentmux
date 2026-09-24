@@ -20,39 +20,19 @@
  * pattern can make a step look instant but never makes the plan wrong.
  */
 
-export type InstallStepStatus = "pending" | "active" | "done" | "failed" | "skipped";
-
-export interface InstallStep {
-    id: NpmStepId;
-    label: string;
-    status: InstallStepStatus;
-    /** Right-aligned short fact, e.g. "189 packages". */
-    hint?: string;
-    /** One muted live line under the step, e.g. "Downloading chalk". */
-    subline?: string;
-}
+import {
+    failureMessage,
+    typedErrorCategory,
+    type InstallErrorCategory,
+    type InstallFailure,
+    type InstallStep as GenericInstallStep,
+    type InstallStepStatus,
+    type LineTone,
+    type StepTracker,
+} from "./install-types";
 
 export type NpmStepId = "requirements" | "download" | "setup" | "scripts" | "verify";
-
-/** How Details should colour a line. Only `error`/`warning` get colour. */
-export type LineTone = "normal" | "command" | "warning" | "error";
-
-export type InstallErrorCategory =
-    | "network"
-    | "permission"
-    | "disk"
-    | "missing_prereq"
-    | "not_on_path"
-    | "cancelled"
-    | "unknown";
-
-export interface InstallFailure {
-    category: InstallErrorCategory;
-    /** Plain-language Layer 1 message. */
-    message: string;
-    /** 0-based index into the lines fed to `line()` of the first error line. */
-    firstErrorLine?: number;
-}
+type InstallStep = GenericInstallStep<NpmStepId>;
 
 /** Quiet gap after the last download line before "Set up files" starts. */
 export const DOWNLOAD_IDLE_MS = 1500;
@@ -71,13 +51,6 @@ const NPM_CODE_CATEGORY: Record<string, InstallErrorCategory> = {
 // Registry HTTP 5xx responses (`npm error code E503`) mean the package
 // server is unavailable — the same next step as a network failure.
 const NPM_HTTP_5XX_RE = /^E5\d\d$/;
-
-// The backend's typed `AgentMuxError` codes (agentmux-common errors.rs),
-// sent when creating the install directory fails before npm is spawned.
-const TYPED_CODE_CATEGORY: Record<string, InstallErrorCategory> = {
-    "AMX-IO-001": "disk",
-    "AMX-IO-002": "permission",
-};
 
 // `npm http fetch GET 200 <url> …` and `npm http cache <name>@<url> …`.
 // Tarball URLs look like `<registry>/<name>/-/<file>.tgz`, where <name> may
@@ -102,7 +75,7 @@ const PLAN: { id: NpmStepId; label: (name: string) => string }[] = [
     { id: "verify", label: (name) => `Check ${name} is installed` },
 ];
 
-export class NpmStepTracker {
+export class NpmStepTracker implements StepTracker {
     private steps: InstallStep[];
     private readonly name: string;
     private tarballs = new Set<string>();
@@ -230,12 +203,12 @@ export class NpmStepTracker {
             category = "not_on_path";
             failedStep = "verify";
         } else {
-            category = typedCategory(error) ?? npmCodeCategory(this.npmErrorCode) ?? "unknown";
+            category = typedErrorCategory(error) ?? npmCodeCategory(this.npmErrorCode) ?? "unknown";
             failedStep = this.activeStep() ?? this.firstPendingStep() ?? "requirements";
         }
 
         const failedLabel = this.steps.find((s) => s.id === failedStep)?.label ?? "installing";
-        const message = messageFor(category, this.name, failedLabel, missingTool);
+        const message = failureMessage(category, { name: this.name, failedLabel, missingTool });
 
         // Steps before the failed one finished; the failed one gets the
         // message; later ones stay pending.
@@ -331,40 +304,10 @@ function npmCodeCategory(code: string | undefined): InstallErrorCategory | undef
     return NPM_CODE_CATEGORY[code];
 }
 
-function typedCategory(error: unknown): InstallErrorCategory | undefined {
-    if (error == null || typeof error !== "object") return undefined;
-    const code = (error as { code?: unknown }).code;
-    return typeof code === "string" ? TYPED_CODE_CATEGORY[code] : undefined;
-}
-
 function decodeName(raw: string): string {
     try {
         return decodeURIComponent(raw);
     } catch {
         return raw;
-    }
-}
-
-function messageFor(
-    category: InstallErrorCategory,
-    name: string,
-    failedLabel: string,
-    missingTool: string | undefined,
-): string {
-    switch (category) {
-        case "network":
-            return "Couldn't reach the package server.";
-        case "permission":
-            return "AgentMux wasn't allowed to write the files.";
-        case "disk":
-            return "The disk is full.";
-        case "missing_prereq":
-            return `${missingTool ?? "A required tool"} is needed first.`;
-        case "not_on_path":
-            return `Installed, but AgentMux can't find ${name} yet.`;
-        case "cancelled":
-            return "Cancelled. Nothing was left behind.";
-        default:
-            return `Something went wrong while running "${failedLabel}".`;
     }
 }
