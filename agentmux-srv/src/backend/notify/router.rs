@@ -36,6 +36,9 @@ pub struct Router {
     store: Arc<Store>,
     /// Block to activate once a window connects (click while no window open).
     pending_activation: Mutex<Option<String>>,
+    /// block_id → sanitized agent name. Names change rarely; caching keeps
+    /// the store (one process-wide SQLite mutex) off the hot path.
+    names: Mutex<std::collections::HashMap<String, String>>,
 }
 
 static ROUTER: OnceLock<Arc<Router>> = OnceLock::new();
@@ -56,6 +59,7 @@ pub fn init(broker: Arc<Broker>, config: Arc<ConfigState>, store: Arc<Store>) ->
                 config,
                 store,
                 pending_activation: Mutex::new(None),
+                names: Mutex::new(Default::default()),
             });
             spawn_ticker(Arc::downgrade(&r));
             r
@@ -164,7 +168,14 @@ impl Router {
         settings_from_extra(&self.config.get_settings().extra)
     }
 
+    /// BLOCKING on a cache miss (SQLite behind `Store`'s process-wide mutex).
+    /// Only ever reached through `emit`, which callers must run off the async
+    /// workers — `notify_handlers.rs` uses `spawn_blocking` (the #1782 failure
+    /// class; see websocket.rs's controllerinput note).
     fn agent_name(&self, block_id: &str) -> String {
+        if let Some(n) = self.names.lock().unwrap_or_else(|e| e.into_inner()).get(block_id) {
+            return n.clone();
+        }
         let raw = self
             .store
             .get::<Block>(block_id)
@@ -179,7 +190,13 @@ impl Router {
                 }
             })
             .unwrap_or_default();
-        sanitize_name(&raw)
+        let name = sanitize_name(&raw);
+        let mut cache = self.names.lock().unwrap_or_else(|e| e.into_inner());
+        if cache.len() > 1024 {
+            cache.clear();
+        }
+        cache.insert(block_id.to_string(), name.clone());
+        name
     }
 
     fn step(&self, input: Input) {
@@ -221,6 +238,9 @@ impl Router {
 
     /// A frontend reports a pane event. `question` is only used for
     /// `InputWaiting` and goes through `redact_body`.
+    ///
+    /// BLOCKING (agent-name lookup may hit the store) — call from
+    /// `spawn_blocking`, never inline on an async worker.
     pub fn emit(&self, kind: NotifyKind, block_id: &str, question: Option<&str>) {
         let preview = self.settings().preview;
         let body = match kind {

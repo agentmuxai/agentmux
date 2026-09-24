@@ -99,13 +99,25 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
             if p.block_id.is_empty() {
                 return Err("notify.emit: block_id required".to_string());
             }
-            match p.event {
-                NotifyPaneEvent::TurnStarted => r.resolve(&p.block_id, Family::Turn),
-                NotifyPaneEvent::TurnCompleted => r.emit(NotifyKind::TurnCompleted, &p.block_id, None),
-                NotifyPaneEvent::TurnErrored => r.emit(NotifyKind::TurnErrored, &p.block_id, None),
-                NotifyPaneEvent::InputWaiting => r.emit(NotifyKind::InputWaiting, &p.block_id, p.question.as_deref()),
-                NotifyPaneEvent::InputResolved => r.resolve(&p.block_id, Family::Input),
-            }
+            // Resolves are in-memory only. Emits resolve the agent name, which
+            // can hit SQLite behind Store's process-wide mutex — keep that off
+            // the Tokio workers (the #1782 failure class).
+            let kind = match p.event {
+                NotifyPaneEvent::TurnStarted => {
+                    r.resolve(&p.block_id, Family::Turn);
+                    return Ok(NotifyOk { ok: true });
+                }
+                NotifyPaneEvent::InputResolved => {
+                    r.resolve(&p.block_id, Family::Input);
+                    return Ok(NotifyOk { ok: true });
+                }
+                NotifyPaneEvent::TurnCompleted => NotifyKind::TurnCompleted,
+                NotifyPaneEvent::TurnErrored => NotifyKind::TurnErrored,
+                NotifyPaneEvent::InputWaiting => NotifyKind::InputWaiting,
+            };
+            tokio::task::spawn_blocking(move || r.emit(kind, &p.block_id, p.question.as_deref()))
+                .await
+                .map_err(|e| format!("notify.emit: {e}"))?;
             Ok(NotifyOk { ok: true })
         }
     });
