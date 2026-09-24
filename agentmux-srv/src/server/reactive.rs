@@ -2305,10 +2305,13 @@ pub(super) async fn handle_reactive_history_search(
         Some(uid) => match super::app_api::SelfOwner::caller_row(uid, &state.mstore) {
             Ok(row) => Some(row),
             Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("history.search: {e}")})),
-                )
+                // A gone row is the caller's problem; a store fault is ours.
+                let status = if e.starts_with("store:") {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                return (status, Json(json!({"error": format!("history.search: {e}")})))
                     .into_response();
             }
         },
