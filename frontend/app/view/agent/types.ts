@@ -549,7 +549,13 @@ export interface DayDividerNode {
  */
 export interface HistoryLinkNode {
     type: "history_link";
-    id: "history-link";
+    /** `history-link` at the top of the feed; `history-gap:<next id>` between
+     *  turns kept around a blocked one (spec §6.9). */
+    id: string;
+    /** Turns rolled off above this row, when known. */
+    earlierTurns?: number;
+    /** A row between kept turns rather than at the top. */
+    gap?: boolean;
 }
 
 /**

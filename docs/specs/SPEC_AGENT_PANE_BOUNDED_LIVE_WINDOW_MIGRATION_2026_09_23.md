@@ -1243,9 +1243,15 @@ last turn can't leave overdue turns resident waiting for a next trigger
   - `shell` nodes (AgentMux's in-pane shell runs, `useShellNodeStream.ts` —
     not the agent's Bash tool, which is a durable `tool` node; backend memory
     ring only, §6.3.2),
-  - AskUserQuestion tools whose answer text was set optimistically
-    (`answerText` / `questionText` / `timeoutNote`; replay can't rebuild them),
   - an optimistic `user_message` not yet paired with its echo.
+
+  *Revised in PR 3 (ReAgent review):* an answered AskUserQuestion is **not**
+  blocked. The answer reaches the transcript as the tool's result (the CLI
+  writes "User has answered your questions: …" when the turn resumes), so
+  History shows it; only the styled rendering (`answerText` / `questionText`)
+  and the client-side auto-fill note are optimistic — and those fields are
+  never cleared, so blocking on them would keep every such turn forever.
+  Rebuilding the styled rendering on replay is a parser follow-up.
 - **A blocked turn is never rolled off — and does not stop the others.** It
   stays where it is; durable finished turns before and after it still roll
   off. Removing from the middle is as safe as removing a prefix here: the
@@ -1269,7 +1275,10 @@ last turn can't leave overdue turns resident waiting for a next trigger
   node. For them roll-off is **off** until the journal (PR 4) records user
   messages: they keep today's behaviour exactly, which is no regression.
   Claude and the Gemini family (whose echo shipped in #3620) are covered from
-  PR 3 (Codex review).
+  PR 3 (Codex review) — Claude only under the **persistent** controller: the
+  per-turn subprocess controller (muxcode, container agents) writes the
+  prompt to the CLI's stdin without persisting it, so those panes are in the
+  "never reach the transcript" group too (found while building PR 3).
 
 **How.** Reducer command `RollOff { ranges }`
 (`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as

@@ -69,6 +69,15 @@ function listenForInput(): void {
     }
 }
 
+/**
+ * Whether the user gave input within INPUT_WINDOW_MS — for housekeeping that
+ * should step aside for typing (the live feed's roll-off pass, spec §6.9).
+ */
+export function userIsInteracting(): boolean {
+    listenForInput();
+    return now() - lastInputAt < INPUT_WINDOW_MS;
+}
+
 function arm(): void {
     if (rafId == null) rafId = requestAnimationFrame(runFrame);
 }
