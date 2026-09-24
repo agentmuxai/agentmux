@@ -24,11 +24,11 @@
 | 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | merged |
 | 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | **deferred** by the §6.9 revision (live feed keeps n small; stores ≤ 8 % at 200 turns, §3.8) |
-| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663 | **5a done**; 5b, 5c, 5e deferred by §6.9; 5d's journal is §6.9 PR 4 |
-| 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | this PR | in review; kill switch `agent:livefeed`, K = `agent:livefeedturns` (§2.2d) |
+| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663, #3701 | **5a done**; 5b, 5c, 5e deferred by §6.9. 5d: user messages now reach the transcript **only** for panes on the per-turn subprocess controller — Kimi, muxcode/container Claude, and Codex *when not run by the app-server controller* (#3701). **Not covered:** app-server Codex, ACP; also still open: the shell journal (`out-of-band.jsonl`) |
+| 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | #3700, #3701 | **merged**, on by default; kill switch `agent:livefeed`, K = `agent:livefeedturns` (§2.2d). Every pane but ACP and app-server Codex; turns holding an in-pane shell stay until the journal |
 | 7 | History tab follows the transcript (spec §6.9) | #3695 | merged |
 | 8 | Off-main-thread markdown (decision) | — | not started |
-| 9 | Default on | — | not started |
+| 9 | Remove the kill switches once each phase has soaked (the flags themselves are already on by default) | — | not started |
 | 10 | `content-visibility` experiment | — | not started |
 
 ## 2. Measurements
@@ -407,9 +407,10 @@ resolving the thunks inside the segment's root; regression tests in
 - **Renderer memory after large loads** (§3.8): a resident high-water mark
   from peak loads, not an agent-pane leak. Phase 6 (bounded live document)
   bounds the peak; the 8 h soak verifies it.
-- **Next phase: 5 (stable node identity and durability)**, the prerequisite
-  for Phase 6 eviction — what moves old messages out of the live pane and
-  into the History tab, bounding memory.
+- **Phases 5b, 5c, 5e are deferred** (spec §6.9): the live feed shipped
+  (#3700, #3701) on 5a alone. They come back only if scroll-back in the feed
+  or History anchored to a turn is wanted. What remains is listed under
+  "Live feed follow-ups" below.
 - ~~**The growing last message's DOM is replaced on every commit**~~ —
   looked at (§3.9): an in-place update was built and measured, no gain on
   current `main`; not shipped. The look found a real bug instead, fixed
@@ -419,5 +420,13 @@ resolving the thunks inside the segment's root; regression tests in
 - **In-row windowing for one huge node** (spec §6.2) — not in 3b.
 - **macOS and Linux baselines** (spec §7 Phase 0).
 - **Fault-suite runner** (spec §8) — a later Phase 0 PR.
+- **Live feed follow-ups (§6.9):** the shell journal (`out-of-band.jsonl`)
+  so turns holding an in-pane shell can roll off and History shows shells;
+  rebuilding AskUserQuestion's styled answer on replay (the answer is already
+  in the tool result); ACP and the Codex app-server controller writing the
+  user's message; opening History at the first kept turn (needs 5b). Not yet
+  verified with a real signed-in agent on a dev build — the dev instance's
+  agents had no credentials; the load-time roll-off was checked on real
+  transcripts (a long pane opened at 4 turns).
 - **Residual nodes after a clear:** a cleared pane can refill with a few
   transcript nodes; the bench records them (`residualNodes`).
