@@ -15,7 +15,13 @@
  * Always `false` with the setting off: `content-visibility: hidden` already
  * skips a hidden tab's rendering, so there is nothing extra to pause.
  */
+import { getSettingsKeyAtom } from "@/store/global";
 import { createContext, useContext, type Accessor } from "solid-js";
+
+/** `window:keepinactivetabslaidout` (opt-in; see this file's header). */
+export function keepInactiveTabsLaidOut(): boolean {
+    return getSettingsKeyAtom("window:keepinactivetabslaidout")() === true;
+}
 
 const WindowTabHiddenContext = createContext<Accessor<boolean>>(() => false);
 
