@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.57.2 — 2026-09-24
+
+- perf(agent): opening or reading an agent's history no longer re-scans its whole transcript after every write by an older AgentMux build (seconds on large agents)
+- fix(jekt): only the production reagent key yields a verified sender
+- fix(agent): relaunching an agent from its pane uses the CLI path the backend resolved, so it no longer fails with "path not found"
+- fix(jekt): marker fields and delimiters from sender text are escaped
+- perf(agent): loading or paging an agent's history reads only the timestamps it needs (~5 ms instead of ~0.6 s per page on large agents)
+- Tables in a long streamed reply show their copy confirmation again: components in the already-rendered part of a streaming message are no longer torn down by each new chunk.
+- docs(integrations): generic integrations spec — research and design
+- fix(menu): shortcut labels derived from the real key bindings
+
 ## 0.57.1 — 2026-09-24
 
 - Agent pane: only the turn in flight stays always-mounted; long conversations no longer slow down streaming or typing (setting agent:turnscopedtail to disable)
