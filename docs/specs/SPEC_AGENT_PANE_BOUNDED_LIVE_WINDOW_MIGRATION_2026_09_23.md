@@ -699,12 +699,39 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      (off the runtime) the first time a pane opens a legacy row. That costs
      one read of the file per epoch. Until then, events for that stream carry
      no position.
-4. **One replace/delete primitive per transcript.** The eight paths above call
-   `replace_transcript` / `delete_transcript`. In one transaction, these
-   replace or delete `output`, delete `output.idx` and `output.tsidx`, and
-   mint the new `gen`. Each then publishes a stream event
-   (`fileop: "replace" | "delete"`, new `gen`), so an open pane learns at once
-   instead of on its next reload.
+4. **Replace and delete are atomic with the sidecars; the index is
+   labelled** (as built in 5a-2b, `filestore/replace.rs`).
+   - **Atomic replace and delete.** `replace_file(zone, name, data, drop)`
+     and `delete_files(zone, names)` each run in one transaction. The
+     transcript paths use them, so a crash can't leave `output.idx` /
+     `output.tsidx` describing an `output` that is gone:
+     - archive and clear delete `output` together with both sidecars;
+     - restore and the transcript backfill replace `output` and drop both
+       sidecars in one step. A reader never sees `output` missing or
+       half-restored, and the replaced content gets a new `gen` (item 3).
+   - **The index names its generation.** `output.idx` records the
+     generation it was built for (`for_gen` in its file metadata, written in
+     the same transaction as the index). The label is taken before the scan,
+     so a replace during the scan leaves a mismatching label.
+     - **When the index is trusted.** The `read_range` fast path, the
+       global line count and `extend_output_idx` trust an index only when its
+       label matches `output`'s valid generation. Any mismatch just triggers
+       a rebuild, which is always safe.
+     - **This covers every path, listed or not.** Today, `output` replaced
+       by content that happens to reach the old covered size is read at the
+       old file's offsets. A test reproduces that.
+   - **Sizes and scans come from the database.** Those readers and the
+     index builder take `output`'s size from the database (`line_state`),
+     and read bytes with `read_bytes_db`, instead of this process's `stat`
+     cache. Another srv instance's appends leave that cache stale, and the
+     builder could otherwise record coverage it never scanned.
+   - **`blockfile:write_state` refuses the transcript names.** It refuses
+     `output` and both sidecars; it is for pane state files.
+   - **The zone move needs no change.** Copied files get a new generation,
+     and a copied index has no matching label.
+   - **Replace/delete stream events** (`fileop: "replace" | "delete"`, new
+     `gen`, so an open pane learns at once) move to 5a-3, with the other
+     events.
 5. **Events carry positions and go out after the write.** `WSFileEventData`
    gains `pos: [{ stream, gen, line, lines }]`, where `stream` is
    `b:<blockId>` or `g:<zone>`. It carries one entry for the block file and one
@@ -760,7 +787,7 @@ to §6.3.6; paths under `agentmux-srv/src/`):
 |---|---|---|
 | 5a-1 | `BEGIN IMMEDIATE` for every `FileStore` mutation; fix the "single-tx" comments | Two `FileStore` instances on one database file, many threads each appending numbered lines: every line present exactly once, intact. Append latency before/after. |
 | 5a-2a | `gen` + counter epoch columns (no schema bump), `append_lines`, torn-tail repair, `init_line_counter`, the shared line rule | Property test: the counter equals the `output.idx` indexer on random bytes (blank, CRLF, VT, broken UTF-8, torn tails). Concurrent `append_lines` from two stores hand out distinct indices that address their records. An older build's write drops the epoch; a re-count gets a new `gen`. A database created by an older build opens concurrently, gains the columns and counts. |
-| 5a-2b | `replace_transcript` / `delete_transcript` on all eight paths; `gen` in the `output.idx` header | Every replace/delete path mints a new `gen` and removes both sidecars. |
+| 5a-2b | `replace_file` / `delete_files` (one transaction) on the archive, clear, restore and backfill paths; `output.idx` labelled with its generation and trusted only on a match; index sizes and scans read from the database; `write_state` refuses transcript names | A same-size replace is no longer served the old index (reproduced first). A failed replace or delete changes nothing. The indexer labels what it read. Full `agentmux-srv` suite. |
 | 5a-3 | Positions on live events and read responses; publish-after-write under the per-stream lock; silent persist with `echo`; error frames and app-server mirrored; `replace`/`delete` events | Backend tests per event source; an event's `line` indexes exactly its record in a range read. |
 | 5a-4 | Frontend consumer contract | Out-of-order, duplicate, gap, `gen` change mid-fetch, cross-process append via the poll; `full-conversation-bench` streaming cost unchanged. |
 

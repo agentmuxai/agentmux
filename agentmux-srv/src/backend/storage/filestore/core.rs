@@ -170,6 +170,21 @@ impl FileStore {
         Ok(out)
     }
 
+    /// Run `f` as one read transaction: in WAL mode every read inside it sees
+    /// one consistent snapshot of the database, however other connections
+    /// write meanwhile. For a decision that combines several reads (a size, a
+    /// header, a label) that must describe the same moment.
+    pub(super) fn read_txn<T>(
+        &self,
+        f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let out = f(&tx)?;
+        tx.commit()?;
+        Ok(out)
+    }
+
     /// Evict the least-recently-used cache entries until `cache_total_bytes <= cache_max_bytes`.
     /// Must be called with *neither* `cache` nor `cache_total_bytes` lock held.
     pub(super) fn evict_to_cap(&self) {
@@ -392,6 +407,54 @@ impl FileStore {
         }
     }
 
+    /// Replace an existing row's content with `data` inside `tx`. Replaced
+    /// content starts a new counted epoch with a fresh `gen` (counter.rs).
+    pub(super) fn replace_content_in(
+        tx: &Transaction<'_>,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+        now: i64,
+    ) -> Result<(), StoreError> {
+        tx.execute(
+            "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
+            params![zone_id, name],
+        )?;
+        for (idx, part_data) in Self::split_into_parts(data).iter().enumerate() {
+            tx.execute(
+                "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                params![zone_id, name, idx as i32, part_data],
+            )?;
+        }
+        // The new epoch is recorded at the `rev` the part writes above left
+        // (the delete trigger bumps it).
+        let count = count_all(data);
+        tx.execute(
+            "UPDATE db_wave_file SET size = ?1, modts = ?2,
+                 gen = ?3, lines = ?4, lines_size = ?1, lines_tail = ?5, lines_modts = ?2,
+                 lines_rev = COALESCE(rev, 0)
+             WHERE zoneid = ?6 AND name = ?7",
+            params![data.len() as i64, now, new_gen(), count.lines as i64, count.tail_start as i64, zone_id, name],
+        )?;
+        Ok(())
+    }
+
+    /// Drop this process's cached rows for `names` (after a write that the
+    /// cache can't be patched to follow).
+    pub(super) fn forget_cached(&self, zone_id: &str, names: &[&str]) {
+        let mut cache = self.cache.lock().unwrap();
+        let mut freed = 0usize;
+        for name in names {
+            if let Some(removed) = cache.remove(&(zone_id.to_string(), name.to_string())) {
+                freed += removed.cached_size_bytes;
+            }
+        }
+        if freed > 0 {
+            let mut total = self.cache_total_bytes.lock().unwrap();
+            *total = total.saturating_sub(freed);
+        }
+    }
+
     /// Write (replace) entire file contents.
     pub fn write_file(
         &self,
@@ -401,9 +464,6 @@ impl FileStore {
     ) -> Result<(), StoreError> {
         let key = (zone_id.to_string(), name.to_string());
         let now = Self::now_ms();
-
-        // Split data into parts
-        let parts = Self::split_into_parts(data);
 
         // Write directly to DB (write-through for full writes, matching Go's
         // WriteFile), in one transaction: a failure part-way keeps the old
@@ -420,27 +480,7 @@ impl FileStore {
             if !exists {
                 return Err(StoreError::NotFound);
             }
-            tx.execute(
-                "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
-                params![zone_id, name],
-            )?;
-            for (idx, part_data) in parts.iter().enumerate() {
-                tx.execute(
-                    "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![zone_id, name, idx as i32, part_data],
-                )?;
-            }
-            // Replaced content starts a new counted epoch (counter.rs), at the
-            // `rev` the part writes above left (the delete trigger bumps it).
-            let count = count_all(data);
-            tx.execute(
-                "UPDATE db_wave_file SET size = ?1, modts = ?2,
-                     gen = ?3, lines = ?4, lines_size = ?1, lines_tail = ?5, lines_modts = ?2,
-                     lines_rev = COALESCE(rev, 0)
-                 WHERE zoneid = ?6 AND name = ?7",
-                params![data.len() as i64, now, new_gen(), count.lines as i64, count.tail_start as i64, zone_id, name],
-            )?;
-            Ok(())
+            Self::replace_content_in(tx, zone_id, name, data, now)
         })?;
 
         // Update cache (metadata only — data parts are already in DB, read_file loads from DB)

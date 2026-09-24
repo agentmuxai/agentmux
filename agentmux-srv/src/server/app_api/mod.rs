@@ -2844,31 +2844,23 @@ pub(super) fn global_zone_line_count(
     gfs: &Arc<crate::backend::storage::filestore::FileStore>,
     zone: &str,
 ) -> Option<u64> {
-    use crate::backend::blockcontroller::shell::OUTPUT_IDX_HEADER_LEN;
+    use crate::backend::blockcontroller::shell::{extend_output_idx, output_index};
 
-    let stat = gfs
-        .stat(zone, crate::backend::agent_session::OUTPUT_FILE)
-        .ok()??;
-    if stat.size == 0 {
+    // `output` and its index from one database snapshot: sizes, header and
+    // generation label of the same moment, whatever another srv instance is
+    // writing to this shared zone (Codex on #3634).
+    let view = output_index(gfs, zone)?;
+    if view.output_size == 0 {
         return Some(0);
     }
-    let output_size = stat.size as u64;
-
-    if let Ok(Some(idx_stat)) = gfs.stat(zone, "output.idx") {
-        if idx_stat.size >= OUTPUT_IDX_HEADER_LEN {
-            if let Ok((_, header)) = gfs.read_at(zone, "output.idx", 0, OUTPUT_IDX_HEADER_LEN) {
-                if let Ok(bytes) = <[u8; 8]>::try_from(header.as_slice()) {
-                    if u64::from_le_bytes(bytes) == output_size {
-                        return Some(((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64);
-                    }
-                }
-            }
-        }
+    if let Some(lines) = view.fresh_lines {
+        return Some(lines);
     }
 
     // Stale or missing. `extend_output_idx` scans only the appended bytes when
     // it can anchor on the existing index, and falls back to a full rebuild
-    // when it can't (missing, unreadable, no entries, or `output` shrank).
+    // when it can't (missing, unreadable, no entries, another generation's, or
+    // `output` shrank).
     //
     // The count must stay EXACT. Returning a stale one instead was tried and
     // is wrong: this feeds `useHistoryPagination`'s tail window
@@ -2880,7 +2872,7 @@ pub(super) fn global_zone_line_count(
     // O(file-size) rescan every time — 37 rebuilds in 19 minutes on a 759 MB
     // transcript, mean 3168 ms, ~10% permanent duty cycle. See
     // docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5.
-    crate::backend::blockcontroller::shell::extend_output_idx(gfs, zone, output_size)
+    extend_output_idx(gfs, zone)
 }
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
@@ -3244,15 +3236,65 @@ mod cross_channel_tests {
         idx.extend_from_slice(&(body.len() as u64).to_le_bytes()); // covered_size == output size
         idx.extend_from_slice(&0u64.to_le_bytes()); // fabricated entry 0
         idx.extend_from_slice(&9u64.to_le_bytes()); // fabricated entry 1 (only 2, not 3)
-        global
-            .make_file(zone, "output.idx", FileMeta::default(), FileOpts::default())
-            .unwrap();
-        global.write_file(zone, "output.idx", &idx).unwrap();
+        // Labelled with `output`'s current generation, as the builder labels
+        // a real index (5a-2b) — so it is trusted as fresh.
+        let gen = global.line_state(zone, OUTPUT_FILE).unwrap().unwrap().counted.unwrap().gen;
+        let mut label = FileMeta::default();
+        label.insert("for_gen".into(), serde_json::json!(gen));
+        global.put_file_with_meta(zone, "output.idx", &idx, label).unwrap();
 
         assert_eq!(
             global_zone_line_count(&global, zone),
             Some(2),
             "must trust the fresh cached index rather than rescanning `output`",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_is_exact_when_another_instance_rebuilt_the_index() {
+        // Codex P1 on #3634: store A holds a stale cached `output.idx` row.
+        // Another srv instance (store B, same database file) appends and
+        // rebuilds the index. A's output size comes from the database; the
+        // index size must too, or A under-reports the count.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("global.db");
+        let a = Arc::new(FileStore::open(&path).unwrap());
+        let b = Arc::new(FileStore::open(&path).unwrap());
+        let zone = "agent:def-cc-11:current";
+        seed_output(&a, zone, b"{\"a\":1}\n");
+        assert_eq!(global_zone_line_count(&a, zone), Some(1));
+        // A caches a row for the index (as an older build's make_file would).
+        a.write_file(zone, "output.idx", &[0u8; 16]).ok();
+        a.make_file(zone, "output.idx", FileMeta::default(), FileOpts::default()).ok();
+        let _ = a.stat(zone, "output.idx");
+
+        b.append_data(zone, OUTPUT_FILE, b"{\"b\":2}\n{\"c\":3}\n{\"d\":4}\n").unwrap();
+        let b_size = b.line_state(zone, OUTPUT_FILE).unwrap().unwrap().size as u64;
+        assert_eq!(crate::backend::blockcontroller::shell::rebuild_output_idx(&b, zone, b_size, crate::backend::blockcontroller::shell::output_now(&b, zone).and_then(|(_, g)| g)), Some(4));
+
+        assert_eq!(global_zone_line_count(&a, zone), Some(4), "A must not count from its stale cached index size");
+    }
+
+    #[test]
+    fn global_zone_line_count_does_not_trust_an_index_of_replaced_content_of_the_same_size() {
+        // The coincidence the covered_size check alone can't see: `output`
+        // replaced (restore, backfill) by different content of exactly the
+        // same byte size. The old index then "matches" and serves the old
+        // file's count and offsets. Since 5a-2b the index is labelled with
+        // the generation it was built for, and a replace mints a new one.
+        let global = mem_store();
+        let zone = "agent:def-cc-10:current";
+        let three: &[u8] = b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n";
+        let two: &[u8] = b"{\"x\":11111}\n{\"y\":22222}\n";
+        assert_eq!(three.len(), two.len(), "precondition: same size");
+        seed_output(&global, zone, three);
+        assert_eq!(global_zone_line_count(&global, zone), Some(3));
+
+        replace_output(&global, zone, two);
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(2),
+            "an index built for another generation of `output` must be rebuilt",
         );
     }
 
