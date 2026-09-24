@@ -29,7 +29,7 @@
 //! an extra, conservative signal; timestamps alone can't be trusted — two
 //! writes can share a millisecond, Codex on #3631.)
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::core::{FileStore, PART_DATA_SIZE};
 use super::lines::{count_append, is_blank_line, LineCount};
@@ -62,6 +62,11 @@ pub struct LineState {
 pub struct AppendPos {
     /// Byte offset of the first appended byte.
     pub offset: i64,
+    /// Byte offset where the appended records start: `offset`, or one past
+    /// it when [`FileStore::append_lines`] first wrote a `\n` to close a torn
+    /// last line. The records themselves are [`normalized_records`] of the
+    /// input, so a reader holding those bytes knows exactly where they sit.
+    pub records_offset: i64,
     /// `None` when the file is not counted (see the module doc).
     pub counted: Option<CountedAppend>,
 }
@@ -233,6 +238,14 @@ fn read_bytes_covered(
     Ok((out, covered))
 }
 
+/// The records [`FileStore::append_lines`] writes for `data`: its complete,
+/// non-blank lines, each ending in `\n` (the reader's rule). What a caller
+/// publishes alongside an append, so the bytes match what landed at
+/// [`AppendPos::records_offset`].
+pub fn normalized_records(data: &[u8]) -> Vec<u8> {
+    normalize_lines(data, false)
+}
+
 /// `data` as complete, non-blank lines, each ending in `\n`; prefixed with a
 /// `\n` when `close_tail`, so it can't continue a torn last line.
 fn normalize_lines(data: &[u8], close_tail: bool) -> Vec<u8> {
@@ -267,119 +280,173 @@ impl FileStore {
         mode: AppendMode,
         now: i64,
     ) -> Result<(AppendPos, i64), StoreError> {
-        self.write_txn(|tx| {
-            let row = read_row(tx, zone_id, name)?.ok_or(StoreError::NotFound)?;
-            let size = row.size;
-            let counter = row.counter();
+        self.write_txn(|tx| Self::append_in_tx(tx, zone_id, name, data, mode, now))
+    }
 
-            let normalized;
-            let data: &[u8] = match mode {
-                AppendMode::Raw => data,
-                AppendMode::Lines => {
-                    let torn = size > 0 && read_bytes(tx, zone_id, name, size - 1, 1)?[0] != b'\n';
-                    normalized = normalize_lines(data, torn);
-                    &normalized
-                }
-            };
-            if data.is_empty() {
-                let counted = counter.map(|(gen, c)| CountedAppend { gen, first_line: c.lines, lines: c.lines });
-                return Ok((AppendPos { offset: size, counted }, size));
+    /// One append inside a caller's transaction: parts, size and counter.
+    /// Returns where it landed and the new size (equal to the offset when
+    /// nothing was written).
+    fn append_in_tx(
+        tx: &Transaction<'_>,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+        mode: AppendMode,
+        now: i64,
+    ) -> Result<(AppendPos, i64), StoreError> {
+        let row = read_row(tx, zone_id, name)?.ok_or(StoreError::NotFound)?;
+        let size = row.size;
+        let counter = row.counter();
+
+        let normalized;
+        let (data, records_offset): (&[u8], i64) = match mode {
+            AppendMode::Raw => (data, size),
+            AppendMode::Lines => {
+                let torn = size > 0 && read_bytes(tx, zone_id, name, size - 1, 1)?[0] != b'\n';
+                normalized = normalize_lines(data, torn);
+                // The closing `\n` (if any) precedes the records.
+                let skip = i64::from(torn && !normalized.is_empty());
+                (&normalized, size + skip)
             }
+        };
+        if data.is_empty() {
+            let counted = counter.map(|(gen, c)| CountedAppend { gen, first_line: c.lines, lines: c.lines });
+            return Ok((AppendPos { offset: size, records_offset: size, counted }, size));
+        }
 
-            // The counter needs the unterminated last line before the append
-            // (normally empty: transcript lines end in `\n`).
-            // If those bytes aren't all stored (a build without transactions
-            // is mid-write), the count can't be advanced: the epoch is
-            // dropped below, like any write it can't vouch for.
-            let counted_before = match &counter {
-                Some((gen, c)) => {
-                    read_bytes_exact(tx, zone_id, name, c.tail_start as i64, size - c.tail_start as i64)?
-                        .map(|open| (gen.clone(), *c, open))
-                }
-                None => None,
-            };
+        // The counter needs the unterminated last line before the append
+        // (normally empty: transcript lines end in `\n`).
+        // If those bytes aren't all stored (a build without transactions
+        // is mid-write), the count can't be advanced: the epoch is
+        // dropped below, like any write it can't vouch for.
+        let counted_before = match &counter {
+            Some((gen, c)) => {
+                read_bytes_exact(tx, zone_id, name, c.tail_start as i64, size - c.tail_start as i64)?
+                    .map(|open| (gen.clone(), *c, open))
+            }
+            None => None,
+        };
 
-            let new_size = size + data.len() as i64;
-            let start_part = (size / PART_DATA_SIZE as i64) as i32;
-            let offset_in_part = (size % PART_DATA_SIZE as i64) as usize;
-            let mut data_offset = 0usize;
-            let mut current_part = start_part;
-            if offset_in_part > 0 {
-                // Keep only the bytes the size covers: anything past it (a
-                // torn append by a build without transactions) is not content.
-                let mut part: Vec<u8> = tx
-                    .query_row(
-                        "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
-                        params![zone_id, name, start_part],
-                        |r| r.get(0),
-                    )
-                    .optional()?
-                    .unwrap_or_default();
-                part.resize(offset_in_part, 0);
-                let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
-                part.extend_from_slice(&data[..to_copy]);
-                data_offset = to_copy;
+        let new_size = size + data.len() as i64;
+        let start_part = (size / PART_DATA_SIZE as i64) as i32;
+        let offset_in_part = (size % PART_DATA_SIZE as i64) as usize;
+        let mut data_offset = 0usize;
+        let mut current_part = start_part;
+        if offset_in_part > 0 {
+            // Keep only the bytes the size covers: anything past it (a
+            // torn append by a build without transactions) is not content.
+            let mut part: Vec<u8> = tx
+                .query_row(
+                    "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                    params![zone_id, name, start_part],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or_default();
+            part.resize(offset_in_part, 0);
+            let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
+            part.extend_from_slice(&data[..to_copy]);
+            data_offset = to_copy;
+            tx.execute(
+                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                params![zone_id, name, current_part, part],
+            )?;
+            current_part += 1;
+        }
+        while data_offset < data.len() {
+            let end = (data_offset + PART_DATA_SIZE).min(data.len());
+            tx.execute(
+                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                params![zone_id, name, current_part, &data[data_offset..end]],
+            )?;
+            data_offset = end;
+            current_part += 1;
+        }
+
+        let counted = match counted_before {
+            Some((gen, before, open)) => {
+                let after = count_append(before, &open, size as u64, data);
+                let open_counted = !open.is_empty() && !is_blank_line(&open);
                 tx.execute(
-                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![zone_id, name, current_part, part],
+                    "UPDATE db_wave_file SET size = ?1, modts = ?2,
+                         lines = ?3, lines_size = ?1, lines_tail = ?4, lines_modts = ?2,
+                         lines_rev = COALESCE(rev, 0)
+                     WHERE zoneid = ?5 AND name = ?6",
+                    params![new_size, now, after.lines as i64, after.tail_start as i64, zone_id, name],
                 )?;
-                current_part += 1;
+                // Raw: the first byte may continue the open line. Lines:
+                // any open line was closed first (it keeps its index, or
+                // was blank and has none), so the first record gets the
+                // next index.
+                let first_line = match mode {
+                    AppendMode::Raw => before.lines - u64::from(open_counted),
+                    AppendMode::Lines => before.lines,
+                };
+                Some(CountedAppend { gen, first_line, lines: after.lines })
             }
-            while data_offset < data.len() {
-                let end = (data_offset + PART_DATA_SIZE).min(data.len());
-                tx.execute(
-                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![zone_id, name, current_part, &data[data_offset..end]],
-                )?;
-                data_offset = end;
-                current_part += 1;
-            }
-
-            let counted = match counted_before {
-                Some((gen, before, open)) => {
-                    let after = count_append(before, &open, size as u64, data);
-                    let open_counted = !open.is_empty() && !is_blank_line(&open);
+            None => {
+                if row.has_epoch_columns() {
+                    tracing::warn!(
+                        zone = %zone_id, name = %name,
+                        "line counter dropped: the file was written, or is mid-write, by a build that doesn't maintain it"
+                    );
                     tx.execute(
-                        "UPDATE db_wave_file SET size = ?1, modts = ?2,
-                             lines = ?3, lines_size = ?1, lines_tail = ?4, lines_modts = ?2,
-                             lines_rev = COALESCE(rev, 0)
-                         WHERE zoneid = ?5 AND name = ?6",
-                        params![new_size, now, after.lines as i64, after.tail_start as i64, zone_id, name],
+                        &format!(
+                            "UPDATE db_wave_file SET size = ?1, modts = ?2, {DROP_EPOCH_SQL}
+                             WHERE zoneid = ?3 AND name = ?4"
+                        ),
+                        params![new_size, now, zone_id, name],
                     )?;
-                    // Raw: the first byte may continue the open line. Lines:
-                    // any open line was closed first (it keeps its index, or
-                    // was blank and has none), so the first record gets the
-                    // next index.
-                    let first_line = match mode {
-                        AppendMode::Raw => before.lines - u64::from(open_counted),
-                        AppendMode::Lines => before.lines,
-                    };
-                    Some(CountedAppend { gen, first_line, lines: after.lines })
+                } else {
+                    tx.execute(
+                        "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                        params![new_size, now, zone_id, name],
+                    )?;
                 }
-                None => {
-                    if row.has_epoch_columns() {
-                        tracing::warn!(
-                            zone = %zone_id, name = %name,
-                            "line counter dropped: the file was written, or is mid-write, by a build that doesn't maintain it"
-                        );
-                        tx.execute(
-                            &format!(
-                                "UPDATE db_wave_file SET size = ?1, modts = ?2, {DROP_EPOCH_SQL}
-                                 WHERE zoneid = ?3 AND name = ?4"
-                            ),
-                            params![new_size, now, zone_id, name],
-                        )?;
-                    } else {
-                        tx.execute(
-                            "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-                            params![new_size, now, zone_id, name],
-                        )?;
-                    }
-                    None
-                }
-            };
-            Ok((AppendPos { offset: size, counted }, new_size))
-        })
+                None
+            }
+        };
+        Ok((AppendPos { offset: size, records_offset, counted }, new_size))
+    }
+
+    /// [`Self::append_lines`], plus one receive-time record appended to
+    /// `stamp_file` (`output.tsidx`: `{"off":<offset>,"ms":<now>}`), in the
+    /// SAME transaction — one commit where the line and its stamp took two
+    /// (Phase 5a-3: a transcript event now waits for its writes, so each
+    /// commit is latency). No stamp when nothing was appended.
+    pub fn append_lines_stamped(
+        &self,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+        stamp_file: &str,
+    ) -> Result<AppendPos, StoreError> {
+        let now = Self::now_ms();
+        let opts_json = serde_json::to_string(&super::FileOpts::default())?;
+        let (pos, new_size, stamp_size) = self.write_txn(|tx| {
+            let (pos, new_size) = Self::append_in_tx(tx, zone_id, name, data, AppendMode::Lines, now)?;
+            if new_size == pos.offset {
+                return Ok((pos, new_size, None));
+            }
+            // The sidecar is created on first use, like `make_file` (an empty
+            // counted file); an existing one is left alone.
+            tx.execute(
+                "INSERT OR IGNORE INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta,
+                     gen, lines, lines_size, lines_tail, lines_modts, lines_rev)
+                 VALUES (?1, ?2, 0, ?3, ?3, ?4, '{}', ?5, 0, 0, 0, ?3, 0)",
+                params![zone_id, stamp_file, now, opts_json, new_gen()],
+            )?;
+            let stamp = format!("{{\"off\":{},\"ms\":{now}}}\n", pos.offset.max(0));
+            let (_, stamp_size) = Self::append_in_tx(tx, zone_id, stamp_file, stamp.as_bytes(), AppendMode::Raw, now)?;
+            Ok((pos, new_size, Some(stamp_size)))
+        })?;
+        if new_size > pos.offset {
+            self.note_appended(zone_id, name, new_size, now);
+        }
+        if let Some(size) = stamp_size {
+            self.note_appended(zone_id, stamp_file, size, now);
+        }
+        Ok(pos)
     }
 
     /// Append transcript lines. `data` is normalized to complete, non-blank,

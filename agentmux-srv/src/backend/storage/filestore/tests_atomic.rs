@@ -192,6 +192,30 @@ fn failed_write_file_keeps_the_old_content() {
     assert_eq!(store.read_file(ZONE, NAME).unwrap().unwrap(), old);
 }
 
+#[test]
+fn a_file_backed_store_checkpoints_in_the_background_not_in_its_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("filestore.db");
+    let store = fresh(&path);
+    // Writes never run a checkpoint themselves...
+    let auto: i64 = store.conn().lock().unwrap().query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0)).unwrap();
+    assert_eq!(auto, 0);
+    store.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    let line = format!("{}\n", "x".repeat(4095));
+    for _ in 0..1500 {
+        store.append_data(ZONE, NAME, line.as_bytes()).unwrap();
+    }
+    // ...so pages only reach the database file through the background
+    // checkpointer, once the WAL passes its threshold.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::fs::metadata(&path).unwrap().len() < 4 * 1024 * 1024 {
+        assert!(std::time::Instant::now() < deadline, "the background checkpointer never ran");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    // Dropping the store stops its thread (and must not hang).
+    drop(store);
+}
+
 /// Append latency on a file-backed store (WAL, like production): one writer
 /// alone, then with a second store appending to the same file. Not a pass/fail
 /// test; run with
