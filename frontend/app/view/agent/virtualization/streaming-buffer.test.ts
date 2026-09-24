@@ -286,3 +286,29 @@ describe("nodeBytes counts nested tool payloads (Codex P2, #3611)", () => {
         expect(nodeBytes(toolWith(a))).toBeGreaterThan(0);
     });
 });
+
+describe("nodeBytes on a long-running tool log (Codex P2, #3611)", () => {
+    // Every streamed chunk makes a new ToolNode, so the per-object cache
+    // misses on each update: the scan itself must stay bounded, or the
+    // frontier calculation turns quadratic over a long command.
+    const runningWith = (count: number, reads: { n: number }) => {
+        const chunks = Array.from({ length: count }, () => {
+            const c = { kind: "stdout" };
+            Object.defineProperty(c, "content", { get: () => (reads.n++, "line of output\n") });
+            return c;
+        });
+        return { type: "tool", id: "t", tool: "Bash", params: {}, status: "running", collapsed: false, summary: "t", log: { open: true, chunks } } as unknown as DocumentNode;
+    };
+
+    it("reads a bounded number of chunks however long the log is", () => {
+        const reads = { n: 0 };
+        const bytes = nodeBytes(runningWith(50_000, reads));
+        expect(reads.n).toBeLessThanOrEqual(5_000);
+        expect(bytes).toBeGreaterThan(TURN_TAIL_MAX_BYTES); // that long a log counts as big
+    });
+
+    it("still measures a short log exactly", () => {
+        const reads = { n: 0 };
+        expect(nodeBytes(runningWith(10, reads))).toBe(64 + 10 * "line of output\n".length);
+    });
+});

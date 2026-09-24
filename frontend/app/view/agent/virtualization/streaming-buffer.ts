@@ -148,6 +148,15 @@ const bytesCache = new WeakMap<DocumentNode, number>();
 const NODE_BYTES_CAP = 4 * TURN_TAIL_MAX_BYTES;
 
 /**
+ * A running tool's log gains a chunk per update and every update is a new
+ * node object, so the per-object cache never hits while it streams: an
+ * unbounded scan would make the frontier calculation quadratic over a long
+ * command (Codex P2, #3611). A log with more chunks than this counts as big
+ * without being walked.
+ */
+const MAX_LOG_CHUNKS_SCANNED = 4_000;
+
+/**
  * Sum of string lengths reachable from `value`, walking arrays and plain
  * objects (a tool's params, a structured result: WriteParams.content, edit
  * strings, search-result arrays, records). Bounded: stops once `budget` is
@@ -175,7 +184,15 @@ export function nodeBytes(node: DocumentNode): number {
     const any = node as { content?: unknown; message?: unknown; log?: { chunks?: { content?: unknown }[] }; params?: unknown; result?: unknown };
     if (typeof any.content === "string") n += any.content.length;
     if (typeof any.message === "string") n += any.message.length;
-    for (const c of any.log?.chunks ?? []) if (typeof c.content === "string") n += c.content.length;
+    const chunks = any.log?.chunks ?? [];
+    if (chunks.length > MAX_LOG_CHUNKS_SCANNED) {
+        n = NODE_BYTES_CAP;
+    } else {
+        for (const c of chunks) {
+            if (n >= NODE_BYTES_CAP) break;
+            if (typeof c.content === "string") n += c.content.length;
+        }
+    }
     if (n < NODE_BYTES_CAP) n += payloadBytes(any.params, NODE_BYTES_CAP - n);
     if (n < NODE_BYTES_CAP) n += payloadBytes(any.result, NODE_BYTES_CAP - n);
     bytesCache.set(node, n);
