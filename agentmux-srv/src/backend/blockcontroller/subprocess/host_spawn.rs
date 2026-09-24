@@ -734,13 +734,17 @@ impl SubprocessController {
                             "error": {"message": format!("[AgentMux] queued message could not be sent: {e}")}
                         }).to_string();
                         if let Some(ref broker) = broker_wait {
+                            // Into the agent's global zone too: that is what
+                            // the pane reads on reload (Phase 5a-3c).
+                            let global_zone =
+                                shell::resolve_global_output_zone(&mstore_wait, &block_id_wait);
                             crate::backend::blockcontroller::shell::handle_append_block_file(
                                 broker,
                                 &block_id_wait,
                                 SUBPROCESS_OUTPUT_SUBJECT,
                                 format!("{error_frame}\n").as_bytes(),
                                 filestore_wait.as_ref(),
-                                None,
+                                global_zone.as_deref(),
                             );
                         }
                     }

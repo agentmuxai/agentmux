@@ -192,6 +192,13 @@ pub struct WSFileEventData {
     /// pick the entry for the stream they read from.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub pos: Vec<StreamPos>,
+    /// Set when the records are an echo of something the pane already shows:
+    /// `"stdin"` for a user message the controller wrote to the agent's stdin
+    /// (the pane has its optimistic node). Written to the transcript like any
+    /// record, with positions, so the stream has no gap; the pane doesn't add
+    /// a second node for it (Phase 5a-3c).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub echo: Option<String>,
 }
 
 /// One transcript stream's position for an append: the records it wrote are

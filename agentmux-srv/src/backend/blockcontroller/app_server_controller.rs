@@ -178,13 +178,18 @@ impl AppServerController {
             });
         }
         if let (Some(filestore), Some(broker)) = (&self.filestore, &self.broker) {
+            // Mirrored into the agent's global zone like every other agent's
+            // output (Phase 5a-3c): a pane reads the global zone when the
+            // block has an agentId, so frames written only to the block file
+            // were missing from its history.
+            let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
             super::shell::handle_append_block_file(
                 broker,
                 &self.block_id,
                 "output",
                 line.as_bytes(),
                 Some(filestore),
-                None,
+                global_zone.as_deref(),
             );
         }
     }

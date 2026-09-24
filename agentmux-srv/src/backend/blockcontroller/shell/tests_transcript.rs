@@ -49,6 +49,12 @@ fn setup(block_id: &str) -> (mps::Broker, Arc<Recorder>, Arc<FileStore>, Arc<Fil
     (broker, rec, fs, gfs)
 }
 
+/// The broker argument of `append_transcript`, from a `Broker` or an
+/// `Arc<Broker>` alike.
+fn at(b: &mps::Broker) -> Option<&mps::Broker> {
+    Some(b)
+}
+
 fn pos_of<'a>(ev: &'a mps::WSFileEventData, prefix: &str) -> &'a mps::StreamPos {
     ev.pos.iter().find(|p| p.stream.starts_with(prefix)).unwrap_or_else(|| panic!("no {prefix} position in {ev:?}"))
 }
@@ -66,8 +72,8 @@ fn an_event_carries_each_streams_position_and_the_exact_offset() {
     gfs.make_file(ZONE, "output", Default::default(), Default::default()).unwrap();
     gfs.append_lines(ZONE, "output", b"{\"other\":0}\n").unwrap();
 
-    append_transcript(&broker, block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, ZONE)), true);
-    append_transcript(&broker, block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, ZONE)), true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
 
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);
@@ -87,8 +93,8 @@ fn an_event_carries_each_streams_position_and_the_exact_offset() {
 fn the_event_goes_out_after_the_record_is_written() {
     let block = "blk-after";
     let (broker, rec, fs, gfs) = setup(block);
-    append_transcript(&broker, block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, ZONE)), true);
-    append_transcript(&broker, block, b"{\"b\":22}\n", Some(&fs), Some((&gfs, ZONE)), true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"b\":22}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
     let seen = rec.seen.lock().unwrap();
     // The block file already held each record when its event arrived.
     assert_eq!(seen.iter().map(|(_, size)| *size).collect::<Vec<_>>(), vec![8, 17]);
@@ -109,7 +115,7 @@ fn one_blocks_events_leave_in_line_order_under_concurrent_writers() {
                 start.wait();
                 for i in 0..EACH {
                     let line = format!("{{\"t\":{t},\"i\":{i}}}\n");
-                    append_transcript(&broker, block, line.as_bytes(), Some(&fs), Some((&gfs, ZONE)), true);
+                    append_transcript(at(&broker), block, line.as_bytes(), Some(&fs), Some((&gfs, ZONE)), true, None);
                 }
             })
         })
@@ -138,7 +144,7 @@ fn a_torn_last_line_is_closed_and_keeps_its_index() {
     let (broker, rec, fs, _gfs) = setup(block);
     fs.make_file(block, "output", Default::default(), Default::default()).unwrap();
     fs.append_data(block, "output", b"{\"a\":1}\n{\"par").unwrap();
-    append_transcript(&broker, block, b"{\"b\":2}\n", Some(&fs), None, true);
+    append_transcript(at(&broker), block, b"{\"b\":2}\n", Some(&fs), None, true, None);
     let seen = rec.seen.lock().unwrap();
     let b = pos_of(&seen[0].0, "b:");
     assert_eq!((b.line, b.lines), (2, 3));
@@ -156,12 +162,12 @@ fn a_torn_last_line_is_closed_and_keeps_its_index() {
 fn an_event_carries_exactly_the_bytes_written_at_its_offset() {
     let block = "blk-exact";
     let (broker, rec, fs, _gfs) = setup(block);
-    append_transcript(&broker, block, b"{\"a\":1}\n", Some(&fs), None, true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), None, true, None);
     // Blank lines, CRLF-only lines and an unterminated last line are
     // normalized away before the write; the event carries what was written.
-    append_transcript(&broker, block, b"\n{\"b\":2}\n \r\n\n{\"c\":3}", Some(&fs), None, true);
+    append_transcript(at(&broker), block, b"\n{\"b\":2}\n \r\n\n{\"c\":3}", Some(&fs), None, true, None);
     // Nothing but blanks: nothing written, nothing announced.
-    append_transcript(&broker, block, b"\n  \r\n", Some(&fs), None, true);
+    append_transcript(at(&broker), block, b"\n  \r\n", Some(&fs), None, true, None);
 
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);
@@ -220,10 +226,10 @@ fn transcript_event_latency() {
     }
     for _ in 0..N {
         let t = std::time::Instant::now();
-        append_transcript(&broker, "bench-local", line.as_bytes(), Some(&fs), None, true);
+        append_transcript(at(&broker), "bench-local", line.as_bytes(), Some(&fs), None, true, None);
         local_only.push(t.elapsed().as_micros());
         let t = std::time::Instant::now();
-        append_transcript(&broker, "bench-both", line.as_bytes(), Some(&fs), Some((&gfs, ZONE)), true);
+        append_transcript(at(&broker), "bench-both", line.as_bytes(), Some(&fs), Some((&gfs, ZONE)), true, None);
         both.push(t.elapsed().as_micros());
     }
     for (label, mut us) in [
@@ -263,7 +269,7 @@ fn an_append_during_a_replace_is_published_after_it() {
     let block = "blk-order-replace";
     let (broker, rec, fs, _gfs) = setup(block);
     let broker = Arc::new(broker);
-    append_transcript(&broker, block, b"{\"old\":1}\n", Some(&fs), None, true);
+    append_transcript(at(&broker), block, b"{\"old\":1}\n", Some(&fs), None, true, None);
 
     let (holding, held) = std::sync::mpsc::channel();
     let replacer = {
@@ -279,7 +285,7 @@ fn an_append_during_a_replace_is_published_after_it() {
     };
     held.recv().unwrap();
     // Waits for the replace to finish, then lands in the new generation.
-    append_transcript(&broker, block, b"{\"new\":2}\n", Some(&fs), None, true);
+    append_transcript(at(&broker), block, b"{\"new\":2}\n", Some(&fs), None, true, None);
     replacer.join().unwrap();
 
     let seen = rec.seen.lock().unwrap();
@@ -291,10 +297,50 @@ fn an_append_during_a_replace_is_published_after_it() {
 }
 
 #[test]
+fn a_persisted_user_line_is_announced_as_an_echo_with_its_position() {
+    // Phase 5a-3c: the stdin user line used to be written without any event,
+    // leaving a hole in the pane's line sequence. It is now announced, marked
+    // as an echo so the pane adds no second node for it.
+    let block = "blk-echo";
+    let (broker, rec, fs, _gfs) = setup(block);
+    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), None, true, None);
+    super::persist_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None);
+
+    let seen = rec.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    let (reply, echo) = (&seen[0].0, &seen[1].0);
+    assert_eq!(reply.echo, None);
+    assert_eq!(echo.echo.as_deref(), Some("stdin"));
+    let b = pos_of(echo, "b:");
+    assert_eq!((b.line, b.lines), (1, 2), "the echo fills line 1: no gap after the reply");
+}
+
+#[test]
+fn an_echo_is_mirrored_with_positions_in_both_streams() {
+    // `persist_user_line` resolves the process-wide global store; drive the
+    // same echo append against a test global store to check the mirror side.
+    let block = "blk-echo-global";
+    let (broker, rec, fs, gfs) = setup(block);
+    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), Some((&gfs, ZONE)), true, Some("stdin"));
+    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+
+    let seen = rec.seen.lock().unwrap();
+    let echoes: Vec<Option<&str>> = seen.iter().map(|(e, _)| e.echo.as_deref()).collect();
+    assert_eq!(echoes, [None, Some("stdin"), None]);
+    for (k, (ev, _)) in seen.iter().enumerate() {
+        let (b, g) = (pos_of(ev, "b:"), pos_of(ev, "g:"));
+        assert_eq!((b.line, g.line), (k as u64, k as u64), "event {k}: the echo leaves no gap in either stream");
+    }
+    let stored = gfs.read_bytes_db(ZONE, "output", 0, gfs.line_state(ZONE, "output").unwrap().unwrap().size).unwrap();
+    assert_eq!(std::str::from_utf8(&stored).unwrap().lines().nth(1), Some("{\"type\":\"user\"}"));
+}
+
+#[test]
 fn without_a_filestore_the_event_still_goes_out_without_positions() {
     let block = "blk-nofs";
     let (broker, rec, _fs, _gfs) = setup(block);
-    append_transcript(&broker, block, b"{\"a\":1}\n", None, None, false);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", None, None, false, None);
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 1);
     assert!(seen[0].0.pos.is_empty());

@@ -50,73 +50,26 @@ fn append_tsidx_entry(fs: &Arc<FileStore>, zone: &str, batch_start: u64, now_ms:
     }
 }
 
-/// Persist `data` to the block's output file and the global transcript zone
-/// **without** publishing a MPS event. Used by the persistent controller to
-/// record user-message lines for future history loads (so that
-/// `parseHistoryLines` can reconstruct `user_message` nodes on reopen) without
-/// triggering a live-stream append that would produce a duplicate node alongside
-/// the `agent-message-accepted` UUID node. Same lazy-create semantics as
-/// `handle_append_block_file`.
-pub fn persist_to_blockfile_silent(
+/// Persist a user message the controller wrote to the agent's stdin, so
+/// `parseHistoryLines` can reconstruct its `user_message` node on reopen.
+///
+/// A transcript record like any other (Phase 5a-3c): written to the block's
+/// file and the global zone with positions, and published — so a pane reading
+/// the stream by line never sees a gap where this record sits — but marked
+/// `echo: "stdin"`, because the pane already shows the message (its
+/// `agent-message-accepted` node) and must not add a second one. Before 5a-3c
+/// this write published nothing at all.
+pub fn persist_user_line(
+    broker: Option<&mps::Broker>,
     block_id: &str,
-    filename: &str,
     data: &[u8],
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
-    if let Some(fs) = filestore {
-        let needs_create: bool = match fs.stat(block_id, filename) {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
-            Err(e) => {
-                tracing::warn!(
-                    block_id = %block_id, filename = %filename, error = %e,
-                    "persist_silent: stat failed; skipping"
-                );
-                return;
-            }
-        };
-        if needs_create {
-            if let Err(e) = fs.make_file(
-                block_id,
-                filename,
-                std::collections::HashMap::new(),
-                crate::backend::storage::filestore::FileOpts::default(),
-            ) {
-                use crate::backend::storage::error::StoreError;
-                if !matches!(e, StoreError::AlreadyExists) {
-                    tracing::warn!(
-                        block_id = %block_id, filename = %filename, error = %e,
-                        "persist_silent: make_file failed; skipping"
-                    );
-                    return;
-                }
-            }
-        }
-        // append_data_at returns the offset the batch ACTUALLY landed at,
-        // read under the store's own lock - a caller-side pre-append stat
-        // can be stale under concurrent appenders (codex P2 on PR #2508).
-        match fs.append_data_at(block_id, filename, data) {
-            Ok(actual_start) => {
-                // Only agent transcript streams carry a global zone; those are
-                // the streams the tsidx sidecar exists for (§4.4).
-                if global_output_zone.is_some() {
-                    append_tsidx_entry(fs, block_id, actual_start.max(0) as u64, unix_ms_now());
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    block_id = %block_id, filename = %filename, error = %e,
-                    "persist_silent: append_data failed"
-                );
-            }
-        }
-    }
-    if let Some(zone) = global_output_zone {
-        if let Some(gfs) = crate::backend::agent_session::global_transcript_store() {
-            mirror_append_to_global(gfs, zone, data);
-        }
-    }
+    let global = global_output_zone.and_then(|zone| {
+        crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
+    });
+    append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), Some("stdin"));
 }
 
 /// Append data to a block's terminal output file, publish a MPS event,
@@ -152,7 +105,7 @@ pub fn handle_append_block_file(
         let global = global_output_zone.and_then(|zone| {
             crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
         });
-        append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some());
+        append_transcript(Some(broker), block_id, data, filestore, global, global_output_zone.is_some(), None);
         return;
     }
 
@@ -200,6 +153,7 @@ pub fn handle_append_block_file(
         data64,
         offset: start_offset,
         pos: Vec::new(),
+        echo: None,
     };
 
     let event = mps::MuxEvent {
@@ -358,12 +312,13 @@ fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[
 /// even if no global store is installed) — as before, only those get the
 /// receive-time sidecar.
 pub(super) fn append_transcript(
-    broker: &mps::Broker,
+    broker: Option<&mps::Broker>,
     block_id: &str,
     data: &[u8],
     filestore: Option<&Arc<FileStore>>,
     global: Option<(&Arc<FileStore>, &str)>,
     stamp_tsidx: bool,
+    echo: Option<&str>,
 ) {
     use crate::backend::agent_session::OUTPUT_FILE;
     // The records exactly as they are written (`append_lines` normalizes to
@@ -401,14 +356,18 @@ pub(super) fn append_transcript(
         data64: base64::engine::general_purpose::STANDARD.encode(&records),
         offset,
         pos,
+        echo: echo.map(str::to_string),
     };
-    broker.publish(mps::MuxEvent {
-        event: mps::EVENT_BLOCK_FILE.to_string(),
-        scopes: vec![format!("block:{block_id}")],
-        sender: String::new(),
-        persist: 0,
-        data: serde_json::to_value(&event_data).ok(),
-    });
+    // No broker (a controller built without one): written, not announced.
+    if let Some(broker) = broker {
+        broker.publish(mps::MuxEvent {
+            event: mps::EVENT_BLOCK_FILE.to_string(),
+            scopes: vec![format!("block:{block_id}")],
+            sender: String::new(),
+            persist: 0,
+            data: serde_json::to_value(&event_data).ok(),
+        });
+    }
 }
 
 /// Run `f` holding `block_id`'s transcript order lock — the lock every append
@@ -444,6 +403,7 @@ pub fn publish_transcript_changed(broker: &mps::Broker, block_id: &str, fileop: 
         data64: String::new(),
         offset: None,
         pos,
+        echo: None,
     };
     broker.publish(mps::MuxEvent {
         event: mps::EVENT_BLOCK_FILE.to_string(),
@@ -496,6 +456,7 @@ pub fn handle_truncate_block_file(broker: &mps::Broker, block_id: &str, filename
         data64: String::new(),
         offset: None,
         pos: Vec::new(),
+        echo: None,
     };
 
     let event = mps::MuxEvent {

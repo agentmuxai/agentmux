@@ -1424,6 +1424,11 @@ declare global {
         // global zone). Pick the entry for the stream the pane reads.
         // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7.
         pos?: StreamPos[];
+        // Set when the records echo something the pane already shows:
+        // "stdin" for a user message the controller wrote to the agent's
+        // stdin. In the transcript with its position; the pane adds no node
+        // for it (Phase 5a-3c).
+        echo?: string;
     };
 
     // mps.StreamPos
