@@ -58,23 +58,10 @@ use super::AppState;
 /// `app_api.rs` sets at agent spawn time. We never write to the global
 /// `~/.claude/projects/` because AgentMux always sets `CLAUDE_CONFIG_DIR`.
 ///
-/// Sanitization mirrors Claude Code's `sessionStoragePortable.ts`:
-/// 1. Replace every non-alphanumeric char with `-`.
-/// 2. If the result is longer than 200 chars, truncate at 200 and append a
-///    base-36 hash of the *raw* working_directory (before sanitization).
+/// The project folder is named by the CLI's own rule
+/// ([`crate::backend::claude_layout::project_dir_name`]).
 fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
-    let sanitized: String = working_directory
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-
-    let folder_name = if sanitized.len() > 200 {
-        let hash = djb2_hash(working_directory);
-        let truncated = &sanitized[..200];
-        format!("{truncated}-{}", radix_36(hash))
-    } else {
-        sanitized
-    };
+    let folder_name = crate::backend::claude_layout::project_dir_name(working_directory);
 
     let base = if claude_config_dir.is_empty() {
         expand_home_dir_safe("~/.agentmux/shared/providers/claude")
@@ -437,33 +424,6 @@ pub(crate) fn validate_memory_filename(filename: &str) -> Result<(), String> {
 /// Parse `metadata.type` from YAML frontmatter (re-exported for App API).
 pub(crate) fn parse_memory_frontmatter_type(content: &str) -> Option<String> {
     parse_frontmatter_type(content)
-}
-
-/// Hash matching Claude Code's sessionStoragePortable.ts implementation.
-/// JS `charCodeAt()` iterates UTF-16 code units (two surrogates per non-BMP char);
-/// Rust `chars()` iterates Unicode scalar values — they diverge for emoji/non-BMP.
-/// `encode_utf16()` produces the same UTF-16 unit stream as JS, so the hashes match.
-fn djb2_hash(s: &str) -> u32 {
-    let mut hash: i32 = 0;
-    for unit in s.encode_utf16() {
-        hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(unit as i32);
-    }
-    hash.unsigned_abs()
-}
-
-/// Convert a u32 to a base-36 string (lowercase, same as Number.toString(36) in JS).
-fn radix_36(mut n: u32) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let mut buf = Vec::new();
-    while n > 0 {
-        buf.push(DIGITS[(n % 36) as usize]);
-        n /= 36;
-    }
-    buf.reverse();
-    String::from_utf8(buf).unwrap_or_else(|_| "0".to_string())
 }
 
 /// Validate a filename: alphanumeric + `-_`, must end with `.md`, no path separators.
@@ -2862,16 +2822,12 @@ mod tests {
             .expect("a blank working_directory must resolve, not error");
 
         // default_agent_working_dir("Blank WD Agent") -> ~/.agentmux/agents/blank-wd-agent,
-        // expanded to the absolute path Claude records as its cwd, then
-        // sanitized as Claude names project folders (every non-alphanumeric
-        // becomes a dash). The unexpanded form (`---agentmux-agents-…`) named
-        // a folder Claude never writes (#3603 review).
+        // expanded to the absolute path Claude records as its cwd, then named
+        // as Claude names project folders (`claude_layout`'s tests pin that
+        // rule against the CLI). The unexpanded form (`---agentmux-agents-…`)
+        // named a folder Claude never writes (#3603 review).
         let expanded = crate::backend::base::expand_home_dir_safe("~/.agentmux/agents/blank-wd-agent");
-        let folder: String = expanded
-            .to_string_lossy()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
+        let folder = crate::backend::claude_layout::project_dir_name(&expanded.to_string_lossy());
         let comps: Vec<String> = dir
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
