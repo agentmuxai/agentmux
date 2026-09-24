@@ -5,24 +5,28 @@
 against `agentmux` `main` @ `236f5cab4`, `agentmux-cloud` `main` @
 `fb93159`, and `a5af/reagent` `main`, all read on 2026-09-24.
 
-**Revision history.** Revised on 2026-09-24 after an adversarial review.
-It found three P1s, nine P2s and four P3s; all were verified against the
-code and all were accepted. The main changes:
-- **The relay no longer resolves agents.** Integration messages go into an
-  **account inbox**. Each desktop resolves the target locally, using its
-  own alias map and the GitHub links in the Armory (§2.4, §2.5). This
-  removes a cloud table that any agent holding the user token could have
-  rewritten to redirect notifications.
-- **Integration tokens are classified first** and accepted only on
-  `/integrations/v1/*` (§2.2).
-- **The `trusted` flag is desktop-local and host-gated.** Grants need a
-  fresh human login (§2.2, §2.8).
-- **Repo scopes must be proven and cover the head repo**, so the fork gate
-  is kept (§2.6).
-- Also: integration sources can't collide with agent ids; dedupe includes
-  the recipient; ReAgent's notify step can't fail the review; the stamp
-  survives held and forwarded delivery; quota is per integration and
-  account; the migration preconditions are listed.
+**Revision history.** Two adversarial reviews on 2026-09-24; every finding
+was verified against code and accepted.
+- **Review 1** (3 P1, 9 P2, 4 P3):
+  - the relay stops resolving agents; messages go to an **account inbox**
+    and each desktop resolves them locally (§2.4, §2.5);
+  - integration tokens are classified first and fenced (§2.2);
+  - trust became desktop-local (§2.8);
+  - scopes cover the head repo (§2.6).
+- **Review 2** (2 P1, 7 P2, 13 P3):
+  - a fresh login time can't prove a human, so grants now go through a
+    **separate consent client and a relay-hosted consent page** (§2.2);
+  - the desktop has no GitHub token to prove repo scopes, so v1
+    integrations serve only **operator-approved accounts, with exact repo
+    ids** (§2.6);
+  - account routes moved to `/account/v1` (§2.4);
+  - one notification carries a **list of candidate targets** and is
+    delivered once per agent (§2.3, §2.4);
+  - claims are atomic, and a desktop where the agent is live wins (§2.4);
+  - integration rows are **never forwarded** (§2.4);
+  - identity links are written only by a host-channel command (§2.5);
+  - the relay rejects sender ids that aren't agent ids (§2.3);
+  - residuals are listed (§4).
 
 **Trigger:** the repo owner, 2026-09-24:
 > "we need generic github integrations. nothing hard coded … ideally the
@@ -72,14 +76,15 @@ code and all were accepted. The main changes:
 - **Target:** AgentMux exposes one **integration interface** that names no
   service.
   - An *integration* is a registered client with its own credential.
-  - It may send only to accounts that granted it, and only about
-    resources whose scope those accounts have proven.
+  - It may send only to accounts that granted it, through a human-only
+    consent step, and that the operator approved for it in v1.
+  - It may send only about the exact resources in that grant.
   - The relay **stamps** every message with the authenticated
     integration's identity and stores it in that account's **inbox**.
   - The account's desktops resolve the recipient locally and render the
     stamp generically.
-  - Whether an integration's messages count as trusted is a local,
-    host-gated decision.
+  - Whether an integration's messages count as trusted is a local
+    decision, made in a host window that agents can't reach.
 - **Services own their logic.**
   - ReAgent notifies about its own reviews with its own credential.
   - Generic GitHub events (CI, merges, human reviews) come from a GitHub
@@ -254,51 +259,58 @@ involved.
    identities are `<provider>:<…>` data.
 2. **Identity comes from the credential.** The relay stamps who sent a
    message from the authenticated credential. A client can never assert
-   its own identity, its trust level, or the account it acts for.
-3. **Routing and trust decisions that agents could tamper with in the
-   cloud move to the desktop.** Every agent holds the account's cloud user
-   token (`MUXBUS_TOKEN`, `server/muxbus_handlers.rs:339`), so the relay
-   can't tell the account's srv from its agents. The cloud therefore only
-   authenticates senders and enforces grants. The recipient and the trust
-   level are decided on the desktop, behind the host-gated boundary from
-   the WAN spec (§2.6 there).
-4. **Accounts grant; integrations don't self-enroll.**
+   its own identity, trust level, or the account it acts for.
+3. **Agents hold the account's everyday credentials.** Every agent gets
+   the user's cloud access token (`MUXBUS_TOKEN`,
+   `server/muxbus_handlers.rs:339`) and the srv's `AGENTMUX_AUTH_KEY`,
+   which reaches every `/ws` RPC.
+   - So anything that grants access, links identities, or sets trust needs
+     a **human-only path**: a separate login client plus a consent page on
+     the relay (§2.2), or a CEF-host window behind the host secret (§2.5,
+     §2.8).
+   - The routing decision — which agent receives a message — is made on
+     the desktop (§2.4).
+4. **Accounts grant; integrations don't self-enroll.** In v1 the
+   operator must also approve every account an integration may serve
+   (§2.6).
 5. **Services own their logic.** Deciding *what* to notify, and *whom*,
    belongs to the service.
 6. **Nothing compiled in.** Adding, rotating, or revoking an integration
    is data, not a release.
 
-### 2.2 Registry, credentials and grants (cloud)
+### 2.2 Registry, credentials, grants, and the consent flow (cloud)
 
 **Registry.** A new table, `muxbus-integrations-<env>`, keyed by
 `integration_id`. Each entry holds:
 - a display name;
 - its Cognito app client id;
 - the scopes it may request;
-- a `link_hosts` allow-list for links it may include (§2.3);
+- `link_hosts`, an allow-list for links (§2.3);
+- `allowed_accounts`, the accounts the operator approved for it (§2.6);
+- `skip_actor_ids`, actors it must not report on (§2.9);
 - a status (`active` or `suspended`).
 
-Registration is an operator action (open question 1).
+Registration and `allowed_accounts` are operator actions.
 
-**Credentials.** Each integration gets its own Cognito app client,
-authenticated with `client_credentials`. It is issued scopes on a new
-resource server, `muxbus-integrations`: `notify`, and `grants.read`.
-
-Cognito access tokens carry no audience, and `verifyRequest`
-(`auth.ts:136-164`) currently accepts any pool token without checking
-`client_id` or scope. So:
-- **Classification comes first.** A token whose `client_id` is in the
-  integration registry **and** that carries a `muxbus-integrations/*`
-  scope becomes `{mode: 'integration', integrationId, scopes}`, before any
-  M2M or user handling.
-- **Route fencing.** The global `onRequest` hook (`index.ts:169-179`)
-  rejects `mode: 'integration'` on every route outside
-  `/integrations/v1/*`. The `/integrations/v1/*` routes reject every other
-  mode.
-- **Scopes on the existing M2M path.** The per-account M2M path (clients
-  created in `agent-provisioning.ts`) must present its own
-  `https://muxbus.agentmux.ai/read|write` scopes, so an integration client
-  can never pass as an account client.
+**Integration credentials.**
+- Each integration gets its own Cognito app client, authenticated with
+  `client_credentials`, with scopes on a new resource server
+  `muxbus-integrations`: `notify` and `grants.read`.
+- Cognito access tokens carry no audience, and `verifyRequest`
+  (`auth.ts:136-164`) accepts any token from the pool.
+- **Classification is first and fails closed.** A token whose `client_id`
+  is in the integration registry becomes `{mode: 'integration',
+  integrationId, scopes}`, whatever its scopes, and never falls through
+  to the M2M or user path.
+- **Fences:**
+  - The global `onRequest` hook (`index.ts:169-179`) accepts
+    `mode: 'integration'` only on `/integrations/v1/*`, and only
+    integration tokens are accepted there.
+  - The WebSocket `$connect` Lambda (`ws-connect.ts:61`) doesn't go
+    through `onRequest`, so it applies the same classification and
+    refuses integration tokens.
+  - The per-account M2M path (clients created in `agent-provisioning.ts`)
+    must carry its own `https://muxbus.agentmux.ai/read|write` scopes.
 
 The integration keeps its client secret in its own infrastructure;
 ReAgent stores it in its own secret, not `services/infra`.
@@ -308,27 +320,47 @@ ReAgent stores it in its own secret, not `services/infra`.
 - **Attributes:**
   - `grant_id`, a random handle;
   - `scopes`;
-  - `resource_scopes`: proven resource patterns, e.g. `github:repo:123456`
-    (§2.6);
+  - `resource_scopes`: **exact** resource ids such as `github:repo:123456`,
+    with no wildcards;
   - `created_at`, `revoked_at`.
 
 There is no `trusted` flag in the cloud (§2.8).
 
-**Who can write grants.**
-- A grant is created or revoked only by a **step-up** request: a user
-  token of that account whose `auth_time` is under 5 minutes old. The
-  desktop obtains it through an interactive login it starts from the
-  host-gated Integrations window (the WAN spec's `credential_broker`
-  pattern), and never injects or persists it.
-- The ordinary `MUXBUS_TOKEN` that agents hold is refused.
-- An agent that can read the srv's files can still do anything the srv
-  can. That is machine compromise, as in the WAN spec §4.
+**The consent flow, human-only.** An agent's `MUXBUS_TOKEN` comes from the
+same public `DesktopClient` (`muxbus-cognito.ts:272-330`) a step-up token
+would. Refreshing keeps the original `auth_time`, and an agent can run the
+PKCE flow itself, so neither `auth_time` nor the desktop client can prove
+a human is present. Instead:
+1. **The desktop creates a pending grant request** with its ordinary
+   account token: `POST /account/v1/integration-grants/requests`, with
+   `{integration_id, scopes, resource_scopes}`. The relay returns a
+   `request_id`. A pending request grants nothing.
+2. **The desktop opens the relay's consent page** in the system browser,
+   through a dedicated **consent app client**:
+   - it is a separate `client_id`;
+   - its only scope is `grants.write`;
+   - it issues **no refresh token**;
+   - its tokens are rejected on every route except the consent callback;
+   - the `request_id` rides in `state`.
+
+   The login forces re-authentication: `prompt=login` if Cognito's managed
+   login supports it, otherwise `max_age=0`. **Verify which one works
+   before building.** If neither does, fall back to requiring MFA on the
+   consent client.
+3. **After login, the relay-hosted page shows the integration and the
+   exact repositories.** It commits the grant only when the human
+   presses Confirm on that page.
+
+The desktop never holds a `grants.write` token.
+- **What an agent can do:** create pending requests.
+- **What it can't do:** complete one without the human's credentials and
+  a click on a page served by the relay.
+- **Revoking** needs no step-up. Any account token may revoke, because
+  revoking only reduces access.
 
 **How an integration learns its grants.** `GET /integrations/v1/grants`
 returns, for the calling integration only, each active grant's
-`grant_id` and `resource_scopes`, and nothing about the account. An
-integration fans an event out to every grant whose scopes cover the
-event's resources.
+`grant_id` and `resource_scopes`, and nothing about the account.
 
 ### 2.3 Notify (cloud)
 
@@ -337,7 +369,10 @@ event's resources.
 ```json
 {
   "grant_id": "g_…",
-  "target": { "agent_id": "lark" } | { "external": { "provider": "github", "id": "583231", "login": "octocat" } },
+  "targets": [
+    { "external": { "provider": "github", "id": "583231" }, "display": "octocat" },
+    { "agent_id": "lark" }
+  ],
   "message": "…",
   "kind": "review.completed",
   "priority": "normal" | "urgent",
@@ -348,196 +383,240 @@ event's resources.
 }
 ```
 
+`targets` is an ordered list of **candidates** for one logical
+notification: for a PR, its author, the head commit's author, and the
+PR-body tag. The desktop delivers once per distinct agent the candidates
+resolve to (§2.4), so one agent never receives the same notice twice.
+
 **The relay:**
 1. Authenticates the token: mode `integration`, scope `notify`.
-2. Loads the grant by `grant_id`. It rejects the request unless:
+2. **Checks the grant.** It loads the grant by `grant_id` and rejects the
+   request unless:
    - the grant is active;
    - its `integration_id` equals the token's;
-   - it has the `notify` scope.
-3. **Checks resources.** `subject` is required, and **every** entry in
-   `subject.resources` must match the grant's `resource_scopes`.
-   - For GitHub pull requests the notifier and ReAgent list **both the
-     base and the head repository**, which keeps today's fork gate
+   - it has the `notify` scope;
+   - its account is in the registry entry's `allowed_accounts`.
+3. **Checks resources.** `subject` is required, and every entry in
+   `subject.resources` must be **exactly equal** to one of the grant's
+   `resource_scopes`.
+   - For pull requests the integration lists both the base and head
+     repositories, which keeps the fork gate
      (`agent-mapping.ts:135-158`) as data.
-   - Scopes are matched as opaque patterns; `kind` is opaque too. The
-     relay knows nothing about GitHub.
+   - Listing the head repo is the integration's job; §4 notes that the
+     integration is trusted to be honest about it.
 4. **Validates everything, as data:**
-   - `target` is size-capped; an `agent_id` target passes
-     `validate_agent_id`, and an `external` target has `provider` and `id`
-     from a safe charset.
-   - `links` must be `https` URLs whose host is in the registry entry's
-     `link_hosts`.
+   - `targets`: at most 8; each `agent_id` passes `validate_agent_id`,
+     each `external` has `provider` and `id` from a safe charset;
+     `display` is capped.
+   - `links`: `https` only, host in `link_hosts`.
    - `kind`, `subject.ref` and the labels are charset- and size-capped.
-   - The message is capped at 10 KB.
-5. **Deduplicates** on `(integration_id, grant_id, target, dedupe_key)`
-   with a conditional write, answering 200 with the existing id. A
-   service that sends one request per recipient therefore loses none of
-   them.
-6. **Charges quota per `(integration_id, account)` pair**, with its own
-   unbilled rate limit and monthly cap. One integration can't exhaust an
-   account's own jekt quota, and one account's traffic can't exhaust an
-   integration's allowance for another account.
-7. **Stores the row in the account inbox:**
-   - `inbox_account` = the grant's `account_user_id`;
-   - a new GSI `inbox_account-created_at-index`.
-   - `target_agent` is **not** set, so the row never appears in the global
-     `target_agent-created_at-index` or in `/reactive/pending/:agent_id`.
-   - The target selector is stored as data.
-8. **Stamps the row.** The stamp is `source_kind = integration`,
-   `integration_id` and `integration_name`, all taken from the registry;
-   the request can't supply any of them.
+   - The message is at most 10 KB.
+5. **Deduplicates** on `(integration_id, grant_id, dedupe_key)`, answering
+   200 with the existing id. The recipient list is part of the one row,
+   so dedupe no longer needs the target (and never the display login).
+6. **Charges quota per `(integration_id, account)` pair**, with an
+   unbilled rate limit and monthly cap.
+7. **Stores the row in the account inbox:** `inbox_account` = the grant's
+   account, plus a GSI `inbox_account-created_at-index`. `target_agent`
+   is not set, so the row never appears in `/reactive/pending/:agent_id`.
+8. **Stamps the row** with `source_kind = integration`, `integration_id`
+   and `integration_name`, all from the registry.
+9. **Wakes only that account.** `ws-connect.ts:81` is changed to store
+   `accountUserId ?? userId` for user tokens too, so an account-scoped
+   wake (`broadcast.ts`) reaches the account's desktops.
 
-### 2.4 Delivery: account inbox, resolved on the desktop
+**Also in I1: a source-id check on the relay.** `/reactive/inject` rejects
+an `X-Agent-ID` that fails the agent-id rule (`validate_agent_id`'s
+charset, lowercase), keeping `github-consumer` as-is until I5. No
+agent-to-agent message can then carry an `integration:` source (§2.7).
 
-**Pulling.** `GET /integrations/v1/inbox` is authenticated with the
-desktop's **account** credential (a user token or a per-agent M2M token).
-- The caller's account is `accountUserId ?? userId`. An M2M client with no
-  owner is refused.
-- It returns pending, unexpired rows for that account.
-- `POST /integrations/v1/inbox/ack` and `/release` check `inbox_account`
-  against the caller.
+### 2.4 Delivery: account inbox, resolved and claimed on the desktop
 
-**The wake.** Stays the existing unscoped broadcast: every desktop polls
-its own inbox. An account-scoped wake would reach no desktop today,
-because the desktop's WebSocket runs on the user token, and `ws-connect`
-stores no account for it (`cloud_subscriber.rs:454`, `ws-connect.ts:81`).
+**Pulling.**
+- `GET /account/v1/integration-inbox?since=<cursor>` is authenticated with
+  the desktop's account credential (a user token, or a per-agent M2M token
+  with an owner). The caller's account is `accountUserId ?? userId`; an
+  M2M client with no owner is refused.
+- It returns rows created after the cursor, plus rows still pending.
+- `POST /account/v1/integration-inbox/claim` and `/release` check
+  `inbox_account`.
+- **Claim is atomic,** a conditional pending→claimed update with the
+  claiming desktop's id, exactly like `/reactive/ack` (`store.ts:343-379`).
+  A claim is per `(row, resolved agent)`, so a row with candidates that
+  resolve to two different agents can be claimed once for each.
 
-**Resolution on the desktop.** For each row, the srv resolves the target
-**locally** before claiming it:
-- **`agent_id`:** matched against this srv's agents by slug or alias,
-  through the alias map (identity spec §4.3), and the identity spec's
-  permanence rule for PR-body tags.
-- **`external`:** matched against local **identity links** (§2.5) on
-  `(provider, id)`, the immutable numeric id. The login is display only.
+**Resolution.** For each row, each desktop resolves the candidates
+**locally**, in order:
+- **`agent_id`:** by slug or alias (identity spec §4.3), which keeps
+  PR-body tags resolving permanently.
+- **`external`:** through local external-identity links (§2.5), on
+  `(provider, id)`.
 
-Then:
-- **The row resolves to an agent on this desktop:** the srv claims it with
-  `ack` and delivers it. If the agent is absent, it holds the message as a
-  durable jekt (Phase 1), with the stamp (§2.8).
-- **It doesn't resolve here:** the srv leaves the row pending for another
-  of the account's desktops. A desktop records which rows it has already
-  evaluated, so it doesn't re-evaluate them on every wake. A row no
-  desktop claims expires at its TTL. The relay counts these as
-  `inbox.expired_unclaimed`, per integration, for §3's migration check.
+It collects the distinct agents the candidates resolve to on this
+desktop.
 
-A target the relay doesn't understand is harmless, because the relay never
-resolves one. It also no longer needs an alias map or complete ownership
-data: the account's own desktops decide.
+**Claiming, when agents are on several desktops.** For each resolved
+agent:
+- **Live here** (registered and present): claim at once and deliver.
+- **Known here but not live:** wait a **grace period** (60 s) so a
+  desktop where the agent is live can claim first. Then claim and hold it
+  as a durable jekt with its stamp (§2.8).
+- **Two desktops each have a live agent of that name** (two seats or two
+  hosts): the atomic claim picks one. This is the same "one row, one
+  delivery" behaviour as agent-to-agent WAN delivery today.
 
-### 2.5 Identity links — where "connect to GitHub" comes in
+**Re-evaluation.** A desktop caches "no local match" for a row under the
+current **resolution generation**, a counter that bumps whenever an
+agent registers, an alias changes, or a link is added. A bump
+re-evaluates every pending row, so a new link or agent picks up
+notifications that are still pending.
 
-Identity links live **on the desktop**, in the srv's store, as Armory
-data: `(provider, external_id) → agent_id | operator`, plus a display
-login and a `source` (`armory`, or `manual`).
+**Unclaimed rows** expire at their TTL. The relay counts them as
+`inbox.expired_unclaimed` per integration.
+
+**Integration rows are never forwarded** between srvs (channels, LAN
+peers, same-host siblings). Each srv of the account pulls the inbox
+itself, and a srv that can't resolve a row leaves it for the others. The
+stamp therefore never has to cross an HTTP hop, where
+`skip_deserializing` would drop it.
+
+**Residual.** Any agent holding the account's token can pull, claim, or
+release the whole account inbox. It could read other agents' notices, or
+suppress them. This matches today's flat `/reactive/pending` exposure,
+and is recorded in §4.
+
+### 2.5 External-identity links — where "connect to GitHub" comes in
+
+The desktop keeps a new table, **`db_external_identity_links`**
+(`db_agent_identity_links` already exists, `migrations.rs:619`, for
+provider accounts):
+- `(provider, external_id)` → `agent_id` or `operator`;
+- plus `display` and `source` (`armory`, `manual`, `seed`).
+
+**Who writes links.** The Armory and Settings panes write over
+`X-AuthKey` RPCs, which agents can reach. So:
+- panes and agents can only **propose** a link;
+- a link is written only by a **host-channel command**, gated on
+  `AGENTMUX_HOST_REG_SECRET` (`server/service/credential.rs`,
+  `host_ipc.rs`);
+- that command runs after the human confirms in a CEF-host window.
+  `UIClick` is limited to the caller's own pane
+  (`ui_handlers.rs:295-298`), so agents can't reach that window.
+
+Every change is audited and announced to the operator.
 
 **Where links come from:**
-- **"Connect to GitHub" in the Armory** (§1.3). The srv records:
+- **"Connect to GitHub" in the Armory**, once #3413 or the Armory spec
+  ships:
   - the user's own GitHub account, as `operator`;
-  - each agent's GitHub App bot account, from the agent's Minted GitHub
-    App identity in #3413, or from its fleet App.
+  - each agent's GitHub App bot account.
 
-  Both are keyed by the numeric GitHub id, which survives renames and
-  covers the `login` vs `login[bot]` forms (`agent-mapping.ts:171`).
-- **Manual:** Settings → Integrations → *Linked identities*, for PAT peer
-  logins such as `lark-asaf`, which the Armory doesn't manage.
-
-**How they are protected.** Links are written only through the
-host-gated Settings or Armory window, never through an `X-AuthKey` RPC
-that agents can reach. They are audited, and every change is announced
-to the operator. The cloud holds no copy, so nothing that holds
-`MUXBUS_TOKEN` can redirect notifications.
+  They are keyed by numeric id, which survives renames and covers the
+  `login` vs `login[bot]` forms. Until those identities exist, links are
+  manual or seeded.
+- **Manual:** Settings → Integrations → *Linked identities*, through the
+  same confirm window.
+- **Seed** (§3 precondition): an operator tool resolves every login in the
+  consumer's `GITHUB_TO_AGENT_MAP` (`agent-mapping.ts:30-59`), and the
+  concrete `agent<slot>-<host>` logins the fleet uses, to numeric ids
+  through the GitHub users API. The human then confirms the import once
+  in the host window.
 
 **Where `operator` targets go** is open question 5.
 
-**Seeding** (§3 precondition). The desktops that run today's fleet import
-the consumer's hard-coded `GITHUB_TO_AGENT_MAP` once, as `manual` links.
-The fleet's `NUMBERED_PAT_PATTERN` (`agent<slot>-<host>`) can't be listed,
-so it is expanded into concrete links for the slots and hosts that exist.
+### 2.6 Tenancy: operator-approved accounts, exact scopes
 
-### 2.6 Tenancy: proven resource scopes
+**v1: the desktop's scope list can't be proven.** The desktop has no
+owner GitHub token to prove repository access with: the OAuth client id
+is `None` (`oauth_client.rs:91`, #2115), GitHub is an API-key provider in
+the Armory (`provider.rs:52`), and #3413 isn't built. Cognito sign-up is
+also open. So:
+- An integration serves **only accounts in its registry
+  `allowed_accounts`**, which the operator sets (our own account for
+  ReAgent and `github-notifier`).
+- Grants carry **exact repository ids**, no wildcards, confirmed by the
+  human on the consent page.
+- A stranger's account can't receive anything from an integration the
+  operator hasn't approved for it.
 
-A GitHub event names repositories, not an AgentMux account. A grant's
-`resource_scopes` must be **proven**, never just typed in. Otherwise any
-account could claim `github:repo:*`, and once one notifier serves several
-accounts, review and CI content about private repos would leak between
-them.
+**Later: the relay proves scopes itself.** Either:
+- the installation-to-tenant link from `PLAN_REAGENT_CLOUD_SERVICE`: a
+  signed `state` through GitHub's setup redirect, then the installation's
+  repositories fetched server-side; or
+- a GitHub user token the relay checks against the repositories.
 
-**v1 (our own deployment, operator-registered integrations).** The
-account owner connects GitHub. At grant time the desktop proposes the
-repositories that the owner's linked GitHub identity can access, fetched
-with the owner's own GitHub token from the Armory. The step-up request
-carries that list, and the relay stores it as the proven scopes.
+Only then can `allowed_accounts` be dropped for that integration.
 
-**Later (a published, installable integration).** The GitHub App
-installation-to-tenant link from `PLAN_REAGENT_CLOUD_SERVICE` provides
-scopes, via a signed `state` round-tripped through GitHub's setup
-redirect. It populates `resource_scopes` from the installation's
-repositories.
+**Stale scopes.** A repository added after the grant isn't covered. The
+relay counts rejected notifies per grant and resource, and the desktop's
+Integrations window shows "N notices for repositories outside this grant",
+with a button to extend it through the consent flow.
 
-Either way the check is generic: opaque patterns on both sides. This
-replaces the hard-coded `TRUSTED_REPO_OWNERS`, and because the head repo
-is checked too (§2.3 step 3), a fork PR from an ungranted owner produces
-no row.
+**PR-body tags** name an agent. Delivery happens only in accounts whose
+grant covers the PR's repositories, and each account resolves the tag
+against its own agents. That is correct, because each such account has
+proven access to the repo (later) or was approved by the operator (v1).
 
 ### 2.7 Stamp, marker, and source naming
 
-**Source naming.** An integration row's `source_agent` is
-`integration:<integration_id>`.
-- `:` is not allowed in agent ids, so it can never collide with or
-  impersonate an agent.
-- Desktops that include #3664 render an unrecognised source as
-  `?integration:<id>` with no reply hint. Older desktops render it
-  plainly, and a reply to it fails `validate_agent_id` at send time.
-  Integration traffic is therefore never mistaken for an agent,
-  regardless of desktop version.
+**Source naming.**
+- An integration row's `source_agent` is `integration:<integration_id>`.
+- `:` is not allowed in agent ids.
+- The relay's source-id check (§2.3) stops agent-to-agent traffic from
+  carrying it.
+- **The desktop renders a bare `integration:<id>` only when the stamp is
+  present.** Otherwise any `integration:`-shaped source renders as
+  `?integration:<id>` (#3664 behaviour) with no reply hint.
 
 **The desktop's stamp.** `PendingInboxRow` carries the stamp.
 `InjectionRequest` gains `integration: Option<IntegrationStamp>`, marked
 `#[serde(skip_deserializing)]`; it is set only from a pulled inbox row.
 
-**Marker, when the stamp is present:**
+**Marker:**
 
 ```
 [JEKT:FROM=integration:reagent VIA=integration TO=lark KIND=review.completed DELIVERY=wan TRUST=integration …]
 ```
 
 - Every field goes through `marker_field`.
-- Subject and links render as **data lines** in the body, never in the
-  header, and links are `https` only (§2.3).
-- The reply hint reads `Reply: not available — integration` (open
-  question 6).
+- Subject and links render as data lines in the body.
+- The reply hint reads `Reply: not available — integration`.
 
 **Frontend.** `stream-parser.ts` learns `VIA` and `KIND`, and `JektTrust`
 gains `integration`. `stripJektEnvelope` stops relying on fixed header
-offsets, so the extra data lines don't break it.
+offsets.
 
-### 2.8 Trust, held and forwarded delivery, and removal
+**CLAUDE.md** gains the `VIA=integration` and `TRUST=integration` wording
+in I2.
 
-**Trust.** The relay authenticated the integration, so its identity is
-**cloud-attested**, not signed end to end. That is the trust anchor the
-pinned ReAgent key really had, because the signing key lived in the
-cloud's own secrets (§1.1).
+### 2.8 Trust, held delivery, and removal
+
+**Trust.** Integration identity is **cloud-attested**. That is the trust
+anchor the pinned ReAgent key really had, because its signing key lived
+in the cloud's own secrets (§1.1).
 
 Whether an integration's messages get the verified-sender treatment
 (`ESCALATE=none` for sensitive-tier content, except where
 `transcript_request_escalate_forced` applies, `handler.rs:1292-1293`) is
-a **desktop-local** setting, `trusted_integrations`, keyed by
-`integration_id`:
-- It is set only through the host-gated window.
+a **desktop-local** setting, `trusted_integrations`:
+- It is written only by the host-channel command after confirmation in
+  the CEF-host window (§2.5).
 - It is **off by default**.
 - The relay has no say in it.
 
-Removing `reagent-v1` signing (I5) drops the relaxation for **every**
-GitHub notice, because the consumer signs them all (§1.1). An operator
-who wants it back marks `github-notifier` or `reagent` as trusted.
+**Sender trust is not content trust.** A trusted integration's notice
+can quote attacker-written PR text. Trusting an integration relaxes the
+*stop*; it does not make the content safe to act on. The Integrations
+window says so next to the toggle.
 
-**Held and forwarded delivery.**
-- `db_jekt_held` gains the stamp columns (`integration_id`,
-  `integration_name`, `kind`, subject and links JSON; additive).
-- The forwarding verdict struct (`server/reactive.rs:44-61`) carries the
-  stamp.
-- Held replay and forwards keep `VIA=integration`. The trust setting is
-  re-read at delivery time.
+Removing `reagent-v1` signing (I5) drops the relaxation for **every**
+GitHub notice, because the consumer signs them all (§1.1). An operator who
+wants it back marks `github-notifier` or `reagent` as trusted.
+
+**Held delivery.** `db_jekt_held` gains stamp columns (`integration_id`,
+`integration_name`, `kind`, subject and links JSON; additive). Held
+replay keeps `VIA=integration`, and re-reads the trust setting at
+delivery time. There is no forwarding (§2.4).
 
 **Removed in I5:**
 - the pinned keys and the `verify_*reagent*` functions;
@@ -555,42 +634,44 @@ who wants it back marks `github-notifier` or `reagent` as trusted.
 
 **ReAgent.** A notify step after it posts a review, a reply, a failure, or
 a Codex request, in **both** reviewer Lambdas (`claude-reviewer` and
-`kimi-reviewer`). It fans out to each grant whose scopes cover the PR's
-base and head repos, with one request per recipient:
-- the PR author;
-- the head commit's author, when different;
-- the PR-body `agentmux:agent_id=` tag, sent as an `agent_id` target.
+`kimi-reviewer`).
+- **Fan-out:** one request per grant whose scopes cover the PR's base and
+  head repositories.
+- **Candidates,** in order: the PR-body tag as `agent_id`, the PR author,
+  and the head commit's author.
+- **`dedupe_key`:** the review id, the comment id, or `codex:<sha>`.
 
-`dedupe_key` is the review id, the comment id, or `codex:<sha>`.
-
-The notify step must never change the review's outcome:
-- It runs in **its own `try`**, after the review is posted, with
-  in-process retries and backoff. It never raises. Today an exception
-  after posting reaches the `except` that posts a failure review
-  (`reviewer_handler.py:1916-1952`), so one run could produce both a
-  success and a failure.
-- The queues have `maxReceiveCount: 1`, so SQS will not retry. A notify
-  that still fails is logged with a metric, and is lost like any
-  best-effort notice.
+It must never change the review's outcome:
+- It runs in **its own `try`** after posting, and never raises.
+  Otherwise an exception after posting reaches the `except` that posts a
+  failure review (`reviewer_handler.py:1916-1952`).
+- Its retries fit a **time budget** taken from the Lambda's remaining
+  time (`context.get_remaining_time_in_millis()`), leaving a margin. A
+  timeout would fail the invocation, and with `maxReceiveCount: 1` send it
+  to the DLQ.
 - It ships **off by default** behind a config flag.
 
-**The GitHub notifier.** The generic parts of today's consumer become an
-integration, `github-notifier`:
+**The GitHub notifier.** An integration, `github-notifier`, built from the
+generic parts of today's consumer:
 - merges, CI failure and completion, human reviews;
-- Codex reviews, until Codex has a notifier of its own (open question 9).
+- Codex reviews, until open question 9 decides.
 
 It has its own credential, and it **leaves the relay's CDK stack**, with
-its dedupe table (open question 7). It uses only the public interface:
-- It keeps its GitHub logic: event parsing, CI aggregation, and GitHub
-  dedupe.
-- It drops the hard-coded login map and trusted owners. Identity links on
-  the desktop and proven scopes replace them.
-- It sends `external` targets by numeric GitHub id.
-- It drops its ReAgent-specific branches (`[ReAgent]` formatting,
-  `issue-comment.ts`), because ReAgent notifies for itself.
+its dedupe table (open question 7). It:
+- keeps its GitHub logic;
+- drops the hard-coded login map and trusted owners;
+- sends numeric-id candidates;
+- drops its ReAgent-specific branches.
 
-**Local messaging bridges** (Discord and the others) stay desktop-local
-(open question 8).
+**Not double-reporting ReAgent.** Without those branches, ReAgent's
+reviews would look like human reviews to `review.ts:96-103`. So the
+notifier skips actors listed in its registry entry's `skip_actor_ids`
+(ReAgent's bot id): data, not code.
+
+**The Codex re-review hint** (`review.ts:220`) moves with whichever
+integration sends Codex notices.
+
+**Local messaging bridges** stay desktop-local (open question 8).
 
 ---
 
@@ -600,108 +681,124 @@ Each step keeps notifications flowing; no step needs a flag day.
 
 | Step | Repo | What ships | During the transition |
 |---|---|---|---|
-| **I1** | cloud | integration token classification and route fencing; scope checks on the M2M path; registry and grants tables, with step-up grant writes; `notify`, `grants`, and the inbox routes; quota per `(integration, account)`; `inbox.expired_unclaimed` and no-grant counters | the consumer still runs; nothing changes for desktops |
-| **I2** | agentmux | inbox pull and local resolution; identity links (Armory and manual) and seeding; the host-gated Integrations window (grants with step-up, trusted integrations, linked identities); stamp rendering and parser; held and forward stamp columns | desktops that haven't upgraded don't pull the inbox, so they get nothing from integrations. They still get consumer notices until I3 and I4 |
-| **I3** | reagent | the notify step, off by default | the consumer's ReAgent branches and ReAgent's notify step are two **config flags, flipped together**. A stack deploy can't be atomic, so the switch is a config change on both sides |
-| **I4** | notifier's new home + cloud | `github-notifier` as an integration, off by default; then the consumer Lambda, its SNS subscription and its dedupe table are removed from the relay stack | the same flag-flip approach |
-| **I5** | agentmux + cloud | removal (§2.8); the legacy key retired once `auth.ts` sees no legacy callers (`DISABLE_LEGACY_AUTH`) | desktops older than I2 get no GitHub notices at all from here on: an announced break, see below |
+| **I1** | cloud | fail-closed integration classification; route and `$connect` fences; scope checks on the M2M path; the relay's source-id check; registry, grants, pending requests and the consent client and page; `notify`, `grants`, and the `/account/v1` inbox routes with atomic claim and `since` cursor; account-scoped wake (`ws-connect` stores the user token's account); quota per `(integration, account)`; `inbox.expired_unclaimed`, no-grant and out-of-scope counters | the consumer still runs; nothing changes for desktops |
+| **I2** | agentmux | inbox pull; local resolution with generations; grace-period claiming; external-identity links (proposal plus host-gated confirm, seeding import); the Integrations CEF-host window (grant requests, trusted integrations, linked identities, out-of-scope notices); stamp rendering, parser, CLAUDE.md; held stamp columns | desktops that haven't upgraded don't pull the inbox; they still get consumer notices until I3 and I4 |
+| **I3** | reagent | the notify step (both Lambdas), off by default | ReAgent's notify flag and the consumer's ReAgent-branch flag are **flipped together as config** |
+| **I4** | notifier's new home + cloud | `github-notifier` (with `skip_actor_ids`), off by default; then the consumer Lambda, its SNS subscription and its dedupe table are removed from the relay stack | the same flag-flip approach |
+| **I5** | agentmux + cloud | removal (§2.8); the legacy key retired once no legacy callers remain (`DISABLE_LEGACY_AUTH`) | desktops older than I2 get no GitHub notices: announced (below) |
 
 **Preconditions for I3 and I4.** These have to be true before either
 flag is flipped:
-- **Grants exist** for every account that receives these notices today.
-  Legacy rows have no account, so first find which Cognito account or
-  accounts own the fleet's agent ids, using the agent-ownership table and
-  the pending callers in logs.
-- **Every desktop that runs a notified agent is on I2 or later**, and its
-  identity links are seeded (§2.5).
-- **A dry run matches:** the notifier runs in shadow mode (resolve and
-  count, don't store) alongside the consumer, and its counts match the
-  consumer's.
-- **Rollback is known:** re-enable the consumer flag.
+- **Grants.** The accounts that receive these notices today are
+  identified (from agent-ownership rows and the logs of pending callers),
+  added to `allowed_accounts`, and granted through the consent flow.
+- **Desktops.** Every desktop running a notified agent is on I2 or later,
+  with its links seeded and confirmed.
+- **Dry run.** A shadow run matches: the notifier resolves and counts
+  without storing, next to the consumer.
+- **Rollback.** Flip the flags back.
 
 **Old desktops.** After I4 a desktop older than I2 receives no GitHub
-notices. It never had another way to get them. This is announced in the
-release notes of the I2 release, and I4 waits one release cycle after I2.
+notices. This is announced in the I2 release notes, and I4 waits one
+release cycle after I2.
 
 ---
 
-## 4. Open questions
+## 4. Residuals and open questions
 
-1. **Registration.** Operator-only registration now; a developer console
-   later? (Recommended: operator-only.)
+**Residuals:**
+- **Inbox exposure.** Any agent holding the account's token can read,
+  claim, or release the account inbox (§2.4). This is the same as today's
+  flat pending exposure. Narrowing it needs per-agent inbox credentials,
+  which is future work.
+- **The fork gate relies on the integration.** The relay can only check
+  the resources the integration lists (§2.3). A dishonest or buggy
+  integration could omit a fork's head repo. v1 integrations are
+  operator-approved, so this is accepted.
+- **The consent flow needs human credentials, not a separate device.** An
+  agent with the human's password and MFA could complete it. Requiring
+  MFA on the consent client is open question 4.
+
+**Open questions:**
+1. **Registration:** operator-only now, a developer console later?
+   (Recommended: operator-only.)
 2. **User-owned App vs one published App**, for "connect to GitHub" (§1.3
-   conflict). This spec needs only identities and proven scopes, so either
-   works, but the Armory spec must decide.
+   conflict).
 3. **`SPEC_CONNECT_WITH_GITHUB_ARMORY_2026_09_23`**: find it and reconcile
-   §2.5 with its bot-identity mode.
-4. **The step-up freshness window** for grant writes (5 minutes proposed),
-   and whether to require MFA.
+   §2.5.
+4. **Consent re-authentication:** `prompt=login` vs `max_age=0`, and
+   whether to require MFA on the consent client (verify Cognito managed
+   login behaviour first).
 5. **Where an `operator` target goes:** the default agent, every agent
-   watching the subject, or the human's desktop notification (the notify
-   work in #3662)?
-6. **Replies to integrations** (bidirectional), e.g. an agent answering
-   ReAgent. Out of scope for v1.
+   watching the subject, or a desktop notification (#3662)?
+6. **Replies to integrations.** Out of scope for v1.
 7. **Home for `github-notifier`**: `shared-infrastructure` next to
    `github-router`, or its own repo?
 8. **Local bridges:** fold Discord, Telegram, Slack and WhatsApp into the
-   same model (local registry, the `VIA=integration` marker, trusted
-   integrations)?
-9. **Codex notifications:** keep them in `github-notifier`, or move them
-   into ReAgent's Codex worker once `codex-review-gate-in-reagent` ships?
+   same model?
+9. **Codex notifications:** `github-notifier`, or ReAgent's Codex worker
+   once `codex-review-gate-in-reagent` ships?
 
 ## 5. Tests (summary)
 
 **Cloud:**
 - Classification and fencing:
-  - an integration token becomes `mode: 'integration'`;
-  - it is rejected on `/reactive/*`, `/api/*` and every other
-    non-integration route;
-  - user and M2M tokens are rejected on `/integrations/v1/*`;
-  - an M2M token without its read or write scope is rejected.
-- Grants:
-  - grant writes without a fresh `auth_time` are rejected;
-  - `grants` lists only the caller's own grants.
+  - a registry `client_id` is classified as an integration even without a
+    scope;
+  - integration tokens are rejected on every non-`/integrations/v1`
+    route and on `$connect`;
+  - account tokens are rejected on `/integrations/v1`;
+  - an M2M token without its read or write scope is rejected;
+  - a non-agent-id `X-Agent-ID` is rejected on `/reactive/inject`.
+- Grants and consent:
+  - a pending request grants nothing;
+  - consent tokens are accepted only on the callback, and never get a
+    refresh token;
+  - a grant commits only on Confirm;
+  - notify is rejected for an account not in `allowed_accounts`.
 - Notify:
-  - a grant belonging to another integration → 403;
-  - missing `subject`, or any resource outside the scopes (including a
-    fork head repo) → 403;
+  - a resource that isn't an exact scope match (including a fork head
+    repo) → 403;
   - a non-`https` link, or a host not in `link_hosts` → 400;
-  - the same `dedupe_key` for two recipients → two rows;
-  - quota is counted per `(integration, account)`.
+  - more than 8 targets → 400;
+  - a duplicate `dedupe_key` → the same id.
 - Inbox:
-  - only the owning account can pull, ack or release;
-  - an inbox row never appears in `/reactive/pending`.
+  - claim is atomic, per `(row, agent)`;
+  - only the owning account can pull, claim or release;
+  - inbox rows never appear in `/reactive/pending`;
+  - the account-scoped wake reaches the account's desktops.
 
 **Desktop:**
-- Resolution:
-  - resolve by slug, by alias, and by numeric-id link;
-  - an unresolved row is left pending and not claimed;
-  - an absent target is held with its stamp.
+- Resolution and claiming:
+  - candidates resolve by tag, alias, or numeric-id link;
+  - two candidates that resolve to the same agent deliver once;
+  - a live-agent desktop claims before a holding desktop within the grace
+    period;
+  - a generation bump re-evaluates pending rows;
+  - integration rows are never forwarded.
 - Protection:
-  - links, trusted integrations and grants reject a caller with only
-    `X-AuthKey`;
+  - links and trusted integrations reject every caller except the host
+    channel;
   - `integration` can't be deserialised from HTTP.
 - Rendering:
-  - the marker is `FROM=integration:<id> VIA=integration`, through
-    `marker_field`;
-  - links are data lines only;
-  - the reply hint is absent.
+  - a bare `integration:` source renders only with the stamp;
+  - the marker and data lines go through `marker_field`.
 - Trust:
   - trusted plus a sensitive message → `ESCALATE=none`;
-  - untrusted → escalates;
-  - a forced transcript request → escalates.
-- Held replay and forwarding keep the stamp.
-- After I5, `git grep` for ReAgent identifiers finds none in code, as a
-  CI check.
+  - a forced transcript request escalates.
+- Held replay keeps the stamp.
+- After I5, `git grep` finds no ReAgent identifiers in code, as a CI
+  check.
 
 **ReAgent:**
-- A notify failure never produces a failure review.
-- Both reviewer Lambdas notify.
-- One request per recipient; fan-out follows grant scopes; head and base
-  repos are both sent.
+- A notify failure or timeout never produces a failure review or a DLQ
+  entry.
+- Both Lambdas notify.
+- Fan-out follows grants; candidate order is tag, author, commit author.
 
 **End to end:**
-- A review on a PR in a granted repo reaches the linked agent with
+- A review on a granted repo reaches the linked agent once, with
   `VIA=integration`.
 - A fork PR from an ungranted owner produces no row.
+- An account outside `allowed_accounts` receives nothing.
 - A second account's desktop never sees the row.
