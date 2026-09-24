@@ -162,12 +162,14 @@ fn preflight_input_from_meta(
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let broker = state.broker.clone();
 
     engine.register_typed(
         COMMAND_SESSION_ARCHIVE,
         move |cmd: CommandSessionArchiveData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let broker = broker.clone();
             async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:archive");
@@ -181,6 +183,13 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                     &cmd.block_id,
                     &archive_dir,
                 )?;
+                // The block's transcript is gone: open panes resync now.
+                crate::backend::blockcontroller::shell::publish_transcript_changed(
+                    &broker,
+                    &cmd.block_id,
+                    crate::backend::mps::FILE_OP_DELETE,
+                    &filestore,
+                );
 
                 Ok(SessionArchiveResult {
                 block_id: cmd.block_id,
@@ -195,12 +204,14 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let broker = state.broker.clone();
 
     engine.register_typed(
         COMMAND_SESSION_RESTORE,
         move |cmd: CommandSessionRestoreData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let broker = broker.clone();
             async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:restore");
@@ -210,6 +221,13 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                     &filestore,
                     &cmd.block_id,
                 )?;
+                // Replaced content, a new generation: open panes resync now.
+                crate::backend::blockcontroller::shell::publish_transcript_changed(
+                    &broker,
+                    &cmd.block_id,
+                    crate::backend::mps::FILE_OP_REPLACE,
+                    &filestore,
+                );
 
                 Ok(SessionRestoreResult {
                 block_id: cmd.block_id,

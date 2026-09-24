@@ -411,6 +411,36 @@ pub(super) fn append_transcript(
     });
 }
 
+/// Tell a block's panes that its transcript `output` was replaced or deleted
+/// as a whole (Phase 5a-3), so an open pane resyncs at once instead of on its
+/// next read. `fileop` is [`mps::FILE_OP_REPLACE`] — with the new generation
+/// and line count read from `filestore` — or [`mps::FILE_OP_DELETE`].
+pub fn publish_transcript_changed(broker: &mps::Broker, block_id: &str, fileop: &str, filestore: &FileStore) {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    let pos = match filestore.line_state(block_id, OUTPUT_FILE) {
+        Ok(Some(state)) => state
+            .counted
+            .map(|c| vec![mps::StreamPos { stream: format!("b:{block_id}"), gen: c.gen, line: 0, lines: c.lines }])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let event_data = mps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: OUTPUT_FILE.to_string(),
+        fileop: fileop.to_string(),
+        data64: String::new(),
+        offset: None,
+        pos,
+    };
+    broker.publish(mps::MuxEvent {
+        event: mps::EVENT_BLOCK_FILE.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: serde_json::to_value(&event_data).ok(),
+    });
+}
+
 /// Serializes one block's transcript appends with their publish (see
 /// [`append_transcript`]). Striped rather than per block: bounded memory and
 /// nothing to clean up; two blocks that share a stripe only wait for each

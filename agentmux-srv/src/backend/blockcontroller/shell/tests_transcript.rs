@@ -238,6 +238,25 @@ fn transcript_event_latency() {
 }
 
 #[test]
+fn a_replaced_or_deleted_transcript_is_announced_with_its_new_generation() {
+    let block = "blk-changed";
+    let (broker, rec, fs, _gfs) = setup(block);
+    fs.make_file(block, "output", Default::default(), Default::default()).unwrap();
+    fs.write_file(block, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
+    super::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
+    fs.delete_files(block, &["output"]).unwrap();
+    super::publish_transcript_changed(&broker, block, mps::FILE_OP_DELETE, &fs);
+
+    let seen = rec.seen.lock().unwrap();
+    let (replaced, deleted) = (&seen[0].0, &seen[1].0);
+    assert_eq!(replaced.fileop, "replace");
+    let b = pos_of(replaced, "b:");
+    assert_eq!((b.line, b.lines), (0, 2));
+    assert_eq!(deleted.fileop, "delete");
+    assert!(deleted.pos.is_empty());
+}
+
+#[test]
 fn without_a_filestore_the_event_still_goes_out_without_positions() {
     let block = "blk-nofs";
     let (broker, rec, _fs, _gfs) = setup(block);
