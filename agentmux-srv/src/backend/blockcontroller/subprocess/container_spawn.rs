@@ -236,6 +236,7 @@ impl SubprocessController {
         // racing on the same path, including the `rm -f` that cleans it up.
         let turn_id = uuid::Uuid::new_v4().to_string();
         let turn_message = config.message.clone();
+        let user_record = self.user_record_sink();
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         // Spawn all async work (exec + I/O) into a background task so this
@@ -299,7 +300,12 @@ impl SubprocessController {
                     let wrapped = container_turn_exec(&prompt_path, cmd);
                     // attach_stdin: false — the CLI's stdin is the prompt file.
                     match cm.exec(&container_name, &wrapped, None, &container_env, false).await {
-                        Ok(session) => Ok(session),
+                        Ok(session) => {
+                            // The exec started with the prompt as its stdin:
+                            // now the transcript may say so (Codex review).
+                            user_record.write(&turn_message);
+                            Ok(session)
+                        }
                         Err(e) => {
                             // The wrapper never ran, so neither did its
                             // `rm -f "$F"` — clean up here or the prompt is
