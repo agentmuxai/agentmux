@@ -18,6 +18,10 @@
 //   and per pane); resident memory of the renderer, browser and GPU processes
 //   (process ids from CDP SystemInfo, memory from the OS).
 //
+// Each window starts only once the page is quiet — no frame gap over 50 ms
+// for 1 s, giving up after 30 s — so the injection before it is not measured
+// as part of it. Recorded per window as `settle: { quiet, ms }`.
+//
 // Usage (dev builds only; the production instance on 9222 is refused):
 //
 //   node scripts/ui-screenshots/full-conversation-bench.mjs --target "<title or id substr>"
@@ -161,6 +165,11 @@ async function processMemoryByType(browser) {
 // ── One measurement window ──────────────────────────────────────────────────
 
 async function measureWindow(page, browser, opts, typingBlock) {
+    // Start from a quiet page: whatever came before (history injection, the
+    // previous window's clear) must not be measured as part of this window.
+    // See waitQuiet in lib/bench-page.js for why a fixed sleep was not enough.
+    const settle = await page.evaluate("window.__fcb.waitQuiet()", { timeout: 45_000 });
+    if (!settle.quiet) log(`note: page not quiet after ${settle.ms} ms — measuring anyway (recorded as settle.quiet=false)`);
     const before = await perfMetrics(page);
     await page.evaluate(
         `window.__fcb.startWindow(${JSON.stringify({ streamKb: opts.streamKb, secs: opts.secs, mode: opts.streamMode })})`
@@ -222,7 +231,7 @@ async function measureWindow(page, browser, opts, typingBlock) {
             : typing && (typing.abortedAt !== null || (typing.restore && typing.restore.stray > 0))
               ? "typing left the composer during the window"
               : null;
-    return { invalid, window: win, metrics: metricsDelta(before, after), dom, memory, typing };
+    return { invalid, settle, window: win, metrics: metricsDelta(before, after), dom, memory, typing };
 }
 
 function summaryLine(n, r) {
@@ -373,7 +382,6 @@ async function sweep(page, browser, opts, typingBlock, blockIds, residual) {
                 await page.evaluate(`window.__fcb.inject(${Math.min(25, left)}, ${opts.turnKb})`);
             have = n;
         }
-        await sleep(1500); // let layout and measurement settle
         const r = await measureWindow(page, browser, opts, typingBlock);
         results.push({ historyTurns: n, ...r });
         log(summaryLine(n, r));

@@ -222,6 +222,35 @@
         return true;
     };
 
+    /**
+     * Resolve once the page has gone `quietMs` without a long frame (a gap
+     * between animation frames over `longGapMs`), or after `timeoutMs`.
+     *
+     * Injecting history is seconds of synchronous work, and more follows it
+     * (trailing markdown renders, resize observers, the injection frame's own
+     * rendering). A fixed sleep before the window let a timing-dependent
+     * share of that land inside the measurement: with 25 turns × 3 panes, one
+     * ~8 s long-frame entry from the injection was counted in some builds'
+     * windows and not others (TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md
+     * §3.6). Frame gaps are the signal because they need nothing the
+     * page might not support.
+     */
+    F.waitQuiet = ({ quietMs = 1000, timeoutMs = 30_000, longGapMs = 50 } = {}) =>
+        new Promise((resolve) => {
+            const t0 = performance.now();
+            let last = t0;
+            let quietSince = t0;
+            const tick = () => {
+                const now = performance.now();
+                if (now - last > longGapMs) quietSince = now;
+                last = now;
+                if (now - quietSince >= quietMs) return resolve({ quiet: true, ms: Math.round(now - t0) });
+                if (now - t0 >= timeoutMs) return resolve({ quiet: false, ms: Math.round(now - t0) });
+                requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+        });
+
     F.domCounts = () => {
         const perPane = {};
         for (const id of F.panes.keys()) {

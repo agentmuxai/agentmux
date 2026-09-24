@@ -165,6 +165,26 @@ siblings. Tested by overriding it to `display: block` on the live page:
 forced layout 2,117 vs 2,129 ms per run — no difference (rows already carry
 `contain: layout style`). Left as is.
 
+### 3.6 History setup leaked into N > 0 windows
+
+The bench injected history, slept a fixed 1.5 s, and opened the window.
+Injecting 25 turns × 3 panes is 7–10 s of synchronous script with more queued
+behind it (trailing markdown renders, resize observers, the injection frame's
+own rendering), so a timing-dependent share of it was measured as part of the
+window. Found while A/B-testing the tool-log fix: every run of one build
+counted a single 7.5–8 s long-frame entry at N = 25 and no run of the other
+did, which doubled "share of time in long frames" and read as a regression.
+A CPU profile of the same runs showed the opposite — the fix removed 3.1 s of
+`isMeasurable` from the injection itself.
+
+Fix: every window now starts once the page has gone 1 s without a frame gap
+over 50 ms (capped at 30 s), recorded as `settle: { quiet, ms }`
+(`waitQuiet` in `scripts/ui-screenshots/lib/bench-page.js`). The soak loop,
+which had no settle at all, gets the same. N = 0 windows were at most lightly
+affected (only a clear precedes them, no injection); N > 0 figures taken
+before this carry some setup cost and are best compared only within the same
+A/B.
+
 ## 4. Open follow-ups
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
