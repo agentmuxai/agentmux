@@ -10,6 +10,7 @@ import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
+import { giveBlockFocus } from "./focusManager";
 
 const blockComponentModelMap = new Map<string, BlockComponentModel>();
 
@@ -175,12 +176,10 @@ export function refocusNode(blockId: string) {
     const layoutNodeId = layoutModel.getNodeByBlockId(blockId);
     if (layoutNodeId?.id == null) return;
     layoutModel.focusNode(layoutNodeId.id);
-    const bcm = getBlockComponentModel(blockId);
-    const ok = bcm?.viewModel?.giveFocus?.();
-    if (!ok) {
-        const inputElem = document.getElementById(`${blockId}-dummy-focus`);
-        inputElem?.focus();
-    }
+    // Explicit, not left to focusNode()'s reducer hook: focusNode() no-ops
+    // when the node is already the focused one, and callers still expect the
+    // caret to land.
+    giveBlockFocus(blockId);
 }
 
 /**

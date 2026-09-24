@@ -22,6 +22,7 @@ import {
     unregisterBlockComponentModel,
 } from "@/store/global";
 import { getMuxObjectAtom, makeORef, useMuxObjectValue } from "@/store/mos";
+import { giveBlockFocus } from "@/app/store/focusManager";
 import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
@@ -134,7 +135,6 @@ function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
 
 function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Element {
     counterInc("render-BlockFull");
-    let focusElemRef: { current: HTMLInputElement | null } = { current: null };
     let blockRef: { current: HTMLDivElement | null } = { current: null };
     let contentRef: { current: HTMLDivElement | null } = { current: null };
     const [blockClicked, setBlockClicked] = createSignal(false);
@@ -190,13 +190,8 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
         invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
     };
 
-    const setFocusTarget = () => {
-        const ok = viewModel?.giveFocus?.();
-        if (ok) {
-            return;
-        }
-        focusElemRef.current?.focus({ preventScroll: true });
-    };
+    // Same routine every pane-selection path uses — see giveBlockFocus().
+    const setFocusTarget = () => giveBlockFocus(nodeModel.blockId);
 
     const setBlockClickedTrue = () => {
         setBlockClicked(true);
@@ -248,7 +243,6 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                 <input
                     type="text"
                     value=""
-                    ref={(el) => { focusElemRef.current = el; }}
                     id={`${nodeModel.blockId}-dummy-focus`}
                     class="dummy-focus"
                     onInput={() => {}}
