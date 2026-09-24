@@ -126,6 +126,7 @@ mod win {
         thumb_bar_add_buttons: usize,
         thumb_bar_update_buttons: usize,
         thumb_bar_set_image_list: usize,
+        /// `SetOverlayIcon(HWND hwnd, HICON hIcon, LPCWSTR pszDescription)`.
         set_overlay_icon: unsafe extern "system" fn(*mut ITaskbarList3, Ptr, Ptr, *const u16) -> i32,
     }
 
@@ -155,12 +156,12 @@ mod win {
             (vt.hr_init)(tbl);
             if count > 0 {
                 let desc: Vec<u16> = super::description(count).encode_utf16().chain(std::iter::once(0)).collect();
-                let hr = (vt.set_overlay_icon)(tbl, badge_icon(), hwnd as Ptr, desc.as_ptr());
+                let hr = (vt.set_overlay_icon)(tbl, hwnd as Ptr, badge_icon(), desc.as_ptr());
                 if hr < 0 {
                     tracing::warn!("[taskbar-attention] SetOverlayIcon failed: hr=0x{:x}", hr);
                 }
             } else {
-                (vt.set_overlay_icon)(tbl, std::ptr::null_mut(), hwnd as Ptr, std::ptr::null());
+                (vt.set_overlay_icon)(tbl, hwnd as Ptr, std::ptr::null_mut(), std::ptr::null());
             }
             (vt.release)(tbl);
         }
