@@ -32,7 +32,18 @@
  * revealing it publishes what arrived meanwhile.
  */
 
-import { batch, createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
+import {
+    batch,
+    createEffect,
+    createMemo,
+    createSignal,
+    on,
+    onCleanup,
+    onMount,
+    Show,
+    untrack,
+    type Accessor,
+} from "solid-js";
 import { isBlockDormant } from "@/app/store/block-component-registry";
 import { getFileSubject } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -181,6 +192,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     const publishNow = (): void => {
         clearTimeout(publishTimer);
         publishTimer = undefined;
+        // Hidden since the timer was armed: keep it for the reveal.
+        if (untrack(hidden)) {
+            dirty = true;
+            return;
+        }
         dirty = false;
         lastPublishAt = Date.now();
         setRawNodes(parser.nodes.slice());
@@ -193,19 +209,57 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     };
     onCleanup(() => clearTimeout(publishTimer));
 
+    // ---- Recovering from a hole without yanking the reader (spec §6.9) ----
+    // After a gap History can't fill, appends would land after a hole, so
+    // they stop being shown. A reader following the bottom gets the newest
+    // page at once; one reading older turns keeps their pages and position,
+    // and the reload waits until they ask for it or scroll back down.
+    const [followingSource, setFollowingSource] = createSignal<Accessor<boolean>>(() => true);
+    const followingSignal = (): boolean => followingSource()();
+    const following: Accessor<boolean> = followingSignal;
+    let scrollToBottom: ((reason?: string) => void) | undefined;
+    const [stale, setStale] = createSignal(false);
+    const recover = (): void => {
+        if (untrack(following)) return void load();
+        setStale(true);
+    };
+    const jumpToLatest = async (): Promise<void> => {
+        await load();
+        scrollToBottom?.("history-jump-to-latest");
+    };
+
     // ---- Following the transcript ----
     // Records land here in order, exactly once, after the initial load
     // (TranscriptCursor). Echoes are the user's own messages — the live pane
     // pairs them with its optimistic copy; this reader has none, so they are
     // parsed like any other record.
     const appendRecords = (text: string): void => {
+        if (untrack(stale)) return;
+        // The cursor joined a new generation (an archive or restore that
+        // recreated the stream without a replace event for this block): these
+        // records start another transcript, which must not be parsed onto
+        // this one's nodes.
+        if ((cursor?.stats.genChanges ?? 0) > genChangesSeen) {
+            genChangesSeen = cursor?.stats.genChanges ?? 0;
+            recover();
+            return;
+        }
         const lines = splitRecords(text);
         if (lines.length === 0) return;
         const now = Date.now();
         const stamps = lines.map(() => now);
+        try {
+            parser.feed(lines, stamps);
+        } catch (err) {
+            // The cursor has already moved past these records and would only
+            // log the throw: without this, they would be missing from what
+            // History shows. Treat it like a skipped gap (spec §6.9).
+            console.warn("[AgentHistoryView] parse failed; reloading", err);
+            recover();
+            return;
+        }
         accLines = accLines.concat(lines);
         accStamps = accStamps.concat(stamps);
-        parser.feed(lines, stamps);
         setTotalLines((t) => t + lines.length);
         publishSoon();
     };
@@ -220,15 +274,17 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
      * so any skip reloads the newest page instead (spec §6.9).
      */
     let skippedSeen = 0;
+    let genChangesSeen = 0;
     const reloadIfSkipped = (): void => {
         const skipped = cursor?.stats.linesSkipped ?? 0;
         if (skipped <= skippedSeen) return;
         skippedSeen = skipped;
-        void load();
+        recover();
     };
     const newCursor = (): TranscriptCursor => {
         cursor?.dispose();
         skippedSeen = 0;
+        genChangesSeen = 0;
         const c = new TranscriptCursor({
             deliver: appendRecords,
             echo: appendRecords,
@@ -278,6 +334,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         accStamps = [];
         parser = newParser();
         batch(() => {
+            setStale(false);
             setLoading(true);
             setLoadError(null);
         });
@@ -341,7 +398,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     const catchUp = async (): Promise<void> => {
         const c = cursor;
         const pin = c?.position();
-        if (!c || !pin) return void load();
+        if (!c || !pin) return recover();
         try {
             const resp = await RpcApi.BlockfileLineCountCommand(
                 TabRpcClient,
@@ -349,27 +406,40 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 { timeout: 5_000 }
             );
             if (disposed || c !== cursor) return;
-            if (!resp?.stream || !resp.gen || resp.stream !== pin.stream || resp.gen !== pin.gen) return void load();
-            if (resp.count - pin.next > GAP_FILL_MAX_LINES) return void load();
+            if (!resp?.stream || !resp.gen || resp.stream !== pin.stream || resp.gen !== pin.gen) return recover();
+            if (resp.count - pin.next > GAP_FILL_MAX_LINES) return recover();
             c.observeCount(resp.count, resp.stream, resp.gen);
         } catch {
-            if (!disposed) void load();
+            if (!disposed) recover();
         }
     };
     createEffect(
         on(hidden, (isHidden) => {
-            if (isHidden) return;
+            if (isHidden) {
+                // An armed publish would render a hidden tab: hold it.
+                if (publishTimer !== undefined) {
+                    clearTimeout(publishTimer);
+                    publishTimer = undefined;
+                    dirty = true;
+                }
+                return;
+            }
             if (dirty) publishSoon();
             if (resetWhileHidden) {
                 resetWhileHidden = false;
                 missedWhileHidden = false;
-                void load();
+                recover();
             } else if (missedWhileHidden) {
                 missedWhileHidden = false;
                 void catchUp();
             }
         })
     );
+
+    // A stale reader who scrolls back to the bottom gets the newest page.
+    createEffect(() => {
+        if (stale() && followingSignal()) void load();
+    });
 
     onMount(() => {
         const fileSubject = getFileSubject(readBlockId, "output");
@@ -399,6 +469,12 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                     { timeout: 5_000 }
                 );
                 if (!resp?.stream || !resp.gen) return;
+                if (resp.stream !== pin.stream || resp.gen !== pin.gen) {
+                    // Recreated under us (see appendRecords): start over.
+                    lastCount = null;
+                    recover();
+                    return;
+                }
                 if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
                     cursor?.observeCount(lastCount.count, resp.stream, resp.gen);
                 }
@@ -457,6 +533,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         <div class="agent-history-view">
             <div class="agent-history-header">
                 <div class="agent-history-title">Agent History</div>
+                <Show when={stale()}>
+                    <button type="button" class="agent-history-jump-latest" onClick={() => void jumpToLatest()}>
+                        Newer turns — jump to latest
+                    </button>
+                </Show>
                 <div class="agent-history-meta">
                     {/* Explicit loading state first — without it the initial
                         async window renders "no recorded history", which is
@@ -475,6 +556,8 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             </div>
             <div class="agent-history-body">
                 <AgentDocumentView
+                    followingRef={(f) => setFollowingSource(() => f)}
+                    scrollToBottomRef={(fn) => (scrollToBottom = fn)}
                     documentNodes={docNodes}
                     documentStateAtom={[docState, setDocState]}
                     onLoadOlder={loadOlder}

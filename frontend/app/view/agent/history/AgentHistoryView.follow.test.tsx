@@ -57,6 +57,8 @@ vi.mock("@/app/store/mps", () => ({
 }));
 
 const [dormant, setDormant] = createSignal(false);
+/** Whether the reader follows the bottom, as the list would report it. */
+const [following, setFollowing] = createSignal(true);
 vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => dormant }));
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabHidden: () => () => false }));
 vi.mock("@/app/store/agent-pane-layout-store", () => ({ registerPane: () => {}, unregisterPane: () => {} }));
@@ -64,7 +66,8 @@ vi.mock("@/app/store/agent-pane-layout-store", () => ({ registerPane: () => {}, 
 /** The document view, reduced to the node list it was handed. */
 let shown: DocumentNode[] = [];
 vi.mock("../components/AgentDocumentView", () => ({
-    AgentDocumentView: (p: { documentNodes: () => DocumentNode[] }) => {
+    AgentDocumentView: (p: { documentNodes: () => DocumentNode[]; followingRef?: (f: () => boolean) => void }) => {
+        p.followingRef?.(following);
         return (
             <div>
                 {(() => {
@@ -118,6 +121,7 @@ beforeEach(() => {
     released = 0;
     subject = new Subject<unknown>();
     setDormant(false);
+    setFollowing(true);
     shown = [];
 });
 afterEach(() => {
@@ -245,6 +249,92 @@ describe("AgentHistoryView follows the transcript", () => {
         setDormant(false);
         await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
         expect(texts()).toEqual(["other gen"]);
+    });
+
+    it("reloads when the stream is recreated under a new generation with no reset event", async () => {
+        await mount();
+        // An archive recreates the global transcript: the next append names a
+        // new generation at line 0 and no replace/delete reaches this block.
+        disk.lines = [user("new session")];
+        disk.gen = "g9";
+        subject.next({
+            fileop: "append",
+            data64: btoa(`${user("new session")}\n`),
+            pos: [{ stream: STREAM, gen: "g9", line: 0, lines: 1 }],
+        });
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        expect(texts()).toEqual(["new session"]);
+    });
+
+    it("holds an armed publish while hidden and shows it on reveal", async () => {
+        await mount();
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS / 2);
+        write([user("q2")]); // armed: the load published half a second ago
+        setDormant(true);
+        await flush(2 * HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        expect(texts()).toEqual(["q1", "a1"]);
+
+        setDormant(false);
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        expect(texts()).toEqual(["q1", "a1", "q2"]);
+    });
+
+    it("keeps a reader who scrolled up in place, and reloads when they ask", async () => {
+        const { container } = render(() => (
+            <AgentHistoryView blockId="hist-1" sourceBlockId="live-1" outputFormat={() => "claude-stream-json"} />
+        ));
+        await flush();
+        setFollowing(false); // reading older turns
+        const readsBefore = reads.length;
+
+        write(
+            Array.from({ length: 6_000 }, (_, i) => text(`t${i}`)),
+            { emit: false }
+        );
+        write([user("latest")]); // the cursor skips the gap
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+
+        // No reload, nothing appended after the hole, a way back to the tail.
+        expect(reads.length).toBe(readsBefore);
+        expect(texts()).toEqual(["q1", "a1"]);
+        const jump = container.querySelector<HTMLButtonElement>("button.agent-history-jump-latest");
+        expect(jump).not.toBeNull();
+
+        jump!.click();
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        expect(texts().at(-1)).toBe("latest");
+        expect(container.querySelector("button.agent-history-jump-latest")).toBeNull();
+    });
+
+    it("reloads a stale reader who scrolls back to the bottom", async () => {
+        await mount();
+        setFollowing(false);
+        write(
+            Array.from({ length: 6_000 }, (_, i) => text(`t${i}`)),
+            { emit: false }
+        );
+        write([user("latest")]);
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        expect(texts()).toEqual(["q1", "a1"]);
+
+        setFollowing(true);
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        expect(texts().at(-1)).toBe("latest");
+    });
+
+    it("reloads rather than drop records when parsing an append throws", async () => {
+        await mount();
+        const { HistoryParser } = await import("../parseHistoryLines");
+        const feed = vi.spyOn(HistoryParser.prototype, "feed").mockImplementationOnce(() => {
+            throw new Error("boom");
+        });
+        write([user("q2"), text("a2")]);
+        await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
+        feed.mockRestore();
+        // The reload re-read the newest page, so the records are shown.
+        expect(texts()).toEqual(["q1", "a1", "q2", "a2"]);
+        const last = reads[reads.length - 1];
+        expect(last.offset + last.limit).toBe(disk.lines.length);
     });
 
     it("reloads when the stream is truncated", async () => {
