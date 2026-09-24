@@ -88,6 +88,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["pause", "snooze", "do not disturb", "notify:pause:allowattention"],
     },
+    taskbarAttention: {
+        id: "notifications.taskbar_attention",
+        label: "Badge the taskbar button",
+        description: "Show a dot on AgentMux's taskbar button, and flash it once, while an agent needs you (Windows)",
+        section: "notifications",
+        keywords: ["taskbar", "badge", "flash", "overlay", "notify:taskbar:attention"],
+    },
     osPreview: {
         id: "notifications.os_preview",
         label: "Notification content",
@@ -178,6 +185,7 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnErrored, "notify:os:turnerrored")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
+                {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow
                     id={NOTIFICATIONS_SETTINGS.pauseAllowAttention.id}
                     indent
