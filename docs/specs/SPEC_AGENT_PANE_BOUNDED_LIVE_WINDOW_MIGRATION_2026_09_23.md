@@ -656,8 +656,13 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      (counts the data), and `init_line_counter` for a row that has none.
      `init_line_counter` scans the file one 1 MiB window at a time, holding
      the connection lock per window, so appends continue. It then counts
-     what they added in one transaction, and gives up if the scanned tail
-     changed.
+     what they added in one transaction. It gives up if the scanned bytes may
+     have changed underneath it:
+     - the row was re-created (`createdts`);
+     - this code rewrote bytes in place (`rev`, bumped by every write that
+       isn't an append);
+     - for older builds, which replace rather than rewrite, the file shrank
+       or its scanned tail changed.
    - **Appends** advance the epoch in the same transaction as the write,
      re-reading only the unterminated last line (normally empty).
    - **`append_lines`** normalizes to complete, non-blank, `\n`-terminated

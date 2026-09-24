@@ -86,6 +86,9 @@ pub(super) enum AppendMode {
 pub(super) struct Row {
     pub size: i64,
     pub modts: i64,
+    createdts: i64,
+    /// Bumped by every write that rewrites existing bytes (not appends).
+    rev: i64,
     gen: Option<String>,
     lines: Option<i64>,
     lines_size: Option<i64>,
@@ -128,7 +131,7 @@ impl Row {
 pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<Option<Row>, StoreError> {
     Ok(conn
         .query_row(
-            "SELECT size, modts, gen, lines, lines_size, lines_tail, lines_modts
+            "SELECT size, modts, gen, lines, lines_size, lines_tail, lines_modts, createdts, rev
              FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
             params![zone_id, name],
             |r| {
@@ -140,6 +143,8 @@ pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<O
                     lines_size: r.get(4)?,
                     lines_tail: r.get(5)?,
                     lines_modts: r.get(6)?,
+                    createdts: r.get(7)?,
+                    rev: r.get::<_, Option<i64>>(8)?.unwrap_or(0),
                 })
             },
         )
@@ -360,21 +365,29 @@ impl FileStore {
     ///
     /// The scan takes the connection lock one window at a time, so appends
     /// continue meanwhile; the final transaction counts what they added. It
-    /// gives up (`Ok(None)`, the file stays uncounted) if the file shrank or
-    /// the scanned tail changed — replaced by a build that doesn't maintain
-    /// the counter — and returns the existing epoch if another writer started
-    /// one first. Cost: one read of the file, once per epoch.
+    /// gives up (`Ok(None)`, the file stays uncounted) if the scanned bytes
+    /// may have changed underneath it, and returns the existing epoch if
+    /// another writer started one first. Cost: one read of the file, once per
+    /// epoch.
     #[allow(dead_code)] // called by the transcript RPCs in 5a-3
     pub fn init_line_counter(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
-        let scan_to = {
-            let conn = self.conn.lock().unwrap();
-            let Some(row) = read_row(&conn, zone_id, name)? else { return Ok(None) };
-            if row.counter().is_some() {
-                return Ok(Some(row.state()));
-            }
-            row.size
-        };
+        match self.init_scan(zone_id, name)? {
+            InitScan::Done(state) => Ok(state),
+            InitScan::Scanned(scan) => self.init_finish(zone_id, name, scan),
+        }
+    }
 
+    /// Phase 1 of [`Self::init_line_counter`]: the windowed scan.
+    pub(super) fn init_scan(&self, zone_id: &str, name: &str) -> Result<InitScan, StoreError> {
+        let row = {
+            let conn = self.conn.lock().unwrap();
+            let Some(row) = read_row(&conn, zone_id, name)? else { return Ok(InitScan::Done(None)) };
+            if row.counter().is_some() {
+                return Ok(InitScan::Done(Some(row.state())));
+            }
+            row
+        };
+        let scan_to = row.size;
         let mut count = LineCount { lines: 0, tail_start: 0 };
         let mut open: Vec<u8> = Vec::new();
         let mut pos = 0i64;
@@ -396,13 +409,35 @@ impl FileStore {
             let conn = self.conn.lock().unwrap();
             read_bytes(&conn, zone_id, name, scan_to - fp_len, fp_len)?
         };
+        Ok(InitScan::Scanned(ScanResult {
+            scan_to,
+            count,
+            open,
+            fingerprint,
+            createdts: row.createdts,
+            rev: row.rev,
+        }))
+    }
 
+    /// Phase 2 of [`Self::init_line_counter`]: validate the scan against the
+    /// row as it is now, count what was appended since, and start the epoch,
+    /// all in one transaction.
+    pub(super) fn init_finish(&self, zone_id: &str, name: &str, scan: ScanResult) -> Result<Option<LineState>, StoreError> {
+        let ScanResult { scan_to, count, open, fingerprint, createdts, rev } = scan;
+        let fp_len = fingerprint.len() as i64;
         self.write_txn(|tx| {
             let Some(row) = read_row(tx, zone_id, name)? else { return Ok(None) };
             if row.counter().is_some() {
                 return Ok(Some(row.state()));
             }
-            if row.size < scan_to
+            // The scanned bytes must still be the file's bytes: the same row
+            // (not deleted and re-created), nothing rewritten in place by this
+            // code (`rev`, review of #3631), and, for writers that don't bump
+            // `rev` (older builds, which replace rather than rewrite), not
+            // shrunk and with the scanned tail unchanged.
+            if row.createdts != createdts
+                || row.rev != rev
+                || row.size < scan_to
                 || read_bytes(tx, zone_id, name, scan_to - fp_len, fp_len)? != fingerprint
             {
                 return Ok(None);
@@ -418,4 +453,21 @@ impl FileStore {
             Ok(Some(LineState { size: row.size, counted: Some(Counted { gen, lines: count.lines }) }))
         })
     }
+}
+
+/// Outcome of [`FileStore::init_scan`].
+pub(super) enum InitScan {
+    /// Nothing to scan: the file is missing, or already counted.
+    Done(Option<LineState>),
+    Scanned(ScanResult),
+}
+
+/// A finished scan, and the row identity it was taken against.
+pub(super) struct ScanResult {
+    scan_to: i64,
+    count: LineCount,
+    open: Vec<u8>,
+    fingerprint: Vec<u8>,
+    createdts: i64,
+    rev: i64,
 }

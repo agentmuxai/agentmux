@@ -2112,6 +2112,9 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_tail INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_modts INTEGER",
+        // Bumped by every write that changes existing bytes (not appends), so
+        // a counter scan can tell its bytes were rewritten underneath it.
+        "ALTER TABLE db_wave_file ADD COLUMN rev INTEGER",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             if !e.to_string().contains("duplicate column") {

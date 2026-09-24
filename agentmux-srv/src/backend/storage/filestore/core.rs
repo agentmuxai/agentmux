@@ -423,7 +423,7 @@ impl FileStore {
             // Replaced content starts a new counted epoch (counter.rs).
             let count = count_all(data);
             tx.execute(
-                "UPDATE db_wave_file SET size = ?1, modts = ?2,
+                "UPDATE db_wave_file SET size = ?1, modts = ?2, rev = COALESCE(rev, 0) + 1,
                      gen = ?3, lines = ?4, lines_size = ?1, lines_tail = ?5, lines_modts = ?2
                  WHERE zoneid = ?6 AND name = ?7",
                 params![data.len() as i64, now, new_gen(), count.lines as i64, count.tail_start as i64, zone_id, name],
@@ -753,7 +753,8 @@ impl FileStore {
                         // vouch for it, so the epoch is dropped (counter.rs).
                         tx.execute(
                             &format!(
-                                "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3, {DROP_EPOCH_SQL}
+                                "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3, {DROP_EPOCH_SQL},
+                                     rev = COALESCE(rev, 0) + 1
                                  WHERE zoneid = ?4 AND name = ?5"
                             ),
                             params![file.size, file.modts, meta_json, file.zoneid, file.name],

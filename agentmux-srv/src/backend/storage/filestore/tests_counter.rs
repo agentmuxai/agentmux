@@ -214,6 +214,57 @@ fn a_database_from_an_older_build_gains_the_columns_and_its_rows_can_be_counted(
     assert_eq!(reader_lines(fs), ["one", "two", "three", "four"]);
 }
 
+/// A counted file whose epoch an older build's write dropped, ready for init.
+fn uncounted(fs: &FileStore, content: &[u8]) {
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_data(ZONE, NAME, content).unwrap();
+    fs.conn().lock().unwrap().execute("UPDATE db_wave_file SET modts = modts + 1", []).unwrap();
+    assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted, None);
+}
+
+fn scanned(fs: &FileStore) -> super::counter::ScanResult {
+    match fs.init_scan(ZONE, NAME).unwrap() {
+        super::counter::InitScan::Scanned(scan) => scan,
+        super::counter::InitScan::Done(_) => panic!("expected a scan"),
+    }
+}
+
+#[test]
+fn init_gives_up_when_bytes_it_scanned_are_rewritten_in_place() {
+    // Review of #3631: size and the scanned tail are not proof that the
+    // middle of the file is unchanged.
+    let fs = mem();
+    uncounted(&fs, b"aaaa\nbbbb\ncccc\n");
+    let scan = scanned(&fs);
+    // Same size, same tail; the middle line becomes blank (3 lines -> 2).
+    fs.write_at(ZONE, NAME, 5, b"    ").unwrap();
+    assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()).1, 2);
+}
+
+#[test]
+fn init_gives_up_when_the_file_is_recreated_during_the_scan() {
+    // Deleted and re-created with the same bytes by a writer that doesn't
+    // start an epoch (an older build): a different row, however alike.
+    let fs = mem();
+    let content: &[u8] = b"one\ntwo\n";
+    uncounted(&fs, content);
+    let scan = scanned(&fs);
+    {
+        let conn = fs.conn().lock().unwrap();
+        let (created, modts): (i64, i64) = conn
+            .query_row("SELECT createdts, modts FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        conn.execute("DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME]).unwrap();
+        conn.execute(
+            "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![ZONE, NAME, content.len() as i64, created + 1, modts + 1],
+        )
+        .unwrap();
+    }
+    assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
+}
+
 #[test]
 fn init_counts_a_file_larger_than_one_scan_window() {
     let fs = mem();
