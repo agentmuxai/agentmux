@@ -18,7 +18,7 @@
 | 0b | Bench streams through the real pipeline (`--stream-mode pipeline`, default) | #3598 | merged |
 | 1 | Pin-to-bottom without forced layout | #3599 (together with Phase 2 — see §3.1) | merged |
 | 2 | Cross-pane stream scheduler, input first | #3599 | merged |
-| 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | this PR | open |
+| 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | open |
 | 3 | Tail holds only the turn in flight | — | not started |
 | 4 | O(batch + log n) stores | — | not started |
 | 5 | Node identity and durability | — | not started |
