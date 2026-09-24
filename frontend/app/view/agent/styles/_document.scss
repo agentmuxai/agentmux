@@ -173,6 +173,14 @@
         position: relative;
         width: 100%;
         flex-shrink: 0;
+        // Cancels .agent-document's flex gap at the head/buffer seam: the
+        // layout store's totalSize already ends with one ROW_GAP_PX after the
+        // last head row (agent-pane-layout/types.ts). Without this the seam
+        // was two gaps, and a row moved up by one gap as it migrated from the
+        // buffer into the head — including the very first migration, when the
+        // head was empty and only the flex gap separated the buffer from the
+        // top (Codex P2, #3610). All three values are tied by reducer.test.ts.
+        margin-bottom: -4px;
     }
 
     .agent-document-streaming-buffer {

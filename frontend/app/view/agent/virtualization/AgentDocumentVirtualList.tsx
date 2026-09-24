@@ -53,7 +53,7 @@ import {
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
-import { inFlowState } from "@/app/store/agent-pane-layout/types";
+import { inFlowState, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
     partitionForVirtualization,
@@ -385,6 +385,38 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         return result;
     });
 
+    // Streaming-buffer row heights, for the height handoff when a node
+    // migrates into the virtualized head (slice effect below). Observed, not
+    // read: a ResizeObserver callback runs with layout already clean, so
+    // reading the rect there forces nothing. ÷zoom to stay in unzoomed CSS px,
+    // exactly like the head's measure RO. Phase 3 of
+    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2.
+    //
+    // Each height is stored with WHAT it measured: the node object the row
+    // was rendering (nodes are immutable, so a content or status change is a
+    // new object) and its in-flow expansion state. The handoff uses it only if
+    // both still match — a row whose content or expansion changes in the same
+    // update that migrates it is disposed before the RO can report its new
+    // size, and that stale height would stay in the layout for good if the
+    // node is above the viewport (never mounted in the head, never
+    // re-measured). Codex P2 on #3610.
+    const tailHeights = new Map<string, { px: number; node: DocumentNode; state: ExpansionState }>();
+    const tailRowNode = new WeakMap<Element, () => DocumentNode>();
+    const tailRO = typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver((entries) => {
+            const zoom = props.zoomFactor?.() ?? 1;
+            const docState = untrack(props.documentState);
+            for (const entry of entries) {
+                const node = untrack(() => tailRowNode.get(entry.target)?.());
+                if (!node) continue;
+                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1); // perf:allow-layout-read — tail ResizeObserver callback (layout clean)
+                if (!Number.isFinite(cssPx) || cssPx <= 0) continue;
+                tailHeights.set(node.id, { px: cssPx, node, state: inFlowState(currentExpansion(node, docState)) });
+            }
+        })
+        : undefined;
+    onCleanup(() => tailRO?.disconnect());
+
     // Phase 3: feed the layout slice from the VIRTUALIZED partition only.
     // The slice models the prefix-summed region; the streaming buffer is
     // normal-flow and out of scope. Dispatches NodesChanged + per-node
@@ -429,9 +461,14 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 const idSet = new Set(ids);
                 for (const k of pushedExpansion.keys()) if (!idSet.has(k)) pushedExpansion.delete(k);
                 for (const k of estimatesPushed) if (!idSet.has(k)) estimatesPushed.delete(k);
+                // Nodes entering the slice this run that the streaming buffer
+                // had measured: handed their real height below (Phase 3 height
+                // handoff, invariant 3).
+                const handoff: DocumentNode[] = [];
                 for (const node of vnodes) {
                     if (!estimatesPushed.has(node.id)) {
                         estimatesPushed.add(node.id);
+                        if (tailHeights.has(node.id)) handoff.push(node);
                         dispatchLayoutIfRegistered(blockId, {
                             type: "EstimateSet",
                             nodeId: node.id,
@@ -456,7 +493,35 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         });
                     }
                 }
+                // Height handoff: a node leaving the streaming buffer for the
+                // head gets the height the browser last laid it out at, in the
+                // SAME batch that adds it — so its first head frame is exact
+                // and nothing below it moves (with ROW_GAP_PX matching the
+                // buffer's gap, the head occupies exactly the space the buffer
+                // did). Without this the first frame used an estimate and the
+                // head's measure RO corrected it a frame later: a visible jump
+                // for everything below. Consumed once: a later head
+                // measurement is never overwritten by a stale buffer height.
+                for (const node of handoff) {
+                    const measured = tailHeights.get(node.id)!;
+                    tailHeights.delete(node.id);
+                    const state = inFlowState(currentExpansion(node, docState));
+                    // Measured something else (older content, other expansion):
+                    // keep the estimate; the head's measure RO corrects it if
+                    // the row is ever mounted.
+                    if (measured.node !== node || measured.state !== state) continue;
+                    dispatchLayoutIfRegistered(blockId, {
+                        type: "RowMeasured",
+                        nodeId: node.id,
+                        state,
+                        cssPx: measured.px,
+                    });
+                }
             });
+            // Heights of nodes that left the buffer any other way (removed,
+            // cleared) are dropped; the buffer holds a few dozen at most.
+            const inBuffer = new Set(partition().streamingNodes.map((n) => n.id));
+            for (const id of tailHeights.keys()) if (!inBuffer.has(id)) tailHeights.delete(id);
         });
     }
 
@@ -1250,19 +1315,28 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         ref={(el) => { streamingBufferRef = el; }}
                     >
                         <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
-                            {(nodeAccessor) => (
-                                <DocumentRow
-                                    node={nodeAccessor}
-                                    documentState={props.documentState}
-                                    highlightNodeId={props.highlightNodeId}
-                                    onToggleCollapse={props.onToggleCollapse}
-                                    onTogglePin={props.onTogglePin}
-                                    onHoldToolOpen={props.onHoldToolOpen}
-                                    onAgentErrorLogin={props.onAgentErrorLogin}
-                                    onOpenHistory={props.onOpenHistory}
-                                    dispatchMatches={props.dispatchMatches}
-                                />
-                            )}
+                            {(nodeAccessor) => {
+                                let rowEl: HTMLElement | undefined;
+                                // Unobserve only — the cached height must
+                                // outlive the row: a migrating node's buffer
+                                // row is disposed before the slice effect hands
+                                // its height to the head.
+                                onCleanup(() => { if (rowEl) tailRO?.unobserve(rowEl); });
+                                return (
+                                    <DocumentRow
+                                        node={nodeAccessor}
+                                        documentState={props.documentState}
+                                        highlightNodeId={props.highlightNodeId}
+                                        onToggleCollapse={props.onToggleCollapse}
+                                        onTogglePin={props.onTogglePin}
+                                        onHoldToolOpen={props.onHoldToolOpen}
+                                        onAgentErrorLogin={props.onAgentErrorLogin}
+                                        onOpenHistory={props.onOpenHistory}
+                                        dispatchMatches={props.dispatchMatches}
+                                        ref={(el) => { rowEl = el; tailRowNode.set(el, nodeAccessor); tailRO?.observe(el); }}
+                                    />
+                                );
+                            }}
                         </Key>
                     </div>
                 )}

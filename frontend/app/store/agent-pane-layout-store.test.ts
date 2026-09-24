@@ -12,7 +12,7 @@ import {
     unregisterPane,
     type LayoutView,
 } from "./agent-pane-layout-store";
-import { DEFAULT_ROW_PX } from "./agent-pane-layout/types";
+import { DEFAULT_ROW_PX, ROW_GAP_PX } from "./agent-pane-layout/types";
 
 const BID = "block-123456789";
 
@@ -48,7 +48,7 @@ describe("agent-pane-layout store", () => {
         const last = layout.mock.calls.at(-1)![0];
         expect(last.rows.map((r) => r.nodeId)).toEqual(["a", "b"]);
         expect(last.rows[0].height).toBe(30);
-        expect(last.totalSize).toBe(30 + DEFAULT_ROW_PX); // measured + default
+        expect(last.totalSize).toBe(30 + DEFAULT_ROW_PX + 2 * ROW_GAP_PX); // measured + default, each followed by the row gap
     });
 
     it("INV-2: ZoomChanged re-emits zoom but NOT the layout view", () => {
@@ -144,12 +144,12 @@ describe("agent-pane-layout store", () => {
             for (const id of ids) {
                 dispatch(BID, { type: "RowMeasured", nodeId: id, state: "collapsed", cssPx: 20 });
             }
-            // Rows are 20px each (0..400 total). viewportPx=40 shows 2 rows;
-            // scrollTop=200 puts rows n10/n11 in view, padded by the default
-            // overscan (5) on each side.
+            // Rows are 20px each, ROW_GAP_PX (4) apart: a 24px stride.
+            // scrollTop=200, viewportPx=40 → [200, 240) overlaps n8 (192..212)
+            // and n9 (216..236), padded by the default overscan (5) each side.
             dispatch(BID, { type: "Scrolled", scrollTop: 200, viewportPx: 40 });
             const view = layout.mock.calls.at(-1)![0];
-            expect(view.window).toEqual({ startIndex: 5, endIndex: 16 });
+            expect(view.window).toEqual({ startIndex: 3, endIndex: 14 });
 
             // Scroll again (still no data change) — window must track the
             // NEW scrollTop, not the stale cached one.

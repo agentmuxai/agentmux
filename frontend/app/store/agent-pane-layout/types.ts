@@ -18,7 +18,8 @@
  * wiring and NO behaviour change. Phases 1–4 wire it in (see spec §6).
  *
  * Invariants (proven by reducer.test.ts):
- *   INV-1  positions() is a prefix-sum of in-flow heights → start[i+1] === end[i].
+ *   INV-1  positions() is a prefix-sum of in-flow heights, one ROW_GAP_PX
+ *          apart → start[i+1] === end[i] + ROW_GAP_PX.
  *   INV-2  heights/positions are unzoomed CSS px; `ZoomChanged` never relayouts.
  *   INV-3  measurements are keyed by (nodeId, ExpansionState) — an expanded
  *          measurement never contaminates the collapsed slot.
@@ -81,6 +82,18 @@ export interface AgentPaneLayoutState {
 /** Height used when a row has neither a measurement nor an estimate for its
  *  current state. Matches the historical `estimateSize` fallback. */
 export const DEFAULT_ROW_PX = 32;
+
+/**
+ * Space after every virtualized row (unzoomed CSS px). Must equal the
+ * streaming buffer's flex `gap` (`.agent-document-streaming-buffer`,
+ * `_document.scss`; reducer.test.ts checks the two agree): then a node that
+ * migrates from the buffer into the virtualized head lands at exactly the
+ * position it had, and the content below it does not move — Phase 3 of
+ * SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md (invariant 3,
+ * "no jump"). Before this the head packed rows flush, so every migration
+ * pulled everything below up by this much per row.
+ */
+export const ROW_GAP_PX = 4;
 const DEFAULT_OVERSCAN = 5;
 
 export const initialState = (): AgentPaneLayoutState => ({

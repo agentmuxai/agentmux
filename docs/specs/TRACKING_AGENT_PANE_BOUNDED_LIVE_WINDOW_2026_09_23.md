@@ -19,8 +19,9 @@
 | 1 | Pin-to-bottom without forced layout | #3599 (together with Phase 2 — see §3.1) | merged |
 | 2 | Cross-pane stream scheduler, input first | #3599 | merged |
 | 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | merged |
-| 2c | Tool logs measure height only when their branch changes (§3.4, §2.2a) | #3607 | open |
-| 3 | Tail holds only the turn in flight | — | not started |
+| 2c | Tool logs measure height only when their branch changes (§3.4, §2.2a) | #3607 | merged |
+| 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | open |
+| 3 | Tail holds only the turn in flight | — | in progress (3a first) |
 | 4 | O(batch + log n) stores | — | not started |
 | 5 | Node identity and durability | — | not started |
 | 6 | Bounded live document | — | not started |
@@ -110,6 +111,34 @@ a couple of ancestors; a real conversation with open tool panels walks the
 whole chain. N = 0 mounts no tool log at all, so its A/B difference (fps 32
 vs 27.4 median) is noise — a useful floor: consecutive runs of identical code
 paths differ by up to ~15 % fps.
+
+### 2.2b Phase 3a (a migrating node keeps its exact position)
+
+Live probe on one pane (`probe-jump.mjs`): 60 markdown nodes of varied
+height, scrolled so a streaming-buffer row sits mid-viewport (not pinned),
+then 8 appends — each forces one node out of the full 50-node buffer into the
+head. Recorded: how far that on-screen row moves over the next 4 frames. Two
+interleaved rounds each.
+
+| | on-screen movement per migration |
+|---|---|
+| `main` (+ 2b, 2c) | **−18 to −141 px, every append, and it stays** |
+| + 3a | **0 px in all 16 appends** |
+
+The row that migrates itself (watching buffer row 0 instead of row 10):
+**−4 px on every migration** with the first version of 3a — `.agent-document`'s
+own flex gap made the head/buffer seam two gaps (Codex P2 on #3610) — and
+**0 px** once the virtualizer cancels it (`margin-bottom: -4px`, tied to
+`ROW_GAP_PX` by a test).
+
+On `main` the shift never corrects: the migrated node is far above the
+viewport, so it is never mounted in the head, never measured, and its
+estimate error (plus the 4 px gap the head did not have) stays in the layout.
+Anyone reading the buffer while an agent streams saw the text jump on every
+migration. With 3a the store places head rows `ROW_GAP_PX` apart (the buffer's
+flex gap, tied by a test) and a migrating node enters with the height the
+buffer last laid it out at (ResizeObserver, no forced layout), in the same
+batch that adds it.
 
 ### 2.3 `main` baseline, direct mode (Phase 0)
 
