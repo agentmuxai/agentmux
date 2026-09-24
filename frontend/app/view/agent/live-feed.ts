@@ -71,18 +71,23 @@ export function splitTurns(nodes: readonly DocumentNode[]): Turn[] {
 /**
  * Content the transcript can't rebuild, so its turn must stay (§6.9):
  * AgentMux's in-pane shell runs (a memory ring on the backend — not the
- * agent's Bash tool, which is an ordinary tool node), and an AskUserQuestion
- * whose answer was filled in optimistically (replay has no source for it).
+ * agent's Bash tool, which is an ordinary tool node).
+ *
+ * An answered AskUserQuestion is NOT blocked: the answer reaches the
+ * transcript as the tool's result ("User has answered your questions: …",
+ * written by the CLI when the turn resumes), so History shows it. Only its
+ * styled rendering (`answerText` / `questionText`) and the client-side
+ * auto-fill note are optimistic, and those fields are never cleared once set
+ * (reducer `mergeReplacement`) — blocking on them would keep every such turn
+ * forever (ReAgent review). An unanswered question is kept anyway: it is in
+ * progress (`isNodeInProgress`).
+ *
  * Live-only decoration rows (stderr, notifications, "Interrupted", heuristic
  * compaction markers) are ephemeral, not content: they roll off with their
  * turn, as any reload drops them today.
  */
 export function blocksRollOff(node: DocumentNode): boolean {
-    if (node.type === "shell") return true;
-    if (node.type === "tool") {
-        return node.answerText != null || node.questionText != null || node.timeoutNote != null;
-    }
-    return false;
+    return node.type === "shell";
 }
 
 export interface RollOffInput {

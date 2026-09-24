@@ -74,6 +74,14 @@ describe("planRollOff", () => {
         expect(ids(kept).slice(0, 3)).toEqual(["u2", "sh", "a2"]);
     });
 
+    it("rolls off a turn with an answered question like any other", () => {
+        const nodes = turns(8);
+        nodes.splice(1, 0, tool("ask", { tool: "Other", answerText: "A", questionText: "Q?" }));
+        const plan = planRollOff(nodes, { keepTurns: 3, visibleIds: none, pinned: true })!;
+        expect(plan.blockedTurns).toBe(0);
+        expect(plan.ranges[0].start).toBe(0);
+    });
+
     it("keeps a turn with a node still in progress", () => {
         const nodes = turns(8);
         nodes.splice(1, 0, tool("t-running", { status: "running" }));
@@ -109,9 +117,11 @@ describe("planRollOff", () => {
 });
 
 describe("blocksRollOff", () => {
-    it("blocks in-pane shells and optimistically answered questions, not ordinary tools or decorations", () => {
+    it("blocks in-pane shells, not tools (answered questions included) or decorations", () => {
         expect(blocksRollOff(shell("s"))).toBe(true);
-        expect(blocksRollOff(tool("q", { answerText: "yes" }))).toBe(true);
+        // The answer is in the transcript as the tool's result; only its
+        // styled rendering is optimistic, and those fields never clear.
+        expect(blocksRollOff(tool("q", { answerText: "yes", questionText: "ok?" }))).toBe(false);
         expect(blocksRollOff(tool("t"))).toBe(false);
         expect(blocksRollOff(md("stderr-1"))).toBe(false);
         expect(blocksRollOff(user("u"))).toBe(false);
