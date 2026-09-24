@@ -1,6 +1,6 @@
 # Agent pane scroll-follow: one owner, one intent-based state machine
 
-**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) ships with this spec on branch `agent2/scroll-follow-phase0`; Phases 1–5 not started.
+**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) ships with this spec in PR #3652; Phases 1–5 not started.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi): "rock solid scrollbar for agent panes … this may need an architecture rethink, perhaps a DRY round."
 **Author:** Agent2.
