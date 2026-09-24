@@ -799,7 +799,24 @@ to §6.3.6; paths under `agentmux-srv/src/`):
    the database inside a read transaction rather than the per-process
    cache. `read_range` accepts `expectGen` and answers `genMismatch` rather
    than returning another generation's lines, so a replace landing between a
-   count and a read can't mix two files.
+   count and a read can't mix two files. As built in 5a-3b:
+   - **Stream names.** The stream is `g:<zone>` when the read is served from
+     the agent's global zone, `b:<blockId>` otherwise.
+   - **Line count.** It answers from the counter (O(1)). A legacy row gets
+     `init_line_counter` first, on the blocking pool; only a file that can't
+     be counted falls back to the index. The local-block path now counts the
+     file too, instead of the `session:line_count` meta, so it matches what
+     `read_range` serves.
+   - **Proving the generation.** `read_range` reads the generation before
+     and after its lines; only an unchanged value proves the lines belong to
+     it, and only then does the response name it. With `expect_gen`, a
+     change is `gen_mismatch` (`lines: []`).
+   - **Replace and delete events.** `session:restore` publishes
+     `fileop: "replace"` with the new generation and line count;
+     `session:archive` publishes `fileop: "delete"`.
+     `agent:session:archive` is keyed by agent definition, not block, so its
+     event waits for the consumer design in 5a-4. Until then a pane detects
+     the change by the generation mismatch on its next read.
 7. **Consumer contract (frontend part of 5a).** Per pinned `(stream, gen)`
    the stream hook keeps `next`, the next line it expects:
    - `line < next`: duplicate, dropped.
