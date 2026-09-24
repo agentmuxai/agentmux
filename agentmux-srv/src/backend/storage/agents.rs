@@ -2759,27 +2759,86 @@ fn slug_held_by_another(
 /// fold (`to_lowercase`). A template row is skipped, as in
 /// [`tombstone_key_names`]. Idempotent.
 fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
-    let slug: Option<String> = conn
+    let names: Option<(String, String, String)> = conn
         .query_row(
-            "SELECT slug FROM db_agents WHERE id = ?1 AND is_template = 0",
+            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
             params![id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map(Some)
         .or_else(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             e => Err(e),
         })?;
-    // Not trimmed: the key tables file the name exactly as sent, folded.
-    let Some(name) = slug
-        .map(|s| s.to_lowercase())
-        .filter(|s| !s.trim().is_empty())
-    else {
+    let Some((slug, name, instance_name)) = names else {
         return Ok(0);
     };
-    if slug_held_by_another(conn, id, &name)? {
-        return Ok(0);
+    let mut removed = 0;
+    for key_name in key_names_of(&slug, &name, &instance_name) {
+        if key_name_used_by_another(conn, id, &key_name)? {
+            continue;
+        }
+        removed += delete_key_rows(conn, &key_name)?;
     }
+    if removed > 0 {
+        tracing::info!(
+            agent = id,
+            removed,
+            "identity M4d-1: deleted the dead agent's name-keyed signing keys"
+        );
+    }
+    Ok(removed)
+}
+
+/// Every name a key row could be filed under for this agent, folded as the
+/// key tables fold (`to_lowercase`) — identity M4d-1 (spec §6.5.10). The
+/// slug exactly as sent (M4a-3); the display name and `instance_name`,
+/// trimmed, as the tombstone records them; and `agent.open`'s fallback id,
+/// the display name lowercased with non-alphanumerics made `-` (used when a
+/// definition has no slug: `Zed Bot` is keyed `zed-bot`).
+fn key_names_of(slug: &str, name: &str, instance_name: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut push = |n: String| {
+        if !n.trim().is_empty() && !names.contains(&n) {
+            names.push(n);
+        }
+    };
+    push(slug.to_lowercase());
+    push(name.trim().to_lowercase());
+    push(instance_name.trim().to_lowercase());
+    push(agent_open_fallback_id(name));
+    names
+}
+
+/// `agent.open`'s id for a definition with no slug (`agent_open.rs`).
+fn agent_open_fallback_id(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect()
+}
+
+/// Whether another row signs under `folded`: holds it as its slug, or has no
+/// slug and `agent.open` would give it that id. Such a key is that agent's,
+/// not the deleted one's.
+fn key_name_used_by_another(
+    conn: &rusqlite::Connection,
+    id: &str,
+    folded: &str,
+) -> Result<bool, StoreError> {
+    let mut stmt = conn.prepare("SELECT slug, name FROM db_agents WHERE id != ?1")?;
+    let rows = stmt.query_map(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (slug, name) = row?;
+        if slug.to_lowercase() == folded || (slug.is_empty() && agent_open_fallback_id(&name) == folded) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Delete one name's rows from the three name-keyed key tables.
+fn delete_key_rows(conn: &rusqlite::Connection, name: &str) -> Result<usize, StoreError> {
     let mut removed = 0;
     for table in [
         "db_agent_jekt_keys",
@@ -2798,13 +2857,6 @@ fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize,
                 params![name],
             )?;
         }
-    }
-    if removed > 0 {
-        tracing::info!(
-            agent = id,
-            removed,
-            "identity M4a-3: deleted the dead agent's name-keyed signing keys"
-        );
     }
     Ok(removed)
 }
