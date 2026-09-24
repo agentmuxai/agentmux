@@ -96,7 +96,7 @@ export interface AgentDocumentVirtualListProps {
     scrollCommand?: Accessor<ScrollCommand | null>;
     /** Wire-up callback so the parent (AgentFooter via AgentDocumentView)
      *  can invoke jumpToBottom on user keystroke. */
-    scrollToBottomRef?: (fn: () => void) => void;
+    scrollToBottomRef?: (fn: (reason?: string) => void) => void;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     /** Hold a tool expanded after it completes live on screen (ToolBlock calls
@@ -219,6 +219,49 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     let scrollbarPointerHeld = false;
     const hasRecentUserScrollInput = (): boolean =>
         scrollbarPointerHeld || performance.now() - lastUserScrollInputAt <= USER_INPUT_WINDOW_MS;
+
+    // ── Follow-state transition log (spec invariant I4) ──────────────────
+    // Every stickToBottom change emits exactly one line:
+    //   [scroll-follow] pane=abc1234 following→detached cause=user-scroll gap=412px
+    // so a pane that stopped following always says why in
+    // `muxlog fe grep scroll-follow`. Bug A (spec §2.1) was invisible for
+    // months precisely because its disengage path logged nothing.
+    //
+    // Call sites go through transitionFollow(), which publishes its cause
+    // BEFORE applying the change. Solid may run the effect below either
+    // synchronously inside apply() (a setter called outside an update) or
+    // later (a setter called from inside another effect); whichever of the
+    // two observes the change first logs it, with that cause, exactly once —
+    // `lastLoggedFollow` is the dedupe. A change that did NOT come through
+    // transitionFollow() has no published cause and logs as cause=external,
+    // so no path can be silent. `data-follow-state` on the scroller mirrors
+    // the state for CDP / tests.
+    const paneTag = (): string => props.blockId?.slice(0, 7) ?? "?";
+    const followLabel = (on: boolean): string => (on ? "following" : "detached");
+    let lastLoggedFollow = untrack(props.viewState.stickToBottom);
+    let pendingFollowCause: { cause: string; detail?: string } | null = null;
+    const logFollowIfChanged = (now: boolean): void => {
+        if (now === lastLoggedFollow) return;
+        const { cause, detail } = pendingFollowCause ?? { cause: "external" };
+        console.info(
+            "[scroll-follow]",
+            `pane=${paneTag()}`,
+            `${followLabel(lastLoggedFollow)}→${followLabel(now)}`,
+            `cause=${cause}${detail ? ` ${detail}` : ""}`,
+        );
+        lastLoggedFollow = now;
+    };
+    const transitionFollow = (cause: string, detail: string | undefined, apply: () => void): void => {
+        pendingFollowCause = { cause, detail };
+        try {
+            apply();
+            logFollowIfChanged(untrack(props.viewState.stickToBottom));
+        } finally {
+            pendingFollowCause = null;
+        }
+    };
+    console.info("[scroll-follow]", `pane=${paneTag()}`, `mount ${followLabel(lastLoggedFollow)}`);
+    createEffect(() => logFollowIfChanged(props.viewState.stickToBottom()));
     // Last scrollHeight observed at a pin-correction call — diagnostic only,
     // see docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md.
     // A shrink between two consecutive calls means content that was already
@@ -907,10 +950,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     });
 
     // jumpToBottom: forced scroll-to-bottom that re-engages stick.
-    // Exposed to parent so AgentFooter can call it on keystroke.
-    const jumpToBottom = (): void => {
+    // Exposed to parent so AgentFooter can call it on keystroke. `reason`
+    // (typing / sent / queued-turn) only feeds the transition log.
+    const jumpToBottom = (reason?: string): void => {
         if (!scrollRef) return;
-        props.viewState.engageStickToBottom();
+        transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
         scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
@@ -944,7 +988,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
             scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
         }
-        props.viewState.disengageStickToBottom();
+        transitionFollow("jump-to-node", `node=${nodeId.slice(0, 8)}`, () => props.viewState.disengageStickToBottom());
     };
 
     // React to jump commands from the parent's useScrollToNode hook.
@@ -1096,7 +1140,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
         if (nearBottom) {
             if (!props.viewState.stickToBottom()) {
-                props.viewState.engageStickToBottom();
+                transitionFollow(
+                    hadUserInput ? "user-scroll-to-bottom" : "reached-bottom",
+                    `gap=${Math.round(scrollHeight - clientHeight - scrollTop)}px`,
+                    () => props.viewState.engageStickToBottom(),
+                );
             }
         } else {
             if (props.viewState.stickToBottom()) {
@@ -1122,7 +1170,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
                         `disengage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight} gap=${gapPx}px`,
                     );
-                    props.viewState.disengageStickToBottom();
+                    transitionFollow(
+                        scrollbarPointerHeld ? "user-scroll:scrollbar" : "user-scroll",
+                        `gap=${Math.round(gapPx)}px`,
+                        () => props.viewState.disengageStickToBottom(),
+                    );
                 }
             }
         }
@@ -1178,7 +1230,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                     [{ id: anchorId, offsetPx: anchorOffsetPx }],
                     scrollTop,
                 );
-                if (anchor) props.viewState.captureHeadAnchor(anchor);
+                if (anchor) {
+                    transitionFollow("load-older", `scrollTop=${Math.round(scrollTop)}`, () => props.viewState.captureHeadAnchor(anchor));
+                }
             }
 
             loadingOlderInFlight = true;
@@ -1370,7 +1424,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // virtualized head, and the streaming buffer. headerSlot offsets
     // the rows; the slice's scrollMargin (fed above) accounts for it.
     return (
-        <div class="agent-document" ref={scrollRef} onScroll={handleScroll}>
+        <div
+            class="agent-document"
+            ref={scrollRef}
+            onScroll={handleScroll}
+            data-follow-state={followLabel(props.viewState.stickToBottom())}
+        >
             {props.headerSlot}
             {/* Virtualized head — only present when document > buffer size.
                 Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM

@@ -1485,7 +1485,7 @@ const AgentPresentationView = ({
         // below (assigned once AgentDocumentView mounts); referencing it in
         // this closure is safe regardless of declaration order since the
         // closure only runs later, on a live `agent-message-accepted` event.
-        onTurnStartFromQueue: () => scrollToBottomFn?.(),
+        onTurnStartFromQueue: () => scrollToBottomFn?.("queued-turn"),
     });
 
     // Mutable ref to the scrollToBottom function exposed by
@@ -1495,7 +1495,7 @@ const AgentPresentationView = ({
     // item #1). Declared here so both useAgentCommands and the JSX below
     // can close over the same reference; assigned once AgentDocumentView
     // mounts via scrollToBottomRef.
-    let scrollToBottomFn: (() => void) | null = null;
+    let scrollToBottomFn: ((reason?: string) => void) | null = null;
 
     // True once the pane's in-flight Bash tool call has been promoted to a
     // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
@@ -1675,7 +1675,7 @@ const AgentPresentationView = ({
         // Scroll the user's own message into view after Enter. The hook
         // defers this to the next animation frame so the mounted node is
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
-        onSent: () => scrollToBottomFn?.(),
+        onSent: () => scrollToBottomFn?.("sent"),
         pendingMessages,
     });
 
@@ -2710,7 +2710,7 @@ const AgentPresentationView = ({
                     agentName={agentName()}
                     onSendMessage={handleSendMessage}
                     onTyping={() => {
-                        scrollToBottomFn?.();
+                        scrollToBottomFn?.("typing");
                     }}
                     onStopAgent={handleEscapeOnEmptyComposer}
                     onRecallLatestQueued={commands.recallLatestHeld}
