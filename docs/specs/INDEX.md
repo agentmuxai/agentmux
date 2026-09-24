@@ -501,6 +501,7 @@ partial list.
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
+| [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
@@ -864,7 +865,6 @@ partial list.
 | [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14`](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | SPEC: Internal-event → frontend WaveObjUpdate bridge |
 | [`SPEC_OPENCLAW_AGENT_2026_05_17`](SPEC_OPENCLAW_AGENT_2026_05_17.md) | SPEC: OpenClaw integration — shared interfaces, distinct flavor |
 | [`SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16`](SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md) | SPEC: OpenEditor — collapsed file-tree + floating-pane support |
-| [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md) | SPEC: OS-level activity indicator when an agent is busy |
 | [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30`](SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md) | SPEC: Pane Icon and Text Visibility Pass |
