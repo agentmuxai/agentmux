@@ -1,6 +1,6 @@
 # SPEC — The Windows CEF runtime guard rejects the correct runtime whenever its path contains a backslash
 
-**Status:** proposed — fixes a regression in #3615 (`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md`).
+**Status:** implemented — PR #3639; fixes a regression in #3615 (`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md`).
 **Date:** 2026-09-24
 **Author:** Agent1
 **Severity:** High.
