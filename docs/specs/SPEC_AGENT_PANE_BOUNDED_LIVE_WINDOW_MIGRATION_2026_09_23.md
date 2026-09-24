@@ -1282,16 +1282,24 @@ goal):
 - It reuses `TranscriptCursor` (`frontend/app/view/agent/transcript-cursor.ts`)
   as-is on the source block's output file subject: settled from its own
   initial read (`historyPin`, same file), gaps filled by
-  range reads, duplicates dropped, the same 5 s line-count poll for other
+  range reads (a gap it won't fill makes History reload — "No silent holes"
+  below), duplicates dropped, the same 5 s line-count poll for other
   writers to the agent's shared zone while visible. Echoes are parsed (they
   are the user's messages; History has no optimistic copy).
-- Parsing is O(new lines). Publishing to the view is coalesced to at most
-  once a second.
+- Parsing an append is O(new lines). Publishing is coalesced to at most once
+  a second and costs O(loaded nodes) — day dividers are re-derived and the
+  virtual list takes a new node array, as the live feed's stores do per flush
+  (the class of cost Phase 4 removes, deferred on measurement). The History
+  PR records the publish cost at 200 turns in the tracker; if it shows as a
+  stall, dividers and the document become incremental there (Codex review).
 - **A dormant tab does no work** (Codex review): events are not handed to the
   cursor at all, so nothing is decoded or parsed; the tab only notes that one
-  arrived. On reveal it reads the line count once: a gap within
-  `GAP_FILL_MAX_LINES` (5,000) is filled by the cursor's chunked range reads;
-  a larger one reloads the newest page instead.
+  arrived — and whether any of them was a truncate, replace or delete. On
+  reveal: a missed truncate/replace/delete reloads; otherwise one line-count
+  read decides — a different stream or generation than the cursor's pin
+  reloads (`TranscriptCursor` ignores such counts, so they must not be handed
+  to it), a gap within `GAP_FILL_MAX_LINES` (5,000) is filled by the cursor's
+  chunked range reads, and a larger one reloads the newest page.
 - **No silent holes** (Codex review): the cursor skips a gap over 5,000 lines
   (or a read that fails or names a vanished generation) by advancing past it,
   which in History would leave lines missing *below* the loaded range, where
@@ -1341,7 +1349,7 @@ Every phase:
 | **4 — O(log n) stores (D)** | §6.6 | Property tests: 100k random sequences per run in CI, 10M locally, 0 divergences; reducer bench flat from 1k to 100k nodes |
 | **5 — Node identity and durability (C prerequisites)** — re-planned as 5a–5e in §6.3.6 | §6.3.1–§6.3.3: positional ids with file generation, `src`/`endLine`/`turn`, full-pipeline parser checkpoints + `parser-checkpoints.jsonl` + one-time index rebuild, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range restored from any checkpoint, in any page order, yields the same ids, nodes and turn ordinals as a parse from line 0 (100k random splits per CI run, every provider format, hidden reinjection included); the checkpoint-schema key test is in CI; replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
 | **6 — Bounded live document (C)** | **Revised: §6.9 live feed + roll-off** (supersedes §6.3.4–§6.3.5) | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
-| **7 — History tab follows (C)** | **Revised: §6.9 "History follows the transcript"** (supersedes §6.4); ships before 6 | Visible tab shows new turns ≤ 1 s after turn end; appends cost O(new lines) (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
+| **7 — History tab follows (C)** | **Revised: §6.9 "History follows the transcript"** (supersedes §6.4); ships before 6 | Visible tab shows new turns ≤ 1 s after turn end; parsing an append costs O(new lines), republishing ≤ 1 Hz (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
 | **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
 | **9 — Default on** | Remove flags once each phase has soaked; update `SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` Status to point here | 8 h soak and fault suite green on all three OSes; user sign-off after daily use |
 | **10 — `content-visibility` (§6.8)** | flagged experiment | memory flat over 8 h on all three OSes *and* measurable frame win; otherwise documented as rejected |
