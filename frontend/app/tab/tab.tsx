@@ -1,8 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { computeBlockActiveBorderColor } from "@/app/block/blockframe";
-import { atoms, MOS, recordTEvent, refocusNode } from "@/app/store/global";
+import { atoms, recordTEvent, refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
@@ -229,14 +228,11 @@ function Tab(props: TabProps): JSX.Element {
     // docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 
     // Visual twin of a tool-call tone from any pane in THIS tab, active or
-    // not — docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md. Clicks
-    // with the source pane's own color (the same resolution its frame and
-    // pill use), else this tab's color, else the accent.
+    // not — docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md. A subtle
+    // lift of the tab's own color (tab.scss); the pane's color is its pill's.
     onMount(() => {
         const unsubscribe = onActivityFlash(({ blockId }) => {
-            if (!tabData()?.blockids?.includes(blockId)) return;
-            const blockMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
-            flashElement(tabInnerRef, computeBlockActiveBorderColor(blockMeta) ?? tabColor());
+            if (tabData()?.blockids?.includes(blockId)) flashElement(tabInnerRef);
         });
         onCleanup(unsubscribe);
     });

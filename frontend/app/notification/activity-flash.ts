@@ -3,9 +3,10 @@
 
 /**
  * Activity flash — the visual twin of a tool-call tone. Every tone that
- * passes its policy gates also "clicks" the source's window tab and its own
- * pill in its pane header: an instant, bright, saturated version of the
- * pane's color that fades out fast.
+ * passes its policy gates also "clicks" the source's own pill in its pane
+ * header (a brightened, more saturated version of the pane's color) and,
+ * more subtly, its window tab (a slight lift of the tab's own color). Both
+ * appear instantly and fade out fast.
  *
  * Spec: docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
  *
@@ -45,9 +46,13 @@ export function onActivityFlash(listener: FlashListener): () => void {
 
 // ── Animation ────────────────────────────────────────────────────────────
 //
-// A click: instant attack to near-full strength, a hold just long enough to
+// A click: instant attack to full strength, a hold just long enough to
 // register the color, then a fast ease-out. Each tone is its own click; a
 // tone that lands mid-decay restarts from peak.
+//
+// The keyframes run the overlay from 1 to 0. HOW strong "full strength" is
+// lives in each stylesheet, as the alpha of its overlay fill: the pane pill
+// is a strong click in the pane's color, the window tab a faint tint.
 //
 // Photosensitivity (WCAG 2.3.1): the general flash threshold only applies
 // once the flashing area reaches roughly a 341×256 px block (25% of a 10°
@@ -61,7 +66,7 @@ export function onActivityFlash(listener: FlashListener): () => void {
 // guards against — and a fade is the substitution reduced-motion guidance
 // itself recommends.
 
-export const FLASH_PEAK_OPACITY = 0.9;
+export const FLASH_PEAK_OPACITY = 1;
 export const FLASH_HOLD_MS = 40;
 export const FLASH_DURATION_MS = 300;
 /** At most one restart per element per this window; extras are dropped. */

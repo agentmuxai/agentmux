@@ -12,6 +12,28 @@ this complements), `docs/specs/SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_
 
 ---
 
+## Revision 3 (2026-09-24): the window tab is subtle and uncolored; the pill is less bright
+
+Owner feedback on Revision 2. It replaces Revision 2's item 2 (color) for both
+targets and the peak opacity in item 3. Everything else in Revision 2 stands.
+
+1. **Window tab:** it never uses the pane's color. Its flash is a slight
+   offset of the tab's own normal color: a `--main-text-color` tint at
+   **0.12** alpha over whatever the tab already is, its own `tab:color`
+   included. That is just above the 0.1 hover tint. The tint is theme-aware,
+   so it lifts dark tabs and darkens light-theme tabs. The tab passes no base
+   color. The pane's color belongs to its pill.
+2. **Pane pill: less bright.** It is still the pane's own color
+   (`--pane-tab-underline`, else accent), brightened less:
+   `oklch(from <base> min(0.85, l + 0.06) c×1.4 h / 0.9)`, down from
+   `min(0.92, l + 0.15) c×1.6`. Measured live: an amber `#f59e0b` pill peaks
+   at `oklch(0.83 0.23 70)` (was 0.92 lightness), and an uncolored pill at
+   `oklch(0.74 0.18 243)` (was 0.83).
+3. **Intensity lives in the stylesheets.** The keyframes now run the overlay
+   from **1** to 0, and each target sets its own strength as the alpha of its
+   fill (pill 0.9, tab 0.12). Timing is unchanged: 40 ms hold, 300 ms total,
+   100 ms throttle.
+
 ## Revision 2 (2026-09-24): owner feedback after testing a dev build
 
 This revision **replaces** §2.1 (routing), the color and envelope parts of

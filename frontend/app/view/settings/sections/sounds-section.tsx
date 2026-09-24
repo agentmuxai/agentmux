@@ -89,7 +89,7 @@ export const SOUNDS_SETTINGS = {
     toolTonesFlash: {
         id: "sounds.tool_tones_flash",
         label: "Flash source tab",
-        description: "Briefly flash the window tab and pane tab each tone came from, in that pane's color",
+        description: "Briefly flash the pane tab each tone came from, in that pane's color, and subtly its window tab",
         section: "sounds",
         keywords: ["activity flash", "tab flash", "highlight tab", "which pane", "notify:tooltones:flash"],
     },

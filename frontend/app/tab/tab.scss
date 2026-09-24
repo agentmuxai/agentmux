@@ -66,16 +66,17 @@
         // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
         // Rests invisible; activity-flash.ts animates its opacity (compositor-
         // only, no layout/paint of the tab). `::after` is the active stripe.
-        // Fill: a brighter, more saturated version of the source pane's color
-        // (`--activity-flash-base`, set inline per flash by tab.tsx).
+        // Fill: deliberately subtle — a faint tint of the theme's text color
+        // over whatever the tab already is (its own `tab:color` included), so
+        // the flash reads as a slight offset of the tab's normal color. Just
+        // above the 0.1 hover tint. The pane's own color is its pill's flash
+        // (PaneTabStrip.scss), not this one.
         &::before {
             content: "";
             position: absolute;
             inset: 0;
             z-index: var(--zindex-activity-flash);
-            background: oklch(
-                from var(--activity-flash-base, var(--accent-color)) min(0.92, calc(l + 0.15)) calc(c * 1.6) h
-            );
+            background: rgb(from var(--main-text-color) r g b / 0.12);
             opacity: 0;
             pointer-events: none;
         }
