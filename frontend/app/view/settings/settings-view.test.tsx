@@ -37,6 +37,10 @@ vi.mock("./sections/sounds-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     SoundsSection: () => <div data-testid="sounds-section" />,
 }));
+vi.mock("./sections/notifications-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    NotificationsSection: () => <div data-testid="notifications-section" />,
+}));
 vi.mock("./sections/recording-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     RecordingSection: () => <div data-testid="recording-section" />,
@@ -67,11 +71,11 @@ describe("SettingsView rail", () => {
         return { ...result, model };
     }
 
-    it("orders the rail as Appearance, Window & Panes, Terminal, Sounds, Recording, Advanced", () => {
+    it("orders the rail as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Advanced", () => {
         renderSettings();
         const rail = screen.getByLabelText("Settings section", { selector: "nav.settings-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Recording", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {

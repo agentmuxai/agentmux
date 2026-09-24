@@ -48,6 +48,10 @@
     // "splash:disabled":          false,
 
     // -- App --
+    // Keep running with a system-tray icon when all windows are closed
+    // (background-service mode). Applies at the NEXT launch: the launcher
+    // reads this before the app itself is running.
+    // "app:runinbackground":      false,
     // "app:globalhotkey":         "",
     // "app:defaultnewblock":      "",
     // "app:showoverlayblocknums": false,

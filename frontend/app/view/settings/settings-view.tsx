@@ -11,6 +11,7 @@ import { AppearanceSection } from "./sections/appearance-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
 import { TerminalSection } from "./sections/terminal-section";
 import { SoundsSection } from "./sections/sounds-section";
+import { NotificationsSection } from "./sections/notifications-section";
 import { RecordingSection } from "./sections/recording-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
@@ -52,6 +53,7 @@ const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
     { id: "window",     label: SETTINGS_SECTION_LABELS.window,     icon: "table-cells" },
     { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "square-terminal" },
     { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
+    { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
     { id: "recording",  label: SETTINGS_SECTION_LABELS.recording,  icon: "microphone" },
     { id: "advanced",   label: SETTINGS_SECTION_LABELS.advanced,   icon: "sliders" },
 ];
@@ -145,6 +147,9 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     </Match>
                     <Match when={section() === "sounds"}>
                         <SoundsSection />
+                    </Match>
+                    <Match when={section() === "notifications"}>
+                        <NotificationsSection />
                     </Match>
                     <Match when={section() === "recording"}>
                         <RecordingSection />
