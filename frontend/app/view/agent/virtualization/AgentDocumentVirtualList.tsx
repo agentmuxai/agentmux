@@ -1129,16 +1129,19 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
         // Older-history pagination — capture anchor, fetch, restore.
         //
-        // Never from our own pin (trustPin), and never when there is nothing
-        // older to load. Capturing the anchor turns stick-to-bottom off, and
-        // a new session's first overflow is only a line or two — our own pin
-        // lands at scrollTop < NEAR_TOP_THRESHOLD_PX, so this used to capture
-        // an anchor on the pin's own scroll event, turn the follow off, and
-        // then load nothing (historyOffset 0): the pane silently stopped
-        // following until the user scrolled down by hand (spec §2.1).
+        // Only from a USER scroll (inside the user-input window; a held
+        // scrollbar drag keeps it open), and never when there is nothing
+        // older to load. Capturing the anchor turns stick-to-bottom off, so
+        // any other trigger silently stops the follow: our own pin (a new
+        // session's first overflow is a line or two, so the pin lands at
+        // scrollTop < NEAR_TOP_THRESHOLD_PX — the pane then loaded nothing and
+        // stopped following until the user scrolled down by hand, spec §2.1),
+        // or a browser-made scroll near the top (a clamp or anchoring
+        // adjustment after the range collapses and regrows — /clear, the
+        // whole-pane collapse — same class as §2.2 B2; ReAgent P1 on #3652).
         if (
             props.onLoadOlder &&
-            !trustPin &&
+            hadUserInput &&
             (props.hasOlderHistory?.() ?? true) &&
             isNearTop(scrollTop) &&
             !loadingOlderInFlight &&

@@ -341,6 +341,35 @@ describe("scroll-follow Phase 0 regressions", () => {
         expect(s.viewState.stickToBottom()).toBe(true);
     });
 
+    it("A: with older history, a browser-made scroll near the top (collapse + regrow) neither pages nor disengages", () => {
+        // ReAgent P1 on #3652: a pane that has already paginated once
+        // (historyOffset > 0) must not be exposed either. The range collapses
+        // (/clear, the whole-pane collapse) and regrows by a few px; the
+        // browser's own clamp/anchoring scroll lands near the top.
+        const s = setupWithHistory({ hasOlder: true, geo: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.g.set({ scrollHeight: 330, scrollTop: 20 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.onLoadOlder).not.toHaveBeenCalled();
+        expect(s.viewState.stickToBottom()).toBe(true);
+        expect(s.viewState.headAnchor()).toBeNull();
+    });
+
+    it("A: a scrollbar drag held to the top still pages when older history exists", () => {
+        const s = setupWithHistory({ hasOlder: true, geo: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.scrollRef.dispatchEvent(new Event("pointerdown")); // grab the scrollbar
+        clock += 3_000; // a slow drag, long past the input window
+        s.g.set({ scrollTop: 5 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+        window.dispatchEvent(new Event("pointerup"));
+    });
+
     it("A: a real user scroll to the top still pages when older history exists", () => {
         const s = setupWithHistory({ hasOlder: true, geo: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 } });
         triggerResize(s.buffer);
