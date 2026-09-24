@@ -1082,7 +1082,13 @@ export type AgentPaneEvent =
      * starts the looping ambient tone on this event.
      * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.3.
      */
-    | { type: "waiting-for-input" }
+    | {
+          type: "waiting-for-input";
+          /** Text of the first pending question, when known. Consumed by the OS
+           *  notification bridge, which forwards it to the srv router for
+           *  redaction (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §9.2). */
+          question?: string;
+      }
     /**
      * Emitted when the waiting state ends — user submitted or started
      * typing, pane closed, or the 5-minute safety cutoff fired.

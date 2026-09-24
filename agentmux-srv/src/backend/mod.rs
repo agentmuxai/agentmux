@@ -42,6 +42,7 @@ pub mod lan_discovery;
 pub mod lan_listeners;
 pub mod lsp;
 pub mod messagebus;
+pub mod notify;
 pub mod oref;
 pub mod process_tracker;
 pub mod reactive;
