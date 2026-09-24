@@ -87,6 +87,13 @@ export function forgetTabShown(tabId: string): void {
     shownTabIds.delete(tabId);
 }
 
+/** Forget every tab: called when `window:keepinactivetabslaidout` changes,
+ *  since a tab shown under the other hiding mode wasn't kept laid out while
+ *  inactive (ReAgent P2 on #3687). Each tab's next switch is gated once. */
+export function clearShownTabs(): void {
+    shownTabIds.clear();
+}
+
 /** A switch that skipped the gate; logged in the gate's own format so
  *  `scripts/tab-switch-report.mjs` measures both kinds the same way. */
 export function logUngatedReveal(tabId: string): void {

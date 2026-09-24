@@ -376,6 +376,14 @@ describe("shown-tab tracking", () => {
         expect(tabWasShown("tab-x")).toBe(true);
     });
 
+    test("forgets every tab when the hiding mode changes", async () => {
+        const { clearShownTabs, markTabShown, tabWasShown } = await import("./tab-reveal");
+        markTabShown("tab-a");
+        markTabShown("tab-b");
+        clearShownTabs();
+        expect(tabWasShown("tab-a") || tabWasShown("tab-b")).toBe(false);
+    });
+
     test("forgets a closed tab", async () => {
         const { forgetTabShown, markTabShown, tabWasShown } = await import("./tab-reveal");
         markTabShown("tab-closed");
