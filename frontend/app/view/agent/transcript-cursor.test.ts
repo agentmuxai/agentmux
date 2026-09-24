@@ -133,13 +133,18 @@ describe("TranscriptCursor", () => {
         expect(h.logs.some((l) => l.includes("generation gone"))).toBe(true);
     });
 
-    it("keeps its line on a re-count (new generation, same lines) and fills from there", async () => {
-        const h = harness({ lines: ["l0", "l1", "l2", "l3"], gen: "g2" });
+    it("never fills from a new generation at the old one's line: it joins at the event", async () => {
+        // Codex on #3663: replaced by a longer file whose replace event this
+        // pane missed. Lines 2..3 of the NEW file are unrelated to what the
+        // pane shows; reading them would splice another history in.
+        const h = harness({ lines: ["n0", "n1", "n2", "n3", "n4"], gen: "g2" });
         h.cursor.settle({ stream: G, gen: "g1", next: 2 });
-        h.cursor.push(append(["l3"], [[G, 3]], "g2"));
+        h.cursor.push(append(["n4"], [[G, 4]], "g2"));
         await flush();
-        expect(h.delivered).toEqual(["l2", "l3"]);
+        expect(h.reads).toEqual([]);
+        expect(h.delivered).toEqual(["n4"]);
         expect(h.cursor.stats.genChanges).toBe(1);
+        expect(h.cursor.position()).toEqual({ stream: G, gen: "g2", next: 5 });
     });
 
     it("joins a recreated file (a new generation starting below its line) at the event", () => {
@@ -270,24 +275,16 @@ describe("TranscriptCursor", () => {
         expect(h.reads).toEqual([]);
     });
 
-    it("follows a re-count seen by the poll, keeping its line", async () => {
-        // An older build's write made a reader re-count: same lines, new gen.
-        const h = harness({ lines: ["l0", "l1", "l2"], gen: "g2" });
-        h.cursor.settle({ stream: G, gen: "g1", next: 1 });
-        h.cursor.observeCount(3, G, "g2");
-        await flush();
-        expect(h.reads).toEqual([[1, 2, "g2"]]);
-        expect(h.delivered).toEqual(["l1", "l2"]);
-        expect(h.cursor.position()).toEqual({ stream: G, gen: "g2", next: 3 });
-    });
-
-    it("leaves a count in a new generation below its line (a recreated file) to the next event", async () => {
-        const h = harness({ lines: ["n0"], gen: "g2" });
-        h.cursor.settle({ stream: G, gen: "g1", next: 40 });
-        h.cursor.observeCount(1, G, "g2");
-        await flush();
-        expect(h.reads).toEqual([]);
-        expect(h.cursor.position()).toEqual({ stream: G, gen: "g1", next: 40 });
+    it("leaves a count in another generation, larger or smaller, to the next event", async () => {
+        // Codex on #3663: a count can't tell a re-count from a replacement.
+        for (const count of [3, 1]) {
+            const h = harness({ lines: ["n0", "n1", "n2"], gen: "g2" });
+            h.cursor.settle({ stream: G, gen: "g1", next: 2 });
+            h.cursor.observeCount(count, G, "g2");
+            await flush();
+            expect(h.reads).toEqual([]);
+            expect(h.cursor.position()).toEqual({ stream: G, gen: "g1", next: 2 });
+        }
     });
 
     it("resets on truncate and delete, and starts the new file from line 0", async () => {

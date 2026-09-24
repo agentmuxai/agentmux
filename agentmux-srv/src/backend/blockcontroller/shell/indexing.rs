@@ -214,8 +214,13 @@ pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
     let full = || build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen.clone());
 
     let Some(idx) = snap.derived else { return full() };
-    // An index built for another generation of `output` is no base at all.
-    if !labelled_for(&idx.meta, output_gen.as_deref()) {
+    // Extending reuses every entry but the last, so it needs proof that the
+    // index describes a prefix of THIS `output`: a valid generation, and the
+    // index labelled with it. An uncounted `output` has no such proof — an
+    // older build may have rewritten it (its `rev` moved, the epoch with it)
+    // to something longer than the index covers (Codex on #3663) — and an
+    // index built for another generation is no base at all. Both rebuild.
+    if output_gen.is_none() || !labelled_for(&idx.meta, output_gen.as_deref()) {
         return full();
     }
     let Some(bytes) = idx.bytes else { return full() };

@@ -902,17 +902,20 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      record of such a node (its echo event was lost in a socket drop) is
      dropped rather than becoming a second bubble. 5b replaces the text match
      with positional ids.
-   - **Generation change without an event.** Two cases:
-     - A re-count after an older build's write keeps every line's index and
-       only grows the file.
-     - `agent:session:archive` deletes a shared zone and has no block to
-       announce it on. The next session's first record is line 0 of a new
-       file.
-
-     So the cursor keeps `next` only when the event starts at or past it and
-     no unpositioned record came in between. Otherwise it joins the new
-     generation at the event. This is also how the agent-level archive
-     reaches an open pane, so it needs no event of its own.
+   - **Generation change without an event.** The cursor joins the new
+     generation at the event's own line and never fills from the new file at
+     the old one's line. A poll count in another generation is ignored until
+     an event arrives.
+     - **Why (amended in #3663):** as first built, a larger new generation
+       kept `next` on the theory that it was a re-count. Codex showed that
+       generation and position can't tell a re-count from a replacement, so
+       that rule could splice another history into the pane.
+     - **What's left:** older builds' appends no longer change the generation
+       (the counter is caught up, item 3), so a new generation now means a
+       rewrite or a new file.
+     - **The agent-level archive:** `agent:session:archive` deletes a shared
+       zone and has no block to announce it on. It reaches an open pane this
+       way too: the next session's first record joins it.
    - **Resets.**
      - `truncate` keeps today's reducer-gated `StreamTruncate`.
      - `replace` (restore) and `delete` (archive) only move the cursor, and
