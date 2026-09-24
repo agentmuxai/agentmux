@@ -2865,6 +2865,7 @@ fn wrap_with_channel(
         requires_stop,
         "msg-1",
         "normal",
+        None,
     )
 }
 
@@ -3741,4 +3742,69 @@ async fn an_attributed_delivery_audits_its_sender_uid_and_only_its_own() {
     assert!(nudges.iter().all(|e| e.audit_source_uid == "uid-sup"), "{nudges:?}");
     handler.inject_message(InjectionRequest { audit_source_uid: String::new(), ..attributed });
     assert_eq!(handler.get_audit_log(1)[0].audit_source_uid, "", "restored after the decision");
+}
+
+/// Durable jekt §2.4: a held message is delivered with the verdict it was
+/// accepted with — a forged one stays unverified and escalated — and its
+/// header shows the original send time and how long it was held.
+#[tokio::test]
+async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
+    let delivered: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = delivered.clone();
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |_: &str, data: &[u8]| {
+        sink.lock().unwrap().push(String::from_utf8_lossy(data).into_owned());
+        Ok(())
+    }));
+    handler
+        .register_agent_full("heldz", "heldz-block", None, 0, None, Some("uid-heldz"), "test")
+        .unwrap();
+    let sent_at_ms = 1_000_000_000_000_i64;
+    let row = crate::backend::storage::jekt_held::HeldJekt {
+        request_id: "req-heldz".into(),
+        target_uid: "uid-heldz".into(),
+        target_agent: "heldz".into(),
+        source_agent: "sender".into(),
+        audit_source_uid: String::new(),
+        message: "do the thing".into(),
+        priority: "normal".into(),
+        jekt_tier: String::new(),
+        delivery_tier: "host".into(),
+        sig_verified: Some(false),
+        reagent_verified: None,
+        lan_verified: None,
+        channel_verified: None,
+        is_transcript_request: false,
+        transcript_request_escalate_forced: false,
+        sent_at_ms,
+        expires_at_ms: sent_at_ms + 1,
+        attempts: 0,
+        last_error: String::new(),
+    };
+    // A verified transcript request whose escalation was forced at accept
+    // time keeps it: replay restores the fields, never recomputes them by
+    // the UID it addresses (review of #3632).
+    let forced = crate::backend::storage::jekt_held::HeldJekt {
+        request_id: "req-heldz-tr".into(),
+        sig_verified: Some(true),
+        is_transcript_request: true,
+        transcript_request_escalate_forced: true,
+        ..row.clone()
+    };
+    let resp = handler.inject_held(crate::server::jekt_held::request_from_held(&forced));
+    assert!(resp.success, "{:?}", resp.error);
+    let text = delivered.lock().unwrap().join("");
+    assert!(text.contains("TRUST=host-verified") && text.contains("ESCALATE=required"), "{text}");
+    delivered.lock().unwrap().clear();
+
+    let req = crate::server::jekt_held::request_from_held(&row);
+    let resp = handler.inject_held(req);
+    assert!(resp.success, "{:?}", resp.error);
+    let text = delivered.lock().unwrap().join("");
+    assert!(text.contains("TRUST=unverified"), "a forged verdict survives: {text}");
+    assert!(text.contains("ESCALATE=required"), "{text}");
+    assert!(text.contains("HELD_FOR="), "{text}");
+    assert!(text.contains(&format!("TS={}", sent_at_ms / 1000)), "original send time: {text}");
+    let audit = handler.get_audit_log(1);
+    assert_eq!(audit[0].outcome.as_deref(), Some("held_delivered"));
 }

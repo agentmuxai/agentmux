@@ -22,6 +22,7 @@ mod messagebus;
 pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
+pub(crate) mod jekt_held;
 pub(crate) mod actor;
 pub(crate) mod service;
 mod shell_handlers;
