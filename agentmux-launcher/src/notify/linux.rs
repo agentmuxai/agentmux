@@ -77,6 +77,22 @@ pub fn texts(n: &Notification, body_markup: bool) -> (String, String) {
     (n.title.clone(), if body_markup { escape_markup(&body) } else { body })
 }
 
+/// `(urgency, expire_timeout, resident)` for a notification.
+///
+/// Attention (needs input / crashed / needs review) must not silently expire
+/// before the user sees it (ReAgent P1 on #3668) — so it never expires
+/// (`expire_timeout = 0`) and is `resident` (stays in the list after an
+/// action). It deliberately stays at urgency **1**, not 2: "critical" breaks
+/// through Do Not Disturb on GNOME, which the spec forbids (§5.1, §6.0) —
+/// Windows' High priority doesn't bypass Focus either.
+pub fn delivery(n: &Notification) -> (u8, i32, bool) {
+    if n.is_attention() {
+        (1, 0, true)
+    } else {
+        (1, -1, false)
+    }
+}
+
 /// Map a `NotificationClosed` reason to user feedback: only 2 ("dismissed by
 /// the user") counts.
 pub fn closed_is_user_dismissal(reason: u32) -> bool {
@@ -129,7 +145,11 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                         let (summary, body) = texts(&n, body_markup);
                         let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
                         hints.insert("desktop-entry", Value::from("agentmux"));
-                        hints.insert("urgency", Value::from(1u8));
+                        let (urgency, timeout, resident) = delivery(&n);
+                        hints.insert("urgency", Value::from(urgency));
+                        if resident {
+                            hints.insert("resident", Value::from(true));
+                        }
                         let args = (
                             "AgentMux",
                             replaces,
@@ -138,7 +158,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                             body.as_str(),
                             vec!["default", "Open"],
                             hints,
-                            -1i32,
+                            timeout,
                         );
                         match conn.call_method(Some(DEST), PATH, Some(IFACE), "Notify", &args).await {
                             Ok(reply) => {
@@ -224,6 +244,16 @@ mod tests {
         assert_eq!(texts(&n(Some(evil)), true).1, "&lt;a href='x'&gt;click&lt;/a&gt; &amp; more");
         assert_eq!(texts(&n(Some(evil)), false).1, evil);
         assert_eq!(texts(&n(None), true), ("lark needs your input".to_string(), String::new()));
+    }
+
+    #[test]
+    fn attention_never_expires_but_never_goes_critical() {
+        let mut a = n(None);
+        a.priority = "attention".into();
+        assert_eq!(delivery(&a), (1, 0, true));
+        let mut normal = n(None);
+        normal.priority = "normal".into();
+        assert_eq!(delivery(&normal), (1, -1, false));
     }
 
     #[test]
