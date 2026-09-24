@@ -19,9 +19,15 @@ const getMemory = vi.fn();
 const loggerWarn = vi.fn();
 const checkNodejsAvailable = vi.fn();
 
+const resolveCli = vi.fn();
+// A plain function, not a vi.fn, for the failure case: vitest reports what a
+// vi.fn implementation throws as a test error even when the caller catches it.
+let resolveCliImpl: ((...args: unknown[]) => unknown) | null = null;
+
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         GetBundleCommand: (...args: unknown[]) => getMemory(...args),
+        ResolveCliCommand: (...args: unknown[]) => (resolveCliImpl ?? resolveCli)(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -32,14 +38,16 @@ vi.mock("@/app/store/global", () => ({
     getApi: () => ({ checkNodejsAvailable: (...args: unknown[]) => checkNodejsAvailable(...args) }),
 }));
 
+import * as launchEnv from "./agent-launch-env";
 import {
     checkNodejsForProvider,
     commitLaunch,
+    resolveCliBin,
     resolveEffectiveLaunchProvider,
     resolveInitialRuntimeConfig,
 } from "./agent-launch-env";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
-import type { ProviderModel } from "./providers/types";
+import type { ProviderDefinition, ProviderModel } from "./providers/types";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 function agentWith(provider: string, memory_id: string): AgentDefinition {
@@ -257,5 +265,72 @@ describe("commitLaunch (identity M4b-3)", () => {
         });
         expect(h.calls).toEqual(["create", "setMeta:null", "resync"]);
         expect(result).toEqual({ ok: true, instanceId: null });
+    });
+});
+
+describe("resolveCliBin", () => {
+    // Agent3 on 0.57.0 (2026-09-24): the frontend built the CLI path itself as
+    // `<global ~/.agentmux>/instances/v<ver>/cli/<p>/node_modules/.bin/<cli>`,
+    // but since v0.56.7 the backend installs CLIs under the channel's data dir,
+    // and the path had no `.cmd` on Windows. The backend spawns whatever the
+    // pane's `cmd` meta says, so every spawn failed "path not found".
+    const provider = {
+        id: "claude",
+        cliCommand: "claude",
+        npmPackage: "@anthropic-ai/claude-code",
+        pinnedVersion: "latest",
+        windowsInstallCommand: "irm https://example/install.ps1 | iex",
+        unixInstallCommand: "curl -fsSL https://example/install.sh | bash",
+    } as unknown as ProviderDefinition;
+    const channelCli = String.raw`C:\Users\u\.agentmux\channels\local-main-x\versions\0.57.0\data\instances\v0.57.0\cli\claude/node_modules/.bin/claude.cmd`;
+
+    beforeEach(() => {
+        resolveCli.mockReset();
+        resolveCliImpl = null;
+    });
+
+    it("returns the path the backend resolved, not one built from the host's home dir", async () => {
+        resolveCli.mockResolvedValue({ cli_path: channelCli, version: "2.1.280", source: "local_install" });
+        await expect(resolveCliBin(provider, "block-1")).resolves.toBe(channelCli);
+    });
+
+    it("asks ResolveCli with the provider's install fields and the pane's block id", async () => {
+        resolveCli.mockResolvedValue({ cli_path: channelCli, version: "x", source: "local_install" });
+        await resolveCliBin(provider, "block-1");
+        expect(resolveCli).toHaveBeenCalledTimes(1);
+        const [, data, opts] = resolveCli.mock.calls[0];
+        expect(data).toEqual({
+            provider_id: "claude",
+            cli_command: "claude",
+            npm_package: "@anthropic-ai/claude-code",
+            pinned_version: "latest",
+            windows_install_command: provider.windowsInstallCommand,
+            unix_install_command: provider.unixInstallCommand,
+            block_id: "block-1",
+        });
+        // A first launch may npm-install; same budget as launch-flow.ts.
+        expect(opts).toEqual({ timeout: 300000 });
+    });
+
+    it("throws instead of returning an empty path", async () => {
+        resolveCli.mockResolvedValue({ cli_path: "", version: "", source: "" });
+        await expect(resolveCliBin(provider, "block-1")).rejects.toThrow(/no CLI path/);
+    });
+
+    it("propagates a backend failure (e.g. CLI missing and not installable)", async () => {
+        resolveCliImpl = async () => {
+            throw new Error('{"code":"AMX-CLI-001"}');
+        };
+        let caught: unknown = null;
+        try {
+            await resolveCliBin(provider, "block-1");
+        } catch (e) {
+            caught = e;
+        }
+        expect(String(caught)).toContain("AMX-CLI-001");
+    });
+
+    it("no longer exports the host-home path builder", () => {
+        expect((launchEnv as Record<string, unknown>).resolveCliDir).toBeUndefined();
     });
 });
