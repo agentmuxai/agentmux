@@ -2541,7 +2541,13 @@ async fn handle_agent_preset_get(
             )
                 .into_response();
         }
-        return app_api_response(app_api::bundle_self_get_impl(&state, &q.agent_id).await);
+        return app_api_response(
+            app_api::bundle_self_get_impl(
+                &state,
+                app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.preset_owner_by_name"),
+            )
+            .await,
+        );
     }
     app_api_response(app_api::bundle_get_impl(&state, &q.id, &q.name).await)
 }
@@ -2565,7 +2571,13 @@ async fn handle_agent_identity_accounts(
         actor::ActorSite::IdentityAccounts,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::identity_self_accounts_impl(&state, &q.agent_id).await)
+    app_api_response(
+        app_api::identity_self_accounts_impl(
+            &state,
+            app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.identity_owner_by_name"),
+        )
+        .await,
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -2589,7 +2601,12 @@ async fn handle_agent_identity_validate(
         Some(&req.agent_id),
     );
     app_api_response(
-        app_api::identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await,
+        app_api::identity_account_validate_stored_impl(
+            &state,
+            app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.identity_owner_by_name"),
+            &req.account_id,
+        )
+        .await,
     )
 }
 
