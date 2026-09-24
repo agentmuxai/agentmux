@@ -1060,14 +1060,24 @@ impl<'a> SelfOwner<'a> {
         }
     }
 
+    /// The calling agent's row — a UID whose row is gone (a token that
+    /// outlived its agent) is an error on every path, never an empty history
+    /// or listing (ReAgent P1 on #3602).
+    fn caller_row(
+        uid: &str,
+        mstore: &crate::backend::storage::store::Store,
+    ) -> Result<crate::backend::storage::AgentDefinition, String> {
+        mstore
+            .agent_def_get(uid)
+            .map_err(|e| format!("memory: store: {e}"))?
+            .ok_or_else(|| format!("memory: calling agent {uid} not found"))
+    }
+
     /// The owner's live memory directory.
     fn dir(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
         match self {
             Self::Uid(uid) => {
-                let agent = mstore
-                    .agent_def_get(uid)
-                    .map_err(|e| format!("memory: store: {e}"))?
-                    .ok_or_else(|| format!("memory: calling agent {uid} not found"))?;
+                let agent = Self::caller_row(uid, mstore)?;
                 crate::server::native_memory_handlers::memory_dir_for_agent_by_id(mstore, &agent)
                     .ok_or_else(|| format!("memory: memory directory for agent {uid} not found"))
             }
@@ -1078,7 +1088,7 @@ impl<'a> SelfOwner<'a> {
     /// The id the owner's versions and mirror rows are keyed by.
     fn version_key(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
         match self {
-            Self::Uid(uid) => Ok(uid.to_string()),
+            Self::Uid(uid) => Self::caller_row(uid, mstore).map(|row| row.id),
             Self::Slug(slug) => crate::server::native_memory_handlers::resolve_agent_uuid(mstore, slug),
         }
     }
@@ -2721,8 +2731,16 @@ mod memory_version_impl_tests {
 
         // A caller whose row is gone is an error, never another's directory
         // and never an empty list.
-        let err = memory_list_impl(&state, SelfOwner::Uid("uid-mo-gone")).unwrap_err();
-        assert!(err.contains("not found"), "{err}");
+        let gone = SelfOwner::Uid("uid-mo-gone");
+        for err in [
+            memory_list_impl(&state, gone).unwrap_err(),
+            memory_history_impl(&state, gone, "MEMORY.md").unwrap_err(),
+            memory_diff_impl(&state, gone, &y_version, &y_version).unwrap_err(),
+            memory_revert_impl(&state, gone, "MEMORY.md", &y_version).unwrap_err(),
+            memory_write_impl(&state, gone, "MEMORY.md", "x", None).unwrap_err(),
+        ] {
+            assert!(err.contains("not found"), "{err}");
+        }
     }
 }
 
