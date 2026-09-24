@@ -90,12 +90,18 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
             let outcome = replay_one(state, row).await;
             outcomes.push((id, outcome));
             // A deferral (queue full, starting) applies to this target's
-            // later rows too: move on, and spend no budget on it, so one
-            // stuck target cannot starve the others.
-            if outcome == ReplayOutcome::Deferred {
-                break;
+            // later rows too: move on, spending no budget. A failure also
+            // ends this target's turn, spending one slot — so a target that
+            // keeps refusing takes at most one slot per pass and cannot
+            // starve the others (Codex P2 on #3632).
+            match outcome {
+                ReplayOutcome::Deferred => break,
+                ReplayOutcome::Failed | ReplayOutcome::Dropped => {
+                    spent += 1;
+                    break;
+                }
+                ReplayOutcome::Delivered => spent += 1,
             }
-            spent += 1;
         }
     }
     outcomes

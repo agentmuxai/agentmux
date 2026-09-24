@@ -67,7 +67,9 @@ senders, idempotency — are folded in too).*
    name (a `candidate_seen` flag set wherever a tier finds one). A target
    that is alive elsewhere but refused — rate limit, queue full, a restarting
    peer — keeps today's error rather than being held here and never replayed
-   there. A same-host entry whose process is dead is **not** a candidate —
+   there. A LAN route whose forward came back stale is evicted as wrong and
+   is not a candidate either (Codex on #3632). A same-host entry whose
+   process is dead is **not** a candidate —
    every entry after an srv restart is (the port changes), and counting it
    refused the first message after a restart instead of holding it (review
    of #3632). A sender signed in to muxbus never reaches this point for an
@@ -130,9 +132,9 @@ as a sweep, and once at srv start:
    `audit_source_uid` and the transcript-request fields, set
    `held_sent_at_ms`, and deliver through the handler's local path with
    audit outcome `held_delivered`. At most 8 deliveries or failures per
-   pass; a deferral ends that target's turn and spends no budget, so one
-   stuck target cannot starve the others (targets are taken longest-waiting
-   first).
+   pass; a deferral ends that target's turn and spends no budget, and a
+   failure ends it spending one slot, so one stuck target cannot starve the
+   others (targets are taken longest-waiting first).
    - success → delete the row (`jekt.held_delivered`); a crash between
      delivery and delete delivers it again — **at-least-once**;
    - still absent, rate limit, queue full, or the agent starting,

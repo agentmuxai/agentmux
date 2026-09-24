@@ -1261,7 +1261,6 @@ pub(crate) async fn deliver(
             .find_agent(&req.target_agent, &state.http_client)
             .await
         {
-            candidate_seen = true;
             match forward_inject_to_peer(
                 &state,
                 &req,
@@ -1291,10 +1290,14 @@ pub(crate) async fn deliver(
                 // freshness/PID guard to weigh: the cache is cheap to refill
                 // from mDNS, so evicting on any non-delivery is the right
                 // trade rather than an oversight.
+                // A stale route is evicted as wrong, so it is not a live
+                // candidate (Codex P1 on #3632): the message may still be
+                // held. Only an inconclusive answer leaves the target
+                // possibly alive there.
                 ForwardOutcome::Stale => {
                     state.lan_discovery.evict_agent(&req.target_agent);
                 }
-                ForwardOutcome::Inconclusive => {}
+                ForwardOutcome::Inconclusive => candidate_seen = true,
             }
         }
 
