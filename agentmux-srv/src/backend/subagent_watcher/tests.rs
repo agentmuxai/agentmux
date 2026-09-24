@@ -149,7 +149,6 @@ fn read_task_prompt_extracts_plain_string_content_from_first_line() {
 
     let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
     assert_eq!(prompt.as_deref(), Some("Analyze the shell module"));
-
 }
 
 #[test]
@@ -164,7 +163,6 @@ fn read_task_prompt_extracts_joined_text_blocks_from_content_array() {
 
     let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
     assert_eq!(prompt.as_deref(), Some("Part one\nPart two"));
-
 }
 
 #[test]
@@ -178,7 +176,6 @@ fn read_task_prompt_returns_none_when_first_line_is_not_a_user_record() {
     .unwrap();
 
     assert!(read_task_prompt(jsonl_path.to_str().unwrap()).is_none());
-
 }
 
 #[test]
