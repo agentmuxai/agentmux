@@ -5537,6 +5537,24 @@ async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(latest(&id).2, "uid-m4c1", "attributed revert");
+    // M4c-2d: returned beside `written_by`, by revert and by history.
+    assert_eq!(v["version"]["written_by_uid"], "uid-m4c1", "{v}");
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/v1/agent/globalmemory/history?id={id}"))
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let history: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let uids: Vec<&str> = history["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["written_by_uid"].as_str().unwrap())
+        .collect();
+    assert_eq!(uids, ["uid-m4c1", "", "uid-m4c1"], "{history}");
 
     let (status, v) = m4c1_send(&state, None, "/api/v1/agent/globalmemory/revert", revert).await;
     assert_eq!(status, StatusCode::OK, "{v}");
@@ -5729,4 +5747,54 @@ async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
         assert!(!body.contains("calling agent"), "{uri}: {body}");
         assert!(m4a2_count(counter) > before, "{uri}: Unattributed is counted");
     }
+}
+
+// ---- identity M4c-2d: the sender's UID is exposed beside its name ----
+
+/// An attributed inject is audited with its token's UID; an attributed bus
+/// send carries it as `from_uid`. Unattributed, both stay empty.
+#[tokio::test]
+async fn m4c2d_the_senders_uid_is_audited_and_carried() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4c2d").unwrap();
+
+    // A registered target, so the inject resolves at once instead of
+    // searching for peers to forward to: the audit ring is shared by every
+    // test and holds 100 entries, so the entry is read back straight away,
+    // by its own request id.
+    let target = format!("m4c2d-target-{}", uuid::Uuid::new_v4());
+    let request_id = format!("m4c2d-{}", uuid::Uuid::new_v4());
+    state.reactive_handler.register_agent(&target, &format!("{target}-block"), None).unwrap();
+    let inject = serde_json::json!({
+        "target_agent": target, "message": "hi", "source_agent": "m4c2d-sender",
+        "request_id": request_id,
+    });
+    // The rate limiter is shared by every test too (10/s); a limited
+    // request writes no audit entry, so wait for a token.
+    let mut resp = serde_json::Value::Null;
+    for _ in 0..25 {
+        resp = m4c1_send(&state, Some(&token), "/agentmux/reactive/inject", inject.clone()).await.1;
+        if resp["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let audited = state.reactive_handler.get_audit_log(100);
+    let entry = audited.iter().find(|e| e.request_id == request_id);
+    assert_eq!(entry.map(|e| e.audit_source_uid.as_str()), Some("uid-m4c2d"), "{resp}");
+
+    m4c1_send(&state, None, "/api/bus/register", serde_json::json!({"agent_id": "m4c2d-inbox"})).await;
+    let send = |payload: &str| {
+        serde_json::json!({"from": "m4c2d-sender", "to": "m4c2d-inbox", "payload": payload})
+    };
+    m4c1_send(&state, Some(&token), "/api/bus/send", send("attributed")).await;
+    m4c1_send(&state, None, "/api/bus/send", send("unattributed")).await;
+    let messages = state.messagebus.read_messages("m4c2d-inbox", 10);
+    let uid_of = |payload: &str| {
+        messages.iter().find(|m| m.payload == payload).map(|m| m.from_uid.clone())
+    };
+    assert_eq!(uid_of("attributed").as_deref(), Some("uid-m4c2d"), "{messages:?}");
+    assert_eq!(uid_of("unattributed").as_deref(), Some(""), "{messages:?}");
 }

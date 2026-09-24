@@ -148,6 +148,11 @@ pub struct Handler {
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
     audit_log: Vec<AuditLogEntry>,
+    /// The UID of the delivery in flight (`InjectionRequest::
+    /// audit_source_uid`), copied onto every audit entry it writes. Set and
+    /// cleared around one `inject_message_inner` call, under this handler's
+    /// mutex, so no other delivery can see it.
+    delivery_source_uid: String,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
     /// Warden Supervisor consecutive-nudge ceiling state, keyed on the
@@ -251,6 +256,7 @@ impl Handler {
             uid_identity_confirmer: None,
             block_liveness: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
+            delivery_source_uid: String::new(),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
             nudge_counters: HashMap::new(),
@@ -859,6 +865,21 @@ impl Handler {
     /// Supervisor UI's decision feed must not show "nudged" for a delivery
     /// that actually failed).
     fn inject_message_inner(
+        &mut self,
+        mut req: InjectionRequest,
+        outcome_on_success: Option<&str>,
+        outcome_on_failure: Option<&str>,
+        reason: Option<&str>,
+    ) -> InjectionResponse {
+        self.delivery_source_uid = std::mem::take(&mut req.audit_source_uid);
+        let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure, reason);
+        self.delivery_source_uid.clear();
+        resp
+    }
+
+    /// The body of [`Self::inject_message_inner`], with the sender's UID in
+    /// `delivery_source_uid` for every audit entry it writes.
+    fn deliver_audited(
         &mut self,
         mut req: InjectionRequest,
         outcome_on_success: Option<&str>,
@@ -1492,6 +1513,7 @@ impl Handler {
         reason: &str,
         request_id: &str,
         source_agent: Option<&str>,
+        source_uid: &str,
     ) -> Result<InjectionResponse, String> {
         let now = now_unix_millis();
         let target_key = target_agent.to_lowercase();
@@ -1507,6 +1529,8 @@ impl Handler {
 
         match action {
             SupervisorAction::Decline => {
+                // No delivery to carry the UID: set it around this one entry.
+                self.delivery_source_uid = source_uid.to_string();
                 self.log_audit(
                     source_agent,
                     target_agent,
@@ -1518,6 +1542,7 @@ impl Handler {
                     Some("nudge_declined"),
                     Some(reason),
                 );
+                self.delivery_source_uid.clear();
                 Ok(InjectionResponse {
                     success: true,
                     request_id: request_id.to_string(),
@@ -1609,6 +1634,7 @@ impl Handler {
                     jekt_tier: Some(super::types::JektTier::Coord),
                     delivery_tier: Some("host".to_string()),
                     forward_hops: 0,
+                    audit_source_uid: source_uid.to_string(),
                     ..Default::default()
                 };
                 let resp = self.inject_message_inner(
@@ -1678,6 +1704,7 @@ impl Handler {
             event_kind: "delivery".to_string(),
             evicted_block: None,
             evicted_agent: None,
+            audit_source_uid: self.delivery_source_uid.clone(),
         };
 
         if self.audit_log.len() >= AUDIT_LOG_MAX {
@@ -1715,6 +1742,7 @@ impl Handler {
             event_kind: event_kind.to_string(),
             evicted_block: evicted_block.map(|s| s.to_string()),
             evicted_agent: evicted_agent.map(|s| s.to_string()),
+            audit_source_uid: String::new(),
         };
 
         if self.audit_log.len() >= AUDIT_LOG_MAX {
@@ -2117,11 +2145,12 @@ impl ReactiveHandler {
         reason: &str,
         request_id: &str,
         source_agent: Option<&str>,
+        source_uid: &str,
     ) -> Result<InjectionResponse, String> {
         self.inner
             .lock()
             .unwrap()
-            .record_supervisor_decision(target_agent, action, reason, request_id, source_agent)
+            .record_supervisor_decision(target_agent, action, reason, request_id, source_agent, source_uid)
     }
 }
 

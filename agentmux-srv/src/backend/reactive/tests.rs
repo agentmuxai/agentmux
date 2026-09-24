@@ -1900,6 +1900,7 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         event_kind: "delivery".to_string(),
         evicted_block: None,
         evicted_agent: None,
+        audit_source_uid: String::new(),
     };
     let json = serde_json::to_value(&with_outcome).unwrap();
     assert_eq!(json["outcome"], "nudge_declined");
@@ -1958,6 +1959,7 @@ fn test_record_supervisor_decision_decline_logs_one_entry_no_delivery() {
             "target looks genuinely done, not just pausing",
             "req-1",
             Some("warden-supervisor"),
+            "",
         )
         .expect("decline never fails");
 
@@ -1997,6 +1999,7 @@ async fn test_record_supervisor_decision_nudge_failure_is_audited_and_not_counte
             "target looks stalled",
             "req-fail-1",
             Some("warden-supervisor"),
+            "",
         )
         .expect("a failed delivery is still Ok — it's not a ceiling refusal");
     assert!(!resp.success);
@@ -2024,6 +2027,7 @@ async fn test_record_supervisor_decision_nudge_failure_is_audited_and_not_counte
                 "still making progress",
                 &format!("req-ok-{i}"),
                 Some("warden-supervisor"),
+                "",
             )
             .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling: {e}"));
         assert!(resp.success);
@@ -2047,6 +2051,7 @@ async fn test_record_supervisor_decision_nudge_ceiling() {
                 "still making progress",
                 &format!("req-{i}"),
                 Some("warden-supervisor"),
+                "",
             )
             .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
         assert!(resp.success);
@@ -2059,6 +2064,7 @@ async fn test_record_supervisor_decision_nudge_ceiling() {
             "still making progress",
             "req-over",
             Some("warden-supervisor"),
+            "",
         )
         .expect_err("the next nudge must be refused");
     assert_eq!(err, "consecutive-nudge ceiling reached");
@@ -2099,6 +2105,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
                 "still making progress",
                 &format!("req-{i}"),
                 Some("warden-supervisor"),
+                "",
             )
             .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
     }
@@ -2110,6 +2117,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
                 "still making progress",
                 "req-over",
                 Some("warden-supervisor"),
+                "",
             )
             .is_err(),
         "ceiling must be hit before the respawn"
@@ -2127,6 +2135,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
             "fresh run, target paused again",
             "req-after-respawn",
             Some("warden-supervisor"),
+            "",
         )
         .expect("a fresh registration_nonce must reset the ceiling");
     assert!(resp.success);
@@ -2154,6 +2163,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_wh
                 "still making progress",
                 &format!("req-{i}"),
                 Some("warden-supervisor"),
+                "",
             )
             .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling yet: {e}"));
     }
@@ -2165,6 +2175,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_wh
                 "still making progress",
                 "req-over",
                 Some("warden-supervisor"),
+                "",
             )
             .is_err(),
         "ceiling must be hit before the relaunch"
@@ -2182,6 +2193,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_wh
             "fresh run in a new pane, target paused again",
             "req-after-relaunch",
             Some("warden-supervisor"),
+            "",
         )
         .expect("a new block_id must reset the ceiling even though nonce stayed 0");
     assert!(resp.success);
@@ -3670,4 +3682,44 @@ mod identity_m2 {
         assert_eq!(h.get_agent(UID_Y).unwrap().block_id, "block-y");
         assert_eq!(h.get_agent(UID_UP).unwrap().block_id, "block-up");
     }
+}
+
+/// Identity M4c-2d (spec §6.5.9): the sender's UID set by the srv handler
+/// reaches every audit entry its delivery writes, is gone before the next
+/// delivery, and never crosses the wire either way.
+#[test]
+fn an_attributed_delivery_audits_its_sender_uid_and_only_its_own() {
+    let mut handler = Handler::new();
+    let attributed = InjectionRequest {
+        target_agent: "m4c2d-nobody".into(),
+        message: "hi".into(),
+        source_agent: Some("agenty".into()),
+        audit_source_uid: "uid-m4c2d".into(),
+        ..Default::default()
+    };
+    handler.inject_message(attributed.clone());
+    handler.inject_message(InjectionRequest {
+        audit_source_uid: String::new(),
+        ..attributed.clone()
+    });
+    let log = handler.get_audit_log(10);
+    let uids: Vec<&str> = log.iter().map(|e| e.audit_source_uid.as_str()).collect();
+    assert!(uids.len() >= 2, "{uids:?}");
+    assert!(uids.contains(&"uid-m4c2d"), "{uids:?}");
+    assert_eq!(uids.iter().filter(|u| u.is_empty()).count(), uids.len() - 1, "{uids:?}");
+
+    let wire = serde_json::to_value(&attributed).unwrap();
+    assert!(wire.get("audit_source_uid").is_none(), "never forwarded: {wire}");
+    let forged: InjectionRequest = serde_json::from_value(serde_json::json!({
+        "target_agent": "x", "message": "m", "audit_source_uid": "uid-forged"
+    }))
+    .unwrap();
+    assert_eq!(forged.audit_source_uid, "", "a body can never set it");
+
+    handler
+        .record_supervisor_decision("m4c2d-nobody", SupervisorAction::Decline, "done", "req-d", None, "uid-sup")
+        .unwrap();
+    let last = handler.get_audit_log(1).pop().unwrap();
+    assert_eq!(last.outcome.as_deref(), Some("nudge_declined"));
+    assert_eq!(last.audit_source_uid, "uid-sup");
 }
