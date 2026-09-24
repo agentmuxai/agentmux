@@ -215,6 +215,26 @@ impl PersistentSubprocessController {
         if already_poisoned {
             return None;
         }
+        // The largest session under this config dir and cwd is only this
+        // conversation if it's the head of the agent's segment chain
+        // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.2). Otherwise
+        // (after an account switch, typically) it's older history. Returning
+        // `None` makes the retry a fresh session, which now carries the
+        // continuation packet.
+        if let (Some(uid), Some(gfs)) = (self.stable_agent_uid(), crate::backend::agent_session::global_transcript_store()) {
+            let chain = crate::backend::continuity_segments::segments(gfs, &uid);
+            let current = self.current_segment.lock().unwrap().clone();
+            let head = crate::backend::continuity_segments::head_session(&chain, current.as_deref());
+            if !crate::backend::continuity_segments::recovery_allowed(&candidate, head.as_deref()) {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    candidate = %candidate,
+                    head = ?head,
+                    "continuity: not recovering a session that isn't the head of the agent's chain"
+                );
+                return None;
+            }
+        }
         Some(candidate)
     }
 

@@ -855,6 +855,10 @@ pub struct PersistentSubprocessController {
     /// the spawn env carried no UID (no `db_agents` row yet). See
     /// `Controller::stable_agent_uid`.
     stable_agent_uid: Mutex<Option<String>>,
+    /// The segment the latest spawn recorded (`segments.rs`), so a resume
+    /// retry can tell the agent's previous segment from the one that just
+    /// failed. `None` until a spawn with an agent UID.
+    current_segment: Mutex<Option<String>>,
     /// Reports whatever is still deferred when this controller is dropped.
     /// See [`DeferredDropReport`].
     deferred_drop_report: DeferredDropReport,
@@ -1159,6 +1163,7 @@ impl PersistentSubprocessController {
             agent_id: Mutex::new(None),
             stable_agent_id: Mutex::new(None),
             stable_agent_uid: Mutex::new(None),
+            current_segment: Mutex::new(None),
             deferred_drop_report: DeferredDropReport(None),
         };
         this.deferred_drop_report =

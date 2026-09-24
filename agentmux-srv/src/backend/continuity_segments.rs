@@ -202,6 +202,29 @@ fn fold(events: impl Iterator<Item = Event>) -> Vec<Segment> {
     out
 }
 
+/// The provider session the agent's conversation was last in: the session
+/// of the newest segment, other than `current` (the spawn now running or
+/// just failed), that has one. `None` when the agent has no such segment.
+pub(crate) fn head_session(segments: &[Segment], current: Option<&str>) -> Option<String> {
+    segments
+        .iter()
+        .rev()
+        .filter(|s| Some(s.start.segment_id.as_str()) != current)
+        .find_map(|s| s.start.provider_session_id.clone())
+}
+
+/// Whether a resume-failure recovery may continue `candidate` (§4.2: only
+/// the head of the chain is this conversation). With a chain, any other
+/// session is older or unrelated history. It's typically the same agent's
+/// session from the last time it ran under this account, and resuming it
+/// would show "Resumed" on the wrong conversation, so the caller falls
+/// through to a fresh session carrying the continuation packet. With no
+/// known head (an agent from before the segment index, whose only segment is
+/// the current one), nothing better is known and recovery works as before.
+pub(crate) fn recovery_allowed(candidate: &str, head: Option<&str>) -> bool {
+    head.is_none_or(|h| h == candidate)
+}
+
 /// The rung a spawn started on, from what the spawn knows: whether it passed
 /// `--resume`, and whether it carries a continuation packet.
 pub(crate) fn rung_for_spawn(resumed: bool, carries_packet: bool) -> Rung {
@@ -324,6 +347,32 @@ mod tests {
         let e = Event::End { segment_id: "s".into(), ended_at_ms: 5, end_reason: EndReason::Restarted, byte_end: None };
         let json = serde_json::to_string(&e).unwrap();
         assert!(json.contains("\"event\":\"end\"") && json.contains("\"end_reason\":\"restarted\""), "{json}");
+    }
+
+    fn seg(id: &str, sid: Option<&str>) -> Segment {
+        let mut s = start(0, Rung::Fresh);
+        s.segment_id = id.into();
+        s.provider_session_id = sid.map(str::to_string);
+        Segment { start: s, ended_at_ms: None, end_reason: None, byte_end: None }
+    }
+
+    #[test]
+    fn the_head_is_the_newest_earlier_segment_with_a_session() {
+        let chain = [seg("a", Some("sid-old")), seg("b", Some("sid-head")), seg("c", None), seg("now", Some("sid-attempted"))];
+        assert_eq!(head_session(&chain, Some("now")).as_deref(), Some("sid-head"));
+        assert_eq!(head_session(&chain, None).as_deref(), Some("sid-attempted"));
+        assert_eq!(head_session(&[], Some("now")), None);
+    }
+
+    /// The account-switch case: the head (the old account's session) was
+    /// just rejected, and the new account's config dir holds an older
+    /// session of the same agent. Recovering it would resume the wrong
+    /// conversation.
+    #[test]
+    fn recovery_only_continues_the_head_of_the_chain() {
+        assert!(!recovery_allowed("sid-old", Some("sid-head")));
+        assert!(recovery_allowed("sid-head", Some("sid-head")), "a stale pane id whose real session is the head");
+        assert!(recovery_allowed("sid-any", None), "no known head (pre-index agent): behave as before the index");
     }
 
     #[test]

@@ -297,9 +297,8 @@ impl PersistentSubprocessController {
         // whole point. The frontend renders that as "—" rather than a blank
         // (`DocumentRow.tsx`'s session-outcome body).
         let mut continuation: Option<String> = None;
-        if fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)
-            && self.has_prior_transcript()
-        {
+        let fresh_onto_history = attempted_resume_sid.is_none() && self.has_prior_transcript();
+        if fresh_onto_history && fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation) {
             tracing::info!(
                 block_id = %self.block_id,
                 "spawned with no --resume while prior history exists — disclosing a fresh start"
@@ -309,9 +308,16 @@ impl PersistentSubprocessController {
                 String::new(),
                 None,
             );
+        }
+        if fresh_onto_history {
             // The provider can't give this process the conversation the pane
             // shows, so AgentMux's own record rides on its first message
-            // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+            // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4). On any
+            // generation, not just the first: a resume the CLI rejected falls
+            // through to here within the same launch (§4.2, "fall through,
+            // don't fail"), and its retry needs the record as much as a
+            // first spawn does. The disclosure above stays first-spawn-only;
+            // the retry path emits its own.
             continuation = self.continuation_packet();
             if let Some(ref packet) = continuation {
                 tracing::info!(
@@ -485,6 +491,7 @@ impl PersistentSubprocessController {
         let segment: super::segments::SegmentRef = agent_uid_for_registry.as_deref().and_then(|uid| {
             self.record_segment_start(uid, &config, attempted_resume_sid.as_deref(), continuation.is_some())
         });
+        *self.current_segment.lock().unwrap() = segment.as_ref().map(|(_, id)| id.clone());
         let segment_read = segment.clone();
         let segment_wait = segment;
         // Defaults to this spawn's own nonce; overridden below if
