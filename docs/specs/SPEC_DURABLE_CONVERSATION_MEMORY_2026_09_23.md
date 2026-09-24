@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1 v1: every spawn records a segment in an event log in the global store (§4.1.1). P2, P4–P6, and P3's resolver ladder and pane chip not started. Exact identifiers are extracted deterministically into the packet (§4.4.1).
+**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1 v1: every spawn records a segment in an event log in the global store (§4.1.1). First ladder slice: a rejected resume falls through to R3, never to older history (§4.2.1). P2, P4–P6, and P3's resolver ladder and pane chip not started. Exact identifiers are extracted deterministically into the packet (§4.4.1).
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -282,6 +282,30 @@ Rules:
   the default.
 - The resolver's verdict replaces `resume_preflight`'s advisory table. The
   preflight module becomes the resolver's reachability probe.
+
+### 4.2.1 First slice of the ladder: a rejected resume falls through to R3
+
+Before the full resolver exists, the segment chain already fixes the
+account-switch case for a pane that is still open:
+- The pane holds the old account's session id. The spawn passes `--resume`,
+  and the new account's CLI answers "No conversation found".
+- `retry_after_resume_failure` then looked for the largest session under the
+  new config dir and cwd. Often that's the same agent's session from the last
+  time it ran under this account, so the pane showed "Resumed" on older
+  history. If there was none, the retry started fresh, but the continuation
+  packet was gated to a controller's first spawn, so the retry got no record
+  at all.
+
+Now:
+- **Recovery only continues the head of the chain.** The head is the
+  provider session of the newest segment before the one that just failed
+  (`continuity_segments::head_session` / `recovery_allowed`). Any other
+  candidate is refused. With no known head (an agent from before the
+  segment index), recovery works as before.
+- **Every spawn without `--resume` onto prior history carries the packet**,
+  whatever the generation, so the refused recovery lands on R3. The "fresh
+  start" disclosure stays first-spawn-only, because the retry path emits its
+  own.
 
 ### 4.3 Case matrix
 
