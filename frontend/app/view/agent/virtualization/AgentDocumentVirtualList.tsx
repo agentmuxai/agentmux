@@ -60,6 +60,13 @@ import {
     STREAMING_BUFFER_SIZE,
 } from "./streaming-buffer";
 
+/** The three numbers the scroll logic works from, in unzoomed CSS px. */
+interface ScrollGeometry {
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+}
+
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
     documentState: Accessor<DocumentState>;
@@ -155,6 +162,21 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // — this is the "input-gating race" both prior passes deferred pending
     // live reports continuing, which they did.
     let pendingProgrammaticScroll = false;
+    // The geometry our own pin read and produced — scrollHeight and
+    // clientHeight read with layout already clean (the pin runs from a
+    // ResizeObserver callback), scrollTop read right after its scrollTo().
+    // The scroll event that scrollTo() fires is handled by handleScrollNow on
+    // the NEXT animation frame, before that frame's layout: reading geometry
+    // there would force a synchronous layout, once per pinned frame per pane.
+    // When the batch is purely our own pin (no user scroll input since), it
+    // uses this instead. Cleared by every handleScrollNow. Phase 1 of
+    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.1.
+    let pinnedGeometry: ScrollGeometry | null = null;
+    // Set by any input that can scroll this container (wheel, touch, pointer
+    // down — including on the scrollbar — or a key while focus is inside it),
+    // consumed by handleScrollNow. A batch with user input always reads live
+    // geometry and is never attributed to the pin.
+    let userScrollInput = false;
     // Last scrollHeight observed at a pin-correction call — diagnostic only,
     // see docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md.
     // A shrink between two consecutive calls means content that was already
@@ -185,9 +207,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // review-fix pass (PR #2834) — the original version of this file only
     // updated the flag from inside scrollToTrueBottom, which is exactly one
     // of those gated call sites.
-    function syncOverflowState(): void {
+    function syncOverflowState(geo?: ScrollGeometry): void {
         if (!scrollRef) return;
-        const overflowing = scrollRef.scrollHeight > scrollRef.clientHeight;
+        const overflowing = geo ? geo.scrollHeight > geo.clientHeight : scrollRef.scrollHeight > scrollRef.clientHeight; // perf:allow-layout-read — only without geometry: RO callbacks (layout clean) and the no-RO fallback
         if (overflowing !== props.viewState.isOverflowing()) {
             if (overflowing) {
                 props.viewState.markOverflowing();
@@ -220,7 +242,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const el = child as HTMLElement;
             const id = el.dataset.nodeId;
             if (!id) continue;
-            out.push({ id, type: el.dataset.nodeType ?? "?", px: el.offsetHeight });
+            out.push({ id, type: el.dataset.nodeType ?? "?", px: el.offsetHeight }); // perf:allow-layout-read — pin pass, inside a ResizeObserver callback (layout clean)
         }
         return out;
     }
@@ -228,7 +250,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     let lastKnownScrollHeight = 0;
     function scrollToTrueBottom(): void {
         if (!scrollRef) return;
-        const h = scrollRef.scrollHeight;
+        const h = scrollRef.scrollHeight; // perf:allow-layout-read — pin pass: ResizeObserver callback, or user-initiated jumpToBottom
         // Sampled unconditionally (not just on a shrink) — every call has to
         // update the baseline, or the next diff would span two intervals.
         // Read in the SAME layout-clean instant as `h` above, so the row
@@ -254,9 +276,23 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             );
         }
         lastKnownScrollHeight = h;
-        syncOverflowState();
+        const clientHeight = scrollRef.clientHeight; // perf:allow-layout-read — pin pass (as above)
+        syncOverflowState({ scrollTop: 0, scrollHeight: h, clientHeight });
+        const before = scrollRef.scrollTop; // perf:allow-layout-read — pin pass (as above)
         pendingProgrammaticScroll = true;
         scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+        // scrollTo() does not invalidate layout, so this read is free.
+        const after = scrollRef.scrollTop; // perf:allow-layout-read — after scrollTo(), which does not invalidate layout
+        if (after !== before) {
+            pinnedGeometry = { scrollTop: after, scrollHeight: h, clientHeight };
+        } else {
+            // Already at true bottom: the browser fires no scroll event for a
+            // scrollTo() that doesn't move, so nothing would consume these —
+            // and a later, unrelated scroll event (a clamp after a shrink)
+            // must not be mistaken for this pin or handed its geometry.
+            pendingProgrammaticScroll = false;
+            pinnedGeometry = null;
+        }
     }
 
     // Sticky frontier id — set once when the document first crosses
@@ -435,7 +471,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     let lastScrollMarginPx = -1;
     const dispatchScrollMargin = (): void => {
         if (!props.blockId) return;
-        const px = virtualContainerRef?.offsetTop ?? 0;
+        const px = virtualContainerRef?.offsetTop ?? 0; // perf:allow-layout-read — ResizeObserver/MutationObserver callbacks and user scroll only
         if (px === lastScrollMarginPx) return; // skip redundant dispatches
         lastScrollMarginPx = px;
         dispatchLayoutIfRegistered(props.blockId, { type: "ScrollMarginChanged", px });
@@ -520,7 +556,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // streaming row mounts with [data-animate] already present. (codex P2.)
     createEffect(() => {
         if (animateEnabled() || !props.viewState.historyReady()) return;
-        void scrollRef?.scrollTop; // forced synchronous style/layout flush
+        void scrollRef?.scrollTop; // forced synchronous style/layout flush perf:allow-layout-read — deliberate one-time flush when history becomes ready (see above)
         setAnimateEnabled(true);
     });
 
@@ -552,29 +588,38 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // this container's *clientHeight* instead of its content height — which
     // the clientHeight ResizeObserver below already re-pins on, and was
     // written for precisely this family of normal-flow siblings.
-    createEffect(() => {
-        // Track length changes — Solid will re-run when nodes() emits.
-        const _len = props.viewState.nodes().length;
-        const _totalSize = props.layoutView?.()?.totalSize;
-        // Unconditional — a node-count drop (e.g. /clear) can collapse this
-        // pane to non-overflowing while scrolled away reading history; see
-        // syncOverflowState's own doc comment.
-        syncOverflowState();
-        if (props.viewState.stickToBottom() && scrollRef) {
-            // queueMicrotask so the new content has rendered before we scroll.
-            queueMicrotask(() => {
-                if (!scrollRef) return;
-                // Re-check: user may have disengaged stickToBottom between
-                // when this microtask was queued and when it fires.
-                if (!props.viewState.stickToBottom()) return;
-                scrollToTrueBottom();
-                // New content may have pushed a held-open tool above the top
-                // without a user scroll event — collapse it now (pinned to
-                // bottom, so no visible jump).
-                collapseScrolledOffTools();
-            });
-        }
-    });
+    //
+    // WHERE THIS NOW HAPPENS (Phase 1 of
+    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.1): not in
+    // an effect. This effect ran synchronously inside Solid's update, before the
+    // browser had laid the new content out, so the scrollHeight it read (in
+    // syncOverflowState and again in the microtask pin) forced a synchronous
+    // layout on every stream flush — measured at 0.5–3.4 s per 10 s with three
+    // panes streaming (ANALYSIS_AGENT_PANE_FULL_CONVERSATION_BASELINE_2026_09_23.md).
+    // Every change this effect tracked also changes the box size of the
+    // virtualized region (its height IS totalSize) or of the streaming buffer
+    // (new or grown rows), and the content ResizeObserver below observes both:
+    // its callback runs after layout and before paint, so the same pin — plus
+    // syncOverflowState and collapseScrolledOffTools — happens there with the
+    // layout already clean, and still before the frame is shown.
+    //
+    // Fallback only for an environment with no ResizeObserver (never the CEF
+    // app): the old microtask pin, so behaviour degrades to what it was.
+    if (typeof ResizeObserver === "undefined") {
+        createEffect(() => {
+            // Track length changes — Solid will re-run when nodes() emits.
+            const _len = props.viewState.nodes().length;
+            const _totalSize = props.layoutView?.()?.totalSize;
+            syncOverflowState();
+            if (props.viewState.stickToBottom() && scrollRef) {
+                queueMicrotask(() => {
+                    if (!scrollRef || !props.viewState.stickToBottom()) return;
+                    scrollToTrueBottom();
+                    collapseScrolledOffTools();
+                });
+            }
+        });
+    }
 
     // Re-apply sticky-bottom on ANY clientHeight change to this scroll
     // container — not just hidden → visible. Originally only handled the
@@ -598,11 +643,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // away is never fought.
     onMount(() => {
         const ro = new ResizeObserver(() => {
-            const h = scrollRef.clientHeight;
+            const h = scrollRef.clientHeight; // perf:allow-layout-read — clientHeight ResizeObserver callback (layout clean)
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState();
             if (h > 0 && props.viewState.stickToBottom()) {
                 scrollToTrueBottom();
+                // Every pin source runs the held-open-tool collapse itself: the
+                // scroll event this pin causes is a trusted pin batch, which
+                // skips it in handleScrollNow. A viewport shrink while pinned
+                // (working row / composer growing below) can push a held-open
+                // tool off the top just as content growth can (ReAgent P1, #3599).
+                collapseScrolledOffTools();
             }
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
@@ -611,7 +662,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (props.blockId && h > 0) {
                 dispatchLayoutIfRegistered(props.blockId, {
                     type: "Scrolled",
-                    scrollTop: scrollRef.scrollTop,
+                    scrollTop: scrollRef.scrollTop, // perf:allow-layout-read — clientHeight ResizeObserver callback (layout clean)
                     viewportPx: h,
                 });
             }
@@ -652,6 +703,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             syncOverflowState();
             if (!props.viewState.stickToBottom()) return;
             scrollToTrueBottom();
+            // New content may have pushed a held-open tool above the top
+            // without a user scroll event — collapse it now (pinned to bottom,
+            // so no visible jump). Formerly done by the pin effect's microtask;
+            // here the rects it reads are already laid out.
+            collapseScrolledOffTools();
         });
         if (virtualContainerRef) ro.observe(virtualContainerRef);
         if (streamingBufferRef) ro.observe(streamingBufferRef);
@@ -684,7 +740,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const v = props.layoutView?.();
             const row = v?.rows[idx];
             if (row) {
-                const viewportPx = scrollRef.clientHeight;
+                const viewportPx = scrollRef.clientHeight; // perf:allow-layout-read — user-initiated scrollToNode
                 const center = row.start - viewportPx / 2 + row.height / 2;
                 scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
             }
@@ -692,8 +748,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // Streaming buffer — node is mounted; query DOM and scroll directly.
             const el = scrollRef.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
             if (!el) return;
-            const elTop = el.offsetTop;
-            const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2;
+            const elTop = el.offsetTop; // perf:allow-layout-read — user-initiated scrollToNode
+            const center = elTop - scrollRef.clientHeight / 2 + el.clientHeight / 2; // perf:allow-layout-read — user-initiated scrollToNode
             scrollRef.scrollTo({ top: Math.max(0, center), behavior: "smooth" });
         }
         props.viewState.disengageStickToBottom();
@@ -720,7 +776,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!release || !scrollRef) return;
         const ds = props.documentState();
         if (ds.expandedTools.size === 0) return;
-        const containerRect = scrollRef.getBoundingClientRect();
+        const containerRect = scrollRef.getBoundingClientRect(); // perf:allow-layout-read — pin pass (RO) or a user scroll batch
         // A hidden pane (inactive tab: display:none, same "0×0" signature the
         // ResizeObserver comment above already relies on) or a minimized window
         // reports a zero-size rect for every element, not just this container's
@@ -738,7 +794,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             ) as HTMLElement | null;
             // No element → not rendered → already off-screen (unmounted): release
             // as a safety net. Otherwise release once it's fully above the top.
-            if (!el || el.getBoundingClientRect().bottom <= containerTop) {
+            if (!el || el.getBoundingClientRect().bottom <= containerTop) { // perf:allow-layout-read — pin pass (RO) or a user scroll batch
                 release(id);
             }
         }
@@ -746,7 +802,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
     const handleScrollNow = (): void => {
         if (!scrollRef) return;
-        const { scrollTop, scrollHeight, clientHeight } = scrollRef;
 
         // Consume the programmatic-scroll flag for THIS batch — see
         // scrollToTrueBottom's own comment. Read once, up front: every
@@ -755,6 +810,20 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // auto-scroll, not just the disengage branch specifically.
         const wasProgrammatic = pendingProgrammaticScroll;
         pendingProgrammaticScroll = false;
+        const hadUserInput = userScrollInput;
+        userScrollInput = false;
+
+        // A batch that is purely our own pin reuses the geometry the pin read
+        // after layout (see pinnedGeometry) — no layout read here. Anything the
+        // user may have caused reads live geometry, exactly as before.
+        const trustPin = wasProgrammatic && !hadUserInput && pinnedGeometry !== null;
+        const geo: ScrollGeometry = trustPin ? pinnedGeometry! : {
+            scrollTop: scrollRef.scrollTop, // perf:allow-layout-read — user scroll batch only; our own pin reuses pinnedGeometry
+            scrollHeight: scrollRef.scrollHeight, // perf:allow-layout-read — user scroll batch only; our own pin reuses pinnedGeometry
+            clientHeight: scrollRef.clientHeight, // perf:allow-layout-read — user scroll batch only; our own pin reuses pinnedGeometry
+        };
+        pinnedGeometry = null;
+        const { scrollTop, scrollHeight, clientHeight } = geo;
 
         // Phase 4: scrollTop / clientHeight are already unzoomed CSS px under the
         // ancestor CSS `zoom` (CDP-confirmed: ratio 1.0 at zoom 0.5/2 — only
@@ -766,7 +835,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 scrollTop,
                 viewportPx: clientHeight,
             });
-            dispatchScrollMargin();
+            // Reads offsetTop (a layout read). Our own pin cannot move the
+            // header above the rows, and the container/header ResizeObservers
+            // and the childList MutationObserver above already track every way
+            // the margin changes — this call is the safety net for user
+            // scrolling, so a trusted pin batch skips it.
+            if (!trustPin) dispatchScrollMargin();
         }
 
         // Collapse held-open tools that have scrolled off the top (latched).
@@ -774,7 +848,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // layout height above scrollTop, which is invisible while pinned to the
         // bottom (no jump) — the primary live-streaming case. The scrolled-up /
         // anchor-compensated case is a documented Phase 2 follow-up.
-        if (props.viewState.stickToBottom()) {
+        // A trusted pin batch skips it: the pin pass that caused this scroll
+        // already ran it with layout clean (content ResizeObserver).
+        if (props.viewState.stickToBottom() && !trustPin) {
             collapseScrolledOffTools();
         }
 
@@ -785,7 +861,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // every scroll event is an observation point regardless of
         // stickToBottom, same as syncOverflowState's other call sites.
         const wasOverflowing = props.viewState.isOverflowing();
-        syncOverflowState();
+        syncOverflowState(geo);
         const isFirstOverflow = scrollHeight > clientHeight && !wasOverflowing;
 
         // Engage stick when user scrolls back near bottom; disengage
@@ -834,7 +910,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         } else {
             if (props.viewState.stickToBottom()) {
                 const gapPx = scrollHeight - clientHeight - scrollTop;
-                if (wasProgrammatic) {
+                // With no user scroll input in the batch, "not near bottom"
+                // after our own scrollTo() can only be new content landing in
+                // the same tick — keep following. With user input, the user
+                // scrolled away in the same frame as a pin: honour it. (Before
+                // user input was tracked, the two could not be told apart and
+                // both were suppressed.)
+                if (wasProgrammatic && !hadUserInput) {
                     // This scroll event batch included our own scrollTo()
                     // call — isNearBottom() reading "not near bottom" here
                     // means either new content landed in the same tick
@@ -890,7 +972,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 const el = scrollRef.querySelector(
                     `[data-node-id="${anchorId}"]`,
                 ) as HTMLElement | null;
-                anchorOffsetPx = el?.offsetTop ?? 0;
+                anchorOffsetPx = el?.offsetTop ?? 0; // perf:allow-layout-read — user scrolled near the top: older-history anchor capture
             }
             if (anchorId != null) {
                 const anchor = captureTopmostAnchor(
@@ -939,7 +1021,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     `[data-node-id="${anchor.nodeId}"]`,
                                 ) as HTMLElement | null;
                                 if (el) {
-                                    const target = restoreScrollFromAnchor(anchor, el.offsetTop);
+                                    const target = restoreScrollFromAnchor(anchor, el.offsetTop); // perf:allow-layout-read — older-history restore, one rAF after the page loaded
                                     scrollRef.scrollTo({ top: target, behavior: "auto" });
                                 }
                             }
@@ -952,6 +1034,32 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             });
         }
     };
+
+    // Record user scroll input (see userScrollInput). On the scroller: wheel,
+    // touch, and pointer down — which includes grabbing its scrollbar. On the
+    // document: the scrolling keys, unless typed into an editable element
+    // (typing in the composer never scrolls this container).
+    onMount(() => {
+        if (!scrollRef) return;
+        const el = scrollRef;
+        const mark = (): void => {
+            userScrollInput = true;
+        };
+        const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+        const onKey = (e: KeyboardEvent): void => {
+            const t = e.target as HTMLElement | null;
+            if (t && (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "INPUT")) return;
+            if (SCROLL_KEYS.has(e.key)) mark();
+        };
+        const opts: AddEventListenerOptions = { passive: true, capture: true };
+        const types = ["wheel", "touchstart", "touchmove", "pointerdown"] as const;
+        for (const type of types) el.addEventListener(type, mark, opts);
+        document.addEventListener("keydown", onKey, opts);
+        onCleanup(() => {
+            for (const type of types) el.removeEventListener(type, mark, opts);
+            document.removeEventListener("keydown", onKey, opts);
+        });
+    });
 
     // Coalesce native `scroll` events to at most one `handleScrollNow` call
     // per animation frame. `onScroll` below wires this, not `handleScrollNow`
@@ -1010,7 +1118,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             for (const entry of entries) {
                 const nodeId = elNodeId.get(entry.target);
                 if (!nodeId) continue;
-                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1);
+                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1); // perf:allow-layout-read — measure ResizeObserver callback (layout clean)
                 const node = nodes.get(nodeId);
                 if (node) {
                     agentPerfStore.recordEstimatorMeasurement(
@@ -1088,7 +1196,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                             top: "0",
                                             left: "0",
                                             width: "100%",
-                                            transform: `translateY(${row().start - (virtualContainerRef?.offsetTop ?? 0)}px)`,
+                                            // start includes the stored scroll margin; subtracting
+                                            // that same stored value (not a live offsetTop read,
+                                            // which forced layout for every row as it rendered)
+                                            // places the row exactly within the region.
+                                            transform: `translateY(${row().start - (props.layoutView?.()?.scrollMarginPx ?? 0)}px)`,
                                         }}
                                     />
                                 )}

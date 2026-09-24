@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** active — Phase 0 (bench + `main` baseline) in #3593; Phases 1–10 not started.
+**Status:** active — Phase 0 (bench + `main` baseline) in #3593; Phases 1 and 2 in #3599; Phases 3–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing
@@ -599,12 +599,17 @@ transcript file. What's missing is the History tab showing **new** output.
 Today each pane's rAF queue flushes independently and to completion. Replace
 with one app-wide scheduler that owns *when* stream work runs:
 
-- **Per-frame budget** for stream work across all panes (proposed 8 ms of a
-  16.7 ms frame; tune from Phase 0). Panes are served round-robin, visible
-  before hidden-but-undormant, the focused pane's own stream first.
-- **Yield to input:** between panes and between chunks within a pane's flush,
-  `await scheduler.yield()`; when the budget is spent, the remainder carries
-  to the next frame.
+- **As built (Phase 2): a panes-per-frame cap, not a script budget.** With no
+  user input in the last 150 ms, every pending pane flushes in the next frame
+  (unchanged behaviour). While the user is interacting (key, pointer, wheel,
+  text input, IME composition), one pane flushes per frame, oldest request
+  first — two once the oldest has waited 100 ms, never more, so a long queue
+  catches up without recreating a multi-pane frame. The originally proposed per-frame *script* budget (8 ms,
+  `scheduler.yield()` between chunks) was dropped on measurement: the cost is
+  layout in the frame's rendering step, roughly constant per pane per flush,
+  which a script budget cannot see
+  (`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md` §3.1). Bounding how
+  many panes' updates land in one frame is what bounds it.
 - **Coalescing, not dropping:** a pane that misses a frame merges more tokens
   into its next flush. No data is lost; only paint cadence of the stream
   changes under load. The pinned view still ends at the latest content.
@@ -724,6 +729,12 @@ Every phase:
 | **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
 | **9 — Default on** | Remove flags once each phase has soaked; update `SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` Status to point here | 8 h soak and fault suite green on all three OSes; user sign-off after daily use |
 | **10 — `content-visibility` (§6.8)** | flagged experiment | memory flat over 8 h on all three OSes *and* measurable frame win; otherwise documented as rejected |
+
+**Phases 1 and 2 ship together (measured 2026-09-23).** Phase 1 alone
+removes forced layout but moves the same layout into each frame's rendering
+step, where input waits behind every pane's update at once; typing got worse.
+Phase 2's cap is what turns it into a gain
+(`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md` §2.1, §3.1).
 
 Order rationale: A and E are independent of history and fix the most for
 the least risk, so they land first and make every later measurement cleaner.

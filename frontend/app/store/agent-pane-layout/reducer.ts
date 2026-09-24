@@ -428,6 +428,12 @@ export interface LayoutView {
     rows: RowPosition[];
     totalSize: number;
     window: WindowRange;
+    /** The scroll margin `rows[].start` includes (the virtualized region's
+     *  offset in the scroll container). Subtract this — not a live
+     *  `offsetTop` read — to place a row inside the region: it is the exact
+     *  value the positions were computed from, and reading it forces no
+     *  layout. */
+    scrollMarginPx: number;
 }
 
 export function computeLayoutView(state: AgentPaneLayoutState): LayoutView {
@@ -441,5 +447,5 @@ export function computeLayoutView(state: AgentPaneLayoutState): LayoutView {
         state.viewportPx,
         state.overscan,
     );
-    return { rows, totalSize: total, window };
+    return { rows, totalSize: total, window, scrollMarginPx: state.scrollMarginPx };
 }
