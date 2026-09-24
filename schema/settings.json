@@ -409,7 +409,7 @@
         "agent:livefeed": {
           "type": "boolean",
           "default": true,
-          "description": "Agent panes keep the turn in flight plus the last few finished turns (agent:livefeedturns); older turns roll off into the History tab, which follows the conversation, so long conversations don't slow the pane down. Applies to Claude and Gemini agents. Set false to keep every turn in the pane and page older ones in by scrolling up. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9."
+          "description": "Agent panes keep the turn in flight plus the last few finished turns (agent:livefeedturns); older turns roll off into the History tab, which follows the conversation, so long conversations don't slow the pane down. Applies to Claude agents on the persistent controller and to Gemini agents. Set false to keep every turn in the pane and page older ones in by scrolling up. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9."
         },
         "agent:livefeedturns": {
           "type": "integer",

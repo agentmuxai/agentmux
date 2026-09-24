@@ -1269,7 +1269,10 @@ last turn can't leave overdue turns resident waiting for a next trigger
   node. For them roll-off is **off** until the journal (PR 4) records user
   messages: they keep today's behaviour exactly, which is no regression.
   Claude and the Gemini family (whose echo shipped in #3620) are covered from
-  PR 3 (Codex review).
+  PR 3 (Codex review) — Claude only under the **persistent** controller: the
+  per-turn subprocess controller (muxcode, container agents) writes the
+  prompt to the CLI's stdin without persisting it, so those panes are in the
+  "never reach the transcript" group too (found while building PR 3).
 
 **How.** Reducer command `RollOff { ranges }`
 (`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as

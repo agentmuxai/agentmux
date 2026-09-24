@@ -23,16 +23,18 @@ export const LIVE_FEED_DEFAULT_TURNS = 3;
 export const LIVE_FEED_MAX_FINISHED_BYTES = 1_000_000;
 
 /**
- * Providers whose transcript carries everything the feed shows, user messages
- * included (Claude writes each stdin line back; the Gemini family's echo is
- * rendered since #3620). Codex, Kimi and ACP never persist the user's
- * message, so rolling their turns off would lose it: they keep today's
- * behaviour until the journal lands (§6.9).
+ * Panes whose transcript carries everything the feed shows, user messages
+ * included: Claude under the PERSISTENT controller (it writes each stdin line
+ * back, Phase 5a-3c), and the Gemini family (its CLI echoes the message into
+ * its own output; rendered since #3620). Claude run by the per-turn
+ * subprocess controller (muxcode, container agents), Codex, Kimi and ACP
+ * never persist the user's message, so rolling their turns off would lose
+ * it: they keep today's behaviour until the journal lands (§6.9).
  */
-const ROLL_OFF_FORMATS = new Set(["claude-stream-json", "gemini-json"]);
-
-export function liveFeedSupported(outputFormat: string | undefined): boolean {
-    return outputFormat != null && ROLL_OFF_FORMATS.has(outputFormat);
+export function liveFeedSupported(outputFormat: string | undefined, controller?: string): boolean {
+    if (outputFormat === "gemini-json") return true;
+    if (outputFormat === "claude-stream-json") return controller === "persistent";
+    return false;
 }
 
 /** Setting → finished turns kept; anything but a positive integer is the default. */

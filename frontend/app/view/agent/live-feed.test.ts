@@ -127,8 +127,12 @@ describe("settings and providers", () => {
     });
 
     it("rolls off only for providers whose transcript holds the user's messages", () => {
-        expect(liveFeedSupported("claude-stream-json")).toBe(true);
-        expect(liveFeedSupported("gemini-json")).toBe(true);
+        expect(liveFeedSupported("claude-stream-json", "persistent")).toBe(true);
+        // Claude under the per-turn subprocess controller (muxcode, container
+        // agents) never writes the user's line to the transcript.
+        expect(liveFeedSupported("claude-stream-json", "subprocess")).toBe(false);
+        expect(liveFeedSupported("claude-stream-json")).toBe(false);
+        expect(liveFeedSupported("gemini-json", "subprocess")).toBe(true);
         expect(liveFeedSupported("codex-json")).toBe(false);
         expect(liveFeedSupported("kimi-stream-json")).toBe(false);
         expect(liveFeedSupported("acp")).toBe(false);
