@@ -23,13 +23,15 @@
  * `log`/`handleShellTermReady`) — see `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { createMemo, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
 import { createAgentViewState } from "../virtualization/state";
+import { resolveTailPolicy } from "../virtualization/streaming-buffer";
 import { correlateDispatchesForBlock } from "../activity/dispatch-correlation";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { allDispatchesAtom } from "../activity/dispatch-source";
@@ -88,7 +90,9 @@ interface AgentDocumentViewProps {
      *  forwarded to the list, which renders rows from its prefix-sum positions. */
     layoutView?: Accessor<LayoutView | null>;
     /** What the always-mounted streaming buffer holds — forwarded to the list
-     *  (see AgentDocumentVirtualListProps.tailPolicy). */
+     *  (see AgentDocumentVirtualListProps.tailPolicy). When omitted it follows
+     *  the `agent:turnscopedtail` setting, so the kill switch covers every
+     *  consumer — the live pane and the History tab alike (Codex P2, #3611). */
     tailPolicy?: "turn" | "count";
     /** Open/focus the Agent History tab — forwarded to the list so a
      *  `history_link` synthetic row can act on click. See
@@ -203,7 +207,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             zoomFactor={props.zoomFactor}
             blockId={props.blockId}
             layoutView={props.layoutView}
-            tailPolicy={props.tailPolicy}
+            tailPolicy={props.tailPolicy ?? resolveTailPolicy(untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()))}
             onOpenHistory={props.onOpenHistory}
             headerSlot={headerSlot()}
             dispatchMatches={dispatchMatches}

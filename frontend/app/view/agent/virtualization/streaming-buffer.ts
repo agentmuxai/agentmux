@@ -126,6 +126,11 @@ export const TURN_TAIL_MAX_BYTES = 512 * 1024;
 export const TURN_TAIL_MAX_DEFERRED_NODES = 12;
 export const TURN_TAIL_MAX_DEFERRED_BYTES = 256 * 1024;
 
+/** `agent:turnscopedtail` → tail policy: turn-scoped unless explicitly false. */
+export function resolveTailPolicy(setting: boolean | null | undefined): "turn" | "count" {
+    return setting === false ? "count" : "turn";
+}
+
 /** Still receiving content or waiting on the user: must stay in the tail. */
 export function isNodeInProgress(node: DocumentNode): boolean {
     if (node.type === "tool") {
@@ -139,18 +144,40 @@ export function isNodeInProgress(node: DocumentNode): boolean {
 // always current and makes the ceiling check O(tail) per call, not O(bytes).
 const bytesCache = new WeakMap<DocumentNode, number>();
 
-/** Rough rendered-content size, for the byte ceiling. */
+/** Past this, a node is "big" as far as the ceilings care: stop measuring. */
+const NODE_BYTES_CAP = 4 * TURN_TAIL_MAX_BYTES;
+
+/**
+ * Sum of string lengths reachable from `value`, walking arrays and plain
+ * objects (a tool's params, a structured result: WriteParams.content, edit
+ * strings, search-result arrays, records). Bounded: stops once `budget` is
+ * spent, below `depth` 6, and on cycles — it only has to tell a big node from
+ * a small one. Codex P2 on #3611: counting only top-level result strings let
+ * megabyte payloads count as ~64 bytes, so the byte ceiling never moved.
+ */
+function payloadBytes(value: unknown, budget: number, depth = 0, seen = new Set<object>()): number {
+    if (typeof value === "string") return Math.min(value.length, budget);
+    if (value == null || typeof value !== "object" || depth > 6 || seen.has(value)) return 0;
+    seen.add(value);
+    let n = 0;
+    for (const v of Array.isArray(value) ? value : Object.values(value as Record<string, unknown>)) {
+        if (n >= budget) break;
+        n += payloadBytes(v, budget - n, depth + 1, seen);
+    }
+    return n;
+}
+
+/** Rough rendered-content size, for the byte ceiling. Cached per node object. */
 export function nodeBytes(node: DocumentNode): number {
     const cached = bytesCache.get(node);
     if (cached !== undefined) return cached;
     let n = 64;
-    const any = node as { content?: unknown; message?: unknown; log?: { chunks?: { content?: unknown }[] }; result?: unknown };
+    const any = node as { content?: unknown; message?: unknown; log?: { chunks?: { content?: unknown }[] }; params?: unknown; result?: unknown };
     if (typeof any.content === "string") n += any.content.length;
     if (typeof any.message === "string") n += any.message.length;
     for (const c of any.log?.chunks ?? []) if (typeof c.content === "string") n += c.content.length;
-    if (any.result && typeof any.result === "object") {
-        for (const v of Object.values(any.result as Record<string, unknown>)) if (typeof v === "string") n += v.length;
-    }
+    if (n < NODE_BYTES_CAP) n += payloadBytes(any.params, NODE_BYTES_CAP - n);
+    if (n < NODE_BYTES_CAP) n += payloadBytes(any.result, NODE_BYTES_CAP - n);
     bytesCache.set(node, n);
     return n;
 }

@@ -9,6 +9,8 @@ import {
     partitionForVirtualization,
     STREAMING_BUFFER_SIZE,
     nodeBytes,
+    resolveTailPolicy,
+    TURN_TAIL_MAX_BYTES,
     turnScopedFrontier,
 } from "./streaming-buffer";
 
@@ -246,5 +248,41 @@ describe("turnScopedFrontier", () => {
         const nodes = [big("huge", 10_000)];
         expect(turnScopedFrontier(nodes, { maxNodes: 40, maxBytes: 100 })).toBe(0);
         expect(turnScopedFrontier([], { maxNodes: 40, maxBytes: 100 })).toBe(0);
+    });
+});
+
+describe("resolveTailPolicy (the agent:turnscopedtail kill switch)", () => {
+    it("is turn-scoped unless the setting is explicitly false", () => {
+        expect(resolveTailPolicy(undefined)).toBe("turn");
+        expect(resolveTailPolicy(null)).toBe("turn");
+        expect(resolveTailPolicy(true)).toBe("turn");
+        expect(resolveTailPolicy(false)).toBe("count");
+    });
+});
+
+describe("nodeBytes counts nested tool payloads (Codex P2, #3611)", () => {
+    const toolWith = (params: unknown, result?: unknown): DocumentNode =>
+        ({ type: "tool", id: "t", tool: "Write", params, status: "success", collapsed: true, summary: "t", result }) as DocumentNode;
+
+    it("counts string params such as a Write's content", () => {
+        expect(nodeBytes(toolWith({ file_path: "a.ts", content: "x".repeat(100_000) }))).toBeGreaterThan(100_000);
+    });
+
+    it("counts strings nested in result arrays and records", () => {
+        const result = { results: Array.from({ length: 50 }, (_, i) => ({ title: `t${i}`, snippet: "y".repeat(2_000) })) };
+        expect(nodeBytes(toolWith({}, result))).toBeGreaterThan(100_000);
+    });
+
+    it("stops counting past the cap instead of walking an arbitrarily large payload", () => {
+        const huge = { chunks: Array.from({ length: 5_000 }, () => "z".repeat(10_000)) }; // 50 MB of strings
+        const n = nodeBytes(toolWith({}, huge));
+        expect(n).toBeGreaterThan(TURN_TAIL_MAX_BYTES); // enough to trip the ceiling
+        expect(n).toBeLessThan(50_000_000);
+    });
+
+    it("survives a cyclic payload", () => {
+        const a: Record<string, unknown> = { s: "abc" };
+        a.self = a;
+        expect(nodeBytes(toolWith(a))).toBeGreaterThan(0);
     });
 });
