@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1, P2, P4–P6, and P3's resolver ladder, pane chip and deterministic identifier extraction not started.
+**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1, P2, P4–P6, and P3's resolver ladder and pane chip not started. Exact identifiers are extracted deterministically into the packet (§4.4.1).
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -395,6 +395,14 @@ It keeps the design and defers everything that needs P1's segment index.
   "Running summary of the whole conversation", with its timestamp and a note
   that the verbatim exchange below is newer and wins where they differ. Then
   come the last request and the exchange, per §4.4's order.
+- **Exact identifiers.** `continuity.rs` `identifiers()` pulls PR and issue
+  references (`#N`, `owner/repo#N`), URLs, repo-relative file paths (a
+  trailing `:line` is dropped) and commit ids (7–40 hex digits with both a
+  digit and a letter) out of the record's turns. The list is deduplicated,
+  newest first, and capped at 40. The packet lists them right after the
+  running summary as "trust these over a paraphrase". Extraction runs on
+  redacted text, so a credential inside a URL never makes the list. On
+  today's 101-turn transcript it produced 40 real identifiers and no noise.
 - **Compaction reuse.** When the hidden memory reinjection that follows a
   compaction reaches srv (`agent_handlers/input.rs`, `hidden: true`, carrying
   `memory-reinjection.ts`'s compaction clause), srv appends the newest version
@@ -411,8 +419,7 @@ It keeps the design and defers everything that needs P1's segment index.
   output still had small errors, like a commit id attached to the wrong PR.
   That's the case for the deterministic identifier extraction below.
 
-**Not in v1:** the resolver ladder (R0–R4), the pane chip, deterministic identifier
-extraction, per-version prompt logging, the Armory diff/revert view, and other
+**Not in v1:** the resolver ladder (R0–R4), the pane chip, per-version prompt logging, the Armory diff/revert view, and other
 providers.
 
 ### 4.5 Recall: pulling older detail on demand
