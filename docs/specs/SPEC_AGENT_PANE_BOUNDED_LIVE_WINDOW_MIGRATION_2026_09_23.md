@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5 groundwork recorded in §6.3.6 (2026-09-24); Phases 4–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
+**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5 groundwork recorded in §6.3.6 (2026-09-24); Phases 4–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing
