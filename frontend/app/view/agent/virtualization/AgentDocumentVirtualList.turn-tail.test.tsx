@@ -161,6 +161,21 @@ describe("turn-scoped streaming buffer", () => {
         s.assertSingleResidency();
     });
 
+    it("a big batch arriving while the reader is at the top does not stay mounted behind one visible row", () => {
+        // Found live (bench, 25 turns into a pane scrolled to the top): the
+        // head/tail split is contiguous, so one visible row at the start of
+        // the tail kept the whole 75-node batch mounted — 44k elements where
+        // the count policy had 33k. Deferral is for the few rows the user is
+        // looking at, not for a batch nobody has seen.
+        const s = setup(turn(1));
+        s.measureTail();
+        s.scrollTo(0); // u1 is on screen
+        const batch = Array.from({ length: 20 }, (_, k) => turn(k + 2)).flat();
+        s.setNodes((n) => [...n, ...batch]);
+        expect(s.tailIds()).toEqual(["u21", "a21", "t21"]);
+        s.assertSingleResidency();
+    });
+
     it("an earlier tool still running keeps itself and everything after it mounted", () => {
         const s = setup([user("u1"), tool("t1", "running"), md("a1")]);
         s.measureTail();

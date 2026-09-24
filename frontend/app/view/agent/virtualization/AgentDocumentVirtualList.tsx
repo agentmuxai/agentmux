@@ -61,6 +61,8 @@ import {
     partitionForVirtualization,
     STREAMING_BUFFER_SIZE,
     TURN_TAIL_MAX_BYTES,
+    TURN_TAIL_MAX_DEFERRED_BYTES,
+    TURN_TAIL_MAX_DEFERRED_NODES,
     TURN_TAIL_MAX_NODES,
     turnScopedFrontier,
 } from "./streaming-buffer";
@@ -383,7 +385,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
      * rows' observed heights (tailHeights), the store's scrollTop — so nothing
      * here reads layout. A row with no observed height yet stops the advance;
      * the next partition run retries. Past twice either ceiling the tail is
-     * trimmed regardless, so it stays bounded while the user reads mid-tail.
+     * trimmed regardless, so it stays bounded while the user reads mid-tail;
+     * and a deferral longer than TURN_TAIL_MAX_DEFERRED_* moves anyway.
      */
     const advanceFrontier = (nodes: readonly DocumentNode[], from: number, to: number): number => {
         let tailBytes = 0;
@@ -402,6 +405,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             rowTop += seen.px + ROW_GAP_PX;
             k++;
         }
+        // Deferral is for the few rows the user is looking at. The split is
+        // contiguous, so a visible row holds back everything after it; past a
+        // small amount, move anyway (the visible rows are remounted, jump-free
+        // since 3a). Otherwise a big batch arriving while the reader is
+        // scrolled up stays mounted behind one visible row — seen live: a
+        // 75-node history load kept 76 rows / 44k elements mounted.
+        let deferredBytes = 0;
+        for (let i = k; i < to; i++) deferredBytes += nodeBytes(nodes[i]);
+        if (to - k > TURN_TAIL_MAX_DEFERRED_NODES || deferredBytes > TURN_TAIL_MAX_DEFERRED_BYTES) return to;
         return k;
     };
 

@@ -115,6 +115,17 @@ export function partitionForVirtualization(
 export const TURN_TAIL_MAX_NODES = 40;
 export const TURN_TAIL_MAX_BYTES = 512 * 1024;
 
+/**
+ * How much a frontier move may be DEFERRED to avoid remounting rows the user
+ * can see. The head/buffer split is contiguous, so one visible row holds back
+ * everything after it; past this much, the move happens anyway and the few
+ * visible rows are remounted (jump-free since Phase 3a). Without the cap, a
+ * big batch (history load) arriving while the reader was scrolled to the top
+ * stayed mounted behind a single visible row.
+ */
+export const TURN_TAIL_MAX_DEFERRED_NODES = 12;
+export const TURN_TAIL_MAX_DEFERRED_BYTES = 256 * 1024;
+
 /** Still receiving content or waiting on the user: must stay in the tail. */
 export function isNodeInProgress(node: DocumentNode): boolean {
     if (node.type === "tool") {
