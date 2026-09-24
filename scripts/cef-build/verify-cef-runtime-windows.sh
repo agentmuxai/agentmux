@@ -47,7 +47,11 @@ refuse() {
 
 [ -f "$libcef" ] || refuse "no libcef.dll in the runtime directory"
 
-actual="$(sha256sum "$libcef" | cut -d' ' -f1)"
+# From stdin, never `sha256sum "$libcef"`: given a file name containing a
+# backslash -- every Windows path here (C:\Users\..., CI's D:\a\...) -- coreutils
+# prefixes the hash with one, and the pinned runtime is refused
+# (SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md).
+actual="$(sha256sum < "$libcef" | cut -d' ' -f1)"
 if [ "$actual" = "$CEF_WINDOWS_LIBCEF_SHA256" ]; then
   echo "CEF runtime verified: $CEF_WINDOWS_RELEASE_TAG (tracer off)"
   exit 0

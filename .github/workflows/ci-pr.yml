@@ -506,6 +506,15 @@ jobs:
       - name: Windows CEF runtime guard self-test
         run: bash scripts/cef-build/verify-cef-runtime-windows.test.sh
 
+      # Hash files from stdin, never by name: given a path containing `\` (every
+      # Windows path), coreutils prefixes the hash with `\` and a pin check
+      # refuses the right file -- the guard above did, for the correct r2 runtime.
+      # docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md
+      - name: Hash-from-stdin gate
+        run: |
+          bash scripts/check-hash-from-stdin.test.sh
+          bash scripts/check-hash-from-stdin.sh
+
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
 
