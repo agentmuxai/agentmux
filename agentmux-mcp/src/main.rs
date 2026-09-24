@@ -318,6 +318,86 @@ fn require_agent_env(local_url: &str, auth_key: &str, block_id: &str) -> Result<
     Ok(())
 }
 
+/// GET a srv route and return its JSON body, with every failure described by
+/// what actually happened (#3473). reqwest's own message for a refused
+/// connection or a timeout is only "error sending request for url (…)", which
+/// reads like a network fault whatever the cause; and parsing the body before
+/// checking the status loses the status whenever an error body isn't JSON.
+/// So: refused / timed out / other transport failures are told apart, the
+/// status is checked first, and an error carries srv's own `error` message,
+/// else the raw body.
+async fn srv_get_json(
+    client: &reqwest::Client,
+    url: &str,
+    auth_key: &str,
+    query: &[(&str, String)],
+    what: &str,
+) -> Result<Value> {
+    let resp = client
+        .get(url)
+        .header("X-AuthKey", auth_key)
+        .query(query)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(describe_transport_error(what, url, &e)))?;
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| anyhow::anyhow!("{what}: reading AgentMux's response failed: {e}"))?;
+    if !status.is_success() {
+        anyhow::bail!(describe_http_error(what, status, &text));
+    }
+    serde_json::from_str(&text).map_err(|e| {
+        anyhow::anyhow!("{what}: AgentMux answered HTTP {status} but not with JSON ({e})")
+    })
+}
+
+fn describe_transport_error(what: &str, url: &str, e: &reqwest::Error) -> String {
+    let mut causes = String::new();
+    let mut source = std::error::Error::source(e);
+    while let Some(s) = source {
+        causes.push_str(&format!(": {s}"));
+        source = s.source();
+    }
+    if e.is_timeout() {
+        format!(
+            "{what} timed out: AgentMux didn't answer in time. This is not an empty result — retry, \
+             or ask for less"
+        )
+    } else if e.is_connect() {
+        format!(
+            "{what}: can't reach AgentMux at {url}{causes}. Is it still running? An agent started \
+             by an AgentMux that has since restarted must be reopened."
+        )
+    } else {
+        format!("{what}: the request to AgentMux failed: {e}{causes}")
+    }
+}
+
+fn describe_http_error(what: &str, status: reqwest::StatusCode, body: &str) -> String {
+    let detail = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| {
+            let body = body.trim();
+            if body.is_empty() {
+                "(no body)".to_string()
+            } else {
+                body.chars().take(300).collect()
+            }
+        });
+    let hint = match status.as_u16() {
+        401 => {
+            " — AgentMux rejected this process's auth key (AGENTMUX_AUTH_KEY). The agent was \
+             probably started by an AgentMux that has since restarted; reopen it."
+        }
+        503 => " — temporary; retry shortly.",
+        _ => "",
+    };
+    format!("{what} failed (HTTP {status}): {detail}{hint}")
+}
+
 /// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
 /// this MCP server's trusted environment. The App API identity/preset/memory
 /// REST endpoints stamp their `agent_id` from this — the agent's own model
@@ -1713,11 +1793,12 @@ async fn call_tool(
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         "SearchHistory" => {
-            // Always this process's own agent id. The tool exposes no `agent`
-            // parameter on purpose — see SEARCH_HISTORY_TOOL's comment — and
-            // `agent_slug()` reads it from the trusted spawn-time env, which
-            // the calling model's own output cannot reach or override.
-            let slug = agent_slug()?;
+            // Whose history this is, srv takes from this process's
+            // `X-Agent-Token` (sent on every request, see `main`), never from a
+            // name; the tool exposes no `agent` parameter on purpose — see
+            // SEARCH_HISTORY_TOOL's comment. The name is sent only for srv's
+            // actor counters, so a process without one still searches.
+            let slug = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
             let query = arguments
                 .get("query")
                 .and_then(|v| v.as_str())
@@ -1742,8 +1823,10 @@ async fn call_tool(
                 "{}/agentmux/reactive/history/search",
                 local_url.trim_end_matches('/')
             );
-            let mut query_params: Vec<(&str, String)> =
-                vec![("agent", slug), ("query", query)];
+            let mut query_params: Vec<(&str, String)> = vec![("query", query)];
+            if !slug.trim().is_empty() {
+                query_params.push(("agent", slug));
+            }
             if let Some(t) = tool {
                 query_params.push(("tool", t.to_string()));
             }
@@ -1761,36 +1844,7 @@ async fn call_tool(
                 }
             }
 
-            let resp = client
-                .get(&url)
-                .header("X-AuthKey", auth_key)
-                .query(&query_params)
-                .send()
-                .await
-                .map_err(|e| {
-                    // reqwest's Display for a timeout is only "error sending
-                    // request for url (…)", which hid the cause of every cold-
-                    // index failure. Say what happened.
-                    if e.is_timeout() {
-                        anyhow::anyhow!(
-                            "history search timed out — the history index may still be building after an \
-                             AgentMux start; this is not an empty history, retry in a minute"
-                        )
-                    } else {
-                        anyhow::anyhow!("history search request failed: {e}")
-                    }
-                })?;
-            let status = resp.status();
-            let body: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            if !status.is_success() {
-                anyhow::bail!(
-                    "history search failed ({status}): {}",
-                    body.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error")
-                );
-            }
+            let body = srv_get_json(client, &url, auth_key, &query_params, "history search").await?;
             Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
         }
         "GetAgentTranscript" => {
@@ -3651,6 +3705,80 @@ fn format_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serve exactly one HTTP response on a fresh localhost port; return the
+    /// base URL.
+    fn one_shot_server(status_line: &'static str, body: &'static str) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = conn.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+            }
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            conn.write_all(response.as_bytes()).unwrap();
+        });
+        url
+    }
+
+    async fn get(url: &str) -> Result<Value> {
+        let client = reqwest::Client::new();
+        srv_get_json(&client, url, "key", &[("query", "x".to_string())], "history search").await
+    }
+
+    #[tokio::test]
+    async fn srv_get_json_returns_the_body_of_a_success() {
+        let url = one_shot_server("200 OK", r#"{"hits":[],"complete":true}"#);
+        assert_eq!(get(&url).await.unwrap()["complete"], true);
+    }
+
+    /// #3473: srv's own message must reach the agent, with the status.
+    #[tokio::test]
+    async fn srv_get_json_reports_srvs_own_error_message_and_the_status() {
+        let url = one_shot_server(
+            "403 Forbidden",
+            r#"{"error":"history.search: this request carries no agent identity (X-Agent-Token)"}"#,
+        );
+        let err = get(&url).await.unwrap_err().to_string();
+        assert!(err.contains("HTTP 403"), "{err}");
+        assert!(err.contains("carries no agent identity"), "{err}");
+    }
+
+    /// A non-JSON error body used to fail JSON parsing first and lose the
+    /// status entirely.
+    #[tokio::test]
+    async fn srv_get_json_keeps_the_status_when_the_error_body_is_not_json() {
+        let url = one_shot_server("502 Bad Gateway", "upstream went away");
+        let err = get(&url).await.unwrap_err().to_string();
+        assert!(err.contains("HTTP 502"), "{err}");
+        assert!(err.contains("upstream went away"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn srv_get_json_says_when_agentmux_cannot_be_reached() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        // The listener is dropped: nothing is listening on `port` now.
+        let err = get(&format!("http://127.0.0.1:{port}")).await.unwrap_err().to_string();
+        assert!(err.contains("can't reach AgentMux"), "{err}");
+    }
+
+    #[test]
+    fn a_401_explains_the_auth_key_rather_than_a_network_fault() {
+        let msg = describe_http_error("history search", reqwest::StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+        assert!(msg.contains("HTTP 401"), "{msg}");
+        assert!(msg.contains("AGENTMUX_AUTH_KEY"), "{msg}");
+    }
 
     /// Guards every test that mutates `AGENTMUX_DATA_HOME` (a process-global
     /// env var) so they never run concurrently against each other — cargo

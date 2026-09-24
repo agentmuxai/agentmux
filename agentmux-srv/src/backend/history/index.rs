@@ -39,6 +39,13 @@ pub struct HistorySearchOptions {
     pub tool: Option<String>,
     /// Max hits to return before reporting `truncated`.
     pub limit: usize,
+    /// Only messages at or after this instant (Unix ms).
+    pub since_ms: Option<i64>,
+    /// Only messages at or before this instant (Unix ms).
+    pub until_ms: Option<i64>,
+    /// Open at most this many of the candidates, in the order given. The rest
+    /// are counted in `sessions_skipped`, never silently dropped.
+    pub max_sessions: Option<usize>,
 }
 
 /// One match.
@@ -58,14 +65,78 @@ pub struct HistorySearchHit {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HistorySearchOutcome {
     pub hits: Vec<HistorySearchHit>,
-    /// Sessions actually opened and parsed.
+    /// Sessions actually opened and read.
     pub sessions_scanned: u32,
-    /// Candidates offered to the search (after the caller's own filtering).
+    /// Candidates in the caller's window, counted before `max_sessions`.
     pub total_sessions: u32,
     /// True when the scan stopped on `limit` rather than exhausting every
     /// candidate — see `search_sessions`' doc comment for why this must never
     /// be conflated with "no matches".
     pub truncated: bool,
+    /// True only when every candidate was read to the end: nothing cut by
+    /// `max_sessions`, nothing unreadable, no hit limit reached. An empty
+    /// `hits` is evidence that something did not happen only when this is
+    /// true; otherwise the answer is "unknown", and `incomplete_reasons`
+    /// says why.
+    pub complete: bool,
+    /// `"hit_limit"`, `"max_sessions"`, `"unreadable_sessions"`,
+    /// `"unreadable_records"`, `"discovery_errors"`.
+    pub incomplete_reasons: Vec<&'static str>,
+    /// Candidates `max_sessions` left unopened.
+    pub sessions_skipped: u32,
+    /// Candidates that could not be read, and why.
+    pub sessions_unreadable: Vec<UnreadableSession>,
+    /// Candidates searched, but with records that could not be read.
+    pub sessions_partly_read: Vec<UnreadableSession>,
+    /// What the index refresh behind this search couldn't read. A session
+    /// there may be missing from the candidates.
+    pub discovery_errors: Vec<String>,
+}
+
+/// At most this many discovery errors are listed in a search's answer.
+const DISCOVERY_ERRORS_LISTED: usize = 20;
+
+impl HistorySearchOutcome {
+    /// Record that the snapshot this search read couldn't see everything.
+    pub fn add_discovery_errors(&mut self, problems: Vec<String>) {
+        if problems.is_empty() {
+            return;
+        }
+        let total = problems.len();
+        self.discovery_errors = problems.into_iter().take(DISCOVERY_ERRORS_LISTED).collect();
+        if total > DISCOVERY_ERRORS_LISTED {
+            self.discovery_errors.push(format!("… and {} more", total - DISCOVERY_ERRORS_LISTED));
+        }
+        self.incomplete_reasons.push("discovery_errors");
+        self.complete = false;
+    }
+}
+
+/// A candidate session the search could not read.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UnreadableSession {
+    pub session_id: String,
+    pub reason: String,
+}
+
+/// Whether a recorded tool name is the tool the caller named. Claude records
+/// an MCP tool with its server prefix (`mcp__agentmux__SendMessage`) while
+/// callers — and SearchHistory's own schema — name it bare (`SendMessage`), so
+/// both forms match. Case-insensitive.
+fn tool_name_matches(recorded: &str, wanted: &str) -> bool {
+    let recorded = recorded.to_ascii_lowercase();
+    let wanted = wanted.to_ascii_lowercase();
+    recorded == wanted
+        || (recorded.starts_with("mcp__") && recorded.ends_with(&format!("__{wanted}")))
+}
+
+/// Whether a message falls inside the caller's time window. A message with
+/// no timestamp (0) can't be placed outside it, and dropping it could only
+/// hide evidence, so it's kept.
+fn within_window(timestamp_ms: i64, opts: &HistorySearchOptions) -> bool {
+    timestamp_ms == 0
+        || (opts.since_ms.is_none_or(|since| timestamp_ms >= since)
+            && opts.until_ms.is_none_or(|until| timestamp_ms <= until))
 }
 
 /// Case-insensitive substring search returning a byte offset into the
@@ -149,7 +220,7 @@ fn match_message(
     // Both were reagentx P1s on PR #3321.
     for tu in &msg.tool_uses {
         if let Some(want) = opts.tool.as_deref() {
-            if !tu.name.eq_ignore_ascii_case(want) {
+            if !tool_name_matches(&tu.name, want) {
                 continue;
             }
             // Empty query + tool filter = "every call to this tool", so the
@@ -291,6 +362,16 @@ pub struct SessionIndex {
     pub(super) refresh_lock: Mutex<()>,
     /// Unix ms when the last refresh finished; 0 = never.
     refreshed_at_ms: std::sync::atomic::AtomicI64,
+    /// Refreshes started so far; each takes the next number, under
+    /// `refresh_lock`, before it lists anything.
+    refreshes_started: std::sync::atomic::AtomicU64,
+    /// The number of the last refresh that finished. A request that finds it
+    /// higher than `refreshes_started` was when the request began knows a
+    /// refresh listed the disk after it began — see [`Self::refresh_covering_now`].
+    last_finished_refresh: std::sync::atomic::AtomicU64,
+    /// What the last refresh couldn't read (see [`Discovery::problems`]),
+    /// kept with the snapshot it produced.
+    discovery_problems: Mutex<Vec<String>>,
     /// Adapters for all registered providers
     adapters: Vec<Box<dyn HistoryAdapter>>,
     /// Roots under which destructive ops (delete/clear) are allowed.
@@ -314,6 +395,9 @@ impl SessionIndex {
             meta_cache: Mutex::new(HashMap::new()),
             refresh_lock: Mutex::new(()),
             refreshed_at_ms: std::sync::atomic::AtomicI64::new(0),
+            refreshes_started: std::sync::atomic::AtomicU64::new(0),
+            last_finished_refresh: std::sync::atomic::AtomicU64::new(0),
+            discovery_problems: Mutex::new(Vec::new()),
             adapters,
             isolated_roots,
         }
@@ -348,7 +432,33 @@ impl SessionIndex {
         self.refresh_holding(guard)
     }
 
+    /// Make the snapshot include every session on disk when this call began,
+    /// sharing the work with concurrent callers. A refresh that started after
+    /// this call began already listed everything this call needs, so once it
+    /// has finished there's nothing left to do; otherwise this runs its own.
+    /// However many searches arrive together, that's at most two walks —
+    /// every search running its own, one after another, put the fourth past
+    /// the MCP's 10 s timeout on a heavy host (Codex P1 on #3693).
+    pub fn refresh_covering_now(&self) {
+        use std::sync::atomic::Ordering;
+        let started_before_this_call = self.refreshes_started.load(Ordering::Acquire);
+        let guard = self.refresh_lock.lock().unwrap_or_else(|p| p.into_inner());
+        if self.last_finished_refresh.load(Ordering::Acquire) > started_before_this_call {
+            return;
+        }
+        self.refresh_holding(guard);
+    }
+
+    /// What the last refresh couldn't read — a session there may be missing
+    /// from the snapshot.
+    pub fn discovery_problems(&self) -> Vec<String> {
+        self.discovery_problems.lock().unwrap().clone()
+    }
+
     fn refresh_holding(&self, _refreshing: std::sync::MutexGuard<'_, ()>) -> (u32, u32, u32) {
+        use std::sync::atomic::Ordering;
+        let this_refresh = self.refreshes_started.fetch_add(1, Ordering::AcqRel) + 1;
+        let mut problems: Vec<String> = Vec::new();
         let mut discovered: u32 = 0;
         let mut updated: u32 = 0;
         let mut new_count: u32 = 0;
@@ -360,14 +470,18 @@ impl SessionIndex {
         let mut new_by_working_dir: HashMap<String, Vec<String>> = HashMap::new();
 
         for adapter in &self.adapters {
-            let files = match adapter.discover_files() {
-                Ok(f) => f,
+            let files = match adapter.discover() {
+                Ok(found) => {
+                    problems.extend(found.problems);
+                    found.files
+                }
                 Err(e) => {
                     tracing::warn!(
                         "history: failed to discover {} files: {}",
                         adapter.provider(),
                         e
                     );
+                    problems.push(format!("{} discovery failed: {e}", adapter.provider()));
                     continue;
                 }
             };
@@ -405,6 +519,9 @@ impl SessionIndex {
                             file.file_path,
                             e
                         );
+                        // A transcript that couldn't be indexed is missing
+                        // from the snapshot, whoever it belongs to.
+                        problems.push(format!("{}: {e}", file.file_path));
                     }
                 }
             }
@@ -425,10 +542,15 @@ impl SessionIndex {
         *self.by_working_dir.lock().unwrap() = new_by_working_dir;
         drop(sessions);
         *self.meta_cache.lock().unwrap() = new_cache;
+        if !problems.is_empty() {
+            tracing::warn!(count = problems.len(), first = %problems[0], "history: discovery couldn't read everything");
+        }
+        *self.discovery_problems.lock().unwrap() = problems;
         self.refreshed_at_ms.store(
             chrono::Utc::now().timestamp_millis().max(1),
-            std::sync::atomic::Ordering::Release,
+            Ordering::Release,
         );
+        self.last_finished_refresh.store(this_refresh, Ordering::Release);
 
         (discovered, updated, new_count)
     }
@@ -620,7 +742,9 @@ impl SessionIndex {
     /// truncates and returns nothing reproduces the exact failure this whole
     /// feature exists to prevent — an agent concluding "I never did that" from
     /// an incomplete audit — so "no matches" and "ran out of budget" must never
-    /// look the same to a caller.
+    /// look the same to a caller. The same goes for every other way a
+    /// candidate goes unread (a `max_sessions` cut, a file that won't parse):
+    /// each is counted, and any of them makes the answer not `complete`.
     pub fn search_sessions(
         &self,
         candidates: &[SessionMeta],
@@ -629,25 +753,57 @@ impl SessionIndex {
         let needle = opts.query.to_lowercase();
         let mut hits: Vec<HistorySearchHit> = Vec::new();
         let mut sessions_scanned = 0u32;
+        let mut sessions_unreadable: Vec<UnreadableSession> = Vec::new();
+        let mut sessions_partly_read: Vec<UnreadableSession> = Vec::new();
         let mut truncated = false;
 
-        for meta in candidates {
+        let opened = opts.max_sessions.map_or(candidates.len(), |max| max.min(candidates.len()));
+        let sessions_skipped = (candidates.len() - opened) as u32;
+
+        for meta in &candidates[..opened] {
             if hits.len() >= opts.limit {
                 // More candidates remained that were never opened.
                 truncated = true;
                 break;
             }
-            sessions_scanned += 1;
             // A session that fails to parse is skipped, not fatal: one
-            // malformed file must not make the whole audit unanswerable.
-            let Ok(Some(session)) = self.get_full(&meta.session_id) else {
-                continue;
+            // malformed file must not make the whole audit unanswerable. But
+            // it's reported, never counted as read.
+            let session = match self.get_full(&meta.session_id) {
+                Ok(Some(session)) => session,
+                Ok(None) => {
+                    sessions_unreadable.push(UnreadableSession {
+                        session_id: meta.session_id.clone(),
+                        reason: "no longer readable (moved, deleted or emptied)".into(),
+                    });
+                    continue;
+                }
+                Err(e) => {
+                    sessions_unreadable.push(UnreadableSession {
+                        session_id: meta.session_id.clone(),
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
             };
+            sessions_scanned += 1;
+            if session.skipped_records > 0 {
+                sessions_partly_read.push(UnreadableSession {
+                    session_id: meta.session_id.clone(),
+                    reason: format!(
+                        "{} record(s) could not be read and were not searched",
+                        session.skipped_records
+                    ),
+                });
+            }
             for msg in &session.messages {
                 if let Some(role) = opts.role.as_deref() {
                     if msg.role != role {
                         continue;
                     }
+                }
+                if !within_window(msg.timestamp, opts) {
+                    continue;
                 }
                 if hits.len() >= opts.limit {
                     truncated = true;
@@ -663,11 +819,30 @@ impl SessionIndex {
             }
         }
 
+        let mut incomplete_reasons = Vec::new();
+        if truncated {
+            incomplete_reasons.push("hit_limit");
+        }
+        if sessions_skipped > 0 {
+            incomplete_reasons.push("max_sessions");
+        }
+        if !sessions_unreadable.is_empty() {
+            incomplete_reasons.push("unreadable_sessions");
+        }
+        if !sessions_partly_read.is_empty() {
+            incomplete_reasons.push("unreadable_records");
+        }
         HistorySearchOutcome {
             hits,
             sessions_scanned,
             total_sessions: candidates.len() as u32,
             truncated,
+            complete: incomplete_reasons.is_empty(),
+            incomplete_reasons,
+            sessions_skipped,
+            sessions_unreadable,
+            sessions_partly_read,
+            discovery_errors: Vec::new(),
         }
     }
 
@@ -786,6 +961,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1131,6 +1307,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: String::new(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, file_path: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1139,9 +1316,13 @@ mod tests {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            if id.starts_with("corrupt") {
+                return Err(HistoryError::Other("unexpected end of JSON".into()));
+            }
             let Some(messages) = self.sessions.get(&id) else { return Ok(None) };
             let meta = self.extract_meta(file_path)?.unwrap();
-            Ok(Some(HistorySession { meta, messages: messages.clone() }))
+            let skipped_records = if id.starts_with("partial") { 2 } else { 0 };
+            Ok(Some(HistorySession { meta, messages: messages.clone(), skipped_records }))
         }
     }
 
@@ -1169,7 +1350,115 @@ mod tests {
     }
 
     fn opts(query: &str) -> HistorySearchOptions {
-        HistorySearchOptions { query: query.into(), role: None, tool: None, limit: 50 }
+        HistorySearchOptions { query: query.into(), limit: 50, ..Default::default() }
+    }
+
+    fn at(timestamp: i64, content: &str) -> HistoryMessage {
+        HistoryMessage { timestamp, ..msg("assistant", content, vec![]) }
+    }
+
+    #[test]
+    fn a_bare_tool_name_matches_the_mcp_prefixed_call() {
+        // Claude records an MCP tool with its server prefix, while callers —
+        // and SearchHistory's own schema — name it bare. "Did I call
+        // SendMessage" must find the AgentMux tool, not only the built-in one.
+        let idx = search_index(vec![(
+            "s1",
+            vec![msg("assistant", "sent", vec![("mcp__agentmux__SendMessage", r#"{"to":"Agent4"}"#)])],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        for wanted in ["SendMessage", "sendmessage", "mcp__agentmux__SendMessage"] {
+            let mut o = opts("");
+            o.tool = Some(wanted.into());
+            let out = idx.search_sessions(&cands, &o);
+            assert_eq!(out.hits.len(), 1, "tool: {wanted}");
+            assert_eq!(out.hits[0].tool_name.as_deref(), Some("mcp__agentmux__SendMessage"));
+        }
+        let mut other = opts("");
+        other.tool = Some("Message".into());
+        assert!(idx.search_sessions(&cands, &other).hits.is_empty(), "a suffix alone is not a name");
+    }
+
+    #[test]
+    fn messages_outside_the_time_window_are_not_hits() {
+        let idx = search_index(vec![(
+            "s1",
+            vec![at(1_000, "deploy early"), at(5_000, "deploy late"), at(0, "deploy undated")],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let mut o = opts("deploy");
+        o.since_ms = Some(2_000);
+        let snippets: Vec<String> = idx.search_sessions(&cands, &o).hits.into_iter().map(|h| h.snippet).collect();
+        // An undated message can't be placed outside the window, and dropping
+        // it could only hide evidence.
+        assert_eq!(snippets, vec!["deploy late", "deploy undated"]);
+
+        let mut o = opts("deploy");
+        o.until_ms = Some(2_000);
+        let snippets: Vec<String> = idx.search_sessions(&cands, &o).hits.into_iter().map(|h| h.snippet).collect();
+        assert_eq!(snippets, vec!["deploy early", "deploy undated"]);
+    }
+
+    #[test]
+    fn a_full_search_says_it_is_complete() {
+        let idx = search_index(vec![("s1", vec![msg("assistant", "nothing relevant", vec![])])]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("never said"));
+        assert!(out.hits.is_empty());
+        assert!(out.complete, "every candidate was read to the end");
+        assert!(out.incomplete_reasons.is_empty());
+    }
+
+    #[test]
+    fn a_max_sessions_cut_is_counted_and_makes_the_answer_incomplete() {
+        let idx = search_index(vec![
+            ("a", vec![msg("assistant", "x", vec![])]),
+            ("b", vec![msg("assistant", "x", vec![])]),
+            ("c", vec![msg("assistant", "x", vec![])]),
+        ]);
+        let cands: Vec<SessionMeta> = ["a", "b", "c"].iter().map(|id| idx.get_meta(id).unwrap()).collect();
+        let mut o = opts("absent");
+        o.max_sessions = Some(1);
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!(out.total_sessions, 3, "counted before the cut");
+        assert_eq!(out.sessions_scanned, 1);
+        assert_eq!(out.sessions_skipped, 2);
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["max_sessions"]);
+    }
+
+    #[test]
+    fn a_session_with_unreadable_records_makes_the_answer_incomplete() {
+        // What the session's readable records hold is still found; that it
+        // had records the search couldn't read is reported, so "no hit" for
+        // anything else isn't taken as proof (Codex P1 on #3693).
+        let idx = search_index(vec![("partial-1", vec![msg("assistant", "deploy done", vec![])])]);
+        let cands = vec![idx.get_meta("partial-1").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("deploy"));
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.sessions_scanned, 1, "it was read, partly");
+        assert_eq!(out.sessions_partly_read.len(), 1);
+        assert_eq!(out.sessions_partly_read[0].session_id, "partial-1");
+        assert!(out.sessions_partly_read[0].reason.contains("2 record"), "{}", out.sessions_partly_read[0].reason);
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["unreadable_records"]);
+    }
+
+    #[test]
+    fn an_unreadable_session_is_reported_not_counted_as_scanned() {
+        let idx = search_index(vec![
+            ("good", vec![msg("assistant", "x", vec![])]),
+            ("corrupt-1", vec![]),
+        ]);
+        let cands: Vec<SessionMeta> =
+            ["good", "corrupt-1"].iter().map(|id| idx.get_meta(id).unwrap()).collect();
+        let out = idx.search_sessions(&cands, &opts("absent"));
+        assert_eq!(out.sessions_scanned, 1, "only the session actually read");
+        assert_eq!(out.sessions_unreadable.len(), 1);
+        assert_eq!(out.sessions_unreadable[0].session_id, "corrupt-1");
+        assert!(out.sessions_unreadable[0].reason.contains("unexpected end of JSON"));
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["unreadable_sessions"]);
     }
 
     #[test]
@@ -1226,10 +1515,13 @@ mod tests {
         let out = idx.search_sessions(&cands, &limited);
         assert_eq!(out.hits.len(), 3);
         assert!(out.truncated, "stopping on budget must be reported");
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["hit_limit"]);
 
         let absent = idx.search_sessions(&cands, &opts("never appears anywhere"));
         assert!(absent.hits.is_empty());
         assert!(!absent.truncated, "genuinely-no-matches must NOT look truncated");
+        assert!(absent.complete);
     }
 
     #[test]
@@ -1433,6 +1725,7 @@ mod refresh_tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: String::new(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1498,5 +1791,108 @@ mod refresh_tests {
         let idx = index_over(&a);
         assert!(idx.try_refresh().is_some());
         assert!(idx.get_meta("a").is_some());
+    }
+
+    /// Discovery that walks slowly and counts its walks.
+    struct SlowAdapter {
+        walks: std::sync::atomic::AtomicUsize,
+    }
+
+    impl HistoryAdapter for Arc<SlowAdapter> {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            self.walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Ok(Vec::new())
+        }
+        fn extract_meta(&self, _: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            Ok(None)
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    /// Searches arriving together share refreshes: a refresh that started
+    /// after a request began already lists everything that existed when it
+    /// began. Every search running its own full walk, one after another,
+    /// put the fourth past the MCP's 10 s timeout on a heavy host (Codex P1
+    /// on #3693).
+    #[test]
+    fn concurrent_searches_share_refreshes() {
+        let a = Arc::new(SlowAdapter { walks: Default::default() });
+        let idx = Arc::new(SessionIndex::with_isolated_roots(vec![Box::new(a.clone())], vec![]));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let (idx, barrier) = (idx.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    idx.refresh_covering_now();
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let walks = a.walks.load(std::sync::atomic::Ordering::SeqCst);
+        assert!((1..=2).contains(&walks), "8 simultaneous searches walked {walks} times");
+    }
+
+    /// …but a refresh that finished before the request began may have
+    /// missed a session written since, so it's never reused.
+    #[test]
+    fn a_refresh_finished_before_the_request_is_not_reused() {
+        let a = Arc::new(SlowAdapter { walks: Default::default() });
+        let idx = SessionIndex::with_isolated_roots(vec![Box::new(a.clone())], vec![]);
+        idx.refresh();
+        idx.refresh_covering_now();
+        assert_eq!(a.walks.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    /// Discovery that reports what it couldn't look at.
+    struct ProblemAdapter {
+        problems: Mutex<Vec<String>>,
+    }
+
+    impl HistoryAdapter for Arc<ProblemAdapter> {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            Ok(vec![DiscoveredFile { file_path: "/h/locked.jsonl".into(), mtime_ms: 1 }])
+        }
+        fn discover(&self) -> Result<Discovery, HistoryError> {
+            Ok(Discovery { files: self.discover_files()?, problems: self.problems.lock().unwrap().clone() })
+        }
+        fn extract_meta(&self, _: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            Err(HistoryError::Other("sharing violation".into()))
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    /// A directory the walk couldn't read, or a transcript it couldn't index,
+    /// may hold the very session being searched for. Both are kept with the
+    /// snapshot so a search over it can't claim to be complete (Codex P1 on
+    /// #3693).
+    #[test]
+    fn what_discovery_could_not_read_is_kept_with_the_snapshot() {
+        let a = Arc::new(ProblemAdapter { problems: Mutex::new(vec!["/h/private: Access is denied".into()]) });
+        let idx = SessionIndex::with_isolated_roots(vec![Box::new(a.clone())], vec![]);
+        idx.refresh();
+        let problems = idx.discovery_problems();
+        assert!(problems.iter().any(|p| p.contains("/h/private")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("locked.jsonl") && p.contains("sharing violation")),
+            "a transcript that couldn't be indexed is a problem too: {problems:?}"
+        );
+
+        a.problems.lock().unwrap().clear();
+        idx.refresh();
+        assert_eq!(idx.discovery_problems().len(), 1, "each refresh replaces the last one's problems");
     }
 }

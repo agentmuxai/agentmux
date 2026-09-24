@@ -24,14 +24,17 @@ use std::time::UNIX_EPOCH;
 
 use super::adapter::*;
 
+/// Where Claude homes live. The homes under them — identity bundles and
+/// channels — are listed again on every discovery ([`ClaudeHistoryAdapter::base_dirs`]),
+/// because they are created while srv runs: an account added or switched
+/// after srv started used to stay invisible until the next restart.
 pub struct ClaudeHistoryAdapter {
-    /// All base directories to scan for project folders. Deduplicated by
-    /// canonical (symlink/junction-resolved) path at construction time —
-    /// after Step 3 above, a per-channel isolated `projects/` dir may be a
-    /// junction pointing at the exact same physical location as one of the
-    /// global `<shared>/...` entries, and scanning both would surface every
-    /// session twice.
-    base_dirs: Vec<PathBuf>,
+    /// The user's home: `~/.claude` and `~/.config/claude-*`.
+    user_home: Option<PathBuf>,
+    /// `<shared>`: `providers/claude` and `identities/*`.
+    shared_dir: Option<PathBuf>,
+    /// AgentMux's home: `channels/*/identities/*` and `dev/…/identities/*`.
+    agentmux_home: Option<PathBuf>,
 }
 
 impl ClaudeHistoryAdapter {
@@ -54,17 +57,45 @@ impl ClaudeHistoryAdapter {
     }
 
     pub fn new() -> Self {
+        // `AGENTMUX_SHARED_DIR` is exported by the launcher; fall back to
+        // ~/.agentmux/shared so discovery still works in plain/test contexts.
+        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
+            .map(PathBuf::from)
+            .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
+        // `home_dir` is re-derived the same way `DataPaths::from_env()`
+        // itself derives it (AGENTMUX_HOME_OVERRIDE or the OS home dir),
+        // not read from an env var AgentMux doesn't currently export for
+        // this purpose.
+        let agentmux_home = agentmux_common::DataPaths::from_env().map(|paths| paths.home_dir);
+        Self::with_roots(dirs::home_dir(), shared_dir, agentmux_home)
+    }
+
+    pub(crate) fn with_roots(
+        user_home: Option<PathBuf>,
+        shared_dir: Option<PathBuf>,
+        agentmux_home: Option<PathBuf>,
+    ) -> Self {
+        ClaudeHistoryAdapter { user_home, shared_dir, agentmux_home }
+    }
+
+    /// Every Claude `projects/` directory under the roots, as the filesystem
+    /// stands now. Deduplicated by canonical (symlink/junction-resolved) path:
+    /// after Step 3 above, a per-channel isolated `projects/` dir may be a
+    /// junction pointing at the exact same physical location as one of the
+    /// global `<shared>/...` entries, and scanning both would surface every
+    /// session twice.
+    fn base_dirs(&self, problems: &mut Vec<String>) -> Vec<PathBuf> {
         let mut base_dirs = Vec::new();
         let mut seen_canonical: HashSet<PathBuf> = HashSet::new();
 
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = &self.user_home {
             // User's personal (non-isolated) Claude sessions
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, home.join(".claude").join("projects"));
 
             // Legacy multi-account convention: ~/.config/claude-*/projects/
             let config_dir = home.join(".config");
             if config_dir.is_dir() {
-                if let Ok(entries) = fs::read_dir(&config_dir) {
+                if let Some(entries) = read_dir_or_note(problems, &config_dir) {
                     for entry in entries.flatten() {
                         let name = entry.file_name();
                         let name_str = name.to_string_lossy();
@@ -82,14 +113,9 @@ impl ClaudeHistoryAdapter {
         // conversation. See docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.
         //   <shared>/providers/claude/projects/              (default, account-wide)
         //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles, global)
-        // `AGENTMUX_SHARED_DIR` is exported by the launcher; fall back to
-        // ~/.agentmux/shared so discovery still works in plain/test contexts.
-        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
-            .map(PathBuf::from)
-            .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
-        if let Some(shared) = &shared_dir {
+        if let Some(shared) = &self.shared_dir {
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
-            if let Ok(entries) = fs::read_dir(shared.join("identities")) {
+            if let Some(entries) = read_dir_or_note(problems, &shared.join("identities")) {
                 for entry in entries.flatten() {
                     Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, entry.path().join("claude").join("projects"));
                 }
@@ -100,22 +126,19 @@ impl ClaudeHistoryAdapter {
         // §4.4) — `<home>/channels/*/identities/*/claude/projects` and
         // `<home>/dev/*/identities/*/claude/projects` (or, when a dev clone
         // id is in play, one level deeper: `<home>/dev/*/*/identities/*/...`).
-        // `home_dir` is re-derived the same way `DataPaths::from_env()`
-        // itself derives it (AGENTMUX_HOME_OVERRIDE or the OS home dir),
-        // not read from an env var AgentMux doesn't currently export for
-        // this purpose.
-        if let Some(paths) = agentmux_common::DataPaths::from_env() {
+        if let Some(agentmux_home) = &self.agentmux_home {
             for root_name in ["channels", "dev"] {
                 Self::scan_isolated_identities_under(
-                    &paths.home_dir.join(root_name),
+                    &agentmux_home.join(root_name),
                     &mut base_dirs,
                     &mut seen_canonical,
                     2,
+                    problems,
                 );
             }
         }
 
-        ClaudeHistoryAdapter { base_dirs }
+        base_dirs
     }
 
     /// Find every `identities/` directory up to `max_depth` levels under
@@ -131,8 +154,9 @@ impl ClaudeHistoryAdapter {
         base_dirs: &mut Vec<PathBuf>,
         seen: &mut HashSet<PathBuf>,
         max_depth: u8,
+        problems: &mut Vec<String>,
     ) {
-        let Ok(entries) = fs::read_dir(root) else {
+        let Some(entries) = read_dir_or_note(problems, root) else {
             return;
         };
         for entry in entries.flatten() {
@@ -142,14 +166,14 @@ impl ClaudeHistoryAdapter {
             }
             let identities = path.join("identities");
             if identities.is_dir() {
-                if let Ok(id_entries) = fs::read_dir(&identities) {
+                if let Some(id_entries) = read_dir_or_note(problems, &identities) {
                     for id_entry in id_entries.flatten() {
                         Self::push_deduped_dir(base_dirs, seen, id_entry.path().join("claude").join("projects"));
                     }
                 }
             }
             if max_depth > 1 {
-                Self::scan_isolated_identities_under(&path, base_dirs, seen, max_depth - 1);
+                Self::scan_isolated_identities_under(&path, base_dirs, seen, max_depth - 1, problems);
             }
         }
     }
@@ -214,26 +238,58 @@ impl ClaudeHistoryAdapter {
     }
 }
 
+/// Record a directory or file discovery couldn't read. A path that no longer
+/// exists isn't one: it was deleted (or never created), so nothing in it was
+/// missed.
+fn note_unreadable(problems: &mut Vec<String>, path: &Path, e: &std::io::Error) {
+    if e.kind() != std::io::ErrorKind::NotFound {
+        problems.push(format!("{}: {e}", path.display()));
+    }
+}
+
+fn read_dir_or_note(problems: &mut Vec<String>, dir: &Path) -> Option<fs::ReadDir> {
+    fs::read_dir(dir).map_err(|e| note_unreadable(problems, dir, &e)).ok()
+}
+
+fn metadata_or_note(problems: &mut Vec<String>, file: &Path) -> Option<fs::Metadata> {
+    file.metadata().map_err(|e| note_unreadable(problems, file, &e)).ok()
+}
+
 impl HistoryAdapter for ClaudeHistoryAdapter {
     fn provider(&self) -> &str {
         "claude"
     }
 
     fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
-        let mut files = Vec::new();
+        self.discover().map(|found| found.files)
+    }
 
-        for base_dir in &self.base_dirs {
+    fn discover(&self) -> Result<Discovery, HistoryError> {
+        let mut files = Vec::new();
+        let mut problems = Vec::new();
+
+        for base_dir in &self.base_dirs(&mut problems) {
             let entries = match fs::read_dir(base_dir) {
                 Ok(e) => e,
-                Err(_) => continue,
+                Err(e) => {
+                    note_unreadable(&mut problems, base_dir, &e);
+                    continue;
+                }
             };
 
-            for project_entry in entries.flatten() {
+            for project_entry in entries {
+                let project_entry = match project_entry {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        note_unreadable(&mut problems, base_dir, &e);
+                        continue;
+                    }
+                };
                 let project_path = project_entry.path();
                 if !project_path.is_dir() {
                     // Top-level .jsonl files (session files at project root level)
                     if project_path.extension().map_or(false, |e| e == "jsonl") {
-                        if let Ok(meta) = project_path.metadata() {
+                        if let Some(meta) = metadata_or_note(&mut problems, &project_path) {
                             let mtime = meta
                                 .modified()
                                 .ok()
@@ -253,9 +309,19 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
                 // These are session directories that may also contain subagents/
                 let dir_entries = match fs::read_dir(&project_path) {
                     Ok(e) => e,
-                    Err(_) => continue,
+                    Err(e) => {
+                        note_unreadable(&mut problems, &project_path, &e);
+                        continue;
+                    }
                 };
-                for file_entry in dir_entries.flatten() {
+                for file_entry in dir_entries {
+                    let file_entry = match file_entry {
+                        Ok(entry) => entry,
+                        Err(e) => {
+                            note_unreadable(&mut problems, &project_path, &e);
+                            continue;
+                        }
+                    };
                     let file_path = file_entry.path();
                     if file_path.extension().map_or(false, |e| e == "jsonl") {
                         // Skip subagent files — those are children of sessions
@@ -266,7 +332,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
                         {
                             continue;
                         }
-                        if let Ok(meta) = file_path.metadata() {
+                        if let Some(meta) = metadata_or_note(&mut problems, &file_path) {
                             let mtime = meta
                                 .modified()
                                 .ok()
@@ -284,7 +350,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
         }
 
         files.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
-        Ok(files)
+        Ok(Discovery { files, problems })
     }
 
     fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
@@ -302,6 +368,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
         let mut total_tokens: u64 = 0;
         let mut first_timestamp: i64 = 0;
         let mut last_timestamp: i64 = 0;
+        let mut starts_undated = false;
         let mut session_id = String::new();
 
         // Extract session_id from filename (stem)
@@ -363,6 +430,12 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             }
 
             let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            // A conversation record before any dated one, itself undated:
+            // the session started no later than it, and nothing says when.
+            if first_timestamp == 0 && matches!(entry_type, "user" | "assistant") {
+                starts_undated = true;
+            }
 
             // Extract model from first assistant entry
             if model == "unknown" && entry_type == "assistant" {
@@ -472,6 +545,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             total_tokens,
             subagent_count,
             identity_id: Self::identity_id_from_path(path),
+            starts_undated,
         }))
     }
 
@@ -482,22 +556,31 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             None => return Ok(None),
         };
 
-        let file = fs::File::open(file_path)?;
-        let reader = BufReader::new(file);
+        // Read whole, not line by line: a record that can't be read has to be
+        // counted rather than skipped in silence, and only the raw bytes say
+        // whether the last line is finished. The CLI appends while the agent
+        // runs, so an unterminated last line is an append in progress, not a
+        // damaged record.
+        let bytes = fs::read(file_path)?;
+        let ends_with_newline = bytes.last() == Some(&b'\n');
+        let lines: Vec<&[u8]> = bytes.split(|b| *b == b'\n').collect();
+        let last = lines.len() - 1;
         let mut messages = Vec::new();
+        let mut skipped_records = 0u32;
 
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if line.trim().is_empty() {
+        for (i, line) in lines.into_iter().enumerate() {
+            if line.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }
-
-            let entry: serde_json::Value = match serde_json::from_str(&line) {
+            let entry: serde_json::Value = match serde_json::from_slice(line) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(_) => {
+                    let in_progress = i == last && !ends_with_newline;
+                    if !in_progress {
+                        skipped_records += 1;
+                    }
+                    continue;
+                }
             };
 
             let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -603,7 +686,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             }
         }
 
-        Ok(Some(HistorySession { meta, messages }))
+        Ok(Some(HistorySession { meta, messages, skipped_records }))
     }
 }
 
@@ -611,6 +694,121 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    const USER_LINE: &str = r#"{"type":"user","message":{"role":"user","content":"deploy the fix"},"timestamp":"2026-09-24T10:00:00Z","cwd":"/work/a"}"#;
+    const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"deployed"}]},"timestamp":"2026-09-24T10:00:05Z","cwd":"/work/a"}"#;
+
+    fn parse(content: &str) -> HistorySession {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("s.jsonl");
+        fs::write(&file, content).unwrap();
+        ClaudeHistoryAdapter::with_roots(None, None, None)
+            .parse_file(&file.to_string_lossy())
+            .unwrap()
+            .unwrap()
+    }
+
+    /// A record that can't be parsed used to be skipped in silence, so a
+    /// search counted the session as fully read and could call a word that
+    /// appeared only in that record definitively absent (Codex P1 on #3693).
+    #[test]
+    fn a_malformed_record_is_counted_not_silently_skipped() {
+        let session = parse(&format!("{USER_LINE}\n{{\"type\":\"assistant\",\"mess\n{ASSISTANT_LINE}\n"));
+        assert_eq!(session.messages.len(), 2);
+        assert_eq!(session.skipped_records, 1);
+    }
+
+    /// The CLI appends while the agent runs, so a live session's last line
+    /// may be half-written when it's read. That's not corruption — counting
+    /// it would make every search that includes the searcher's own session
+    /// incomplete.
+    #[test]
+    fn an_unterminated_last_line_is_an_append_in_progress_not_corruption() {
+        let session = parse(&format!("{USER_LINE}\n{{\"type\":\"assistant\",\"message\":{{\"con"));
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.skipped_records, 0);
+    }
+
+    /// A bundle with no Claude home yet, or a root that doesn't exist, is
+    /// nothing missed — only an unreadable directory is.
+    #[test]
+    fn a_missing_directory_is_not_a_discovery_problem() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        fs::create_dir_all(shared.join("identities").join("bundle-without-claude")).unwrap();
+        let adapter = ClaudeHistoryAdapter::with_roots(
+            Some(tmp.path().join("no-such-user-home")),
+            Some(shared),
+            Some(tmp.path().join("no-such-agentmux-home")),
+        );
+        let found = adapter.discover().unwrap();
+        assert!(found.problems.is_empty(), "{:?}", found.problems);
+    }
+
+    /// A directory that exists but can't be read may hold the session being
+    /// searched for, so it's reported rather than skipped (Codex P1 on
+    /// #3693).
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_project_directory_is_a_discovery_problem() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let project = shared.join("providers").join("claude").join("projects").join("-work-locked");
+        fs::create_dir_all(&project).unwrap();
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o000)).unwrap();
+        let readable_anyway = fs::read_dir(&project).is_ok(); // root ignores modes
+        let found = ClaudeHistoryAdapter::with_roots(None, Some(shared), None).discover().unwrap();
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o755)).unwrap();
+        if readable_anyway {
+            return;
+        }
+        assert!(found.problems.iter().any(|p| p.contains("-work-locked")), "{:?}", found.problems);
+    }
+
+    /// An identity bundle or a channel created after the adapter is built —
+    /// an account added or switched while srv runs — must still be found.
+    /// The adapter used to list these directories once, when srv started, so
+    /// a session under a later bundle stayed invisible until a restart: on
+    /// 2026-09-24 both of an agent's bundles post-dated srv start and
+    /// SearchHistory answered "no history" with `truncated: false`.
+    #[test]
+    fn a_bundle_created_after_the_adapter_is_built_is_discovered() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let agentmux_home = tmp.path().join("agentmux");
+        fs::create_dir_all(&shared).unwrap();
+        fs::create_dir_all(agentmux_home.join("channels")).unwrap();
+        let adapter = ClaudeHistoryAdapter::with_roots(
+            None,
+            Some(shared.clone()),
+            Some(agentmux_home.clone()),
+        );
+
+        let global = shared.join("identities").join("late-bundle").join("claude").join("projects").join("-work");
+        let channel = agentmux_home
+            .join("channels")
+            .join("late-channel")
+            .join("identities")
+            .join("channel-bundle")
+            .join("claude")
+            .join("projects")
+            .join("-work");
+        for dir in [&global, &channel] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(global.join("in-global-bundle.jsonl"), "{}\n").unwrap();
+        fs::write(channel.join("in-channel-bundle.jsonl"), "{}\n").unwrap();
+
+        let found: Vec<String> = adapter
+            .discover_files()
+            .unwrap()
+            .into_iter()
+            .map(|f| f.file_path)
+            .collect();
+        assert!(found.iter().any(|p| p.ends_with("in-global-bundle.jsonl")), "{found:?}");
+        assert!(found.iter().any(|p| p.ends_with("in-channel-bundle.jsonl")), "{found:?}");
+    }
 
     #[test]
     fn push_deduped_dir_skips_a_path_that_is_not_a_real_directory() {
@@ -671,7 +869,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert_eq!(dirs, vec![projects]);
     }
 
@@ -690,7 +888,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert_eq!(dirs, vec![projects]);
     }
 
@@ -711,7 +909,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert!(dirs.is_empty(), "must not walk past the bounded depth");
     }
 
@@ -722,7 +920,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert!(dirs.is_empty());
     }
 }

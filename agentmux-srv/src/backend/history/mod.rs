@@ -132,12 +132,41 @@ fn accounts_linked_to_several_agents(
         .collect())
 }
 
-/// How old the index may be before a search refreshes it.
-const SEARCH_STALE_AFTER_MS: i64 = 30_000;
-
 /// A search's answer while the first index build after srv start is running.
 pub const HISTORY_INDEX_BUILDING: &str = "history index is still being built after AgentMux started \
      (it reads every transcript once) — this is not an empty history; retry in a minute";
+
+/// Why a history search could not answer.
+#[derive(Debug)]
+pub enum HistorySearchError {
+    /// The first index build after srv start is still running. Retryable,
+    /// and never to be read as "no history".
+    IndexBuilding,
+    /// Anything else, e.g. the store failing to list the owner's accounts.
+    Failed(String),
+}
+
+impl std::fmt::Display for HistorySearchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HistorySearchError::IndexBuilding => f.write_str(HISTORY_INDEX_BUILDING),
+            HistorySearchError::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+/// SearchHistory's `since`/`until` in milliseconds. They're documented as
+/// Unix seconds, but a hit's own `timestamp` is in milliseconds and is the
+/// natural value to pass back; a value this large is already milliseconds
+/// (as seconds it would be the year 5138).
+pub fn unix_time_to_ms(value: i64) -> i64 {
+    const ALREADY_MS: i64 = 100_000_000_000;
+    if value.abs() >= ALREADY_MS {
+        value
+    } else {
+        value.saturating_mul(1000)
+    }
+}
 
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
@@ -192,20 +221,31 @@ impl HistoryService {
         }
     }
 
-    /// Make the index current enough for a search without ever waiting on a
-    /// refresh another thread is running — the MCP caller gives up after 10 s.
-    /// Refreshes (incrementally) when older than [`SEARCH_STALE_AFTER_MS`], so
-    /// sessions started since srv start are found.
-    fn fresh_enough_for_search(&self) -> Result<(), String> {
-        let built_at = self.index.refreshed_at_ms();
-        let now = chrono::Utc::now().timestamp_millis();
-        if built_at != 0 && now - built_at < SEARCH_STALE_AFTER_MS {
-            return Ok(());
+    /// Bring the index up to date before a search, so that "no hits, complete"
+    /// can mean nothing was there: every session on disk when the search began
+    /// is in the snapshot it reads. Reusing a recent snapshot (it used to be
+    /// reused for 30 s, or whenever another refresh was running) let a session
+    /// written in that window go unseen while the answer claimed to be
+    /// complete (Codex P1 on #3693).
+    ///
+    /// An incremental refresh re-lists the transcript directories and
+    /// re-parses only files whose mtime moved: 51,671 files stat'd in 2.7 s on
+    /// one heavy host (2026-09-24), far less on most. A refresh already
+    /// running is waited for and then followed by this search's own (unless
+    /// another search's refresh began after this one did), since it may have
+    /// started before this search's sessions were written. Only the
+    /// very first build answers "still building" instead of waiting: it reads
+    /// every transcript once and would outlast the MCP's 10 s timeout.
+    /// Concurrent searches share refreshes ([`SessionIndex::refresh_covering_now`]).
+    fn refresh_for_search(&self) -> Result<(), HistorySearchError> {
+        if self.index.refreshed_at_ms() == 0 {
+            return match self.index.try_refresh() {
+                Some(_) => Ok(()),
+                None => Err(HistorySearchError::IndexBuilding),
+            };
         }
-        if self.index.try_refresh().is_some() || built_at != 0 {
-            return Ok(());
-        }
-        Err(HISTORY_INDEX_BUILDING.to_string())
+        self.index.refresh_covering_now();
+        Ok(())
     }
 
     /// List sessions with pagination and filters.
@@ -361,40 +401,38 @@ impl HistoryService {
     /// dangerous one for looking like an ordinary read tool. Cross-agent
     /// search must route *through* `transcript_request`, as its own phase.
     ///
-    /// `since_secs`/`until_secs` filter on indexed `modified_at` **before** any
-    /// file is opened, so a narrow time window costs nothing on irrelevant
-    /// sessions. `max_sessions` bounds how many of the remaining candidates
-    /// may be parsed, newest first.
+    /// `opts.since_ms`/`until_ms` drop whole sessions on indexed metadata
+    /// **before** any file is opened, so a narrow time window costs nothing on
+    /// irrelevant sessions, and then filter the messages of the sessions that
+    /// remain. `opts.max_sessions` bounds how many of those are parsed, newest
+    /// first; the rest are counted, not dropped.
     pub fn search_for_agent(
         &self,
         store: &crate::backend::storage::store::Store,
         owner: &HistoryOwner,
         opts: &index::HistorySearchOptions,
-        since_secs: Option<i64>,
-        until_secs: Option<i64>,
-        max_sessions: usize,
-    ) -> Result<index::HistorySearchOutcome, String> {
-        self.fresh_enough_for_search()?;
-        let (all, _total, _has_more) = self.sessions_for_owner(
-            store,
-            owner,
-            0,
-            usize::MAX,
-            "modified_at",
-            "desc",
-            false,
-        )?;
+    ) -> Result<index::HistorySearchOutcome, HistorySearchError> {
+        self.refresh_for_search()?;
+        let (all, _total, _has_more) = self
+            .sessions_for_owner(store, owner, 0, usize::MAX, "modified_at", "desc", false)
+            .map_err(HistorySearchError::Failed)?;
 
-        // Cheap metadata filtering first — this is the whole reason a time
-        // window is worth offering: it removes candidates without a read.
+        // A session last written before `since` holds nothing after it, and
+        // one started after `until` holds nothing before it. An unknown start
+        // — no timestamp at all, or an undated record before the first dated
+        // one — can't rule a session out.
         let in_window: Vec<SessionMeta> = all
             .into_iter()
-            .filter(|s| since_secs.is_none_or(|since| s.modified_at >= since))
-            .filter(|s| until_secs.is_none_or(|until| s.modified_at <= until))
-            .take(max_sessions)
+            .filter(|s| opts.since_ms.is_none_or(|since| s.modified_at >= since))
+            .filter(|s| {
+                opts.until_ms
+                    .is_none_or(|until| s.created_at == 0 || s.starts_undated || s.created_at <= until)
+            })
             .collect();
 
-        Ok(self.index.search_sessions(&in_window, opts))
+        let mut outcome = self.index.search_sessions(&in_window, opts);
+        outcome.add_discovery_errors(self.index.discovery_problems());
+        Ok(outcome)
     }
 
     /// This agent's own sessions — the actual "fast Conversation History
@@ -482,25 +520,124 @@ mod search_freshness_tests {
     fn a_search_during_the_first_build_says_so_instead_of_waiting() {
         let svc = empty_service();
         let _building = svc.index.refresh_lock.lock().unwrap();
-        let err = svc.fresh_enough_for_search().unwrap_err();
-        assert!(err.contains("still being built"), "{err}");
+        let err = svc.refresh_for_search().unwrap_err();
+        assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
+        assert!(err.to_string().contains("still being built"), "{err}");
+    }
+
+    #[test]
+    fn since_and_until_accept_seconds_or_milliseconds() {
+        // Documented as seconds …
+        assert_eq!(unix_time_to_ms(1_790_280_000), 1_790_280_000_000);
+        // … but a hit's own timestamp is milliseconds, and passing it back
+        // must not be multiplied into the year 58,000.
+        assert_eq!(unix_time_to_ms(1_790_280_000_123), 1_790_280_000_123);
+        assert_eq!(unix_time_to_ms(0), 0);
     }
 
     #[test]
     fn a_search_on_a_never_built_idle_index_builds_it() {
         let svc = empty_service();
-        assert!(svc.fresh_enough_for_search().is_ok());
+        assert!(svc.refresh_for_search().is_ok());
         assert!(svc.index.refreshed_at_ms() > 0);
     }
 
-    /// Once built, a refresh in progress elsewhere doesn't block a search:
-    /// it reads the previous snapshot.
+    fn real_service(shared: &std::path::Path) -> HistoryService {
+        HistoryService::from_index(SessionIndex::with_isolated_roots(
+            vec![Box::new(ClaudeHistoryAdapter::with_roots(None, Some(shared.to_path_buf()), None))],
+            vec![],
+        ))
+    }
+
+    fn owner_in(dir: &str) -> HistoryOwner {
+        HistoryOwner { definition_id: "agent-a".into(), working_directory: Some(dir.into()) }
+    }
+
+    /// A transcript whose first message carries no timestamp: its session
+    /// start (the first dated record) is after `until`, but the undated
+    /// message may not be, and the message-level window keeps undated
+    /// messages. Dropping the whole session on its start made the two
+    /// disagree and could answer "complete, no hits" (Codex P2 on #3693).
     #[test]
-    fn a_search_during_a_later_refresh_uses_the_last_snapshot() {
-        let svc = empty_service();
-        svc.index.refresh();
-        let _refreshing = svc.index.refresh_lock.lock().unwrap();
-        assert!(svc.fresh_enough_for_search().is_ok());
+    fn a_session_starting_with_an_undated_message_stays_in_the_until_window() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let project = shared.join("providers").join("claude").join("projects").join("-work-a");
+        std::fs::create_dir_all(&project).unwrap();
+        let undated = r#"{"type":"user","message":{"role":"user","content":"undated question"},"cwd":"/work/a"}"#;
+        let dated = r#"{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"answered"}]},"timestamp":"2026-09-24T12:00:00Z","cwd":"/work/a"}"#;
+        std::fs::write(project.join("s.jsonl"), format!("{undated}\n{dated}\n")).unwrap();
+        let svc = real_service(&shared);
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let until = chrono::DateTime::parse_from_rfc3339("2026-09-24T11:00:00Z").unwrap().timestamp_millis();
+        let opts = index::HistorySearchOptions {
+            query: "undated question".into(),
+            limit: 50,
+            until_ms: Some(until),
+            ..Default::default()
+        };
+        let out = svc.search_for_agent(&store, &owner_in("/work/a"), &opts).unwrap();
+        assert_eq!(out.hits.len(), 1, "{out:?}");
+    }
+
+    /// Discovery that couldn't read somewhere may have missed the session
+    /// being searched for, so the answer isn't complete (Codex P1 on #3693).
+    #[test]
+    fn a_search_over_a_snapshot_with_discovery_problems_is_not_complete() {
+        struct Unreadable;
+        impl HistoryAdapter for Unreadable {
+            fn provider(&self) -> &str {
+                "mock"
+            }
+            fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+                Ok(Vec::new())
+            }
+            fn discover(&self) -> Result<Discovery, HistoryError> {
+                Ok(Discovery { files: Vec::new(), problems: vec!["/x/projects: Access is denied".into()] })
+            }
+            fn extract_meta(&self, _: &str) -> Result<Option<SessionMeta>, HistoryError> {
+                Ok(None)
+            }
+            fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+                Ok(None)
+            }
+        }
+        let svc = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![Box::new(Unreadable)], vec![]));
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let opts = index::HistorySearchOptions { query: "anything".into(), limit: 50, ..Default::default() };
+        let out = svc.search_for_agent(&store, &owner_in("/work/a"), &opts).unwrap();
+        assert!(out.hits.is_empty());
+        assert!(!out.complete, "{out:?}");
+        assert_eq!(out.incomplete_reasons, vec!["discovery_errors"]);
+        assert!(out.discovery_errors.iter().any(|p| p.contains("Access is denied")), "{out:?}");
+    }
+
+    /// A session written moments after one search is found by the next. A
+    /// snapshot reused because it was "fresh enough" (under 30 s old, or
+    /// another refresh running) answered `complete: true` without it — the
+    /// false negative this whole tool exists to prevent (Codex P1 on #3693).
+    #[test]
+    fn a_session_written_right_after_a_search_is_found_by_the_next_search() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let project = shared.join("providers").join("claude").join("projects").join("-work-a");
+        std::fs::create_dir_all(&project).unwrap();
+        let svc = HistoryService::from_index(SessionIndex::with_isolated_roots(
+            vec![Box::new(ClaudeHistoryAdapter::with_roots(None, Some(shared.clone()), None))],
+            vec![],
+        ));
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let owner = HistoryOwner { definition_id: "agent-a".into(), working_directory: Some("/work/a".into()) };
+        let opts = index::HistorySearchOptions { query: "deploy".into(), limit: 50, ..Default::default() };
+
+        let first = svc.search_for_agent(&store, &owner, &opts).unwrap();
+        assert!(first.hits.is_empty() && first.complete, "{first:?}");
+
+        let line = r#"{"type":"user","message":{"role":"user","content":"deploy now"},"timestamp":"2026-09-24T10:00:00Z","cwd":"/work/a"}"#;
+        std::fs::write(project.join("written-after.jsonl"), format!("{line}\n")).unwrap();
+        let second = svc.search_for_agent(&store, &owner, &opts).unwrap();
+        assert_eq!(second.hits.len(), 1, "{second:?}");
+        assert!(second.complete, "{second:?}");
     }
 
     #[test]
@@ -571,6 +708,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1292,6 +1430,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
