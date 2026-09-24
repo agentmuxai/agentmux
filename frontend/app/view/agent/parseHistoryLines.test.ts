@@ -440,3 +440,20 @@ describe("parseHistoryLines", () => {
         });
     });
 });
+
+describe("parseHistoryLines — Gemini-family transcripts keep the user's messages", () => {
+    it("restores the user message from the CLI's echo", () => {
+        const lines = [
+            JSON.stringify({ type: "init", session_id: "s", model: "gemini" }),
+            JSON.stringify({ type: "message", role: "user", content: "summarise the repo" }),
+            JSON.stringify({ type: "message", role: "assistant", content: "Here is", delta: true }),
+            JSON.stringify({ type: "message", role: "assistant", content: " a summary.", delta: true }),
+            JSON.stringify({ type: "result", status: "success", stats: {} }),
+        ];
+        const { nodes } = parseHistoryLines(lines, "gemini-json");
+        const kinds = nodes.map((n) => n.type);
+        expect(kinds[0]).toBe("user_message");
+        expect((nodes[0] as { message: string }).message).toBe("summarise the repo");
+        expect(kinds).toContain("markdown");
+    });
+});
