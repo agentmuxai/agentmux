@@ -69,9 +69,12 @@ Accepts the runtime and exits 0 when either:
 1. `sha256(<dir>/libcef.dll) == CEF_WINDOWS_LIBCEF_SHA256`, or
 2. `<dir>` is a local Chromium build tree whose `args.gn` sets
    `enable_backup_ref_ptr_instance_tracer=false` **exactly once, to exactly
-   `false`**, and whose `libcef.dll` is **newer than `args.gn` and
-   `build.ninja`**. `args.gn` is configuration, not proof of what the DLL
-   contains (Codex and ReAgent on #3615):
+   `false`**, which **has a `build.ninja`** (it's a real `gn gen` tree), and
+   whose `libcef.dll` is **newer than `args.gn` and `build.ninja`**. `args.gn`
+   is configuration, not proof of what the DLL contains (Codex and ReAgent on
+   #3615):
+   - `args.gn` alone, next to a DLL copied in afterwards, ties nothing to that
+     config. Without `build.ninja`, only the pinned hash is accepted;
    - a tree reconfigured with the fixed args but not yet, or not
      successfully, rebuilt still holds the old tracer-on DLL. `gn gen`
      rewrites `build.ninja` on every args change, so an older DLL is refused;
@@ -128,7 +131,7 @@ Synthetic runtime dirs:
 - `args.gn` with the tracer `=true`, not mentioning it, commented out,
   `=falsey_nonsense`, or assigned twice (one conditional) → fail;
 - `libcef.dll` older than `args.gn` or `build.ninja` (reconfigured, not rebuilt) → fail;
-  newer than both → pass;
+  newer than both → pass; `args.gn` without `build.ninja` → fail;
 - `AGENTMUX_ALLOW_UNVERIFIED_CEF=1` on a bad runtime → exit 0 with a warning;
 - the fetch script and the guard read the same pin;
 - `bundle:windows` calls the guard after the version check.

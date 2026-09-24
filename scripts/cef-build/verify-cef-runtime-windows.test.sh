@@ -35,10 +35,12 @@ GUARD="$GUARD_DIR/verify-cef-runtime-windows.sh"
 runtime() {  # runtime <name> <libcef-content-file|-> [args.gn line]
   local d="$TMP/rt-$1"; mkdir -p "$d"
   [ "$2" = "-" ] || cp "$2" "$d/libcef.dll"
-  # A finished local build: configured first, DLL built afterwards.
+  # A finished local gn build: configured (args.gn + build.ninja) first, DLL
+  # built afterwards.
   if [ -n "${3:-}" ]; then
     printf '%s\n' "$3" > "$d/args.gn"
-    touch -d '2026-01-01 00:00' "$d/args.gn"
+    : > "$d/build.ninja"
+    touch -d '2026-01-01 00:00' "$d/args.gn" "$d/build.ninja"
   fi
   echo "$d"
 }
@@ -75,9 +77,11 @@ expect 1 "libcef.dll older than args.gn fails (reconfigured, not rebuilt)" "$d"
 d="$(runtime lb-ninja "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
 touch -d '2026-02-01 00:00' "$d/libcef.dll"; : > "$d/build.ninja"
 expect 1 "libcef.dll older than build.ninja fails" "$d"
-d="$(runtime lb-done "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
-touch -d '2026-01-01 00:00' "$d/build.ninja" 2>/dev/null || { : > "$d/build.ninja"; touch -d '2026-01-01 00:00' "$d/build.ninja"; }
-expect 0 "libcef.dll newer than args.gn and build.ninja passes" "$d"
+expect 0 "libcef.dll newer than args.gn and build.ninja passes" "$(runtime lb-done "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
+# Codex on #3615: args.gn alone, with an old DLL copied in after it, is not a build tree.
+d="$(runtime lb-nobn "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
+rm "$d/build.ninja"
+expect 1 "args.gn without build.ninja fails (copied-in DLL, no gn tree)" "$d"
 
 expect 0 "AGENTMUX_ALLOW_UNVERIFIED_CEF=1 overrides a failure" "$TMP/rt-stale" AGENTMUX_ALLOW_UNVERIFIED_CEF=1
 out="$(AGENTMUX_ALLOW_UNVERIFIED_CEF=1 bash "$GUARD" "$TMP/rt-stale" 2>&1)"

@@ -58,17 +58,20 @@ fi
 # DLL contains, so accept only when (Codex + reagentx on #3615):
 #   - the flag is assigned exactly once, to exactly `false` (a trailing
 #     comment is fine; `falsey`, a second or conditional assignment is not);
+#   - it is a real gn build tree (build.ninja present -- args.gn alone next to
+#     a copied-in DLL ties nothing to that config), and
 #   - libcef.dll is newer than args.gn and build.ninja (which `gn gen`
 #     rewrites on every args change): a tree reconfigured with the fixed args
 #     but not yet (or not successfully) rebuilt still holds the old DLL.
 if [ -f "$dir/args.gn" ]; then
+  [ -f "$dir/build.ninja" ] || refuse "args.gn without build.ninja isn't a gn build tree — only the pinned build is accepted here"
   args="$(tr -d '\r' < "$dir/args.gn")"
   mentions="$(grep -Ec '^[^#]*enable_backup_ref_ptr_instance_tracer' <<<"$args")"
   if [ "$mentions" != 1 ] || ! grep -Eq '^[[:space:]]*enable_backup_ref_ptr_instance_tracer[[:space:]]*=[[:space:]]*false[[:space:]]*(#.*)?$' <<<"$args"; then
     refuse "local CEF build whose args.gn doesn't set enable_backup_ref_ptr_instance_tracer=false exactly once"
   fi
   for cfg in args.gn build.ninja; do
-    if [ -f "$dir/$cfg" ] && [ "$dir/$cfg" -nt "$libcef" ]; then
+    if [ "$dir/$cfg" -nt "$libcef" ]; then
       refuse "local CEF build reconfigured after libcef.dll was built ($cfg is newer) — finish the rebuild"
     fi
   done
