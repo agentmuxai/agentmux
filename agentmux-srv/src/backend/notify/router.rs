@@ -167,8 +167,11 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
 }
 
 /// `AgentFailure.code` → the fixed body for its toast; `None` = don't notify.
-/// `killed` is a deliberate stop and `agent_deleted` a user action — neither
-/// is news to the user. Detail/stderr never reach a toast.
+/// Only `agent_deleted` (a user action) is skipped. `killed` is NOT a user
+/// Stop — those go through the controllers' kill arm and are never
+/// classified (host_spawn.rs) — it means a signal/137, most often the OOM
+/// killer: exactly the "stopped while you were away" case (ReAgent P1 on
+/// #3654). Detail/stderr never reach a toast.
 pub fn failure_body(code: &str) -> Option<&'static str> {
     Some(match code {
         "rate_limited" => "Hit a rate limit.",
@@ -180,6 +183,7 @@ pub fn failure_body(code: &str) -> Option<&'static str> {
         "network" => "Lost its network connection.",
         "spawn_failure" => "Couldn't start.",
         "no_output" | "unknown_non_zero" => "Exited unexpectedly.",
+        "killed" => "Was stopped by the system (possibly out of memory).",
         _ => return None,
     })
 }
@@ -465,10 +469,10 @@ mod tests {
     }
 
     #[test]
-    fn failure_classes_map_to_fixed_bodies_and_skip_deliberate_stops() {
+    fn failure_classes_map_to_fixed_bodies_and_skip_user_deletes() {
         assert_eq!(failure_body("auth"), Some("Needs you to sign in again."));
         assert_eq!(failure_body("unknown_non_zero"), Some("Exited unexpectedly."));
-        assert_eq!(failure_body("killed"), None);
+        assert_eq!(failure_body("killed"), Some("Was stopped by the system (possibly out of memory)."));
         assert_eq!(failure_body("agent_deleted"), None);
         assert_eq!(failure_body("<script>"), None);
     }
