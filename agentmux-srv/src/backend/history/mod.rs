@@ -132,9 +132,6 @@ fn accounts_linked_to_several_agents(
         .collect())
 }
 
-/// How old the index may be before a search refreshes it.
-const SEARCH_STALE_AFTER_MS: i64 = 30_000;
-
 /// A search's answer while the first index build after srv start is running.
 pub const HISTORY_INDEX_BUILDING: &str = "history index is still being built after AgentMux started \
      (it reads every transcript once) — this is not an empty history; retry in a minute";
@@ -224,20 +221,29 @@ impl HistoryService {
         }
     }
 
-    /// Make the index current enough for a search without ever waiting on a
-    /// refresh another thread is running — the MCP caller gives up after 10 s.
-    /// Refreshes (incrementally) when older than [`SEARCH_STALE_AFTER_MS`], so
-    /// sessions started since srv start are found.
-    fn fresh_enough_for_search(&self) -> Result<(), HistorySearchError> {
-        let built_at = self.index.refreshed_at_ms();
-        let now = chrono::Utc::now().timestamp_millis();
-        if built_at != 0 && now - built_at < SEARCH_STALE_AFTER_MS {
-            return Ok(());
+    /// Bring the index up to date before a search, so that "no hits, complete"
+    /// can mean nothing was there: every session on disk when the search began
+    /// is in the snapshot it reads. Reusing a recent snapshot (it used to be
+    /// reused for 30 s, or whenever another refresh was running) let a session
+    /// written in that window go unseen while the answer claimed to be
+    /// complete (Codex P1 on #3693).
+    ///
+    /// An incremental refresh re-lists the transcript directories and
+    /// re-parses only files whose mtime moved: 51,671 files stat'd in 2.7 s on
+    /// one heavy host (2026-09-24), far less on most. A refresh already
+    /// running is waited for and then followed by this search's own, since it
+    /// may have started before this search's sessions were written. Only the
+    /// very first build answers "still building" instead of waiting: it reads
+    /// every transcript once and would outlast the MCP's 10 s timeout.
+    fn refresh_for_search(&self) -> Result<(), HistorySearchError> {
+        if self.index.refreshed_at_ms() == 0 {
+            return match self.index.try_refresh() {
+                Some(_) => Ok(()),
+                None => Err(HistorySearchError::IndexBuilding),
+            };
         }
-        if self.index.try_refresh().is_some() || built_at != 0 {
-            return Ok(());
-        }
-        Err(HistorySearchError::IndexBuilding)
+        self.index.refresh();
+        Ok(())
     }
 
     /// List sessions with pagination and filters.
@@ -404,7 +410,7 @@ impl HistoryService {
         owner: &HistoryOwner,
         opts: &index::HistorySearchOptions,
     ) -> Result<index::HistorySearchOutcome, HistorySearchError> {
-        self.fresh_enough_for_search()?;
+        self.refresh_for_search()?;
         let (all, _total, _has_more) = self
             .sessions_for_owner(store, owner, 0, usize::MAX, "modified_at", "desc", false)
             .map_err(HistorySearchError::Failed)?;
@@ -506,7 +512,7 @@ mod search_freshness_tests {
     fn a_search_during_the_first_build_says_so_instead_of_waiting() {
         let svc = empty_service();
         let _building = svc.index.refresh_lock.lock().unwrap();
-        let err = svc.fresh_enough_for_search().unwrap_err();
+        let err = svc.refresh_for_search().unwrap_err();
         assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
         assert!(err.to_string().contains("still being built"), "{err}");
     }
@@ -524,18 +530,36 @@ mod search_freshness_tests {
     #[test]
     fn a_search_on_a_never_built_idle_index_builds_it() {
         let svc = empty_service();
-        assert!(svc.fresh_enough_for_search().is_ok());
+        assert!(svc.refresh_for_search().is_ok());
         assert!(svc.index.refreshed_at_ms() > 0);
     }
 
-    /// Once built, a refresh in progress elsewhere doesn't block a search:
-    /// it reads the previous snapshot.
+    /// A session written moments after one search is found by the next. A
+    /// snapshot reused because it was "fresh enough" (under 30 s old, or
+    /// another refresh running) answered `complete: true` without it — the
+    /// false negative this whole tool exists to prevent (Codex P1 on #3693).
     #[test]
-    fn a_search_during_a_later_refresh_uses_the_last_snapshot() {
-        let svc = empty_service();
-        svc.index.refresh();
-        let _refreshing = svc.index.refresh_lock.lock().unwrap();
-        assert!(svc.fresh_enough_for_search().is_ok());
+    fn a_session_written_right_after_a_search_is_found_by_the_next_search() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let project = shared.join("providers").join("claude").join("projects").join("-work-a");
+        std::fs::create_dir_all(&project).unwrap();
+        let svc = HistoryService::from_index(SessionIndex::with_isolated_roots(
+            vec![Box::new(ClaudeHistoryAdapter::with_roots(None, Some(shared.clone()), None))],
+            vec![],
+        ));
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let owner = HistoryOwner { definition_id: "agent-a".into(), working_directory: Some("/work/a".into()) };
+        let opts = index::HistorySearchOptions { query: "deploy".into(), limit: 50, ..Default::default() };
+
+        let first = svc.search_for_agent(&store, &owner, &opts).unwrap();
+        assert!(first.hits.is_empty() && first.complete, "{first:?}");
+
+        let line = r#"{"type":"user","message":{"role":"user","content":"deploy now"},"timestamp":"2026-09-24T10:00:00Z","cwd":"/work/a"}"#;
+        std::fs::write(project.join("written-after.jsonl"), format!("{line}\n")).unwrap();
+        let second = svc.search_for_agent(&store, &owner, &opts).unwrap();
+        assert_eq!(second.hits.len(), 1, "{second:?}");
+        assert!(second.complete, "{second:?}");
     }
 
     #[test]

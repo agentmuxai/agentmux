@@ -504,22 +504,31 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             None => return Ok(None),
         };
 
-        let file = fs::File::open(file_path)?;
-        let reader = BufReader::new(file);
+        // Read whole, not line by line: a record that can't be read has to be
+        // counted rather than skipped in silence, and only the raw bytes say
+        // whether the last line is finished. The CLI appends while the agent
+        // runs, so an unterminated last line is an append in progress, not a
+        // damaged record.
+        let bytes = fs::read(file_path)?;
+        let ends_with_newline = bytes.last() == Some(&b'\n');
+        let lines: Vec<&[u8]> = bytes.split(|b| *b == b'\n').collect();
+        let last = lines.len() - 1;
         let mut messages = Vec::new();
+        let mut skipped_records = 0u32;
 
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if line.trim().is_empty() {
+        for (i, line) in lines.into_iter().enumerate() {
+            if line.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }
-
-            let entry: serde_json::Value = match serde_json::from_str(&line) {
+            let entry: serde_json::Value = match serde_json::from_slice(line) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(_) => {
+                    let in_progress = i == last && !ends_with_newline;
+                    if !in_progress {
+                        skipped_records += 1;
+                    }
+                    continue;
+                }
             };
 
             let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -625,7 +634,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             }
         }
 
-        Ok(Some(HistorySession { meta, messages }))
+        Ok(Some(HistorySession { meta, messages, skipped_records }))
     }
 }
 
@@ -633,6 +642,40 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    const USER_LINE: &str = r#"{"type":"user","message":{"role":"user","content":"deploy the fix"},"timestamp":"2026-09-24T10:00:00Z","cwd":"/work/a"}"#;
+    const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"deployed"}]},"timestamp":"2026-09-24T10:00:05Z","cwd":"/work/a"}"#;
+
+    fn parse(content: &str) -> HistorySession {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("s.jsonl");
+        fs::write(&file, content).unwrap();
+        ClaudeHistoryAdapter::with_roots(None, None, None)
+            .parse_file(&file.to_string_lossy())
+            .unwrap()
+            .unwrap()
+    }
+
+    /// A record that can't be parsed used to be skipped in silence, so a
+    /// search counted the session as fully read and could call a word that
+    /// appeared only in that record definitively absent (Codex P1 on #3693).
+    #[test]
+    fn a_malformed_record_is_counted_not_silently_skipped() {
+        let session = parse(&format!("{USER_LINE}\n{{\"type\":\"assistant\",\"mess\n{ASSISTANT_LINE}\n"));
+        assert_eq!(session.messages.len(), 2);
+        assert_eq!(session.skipped_records, 1);
+    }
+
+    /// The CLI appends while the agent runs, so a live session's last line
+    /// may be half-written when it's read. That's not corruption — counting
+    /// it would make every search that includes the searcher's own session
+    /// incomplete.
+    #[test]
+    fn an_unterminated_last_line_is_an_append_in_progress_not_corruption() {
+        let session = parse(&format!("{USER_LINE}\n{{\"type\":\"assistant\",\"message\":{{\"con"));
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.skipped_records, 0);
+    }
 
     /// An identity bundle or a channel created after the adapter is built —
     /// an account added or switched while srv runs — must still be found.

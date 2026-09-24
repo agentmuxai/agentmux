@@ -80,6 +80,10 @@ pub struct SessionMeta {
 pub struct HistorySession {
     pub meta: SessionMeta,
     pub messages: Vec<HistoryMessage>,
+    /// Records in the transcript that could not be read, so `messages` may be
+    /// missing some. A search over this session is then not a complete one.
+    #[serde(default)]
+    pub skipped_records: u32,
 }
 
 /// A single message in a conversation.

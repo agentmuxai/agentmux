@@ -79,12 +79,15 @@ pub struct HistorySearchOutcome {
     /// true; otherwise the answer is "unknown", and `incomplete_reasons`
     /// says why.
     pub complete: bool,
-    /// `"hit_limit"`, `"max_sessions"`, `"unreadable_sessions"`.
+    /// `"hit_limit"`, `"max_sessions"`, `"unreadable_sessions"`,
+    /// `"unreadable_records"`.
     pub incomplete_reasons: Vec<&'static str>,
     /// Candidates `max_sessions` left unopened.
     pub sessions_skipped: u32,
     /// Candidates that could not be read, and why.
     pub sessions_unreadable: Vec<UnreadableSession>,
+    /// Candidates searched, but with records that could not be read.
+    pub sessions_partly_read: Vec<UnreadableSession>,
 }
 
 /// A candidate session the search could not read.
@@ -678,6 +681,7 @@ impl SessionIndex {
         let mut hits: Vec<HistorySearchHit> = Vec::new();
         let mut sessions_scanned = 0u32;
         let mut sessions_unreadable: Vec<UnreadableSession> = Vec::new();
+        let mut sessions_partly_read: Vec<UnreadableSession> = Vec::new();
         let mut truncated = false;
 
         let opened = opts.max_sessions.map_or(candidates.len(), |max| max.min(candidates.len()));
@@ -710,6 +714,15 @@ impl SessionIndex {
                 }
             };
             sessions_scanned += 1;
+            if session.skipped_records > 0 {
+                sessions_partly_read.push(UnreadableSession {
+                    session_id: meta.session_id.clone(),
+                    reason: format!(
+                        "{} record(s) could not be read and were not searched",
+                        session.skipped_records
+                    ),
+                });
+            }
             for msg in &session.messages {
                 if let Some(role) = opts.role.as_deref() {
                     if msg.role != role {
@@ -743,6 +756,9 @@ impl SessionIndex {
         if !sessions_unreadable.is_empty() {
             incomplete_reasons.push("unreadable_sessions");
         }
+        if !sessions_partly_read.is_empty() {
+            incomplete_reasons.push("unreadable_records");
+        }
         HistorySearchOutcome {
             hits,
             sessions_scanned,
@@ -752,6 +768,7 @@ impl SessionIndex {
             incomplete_reasons,
             sessions_skipped,
             sessions_unreadable,
+            sessions_partly_read,
         }
     }
 
@@ -1228,7 +1245,8 @@ mod tests {
             }
             let Some(messages) = self.sessions.get(&id) else { return Ok(None) };
             let meta = self.extract_meta(file_path)?.unwrap();
-            Ok(Some(HistorySession { meta, messages: messages.clone() }))
+            let skipped_records = if id.starts_with("partial") { 2 } else { 0 };
+            Ok(Some(HistorySession { meta, messages: messages.clone(), skipped_records }))
         }
     }
 
@@ -1331,6 +1349,23 @@ mod tests {
         assert_eq!(out.sessions_skipped, 2);
         assert!(!out.complete);
         assert_eq!(out.incomplete_reasons, vec!["max_sessions"]);
+    }
+
+    #[test]
+    fn a_session_with_unreadable_records_makes_the_answer_incomplete() {
+        // What the session's readable records hold is still found; that it
+        // had records the search couldn't read is reported, so "no hit" for
+        // anything else isn't taken as proof (Codex P1 on #3693).
+        let idx = search_index(vec![("partial-1", vec![msg("assistant", "deploy done", vec![])])]);
+        let cands = vec![idx.get_meta("partial-1").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("deploy"));
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.sessions_scanned, 1, "it was read, partly");
+        assert_eq!(out.sessions_partly_read.len(), 1);
+        assert_eq!(out.sessions_partly_read[0].session_id, "partial-1");
+        assert!(out.sessions_partly_read[0].reason.contains("2 record"), "{}", out.sessions_partly_read[0].reason);
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["unreadable_records"]);
     }
 
     #[test]
