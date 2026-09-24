@@ -363,7 +363,7 @@
 
     // A tab that was just dropped into place — from another pane, or
     // reordered within this one — plays the Window Tab landing bounce
-    // (drop-feedback.scss). Toggled by PaneTabStrip.tsx's `landingTabId`.
+    // (drop-feedback.scss). Toggled by PaneTabStrip.tsx's `landedTab` (id + destination pane).
     // Sits on the pill, not its `.pane-tab-tip` wrapper: the wrapper owns
     // the flex sizing, so a transform here never moves its neighbours.
     // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4.

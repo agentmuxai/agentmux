@@ -45,20 +45,22 @@ export const paneTabItemType = "PANE_TAB_ITEM";
  *  bar's own clear-timeout for its bounce (tab-reorder.ts), so the two match. */
 export const LANDING_BOUNCE_MS = 400;
 
-/** The tab (by id) that was just dropped into place and should play the
- *  landing bounce. Module-level rather than per-strip: a cross-pane drop
- *  lands the pill in a DIFFERENT strip instance than the one that handled
- *  the drop (and mounts it fresh there), so the flag has to be readable by
- *  whichever strip ends up rendering that id. Only header strips set it,
- *  and their ids are blockIds, which never collide with the editor's or
- *  History strip's ids.
+/** The tab that was just dropped into place and should play the landing
+ *  bounce: its id AND the pane (`paneKey`) it landed in. Module-level rather
+ *  than per-strip: a cross-pane drop re-renders the pill in the destination
+ *  strip (mounting it fresh there), so the flag has to be readable by
+ *  whichever strip ends up rendering it. The pane is part of the identity
+ *  because one block can have pills in several strips: agent fork lineages
+ *  show blocks from OTHER panes as extra tabs (`PaneChromeModel.extraTabs`),
+ *  and only the pill in the pane it actually landed in should bounce (Codex
+ *  P2 on #3694). Only header strips set it.
  *  SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4. */
-const [landingTabId, setLandingTabId] = createSignal<string | null>(null);
+const [landedTab, setLandedTab] = createSignal<{ id: string; paneKey: string | undefined } | null>(null);
 let landingTimer: ReturnType<typeof setTimeout> | undefined;
-function markLanded(id: string): void {
+function markLanded(id: string, paneKey: string | undefined): void {
     clearTimeout(landingTimer);
-    setLandingTabId(id);
-    landingTimer = setTimeout(() => setLandingTabId(null), LANDING_BOUNCE_MS);
+    setLandedTab({ id, paneKey });
+    landingTimer = setTimeout(() => setLandedTab(null), LANDING_BOUNCE_MS);
 }
 
 /** A tab's own pane color, split into the two treatments PaneChrome's
@@ -341,7 +343,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
                 const receive = props.onReceiveForeignTab!;
                 setTimeout(() => {
-                    if (receive(blockId) !== false) markLanded(blockId);
+                    if (receive(blockId) !== false) markLanded(blockId, paneKey);
                 }, 0);
             },
         });
@@ -619,7 +621,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 const position = dropPositionForPointerX(el.getBoundingClientRect(), location.current.input.clientX);
                 // The moved pill (not the one it was dropped on) bounces,
                 // same as a reordered Window Tab.
-                if (props.onReorder!(blockId, id(), position) !== false) markLanded(blockId);
+                if (props.onReorder!(blockId, id(), position) !== false) markLanded(blockId, props.paneKey);
             },
         });
         onCleanup(() => {
@@ -689,7 +691,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     "pane-tab--dragging": isDragging(),
                     "pane-tab--drop-before": dropSide() === "before",
                     "pane-tab--drop-after": dropSide() === "after",
-                    "pane-tab--landing": landingTabId() === id(),
+                    "pane-tab--landing": landedTab()?.id === id() && landedTab()?.paneKey === props.paneKey,
                     // Gates PaneTabStrip.scss's lighter-on-hover treatment —
                     // only a tab with its own color gets it; every other
                     // consumer's plain hover tint is untouched.

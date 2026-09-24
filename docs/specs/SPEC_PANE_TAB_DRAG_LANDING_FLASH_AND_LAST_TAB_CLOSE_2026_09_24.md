@@ -302,9 +302,13 @@ activity flash meaning only "a tool ran".)
 - **Timing:** class on for 400ms, then off. That's the same clear-timeout
   the Window Tab bar uses (`tab-reorder.ts:240-241`).
 - **Mechanism (as implemented):** a module-level Solid signal
-  `landingTabId` in `PaneTabStrip.tsx`, set by `markLanded(blockId)` and
-  cleared after `LANDING_BOUNCE_MS` (400). Every `PaneTabStripItem` binds
-  `.pane-tab--landing` to `landingTabId() === id()`, so it works both for a
+  `landedTab` (`{ id, paneKey }`) in `PaneTabStrip.tsx`, set by
+  `markLanded(blockId, destinationPaneKey)` and cleared after
+  `LANDING_BOUNCE_MS` (400). Every `PaneTabStripItem` binds
+  `.pane-tab--landing` to "same id AND same `paneKey`". The pane is part of
+  the identity because one block can have pills in several strips (agent
+  fork lineages show other panes' blocks as `extraTabs`), and only the pill
+  in the pane it landed in should bounce (Codex P2 on #3694). This works both for a
   pill that mounts fresh in the destination strip (cross-pane) and for a
   pill that `<For>` just moved in place (same-pane reorder). An earlier
   draft used a one-shot `onMount` check, which can't see a reorder, since

@@ -272,6 +272,45 @@ describe("PaneTabStrip — landing bounce", () => {
         expect(pill(container, "beta").classList.contains("pane-tab--landing")).toBe(false);
     });
 
+    // Codex P2 on #3694: one block can have pills in several strips (agent
+    // fork lineages show other panes' blocks as extra tabs). Only the pill in
+    // the pane it landed in may bounce.
+    it("bounces only the pill in the destination pane, not the same block's pill in another pane", () => {
+        vi.useFakeTimers();
+        const { container } = render(() => (
+            <>
+                <div data-role="block-header" data-testid="dest">
+                    <PaneTabStrip
+                        tabs={TABS}
+                        activeId="a"
+                        getId={(t: T) => t.id}
+                        getLabel={(t: T) => t.label}
+                        onActivate={vi.fn()}
+                        paneKey="pane-dest"
+                        onReceiveForeignTab={vi.fn(() => true)}
+                    />
+                </div>
+                <div data-role="block-header" data-testid="elsewhere">
+                    <PaneTabStrip
+                        tabs={TABS}
+                        activeId="a"
+                        getId={(t: T) => t.id}
+                        getLabel={(t: T) => t.label}
+                        onActivate={vi.fn()}
+                        paneKey="pane-elsewhere"
+                        onReceiveForeignTab={vi.fn(() => true)}
+                    />
+                </div>
+            </>
+        ));
+        const dest = container.querySelector<HTMLElement>('[data-testid="dest"]')!;
+        const elsewhere = container.querySelector<HTMLElement>('[data-testid="elsewhere"]')!;
+        dropTargetCalls.find((c) => c.element === dest)!.onDrop(foreignDrop("b"));
+        vi.advanceTimersByTime(0);
+        expect(pill(dest, "beta").classList.contains("pane-tab--landing")).toBe(true);
+        expect(pill(elsewhere, "beta").classList.contains("pane-tab--landing")).toBe(false);
+    });
+
     it("does not bounce anything when the move was refused", () => {
         vi.useFakeTimers();
         const { config, container } = renderInHeader(vi.fn(() => false));
