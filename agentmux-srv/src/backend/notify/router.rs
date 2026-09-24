@@ -9,9 +9,12 @@
 //! debounce release, and the single pending "activate on next window" slot
 //! for a click that arrived while no window was open.
 //!
-//! Process-global (`OnceLock`) rather than an `AppState` field: it is
-//! initialized from the first WS connection's `AppState` and is independent
-//! of any one connection's lifetime.
+//! One Router per broker (i.e. per `AppState`), kept in a small registry
+//! keyed by the broker's identity rather than as an `AppState` field: it is
+//! created lazily by the first WS connection and outlives any one connection.
+//! Keying by broker (not a single global) means a second `AppState` in the
+//! same process — tests, or any future multi-state setup — never has its
+//! events published onto someone else's bus.
 
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -41,18 +44,27 @@ pub struct Router {
     names: Mutex<std::collections::HashMap<String, String>>,
 }
 
-static ROUTER: OnceLock<Arc<Router>> = OnceLock::new();
+type Registry = Mutex<std::collections::HashMap<usize, Arc<Router>>>;
+static ROUTERS: OnceLock<Registry> = OnceLock::new();
 
-/// The router, if any connection has initialized it yet.
-pub fn get() -> Option<Arc<Router>> {
-    ROUTER.get().cloned()
+fn registry() -> &'static Registry {
+    ROUTERS.get_or_init(Default::default)
 }
 
-/// Get-or-init the global router. Idempotent; the first caller's handles win
-/// (they are process-wide singletons in `AppState` anyway).
+fn key(broker: &Arc<Broker>) -> usize {
+    Arc::as_ptr(broker) as usize
+}
+
+/// The router for this broker, if a connection has created it yet.
+pub fn get(broker: &Arc<Broker>) -> Option<Arc<Router>> {
+    registry().lock().unwrap_or_else(|e| e.into_inner()).get(&key(broker)).cloned()
+}
+
+/// Get-or-create the router for this broker. Idempotent.
 pub fn init(broker: Arc<Broker>, config: Arc<ConfigState>, store: Arc<Store>) -> Arc<Router> {
-    ROUTER
-        .get_or_init(|| {
+    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+    reg.entry(key(&broker))
+        .or_insert_with(|| {
             let r = Arc::new(Router {
                 policy: Mutex::new(PolicyState::new()),
                 broker,

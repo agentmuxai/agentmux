@@ -154,3 +154,77 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
         async move { Ok(NotifyTakeActivationResult { block_id: r.take_pending_activation() }) }
     });
 }
+
+#[cfg(test)]
+mod live_tests {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{ClientRequestBuilder, Message};
+
+    async fn next_event<S>(rx: &mut S, want: &str) -> serde_json::Value
+    where
+        S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    {
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next())
+                .await
+                .unwrap_or_else(|_| panic!("timed out waiting for {want}"))
+                .unwrap()
+                .unwrap();
+            let Ok(text) = msg.to_text() else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { continue };
+            if v["data"]["command"] == "eventrecv" && v["data"]["data"]["event"] == want {
+                return v["data"]["data"]["data"].clone();
+            }
+        }
+    }
+
+    /// The launcher presenter's exact wire shape, against the REAL srv router:
+    /// `X-AuthKey` header auth on /ws, `eventsub`, then a Router-published
+    /// `notification` (via notify.test) and its `notification:retract` after
+    /// a dismiss ack.
+    #[tokio::test]
+    async fn header_authed_client_receives_router_events_over_ws() {
+        let state = crate::server::tests::test_state();
+        // test_state() leaves the broker without its fan-out client; wire it
+        // exactly as bootstrap.rs does so published events reach /ws clients.
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        let auth = state.auth_key.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let req = ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth);
+        let (ws, _) = tokio_tungstenite::connect_async(req).await.expect("header auth accepted on /ws");
+        let (mut tx, mut rx) = ws.split();
+
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        for (i, ev) in ["notification", "notification:retract"].iter().enumerate() {
+            tx.send(Message::Text(send("eventsub", &format!("s{i}"), serde_json::json!({"event":ev,"scopes":[],"allscopes":true})).into()))
+                .await
+                .unwrap();
+        }
+        tx.send(Message::Text(send("notify.test", "t1", serde_json::json!({})).into())).await.unwrap();
+
+        let n = next_event(&mut rx, "notification").await;
+        assert_eq!(n["kind"], "test");
+        assert_eq!(n["title"], "AgentMux notifications are working");
+        let id = n["id"].as_str().unwrap().to_string();
+        let tag = n["tag"].as_str().unwrap().to_string();
+
+        tx.send(Message::Text(send("notify.ack", "a1", serde_json::json!({"id": id, "clicked": false})).into()))
+            .await
+            .unwrap();
+        let r = next_event(&mut rx, "notification:retract").await;
+        assert_eq!(r["tag"], tag);
+    }
+}

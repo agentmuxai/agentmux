@@ -305,7 +305,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     tracing::info!(conn_id = %conn_id, "WebSocket client disconnected");
     state.event_bus.unregister_ws(&conn_id);
     state.broker.unsubscribe_all(&conn_id);
-    if let Some(r) = crate::backend::notify::router::get() {
+    if let Some(r) = crate::backend::notify::router::get(&state.broker) {
         r.disconnect(&conn_id);
     }
 
