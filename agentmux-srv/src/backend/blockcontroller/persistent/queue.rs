@@ -76,7 +76,10 @@ impl PersistentSubprocessController {
             && !inner.drain_claim
             && !inner.restart_pending
         {
-            SendAction::DeliverDirect
+            // Reserve the turn before `inner` is released. Lock order is
+            // `inner` → `health_monitor`, as everywhere else.
+            let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+            SendAction::DeliverDirect { was_active }
         } else if inner.spawning_in_progress || inner.drain_claim {
             let already_queued = skip_if_seq_queued
                 .is_some_and(|seq| inner.pending_send_messages.iter().any(|m| m.seq == seq));
@@ -634,17 +637,20 @@ impl PersistentSubprocessController {
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }
-            SendAction::DeliverDirect => {
+            SendAction::DeliverDirect { was_active } => {
                 // spawn_process already marks a fresh process's first turn
                 // active (and starts its watchdog); for an already-running
                 // process (the common case — every turn after the first)
                 // this is the only place that re-marks the turn active,
                 // since the persistent process never exits between turns.
                 // Without this, `turn_active` would go stale after turn 1.
-                self.mark_turn_active_and_publish();
+                // The mark itself happened inside `decide_send_action` (see
+                // `SendAction::DeliverDirect`); this publishes it.
+                if !was_active {
+                    self.spawn_status_heartbeat();
+                }
+                self.publish_status();
                 let mut inner = self.inner.lock().unwrap();
-                let tx = inner.stdin_tx.as_ref()
-                    .ok_or("persistent process not running after spawn")?;
                 // Persist only AFTER a successful send — reagentx P1 on PR
                 // #2360 (sixth review pass, round 5): `stdin_tx` can have
                 // gone `None` (process died) between `decide_send_action`'s
@@ -654,8 +660,26 @@ impl PersistentSubprocessController {
                 // never-delivered message" bug the immediately prior
                 // commit fixed for `BecomeSpawner`. Matches
                 // `send_user_message`'s existing (correct) ordering.
-                tx.try_send(json_str.clone())
-                    .map_err(|e| format!("stdin send failed: {e}"))?;
+                let written = match inner.stdin_tx.as_ref() {
+                    None => Err("persistent process not running after spawn".to_string()),
+                    Some(tx) => tx
+                        .try_send(json_str.clone())
+                        .map_err(|e| format!("stdin send failed: {e}")),
+                };
+                if let Err(e) = written {
+                    // Nothing was written, so hand back the turn this send
+                    // reserved. Left active, it would hold every deferred
+                    // message for a `result` that never comes. Nobody else
+                    // can have started a turn meanwhile: they all saw it
+                    // reserved and deferred, and the watchdog each armed
+                    // releases them once it reads idle.
+                    if !was_active {
+                        self.health_monitor.set_active_turn(false);
+                    }
+                    drop(inner);
+                    self.publish_status();
+                    return Err(e);
+                }
                 // codex P1 on PR #3513: track this message into the CURRENT
                 // generation's retry batch, same as the drain loop already
                 // does for queued deliveries (see that call site's own doc

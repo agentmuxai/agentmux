@@ -227,11 +227,11 @@ fn a_committed_restart_refuses_deliver_direct_even_with_a_live_stdin() {
         // other precondition failing.
         assert!(inner.stdin_tx.is_some());
     }
-    assert!(matches!(c.decide_send_action("m1", None), SendAction::DeliverDirect));
+    assert!(matches!(c.decide_send_action("m1", None), SendAction::DeliverDirect { .. }));
 
     c.inner.lock().unwrap().restart_pending = true;
     assert!(
-        !matches!(c.decide_send_action("m2", None), SendAction::DeliverDirect),
+        !matches!(c.decide_send_action("m2", None), SendAction::DeliverDirect { .. }),
         "a message must not be written into a process that is being killed",
     );
 }
@@ -275,7 +275,7 @@ fn the_quiesce_flag_does_not_outlive_the_restart() {
     let (tx, _rx) = mpsc::channel::<String>(4);
     c.inner.lock().unwrap().stdin_tx = Some(tx);
     assert!(
-        matches!(c.decide_send_action("m1", None), SendAction::DeliverDirect),
+        matches!(c.decide_send_action("m1", None), SendAction::DeliverDirect { .. }),
         "once the replacement is up, ordinary direct delivery resumes",
     );
 }
@@ -1499,7 +1499,7 @@ fn decide_send_action_delivers_directly_when_already_running() {
     c.inner.lock().unwrap().stdin_tx = Some(tx);
 
     let action = c.decide_send_action("msg-c", None);
-    assert!(matches!(action, SendAction::DeliverDirect));
+    assert!(matches!(action, SendAction::DeliverDirect { was_active: false }));
     let inner = c.inner.lock().unwrap();
     assert!(
         inner.pending_send_messages.is_empty(),
@@ -1632,7 +1632,7 @@ fn decide_send_action_produces_exactly_one_spawner_under_real_concurrency() {
                 SendAction::Queued => {
                     queued_count.fetch_add(1, AtomicOrdering::SeqCst);
                 }
-                SendAction::DeliverDirect => panic!("process was never running in this test"),
+                SendAction::DeliverDirect { .. } => panic!("process was never running in this test"),
             })
         })
         .collect();
@@ -3053,6 +3053,51 @@ async fn dropping_the_controller_reports_a_message_enqueued_after_stop() {
         inner.lock().unwrap().deferred_deliveries.is_empty(),
         "drained and reported on drop, not discarded with the controller"
     );
+}
+
+/// Codex P1 on #3562: a human send that chose `DeliverDirect` used to mark the
+/// turn active only after releasing `inner`. An automated send landing in
+/// that gap saw an idle agent and wrote first, so both prompts entered one
+/// turn with the automated one ahead. The decision now reserves the turn in
+/// the same acquisition, so the automated send defers behind it.
+#[tokio::test]
+async fn a_human_direct_send_reserves_the_turn_before_an_automated_send_can_take_it() {
+    let (c, mut rx) = idle_controller();
+    let human = PersistentSubprocessController::encode_user_message("human");
+
+    let action = c.decide_send_action(&human, None);
+    assert!(matches!(action, SendAction::DeliverDirect { was_active: false }));
+
+    // The automated sender, in the gap before the human write.
+    c.send_user_message("automated".to_string()).unwrap();
+
+    assert!(rx.try_recv().is_err(), "the automated message must not overtake the human one");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "deferred to the next boundary");
+}
+
+/// The reservation above happens before the write, so a failed write must
+/// hand the turn back. Otherwise the agent stays "busy" with nothing running,
+/// and every deferred message waits for a `result` that never comes.
+#[tokio::test]
+async fn a_failed_human_direct_send_releases_the_turn_it_reserved() {
+    let c = controller();
+    let (tx, _rx) = mpsc::channel::<String>(1);
+    tx.try_send("occupying the only slot".to_string()).unwrap();
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    let config = PersistentSpawnConfig {
+        cli_command: "unused-the-process-is-already-running".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: String::new(),
+        message_id: None,
+    };
+
+    assert!(c.send_message("human".to_string(), config).is_err());
+
+    assert!(!c.health_monitor.is_active_turn(), "nothing was written, so no turn is running");
 }
 
 /// The §4.2 race, with real threads: concurrent senders hitting a busy
