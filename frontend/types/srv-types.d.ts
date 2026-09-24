@@ -1126,6 +1126,7 @@ declare global {
         "notify:os:messageneedsreview"?: boolean;
         "notify:pause:until"?: number;
         "notify:pause:allowattention"?: boolean;
+        "notify:taskbar:attention"?: boolean;
         "notify:os:preview"?: "redacted" | "full" | "none";
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;

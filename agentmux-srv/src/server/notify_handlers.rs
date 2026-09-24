@@ -99,25 +99,17 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
             if p.block_id.is_empty() {
                 return Err("notify.emit: block_id required".to_string());
             }
-            // Resolves are in-memory only. Emits resolve the agent name, which
-            // can hit SQLite behind Store's process-wide mutex — keep that off
-            // the Tokio workers (the #1782 failure class).
-            let kind = match p.event {
-                NotifyPaneEvent::TurnStarted => {
-                    r.resolve(&p.block_id, Family::Turn);
-                    return Ok(NotifyOk { ok: true });
-                }
-                NotifyPaneEvent::InputResolved => {
-                    r.resolve(&p.block_id, Family::Input);
-                    return Ok(NotifyOk { ok: true });
-                }
-                NotifyPaneEvent::TurnCompleted => NotifyKind::TurnCompleted,
-                NotifyPaneEvent::TurnErrored => NotifyKind::TurnErrored,
-                NotifyPaneEvent::InputWaiting => NotifyKind::InputWaiting,
-            };
-            tokio::task::spawn_blocking(move || r.emit(kind, &p.block_id, p.question.as_deref()))
-                .await
-                .map_err(|e| format!("notify.emit: {e}"))?;
+            // Everything goes through the Router's single ordered queue, so a
+            // resolve can never overtake the emit it cancels — whichever
+            // source (renderer or srv) sent either one (Codex P2 on #3662).
+            // Emits resolve the agent name off the async workers there too.
+            match p.event {
+                NotifyPaneEvent::TurnStarted => r.resolve_nonblocking(&p.block_id, Family::Turn),
+                NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
+                NotifyPaneEvent::TurnCompleted => r.emit_nonblocking(NotifyKind::TurnCompleted, &p.block_id),
+                NotifyPaneEvent::TurnErrored => r.emit_nonblocking(NotifyKind::TurnErrored, &p.block_id),
+                NotifyPaneEvent::InputWaiting => r.input_waiting_nonblocking(&p.block_id, p.question),
+            }
             Ok(NotifyOk { ok: true })
         }
     });
