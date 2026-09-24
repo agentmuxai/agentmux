@@ -1117,6 +1117,12 @@ declare global {
         "voice:whisperModelPath"?: string;
         "voice:inputDeviceId"?: string;
         "notify:*"?: boolean;
+        "notify:os:enabled"?: boolean;
+        "notify:os:when"?: "unfocused" | "always" | "never";
+        "notify:os:inputwaiting"?: boolean;
+        "notify:os:turncompleted"?: boolean;
+        "notify:os:turnerrored"?: boolean;
+        "notify:os:preview"?: "redacted" | "full" | "none";
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;
         "notify:sounds:suppresswhenfocused"?: boolean;

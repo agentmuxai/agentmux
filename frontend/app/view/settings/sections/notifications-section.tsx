@@ -9,6 +9,8 @@
 import { createResource, createSignal, Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
@@ -29,6 +31,55 @@ export const NOTIFICATIONS_SETTINGS = {
         description: "Start AgentMux in the background (tray only, no window) when you log in.",
         section: "notifications",
         keywords: ["auto start", "autostart", "launch at login", "startup", "run at boot", "login items"],
+    },
+    osEnabled: {
+        id: "notifications.os_enabled",
+        label: "Desktop notifications",
+        description: "Show a system notification when an agent needs you or finishes while you're not looking at it.",
+        section: "notifications",
+        keywords: ["toast", "os notification", "system notification", "alert", "action center", "notify:os:enabled"],
+    },
+    osWhen: {
+        id: "notifications.os_when",
+        label: "When to notify",
+        description: "\u201cWhen AgentMux isn't focused\u201d still alerts you if an agent needs input in a pane you aren't looking at.",
+        section: "notifications",
+        keywords: ["focus", "background only", "always notify", "notify:os:when"],
+    },
+    osInputWaiting: {
+        id: "notifications.os_input_waiting",
+        label: "Agent needs input",
+        description: "An agent asked a question and is waiting for your answer",
+        section: "notifications",
+        keywords: ["question", "waiting", "blocked", "notify:os:inputwaiting"],
+    },
+    osTurnCompleted: {
+        id: "notifications.os_turn_completed",
+        label: "Agent finished",
+        description: "An agent's turn completed",
+        section: "notifications",
+        keywords: ["done", "finished", "complete", "notify:os:turncompleted"],
+    },
+    osTurnErrored: {
+        id: "notifications.os_turn_errored",
+        label: "Agent stopped with an error",
+        description: "An agent's turn ended with an error",
+        section: "notifications",
+        keywords: ["error", "failure", "crash", "notify:os:turnerrored"],
+    },
+    osPreview: {
+        id: "notifications.os_preview",
+        label: "Notification content",
+        description: "How much of an agent's question to show. Credentials and sensitive terms are always hidden.",
+        section: "notifications",
+        keywords: ["privacy", "preview", "lock screen", "notify:os:preview"],
+    },
+    osTest: {
+        id: "notifications.os_test",
+        label: "Send test notification",
+        description: "Check that notifications reach your desktop (Windows Focus / Do Not Disturb may hold it in the notification center).",
+        section: "notifications",
+        keywords: ["test toast", "try notification"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -61,8 +112,81 @@ export function NotificationsSection(): JSX.Element {
         }
     };
 
+    const osOn = () => (s()["notify:os:enabled"] as boolean | undefined) ?? true;
+    const kindRow = (entry: SettingsIndexEntry, key: string) => (
+        <SettingRow
+            id={entry.id}
+            indent
+            label={entry.label}
+            description={entry.description}
+            control={
+                <ToggleControl checked={(s()[key] as boolean | undefined) ?? true} onChange={(v) => set(key, v)} />
+            }
+        />
+    );
+
     return (
         <div class="settings-section-body">
+            <SectionHeader label="Notifications" />
+            <SettingRow
+                id={NOTIFICATIONS_SETTINGS.osEnabled.id}
+                label={NOTIFICATIONS_SETTINGS.osEnabled.label}
+                description={NOTIFICATIONS_SETTINGS.osEnabled.description}
+                control={<ToggleControl checked={osOn()} onChange={(v) => set("notify:os:enabled", v)} />}
+            />
+            <Show when={osOn()}>
+                <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.osWhen.id}
+                    indent
+                    label={NOTIFICATIONS_SETTINGS.osWhen.label}
+                    description={NOTIFICATIONS_SETTINGS.osWhen.description}
+                    control={
+                        <select
+                            class="setting-select"
+                            value={(s()["notify:os:when"] as string) ?? "unfocused"}
+                            onChange={(e) => set("notify:os:when", e.currentTarget.value)}
+                        >
+                            <option value="unfocused">When AgentMux isn't focused</option>
+                            <option value="always">Always (except the pane you're looking at)</option>
+                            <option value="never">Never</option>
+                        </select>
+                    }
+                />
+                {kindRow(NOTIFICATIONS_SETTINGS.osInputWaiting, "notify:os:inputwaiting")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osTurnCompleted, "notify:os:turncompleted")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osTurnErrored, "notify:os:turnerrored")}
+                <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.osPreview.id}
+                    indent
+                    label={NOTIFICATIONS_SETTINGS.osPreview.label}
+                    description={NOTIFICATIONS_SETTINGS.osPreview.description}
+                    control={
+                        <select
+                            class="setting-select"
+                            value={(s()["notify:os:preview"] as string) ?? "redacted"}
+                            onChange={(e) => set("notify:os:preview", e.currentTarget.value)}
+                        >
+                            <option value="redacted">Short preview</option>
+                            <option value="full">Longer preview</option>
+                            <option value="none">Title only</option>
+                        </select>
+                    }
+                />
+            </Show>
+            <SettingRow
+                id={NOTIFICATIONS_SETTINGS.osTest.id}
+                label={NOTIFICATIONS_SETTINGS.osTest.label}
+                description={NOTIFICATIONS_SETTINGS.osTest.description}
+                control={
+                    <button
+                        type="button"
+                        class="setting-masked-key-btn"
+                        onClick={() => void RpcApi.NotifyTestCommand(TabRpcClient).catch(() => {})}
+                    >
+                        Send
+                    </button>
+                }
+            />
             <SectionHeader label="System tray" />
             <SettingRow
                 id={NOTIFICATIONS_SETTINGS.runInBackground.id}

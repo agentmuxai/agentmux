@@ -81,6 +81,14 @@
     // "notify:sound:agent.waiting.for.input":   true,
     // "notify:sounds:waiting:volume":           0.25,  // 0–1, scaled by notify:sounds:volume
 
+    // -- Desktop notifications (OS toasts) --
+    // "notify:os:enabled":                      true,
+    // "notify:os:when":                         "unfocused",  // "unfocused" | "always" | "never"
+    // "notify:os:inputwaiting":                 true,
+    // "notify:os:turncompleted":                true,
+    // "notify:os:turnerrored":                  true,
+    // "notify:os:preview":                      "redacted",   // "redacted" | "full" | "none"
+
     // -- Tool-call tones (subliminal per-tool "voice") --
     // "notify:tooltones:enabled":               true,
     // "notify:tooltones:volume":                0.25,

@@ -291,6 +291,38 @@
           "default": 0.25,
           "description": "Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the shared master gain. Default 0.25."
         },
+        "notify:os:enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for OS desktop notifications (native toasts) from agents. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §8."
+        },
+        "notify:os:when": {
+          "type": "string",
+          "enum": ["unfocused", "always", "never"],
+          "default": "unfocused",
+          "description": "When to show OS notifications. unfocused: only when no AgentMux window is focused (an agent needing input still alerts if you're looking at a different pane). always: unless you're looking at that pane. never: off."
+        },
+        "notify:os:inputwaiting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent asks a question and waits for your answer."
+        },
+        "notify:os:turncompleted": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent's turn completes."
+        },
+        "notify:os:turnerrored": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent's turn ends with an error."
+        },
+        "notify:os:preview": {
+          "type": "string",
+          "enum": ["redacted", "full", "none"],
+          "default": "redacted",
+          "description": "How much of an agent's question appears in the notification body. Credential/destructive keywords always replace the body with a generic message."
+        },
         "notify:tooltones:enabled": {
           "type": "boolean",
           "default": true,

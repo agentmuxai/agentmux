@@ -305,6 +305,9 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     tracing::info!(conn_id = %conn_id, "WebSocket client disconnected");
     state.event_bus.unregister_ws(&conn_id);
     state.broker.unsubscribe_all(&conn_id);
+    if let Some(r) = crate::backend::notify::router::get(&state.broker) {
+        r.disconnect(&conn_id);
+    }
 
     // Unregister from messagebus if this connection was an agent
     if let Some(ref agent_id) = bus_agent_id {
@@ -1795,6 +1798,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
     // Native memory file browser (agent:memory:list / read_file / write_file)
     super::native_memory_handlers::register_native_memory_handlers(engine, &state);
+
+    // OS notification Router (notify.emit / focus / ack / test / takeactivation
+    // — docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §3.3).
+    super::notify_handlers::register_notify_handlers(engine, &state, conn_id.clone());
 }
 
 
