@@ -21,7 +21,7 @@
 | 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | merged |
 | 2c | Tool logs measure height only when their branch changes (§3.4, §2.2a) | #3607 | merged |
 | 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | merged |
-| 3b | The tail holds only the turn in flight (§2.2c, §3.7) | this PR | open |
+| 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | open |
 | 3 | Tail holds only the turn in flight | 3a + 3b | done once 3b merges; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | not started |
 | 5 | Node identity and durability | — | not started |
