@@ -14,10 +14,22 @@ import { cleanup, render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Block metas the activity-flash color lookup reads (MOS.getObjectValue).
+const blockMetas: Record<string, Record<string, unknown>> = {};
 vi.mock("@/app/store/global", () => ({
     atoms: {},
     recordTEvent: vi.fn(),
     refocusNode: vi.fn(),
+    MOS: {
+        makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
+        getObjectValue: (oref: string) => ({ meta: blockMetas[oref.replace(/^block:/, "")] }),
+    },
+}));
+// The real resolver lives in blockframe.tsx (a large module graph); the
+// test only needs "a pane with a color yields it".
+vi.mock("@/app/block/blockframe", () => ({
+    computeBlockActiveBorderColor: (meta: Record<string, unknown> | undefined) =>
+        (meta?.["frame:activebordercolor"] as string | undefined) ?? undefined,
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -88,8 +100,8 @@ describe("Tab close button", () => {
     });
 });
 
-// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a background tab pulses when
-// one of ITS panes is the source; the active tab never does.
+// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a tab clicks on every tone
+// from one of ITS panes, active or not, in that pane's color.
 describe("Tab activity flash", () => {
     function stubAnimate() {
         const animate = vi.fn((..._args: unknown[]) => ({ cancel: vi.fn() }) as unknown as Animation);
@@ -98,36 +110,42 @@ describe("Tab activity flash", () => {
         return { animate, restore: () => (HTMLElement.prototype.animate = original) };
     }
 
-    it("pulses the tab's overlay for a block in this background tab", () => {
+    it("clicks the tab's overlay for a block in this tab, with that pane's color", () => {
+        blockMetas["blk-1"] = { "frame:activebordercolor": "#f59e0b" };
         const { animate, restore } = stubAnimate();
         const { container } = renderTab();
-        emitActivityFlash({ kind: "tab", blockId: "blk-1" });
+        emitActivityFlash({ blockId: "blk-1" });
+        const inner = container.querySelector<HTMLDivElement>(".tab-inner")!;
         expect(animate).toHaveBeenCalledTimes(1);
-        expect(animate.mock.instances[0]).toBe(container.querySelector(".tab-inner"));
+        expect(animate.mock.instances[0]).toBe(inner);
         expect(animate.mock.calls[0][1]).toMatchObject({ pseudoElement: "::before" });
+        expect(inner.style.getPropertyValue("--activity-flash-base")).toBe("#f59e0b");
+        delete blockMetas["blk-1"];
+        restore();
+    });
+
+    it("the active tab clicks too", () => {
+        const { animate, restore } = stubAnimate();
+        renderTab({ active: true });
+        emitActivityFlash({ blockId: "blk-1" });
+        expect(animate).toHaveBeenCalledTimes(1);
+        restore();
+    });
+
+    it("an uncolored pane leaves the base unset (the stylesheet falls back to accent)", () => {
+        const { animate, restore } = stubAnimate();
+        const { container } = renderTab();
+        emitActivityFlash({ blockId: "blk-1" });
+        expect(animate).toHaveBeenCalledTimes(1);
+        const inner = container.querySelector<HTMLDivElement>(".tab-inner")!;
+        expect(inner.style.getPropertyValue("--activity-flash-base")).toBe("");
         restore();
     });
 
     it("ignores a block that lives in another tab", () => {
         const { animate, restore } = stubAnimate();
         renderTab();
-        emitActivityFlash({ kind: "tab", blockId: "blk-elsewhere" });
-        expect(animate).not.toHaveBeenCalled();
-        restore();
-    });
-
-    it("the active tab never pulses", () => {
-        const { animate, restore } = stubAnimate();
-        renderTab({ active: true });
-        emitActivityFlash({ kind: "tab", blockId: "blk-1" });
-        expect(animate).not.toHaveBeenCalled();
-        restore();
-    });
-
-    it("ignores pane-tab targets (those belong to the pane-header pill)", () => {
-        const { animate, restore } = stubAnimate();
-        renderTab();
-        emitActivityFlash({ kind: "pane-tab", blockId: "blk-1" });
+        emitActivityFlash({ blockId: "blk-elsewhere" });
         expect(animate).not.toHaveBeenCalled();
         restore();
     });
@@ -136,7 +154,7 @@ describe("Tab activity flash", () => {
         const { animate, restore } = stubAnimate();
         const { unmount } = renderTab();
         unmount();
-        emitActivityFlash({ kind: "tab", blockId: "blk-1" });
+        emitActivityFlash({ blockId: "blk-1" });
         expect(animate).not.toHaveBeenCalled();
         restore();
     });

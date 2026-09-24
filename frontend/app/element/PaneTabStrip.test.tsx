@@ -783,8 +783,8 @@ describe("PaneTabStrip — animateWidth (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_202
     });
 });
 
-// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a Pane header's pill pulses
-// when its own block is the source; strips that don't opt in never do.
+// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a Pane header's pill clicks
+// on every tone from its own block; strips that don't opt in never do.
 describe("PaneTabStrip activity flash", () => {
     let animate: ReturnType<typeof vi.fn>;
     let original: typeof HTMLElement.prototype.animate;
@@ -811,22 +811,22 @@ describe("PaneTabStrip activity flash", () => {
         ));
     }
 
-    it("pulses only the matching pill, including a background stack member", () => {
+    it("clicks only the matching pill, including a background stack member", () => {
         const { container } = renderStrip(true);
-        emitActivityFlash({ kind: "pane-tab", blockId: "b" });
+        emitActivityFlash({ blockId: "b" });
         expect(animate).toHaveBeenCalledTimes(1);
         expect(animate.mock.instances[0]).toBe(container.querySelectorAll(".pane-tab")[1]);
     });
 
-    it("ignores window-tab targets", () => {
+    it("ignores other blocks", () => {
         renderStrip(true);
-        emitActivityFlash({ kind: "tab", blockId: "b" });
+        emitActivityFlash({ blockId: "zzz" });
         expect(animate).not.toHaveBeenCalled();
     });
 
-    it("a strip without flashOnActivity never pulses", () => {
+    it("a strip without flashOnActivity never clicks", () => {
         renderStrip(false);
-        emitActivityFlash({ kind: "pane-tab", blockId: "b" });
+        emitActivityFlash({ blockId: "b" });
         expect(animate).not.toHaveBeenCalled();
     });
 });

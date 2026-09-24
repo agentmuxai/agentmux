@@ -522,12 +522,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const [isDragging, setIsDragging] = createSignal(false);
     const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
 
-    // Activity flash for a source in the ACTIVE window tab (a background
-    // tab's panes flash their window tab instead — the router decides).
+    // Activity flash: click this pill on every tone from its own block,
+    // whether or not its window tab is showing. The color comes from the
+    // pill's own `--pane-tab-underline` in the stylesheet, so no base
+    // color is passed here.
     onMount(() => {
         if (!props.flashOnActivity) return;
-        const unsubscribe = onActivityFlash((target) => {
-            if (target.kind === "pane-tab" && target.blockId === id() && pillRef) flashElement(pillRef);
+        const unsubscribe = onActivityFlash(({ blockId }) => {
+            if (blockId === id() && pillRef) flashElement(pillRef);
         });
         onCleanup(unsubscribe);
     });

@@ -22,20 +22,8 @@ function resetSettings(): void {
 
 const focusState = { focusedBlockId: null as string | null, windowFocused: true };
 
-// Active window tab + its members, for the activity-flash router.
-const tabState = { activeTabId: "tab-A" as string | null, blockids: {} as Record<string, string[]> };
-
 vi.mock("@/app/store/global", () => ({
     getSettingsKeyAtom: (key: string) => () => settings[key],
-    atoms: { activeTabId: () => tabState.activeTabId },
-    MOS: {
-        makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
-        getObjectValue: (oref: string) => {
-            const id = oref.replace(/^tab:/, "");
-            const blockids = tabState.blockids[id];
-            return blockids ? { oid: id, blockids } : null;
-        },
-    },
 }));
 
 vi.mock("@/app/store/focusManager", () => ({
@@ -334,7 +322,8 @@ describe("sound-service tool-tones policy", () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────
-// Activity flash — the visual twin of a tool tone.
+// Activity flash — the visual twin of a tool tone: one event per tone that
+// passes the gates, from any pane, focused or not.
 // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2. The player is left
 // UNPRIMED here on purpose: the flash must not depend on audio.
 // ──────────────────────────────────────────────────────────────────────
@@ -347,8 +336,6 @@ describe("sound-service activity flash", () => {
         resetSettings();
         focusState.focusedBlockId = null;
         focusState.windowFocused = true;
-        tabState.activeTabId = "tab-A";
-        tabState.blockids = { "tab-A": ["blk-A1", "blk-A2"], "tab-B": ["blk-B1"] };
         __resetSoundService();
         __resetSoundListeners();
         __resetActivityFlash();
@@ -369,52 +356,41 @@ describe("sound-service activity flash", () => {
         captured(blockId, { type: "tool-started", name: "Read" });
     }
 
-    it("a pane in a background tab flashes its window tab — even before audio is primed", () => {
-        fireToolStarted("blk-B1");
-        expect(flashes).toEqual([{ kind: "tab", blockId: "blk-B1" }]);
+    it("emits one flash per tone, even before audio is primed", () => {
+        fireToolStarted("blk-1");
+        fireToolStarted("blk-2");
+        expect(flashes).toEqual([{ blockId: "blk-1" }, { blockId: "blk-2" }]);
     });
 
-    it("an unfocused pane in the active tab flashes its pill", () => {
-        focusState.focusedBlockId = "blk-A1";
-        fireToolStarted("blk-A2");
-        expect(flashes).toEqual([{ kind: "pane-tab", blockId: "blk-A2" }]);
-    });
-
-    it("the focused pane in a focused window does not flash", () => {
-        focusState.focusedBlockId = "blk-A1";
-        fireToolStarted("blk-A1");
-        expect(flashes).toEqual([]);
-    });
-
-    it("the focused pane flashes its pill when the window is blurred", () => {
-        focusState.focusedBlockId = "blk-A1";
-        focusState.windowFocused = false;
-        fireToolStarted("blk-A1");
-        expect(flashes).toEqual([{ kind: "pane-tab", blockId: "blk-A1" }]);
+    it("flashes for the focused pane in a focused window too", () => {
+        focusState.focusedBlockId = "blk-1";
+        focusState.windowFocused = true;
+        fireToolStarted("blk-1");
+        expect(flashes).toEqual([{ blockId: "blk-1" }]);
     });
 
     it("notify:tooltones:flash=false removes the flash", () => {
         setSetting("notify:tooltones:flash", false);
-        fireToolStarted("blk-B1");
+        fireToolStarted("blk-1");
         expect(flashes).toEqual([]);
     });
 
     it("follows the tone's gates: master off, tool tones off, focused scope", () => {
         setSetting("notify:sounds:enabled", false);
-        fireToolStarted("blk-B1");
+        fireToolStarted("blk-1");
         resetSettings();
         setSetting("notify:tooltones:enabled", false);
-        fireToolStarted("blk-B1");
+        fireToolStarted("blk-1");
         resetSettings();
         setSetting("notify:tooltones:scope", "focused");
-        focusState.focusedBlockId = "blk-A1";
-        fireToolStarted("blk-B1");
+        focusState.focusedBlockId = "blk-OTHER";
+        fireToolStarted("blk-1");
         expect(flashes).toEqual([]);
     });
 
     it("replay mode drops the flash with the tone", () => {
         setReplayMode(true);
-        fireToolStarted("blk-B1");
+        fireToolStarted("blk-1");
         expect(flashes).toEqual([]);
     });
 });

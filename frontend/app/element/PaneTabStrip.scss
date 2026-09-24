@@ -232,19 +232,20 @@
 
     // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
     // Only strips with `flashOnActivity` (a Pane's own header) ever animate
-    // it; everywhere else it stays at opacity 0.
+    // it; everywhere else it stays at opacity 0. Fill: a brighter, more
+    // saturated version of this pill's own pane color (`--pane-tab-underline`,
+    // set inline by PaneTabStrip from PaneChrome's getColor), else accent.
     &::before {
         content: "";
         position: absolute;
         inset: 0;
         z-index: var(--zindex-activity-flash);
-        background: var(--accent-color);
+        background: oklch(
+            from var(--activity-flash-base, var(--pane-tab-underline, var(--accent-color)))
+                min(0.92, calc(l + 0.15)) calc(c * 1.6) h
+        );
         opacity: 0;
         pointer-events: none;
-    }
-
-    &.activity-flash-static::before {
-        opacity: 0.22;
     }
 
     &:hover {

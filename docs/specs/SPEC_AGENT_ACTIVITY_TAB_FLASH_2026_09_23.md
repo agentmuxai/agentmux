@@ -12,6 +12,42 @@ this complements), `docs/specs/SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_
 
 ---
 
+## Revision 2 (2026-09-24): owner feedback after testing a dev build
+
+This revision **replaces** §2.1 (routing), the color and envelope parts of
+§3.1, §3.2's numbers, and §3.3 (reduced motion). The rest still holds.
+
+1. **Always flash, no routing.** Every tone that passes the gates (§2.2)
+   flashes **both** the source's window tab (active or not) **and** its own
+   pill in its pane header (whether or not its window tab is showing),
+   including for the focused pane. The owner wanted the flash every time,
+   regardless of what is on screen. §2.1's table, the focused-pane exception,
+   and the `flashTargetFor` routing rule are gone. An event is just
+   `{ blockId }`.
+2. **Color: a brighter, more saturated version of the pane's own color.**
+   The base is the source block's active-border color, resolved the same way
+   its frame and pill do (`computeBlockActiveBorderColor`: `frame:hue` first,
+   then `frame:activebordercolor`). A window tab falls back to its own
+   `tab:color`, then to `--accent-color`. The pill uses its own
+   `--pane-tab-underline`, then accent. Both stylesheets brighten that base
+   with `oklch(from <base> min(0.92, l + 0.15) c×1.6 h)`. Chromium gamut-maps
+   any out-of-gamut result.
+3. **Envelope: a click.** The overlay jumps to opacity **0.9** in the flash
+   color, holds for **40 ms**, then fades to 0 with `ease-out` over the rest
+   of **300 ms**. A tone that lands mid-fade restarts it from peak. The
+   per-element throttle is **100 ms**.
+4. **Reduced motion no longer changes the envelope.** An opacity fade in
+   place isn't motion (nothing moves, scales, or slides), and a fade is the
+   usual reduced-motion substitute. The owner's machine has the OS setting
+   on, and the no-fade version was not what they asked for.
+5. **Photosensitivity rationale updated** (code comment beside the
+   constants). Each click is now high-contrast, so the argument is the
+   WCAG 2.3.1 small-safe-area exemption rather than low luminance. A tab
+   (~200×33 px) or pill (~120×20 px) is a small fraction of the ~341×256 px
+   area the general flash threshold starts at.
+
+---
+
 ## 1. The problem
 
 Tool-call tones play for **every** agent pane in the window by default
@@ -306,37 +342,41 @@ and subscribers in `frontend/app/tab/tab.tsx` and
 tones). The §2.2 open question was answered with the recommended default: no
 flash when sounds are off.
 
-Departures from §2–§4 as first written:
+Departures from §2–§4 as first written (as of Revision 2):
 
-1. **The active-tab target is the source's pill, not the whole pane header.**
-   Every pane header now renders its members as pills through the shared
-   `PaneChrome` → `PaneHeaderTabStrip` → `PaneTabStrip`
+1. **Every tone flashes both targets.** There's no routing (see Revision 2).
+   The pill target comes from every pane header now rendering its members
+   as pills through the shared `PaneChrome` → `PaneHeaderTabStrip` →
+   `PaneTabStrip`
    (`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`), one
-   pill per blockId. Flashing the source's own pill is more precise and
-   also covers §4.4's first gap: a source that is a background member of a
-   pane stack flashes its own pill. The router's two targets are `tab` and
-   `pane-tab`. `PaneTabStrip` gets an opt-in `flashOnActivity` prop, set only
-   by `PaneHeaderTabStrip`, because the editor file tabs and the agent History
-   strip reuse the same component with ids that aren't blockIds.
+   pill per blockId. That also covers §4.4's first gap: a background member
+   of a pane stack flashes its own pill. `PaneTabStrip` gets an opt-in
+   `flashOnActivity` prop, set only by `PaneHeaderTabStrip`, because the
+   editor file tabs and the agent History strip reuse the same component with
+   ids that aren't blockIds.
 2. **Known gap:** with `pane:tabstrip = "multi-only"`, a single-block pane
-   shows no pill, so a source there in the active tab shows no flash. The
-   default (`"always"`) is unaffected.
+   shows no pill. Its window tab still flashes.
 3. **Overlay under the content:** each host gets `isolation: isolate`, and the
    overlay sits at `z-index: var(--zindex-activity-flash)`, a new token in
    `theme.scss` set to -1, because stylelint only allows z-index tokens. This
    keeps it above the host's background (including the `!important` custom tab
    color) and under the label and close button.
-4. **Reduced motion is read from `matchMedia` directly.**
-   `atoms.prefersReducedMotionAtom` (`frontend/app/store/global.ts`) is a
-   hard-coded `false` stub today, so it could not be the source.
+4. **Base color passed inline:** `flashElement(el, baseColor)` sets
+   `--activity-flash-base` on the element, and the stylesheet brightens it.
+   The tab passes the source pane's color. The pill passes nothing and uses
+   its own `--pane-tab-underline`.
 5. **Per-keyframe easing**: the hold segment is linear and the decay uses
-   `ease-out`, instead of a single easing over the whole animation. That
-   keeps the 80 ms hold flat.
+   `ease-out`.
 
-Tests: `frontend/app/notification/__tests__/activity-flash.test.ts` (the §2.1
-table, the bus, throttle, and reduced motion), a new "activity flash" suite in
-`sound/__tests__/sound-service.test.ts` (routing and every gate, with the
-player unprimed), and flash suites in `tab.test.tsx` and
-`PaneTabStrip.test.tsx`. Acceptance items 1–8 in §5 are for manual
+Tests: `frontend/app/notification/__tests__/activity-flash.test.ts` (the bus,
+the envelope, the base-color variable, and the throttle), a new "activity
+flash" suite in `sound/__tests__/sound-service.test.ts` (one event per tone,
+including from the focused pane, plus every gate, with the player unprimed),
+and flash suites in `tab.test.tsx` (active and background tabs, pane color)
+and `PaneTabStrip.test.tsx`. Revision 2 was also checked live in a dev build
+over CDP: an amber (`#f59e0b`) pane flashed its pill and its window tab with
+`oklch(0.92 0.26 70)`, an uncolored pane flashed with a boosted accent,
+`oklch(0.83 0.21 243)`, and both overlays were back at opacity 0 within
+400 ms. Acceptance items 1–8 in §5 are for manual
 verification in a dev build. Item 9 (the typing benchmark) was not run for
 this change.

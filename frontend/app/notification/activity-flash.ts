@@ -3,43 +3,19 @@
 
 /**
  * Activity flash — the visual twin of a tool-call tone. Every tone that
- * passes its policy gates also pulses the one on-screen element that
- * identifies where it came from, so a tone from a pane you can't see can be
- * traced to its window tab or pane-header pill.
+ * passes its policy gates also "clicks" the source's window tab and its own
+ * pill in its pane header: an instant, bright, saturated version of the
+ * pane's color that fades out fast.
  *
  * Spec: docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
  *
- * Deliberately store-free: the sound service decides the route (it already
- * owns the focus + window-focus reads the gates use) and consumers
- * (tab.tsx, PaneTabStrip.tsx) decide whether a target is theirs. That keeps
- * this module a pure routing rule + a subscriber set + one animation helper,
- * all unit-testable without a layout or a MOS cache.
+ * Deliberately store-free: consumers (tab.tsx, PaneTabStrip.tsx) decide
+ * whether an event is theirs and which color to click with; this module is
+ * a subscriber set plus one animation helper.
  */
 
-/**
- * `tab` — the source is in a background window tab: pulse that tab.
- * `pane-tab` — the source is in the active window tab: pulse its own pill
- * in its pane's header (flashing the active window tab would not say which
- * pane it was).
- */
-export type FlashTarget = { kind: "tab" | "pane-tab"; blockId: string };
-
-export interface FlashRouteInput {
-    /** The source block is a member of the currently active window tab. */
-    sourceInActiveTab: boolean;
-    /** The source block is the focused block. */
-    sourceFocused: boolean;
-    /** The OS window has focus. */
-    windowFocused: boolean;
-}
-
-/** The routing rule, spec §2.1. `null` = nothing to flash. */
-export function flashTargetFor(blockId: string, input: FlashRouteInput): FlashTarget | null {
-    // Focused pane in a focused window: its own transcript is already in
-    // front of the user — a flash would add noise, not information.
-    if (input.sourceFocused && input.windowFocused) return null;
-    return { kind: input.sourceInActiveTab ? "pane-tab" : "tab", blockId };
-}
+/** One tool-call tone from `blockId`. */
+export type FlashTarget = { blockId: string };
 
 // ── Bus ──────────────────────────────────────────────────────────────────
 //
@@ -69,25 +45,29 @@ export function onActivityFlash(listener: FlashListener): () => void {
 
 // ── Animation ────────────────────────────────────────────────────────────
 //
-// Envelope: instant attack to a low peak, short hold, ease-out decay.
-// Instant attack is what reads as "that one, just now"; the long tail keeps
-// it soft.
+// A click: instant attack to near-full strength, a hold just long enough to
+// register the color, then a fast ease-out. Each tone is its own click; a
+// tone that lands mid-decay restarts from peak.
 //
-// Why this cannot strobe (WCAG 2.3.1, three flashes per second): a
-// re-trigger inside the decay restarts from PEAK while the overlay is still
-// bright, a small luminance step, so continuous activity reads as a steady
-// glow. A full dark→peak transition needs the previous flash to have
-// decayed, which takes FLASH_DURATION_MS — at most ~1.4 full flashes/s —
-// and a 0.22-opacity accent overlay is far below the luminance change that
-// criterion counts in the first place.
+// Photosensitivity (WCAG 2.3.1): the general flash threshold only applies
+// once the flashing area reaches roughly a 341×256 px block (25% of a 10°
+// field at typical viewing distance). A window tab (~200×33 px) or a pane
+// pill (~120×20 px) is a small fraction of that, so repeated clicks on one
+// target stay inside the small-safe-area exemption. The throttle below still
+// caps a single target at 10 restarts/s.
+//
+// Not gated on prefers-reduced-motion: this only animates opacity in
+// place — nothing moves, scales or slides, which is what that preference
+// guards against — and a fade is the substitution reduced-motion guidance
+// itself recommends.
 
-export const FLASH_PEAK_OPACITY = 0.22;
-export const FLASH_HOLD_MS = 80;
-export const FLASH_DURATION_MS = 700;
+export const FLASH_PEAK_OPACITY = 0.9;
+export const FLASH_HOLD_MS = 40;
+export const FLASH_DURATION_MS = 300;
 /** At most one restart per element per this window; extras are dropped. */
-export const FLASH_THROTTLE_MS = 150;
-/** Class the reduced-motion path toggles; the stylesheets hold the overlay at peak while it is set. */
-export const FLASH_STATIC_CLASS = "activity-flash-static";
+export const FLASH_THROTTLE_MS = 100;
+/** Inline custom property the stylesheets brighten into the flash color. */
+export const FLASH_BASE_COLOR_VAR = "--activity-flash-base";
 
 const FLASH_KEYFRAMES: Keyframe[] = [
     { opacity: FLASH_PEAK_OPACITY, offset: 0 },
@@ -98,56 +78,39 @@ const FLASH_KEYFRAMES: Keyframe[] = [
 interface RunningFlash {
     startedAt: number;
     anim: Animation | null;
-    timer: ReturnType<typeof setTimeout> | null;
 }
 const running = new WeakMap<Element, RunningFlash>();
-
-function prefersReducedMotion(): boolean {
-    // matchMedia directly, not `atoms.prefersReducedMotionAtom` — that atom
-    // is a hard-coded `false` stub today (store/global.ts), and this path is
-    // driven from JS, so the app's CSS-only reduced-motion rules never see it.
-    return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-}
 
 function now(): number {
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
 }
 
 /**
- * Pulse the `::before` overlay of `el`. The element's stylesheet owns the
- * overlay (position, color, `opacity: 0` at rest, `pointer-events: none`);
- * this only drives its opacity.
+ * Click the `::before` overlay of `el`. The element's stylesheet owns the
+ * overlay (position, `opacity: 0` at rest, `pointer-events: none`, and the
+ * brightening of `--activity-flash-base` into its fill); this drives its
+ * opacity and, when `baseColor` is given, which color it brightens.
  *
  * Web Animations API rather than a CSS class toggle: re-triggering a CSS
  * keyframe animation needs a forced reflow between remove and re-add, and
  * a forced layout on every tool call is exactly the cost the agent-pane
  * typing work (PR #3599) removed.
  */
-export function flashElement(el: HTMLElement): void {
+export function flashElement(el: HTMLElement, baseColor?: string | null): void {
     const t = now();
     const prev = running.get(el);
     if (prev && t - prev.startedAt < FLASH_THROTTLE_MS) return;
     prev?.anim?.cancel();
-    if (prev?.timer != null) clearTimeout(prev.timer);
 
-    if (prefersReducedMotion()) {
-        // Same signal (which tab), no motion: show at peak, then remove.
-        el.classList.add(FLASH_STATIC_CLASS);
-        const timer = setTimeout(() => {
-            el.classList.remove(FLASH_STATIC_CLASS);
-            running.delete(el);
-        }, FLASH_DURATION_MS);
-        running.set(el, { startedAt: t, anim: null, timer });
-        return;
-    }
+    if (baseColor) el.style.setProperty(FLASH_BASE_COLOR_VAR, baseColor);
+    else el.style.removeProperty(FLASH_BASE_COLOR_VAR);
 
-    el.classList.remove(FLASH_STATIC_CLASS);
     if (typeof el.animate !== "function") return;
     const anim = el.animate(FLASH_KEYFRAMES, {
         duration: FLASH_DURATION_MS,
         pseudoElement: "::before",
     });
-    running.set(el, { startedAt: t, anim, timer: null });
+    running.set(el, { startedAt: t, anim });
 }
 
 // ── Test helpers (NEVER call from production) ────────────────────────────

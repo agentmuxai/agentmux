@@ -19,9 +19,9 @@
  * Installed once from app-init via `installSoundService()`.
  */
 
-import { emitActivityFlash, flashTargetFor } from "@/app/notification/activity-flash";
+import { emitActivityFlash } from "@/app/notification/activity-flash";
 import { focusManager } from "@/app/store/focusManager";
-import { atoms, getSettingsKeyAtom, MOS } from "@/app/store/global";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import {
     addEventListener as addPaneListener,
@@ -330,7 +330,7 @@ function playToolToneIfAllowed(blockId: string, tool: string): void {
     // AudioContext check — so it works before priming and at volume 0.
     // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2.
     if (getSettingsKeyAtom("notify:tooltones:flash")() !== false) {
-        routeActivityFlash(blockId);
+        emitActivityFlash({ blockId });
     }
     const ctx = player.getAudioContext();
     if (!ctx || !toolTones.isAttached()) return; // not primed yet
@@ -339,17 +339,6 @@ function playToolToneIfAllowed(blockId: string, tool: string): void {
     } catch (e) {
         console.warn(`[sound] tool-tone play threw for ${tool}`, e);
     }
-}
-
-function routeActivityFlash(blockId: string): void {
-    const activeTabId = atoms.activeTabId?.();
-    const activeTab = activeTabId ? MOS.getObjectValue<Tab>(MOS.makeORef("tab", activeTabId)) : null;
-    const target = flashTargetFor(blockId, {
-        sourceInActiveTab: activeTab?.blockids?.includes(blockId) ?? false,
-        sourceFocused: focusManager.blockFocusAtom() === blockId,
-        windowFocused: windowFocusedSignal?.() ?? true,
-    });
-    if (target) emitActivityFlash(target);
 }
 
 function shouldPlay(ev: SoundEvent, windowFocused: () => boolean): boolean {

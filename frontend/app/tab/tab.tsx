@@ -1,7 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, recordTEvent, refocusNode } from "@/app/store/global";
+import { computeBlockActiveBorderColor } from "@/app/block/blockframe";
+import { atoms, MOS, recordTEvent, refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
@@ -227,15 +228,15 @@ function Tab(props: TabProps): JSX.Element {
     // their content via flex layout. See the analysis at
     // docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 
-    // Visual twin of a tool-call tone from a pane in THIS (background) tab —
-    // see docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md. The active
-    // tab never flashes: the router sends its panes' activity to their
-    // pane-header pills instead.
+    // Visual twin of a tool-call tone from any pane in THIS tab, active or
+    // not — docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md. Clicks
+    // with the source pane's own color (the same resolution its frame and
+    // pill use), else this tab's color, else the accent.
     onMount(() => {
-        const unsubscribe = onActivityFlash((target) => {
-            if (target.kind !== "tab" || props.active) return;
-            if (!tabData()?.blockids?.includes(target.blockId)) return;
-            flashElement(tabInnerRef);
+        const unsubscribe = onActivityFlash(({ blockId }) => {
+            if (!tabData()?.blockids?.includes(blockId)) return;
+            const blockMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
+            flashElement(tabInnerRef, computeBlockActiveBorderColor(blockMeta) ?? tabColor());
         });
         onCleanup(unsubscribe);
     });

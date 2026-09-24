@@ -66,18 +66,18 @@
         // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
         // Rests invisible; activity-flash.ts animates its opacity (compositor-
         // only, no layout/paint of the tab). `::after` is the active stripe.
+        // Fill: a brighter, more saturated version of the source pane's color
+        // (`--activity-flash-base`, set inline per flash by tab.tsx).
         &::before {
             content: "";
             position: absolute;
             inset: 0;
             z-index: var(--zindex-activity-flash);
-            background: var(--accent-color);
+            background: oklch(
+                from var(--activity-flash-base, var(--accent-color)) min(0.92, calc(l + 0.15)) calc(c * 1.6) h
+            );
             opacity: 0;
             pointer-events: none;
-        }
-
-        &.activity-flash-static::before {
-            opacity: 0.22;
         }
     }
 
