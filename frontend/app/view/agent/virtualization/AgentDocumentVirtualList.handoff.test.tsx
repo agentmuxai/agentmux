@@ -15,6 +15,11 @@
  * so the migrating node enters the store with its real height in the same
  * update that adds it.
  *
+ * These use the pre-Phase-3 count policy (`tailPolicy="count"`, the last 50
+ * nodes): it migrates exactly one node per append, which isolates the
+ * handoff itself. The turn policy's migrations are covered in
+ * AgentDocumentVirtualList.turn-tail.test.tsx.
+ *
  * jsdom has no layout: row heights come from a stubbed getBoundingClientRect
  * keyed by data-node-id, delivered through a fake ResizeObserver — the same
  * approach as AgentDocumentVirtualList.pin.test.tsx.
@@ -104,6 +109,7 @@ function setup(count: number) {
             documentState={docState}
             layoutView={view}
             zoomFactor={() => 1}
+            tailPolicy="count"
             onToggleCollapse={() => {}}
             onTogglePin={() => {}}
         />
@@ -174,6 +180,7 @@ describe("height handoff from the streaming buffer to the virtualized head", () 
                 documentState={docState}
                 layoutView={view}
                 zoomFactor={() => 1}
+            tailPolicy="count"
                 onToggleCollapse={() => {}}
                 onTogglePin={() => {}}
             />

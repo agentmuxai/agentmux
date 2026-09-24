@@ -53,11 +53,16 @@ import {
     type RowPosition,
 } from "@/app/store/agent-pane-layout-store";
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
-import { inFlowState, type ExpansionState } from "@/app/store/agent-pane-layout/types";
+import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
     initialStickyFrontierId,
+    nodeBytes,
+    partitionAt,
     partitionForVirtualization,
     STREAMING_BUFFER_SIZE,
+    TURN_TAIL_MAX_BYTES,
+    TURN_TAIL_MAX_NODES,
+    turnScopedFrontier,
 } from "./streaming-buffer";
 
 /** The three numbers the scroll logic works from, in unzoomed CSS px. */
@@ -126,6 +131,15 @@ export interface AgentDocumentVirtualListProps {
     /** Ordinal-matched tool_use_id -> live dispatch, for this pane's
      *  Agent/Task/Workflow tool nodes. See `activity/dispatch-correlation.ts`. */
     dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
+    /**
+     * What the always-mounted streaming buffer holds. `"turn"` (default): the
+     * turn in flight, bounded by TURN_TAIL_MAX_NODES / TURN_TAIL_MAX_BYTES —
+     * Phase 3 of SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md.
+     * `"count"`: the last STREAMING_BUFFER_SIZE nodes, the pre-Phase-3
+     * behaviour and the kill switch (`agent:turnscopedtail` = false). Read
+     * once at mount.
+     */
+    tailPolicy?: "turn" | "count";
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -295,6 +309,38 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     }
 
+    // Streaming-buffer row heights, for the height handoff when a node
+    // migrates into the virtualized head (slice effect below). Observed, not
+    // read: a ResizeObserver callback runs with layout already clean, so
+    // reading the rect there forces nothing. ÷zoom to stay in unzoomed CSS px,
+    // exactly like the head's measure RO. Phase 3 of
+    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2.
+    //
+    // Each height is stored with WHAT it measured: the node object the row
+    // was rendering (nodes are immutable, so a content or status change is a
+    // new object) and its in-flow expansion state. The handoff uses it only if
+    // both still match — a row whose content or expansion changes in the same
+    // update that migrates it is disposed before the RO can report its new
+    // size, and that stale height would stay in the layout for good if the
+    // node is above the viewport (never mounted in the head, never
+    // re-measured). Codex P2 on #3610.
+    const tailHeights = new Map<string, { px: number; node: DocumentNode; state: ExpansionState }>();
+    const tailRowNode = new WeakMap<Element, () => DocumentNode>();
+    const tailRO = typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver((entries) => {
+            const zoom = props.zoomFactor?.() ?? 1;
+            const docState = untrack(props.documentState);
+            for (const entry of entries) {
+                const node = untrack(() => tailRowNode.get(entry.target)?.());
+                if (!node) continue;
+                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1); // perf:allow-layout-read — tail ResizeObserver callback (layout clean)
+                if (!Number.isFinite(cssPx) || cssPx <= 0) continue;
+                tailHeights.set(node.id, { px: cssPx, node, state: inFlowState(currentExpansion(node, docState)) });
+            }
+        })
+        : undefined;
+    onCleanup(() => tailRO?.disconnect());
+
     // Sticky frontier id — set once when the document first crosses
     // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
     // cap (see below) to keep streamingNodes.length ≤ STREAMING_BUFFER_SIZE.
@@ -324,9 +370,72 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // <Key>. Without createMemo, every read re-slices the document
     // (O(n)) on every token of streaming, defeating the streaming
     // buffer's purpose. (reagent P1 on #784.)
+    // Tail policy, fixed for this mount: a settings toggle takes effect on the
+    // pane's next mount and never re-partitions a live pane.
+    const turnScopedTail = untrack(() => (props.tailPolicy ?? "turn") === "turn");
+
+    /**
+     * How far the frontier may move right now, from `from` toward `to`: across
+     * buffer rows that are wholly above the viewport, so no row the user can
+     * see is remounted (a remount is jump-free since 3a, but re-renders
+     * content — async markdown like mermaid would flash). Geometry comes from
+     * values already known — the head's current size (layoutView), the buffer
+     * rows' observed heights (tailHeights), the store's scrollTop — so nothing
+     * here reads layout. A row with no observed height yet stops the advance;
+     * the next partition run retries. Past twice either ceiling the tail is
+     * trimmed regardless, so it stays bounded while the user reads mid-tail.
+     */
+    const advanceFrontier = (nodes: readonly DocumentNode[], from: number, to: number): number => {
+        let tailBytes = 0;
+        for (let i = from; i < nodes.length; i++) tailBytes += nodeBytes(nodes[i]);
+        if (nodes.length - from > 2 * TURN_TAIL_MAX_NODES || tailBytes > 2 * TURN_TAIL_MAX_BYTES) return to;
+        const snap = props.blockId ? snapshotLayout(props.blockId) : null;
+        const view = untrack(() => props.layoutView?.());
+        if (!snap || !view) return to; // no layout store: nothing measured to protect
+        let rowTop = view.scrollMarginPx + view.totalSize;
+        let k = from;
+        while (k < to) {
+            // Only a height observed for this exact node object counts; a stale
+            // or missing one stops the advance (retried on the next run).
+            const seen = tailHeights.get(nodes[k].id);
+            if (!seen || seen.node !== nodes[k] || rowTop + seen.px > snap.scrollTop) break; // perf:allow-layout-read — snap is the layout store's state: a stored number, not a DOM read
+            rowTop += seen.px + ROW_GAP_PX;
+            k++;
+        }
+        return k;
+    };
+
+    /**
+     * Turn-scoped partition (Phase 3, §6.2): the tail starts at the turn in
+     * flight (turnScopedFrontier). The frontier only moves forward, only
+     * inside this memo (invariant 1, single residency), and only as far as
+     * advanceFrontier allows. With no frontier yet — first run, or its anchor
+     * was cleared/truncated — nothing is mounted to protect, so it goes
+     * straight to the target: restoring a long conversation mounts only its
+     * last turn plus the visible head rows.
+     */
+    const turnPartition = (nodes: readonly DocumentNode[]) => {
+        let at = stickyFrontierId == null ? -1 : nodes.findIndex((n) => n.id === stickyFrontierId);
+        const target = turnScopedFrontier(nodes);
+        if (at < 0) at = target;
+        else if (target > at) at = advanceFrontier(nodes, at, target);
+        stickyFrontierId = nodes[at]?.id ?? null;
+        const result = partitionAt(nodes, at);
+        trail("agent:virt:partition", {
+            virtCount: result.virtualizedNodes.length,
+            streamCount: result.streamingNodes.length,
+            frontier: stickyFrontierId?.slice(0, 8) ?? null,
+            policy: "turn",
+        });
+        return result;
+    };
+
     const partition = createMemo(() => {
         const nodes = props.viewState.nodes();
+        if (turnScopedTail) return turnPartition(nodes);
 
+        // Kill-switch path (`agent:turnscopedtail` off): the last
+        // STREAMING_BUFFER_SIZE nodes, as before Phase 3.
         // First time the document exceeds the streaming buffer, lock
         // the frontier. Subsequent appends grow `streamingNodes`.
         if (stickyFrontierId == null) {
@@ -384,38 +493,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         });
         return result;
     });
-
-    // Streaming-buffer row heights, for the height handoff when a node
-    // migrates into the virtualized head (slice effect below). Observed, not
-    // read: a ResizeObserver callback runs with layout already clean, so
-    // reading the rect there forces nothing. ÷zoom to stay in unzoomed CSS px,
-    // exactly like the head's measure RO. Phase 3 of
-    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2.
-    //
-    // Each height is stored with WHAT it measured: the node object the row
-    // was rendering (nodes are immutable, so a content or status change is a
-    // new object) and its in-flow expansion state. The handoff uses it only if
-    // both still match — a row whose content or expansion changes in the same
-    // update that migrates it is disposed before the RO can report its new
-    // size, and that stale height would stay in the layout for good if the
-    // node is above the viewport (never mounted in the head, never
-    // re-measured). Codex P2 on #3610.
-    const tailHeights = new Map<string, { px: number; node: DocumentNode; state: ExpansionState }>();
-    const tailRowNode = new WeakMap<Element, () => DocumentNode>();
-    const tailRO = typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver((entries) => {
-            const zoom = props.zoomFactor?.() ?? 1;
-            const docState = untrack(props.documentState);
-            for (const entry of entries) {
-                const node = untrack(() => tailRowNode.get(entry.target)?.());
-                if (!node) continue;
-                const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1); // perf:allow-layout-read — tail ResizeObserver callback (layout clean)
-                if (!Number.isFinite(cssPx) || cssPx <= 0) continue;
-                tailHeights.set(node.id, { px: cssPx, node, state: inFlowState(currentExpansion(node, docState)) });
-            }
-        })
-        : undefined;
-    onCleanup(() => tailRO?.disconnect());
 
     // Phase 3: feed the layout slice from the VIRTUALIZED partition only.
     // The slice models the prefix-summed region; the streaming buffer is

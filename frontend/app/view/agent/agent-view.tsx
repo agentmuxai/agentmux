@@ -27,6 +27,7 @@ import {
     atoms,
     getApi,
     getBlockMetaKeyAtom,
+    getSettingsKeyAtom,
     openOrFocusPaneByView,
     refocusNode,
     MOS,
@@ -2421,6 +2422,11 @@ const AgentPresentationView = ({
                     zoomFactor={zoomFactor}
                     blockId={model.blockId}
                     layoutView={layoutView}
+                    // Kill switch for the turn-scoped tail (Phase 3 of
+                    // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md):
+                    // `agent:turnscopedtail: false` restores the last-50-nodes
+                    // tail. Read once here; the list fixes its policy at mount.
+                    tailPolicy={untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()) === false ? "count" : "turn"}
                 />
             </div>
 

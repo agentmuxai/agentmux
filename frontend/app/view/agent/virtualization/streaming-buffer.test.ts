@@ -8,6 +8,8 @@ import {
     locateIndex,
     partitionForVirtualization,
     STREAMING_BUFFER_SIZE,
+    nodeBytes,
+    turnScopedFrontier,
 } from "./streaming-buffer";
 
 const md = (id: string): DocumentNode => ({ type: "markdown", id, content: id, timestamp: 0 });
@@ -178,5 +180,71 @@ describe("locateIndex", () => {
     it("locates the only index in a single-node streaming partition", () => {
         const p = partitionForVirtualization(range(1));
         expect(locateIndex(0, p)).toEqual({ side: "streaming", relativeIndex: 0 });
+    });
+});
+
+// ── Phase 3: the tail holds only the turn in flight ─────────────────────────
+// SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2.
+
+const user = (id: string): DocumentNode => ({ type: "user_message", id, message: id, timestamp: 0 });
+const tool = (id: string, status: "running" | "pending_approval" | "awaiting_answer" | "success" | "failed" = "success"): DocumentNode =>
+    ({ type: "tool", id, tool: "Bash", params: {}, status, collapsed: true, summary: id }) as DocumentNode;
+const big = (id: string, bytes: number): DocumentNode => ({ type: "markdown", id, content: "x".repeat(bytes), timestamp: 0 });
+const ids = (nodes: readonly DocumentNode[], from: number) => nodes.slice(from).map((n) => n.id);
+
+describe("turnScopedFrontier", () => {
+    it("starts the tail at the last user message", () => {
+        const nodes = [user("u1"), md("a1"), tool("t1"), user("u2"), md("a2"), tool("t2")];
+        expect(ids(nodes, turnScopedFrontier(nodes))).toEqual(["u2", "a2", "t2"]);
+    });
+
+    it("keeps an earlier node that is still in progress, and everything after it", () => {
+        for (const status of ["running", "pending_approval", "awaiting_answer"] as const) {
+            const nodes = [user("u1"), tool("t1", status), md("a1"), user("u2"), md("a2")];
+            expect(ids(nodes, turnScopedFrontier(nodes)), status).toEqual(["t1", "a1", "u2", "a2"]);
+        }
+    });
+
+    it("a running shell counts as in progress; a finished one does not", () => {
+        const shell = (id: string, status: "running" | "exited-ok"): DocumentNode =>
+            ({ type: "shell", id, cmd: "x", title: "x", status, spawnedAt: 0, log: { open: status === "running", chunks: [] } }) as DocumentNode;
+        const running = [user("u1"), shell("s1", "running"), user("u2")];
+        expect(ids(running, turnScopedFrontier(running))).toEqual(["s1", "u2"]);
+        const done = [user("u1"), shell("s1", "exited-ok"), user("u2")];
+        expect(ids(done, turnScopedFrontier(done))).toEqual(["u2"]);
+    });
+
+    it("with no user message at all, the whole document is the turn (bounded by the ceiling)", () => {
+        const nodes = range(5);
+        expect(turnScopedFrontier(nodes)).toBe(0);
+    });
+
+    it("a turn longer than the node ceiling keeps only its last maxNodes nodes", () => {
+        const nodes = [user("u1"), ...range(60)];
+        const at = turnScopedFrontier(nodes, { maxNodes: 40, maxBytes: Infinity });
+        expect(nodes.length - at).toBe(40);
+        expect(nodes[at].id).toBe("n20");
+    });
+
+    it("a turn over the byte ceiling sheds its oldest finished nodes until it fits", () => {
+        const nodes = [user("u1"), big("b1", 300), big("b2", 300), big("b3", 300), md("last")];
+        // Exactly room for the last three.
+        const budget = nodeBytes(nodes[2]) + nodeBytes(nodes[3]) + nodeBytes(nodes[4]);
+        const at = turnScopedFrontier(nodes, { maxNodes: Infinity, maxBytes: budget });
+        expect(ids(nodes, at)).toEqual(["b2", "b3", "last"]);
+        // One byte less and b2 goes too.
+        expect(ids(nodes, turnScopedFrontier(nodes, { maxNodes: Infinity, maxBytes: budget - 1 }))).toEqual(["b3", "last"]);
+    });
+
+    it("the ceiling never moves past a node that is still in progress", () => {
+        const nodes = [user("u1"), tool("t1", "running"), ...range(60)];
+        const at = turnScopedFrontier(nodes, { maxNodes: 10, maxBytes: Infinity });
+        expect(nodes[at].id).toBe("t1");
+    });
+
+    it("always keeps at least the last node", () => {
+        const nodes = [big("huge", 10_000)];
+        expect(turnScopedFrontier(nodes, { maxNodes: 40, maxBytes: 100 })).toBe(0);
+        expect(turnScopedFrontier([], { maxNodes: 40, maxBytes: 100 })).toBe(0);
     });
 });

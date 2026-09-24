@@ -103,6 +103,90 @@ export function partitionForVirtualization(
     };
 }
 
+// ── Turn-scoped tail ─────────────────────────────────────────────────────────
+// Phase 3 of SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2:
+// the always-mounted tail holds the turn in flight, not the last 50 nodes.
+// Every node before it lives in the virtualized head, where only rows in or
+// near the viewport are mounted — so what is mounted no longer grows with the
+// history above (mounting 25 turns × 3 panes was ~6 s of synchronous markdown
+// parsing, almost all of it rows nobody could see).
+
+/** Tail ceilings: a turn longer than this sheds its oldest finished nodes. */
+export const TURN_TAIL_MAX_NODES = 40;
+export const TURN_TAIL_MAX_BYTES = 512 * 1024;
+
+/** Still receiving content or waiting on the user: must stay in the tail. */
+export function isNodeInProgress(node: DocumentNode): boolean {
+    if (node.type === "tool") {
+        return node.status === "running" || node.status === "pending_approval" || node.status === "awaiting_answer";
+    }
+    if (node.type === "shell") return node.status === "running";
+    return false;
+}
+
+// Nodes are immutable (an update is a new object), so a per-object cache is
+// always current and makes the ceiling check O(tail) per call, not O(bytes).
+const bytesCache = new WeakMap<DocumentNode, number>();
+
+/** Rough rendered-content size, for the byte ceiling. */
+export function nodeBytes(node: DocumentNode): number {
+    const cached = bytesCache.get(node);
+    if (cached !== undefined) return cached;
+    let n = 64;
+    const any = node as { content?: unknown; message?: unknown; log?: { chunks?: { content?: unknown }[] }; result?: unknown };
+    if (typeof any.content === "string") n += any.content.length;
+    if (typeof any.message === "string") n += any.message.length;
+    for (const c of any.log?.chunks ?? []) if (typeof c.content === "string") n += c.content.length;
+    if (any.result && typeof any.result === "object") {
+        for (const v of Object.values(any.result as Record<string, unknown>)) if (typeof v === "string") n += v.length;
+    }
+    bytesCache.set(node, n);
+    return n;
+}
+
+/**
+ * Index of the first node the tail must hold: the last `user_message` (the
+ * turn in flight), pulled back to any earlier node still in progress, then
+ * pushed forward past the oldest FINISHED nodes while the tail exceeds either
+ * ceiling. Never past an in-progress node, and never past the last node.
+ * With no user message the whole document is the turn. Pure: where and when
+ * the frontier may actually move (viewport, pin) is the caller's decision.
+ */
+export function turnScopedFrontier(
+    nodes: readonly DocumentNode[],
+    { maxNodes = TURN_TAIL_MAX_NODES, maxBytes = TURN_TAIL_MAX_BYTES }: { maxNodes?: number; maxBytes?: number } = {},
+): number {
+    if (nodes.length === 0) return 0;
+    let start = 0;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+        if (nodes[i].type === "user_message") {
+            start = i;
+            break;
+        }
+    }
+    for (let i = 0; i < start; i++) {
+        if (isNodeInProgress(nodes[i])) {
+            start = i;
+            break;
+        }
+    }
+    let count = nodes.length - start;
+    let bytes = 0;
+    for (let i = start; i < nodes.length; i++) bytes += nodeBytes(nodes[i]);
+    while ((count > maxNodes || bytes > maxBytes) && start < nodes.length - 1 && !isNodeInProgress(nodes[start])) {
+        bytes -= nodeBytes(nodes[start]);
+        start++;
+        count--;
+    }
+    return start;
+}
+
+/** Split at an index, sharing the empty-head constant like the other paths. */
+export function partitionAt(nodes: readonly DocumentNode[], splitIndex: number): VirtualizationPartition {
+    if (splitIndex <= 0) return { virtualizedNodes: EMPTY_NODES, streamingNodes: nodes, splitIndex: 0 };
+    return { virtualizedNodes: nodes.slice(0, splitIndex), streamingNodes: nodes.slice(splitIndex), splitIndex };
+}
+
 /**
  * Pick the initial frontier id when the document first crosses
  * `STREAMING_BUFFER_SIZE`. Returns the id of the node at
