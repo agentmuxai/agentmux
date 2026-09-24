@@ -236,6 +236,7 @@ export function parseHistoryLines(
                     outcome: data.outcome,
                     attemptedSid: data.attemptedSid,
                     actualSid: data.actualSid,
+                    continued: data.continued,
                     // Same wire-wins-then-stamp rule as context_compacted above.
                     timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
                 };

@@ -646,12 +646,18 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         >
                             <div class="agent-session-outcome-rule">
                                 <span class="agent-session-outcome-label">
-                                    {resumed ? "Session continued" : "New session started"}
+                                    {resumed
+                                        ? "Session continued"
+                                        : n.continued
+                                          ? "Session continued · reconstructed context"
+                                          : "New session started"}
                                 </span>
                             </div>
                             <Show when={!resumed}>
                                 <div class="agent-session-outcome-detail">
-                                    Prior conversation isn't available to this agent — it's preserved in the agent's history
+                                    {n.continued
+                                        ? "The provider couldn't resume the previous session, so this new one was given AgentMux's record of the conversation: a running summary and the recent exchange"
+                                        : "Prior conversation isn't available to this agent — it's preserved in the agent's history"}
                                 </div>
                             </Show>
                             <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
