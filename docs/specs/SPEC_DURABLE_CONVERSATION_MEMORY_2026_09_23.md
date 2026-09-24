@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0a in #3626 (a first spawn continues the session its pane renders); P0b was already done by #3605. P0c, P0d and P1–P6 not started.
+**Status:** active — P0a in #3626 (a first spawn continues the session its pane renders); P0b was already done by #3605; P0d in #3637 (180-day transcript retention). P0c (cold history index) and P1–P6 not started.
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -130,7 +130,7 @@ AgentMux-owned copy (§3). None of them was consulted.
 | Account-dir history link | `agentmux-srv/src/server/identity_auth_dirs.rs:37` (`link_history_if_isolated`, called from `identity/resolver/inject.rs:805`); junction creation in `agentmux-common/src/data_paths.rs:451-500` | `claude/projects` junctioned to `shared/identities/<account>/claude/projects`, so history survives **channel** changes | Keyed by **account**. A new account starts with an empty dir |
 | Hidden injection turn | #3502, frontend `memory-reinjection*.ts` | Model sees full text, user sees a label. Fires on compaction and on a `fresh` outcome | Injects memory files only. Claude only. Never checked on a live instance |
 | SearchHistory | `agentmux-mcp/src/main.rs:1706` (`"SearchHistory" =>`), `server/reactive.rs` (`handle_reactive_history_search`), `backend/history/claude_adapter.rs` (project-root discovery) | Search your own past sessions. Since #3605 (identity M4c-2c), an attributed caller (one sending `X-Agent-Token`) searches its own UID row's history, whatever `agent` names. That fixes §1.1's slug miss on `main` | Index refreshes only when empty (`backend/history/mod.rs:154, 211`). Claude only |
-| MCP → srv URL | `agentmux-mcp/src/main.rs:72-73` | Read once from env at MCP startup | No rediscovery if srv restarts on a new port |
+| MCP → srv URL | `agentmux-mcp/src/main.rs:72-73`, client timeout `:109` (10 s) | Read once from env at MCP startup | Not a practical gap: CLIs die with srv and respawn with the new URL. The 10 s timeout is the real exposure (§4.5) |
 | Activity summaries | `server/app_api/session.rs:237-314` (`invoke_ambient_haiku_call`) | Haiku summarizes the last ~30 lines for titles and status | Not a continuation summary |
 
 **Implication:** the hard part, an account-independent copy of every
@@ -377,11 +377,23 @@ The packet stays small because older detail can be fetched just-in-time
   with provenance headers. Own agent only, enforced **server-side** from the
   caller's authenticated UID, not a client-supplied name. Uses the same
   Caller-owner rule #3605 introduced for `SearchHistory`.
-- **MCP → srv rediscovery.** On connection failure, agentmux-mcp re-reads the
-  srv endpoint from a per-channel endpoint file that srv writes atomically at
-  bind (`backend/lan_listeners.rs:68` binds a random port today). It then
-  retries once before surfacing an error. Recall must work in exactly the
-  post-upgrade, post-restart moments this spec is about.
+- **A cold history index must not fail the first search.** Revised
+  2026-09-24. Rediscovering the srv endpoint was the original P0c, but the
+  evidence points elsewhere:
+  - Agent CLIs are srv children on pipes, so they die with srv and respawn
+    with the new URL. A live pane can't hold a stale one.
+  - §1.1's failure hit a live port. The MCP client times out at 10 s
+    (`agentmux-mcp/src/main.rs:109`). The first search after an srv start
+    runs `HistoryIndex::refresh()`, which JSON-parses every line of every
+    transcript (`history/claude_adapter.rs`, `extract_meta`). On this host
+    that is 42,491 files and 3.8 GB, far past 10 s. reqwest's Display for
+    that timeout is exactly "error sending request for url (…)".
+  - Warm searches take under 0.1 s.
+
+  Fix: build the index in the background at srv start, and re-parse only
+  files whose size or mtime changed, so every search can refresh cheaply and
+  new sessions show up without a restart. A search that arrives mid-build
+  says so, instead of timing out or answering "no history".
 
 ### 4.6 Providers
 
@@ -435,7 +447,7 @@ the other providers need only an adapter plus an injection hook.
 
 | Phase | Scope | Closes |
 |---|---|---|
-| **P0** Stop the bleeding | (a) Ledger-less resolver in the persistent controller's **first spawn**. When it has no sid, it resumes the most recently written top-level transcript for this cwd under the spawn's own config dir: the scan `resume_preflight` already runs, but by recency, not size. It skips sessions live in another pane, and an explicit fresh start opts out. The fix goes in the backend so every launch path gets it. It doesn't trust the registry `session_id`, which `STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20` §3 shows is write-once and can be stale, or a subagent's id. (b) ~~`SearchHistory` by UID~~, done in #3605. (c) MCP endpoint rediscovery. (d) Set `cleanupPeriodDays` | §1.1 incident, retention sweep |
+| **P0** Stop the bleeding | (a) **Done in #3626.** A persistent controller's first spawn with no sid continues the session of the history its pane renders: the last provider session id in the pane's own transcript, else the agent's global zone. It's used only when `--resume` can reach it and no other pane holds it. It reads AgentMux's own record, not a provider-dir scan, so archived conversations and subagent transcripts are never picked up. It doesn't trust the registry `session_id` either, which `STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20` §3 shows is write-once and can be stale or a subagent's id. (b) ~~`SearchHistory` by UID~~, done in #3605. (c) Cold history index vs the MCP's 10 s timeout (§4.5, revised). (d) **In #3637.** Seed `cleanupPeriodDays: 180` into AgentMux-owned Claude config dirs. They junction `projects` to shared history, so the CLI's 30-day default swept every channel's history | §1.1 incident, retention sweep |
 | **P1** Segment index | `conversation_segments` written at spawn and close. Backfill from existing FileStore zones and `db_agent_instances` | G3, G4 |
 | **P2** Projection + recall | Claude adapter, redaction, dedup. `SearchHistory` over the projection; `ReadHistory` | G5 |
 | **P3** Virtualized continuity (Claude) | Deterministic packet first, then the rolling LLM state block. R3 injection via #3502. Resolver ladder R0–R4 incl. fall-through. Pane chip | G1, G2 for Claude, including account switch |
