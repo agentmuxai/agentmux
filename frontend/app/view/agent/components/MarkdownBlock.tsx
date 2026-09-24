@@ -23,10 +23,13 @@ interface MarkdownBlockProps {
 // During streaming the message content grows ~60x/s. Re-parsing the whole
 // document (including syntax highlighting) on every frame is O(n^2) and
 // starves keystrokes (see ANALYSIS_AGENT_PANE_TYPING_LATENCY_2026_05_30.md).
-// Coalesce: commit at most one cheap (un-highlighted) intermediate render per
-// window while content keeps arriving, then one full highlighted render once
-// it settles. The whole message stays a SINGLE parse, so lists / reference
-// definitions / paragraph spacing are unaffected. This is a perf rate-limit
+// Coalesce: commit at most one intermediate render per window while content
+// keeps arriving, marked `streaming` so <Markdown> renders the open trailing
+// block without syntax highlighting, then one settled render once updates
+// stop. "Settled" is a guess from a quiet window — real streams pause longer
+// than this mid-message — so it must stay cheap to be wrong: flipping
+// `streaming` re-renders only the trailing block, never the closed blocks
+// before it (MarkdownBlock.stream-pauses.test.tsx). This is a perf rate-limit
 // on an expensive render, not a timer papering over a race.
 const STREAM_RENDER_MS = 90;
 
@@ -46,16 +49,16 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     const isCanceled = (): boolean => props.node.metadata?.canceled === true;
     const [expanded, setExpanded] = createSignal(false);
 
-    // Throttled view of the streaming content + whether to syntax-highlight.
+    // Throttled view of the streaming content + whether it is still streaming.
     // A settled/static message renders fully (highlighted) immediately; a
     // fast stream renders cheap intermediates and a full final.
     // Value-based equality: `Markdown` subscribes to this signal via the
-    // `highlight` prop, so a fresh-but-equal object would needlessly re-parse
+    // `streaming` prop, so a fresh-but-equal object would needlessly re-parse
     // static / history blocks on mount (and on the trailing no-op write).
     // With this, a same-value setView is a no-op.
-    const [view, setView] = createSignal<{ text: string; highlight: boolean }>(
-        { text: props.node.content, highlight: true },
-        { equals: (a, b) => a.text === b.text && a.highlight === b.highlight },
+    const [view, setView] = createSignal<{ text: string; streaming: boolean }>(
+        { text: props.node.content, streaming: false },
+        { equals: (a, b) => a.text === b.text && a.streaming === b.streaming },
     );
     let lastCommitAt = 0;
     let streaming = false;
@@ -85,16 +88,18 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
         const now = performance.now();
         if (trailing) clearTimeout(trailing);
         if (now - lastCommitAt >= STREAM_RENDER_MS) {
-            // Leading edge: cheap intermediate (skip highlight mid-stream).
+            // Leading edge: cheap intermediate (open tail un-highlighted
+            // mid-stream). The first update after a settle is not yet known to
+            // be a stream, so it renders full, as a one-off change would.
             lastCommitAt = now;
-            setView({ text, highlight: !streaming });
+            setView({ text, streaming });
         }
         streaming = true;
-        // Trailing edge: once updates stop for a window, render full + highlight.
+        // Trailing edge: once updates stop for a window, render settled.
         trailing = setTimeout(() => {
             streaming = false;
             lastCommitAt = performance.now();
-            setView({ text: props.node.content, highlight: true });
+            setView({ text: props.node.content, streaming: false });
         }, STREAM_RENDER_MS);
     });
     onCleanup(() => {
@@ -159,7 +164,7 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                             on a node it has moved → the long-standing replaceChild crash
                             (#1326). Per-block scroll is also wrong inside the virtualized
                             document, which owns the scroll. */}
-                        <Markdown text={view().text} highlight={view().highlight} scrollable={false} />
+                        <Markdown text={view().text} streaming={view().streaming} scrollable={false} />
                     </div>
                     {/* Peek overlay — see ToolBlock.tsx's identical pattern
                         and PeekOverlay.tsx. */}

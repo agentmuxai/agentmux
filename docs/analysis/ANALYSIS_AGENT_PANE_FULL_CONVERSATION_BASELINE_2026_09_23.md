@@ -21,7 +21,7 @@ This matches the spec's model:
 - **Drawing cost plateaus** because the always-mounted tail is capped at 50
   nodes: 25 turns × 3 nodes already fills it, and the DOM stays at ~99k
   elements from there on (§6.2 of the spec).
-- **Forced layout is large from the start**: ~2.8 s of layout per 10 s even
+- **Forced layout is large from the start**: ~2.8 s of layout per run (a 10 s-paced stream that took 14–20 s to deliver) even
   at N = 0, and 0.54–3.4 s of it forced from script (§6.1, pin-to-bottom).
 - **Memory has no ceiling**: it grows with every turn of history even though
   the DOM does not (§6.3, bounded live document). Most of the growth is
@@ -74,8 +74,8 @@ misses the fps and key→paint targets even at N = 0.
 
 ## 4. Observations for the next phases
 
-1. **Phase 1 (pin):** ~560–600 layouts per 10 s at every N — about one per
-   frame per pane — and 0.5–3.4 s of forced layout. The pin microtask and the
+1. **Phase 1 (pin):** ~560–600 layouts per run at every N — about one per
+   frame (25–44 fps over a 14–20 s run) — and 0.5–3.4 s of forced layout. The pin microtask and the
    pre-layout scroll handler are the expected sources; Phase 1 should remove
    most of the forced share, and the bench's "forced layout" column is its
    exit metric.
