@@ -317,6 +317,26 @@
           "default": true,
           "description": "Notify when an agent's turn ends with an error."
         },
+        "notify:os:agentcrashed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent stops unexpectedly (auth expired, usage limit, crash). User stops are never notified."
+        },
+        "notify:os:messageneedsreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent receives a message that needs your review before it acts (ESCALATE=required). The notification never contains the message."
+        },
+        "notify:pause:until": {
+          "type": "integer",
+          "default": 0,
+          "description": "Epoch milliseconds until which OS notifications are paused (set from the tray's Pause notifications menu). 0 = not paused."
+        },
+        "notify:pause:allowattention": {
+          "type": "boolean",
+          "default": false,
+          "description": "While paused, still notify when an agent needs your input or review."
+        },
         "notify:os:preview": {
           "type": "string",
           "enum": ["redacted", "full", "none"],
