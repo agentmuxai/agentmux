@@ -25,6 +25,23 @@ data, and all were accepted.
 - **Also:** existing history is imported first; M0 restores the union of
   Maricon's older folders.
 
+**Second review** (1 P1, 8 P2, 8 P3), all accepted:
+- **Shared directories:** a directory is treated as shared unless it is
+  proven exclusive — machine-wide claims, registry vetoes, and files
+  found at first sighting going to the adoption list (§2.1.2).
+- **Conflicts:** they now converge (`conflicts_with`), and
+  "disk equals head" is the first reconcile rule (§2.1.3).
+- **Reconcile timing:** it runs before the provider process starts
+  (§2.1.3).
+- **Projection state:** keyed by directory, not by instance.
+- **Reads:** sized from the database inside a read transaction (§2.1.1).
+- **Quarantine:** quarantined versions never become heads.
+- **Instances:** enrolled at the relay through the consent flow (§2.2).
+- **Residual:** stated plainly, and agent-written Global Memory is
+  quarantined by default when it arrives by sync (§2.2).
+- **Imported history:** rows from unproven sources are imported only
+  when proven (§2.1.1).
+
 **Trigger:** the repo owner, on 2026-09-24, after upgrading to 0.57.2 and
 reopening this agent in the new build:
 > "we are doing work right now regarding conversation history, more
@@ -271,6 +288,26 @@ Readers use `heads.json` for current state and read `log.jsonl` only for
 history, so no tail window has to hold every file's head (the 64 KB
 windows in continuity would miss rarely edited files).
 
+**Reads are sized from the database, inside a read transaction.** Today
+`read_file` sizes its read from the per-process `stat()` cache
+(`core.rs:538 → 395-403`). After another process rewrites `heads.json`,
+that returns truncated or overlong bytes. So:
+- every read of `heads.json` and `log.jsonl` is sized from the database,
+  inside a `read_txn`;
+- the conditional append reads `heads.json` from its own `tx`, because
+  calling `read_file` inside `write_txn` would deadlock on the connection
+  mutex (`core.rs:189, 553`);
+- both files are dropped from the cache (`forget_cached`) after every
+  commit.
+
+**Ordering within an append:**
+- The blob is written before the log line, or in the same transaction.
+  A log line never points at a missing blob.
+- A `projected` event is appended only **after** the file write
+  succeeds.
+- `projected` events and `dir_id` values contain local paths, so they
+  **never sync** (§2.2).
+
 **One writer at a time, across srv processes.** The filestore gets a
 **conditional append**, run in one `write_txn`:
 - it checks that `heads.json`'s head for `file` equals the caller's
@@ -293,7 +330,17 @@ warning). New sources are `provider` (captured from disk), `adopted`,
 **Existing history is imported first.** Before any table becomes a cache,
 a one-time import copies `db_agent_native_memory_versions` (from every
 channel store on the machine) into the record, deduplicated by sha256.
-The known misattributed rows (§1.3) are excluded by exact row id.
+
+Rows with the sources `agent_inferred` (from m0024) and
+`external_fs_write` (from drift) came from the registry-based
+`list_all_memory_targets` on **every** user's machine (`m0024…rs:132`),
+so they are treated as **unproven**:
+- they are imported only when their hash appears in a directory proven
+  exclusive to that agent (§2.1.2);
+- otherwise they go to the adoption list (§2.1.4).
+
+The rows known to be misattributed on this machine (§1.3) are deleted by
+exact id in M0, by hand.
 
 **AgentMux writes are never failed by the record.** `memory_write_impl`,
 the UI write RPC and revert all run the same sequence:
@@ -324,30 +371,78 @@ records (`persistent/segments.rs:52-58`).
   (`:358-391`) and the drift detector stop using that path. Drift maps a
   directory to agents only through segments.
 
-**Shared directories.** Two agents can share one memory directory: same
-account plus same working directory, or agents with no linked account in
-`shared/providers/claude`. On this machine, account `267abecd` holds
-project folders for three agents.
-- **Detecting it:** at reconcile time, if the segment log of any **other**
-  UID shows the same `dir_id`, the directory is **shared**.
+**Shared directories: shared unless proven exclusive.** Two agents can
+share one memory directory: the same account plus the same working
+directory, or agents with no linked account in `shared/providers/claude`.
+On this machine a `-home-yas` project folder exists under 7 accounts.
+Blank-`working_directory` agents launch in `~/.agentmux/agents/<slug>`,
+which the code already treats as shared across same-name tabs
+(`agent_open.rs:959-964`, `autoMemoryEnabled=false`). Only one agent here
+has segments yet, so segment history alone can't detect sharing.
+
+A directory is **exclusive** to an agent only when every one of these
+holds:
+1. **It isn't a known shared location:** not the blank-working-dir or
+   `default_agent_working_dir` path, not `$HOME`, not
+   `shared/providers/claude`, and not an ancestor of another agent's
+   working dir.
+2. **No registry veto.** No other `db_agents` row (in any channel store)
+   or registry record could resolve to the same `dir_id` through its
+   linked account or registry `identity_id` × working dir. These lookups
+   **veto** only; they are never used to *find* a directory (above).
+3. **It holds a machine-wide claim.** Before reconcile, the agent writes a
+   claim to zone `memory-dir:<sha(dir_id)>` with the conditional append,
+   and re-reads it afterwards. A second UID's claim makes the directory
+   shared, permanently. Two agents spawning at once both see both claims.
+
+- **Detecting it:** a directory that fails any of the three is
+  **shared**.
 - **What a shared directory does not get:**
   - no projection, so the record's files aren't written into it;
   - no capture, so its files aren't attributed to either agent;
   - no deletion.
 - **What it does get:** the Armory flags it as "Memory folder shared with
-  <other agent>", with a fix: give the agent its own working directory.
-  The agents keep working exactly as today in the meantime.
+  <other agent>" (or "may be shared"), with a fix: give the agent its own
+  working directory. The agents keep working exactly as today in the
+  meantime.
+
+**Files already there at first sighting are never captured
+automatically.** When a directory first becomes exclusive to an agent,
+the files already in it go to the human-confirmed adoption list
+(§2.1.4). Only files that appear **after** the claim are captured
+automatically.
+
+**Agents without segments yet** (every agent except one on this machine):
+- `MemoryRead` and `MemoryWrite` resolve the directory from the caller's
+  **live** spawn (its segment, which is written at spawn);
+- until a segment exists, the Armory shows the registry-derived
+  directory **read-only**, marked "unverified";
+- drift capture skips that agent.
 
 #### 2.1.3 Reconcile
 
-**Where it runs:** in `persistent/spawn.rs`, next to `record_segment_start`
-(`:488`). That is once per process spawn, where the spawn's directory is
-known. Not in `inject.rs`, whose account branch is skipped for agents
-without an account and runs on every turn.
+**Where it runs:** in `persistent/spawn.rs`, **before the provider process
+starts** (`cmd.spawn()`, `:165`). `config.env_vars` and
+`config.working_dir` are already known there. It runs once per process
+spawn, before Claude reads MEMORY.md, so a new account or a new working
+dir starts its first session **with** its memory. The segment write stays
+where it is (`:488`).
+
+It doesn't run in `inject.rs`, whose account branch is skipped for agents
+without an account, and which runs on every turn.
+
+**Projection state is per directory.** The last-projected version is kept
+per `(dir_id, file)` — a fact about the machine, not the channel. So two
+channels (two WAN instances) on one machine never disagree about the
+same directory. The instance is used only for sync provenance.
 
 **For each file**, comparing the record's head, the version last
-projected into this `(instance, dir_id)` (from `heads.json`), and what is
-on disk:
+projected into this `dir_id` (from `heads.json`), and what is on disk:
+
+**Rule 0: if the disk's sha256 equals the head's sha256, record
+`projected` and do nothing else.** This covers a crash between writing a
+file and recording it, and another channel having already projected the
+same head.
 
 | Disk vs last projected | Record head vs last projected | Action |
 |---|---|---|
@@ -356,7 +451,9 @@ on disk:
 | changed | same | **capture**: a new version whose parent is the **last projected** version; record `projected` |
 | changed | changed | **conflict** (below) |
 | absent, never projected | exists | write the head (new account, cwd, channel or host) |
-| exists, never projected | none | capture (the provider wrote it) |
+| absent, previously projected | exists | the provider deleted it: capture a **tombstone** whose parent is the last-projected version |
+| exists, never projected | none | the directory is exclusive and the claim is older than the file: capture. Otherwise: the adoption list |
+| exists, never projected | exists (different sha) | **first sighting** (e.g. the first M3 spawn after history import, or after M0): the adoption list, never an automatic overwrite either way |
 
 **The parent is always the version last projected into that directory**,
 never the record's current head. A version that arrived from another
@@ -364,10 +461,20 @@ directory in the meantime therefore shows up as a conflict instead of
 being overwritten.
 
 **Conflicts:**
-- The record keeps both versions. Disk keeps its file.
-- The record's version is written beside it as `<stem>__conflict_<short>.md`,
-  which passes `validate_filename`'s stem rule (`:449-453`), so the agent
-  can read, merge and remove it with its normal memory tools.
+- **The disk version D becomes the head**, carrying a `conflicts_with: H`
+  marker, where H is the record's previous head. The last-projected
+  version becomes D, so the next reconcile doesn't raise the conflict
+  again, and D is never overwritten.
+- The other version H is written beside it as
+  `<stem>__conflict_<short>.md`. The stem is truncated so that the whole
+  name stays within `validate_filename`'s 200-character limit and stem
+  rule (`:437, 449-453`), so the agent can read, merge and remove it with
+  its normal memory tools.
+- Both the conflict file and the index line are recorded as `projected`
+  in the same transaction. `__conflict_*` files are **never captured** as
+  provider writes.
+- A merge (by the agent, or in the Armory) records a version with **two
+  parents** (D and H), which clears the marker.
 - The **MEMORY.md index** gets one line pointing at the conflict file.
   Claude loads only the index, so an unindexed file would never be seen.
 - The Armory shows the conflict with a merge view.
@@ -393,8 +500,10 @@ miss older accounts: `e562b87a` for this agent, and `b43cec34` and
   dir>/memory/` directory, with file counts, dates and hashes, excluding
   directories shared with another agent (§2.1.2).
 - It offers the human the list in the Armory ("Earlier memory found under
-  N accounts"). **The client submits only indexes into the server's own
-  list, never a path.**
+  N accounts"). The list gets a server-issued `list_id`. **The client
+  submits only `(list_id, index, dir hash)` choices, never a path.** A
+  directory that changed after the list was issued is refused, and the
+  human sees a refreshed list.
 - Nothing is adopted automatically, except directories the agent's own
   segments prove were its own.
 
@@ -475,11 +584,29 @@ asks for.
 **Who sent a version.** Versions are signed by the sending instance's
 **instance key**, from the WAN spec's self-certifying instances
 (`SPEC_WAN_JEKT_VERIFICATION` §2.2). The relay checks the signature on
-upload, and every receiver checks it again. `instance` and `source` are
-never trusted from the client. A version from an instance the receiver
-hasn't approved (the WAN spec's `INSTANCE_STATUS=new`) is
-**quarantined**: kept in the record but not projected, and shown in the
-Armory for a human to accept.
+upload, and every receiver checks it again.
+
+**The signature proves the instance, not the author.** Any agent on an
+instance can read its key (WAN spec §4), so `source` stays a label the
+sending instance asserts.
+
+**Instances are enrolled at the relay, through the consent flow.** The
+human confirms an instance in the system browser, with
+re-authentication, on a page showing its full 26-character id. The relay
+refuses uploads from instances that aren't enrolled. This does **not**
+depend on the host-gated window, so M5 doesn't wait for the
+GHSA-6726-q276-g6f6 fix.
+
+**Quarantine.** Two kinds of version are quarantined:
+- versions from an instance **this receiver** hasn't accepted yet;
+- by default, **agent-authored Global Memory versions** (`source` other
+  than `armory-ui` or `human`) from any other instance, until a human
+  accepts them.
+
+Quarantined versions sit in a **pending set, outside `heads.json` and
+outside the `db_bundles` cache**. So they are never projected into a
+folder, and never rendered into CLAUDE.md by `format_global_bundle_block`
+(`agent_open.rs:992`). They show in the Armory with Accept/Reject.
 
 **What is always refused:**
 - system-tier Global Memory (`is_system`), on send and on receipt;
@@ -506,11 +633,19 @@ line.
   - `GET /account/v1/memory/versions?after=<seq>&scope=…`;
   - the consent-gated group and opt-in routes.
 - **Cursor:** a **server-assigned sequence number** per `(account,
-  scope)`. Receivers re-read a small overlap window, and dedupe by version
-  id. Desktop clocks are never trusted for ordering.
+  scope)`.
+  - The number and the item are written in one `TransactWriteItems`, so
+    number N+1 never becomes visible before N.
+  - Receivers dedupe by version id.
+  - Desktop clocks are never trusted for ordering.
 - **Storage:** DynamoDB holds the event metadata. **Bodies go to S3** at
-  `s3://…/<account>/<sha256>`, prefixed by account and only readable
-  through the relay.
+  `s3://…/<account>/<sha256>`, prefixed by account.
+  - Uploads use **presigned S3 PUTs** with a sha256 checksum, because the
+    relay Lambda's roughly 6 MB body limit is below the 10 MB per-file
+    cap.
+  - Downloads are presigned GETs, issued only after the account check.
+- **What never syncs:** `projected` events and `dir_id` values, which are
+  local paths.
 - **Wake** (dependencies listed in §3):
   - `broadcast.ts` gains a payload parameter; today it is hard-coded to
     `inject_available` (`:65`);
@@ -519,11 +654,24 @@ line.
   - the desktop's `ServerMsg` enum (`cloud_subscriber.rs:112-128`) gains
     `MemoryUpdated`.
 
-**Residual.** Memory is loaded as instructions (MEMORY.md into every
-Claude session; Global Memory into CLAUDE.md). A compromised *approved*
-instance can therefore push instructions to the account's other
-machines. That is the same trust as the account itself, and it is
-recorded in §4.
+**Residual, stated plainly.** Memory is loaded as instructions: MEMORY.md
+into every Claude session, Global Memory into CLAUDE.md.
+
+**Personal Memory in a group.** Any agent on an enrolled instance can
+write its own memory file, and that file is captured, synced, and
+projected on the linked machines. This is inherent and accepted: it is
+the same logical agent's memory reaching its own counterpart, exactly as
+if it had written its MEMORY.md there itself.
+
+**Global Memory.** An agent's `GlobalMemoryWrite` would reach **every
+agent on every machine** of the account. That is why agent-authored
+Global Memory is quarantined by default on receipt (above). An operator
+who turns that off accepts the reach.
+
+**Source labels.** Until the GHSA-6726-q276-g6f6 fix, and until the
+instance key is kept out of agents' reach (WAN spec open question 5), an
+agent can forge `source` labels on its own instance. Receivers must
+treat `source` as advisory.
 
 ### 2.3 Armory: Global Memory as tiles (Part 3)
 
@@ -563,8 +711,9 @@ Memory back/breadcrumb header (`native-memory-manager.tsx:509-530`).
   edge.
 
 A drag handle resizes the two regions, and the split is remembered per
-surface. Small panes (down to 128 px) keep working because of the
-percentage floor.
+surface **as a fraction**. The column has a definite height (the pane),
+so the `50%` floor resolves. Small panes (down to 128 px) keep working
+because of that floor.
 
 **Unsaved edits are never lost.** Today the detail panel remounts on
 every `agent:memory:changed` for that agent (`native-memory-manager.tsx:344, 580`).
@@ -575,6 +724,12 @@ With a dirty draft, a change event instead:
 
 A save carries its base version, and a base that has moved becomes a
 conflict (§2.1.3), not an overwrite.
+- **The base version needs new RPC parameters.** `agent:memory:write_file`
+  and the bundle save gain an optional `base_sha256` in **M2**; without
+  it they behave as today.
+- **The banner compares the file's hash.** It appears only when the
+  hash differs from the draft's base, not on every change event
+  (`refreshNonce` bumps on every refresh, `native-memory-manager.tsx:344`).
 
 **Surfaces:**
 - **Armory → Global Memory full view** (§2.3).
@@ -597,12 +752,12 @@ draft is dirty).
 
 | Phase | What ships | Depends on |
 |---|---|---|
-| **M0** (manual, with the human's OK) | Restore Maricon's memory: the **union** of `ee8af73e` (newest), `b43cec34` (two topics only there; **the human confirms it is Maricon's**, since it is the stale id from the m0024 bug) and `d5ba7d63` (one differing file, kept as a `__conflict_` sibling), with a unioned MEMORY.md, written into `1b64d8a3`'s shared `projects/…/memory`. The current dir is empty, so nothing is overwritten; a backup is taken first. | — |
-| **M1** (fixes) | stop using registry `identity_id`, the blank-working-dir fallback and name-derived dirs in `list_all_memory_targets` and drift; **a new post-attach step** after `attach_identity_stores` replaces m0024's backfill (m0024 has already run in existing channels, so moving it wouldn't help); first sighting recorded as `adopted`; the misattributed rows deleted by exact id | — |
+| **M0** (manual, with the human's OK) | Restore Maricon's memory. Stop Maricon first. The human confirms all three source accounts are Maricon's (`b43cec34` is the stale id from the m0024 bug). Write the **union** into `1b64d8a3`'s `projects/-home-yas--agentmux-agents-maricon-09101/memory` (empty today; only Maricon is linked to that account, and the folder is keyed by Maricon's working dir, so no other agent is affected): `ee8af73e` (newest, 3 files), plus the two topics only in `b43cec34`, with a unioned MEMORY.md. `d5ba7d63`'s older, superseded `agentmux-contribution-rules.md` goes to the backup only, never as an indexed file. Take a backup first. Also delete this machine's misattributed history rows by exact id. | — |
+| **M1** (fixes) | stop using registry `identity_id`, the blank-working-dir fallback and name-derived dirs to *find* memory, in `list_all_memory_targets` and drift; MemoryRead and MemoryWrite resolve from the caller's live segment, and the Armory shows unverified dirs read-only (§2.1.2); **a new post-attach step** after `attach_identity_stores` replaces m0024's backfill (m0024 has already run in existing channels, so moving it wouldn't help); first sighting recorded as `adopted` | — |
 | **M2** (UI) | Global Memory tiles and full view; history and content split; editors pinned to the bottom; dirty-draft protection; Personal Memory editing through the existing RPC; Global Memory history RPCs | — |
 | **M3** (record) | the filestore conditional append and database-read sizes; the `agent-uid:<uid>:memory` record (log, blobs, heads); history import; reconcile at spawn; shared-dir detection; drift into the record; server-listed, host-confirmed adoption with index union; opt-out | M1 |
 | **M4** (Global Memory record) | `global-memory:<scope>` with entry ids, order events and the import step; legacy-build capture; the bundle sidecar | M3 |
-| **M5** (cloud sync) | the integrations spec's I1 `ws-connect` change and consent flow; the WAN spec's instance keys; relay routes, sequence cursor, S3 bodies, broadcast payload, `MemoryUpdated`; Global Memory first, then memory groups | M3, M4; integrations I1; WAN instance keys |
+| **M5** (cloud sync) | the integrations spec's I1 `ws-connect` change and consent flow; the WAN spec's instance keys, with instances enrolled at the relay; relay routes, transactional sequence cursor, presigned S3 bodies, broadcast payload, `MemoryUpdated`; the pending set for quarantine; Global Memory first, then memory groups | M3, M4; integrations I1; WAN instance keys |
 | **M6** (other providers) | project the record into Gemini's memory file | M3 |
 
 **Compatibility:**
@@ -622,12 +777,14 @@ draft is dirty).
 - **Shared memory directories** don't get the record's benefits until the
   agents are given separate working directories (§2.1.2).
 - **Same-user processes.** Until GHSA-6726-q276-g6f6 is fixed, a
-  same-user process can confirm adoption or approve instances through
-  the host channel. Adoption is limited to directories the server lists
-  for that agent.
-- **Approved instances are trusted like the account.** A compromised
-  approved instance can push memory, which is loaded as instructions, to
-  the account's other machines (§2.2).
+  same-user process can confirm adoption through the host channel.
+  Adoption is limited to directories the server lists for that agent.
+  Instance enrolment for sync uses the relay's consent flow, so the fix
+  doesn't block it.
+- **Any agent on an enrolled instance** can push its own Personal Memory
+  to its linked counterparts, which is inherent. Agent-authored Global
+  Memory is quarantined on receipt by default, and `source` labels are
+  advisory (§2.2).
 - **Unattributed writers** (no agent token) aren't recorded unless their
   directory is proven for exactly one agent (§2.1.5).
 
@@ -654,6 +811,10 @@ draft is dirty).
 
 **Record:**
 - The conditional append refuses a stale parent.
+- Reads are sized from the database: a process reads another process's
+  rewrite of `heads.json` correctly.
+- A blob is written before its log line.
+- `projected` is recorded only after the file write.
 - Three srv processes capturing the same write produce one version.
 - A process sees another process's appends (database-read size).
 - `heads.json` stays consistent with the log after a crash between
@@ -663,14 +824,29 @@ draft is dirty).
 - The record being unavailable never fails a MemoryWrite.
 
 **Directories:**
-- Only spawn-env directories are used; registry `identity_id` and the
-  blank-working-dir fallback are never used.
-- A directory shared with another UID is neither projected nor captured.
+- Only spawn-env directories are used to find memory; registry
+  `identity_id` and the blank-working-dir fallback are never used for
+  that.
+- These are treated as shared:
+  - `$HOME`;
+  - a blank-working-dir path;
+  - a directory vetoed by a registry match;
+  - a directory claimed by a second UID;
+  - two agents spawning at once.
+- A shared directory is neither projected nor captured.
+- Files present at first sighting go to the adoption list.
 - A new account dir is filled from the record.
 - A working-dir change projects into the new folder.
 
 **Reconcile:**
+- Rule 0: after a crash between the file write and the record, there is
+  no spurious conflict.
 - Every row of the §2.1.3 table.
+- A conflict converges: it is not raised again on the next sweep, and D
+  is not overwritten.
+- `__conflict_` files aren't captured; a long stem is truncated.
+- Reconcile runs before the provider process starts.
+- Two channels on one machine share the projection state.
 - The parent is the last-projected version, so a concurrent remote
   version produces a conflict, never a silent overwrite.
 - A tombstone deletes the file only when the disk hash matches its
@@ -696,7 +872,14 @@ draft is dirty).
 - A user token alone can't enable sync or join a group.
 - An unsigned version is rejected; so is a version signed by another
   instance's key.
-- A new instance's versions are quarantined.
+- An instance that isn't enrolled is refused at the relay.
+- A new instance's versions, and agent-authored Global Memory, are
+  quarantined.
+- A quarantined version never reaches `heads.json`, `db_bundles` or
+  CLAUDE.md.
+- Sequence numbers are gap-free.
+- Presigned uploads are used for bodies up to 10 MB.
+- `projected` events and `dir_id` never sync.
 - `is_system` is refused.
 - Stale tombstones are refused.
 - The cursor survives clock skew.
