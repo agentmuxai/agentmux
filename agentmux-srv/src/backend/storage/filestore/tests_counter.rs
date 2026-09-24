@@ -466,7 +466,7 @@ proptest! {
         for chunk in &chunks {
             fs.append_data(ZONE, NAME, chunk).unwrap();
             let state = fs.line_state(ZONE, NAME).unwrap().unwrap();
-            let indexed = rebuild_output_idx(&fs, ZONE, state.size as u64).unwrap();
+            let indexed = rebuild_output_idx(&fs, ZONE, state.size as u64, state.counted.as_ref().map(|c| c.gen.clone())).unwrap();
             prop_assert_eq!(state.counted.unwrap().lines, indexed);
         }
     }

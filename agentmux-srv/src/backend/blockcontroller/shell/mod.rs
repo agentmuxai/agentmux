@@ -42,7 +42,10 @@ pub use file_ops::{handle_append_block_file, persist_to_blockfile_silent};
 // be re-exported at the same visibility — `pub use` of a `pub(crate)` item is
 // rejected (E0364).
 pub(crate) use file_ops::resolve_global_output_zone;
-pub(crate) use indexing::{extend_output_idx, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
+pub(crate) use indexing::{
+    extend_output_idx, output_index, output_now, read_via_index, rebuild_output_idx,
+    OUTPUT_IDX_HEADER_LEN,
+};
 
 #[cfg(test)]
 mod tests;

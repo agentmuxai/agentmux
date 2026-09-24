@@ -156,7 +156,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
+                use crate::backend::blockcontroller::shell::{output_index, read_via_index, rebuild_output_idx};
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
                     // streaming scan of `output`, which reaches hundreds of MB
@@ -172,55 +172,30 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
                         }
-                        let output_size = out_stat.size as u64;
-
-                        // Determine total_lines, rebuilding the index iff it is missing or
-                        // its covered-size header doesn't match the current output size.
-                        let idx_stat = filestore.stat(&read_block, "output.idx").ok().flatten();
-                        let fresh = match &idx_stat {
-                            Some(s) if s.size >= OUTPUT_IDX_HEADER_LEN => {
-                                let (_, h) = filestore
-                                    .read_at(&read_block, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
-                                    .ok()?;
-                                u64::from_le_bytes(h.try_into().ok()?) == output_size
+                        // Everything the answer rests on — the index judged fresh,
+                        // its entries, the output bytes they point at — comes from
+                        // ONE database snapshot (Codex on #3634), never the stale
+                        // per-process `stat` cache. A missing or stale index is
+                        // rebuilt once, for the output as a snapshot saw it, and read
+                        // again in a new snapshot; if that still doesn't match
+                        // (replaced again meanwhile), the slow path below answers.
+                        let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
+                            Some(read) => read,
+                            None => {
+                                let view = output_index(&filestore, &read_block)?;
+                                if view.fresh_lines.is_none() {
+                                    rebuild_output_idx(&filestore, &read_block, view.output_size, view.output_gen)?;
+                                }
+                                read_via_index(&filestore, &read_block, offset as u64, limit as u64)?
                             }
-                            _ => false,
                         };
-                        let total_lines: u64 = if fresh {
-                            let s = idx_stat.unwrap();
-                            ((s.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64
-                        } else {
-                            rebuild_output_idx(&filestore, &read_block, output_size)?
-                        };
+                        let total_lines = read.total;
 
                         // Empty result cases — answered from the index, no output read.
-                        if limit == 0 || total_lines == 0 || (offset as u64) >= total_lines {
+                        if read.line_offsets.is_empty() {
                             return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, stamps: None });
                         }
-
-                        // entry(k) = byte offset of non-blank line k (past the 8-byte header).
-                        let entry = |k: u64| -> Option<i64> {
-                            let (_, b) = filestore
-                                .read_at(
-                                    &read_block,
-                                    "output.idx",
-                                    OUTPUT_IDX_HEADER_LEN + (k * 8) as i64,
-                                    8,
-                                )
-                                .ok()?;
-                            Some(u64::from_le_bytes(b.try_into().ok()?) as i64)
-                        };
-
-                        let byte_start = entry(offset as u64)?;
-                        let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
-                            output_size as i64
-                        } else {
-                            entry((offset + limit) as u64)?
-                        };
-                        let read_len = (byte_end - byte_start).max(0);
-                        let (_, raw) = filestore
-                            .read_at(&read_block, "output", byte_start, read_len)
-                            .ok()?;
+                        let raw = read.raw;
                         let text = String::from_utf8_lossy(&raw);
                         let lines: Vec<String> = text
                             .lines()
@@ -235,13 +210,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // byte offset. Best-effort — any failure yields no
                         // stamps, never a failed read.
                         let stamps: Option<Vec<i64>> = (|| {
-                            use crate::backend::agent_session::TSIDX_FILE;
-                            let ts_stat = filestore.stat(&read_block, TSIDX_FILE).ok().flatten()?;
-                            if ts_stat.size == 0 {
-                                return None;
-                            }
-                            let raw_ts = filestore.read_file(&read_block, TSIDX_FILE).ok().flatten()?;
-                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(&raw_ts)
+                            // Read in the same snapshot as the lines (Codex on #3634).
+                            let raw_ts = read.tsidx.as_deref()?;
+                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(raw_ts)
                                 .lines()
                                 .filter_map(|l| {
                                     let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
@@ -257,24 +228,15 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             // zone).
                             entries.sort_by_key(|(off, _)| *off);
 
-                            // Byte offset of every returned line, read from
-                            // output.idx in one slice.
-                            let returned = lines.len() as u64;
-                            let (_, idx_raw) = filestore
-                                .read_at(
-                                    &read_block,
-                                    "output.idx",
-                                    OUTPUT_IDX_HEADER_LEN + (offset as u64 * 8) as i64,
-                                    (returned * 8) as i64,
-                                )
-                                .ok()?;
-                            if idx_raw.len() != (returned * 8) as usize {
+                            // Byte offset of every returned line: from the same
+                            // snapshot as the lines themselves.
+                            if read.line_offsets.len() != lines.len() {
                                 return None;
                             }
-                            let stamps = idx_raw
-                                .chunks_exact(8)
-                                .map(|b| {
-                                    let line_off = u64::from_le_bytes(b.try_into().unwrap());
+                            let stamps = read
+                                .line_offsets
+                                .iter()
+                                .map(|&line_off| {
                                     match entries.partition_point(|(off, _)| *off <= line_off) {
                                         0 => 0,
                                         p => entries[p - 1].1,
@@ -441,6 +403,17 @@ fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) 
             async move {
                 if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
                     return Err("blockfile:write_state: filename must not contain path separators".to_string());
+                }
+                // The transcript and its sidecars are written only by the
+                // transcript paths, which keep its generation and sidecars
+                // consistent (5a-2b). This RPC is for pane state files; letting
+                // it replace `output` would leave `output.idx` / `output.tsidx`
+                // describing other bytes.
+                if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
+                    return Err(format!(
+                        "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
+                        cmd.filename
+                    ));
                 }
                 let bytes = cmd.content.as_bytes();
                 let bytes_written = bytes.len() as u64;

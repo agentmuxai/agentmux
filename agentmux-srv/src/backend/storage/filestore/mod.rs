@@ -15,6 +15,7 @@ mod counter;
 mod ijson;
 mod lines;
 mod offset_ops;
+mod replace;
 mod types;
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,8 @@ mod tests;
 mod tests_atomic;
 #[cfg(test)]
 mod tests_counter;
+#[cfg(test)]
+mod tests_replace;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};
@@ -29,3 +32,5 @@ pub use types::{FileMeta, FileOpts, MuxFile};
 pub(crate) use lines::is_blank_line;
 #[allow(unused_imports)] // consumed by the transcript writers in 5a-3
 pub use counter::{AppendPos, Counted, CountedAppend, LineState};
+#[allow(unused_imports)]
+pub use replace::{DerivedSnapshot, DerivedView, SnapshotFile, SnapshotReader};
