@@ -360,6 +360,84 @@ mod tests {
         assert_eq!(parse_frame("garbage"), Frame::Other);
     }
 
+    /// End-to-end over a real socket: a fake srv checks the auth header and
+    /// subscriptions, pushes a notification + retract, and receives the ack
+    /// the presenter's click produces.
+    #[tokio::test]
+    async fn session_round_trip_against_fake_srv() {
+        use std::sync::Mutex;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+
+        #[derive(Default)]
+        struct Fake {
+            calls: Mutex<Vec<String>>,
+        }
+        impl Presenter for Fake {
+            fn show(&self, n: &Notification) {
+                self.calls.lock().unwrap().push(format!("show:{}", n.id));
+            }
+            fn retract(&self, tag: &str) {
+                self.calls.lock().unwrap().push(format!("retract:{tag}"));
+            }
+            fn clear_all(&self) {}
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (got_tx, mut got_rx) = mpsc::unbounded_channel::<serde_json::Value>();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(sock, |req: &Request, resp: Response| {
+                assert_eq!(req.uri().path(), "/ws");
+                assert_eq!(req.headers().get("X-AuthKey").unwrap(), "k1");
+                Ok(resp)
+            })
+            .await
+            .unwrap();
+            // Two eventsubs first.
+            for _ in 0..2 {
+                let m = ws.next().await.unwrap().unwrap();
+                got_tx.send(serde_json::from_str(m.to_text().unwrap()).unwrap()).unwrap();
+            }
+            let show = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification","data":{"id":"n1","kind":"turn_completed","priority":"normal","title":"lark finished","body":null,"tag":"t1"}}}}"#;
+            ws.send(Message::Text(show.into())).await.unwrap();
+            let retract = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification:retract","data":{"id":"n1","tag":"t1"}}}}"#;
+            ws.send(Message::Text(retract.into())).await.unwrap();
+            // The ack produced by the simulated click.
+            let m = ws.next().await.unwrap().unwrap();
+            got_tx.send(serde_json::from_str(m.to_text().unwrap()).unwrap()).unwrap();
+        });
+
+        let fake = Arc::new(Fake::default());
+        let presenter: Arc<dyn Presenter> = fake.clone();
+        let (_ep_tx, ep_rx) = watch::channel(Some(Endpoint { ws: addr.to_string(), auth_key: "k1".into() }));
+        let (act_tx, act_rx) = mpsc::unbounded_channel();
+        let dir = std::env::temp_dir();
+        tokio::spawn(run(ep_rx, act_rx, presenter, dir, "h".into()));
+
+        let sub1 = got_rx.recv().await.unwrap();
+        let sub2 = got_rx.recv().await.unwrap();
+        assert_eq!(sub1["message"]["command"], "eventsub");
+        assert_eq!(sub1["message"]["data"]["event"], "notification");
+        assert_eq!(sub2["message"]["data"]["event"], "notification:retract");
+
+        // Wait until show + retract reached the presenter, then click.
+        for _ in 0..100 {
+            if fake.calls.lock().unwrap().len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(*fake.calls.lock().unwrap(), vec!["show:n1".to_string(), "retract:t1".to_string()]);
+        act_tx.send(UserAction::Clicked("n1".into())).unwrap();
+        let ack = got_rx.recv().await.unwrap();
+        assert_eq!(ack["message"]["command"], "notify.ack");
+        assert_eq!(ack["message"]["data"]["id"], "n1");
+        assert_eq!(ack["message"]["data"]["clicked"], true);
+        assert!(ack["message"]["reqid"].is_string());
+    }
+
     #[test]
     fn rpc_envelope_shape() {
         let v: serde_json::Value = serde_json::from_str(&rpc("notify.ack", Some("r1"), serde_json::json!({"id":"n1","clicked":true}))).unwrap();
