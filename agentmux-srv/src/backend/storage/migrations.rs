@@ -2112,9 +2112,11 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_tail INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_modts INTEGER",
-        // Bumped by every write that changes existing bytes (not appends), so
-        // a counter scan can tell its bytes were rewritten underneath it.
+        // Bumped (by the triggers below) by every write that changes bytes
+        // already in the file — not by appends — and the value an epoch was
+        // counted at. An epoch is valid only while they are equal.
         "ALTER TABLE db_wave_file ADD COLUMN rev INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_rev INTEGER",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             if !e.to_string().contains("duplicate column") {
@@ -2122,6 +2124,45 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
             }
         }
     }
+    // `rev` is maintained by triggers, not by this code's writes, because
+    // triggers are part of the database: they fire for every connection,
+    // including older builds that know nothing about the counter. Any write
+    // that changes existing bytes bumps it:
+    //   - a part deleted (write_file's replace, a delete);
+    //   - a part written over with bytes that aren't a pure extension of it
+    //     (REPLACE INTO / UPDATE). Appending extends the last part, which
+    //     keeps it a prefix, so appends — ours or an older build's — don't.
+    // REPLACE INTO doesn't fire DELETE triggers (recursive_triggers is off,
+    // SQLite's default; nothing here enables it), so an append can't reach
+    // the delete trigger. A trigger on a deleted row's parts finds no row.
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS db_file_data_rev_insert
+         BEFORE INSERT ON db_file_data
+         WHEN EXISTS (
+             SELECT 1 FROM db_file_data d
+             WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+               AND substr(NEW.data, 1, length(d.data)) IS NOT d.data
+         )
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_update
+         BEFORE UPDATE OF data ON db_file_data
+         WHEN substr(NEW.data, 1, length(OLD.data)) IS NOT OLD.data
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = OLD.zoneid AND name = OLD.name;
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_delete
+         AFTER DELETE ON db_file_data
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = OLD.zoneid AND name = OLD.name;
+         END;",
+    )?;
     Ok(())
 }
 

@@ -265,6 +265,74 @@ fn init_gives_up_when_the_file_is_recreated_during_the_scan() {
     assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
 }
 
+fn rev(fs: &FileStore) -> i64 {
+    fs.conn()
+        .lock()
+        .unwrap()
+        .query_row("SELECT COALESCE(rev, 0) FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| r.get(0))
+        .unwrap()
+}
+
+/// An older build's `write_file`: delete the parts, insert the new ones,
+/// update size and modts — here to exactly the values they had.
+fn old_build_replace_keeping_size_and_modts(fs: &FileStore, content: &[u8]) {
+    let conn = fs.conn().lock().unwrap();
+    let modts: i64 = conn
+        .query_row("SELECT modts FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| r.get(0))
+        .unwrap();
+    conn.execute("DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME]).unwrap();
+    conn.execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, 0, ?3)", params![ZONE, NAME, content])
+        .unwrap();
+    conn.execute(
+        "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+        params![content.len() as i64, modts, ZONE, NAME],
+    )
+    .unwrap();
+}
+
+#[test]
+fn appends_never_bump_rev() {
+    // The triggers must tell an append (a pure extension of the last part)
+    // from a rewrite, or every append would drop the epoch.
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    for i in 0..40 {
+        // Some lines span a part boundary.
+        let line = format!("{i}:{}\n", "z".repeat(if i % 9 == 0 { 70_000 } else { 50 }));
+        fs.append_lines(ZONE, NAME, line.as_bytes()).unwrap();
+        fs.append_data(ZONE, NAME, b"raw\n").unwrap();
+    }
+    assert_eq!(rev(&fs), 0);
+    assert_eq!(counted(&fs.line_state(ZONE, NAME).unwrap()).1, 80);
+}
+
+#[test]
+fn an_older_builds_same_size_replace_in_the_same_millisecond_drops_the_epoch() {
+    // Codex P1 on #3631: size and a millisecond timestamp can both match
+    // after a replace; the database's own trigger still records it.
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"aaaa\nbbbb\n").unwrap();
+    assert!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted.is_some());
+    old_build_replace_keeping_size_and_modts(&fs, b"x\ny\nz\nw\nv\n");
+    assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted, None);
+    // And nothing appended afterwards is given a position in the old epoch.
+    assert_eq!(fs.append_lines(ZONE, NAME, b"after\n").unwrap().counted, None);
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()).1, 6);
+}
+
+#[test]
+fn init_gives_up_when_an_older_build_replaces_the_file_during_the_scan() {
+    // Codex P1 on #3631: same length, same last bytes, different lines in
+    // the already-scanned region.
+    let fs = mem();
+    uncounted(&fs, b"a\nb\nc\nd\n.......tail-that-stays\n");
+    let scan = scanned(&fs);
+    old_build_replace_keeping_size_and_modts(&fs, b"ab\n\ncd\n\n.......tail-that-stays\n");
+    assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()).1, 3);
+}
+
 #[test]
 fn init_counts_a_file_larger_than_one_scan_window() {
     let fs = mem();

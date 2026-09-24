@@ -659,10 +659,10 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      what they added in one transaction. It gives up if the scanned bytes may
      have changed underneath it:
      - the row was re-created (`createdts`);
-     - this code rewrote bytes in place (`rev`, bumped by every write that
-       isn't an append);
-     - for older builds, which replace rather than rewrite, the file shrank
-       or its scanned tail changed.
+     - any writer, older builds included, rewrote bytes (`rev`, bumped by
+       the database's triggers for every write that isn't an append);
+     - as a second line of defence, the file shrank or its scanned tail
+       changed.
    - **Appends** advance the epoch in the same transaction as the write,
      re-reading only the unterminated last line (normally empty).
    - **`append_lines`** normalizes to complete, non-blank, `\n`-terminated
@@ -674,11 +674,21 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      without maintaining the epoch. There is no `FILESTORE_SCHEMA_VERSION`
      bump: a bump would make them refuse to open the store. The columns are
      added with `ALTER TABLE ADD COLUMN`, so an older build's rows are
-     NULL, i.e. not counted. If `size` or `modts` no longer match
-     `lines_size` / `lines_modts`, someone else wrote. An append can't be told
-     from a replace, so the epoch is dropped, never patched. The next epoch
-     gets a new `gen`, so no line index is reused for different content;
-     the cost is a resync while builds are mixed.
+     NULL, i.e. not counted.
+     - **Detecting their writes.** Older builds can't avoid the database's
+       own triggers, which fire for every connection. Any write that changes
+       bytes already in a file bumps `rev`: a part deleted, or overwritten
+       with anything but a pure extension. Appends extend the last part, so
+       they don't bump it.
+     - **Validity.** An epoch records the `rev` and size it was counted at,
+       so an append by someone else (size moved) or a rewrite (`rev` moved)
+       invalidates it.
+     - **Timestamps alone were not enough.** Two writes can share a
+       millisecond, so an older build's same-size replace could go unnoticed
+       (Codex on #3631).
+     - **Recovery.** The epoch is dropped, never patched, and the next one
+       gets a new `gen`, so no line index is reused for different content.
+       The cost is a resync while builds are mixed.
    - **Legacy rows.** 5a-3 calls `init_line_counter` from the line-count path
      (off the runtime) the first time a pane opens a legacy row. That costs
      one read of the file per epoch. Until then, events for that stream carry

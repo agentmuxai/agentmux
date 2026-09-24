@@ -263,8 +263,8 @@ impl FileStore {
             // A new, empty file starts a counted epoch (counter.rs).
             tx.execute(
                 "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta,
-                     gen, lines, lines_size, lines_tail, lines_modts)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 0, 0, ?5)",
+                     gen, lines, lines_size, lines_tail, lines_modts, lines_rev)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 0, 0, ?5, 0)",
                 params![file.zoneid, file.name, file.size, file.createdts, file.modts, opts_json, meta_json, new_gen()],
             )?;
             Ok(())
@@ -420,14 +420,6 @@ impl FileStore {
             if !exists {
                 return Err(StoreError::NotFound);
             }
-            // Replaced content starts a new counted epoch (counter.rs).
-            let count = count_all(data);
-            tx.execute(
-                "UPDATE db_wave_file SET size = ?1, modts = ?2, rev = COALESCE(rev, 0) + 1,
-                     gen = ?3, lines = ?4, lines_size = ?1, lines_tail = ?5, lines_modts = ?2
-                 WHERE zoneid = ?6 AND name = ?7",
-                params![data.len() as i64, now, new_gen(), count.lines as i64, count.tail_start as i64, zone_id, name],
-            )?;
             tx.execute(
                 "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
                 params![zone_id, name],
@@ -438,6 +430,16 @@ impl FileStore {
                     params![zone_id, name, idx as i32, part_data],
                 )?;
             }
+            // Replaced content starts a new counted epoch (counter.rs), at the
+            // `rev` the part writes above left (the delete trigger bumps it).
+            let count = count_all(data);
+            tx.execute(
+                "UPDATE db_wave_file SET size = ?1, modts = ?2,
+                     gen = ?3, lines = ?4, lines_size = ?1, lines_tail = ?5, lines_modts = ?2,
+                     lines_rev = COALESCE(rev, 0)
+                 WHERE zoneid = ?6 AND name = ?7",
+                params![data.len() as i64, now, new_gen(), count.lines as i64, count.tail_start as i64, zone_id, name],
+            )?;
             Ok(())
         })?;
 
@@ -753,8 +755,7 @@ impl FileStore {
                         // vouch for it, so the epoch is dropped (counter.rs).
                         tx.execute(
                             &format!(
-                                "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3, {DROP_EPOCH_SQL},
-                                     rev = COALESCE(rev, 0) + 1
+                                "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3, {DROP_EPOCH_SQL}
                                  WHERE zoneid = ?4 AND name = ?5"
                             ),
                             params![file.size, file.modts, meta_json, file.zoneid, file.name],

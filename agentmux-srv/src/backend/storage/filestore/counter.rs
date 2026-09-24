@@ -17,12 +17,17 @@
 //! advance it in the same transaction as the write.
 //!
 //! Older builds share the global transcript store and write without
-//! maintaining the epoch. `lines_size` / `lines_modts` record the size and
-//! modts this code last left; if either differs, someone else wrote, and an
-//! append can't be told from a replace. The epoch is then dropped (NULL),
-//! never patched, so the next epoch gets a new `gen` and no line index is
-//! ever reused for different content. That costs a reader a resync, only
-//! while builds are mixed.
+//! maintaining the epoch. What they can't avoid is the database's own
+//! triggers (`run_filestore_migrations`): any write that changes bytes
+//! already in a file — by any connection, any build — bumps `rev`, while
+//! appends don't. An epoch records the `rev` it was counted at
+//! (`lines_rev`) and the size it covers (`lines_size`), so an append by
+//! someone else (size moved) or any rewrite (rev moved) makes it invalid.
+//! It is then dropped (NULL), never patched, so the next epoch gets a new
+//! `gen` and no line index is ever reused for different content. That costs
+//! a reader a resync, only while builds are mixed. (`lines_modts` is kept as
+//! an extra, conservative signal; timestamps alone can't be trusted — two
+//! writes can share a millisecond, Codex on #3631.)
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -94,6 +99,7 @@ pub(super) struct Row {
     lines_size: Option<i64>,
     lines_tail: Option<i64>,
     lines_modts: Option<i64>,
+    lines_rev: Option<i64>,
 }
 
 impl Row {
@@ -102,7 +108,10 @@ impl Row {
     pub fn counter(&self) -> Option<(String, LineCount)> {
         let gen = self.gen.clone()?;
         let (lines, tail) = (self.lines?, self.lines_tail?);
-        if self.lines_size != Some(self.size) || self.lines_modts != Some(self.modts) {
+        if self.lines_size != Some(self.size)
+            || self.lines_rev != Some(self.rev)
+            || self.lines_modts != Some(self.modts)
+        {
             return None;
         }
         if lines < 0 || tail < 0 || tail > self.size {
@@ -118,6 +127,7 @@ impl Row {
             || self.lines_size.is_some()
             || self.lines_tail.is_some()
             || self.lines_modts.is_some()
+            || self.lines_rev.is_some()
     }
 
     fn state(&self) -> LineState {
@@ -131,7 +141,7 @@ impl Row {
 pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<Option<Row>, StoreError> {
     Ok(conn
         .query_row(
-            "SELECT size, modts, gen, lines, lines_size, lines_tail, lines_modts, createdts, rev
+            "SELECT size, modts, gen, lines, lines_size, lines_tail, lines_modts, createdts, rev, lines_rev
              FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
             params![zone_id, name],
             |r| {
@@ -145,6 +155,7 @@ pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<O
                     lines_modts: r.get(6)?,
                     createdts: r.get(7)?,
                     rev: r.get::<_, Option<i64>>(8)?.unwrap_or(0),
+                    lines_rev: r.get(9)?,
                 })
             },
         )
@@ -153,7 +164,7 @@ pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<O
 
 /// SQL fragment clearing the epoch, for writes that can't maintain it.
 pub(super) const DROP_EPOCH_SQL: &str =
-    "gen = NULL, lines = NULL, lines_size = NULL, lines_tail = NULL, lines_modts = NULL";
+    "gen = NULL, lines = NULL, lines_size = NULL, lines_tail = NULL, lines_modts = NULL, lines_rev = NULL";
 
 /// Bytes `[offset, offset + len)` of a file, straight from its parts (never
 /// the cache). A missing part reads as zeros, as `append_data_at` pads it.
@@ -296,7 +307,8 @@ impl FileStore {
                     let open_counted = !open.is_empty() && !is_blank_line(&open);
                     tx.execute(
                         "UPDATE db_wave_file SET size = ?1, modts = ?2,
-                             lines = ?3, lines_size = ?1, lines_tail = ?4, lines_modts = ?2
+                             lines = ?3, lines_size = ?1, lines_tail = ?4, lines_modts = ?2,
+                             lines_rev = COALESCE(rev, 0)
                          WHERE zoneid = ?5 AND name = ?6",
                         params![new_size, now, after.lines as i64, after.tail_start as i64, zone_id, name],
                     )?;
@@ -431,10 +443,11 @@ impl FileStore {
                 return Ok(Some(row.state()));
             }
             // The scanned bytes must still be the file's bytes: the same row
-            // (not deleted and re-created), nothing rewritten in place by this
-            // code (`rev`, review of #3631), and, for writers that don't bump
-            // `rev` (older builds, which replace rather than rewrite), not
-            // shrunk and with the scanned tail unchanged.
+            // (not deleted and re-created) and nothing rewritten since the
+            // scan began — `rev` is bumped by the database's triggers for any
+            // writer, older builds included (review of #3631). Appends don't
+            // bump it, and are counted below. The size and tail checks are
+            // redundant with `rev`, kept as a second line of defence.
             if row.createdts != createdts
                 || row.rev != rev
                 || row.size < scan_to
@@ -446,7 +459,8 @@ impl FileStore {
             let count = count_append(count, &open, scan_to as u64, &appended);
             let gen = new_gen();
             tx.execute(
-                "UPDATE db_wave_file SET gen = ?1, lines = ?2, lines_size = ?3, lines_tail = ?4, lines_modts = ?5
+                "UPDATE db_wave_file SET gen = ?1, lines = ?2, lines_size = ?3, lines_tail = ?4, lines_modts = ?5,
+                     lines_rev = COALESCE(rev, 0)
                  WHERE zoneid = ?6 AND name = ?7",
                 params![gen, count.lines as i64, row.size, count.tail_start as i64, row.modts, zone_id, name],
             )?;
