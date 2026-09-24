@@ -1,10 +1,10 @@
 # SPEC: durable jekt delivery — a message to an absent agent is held, not dropped
 
 **Date:** 2026-09-24
-**Status:** active — Phase 1 designed, revised after an adversarial pass
-(§2), and implemented in the same PR: `storage/jekt_held.rs` (objects v40),
-`reactive::hold_for_absent_target`, `server/jekt_held.rs` (replay), the
-`HELD_FOR` header field and the MCP's `HELD` report. Phase 2 recorded.
+**Status:** active — Phase 1 shipped in PR #3632 (`storage/jekt_held.rs`,
+objects v40; `reactive::hold_for_absent_target`; `server/jekt_held.rs`
+replay; the `HELD_FOR` header field; the MCP's `HELD` report), designed and
+revised after adversarial and Codex review (§2). Phase 2 (§3) not started.
 **Trigger:** Repo owner: *"the durable jekt messaging was another thing we
 couldn't get working."*
 **Related:**
