@@ -665,6 +665,7 @@ partial list.
 | [`SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13`](SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13.md) | Spec: Unified tool-block hover overlay (no double-popup) |
 | [`SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23`](SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md) | SPEC: Universal install dialog — plain-language steps by default, full console under "Details" |
 | [`SPEC_UPGRADE_PANEL_2026_06_27`](SPEC_UPGRADE_PANEL_2026_06_27.md) | Maintenance Section in InstancePanel |
+| [`SPEC_WAN_JEKT_VERIFICATION_2026_09_24`](SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md) | SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay |
 | [`SPEC_WEBSEARCH_CARD_FULL_CONTENT_AND_STYLING_2026_08_13`](SPEC_WEBSEARCH_CARD_FULL_CONTENT_AND_STYLING_2026_08_13.md) | Spec: WebSearch tool-card — full (unclamped) content + styling fixes |
 | [`SPEC_WEBSEARCH_RICH_VIEW_2026_06_19`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) | SPEC: Web-search rich result view |
 | [`SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20`](SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md) | SPEC: Widget bar "More" / pinned-parent flyout closes on its first click when hover already opened it |
