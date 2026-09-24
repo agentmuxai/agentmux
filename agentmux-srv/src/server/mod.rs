@@ -38,6 +38,7 @@ mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
 pub(crate) mod native_memory_handlers;
+mod notify_handlers;
 mod ui_handlers;
 
 #[cfg(test)]

@@ -16,11 +16,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const setConfig = vi.fn();
+const notifyTest = vi.fn();
 const invokeCommand = vi.fn();
 let settings: Record<string, unknown> = {};
 
 vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: { SetConfigCommand: (...args: unknown[]) => setConfig(...args) },
+    RpcApi: {
+        SetConfigCommand: (...args: unknown[]) => setConfig(...args),
+        NotifyTestCommand: (...args: unknown[]) => notifyTest(...args),
+    },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/global", () => ({ settingsAtom: () => settings }));
@@ -86,5 +90,41 @@ describe("Notifications & Tray — start at login", () => {
         await waitFor(() => expect(screen.getByText(/Unavailable in this build/)).toBeTruthy());
         fireEvent.click(toggleFor("Start at login"));
         expect(invokeCommand).not.toHaveBeenCalledWith("set_autostart", expect.anything());
+    });
+});
+
+describe("Notifications & Tray — desktop notifications", () => {
+    beforeEach(() => {
+        setConfig.mockReset();
+        notifyTest.mockReset().mockResolvedValue({ ok: true });
+        invokeCommand.mockReset().mockResolvedValue({ available: true, enabled: false });
+        settings = {};
+    });
+    afterEach(() => cleanup());
+
+    it("defaults ON and writes notify:os:enabled=false when turned off", () => {
+        render(() => <NotificationsSection />);
+        const t = toggleFor("Desktop notifications");
+        expect(t.getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(t);
+        expect(setConfig.mock.calls[0][1]).toEqual({ "notify:os:enabled": false });
+    });
+
+    it("hides the per-kind rows when the master switch is off", () => {
+        settings = { "notify:os:enabled": false };
+        render(() => <NotificationsSection />);
+        expect(screen.queryByText("Agent needs input")).toBeNull();
+    });
+
+    it("per-kind toggles write their own keys", () => {
+        render(() => <NotificationsSection />);
+        fireEvent.click(toggleFor("Agent finished"));
+        expect(setConfig.mock.calls[0][1]).toEqual({ "notify:os:turncompleted": false });
+    });
+
+    it("the test button calls notify.test", () => {
+        render(() => <NotificationsSection />);
+        fireEvent.click(screen.getByText("Send"));
+        expect(notifyTest).toHaveBeenCalledTimes(1);
     });
 });
