@@ -521,6 +521,11 @@ first_seen_at, approved_at, revoked_at)`:
   - a caller holding only `X-AuthKey` is rejected.
 - A local agent can still write `wan.db` directly, as the same OS user. That
   is machine compromise (§4).
+- **Amended 2026-09-24** (`SPEC_GENERIC_INTEGRATIONS_2026_09_24.md`, review
+  3): until GHSA-6726-q276-g6f6 is fixed, the host-gated window and host
+  channel protect against MCP tools, not against a same-user process. So
+  instance approval should ship enabled only in builds that include that
+  fix. Until then every instance stays `new`, and gets no relaxation.
 
 **The approval UI and the marker never show a sender-chosen label alone.**
 - The receiver renders `<host_hint>~<first 8 chars of the verified id>`.
