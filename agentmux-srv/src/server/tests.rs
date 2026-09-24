@@ -4556,6 +4556,7 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
         registry,
         state.boot_id.clone(),
         &state.auth_key,
+        Some(state.config_watcher.clone()),
     )
     .expect("resync/start shell");
 
@@ -4666,6 +4667,7 @@ async fn force_restart_does_not_close_the_pane_via_the_old_controllers_exit() {
             state.mstore.shared_agent_registry(),
             state.boot_id.clone(),
             &state.auth_key,
+            Some(state.config_watcher.clone()),
         )
     };
 
@@ -4745,6 +4747,7 @@ async fn plain_terminal_pane_shell_receives_the_instance_auth_key() {
         registry,
         state.boot_id.clone(),
         &state.auth_key,
+        Some(state.config_watcher.clone()),
     )
     .expect("resync/start shell");
 
@@ -4795,6 +4798,137 @@ async fn plain_terminal_pane_shell_receives_the_instance_auth_key() {
     );
 
     blockcontroller::delete_controller("test-authkey-shell");
+}
+
+/// The global `cmd:env` setting reaches a real Terminal pane's shell, through
+/// the same `resync_controller` → `ShellController::start` path a pane takes
+/// in production, with the block's own `cmd:env` still winning and a global
+/// `AGENTMUX_AGENT_ID` still kept out. Before the fix the spawn read a fresh
+/// default config instead of `AppState::config_watcher`, so no global value
+/// ever arrived.
+///
+/// Uses the interactive-shell branch (no `cmd`), the only branch that applies
+/// `cmd:env`: `$SHELL` on Unix, PowerShell on Windows. Same real-PTY and
+/// process-global `OnceLock` caveats as the sibling tests above; run
+/// individually (`cargo test -p agentmux-srv --bin agentmux-srv
+/// terminal_pane_shell_receives_the_global_cmd_env_setting -- --ignored
+/// --nocapture`).
+#[tokio::test]
+#[ignore]
+async fn terminal_pane_shell_receives_the_global_cmd_env_setting() {
+    let state = test_state();
+    let block_id = "test-global-cmd-env-shell";
+
+    // Loaded the way `config_watcher_fs` loads a saved settings.json.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(wconfig::SETTINGS_FILE);
+    std::fs::write(
+        &path,
+        r#"{ "cmd:env": {
+            "AMUX_E2E_GLOBAL": "global-value-7f3a",
+            "AMUX_E2E_SHARED": "global-loses-1d8e",
+            "AGENTMUX_AGENT_ID": "global-id-leak-5e0b"
+        } }"#,
+    )
+    .unwrap();
+    let (settings, errors): (wconfig::SettingsType, _) = wconfig::read_config_file(&path);
+    assert!(errors.is_empty(), "{errors:?}");
+    state.config_watcher.update_settings(settings);
+
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("term"));
+    meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    meta.insert(
+        blockcontroller::META_KEY_CMD_ENV.to_string(),
+        serde_json::json!({ "AMUX_E2E_SHARED": "block-wins-91c2" }),
+    );
+    let mut block = crate::backend::obj::Block {
+        oid: block_id.to_string(),
+        parentoref: "tab:test-global-cmd-env-tab".to_string(),
+        meta,
+        ..Default::default()
+    };
+    state.mstore.insert(&mut block).expect("insert block");
+
+    let registry = state.mstore.shared_agent_registry();
+    blockcontroller::resync_controller(
+        &block,
+        "test-global-cmd-env-tab",
+        None,
+        false,
+        true,
+        Some(state.broker.clone()),
+        Some(state.event_bus.clone()),
+        Some(state.mstore.clone()),
+        Some(state.filestore.clone()),
+        None,
+        None,
+        registry,
+        state.boot_id.clone(),
+        &state.auth_key,
+        Some(state.config_watcher.clone()),
+    )
+    .expect("resync/start shell");
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // Answer ConPTY's startup cursor-position query, as the siblings do.
+    #[cfg(windows)]
+    blockcontroller::send_input(
+        block_id,
+        blockcontroller::BlockInputUnion::data(b"\x1b[1;1R".to_vec()),
+        None,
+    )
+    .expect("answer cursor-position query");
+
+    // The values never appear in the typed command itself, so finding them
+    // in the scrollback means the shell's own environment had them.
+    #[cfg(windows)]
+    let print_cmd: &[u8] =
+        b"echo \"[$env:AMUX_E2E_GLOBAL|$env:AMUX_E2E_SHARED|$env:AGENTMUX_AGENT_ID]\"\r\n";
+    #[cfg(not(windows))]
+    let print_cmd: &[u8] = b"echo \"[$AMUX_E2E_GLOBAL|$AMUX_E2E_SHARED|$AGENTMUX_AGENT_ID]\"\r\n";
+    let expected = "[global-value-7f3a|block-wins-91c2|]";
+
+    // Shell startup time varies (PowerShell especially), so poll, re-sending
+    // the command now and then in case the first one arrived too early.
+    let mut scrollback = String::new();
+    for attempt in 0..60 {
+        if attempt % 10 == 0 {
+            blockcontroller::send_input(
+                block_id,
+                blockcontroller::BlockInputUnion::data(print_cmd.to_vec()),
+                None,
+            )
+            .expect("send env print");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let bytes = state
+            .filestore
+            .read_file(block_id, "term")
+            .expect("read term scrollback")
+            .unwrap_or_default();
+        scrollback = String::from_utf8_lossy(&bytes).into_owned();
+        if scrollback.contains(expected) {
+            break;
+        }
+    }
+    blockcontroller::delete_controller(block_id);
+
+    assert!(
+        scrollback.contains(expected),
+        "expected the shell to print {expected:?} from its own env, got: {scrollback:?}"
+    );
+    assert!(
+        !scrollback.contains("global-loses-1d8e"),
+        "the block's cmd:env must override the global value"
+    );
+    assert!(
+        !scrollback.contains("global-id-leak-5e0b"),
+        "a global AGENTMUX_AGENT_ID must never reach the pane"
+    );
 }
 
 // ---- identity M4a: the Caller middleware, end to end through the router ----
