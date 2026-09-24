@@ -73,6 +73,21 @@ pub struct SessionMeta {
     /// not a specific agent's claim on it.
     #[serde(default)]
     pub identity_id: String,
+    /// A conversation record with no timestamp comes before the first dated
+    /// one, so `created_at` (the first timestamp) isn't when the session
+    /// started — a time-window search can't rule the session out by it.
+    #[serde(default)]
+    pub starts_undated: bool,
+}
+
+/// What a discovery walk found, and what it should have looked at but
+/// couldn't (an unreadable directory, a file whose metadata failed). A
+/// search over a snapshot with problems can't claim to be complete: the
+/// session it's looking for may be exactly what was missed.
+#[derive(Default)]
+pub struct Discovery {
+    pub files: Vec<DiscoveredFile>,
+    pub problems: Vec<String>,
 }
 
 /// Full parsed session — produced on demand when user opens a conversation.
@@ -80,6 +95,10 @@ pub struct SessionMeta {
 pub struct HistorySession {
     pub meta: SessionMeta,
     pub messages: Vec<HistoryMessage>,
+    /// Records in the transcript that could not be read, so `messages` may be
+    /// missing some. A search over this session is then not a complete one.
+    #[serde(default)]
+    pub skipped_records: u32,
 }
 
 /// A single message in a conversation.
@@ -106,6 +125,12 @@ pub trait HistoryAdapter: Send + Sync {
     /// Discover all session file paths on disk.
     /// Returns (file_path, mtime_ms) pairs, sorted by mtime descending.
     fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError>;
+
+    /// [`Self::discover_files`], plus what the walk couldn't read. An adapter
+    /// whose discovery can't fail part-way keeps this default.
+    fn discover(&self) -> Result<Discovery, HistoryError> {
+        Ok(Discovery { files: self.discover_files()?, problems: Vec::new() })
+    }
 
     /// Extract lightweight metadata without full parsing.
     fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError>;
