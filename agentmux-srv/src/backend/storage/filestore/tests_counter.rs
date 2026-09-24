@@ -242,13 +242,37 @@ fn a_caught_up_epoch_continues_an_open_line() {
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
     fs.append_data(ZONE, NAME, b"a\n  ").unwrap(); // a blank open line: not counted
     let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
-    // The older build's bytes complete it, and it becomes a line.
+    // The older build's bytes complete it, and it becomes a line: a new
+    // index, so the generation is kept.
     old_build_append(&fs, b"b\nc");
     assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()), (g0.clone(), 3));
+    // Now the counted open line "c" is continued: line 2 would name "cd"
+    // under the generation it was counted as "c" in (Codex on #3663).
     old_build_append(&fs, b"d\n");
-    assert_eq!(pos(&fs.append_data_pos(ZONE, NAME, b"e\n").unwrap()), (3, 4));
+    // An append doesn't extend that epoch: it is left for init ...
+    assert_eq!(fs.append_data_pos(ZONE, NAME, b"e\n").unwrap().counted, None);
+    // ... which catches it up under a new generation.
+    let (g1, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
+    assert_ne!(g1, g0);
+    assert_eq!(lines, 4);
     assert_eq!(reader_lines(&fs), ["a", "  b", "cd", "e"]);
-    assert_eq!(counted(&fs.line_state(ZONE, NAME).unwrap()).0, g0);
+}
+
+#[test]
+fn a_counted_open_line_completed_into_whitespace_gets_a_new_generation() {
+    // Codex on #3663: a split UTF-8 sequence counts as a line ("\xe3\x80"
+    // decodes to U+FFFD); completed into U+3000 it is blank, the line
+    // vanishes, and its index would go to the next record.
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_data(ZONE, NAME, b"a\n\xe3\x80").unwrap();
+    let (g0, lines) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    assert_eq!(lines, 2);
+    old_build_append(&fs, b"\x80\nb\n");
+    let (g1, lines) = counted(&fs.catch_up_line_counter(ZONE, NAME).unwrap());
+    assert_ne!(g1, g0, "index 1 now names \"b\", not the old line");
+    assert_eq!(lines, 2);
+    assert_eq!(reader_lines(&fs), ["a", "b"]);
 }
 
 #[test]
@@ -633,10 +657,15 @@ fn arb_chunk() -> impl Strategy<Value = Vec<u8>> {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
-    /// Builds mixed on one file, appending only: the generation never
-    /// changes, and whenever the file is counted its count is the reader's.
+    /// Builds mixed on one file, appending only. Whenever the file is
+    /// counted its count is the reader's, and a line index never names
+    /// different content under the same generation — the guarantee the pane
+    /// relies on (Codex on #3663: catching up must not keep a generation
+    /// whose counted open line it changes). The one exception is this build's
+    /// own raw append continuing the open last line: by design it reports
+    /// that line as the one it starts in.
     #[test]
-    fn mixed_build_appends_keep_one_generation_and_the_readers_count(ops in prop::collection::vec(
+    fn mixed_build_appends_never_rename_a_line_under_one_generation(ops in prop::collection::vec(
         prop_oneof![
             arb_chunk().prop_map(MixedOp::New),
             arb_chunk().prop_map(MixedOp::NewLines),
@@ -647,22 +676,69 @@ proptest! {
     )) {
         let fs = mem();
         fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
-        let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+        // (gen, index) -> the content it named when last seen.
+        let mut named: std::collections::HashMap<(String, usize), String> = std::collections::HashMap::new();
+        let mut gens = HashSet::new();
         for op in &ops {
+            // The open (unterminated, counted) last line before this op, if any.
+            let before = reader_lines(&fs);
+            let size = fs.line_state(ZONE, NAME).unwrap().unwrap().size;
+            let ends_open = size > 0 && fs.read_bytes_db(ZONE, NAME, size - 1, 1).unwrap()[0] != b'\n';
+            let open_index = (ends_open && !before.is_empty()).then(|| before.len() - 1);
             match op {
                 MixedOp::New(b) => { fs.append_data_pos(ZONE, NAME, b).unwrap(); }
                 MixedOp::NewLines(b) => { fs.append_lines(ZONE, NAME, b).unwrap(); }
                 MixedOp::Old(b) => old_build_append(&fs, b),
                 MixedOp::Init => { fs.init_line_counter(ZONE, NAME).unwrap(); }
             }
+            let Some(c) = fs.line_state(ZONE, NAME).unwrap().unwrap().counted else { continue };
+            let lines = reader_lines(&fs);
+            prop_assert_eq!(c.lines, lines.len() as u64);
+            gens.insert(c.gen.clone());
+            for (i, line) in lines.iter().enumerate() {
+                let key = (c.gen.clone(), i);
+                if let Some(prev) = named.get(&key) {
+                    let by_design = matches!(op, MixedOp::New(_)) && open_index.map_or(false, |k| i >= k);
+                    // The reader (`str::lines`) keeps a trailing `\r` on an
+                    // unterminated last line and drops it once a `\n` closes
+                    // the line (CRLF): the same record, read two ways.
+                    let same = prev.trim_end_matches('\r') == line.trim_end_matches('\r');
+                    prop_assert!(same || by_design, "gen {} line {}: {:?} became {:?} after {:?}", c.gen, i, prev, line, op);
+                }
+                named.insert(key, line.clone());
+            }
+        }
+        let (_, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
+        prop_assert_eq!(lines, reader_lines(&fs).len() as u64);
+    }
+
+    /// Appends that never continue a counted open line (complete lines, as
+    /// transcripts are written): one generation throughout.
+    #[test]
+    fn whole_line_appends_from_mixed_builds_keep_one_generation(ops in prop::collection::vec(
+        prop_oneof![
+            arb_chunk().prop_map(|b| MixedOp::NewLines(b)),
+            arb_chunk().prop_map(|mut b| { b.push(b'\n'); MixedOp::Old(b) }),
+            Just(MixedOp::Init),
+        ],
+        1..24,
+    )) {
+        let fs = mem();
+        fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+        let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+        for op in &ops {
+            match op {
+                MixedOp::NewLines(b) => { fs.append_lines(ZONE, NAME, b).unwrap(); }
+                MixedOp::Old(b) => old_build_append(&fs, b),
+                MixedOp::Init => { fs.init_line_counter(ZONE, NAME).unwrap(); }
+                MixedOp::New(_) => unreachable!(),
+            }
             if let Some(c) = fs.line_state(ZONE, NAME).unwrap().unwrap().counted {
                 prop_assert_eq!(&c.gen, &g0);
                 prop_assert_eq!(c.lines, reader_lines(&fs).len() as u64);
             }
         }
-        let (gen, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
-        prop_assert_eq!(gen, g0);
-        prop_assert_eq!(lines, reader_lines(&fs).len() as u64);
+        prop_assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()).0, g0);
     }
 
     /// Raw appends of arbitrary bytes keep the counter equal to the
