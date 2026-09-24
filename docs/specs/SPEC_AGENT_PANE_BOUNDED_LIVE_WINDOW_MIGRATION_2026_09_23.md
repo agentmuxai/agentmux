@@ -1199,21 +1199,24 @@ prerequisites shrink to what already shipped:
   still keeping at least one.
 - **A turn** starts at a `user_message` node (parser-produced or optimistic);
   nodes before the first one form a leading turn. Same rule as
-  `turnScopedFrontier` (Phase 3b). A turn is **finished** when it is not the
-  last turn and none of its nodes is in progress (`isNodeInProgress`).
+  `turnScopedFrontier` (`frontend/app/view/agent/virtualization/streaming-buffer.ts`,
+  Phase 3b, §6.2). A turn is **finished** when it is not the
+  last turn and none of its nodes is in progress (`isNodeInProgress`, same file).
 - **Kill switch:** `agent:livefeed` (default true). Off restores today's
   behaviour exactly, paging included.
 
 **When turns roll off** — never mid-render, never mid-turn:
 
-- when a turn ends (`turnJustEndedAtom`'s edge);
+- when a turn ends (the edge of `turnJustEndedAtom`,
+  `frontend/app/view/agent/agent-view.tsx`);
 - when a new `user_message` enters the feed (the next send);
 - when the pane becomes dormant (hidden tab or window tab);
 - once after the initial history load, so a pane opens with K turns, not the
   load window's worth.
 
 Each point schedules one roll-off pass off the input path
-(`requestIdleCallback`, 1 s timeout; skipped and retried at the next point if
+(`requestIdleCallback`, 1 s timeout — the stream scheduler,
+`frontend/app/view/agent/stream-scheduler.ts`, has no housekeeping lane yet; skipped and retried at the next point if
 the user typed in the last 150 ms and the timeout hasn't passed). A pass is a
 single reducer command, O(nodes kept).
 
@@ -1240,16 +1243,19 @@ single reducer command, O(nodes kept).
   The blocked case gets the same K + 10 backstop, logged with what was lost,
   until the journal (§6.3.2, step 4 below) makes shells and answers durable.
 
-**How.** Reducer command `RollOff { beforeIndex }`: the same prefix cut as
-`clampToSessionScope` (both share one `trimPrefix` helper), emitting
+**How.** Reducer command `RollOff { beforeIndex }`
+(`frontend/app/store/agent-document/reducer.ts`): the same prefix cut as
+`clampToSessionScope` in that file (both share one `trimPrefix` helper), emitting
 `turns-rolled-off { removedCount, turns }`. The layout store already prunes
-ids no longer present (`NodesChanged` → `pruneMap`); the document state's
+ids no longer present (`NodesChanged` → `pruneMap`,
+`frontend/app/store/agent-pane-layout/reducer.ts`); the document state's
 collapsed / pinned / expanded id sets are pruned in the same pass. The pane
 keeps a count of turns rolled off since mount.
 
 **The top of the live feed.** Paging older content into the feed is off
 while `agent:livefeed` is on (`onLoadOlder` not passed, `hasOlderHistory`
-false). The existing `history_link` row shows whenever anything rolled off or
+false; `frontend/app/view/agent/hooks/useHistoryPagination.ts`). The existing
+`history_link` row (`frontend/app/view/agent/inject-history-link.ts`) shows whenever anything rolled off or
 the load didn't start at line 0, and reads "N earlier turns · open in
 History" when N is known (turns rolled off since mount, and the load started
 at line 0), otherwise "Earlier turns · open in History". Clicking it opens or
@@ -1260,13 +1266,16 @@ opens at its end, which is where the rolled-off turns are.
 **History follows the transcript** (replaces §6.4's design with the same
 goal):
 
-- The History tab keeps **one incremental parser** (`HistoryParser`, the body
-  of `parseHistoryLines` made resumable) for the range it has loaded; new
+- The History tab (`frontend/app/view/agent/history/AgentHistoryView.tsx`)
+  keeps **one incremental parser** (`HistoryParser`, the body of
+  `parseHistoryLines` in `frontend/app/view/agent/parseHistoryLines.ts` made
+  resumable) for the range it has loaded; new
   lines go through the same instance, so open text runs continue and counter
   ids don't collide. `parseHistoryLines` becomes "a `HistoryParser` fed once",
   and a test requires feeding in arbitrary chunks to give identical nodes.
-- It reuses `TranscriptCursor` as-is on the source block's output file
-  subject: settled from its own initial read (`historyPin`), gaps filled by
+- It reuses `TranscriptCursor` (`frontend/app/view/agent/transcript-cursor.ts`)
+  as-is on the source block's output file subject: settled from its own
+  initial read (`historyPin`, same file), gaps filled by
   range reads, duplicates dropped, the same 5 s line-count poll for other
   writers to the agent's shared zone while visible. Echoes are parsed (they
   are the user's messages; History has no optimistic copy).
