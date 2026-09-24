@@ -75,6 +75,7 @@ impl AgentMuxHandler {
             return;
         };
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
+        super::liveness::start(&self.state); // SPIKE
 
         // Each OAuth popup allowed by on_before_popup is created (as the next
         // browser(s) on this pane's handler) — record its id so do_close can
