@@ -526,6 +526,7 @@ impl Handler {
             evicted_block.as_deref(),
             evicted_agent.as_deref(),
         );
+        super::held_jekt_wake().notify_one();
 
         Ok(())
     }
@@ -815,6 +816,19 @@ impl Handler {
                 None
             }
         }
+    }
+
+    /// Whether `uid` has a live registration — a lookup with no side effect
+    /// (no counter, no rate-limit token, no audit entry), for the held-jekt
+    /// replay's presence check.
+    pub fn has_uid_registration(&self, uid: &str) -> bool {
+        self.uid_to_block.contains_key(uid)
+    }
+
+    /// Deliver a held jekt (durable jekt spec §2.3): the ordinary delivery
+    /// path, audited as `held_delivered` (or `held_retry` on failure).
+    pub fn inject_held(&mut self, req: InjectionRequest) -> InjectionResponse {
+        self.inject_message_inner(req, Some("held_delivered"), Some("held_retry"), None)
     }
 
     /// Get agent registration by block ID.
@@ -1291,6 +1305,7 @@ impl Handler {
             requires_stop,
             &request_id,
             priority,
+            req.held_sent_at_ms,
         );
 
         // Legacy source-prefix format preserved for PTY controllers that don't
@@ -2113,6 +2128,16 @@ impl ReactiveHandler {
 
     pub fn inject_message(&self, req: InjectionRequest) -> InjectionResponse {
         self.inner.lock().unwrap().inject_message(req)
+    }
+
+    /// See [`Handler::inject_held`].
+    pub fn inject_held(&self, req: InjectionRequest) -> InjectionResponse {
+        self.inner.lock().unwrap().inject_held(req)
+    }
+
+    /// See [`Handler::has_uid_registration`].
+    pub fn has_uid_registration(&self, uid: &str) -> bool {
+        self.inner.lock().unwrap().has_uid_registration(uid)
     }
 
     pub fn get_audit_log(&self, limit: usize) -> Vec<AuditLogEntry> {

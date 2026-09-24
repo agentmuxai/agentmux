@@ -103,6 +103,12 @@ pub struct InjectionRequest {
     /// to set and sign (M4d). Empty = Unattributed.
     #[serde(skip)]
     pub audit_source_uid: String,
+    /// When a held message was originally accepted (ms), set only by the
+    /// held-jekt replay (`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.4):
+    /// the delivered header shows this as `TS` plus `HELD_FOR`, so a late
+    /// message never reads as a current one. `#[serde(skip)]` both ways.
+    #[serde(skip)]
+    pub held_sent_at_ms: Option<i64>,
     /// Base64 Ed25519 signature over the same signed material as `jekt_sig`
     /// (request_id, source_agent, target_agent, ts_secs, message), produced
     /// by an AgentMux-operated WAN-tier service sender (currently only the

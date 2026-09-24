@@ -107,6 +107,10 @@ async fn main() {
     // fallback.
     bootstrap::install_cron_delivery(&state);
 
+    // Durable jekt: replay messages held for an agent that was not running
+    // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
+    server::jekt_held::install(&state);
+
     // Now that AppState exists, wire up close-on-exit so a shell pane can
     // actually close itself when its process exits — see
     // `bootstrap::install_close_on_exit_handler`'s doc comment.
