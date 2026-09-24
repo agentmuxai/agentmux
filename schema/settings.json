@@ -324,6 +324,11 @@
           "default": true,
           "description": "Insert a file-reference token into the composer on drop (in addition to attaching the file). Default true."
         },
+        "app:runinbackground": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed (background-service mode; implies the tray). Read by agentmux-launcher at startup, so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY and the --background flag also enable it. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1."
+        },
         "splash:disabled": {
           "type": "boolean",
           "default": false,
