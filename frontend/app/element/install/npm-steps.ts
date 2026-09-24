@@ -96,6 +96,7 @@ export class NpmStepTracker {
     private readonly name: string;
     private tarballs = new Set<string>();
     private lastDownloadAt = 0;
+    private scriptsRan = false;
     private lineIndex = 0;
     private firstErrorLine: number | undefined;
     private npmErrorCode: string | undefined;
@@ -115,6 +116,7 @@ export class NpmStepTracker {
         this.steps = PLAN.map((s) => ({ id: s.id, label: s.label(this.name), status: "pending" as const }));
         this.tarballs.clear();
         this.lastDownloadAt = 0;
+        this.scriptsRan = false;
         this.lineIndex = 0;
         this.firstErrorLine = undefined;
         this.npmErrorCode = undefined;
@@ -147,6 +149,14 @@ export class NpmStepTracker {
 
         const run = RUN_RE.exec(text);
         if (run && !RUN_DONE_RE.test(text)) {
+            this.scriptsRan = true;
+            if (this.status("verify") !== "pending") {
+                // The backend reads stdout and stderr in separate tasks,
+                // so npm's stdout summary can overtake these stderr lines.
+                // Record that scripts ran without reopening an earlier step.
+                if (this.status("scripts") === "pending") this.set("scripts", { status: "done" });
+                return "normal";
+            }
             this.complete("download");
             this.complete("setup");
             this.activate("scripts");
@@ -178,7 +188,7 @@ export class NpmStepTracker {
     succeed(): void {
         for (const s of this.steps) {
             if (s.status === "done" || s.status === "skipped") continue;
-            if (s.id === "scripts" && s.status === "pending") {
+            if (s.id === "scripts" && s.status === "pending" && !this.scriptsRan) {
                 this.set("scripts", { status: "skipped", hint: "none needed", subline: undefined });
             } else {
                 this.set(s.id, { status: "done", subline: undefined });
@@ -249,15 +259,17 @@ export class NpmStepTracker {
         if (meta) this.set("download", { subline: `Looking up ${decodeName(meta[2])}` });
     }
 
+    /**
+     * npm has finished (its summary or exit line arrived). Scripts that
+     * never started stay pending rather than "skipped": the summary is on
+     * stdout and can arrive before stderr's script lines, so whether any
+     * ran is only settled by `succeed()` / `fail()`.
+     */
     private onNpmFinished(): void {
         if (this.status("verify") !== "pending") return;
         this.complete("download");
         this.complete("setup");
-        if (this.status("scripts") === "active") {
-            this.complete("scripts");
-        } else if (this.status("scripts") === "pending") {
-            this.set("scripts", { status: "skipped", hint: "none needed" });
-        }
+        if (this.status("scripts") === "active") this.complete("scripts");
         this.activate("verify");
     }
 

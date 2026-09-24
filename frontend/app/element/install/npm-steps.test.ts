@@ -132,10 +132,32 @@ describe("NpmStepTracker", () => {
         t.start();
         t.line("npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms (cache miss)", 1);
         t.line("added 1 package in 1s", 2);
+        expect(statuses(t).verify).toBe("active");
+        // Not settled until the install ends — script lines may still arrive.
+        expect(statuses(t).scripts).toBe("pending");
+        t.succeed();
         const scripts = t.snapshot().find((s) => s.id === "scripts")!;
         expect(scripts.status).toBe("skipped");
         expect(scripts.hint).toBe("none needed");
+    });
+
+    it("doesn't call scripts skipped when npm's stdout summary overtakes its stderr script lines", () => {
+        // stdout and stderr are read by separate backend tasks, so the
+        // summary can arrive before the lifecycle lines it follows.
+        const t = new NpmStepTracker("Pi");
+        t.start();
+        t.line("npm http fetch GET 200 https://registry.npmjs.org/koffi/-/koffi-2.16.3.tgz 12ms", 1);
+        t.line("added 189 packages in 7s", 2);
         expect(statuses(t).verify).toBe("active");
+        t.line("npm info run koffi@2.16.3 install node_modules/koffi node src/cnoke/cnoke.js", 3);
+        t.line("npm info run koffi@2.16.3 install { code: 0, signal: null }", 4);
+        // Late script evidence doesn't reopen an earlier step or add a
+        // second active one.
+        expect(t.snapshot().filter((s) => s.status === "active").map((s) => s.id)).toEqual(["verify"]);
+        t.succeed();
+        const scripts = t.snapshot().find((s) => s.id === "scripts")!;
+        expect(scripts.status).toBe("done");
+        expect(scripts.hint).toBeUndefined();
     });
 
     it("colours only real errors and warnings", () => {
