@@ -37,7 +37,10 @@ pub const EVENT_NOTIFICATION_STATE: &str = "notification:state";
 /// srv-internal sources, fed from places that must not block (the broker's
 /// publish path, the jekt delivery path) and drained by the router's task.
 enum Internal {
-    Emit { kind: NotifyKind, block_id: String, body: Option<String> },
+    /// `own_blocks_only`: the source is process-global (the reactive handler
+    /// is shared by every AppState), so drop blocks this Router's store
+    /// doesn't know.
+    Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
 }
 
 const AGENT_NAME_MAX: usize = 32;
@@ -122,17 +125,20 @@ fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crat
                 kind: NotifyKind::AgentCrashed,
                 block_id: block_id.to_string(),
                 body: Some(body.to_string()),
+                // Per-broker observer: already scoped to this AppState.
+                own_blocks_only: false,
             });
         }
     }));
     let tx = r.internal.clone();
-    reactive.set_needs_review_hook(Arc::new(move |block_id: &str| {
+    reactive.add_needs_review_hook(Arc::new(move |block_id: &str| {
         let _ = tx.send(Internal::Emit {
             kind: NotifyKind::MessageNeedsReview,
             block_id: block_id.to_string(),
             // Fixed text only — never the message, sender or trust label
             // (spec §9.1: the toast can only say "go look").
             body: Some("Open AgentMux to see the sender and trust level before it acts.".to_string()),
+            own_blocks_only: true,
         });
     }));
 }
@@ -145,9 +151,15 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
         while let Some(msg) = rx.recv().await {
             let Some(r) = r.upgrade() else { return };
             match msg {
-                Internal::Emit { kind, block_id, body } => {
-                    // Name lookup may hit the store — off the async workers.
-                    let _ = tokio::task::spawn_blocking(move || r.emit_fixed(kind, &block_id, body)).await;
+                Internal::Emit { kind, block_id, body, own_blocks_only } => {
+                    // Store lookups — off the async workers.
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if own_blocks_only && !r.owns_block(&block_id) {
+                            return;
+                        }
+                        r.emit_fixed(kind, &block_id, body)
+                    })
+                    .await;
                 }
             }
         }
@@ -279,6 +291,11 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
 impl Router {
     fn settings(&self) -> Settings {
         settings_from_extra(&self.config.get_settings().extra)
+    }
+
+    /// Does this Router's store know the block? BLOCKING (SQLite).
+    fn owns_block(&self, block_id: &str) -> bool {
+        matches!(self.store.get::<Block>(block_id), Ok(Some(_)))
     }
 
     /// BLOCKING on a cache miss (SQLite behind `Store`'s process-wide mutex).

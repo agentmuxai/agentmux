@@ -1803,24 +1803,28 @@ pub struct ReactiveHandler {
     /// Called with the target block_id after a successful delivery whose
     /// marker says `ESCALATE=required` — the notification Router turns it
     /// into a "needs your review" OS notification (fixed text, no content).
-    needs_review_hook: std::sync::RwLock<Option<NeedsReviewHook>>,
+    /// A list, not a slot: this handler is process-global, and each Router
+    /// (one per broker/AppState) registers its own hook and ignores blocks
+    /// that aren't in its own store — so a second AppState can never steal
+    /// another's notifications (ReAgent P1 on #3654).
+    needs_review_hooks: std::sync::RwLock<Vec<NeedsReviewHook>>,
 }
 
-/// See `ReactiveHandler::set_needs_review_hook`.
+/// See `ReactiveHandler::add_needs_review_hook`.
 pub type NeedsReviewHook = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 
 impl ReactiveHandler {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(Handler::new()),
-            needs_review_hook: std::sync::RwLock::new(None),
+            needs_review_hooks: std::sync::RwLock::new(Vec::new()),
         }
     }
 
-    /// Install (or replace) the needs-review hook. Must not block or call
-    /// back into this handler; it runs after the inner lock is released.
-    pub fn set_needs_review_hook(&self, f: NeedsReviewHook) {
-        *self.needs_review_hook.write().unwrap_or_else(|e| e.into_inner()) = Some(f);
+    /// Register a needs-review hook. Must not block or call back into this
+    /// handler; hooks run after the inner lock is released.
+    pub fn add_needs_review_hook(&self, f: NeedsReviewHook) {
+        self.needs_review_hooks.write().unwrap_or_else(|e| e.into_inner()).push(f);
     }
 
     fn after_delivery(&self, resp: &InjectionResponse) {
@@ -1828,8 +1832,8 @@ impl ReactiveHandler {
             return;
         }
         let Some(block_id) = resp.block_id.as_deref() else { return };
-        let hook = self.needs_review_hook.read().unwrap_or_else(|e| e.into_inner()).clone();
-        if let Some(h) = hook {
+        let hooks = self.needs_review_hooks.read().unwrap_or_else(|e| e.into_inner()).clone();
+        for h in hooks {
             h(block_id);
         }
     }
@@ -2266,12 +2270,24 @@ mod needs_review_hook_tests {
         let h = ReactiveHandler::new();
         let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let h2 = hits.clone();
-        h.set_needs_review_hook(std::sync::Arc::new(move |b: &str| h2.lock().unwrap().push(b.to_string())));
+        h.add_needs_review_hook(std::sync::Arc::new(move |b: &str| h2.lock().unwrap().push(b.to_string())));
         h.after_delivery(&resp(true, Some(true), Some("b1")));
         h.after_delivery(&resp(true, Some(false), Some("b2"))); // ESCALATE=none
         h.after_delivery(&resp(true, None, Some("b3")));        // not sensitive
         h.after_delivery(&resp(false, Some(true), Some("b4"))); // delivery failed
         h.after_delivery(&resp(true, Some(true), None));        // no block
         assert_eq!(*hits.lock().unwrap(), vec!["b1".to_string()]);
+    }
+
+    #[test]
+    fn every_registered_hook_is_called() {
+        let h = ReactiveHandler::new();
+        let hits = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+        for _ in 0..2 {
+            let h2 = hits.clone();
+            h.add_needs_review_hook(std::sync::Arc::new(move |_: &str| *h2.lock().unwrap() += 1));
+        }
+        h.after_delivery(&resp(true, Some(true), Some("b1")));
+        assert_eq!(*hits.lock().unwrap(), 2, "a second router must not replace the first");
     }
 }

@@ -87,10 +87,23 @@ struct Endpoint {
 struct Handle {
     endpoint: watch::Sender<Option<Endpoint>>,
     presenter: Arc<dyn Presenter>,
-    actions: mpsc::UnboundedSender<UserAction>,
 }
 
 static HANDLE: OnceLock<Handle> = OnceLock::new();
+
+/// The user-action channel exists from first use, not from `start`: the tray
+/// (and its Pause/Resume/Open menu) comes up before srv does, and a pick made
+/// in that window must queue until the presenter connects rather than vanish
+/// (ReAgent P2 on #3654). `start` takes the receiver.
+type ActionChannel = (mpsc::UnboundedSender<UserAction>, std::sync::Mutex<Option<mpsc::UnboundedReceiver<UserAction>>>);
+static ACTIONS: OnceLock<ActionChannel> = OnceLock::new();
+
+fn actions() -> &'static ActionChannel {
+    ACTIONS.get_or_init(|| {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (tx, std::sync::Mutex::new(Some(rx)))
+    })
+}
 
 fn make_presenter(actions: mpsc::UnboundedSender<UserAction>, data_dir: &std::path::Path) -> Arc<dyn Presenter> {
     #[cfg(target_os = "windows")]
@@ -112,13 +125,16 @@ pub fn start(ws_endpoint: &str, auth_key: &str, data_dir: std::path::PathBuf, di
         let _ = h.endpoint.send(Some(ep));
         return;
     }
-    let (act_tx, act_rx) = mpsc::unbounded_channel();
-    let presenter = make_presenter(act_tx.clone(), &data_dir);
+    let act_tx = actions().0.clone();
+    let Some(act_rx) = actions().1.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+        return;
+    };
+    let presenter = make_presenter(act_tx, &data_dir);
     // A fresh launcher owns nothing on screen yet — anything left over from a
     // previous (crashed) run points at a dead instance.
     presenter.clear_all();
     let (ep_tx, ep_rx) = watch::channel(Some(ep));
-    if HANDLE.set(Handle { endpoint: ep_tx, presenter: presenter.clone(), actions: act_tx }).is_err() {
+    if HANDLE.set(Handle { endpoint: ep_tx, presenter: presenter.clone() }).is_err() {
         return;
     }
     tokio::spawn(run(ep_rx, act_rx, presenter, data_dir, dir_hash));
@@ -136,7 +152,6 @@ pub fn update_endpoint(ws_endpoint: &str, auth_key: &str) {
 /// tray thread.
 pub fn tray_request(action: crate::tray::notify_menu::NotifyMenuAction) {
     use crate::tray::notify_menu::{resolve_pause, NotifyMenuAction};
-    let Some(h) = HANDLE.get() else { return };
     let ua = match action {
         NotifyMenuAction::Open(id) => {
             // The menu pick made us foreground-eligible; hand that to the host
@@ -152,7 +167,8 @@ pub fn tray_request(action: crate::tray::notify_menu::NotifyMenuAction) {
         NotifyMenuAction::Pause(choice) => UserAction::SetPause(resolve_pause(choice, chrono::Local::now())),
         NotifyMenuAction::Resume => UserAction::SetPause(0),
     };
-    let _ = h.actions.send(ua);
+    // Queues even before `start` — delivered once the presenter connects.
+    let _ = actions().0.send(ua);
 }
 
 /// Launcher is exiting: remove our toasts from the notification center.
