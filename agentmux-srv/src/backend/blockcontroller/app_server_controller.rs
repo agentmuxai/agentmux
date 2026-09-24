@@ -166,7 +166,10 @@ impl AppServerController {
         Ok(command)
     }
 
-    fn publish_protocol_frame(&self, frame: serde_json::Value) {
+    /// `global_zone` is resolved once per process by `spawn_event_loop`, not
+    /// per frame: resolving reads the block from the store, and frames arrive
+    /// many times a second while a turn streams.
+    fn publish_protocol_frame(&self, frame: serde_json::Value, global_zone: Option<&str>) {
         let line = format!("{}\n", frame);
         if let Some(broker) = &self.broker {
             broker.publish(mps::MuxEvent {
@@ -182,14 +185,13 @@ impl AppServerController {
             // output (Phase 5a-3c): a pane reads the global zone when the
             // block has an agentId, so frames written only to the block file
             // were missing from its history.
-            let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
             super::shell::handle_append_block_file(
                 broker,
                 &self.block_id,
                 "output",
                 line.as_bytes(),
                 Some(filestore),
-                global_zone.as_deref(),
+                global_zone,
             );
         }
     }
@@ -200,6 +202,9 @@ impl AppServerController {
         session: Arc<CodexAppServerSession>,
     ) {
         let weak = self.self_ref.lock().unwrap().clone();
+        // The agent's global transcript zone, resolved once for this process
+        // (as the host and container spawn paths do), not per frame.
+        let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
             while let Some(incoming) = process.transport.next_incoming().await {
                 // KNOWN GAP (ReAgent P1, PR #3215, tracked for a follow-up PR, not
@@ -225,7 +230,7 @@ impl AppServerController {
                     }
                 };
                 if let Some(controller) = weak.as_ref().and_then(Weak::upgrade) {
-                    controller.publish_protocol_frame(frame);
+                    controller.publish_protocol_frame(frame, global_zone.as_deref());
                     match incoming {
                         notification @ AppServerIncoming::Notification { .. } => {
                             if let Ok(event) = session.apply_incoming(notification) {
