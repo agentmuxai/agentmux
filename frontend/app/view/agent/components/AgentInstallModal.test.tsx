@@ -320,4 +320,23 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
         const errorLine = terminals[0].written.find((l) => l.includes("npm error code ENOTFOUND"))!;
         expect(errorLine.startsWith("\x1b[31m")).toBe(true);
     });
+
+    it("scrolls to the first error even when Details was already open during the install", async () => {
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+        const send = await startAndSubscribe();
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        details.open = true;
+        fireEvent(details, new Event("toggle"));
+        await waitFor(() => expect(terminals).toHaveLength(1));
+
+        send({ line: "npm error code ENOTFOUND", stream: "stderr" });
+        send({ op: "done", ok: false, error: "npm exited Some(1)" });
+        await waitFor(() => expect(terminals[0].scrolledTo).not.toBeNull());
+
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+    });
 });

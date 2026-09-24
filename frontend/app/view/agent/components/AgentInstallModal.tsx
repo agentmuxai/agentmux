@@ -442,13 +442,17 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     // Opening Details creates or refits the terminal. A closed <details>
     // doesn't lay out its children, so FitAddon can't size until it's
     // open. Runs after the `open` attribute is applied to the element.
+    // Tracks `phase` too: a failure while Details is already open must
+    // still scroll to the first error, and re-setting an already-true
+    // `detailsOpen` would not re-run this (codex P2 on #3661).
     createEffect(() => {
+        const failed = phase() === "failed";
         if (!detailsOpen()) return;
         queueMicrotask(() => {
             if (disposed || !detailsRef?.open) return;
             ensureTerminal();
             tryFit();
-            if (phase() === "failed") scrollToFirstError();
+            if (failed) scrollToFirstError();
         });
     });
 
