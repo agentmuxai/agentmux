@@ -424,7 +424,7 @@ export function useAgentStream({
         const fileSubject = getFileSubject(blockId, OutputFileName);
 
         console.debug(`[useAgentStream] subscribed blockId=${blockId} format=${outputFormat}`);
-        const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string }) => {
+        const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string; echo?: string }) => {
             if (msg.fileop === "truncate") {
                 // Reducer decides whether to honor — late truncates after
                 // a socket-reconnect race are suppressed. Only reset the
@@ -449,6 +449,12 @@ export function useAgentStream({
             }
 
             if (msg.fileop !== "append" || !msg.data64) return;
+            // An echo of something the pane already shows — the user message
+            // the controller wrote to the agent's stdin (its optimistic node
+            // is on screen). Written to the transcript with its position so
+            // the stream has no gap; parsing it here would add a second node.
+            // (Phase 5a-3c; 5b re-keys the optimistic node from it.)
+            if (msg.echo) return;
 
             // Decode base64 subprocess data to UTF-8 text
             const bytes = base64ToArray(msg.data64);

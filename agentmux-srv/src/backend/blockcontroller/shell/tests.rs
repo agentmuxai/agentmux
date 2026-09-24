@@ -836,7 +836,7 @@ use std::sync::Arc;
         assert_eq!(stat.size as u64, expected);
     }
 
-    /// `persist_to_blockfile_silent` (user-message lines) stamps the
+    /// `persist_user_line` (user-message lines) stamps the
     /// per-channel sidecar too — those lines are transcript content.
     #[test]
     fn tsidx_stamped_by_persist_silent() {
@@ -847,9 +847,9 @@ use std::sync::Arc;
         let block_id = "tsidx-silent-block";
         let line = b"{\"type\":\"user_message\"}\n";
 
-        super::file_ops::persist_to_blockfile_silent(
+        super::file_ops::persist_user_line(
+            None,
             block_id,
-            "output",
             line,
             Some(&fs),
             Some("agent:tsidx-silent:current"),
