@@ -20,8 +20,9 @@
 | 2 | Cross-pane stream scheduler, input first | #3599 | merged |
 | 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | merged |
 | 2c | Tool logs measure height only when their branch changes (§3.4, §2.2a) | #3607 | merged |
-| 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | open |
-| 3 | Tail holds only the turn in flight | — | in progress (3a first) |
+| 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | merged |
+| 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | open |
+| 3 | Tail holds only the turn in flight | 3a + 3b | done once 3b merges; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | not started |
 | 5 | Node identity and durability | — | not started |
 | 6 | Bounded live document | — | not started |
@@ -140,6 +141,36 @@ flex gap, tied by a test) and a migrating node enters with the height the
 buffer last laid it out at (ResizeObserver, no forced layout), in the same
 batch that adds it.
 
+### 2.2c Phase 3b (the tail holds only the turn in flight)
+
+A = `main` + 3a (tail = last 50 nodes), B = A + 3b; bench with #3606's
+settle, interleaved ×3.
+
+**Streaming + typing, medians of 3:**
+
+| N = 0 / 25 turns | A | + 3b |
+|---|---|---|
+| DOM elements | 6,025 / 99,267 | 6,028 / **14,820** (−85 % at N = 25) |
+| fps | 33.5 / 23.4 | 35.7 / **34.3** |
+| key → paint p95 | 112 / 120 ms | 96 / **96 ms** |
+| share of time in long frames | 34 / 44 % | 27 / **28 %** |
+| time in long frames blocking input, per run | 2.5 / 3.5 s | 1.8 / **1.9 s** |
+| JS heap | 113 / 249 MB | 109 / **132 MB** |
+
+Every B run beat every A run at N = 25 (fps 34.2–35.1 vs 17.6–25.0; p95
+96–104 vs 120–144 ms). **N = 25 is now indistinguishable from N = 0** — the
+first measurement in this series where the cost of streaming does not grow
+with the history above it (spec §4, "flat in conversation length").
+
+**Mounting history** (`probe-inject.mjs`, 25 turns × 3 panes, 6 cycles each,
+first version of 3b): synchronous mount 5.5–7.1 s → **2.75–3.14 s**
+(−53 %); until quiet 9.9–12.5 s → **5.7–7.2 s**.
+
+**Per pane after a history load** (`probe-dom.mjs`): pinned panes mount the
+last turn (3 nodes) and no head rows; a pane scrolled to the top mounts the
+last turn plus ~10 head rows in view — 5.5k elements, where the count policy
+mounted 33k and the first version of 3b 44k (§3.7).
+
 ### 2.3 `main` baseline, direct mode (Phase 0)
 
 `docs/analysis/ANALYSIS_AGENT_PANE_FULL_CONVERSATION_BASELINE_2026_09_23.md`.
@@ -248,16 +279,44 @@ affected (only a clear precedes them, no injection); N > 0 figures taken
 before this carry some setup cost and are best compared only within the same
 A/B.
 
+### 3.7 Deferring a move to protect visible rows must stay small
+
+3b moves the frontier only across rows wholly above the viewport, so nothing
+the user is looking at is remounted. The first version made the bench's N = 25
+DOM **larger** (143k vs 99k): a history load into a pane scrolled to the top
+kept all 76 of its rows mounted, because the head/buffer split is contiguous
+and one visible row at the start of the buffer held back the whole batch
+after it (the 2×-ceiling hard cap, 80 nodes, never triggered). Deferral now
+covers at most 12 nodes / 256 KB; beyond that the move happens and the
+visible rows are remounted — jump-free since 3a. Regression test in
+`AgentDocumentVirtualList.turn-tail.test.tsx`.
+
+**Where 3b differs from spec §6.2's text:** migration is not scheduled on
+`turnJustEndedAtom` as a housekeeping task. The frontier is recomputed inside
+the partition memo on every document change and moves as soon as rows are
+off-screen (or the deferral cap is hit). That needs no turn-end signal,
+keeps invariant 1 trivially (one memo), and each move is cheap and jump-free
+after 3a. The spec's per-node in-row windowing for single huge nodes (§6.2)
+is not part of 3b.
+
 ## 4. Open follow-ups
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
   numbers were taken with it.
-- **Mounting history is one multi-second synchronous task** (§2.2a): 25
-  turns × 3 panes still blocks the main thread ~6 s, then ~5 s more until
-  quiet. Opening or restoring a pane with a long conversation has this shape.
-  Phase 3 (turn-scoped tail) and Phase 6 (bounded live document) shrink what
-  is mounted; chunking the mount across frames is worth measuring before
-  then.
+- **Mounting history: ~1.2 s per load** for 25 turns × 3 panes with 3b's
+  review fixes (down from ~8.8 s before 2c/3b). Profiled: 82 % is parsing the
+  markdown of rows that are actually on screen (the visible 20 KB last message
+  and visible head rows) — no longer hidden rows. What lowers it further is
+  in-row windowing (below) or off-main-thread parsing (Phase 8).
+- **Per-flush work still proportional to the head** (Phase 4): the slice-
+  feeding effect re-maps every head id and `JSON.stringify`s each head row's
+  expansion on every partition change, and the reducer copies the node array.
+  3b made the frontier search itself independent of history (`from`, Codex P2
+  on #3611); these are the remaining O(history) costs per stream flush.
+- **Renderer memory grows across consecutive bench runs regardless of
+  variant** (3.7 → 5.1 GB over one §2.2c session): process-lifetime growth,
+  not per-window. Phase 6 (bounded live document) and the 8 h soak target it.
+- **In-row windowing for one huge node** (spec §6.2) — not in 3b.
 - **macOS and Linux baselines** (spec §7 Phase 0).
 - **Fault-suite runner** (spec §8) — a later Phase 0 PR.
 - **Residual nodes after a clear:** a cleared pane can refill with a few

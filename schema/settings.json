@@ -329,6 +329,11 @@
           "default": false,
           "description": "Suppress the startup splash screen entirely (no window is created). Read by agentmux-launcher BEFORE the host and backend exist, so a change applies at the NEXT launch, not the current one. Env AGENTMUX_SPLASH=0 / AGENTMUX_NO_SPLASH=1 override this for a single run. See docs/specs/SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21.md §6."
         },
+        "agent:turnscopedtail": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agent panes keep only the turn in flight (plus anything still running) always mounted; older messages are virtualized. Set false to restore the previous behaviour (the last 50 messages always mounted). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2."
+        },
         "agent:askquestiontimeoutms": {
           "type": "integer",
           "minimum": 1000,
