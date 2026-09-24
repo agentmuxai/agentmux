@@ -3028,6 +3028,33 @@ async fn an_idle_agent_being_stopped_defers_until_the_process_is_gone() {
     assert_eq!(c.sweep_deferred_once(&mut orphaned), WatchdogStep::Exit, "reported, not parked");
 }
 
+/// Codex P2 on #3562: a sender that fetched the controller before
+/// `delete_controller` unregistered it can enqueue AFTER `stop()` drained the
+/// queue (it defers behind `stop_pending`, and gets `Ok`). When that sender
+/// drops the last strong reference, the watchdog (weak ref) exits, so
+/// dropping the controller must report whatever is still queued rather than
+/// discard it. `stop()` cannot gate this instead: the max-runtime watchdog
+/// stops controllers that stay registered and are used again.
+#[tokio::test]
+async fn dropping_the_controller_reports_a_message_enqueued_after_stop() {
+    let (c, _rx) = busy_controller();
+    let (kill_tx, _kill_rx) = tokio::sync::oneshot::channel();
+    c.inner.lock().unwrap().kill_tx = Some(kill_tx);
+    crate::backend::blockcontroller::Controller::stop(&c, true, "done").unwrap();
+
+    // The late sender, after stop()'s drain.
+    c.send_user_message("late".to_string()).unwrap();
+    let inner = Arc::clone(&c.inner);
+    assert_eq!(inner.lock().unwrap().deferred_deliveries.len(), 1);
+
+    drop(c);
+
+    assert!(
+        inner.lock().unwrap().deferred_deliveries.is_empty(),
+        "drained and reported on drop, not discarded with the controller"
+    );
+}
+
 /// The §4.2 race, with real threads: concurrent senders hitting a busy
 /// controller must all be accounted for — none written through, none lost
 /// between the turn-state check and the enqueue.
