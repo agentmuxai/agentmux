@@ -69,6 +69,14 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
     .await
     .unwrap_or_default();
 
+    // Rotate the starting target every pass, so targets that keep failing
+    // cannot take the budget ahead of a healthy one forever (Codex P2).
+    let mut targets = targets;
+    if !targets.is_empty() {
+        static ROTATION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = targets.len();
+        targets.rotate_left(ROTATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % n);
+    }
     let mut outcomes = Vec::new();
     let mut spent = 0;
     for uid in targets {

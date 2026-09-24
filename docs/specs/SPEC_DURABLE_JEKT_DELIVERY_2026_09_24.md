@@ -77,7 +77,8 @@ senders, idempotency — are folded in too).*
 5. **Not running under another name:** if the resolved UID has a live
    registration (the handler binds only the display and stable names, so
    another of the row's names can miss it), the message is delivered by
-   UID at once instead of held.
+   UID at once instead of held — unless it unregistered in between, in
+   which case it is held after all.
 4. **Not a periodic sender:** `source_agent == "cron"` is never held — a job
    fires again on its schedule, and a stale backlog of fires would each start
    a turn.
@@ -133,8 +134,8 @@ as a sweep, and once at srv start:
    `held_sent_at_ms`, and deliver through the handler's local path with
    audit outcome `held_delivered`. At most 8 deliveries or failures per
    pass; a deferral ends that target's turn and spends no budget, and a
-   failure ends it spending one slot, so one stuck target cannot starve the
-   others (targets are taken longest-waiting first).
+   failure ends it spending one slot, and the starting target rotates each
+   pass, so targets that keep failing cannot starve a healthy one.
    - success → delete the row (`jekt.held_delivered`); a crash between
      delivery and delete delivers it again — **at-least-once**;
    - still absent, rate limit, queue full, or the agent starting,

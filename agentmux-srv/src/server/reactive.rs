@@ -1412,7 +1412,12 @@ async fn hold_for_absent_target(
             // (ReAgent P1 on #3632: this path skipped the echo).
             echo_local_delivery(state, req, &resp);
         }
-        return Some(serde_json::to_value(&resp).unwrap_or_default());
+        // A refusal is the target's answer; but if it unregistered between
+        // the check and the delivery, fall through and hold it (Codex P2).
+        let raced_away = resp.error.as_deref().is_some_and(|e| e.starts_with("agent not found"));
+        if !raced_away {
+            return Some(serde_json::to_value(&resp).unwrap_or_default());
+        }
     }
     let mstore = state.mstore.clone();
     let outcome = tokio::task::spawn_blocking(move || mstore.jekt_held_insert(&outcome))
