@@ -450,7 +450,12 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        store is unavailable `id_store` falls back to this one and writes
 ///        here. Identity M4c-1 of
 ///        `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.9.
-pub const OBJECT_SCHEMA_VERSION: i64 = 39;
+///   v40 — db_jekt_held: a jekt to a known agent of this channel that no
+///        delivery tier could take (the agent was not running anywhere), held
+///        for up to 24 h and replayed when it registers, with the trust
+///        verdicts it was accepted with as explicit columns.
+///        `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` Phase 1.
+pub const OBJECT_SCHEMA_VERSION: i64 = 40;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -1095,6 +1100,30 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             INSERT OR IGNORE INTO db_agent_former_names (agent_id, name, recorded_at)
             VALUES (old.id, old.instance_name, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
         END;
+
+        -- v40: jekts held for an absent agent of this channel
+        -- (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md). Verdict columns are
+        -- NULL (unchecked), 0 (failed) or 1 (verified).
+        CREATE TABLE IF NOT EXISTS db_jekt_held (
+            request_id       TEXT PRIMARY KEY,
+            target_uid       TEXT NOT NULL,
+            target_agent     TEXT NOT NULL DEFAULT '',
+            source_agent     TEXT NOT NULL DEFAULT '',
+            audit_source_uid TEXT NOT NULL DEFAULT '',
+            message          TEXT NOT NULL,
+            priority         TEXT NOT NULL DEFAULT '',
+            jekt_tier        TEXT NOT NULL DEFAULT '',
+            delivery_tier    TEXT NOT NULL DEFAULT '',
+            sig_verified     INTEGER,
+            reagent_verified INTEGER,
+            lan_verified     INTEGER,
+            channel_verified INTEGER,
+            sent_at_ms       INTEGER NOT NULL,
+            expires_at_ms    INTEGER NOT NULL,
+            attempts         INTEGER NOT NULL DEFAULT 0,
+            last_error       TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_jekt_held_target ON db_jekt_held (target_uid, sent_at_ms);
 
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
         -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).
@@ -2902,7 +2931,9 @@ mod tests {
         ];
         let dir = tempfile::tempdir().unwrap();
         for (file, open, old, new, cols) in cases {
-            assert_eq!(new, old + 1, "{file}: M4c-1 is one bump");
+            // M4c-1 was one bump each; later bumps (objects v40, durable
+            // jekt) keep the upgrade from `old` covered.
+            assert!(new > old, "{file}: the current version is past M4c-1's base");
             let user_version = |c: &Connection| -> i64 {
                 c.query_row("PRAGMA user_version", [], |r| r.get(0))
                     .unwrap()

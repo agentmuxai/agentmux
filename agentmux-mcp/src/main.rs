@@ -1391,6 +1391,15 @@ async fn call_tool(
                          local delivery."
                     ))
                 }
+            } else if result.get("held").and_then(|v| v.as_bool()) == Some(true) {
+                // SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md: the target is a
+                // known agent that is not running anywhere srv can reach, so
+                // srv kept the message and delivers it when the agent starts.
+                Ok(format!(
+                    "HELD for {to} — not delivered yet. {to} is not running; this AgentMux \
+                     instance (channel) keeps the message and delivers it when {to} starts \
+                     here, for up to 24 hours. Do not resend it."
+                ))
             } else {
                 let err = result
                     .get("error")

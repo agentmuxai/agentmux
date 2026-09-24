@@ -5829,3 +5829,59 @@ async fn m4c3_a_cron_fire_is_delivered_in_process_and_audited_with_its_creator()
     assert_eq!(entry.source_agent.as_deref(), Some("cron"));
     assert_eq!(entry.audit_source_uid, "uid-m4c3-creator");
 }
+
+// ---- durable jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) ----
+
+/// A jekt to a known agent that is not running anywhere is held once, by
+/// its UID; an unknown name and a `cron` fire keep today's error; a replay
+/// pass leaves a still-absent target's message where it is, with no attempt
+/// counted.
+#[tokio::test]
+async fn a_jekt_to_an_absent_known_agent_is_held_and_waits() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("heldy-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Held Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+
+    let send = |target: &str, source: &str, id: &str| {
+        serde_json::json!({"target_agent": target, "message": "hi", "source_agent": source, "request_id": id})
+    };
+    let id = format!("req-{slug}");
+    // The global handler's rate limiter is shared by every test (10/s).
+    let mut v = serde_json::Value::Null;
+    for _ in 0..25 {
+        v = m4c1_send(&state, None, "/agentmux/reactive/inject", send(&slug, "sender", &id)).await.1;
+        if v["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(v["success"], false, "held is not delivered: {v}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].request_id, id);
+
+    // Same id again: the same answer, nothing stored twice.
+    let v = m4c1_send(&state, None, "/agentmux/reactive/inject", send(&slug, "sender", &id)).await.1;
+    if v["error"] != "rate limit exceeded" {
+        assert_eq!(v["held"], true, "{v}");
+    }
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().len(), 1);
+
+    // Not held: a name no agent has, and a periodic cron fire.
+    for (target, source) in [(format!("nobody-{slug}"), "sender"), (slug.clone(), "cron")] {
+        let v = m4c1_send(&state, None, "/agentmux/reactive/inject", send(&target, source, &format!("x-{target}-{source}"))).await.1;
+        assert!(v.get("held").is_none(), "{target} from {source}: {v}");
+    }
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().len(), 1);
+
+    // Still absent: the replay pass does not touch it.
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().all(|(r, _)| r != &id), "{outcomes:?}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows[0].attempts, 0);
+}

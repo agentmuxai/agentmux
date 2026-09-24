@@ -142,6 +142,7 @@ pub(super) fn echo_jekt_to_sender(
         requires_stop.unwrap_or(true),
         msgid,
         priority,
+        None,
     );
     let line = serde_json::json!({
         "type": "user",
@@ -1097,12 +1098,17 @@ pub(crate) async fn deliver(
     let mut same_host_req = forwarded_req.clone();
     same_host_req.delivery_tier = Some(same_host_tier.to_string());
 
+    // Whether any forwarding tier found an entry for the target. A target
+    // alive elsewhere that refused is not "absent" and is never held here
+    // (durable jekt spec §2.1, condition 3).
+    let mut candidate_seen = false;
     if is_not_found {
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url {
+                candidate_seen = true;
                 match forward_inject_to_peer(
                     &state,
                     &req,
@@ -1187,6 +1193,7 @@ pub(crate) async fn deliver(
                 if !is_loopback || entry.local_url == state.local_web_url {
                     continue;
                 }
+                candidate_seen = true;
 
                 match forward_inject_to_peer(
                     &state,
@@ -1249,6 +1256,7 @@ pub(crate) async fn deliver(
             .find_agent(&req.target_agent, &state.http_client)
             .await
         {
+            candidate_seen = true;
             match forward_inject_to_peer(
                 &state,
                 &req,
@@ -1298,10 +1306,106 @@ pub(crate) async fn deliver(
         if let Some(body) = try_cloud_relay(&state, &req).await {
             return body;
         }
+        // 5. No tier knew the target: hold it for the agent's return, when
+        //    the durable jekt conditions hold.
+        if !candidate_seen {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp).await {
+                return held;
+            }
+        }
     }
 
-    // 5. Every tier declined — return the original local error.
+    // 6. Every tier declined — return the original local error.
     serde_json::to_value(&resp).unwrap_or_default()
+}
+
+/// Hold a jekt no tier could take, when every condition of
+/// `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.1 holds: a full-key,
+/// host-tier request (a LAN caller never fills the hold); not a periodic
+/// `cron` fire; and a target that is a known agent of this channel —
+/// resolved to its row's UID, so a typo or a name registered later by
+/// another block never receives the backlog. `None` keeps today's error.
+async fn hold_for_absent_target(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+) -> Option<serde_json::Value> {
+    use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
+    if auth_via != super::ReactiveAuthVia::FullAuthKey
+        || req.delivery_tier.as_deref() != Some("host")
+        || req.source_agent.as_deref() == Some("cron")
+        || resp.request_id.is_empty()
+    {
+        return None;
+    }
+    let now = agentmux_common::time::now_ms();
+    let mut held = HeldJekt {
+        request_id: resp.request_id.clone(),
+        target_uid: String::new(),
+        target_agent: req.target_agent.clone(),
+        source_agent: req.source_agent.clone().unwrap_or_default(),
+        audit_source_uid: req.audit_source_uid.clone(),
+        message: req.message.clone(),
+        priority: req.priority.clone().unwrap_or_default(),
+        jekt_tier: req
+            .jekt_tier
+            .as_ref()
+            .and_then(|t| serde_json::to_value(t).ok())
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        delivery_tier: "host".to_string(),
+        sig_verified: req.sig_verified,
+        reagent_verified: req.reagent_verified,
+        lan_verified: req.lan_verified,
+        channel_verified: req.channel_verified,
+        sent_at_ms: now,
+        expires_at_ms: now + HELD_TTL_MS,
+        attempts: 0,
+        last_error: String::new(),
+    };
+    let mstore = state.mstore.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let target = held.target_agent.trim().to_string();
+        let uid = match mstore.instance_get(&target) {
+            Ok(Some(row)) => Some(row.id),
+            _ => match mstore.agents_matching_name(&target) {
+                Ok(rows) if rows.len() == 1 => Some(rows[0].id.clone()),
+                _ => None,
+            },
+        }?;
+        held.target_uid = uid;
+        Some(mstore.jekt_held_insert(&held))
+    })
+    .await
+    .ok()
+    .flatten()?;
+    let target = &req.target_agent;
+    match outcome {
+        Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
+            crate::backend::agent_resolve::record_uid_fallback("jekt.held");
+            Some(json!({
+                "success": false,
+                "held": true,
+                "request_id": resp.request_id,
+                "error": format!(
+                    "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
+                ),
+            }))
+        }
+        Ok(HoldOutcome::Full) => Some(json!({
+            "success": false,
+            "request_id": resp.request_id,
+            "error": format!(
+                "{} (hold full: too many messages already held for {target})",
+                resp.error.clone().unwrap_or_default()
+            ),
+        })),
+        Err(e) => {
+            tracing::warn!(error = %e, target = %target, "durable jekt: hold failed");
+            None
+        }
+    }
 }
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender

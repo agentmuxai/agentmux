@@ -31,6 +31,15 @@ pub const TRUNCATION_SUFFIX: &str = "\n[Message truncated]";
 /// Maximum entries in the audit log ring buffer.
 const AUDIT_LOG_MAX: usize = 100;
 
+/// Woken whenever an agent registers, so jekts held for an absent agent are
+/// replayed promptly (`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.3).
+/// `notify_one` does no I/O, so it is safe under the handler lock.
+pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
+    static WAKE: std::sync::LazyLock<tokio::sync::Notify> =
+        std::sync::LazyLock::new(tokio::sync::Notify::new);
+    &WAKE
+}
+
 /// Rate limit: max tokens (requests per second).
 const RATE_LIMIT_MAX: u32 = 10;
 
