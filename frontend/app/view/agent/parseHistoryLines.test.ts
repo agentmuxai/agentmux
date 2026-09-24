@@ -440,3 +440,55 @@ describe("parseHistoryLines", () => {
         });
     });
 });
+
+describe("parseHistoryLines — Gemini-family transcripts keep the user's messages", () => {
+    it("restores the user message from the CLI's echo", () => {
+        const lines = [
+            JSON.stringify({ type: "init", session_id: "s", model: "gemini" }),
+            JSON.stringify({ type: "message", role: "user", content: "summarise the repo" }),
+            JSON.stringify({ type: "message", role: "assistant", content: "Here is", delta: true }),
+            JSON.stringify({ type: "message", role: "assistant", content: " a summary.", delta: true }),
+            JSON.stringify({ type: "result", status: "success", stats: {} }),
+        ];
+        const { nodes } = parseHistoryLines(lines, "gemini-json");
+        const kinds = nodes.map((n) => n.type);
+        expect(kinds[0]).toBe("user_message");
+        expect((nodes[0] as { message: string }).message).toBe("summarise the repo");
+        expect(kinds).toContain("markdown");
+    });
+});
+
+describe("parseHistoryLines — restored user messages keep their historical time (ReAgent P1, #3620)", () => {
+    // A translator must not invent a "now" timestamp for a replayed user
+    // message: parseHistoryLines only fills the line's batch stamp when a node
+    // has no timestamp, so a fabricated Date.now() showed every restored user
+    // message as sent "just now".
+    const T0 = Date.UTC(2026, 0, 2, 3, 4, 5);
+
+    it("Gemini: the echo takes its line's batch stamp", () => {
+        const lines = [
+            JSON.stringify({ type: "message", role: "user", content: "hi" }),
+            JSON.stringify({ type: "message", role: "assistant", content: "hello", delta: true }),
+        ];
+        const { nodes } = parseHistoryLines(lines, "gemini-json", undefined, [T0, T0 + 1000]);
+        const user = nodes.find((n) => n.type === "user_message") as { timestamp?: number };
+        expect(user.timestamp).toBe(T0);
+    });
+
+    it("Claude: a persisted user line takes its line's batch stamp", () => {
+        const lines = [
+            JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }),
+            JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } }),
+        ];
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json", undefined, [T0, T0 + 1000]);
+        const user = nodes.find((n) => n.type === "user_message") as { timestamp?: number };
+        expect(user.timestamp).toBe(T0);
+    });
+
+    it("no stamp available: the timestamp is unknown, never a fabricated 'now'", () => {
+        const before = Date.now();
+        const { nodes } = parseHistoryLines([JSON.stringify({ type: "message", role: "user", content: "hi" })], "gemini-json");
+        const user = nodes.find((n) => n.type === "user_message") as { timestamp?: number };
+        expect(user.timestamp === undefined || user.timestamp < before).toBe(true);
+    });
+});

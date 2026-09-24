@@ -707,7 +707,9 @@ export class ClaudeCodeStreamParser {
             type: "user_message",
             id: this.nextIdOf("user"),
             message: event.message,
-            timestamp: event.timestamp || Date.now(),
+            // Replay: no invented "now" — parseHistoryLines fills the line's
+            // stored receive time (ReAgent P1, #3620).
+            timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),
             isStartup,
         };
     }
