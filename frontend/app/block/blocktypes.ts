@@ -109,26 +109,15 @@ export interface BlockFrameProps {
      *  §4.1) — when provided, `BlockFrame_Header` renders this INSTEAD of its
      *  own `.block-frame-default-header-iconview` (icon + title + blockid),
      *  while keeping every other row element (ConnectionButton, header text
-     *  elems, EndIcons) exactly as-is. Only set this when there are 2+ real
-     *  Pane Tabs to show as pills — with 0 or 1, the real iconview (which
-     *  already correctly reads the active ViewModel's own name/icon and
-     *  supports click-to-rename via `ViewNameEditor`) is strictly more
-     *  correct than any synthetic substitute (ReAgent P1 on PR #3309: an
-     *  earlier version of this unconditionally overrode the iconview with a
-     *  hardcoded literal for the single most common pane state — a lone
-     *  conversation/shell — silently losing the real per-pane name, icon,
-     *  and rename affordance). See `trailingAddButton` for how the "+"
-     *  still reaches the row in that case. */
+     *  elems, EndIcons) exactly as-is. PaneHeaderTabStrip always sets it,
+     *  lone tab included — a Pane header always shows its tabs
+     *  (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §8).
+     *  The per-pane name, icon and rename affordance that ReAgent P1 on
+     *  PR #3309 guarded here now live on the pill itself (PaneChrome's
+     *  pane-tab model, #3373), so a lone pill loses nothing the iconview
+     *  had. Left unset only by the non-PaneChrome BlockFrame header path,
+     *  which keeps the plain iconview. */
     leadingTabStrip?: JSX.Element;
-
-    /** Rendered right after the iconview/leadingTabStrip, ONLY when
-     *  `leadingTabStrip` is unset (i.e. the real iconview is showing) —
-     *  when `leadingTabStrip` IS set, its own tab strip already carries its
-     *  own "+", so this is skipped to avoid a duplicate. This is how a
-     *  lone-conversation/lone-shell Pane still gets an "add tab" affordance
-     *  without losing its real identity — see `leadingTabStrip`'s own doc
-     *  comment for the bug this split fixes. */
-    trailingAddButton?: JSX.Element;
 
     /** Explicit header-row background, overriding the active block's own
      *  pane color (`computeBlockColorBg`) and the non-agent default.

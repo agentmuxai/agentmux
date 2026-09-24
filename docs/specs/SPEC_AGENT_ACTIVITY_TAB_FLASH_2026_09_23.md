@@ -376,8 +376,10 @@ Departures from §2–§4 as first written (as of Revision 2):
    `flashOnActivity` prop, set only by `PaneHeaderTabStrip`, because the
    editor file tabs and the agent History strip reuse the same component with
    ids that aren't blockIds.
-2. **Known gap:** with `pane:tabstrip = "multi-only"`, a single-block pane
-   shows no pill. Its window tab still flashes.
+2. **Known gap (closed 2026-09-24):** with `pane:tabstrip = "multi-only"`, a
+   single-block pane showed no pill, so only its window tab flashed. The
+   setting has been removed and every pane now has a pill
+   (`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md` §8).
 3. **Overlay under the content:** each host gets `isolation: isolate`, and the
    overlay sits at `z-index: var(--zindex-activity-flash)`, a new token in
    `theme.scss` set to -1, because stylelint only allows z-index tokens. This
