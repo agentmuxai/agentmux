@@ -94,10 +94,38 @@ export function agentmuxHome(): string {
 }
 
 /**
- * Resolve the version-isolated CLI install directory.
+ * The CLI binary a pane's `cmd` meta should name, as the backend resolves it
+ * (`ResolveCli`, the same call `flows/launch-flow.ts` makes). The backend
+ * installs the CLI if it's missing.
+ *
+ * This used to be built here as
+ * `${agentmuxHome()}/instances/v<version>/cli/<provider>/node_modules/.bin/<cli>`.
+ * Since v0.56.7 the backend installs CLIs under the channel's own data dir
+ * (`DataPaths::from_env()`), which `agentmuxHome()` (the host's global
+ * `~/.agentmux`) is not, and the string also lacked Windows' `.cmd`. The
+ * backend spawns whatever `cmd` says, so a pane relaunched through this path
+ * failed every spawn with "The system cannot find the path specified" (Agent3
+ * on 0.57.0, 2026-09-24) while panes seeded by the backend kept working.
  */
-export function resolveCliDir(version: string, providerId: string): string {
-    return `${agentmuxHome()}/instances/v${version}/cli/${providerId}`;
+export async function resolveCliBin(provider: ProviderDefinition, blockId: string): Promise<string> {
+    const result = await RpcApi.ResolveCliCommand(
+        TabRpcClient,
+        {
+            provider_id: provider.id,
+            cli_command: provider.cliCommand,
+            npm_package: provider.npmPackage,
+            pinned_version: provider.pinnedVersion,
+            windows_install_command: provider.windowsInstallCommand,
+            unix_install_command: provider.unixInstallCommand,
+            block_id: blockId,
+        },
+        // Same budget as launch-flow.ts: a first launch may npm-install.
+        { timeout: 300000 },
+    );
+    if (!result?.cli_path) {
+        throw new Error(`ResolveCli returned no CLI path for provider '${provider.id}'`);
+    }
+    return result.cli_path;
 }
 
 /**
