@@ -94,6 +94,49 @@ fn parse_claude_config_dir(env_blob: &str) -> String {
     String::new()
 }
 
+/// The identity stores (`id_store`, `identity_store`), attached once at boot,
+/// so memory resolution can find the account an agent is linked to — the
+/// directory its spawn actually runs Claude in. Its callers hold only the
+/// channel store. Unattached (tests): the linked-account step is skipped.
+static IDENTITY_STORES: std::sync::OnceLock<(
+    std::sync::Arc<crate::backend::storage::store::Store>,
+    std::sync::Arc<crate::backend::storage::store::Store>,
+)> = std::sync::OnceLock::new();
+
+pub(crate) fn attach_identity_stores(
+    id_store: std::sync::Arc<crate::backend::storage::store::Store>,
+    identity_store: std::sync::Arc<crate::backend::storage::store::Store>,
+) {
+    let _ = IDENTITY_STORES.set((id_store, identity_store));
+}
+
+/// The Claude config dir an agent runs in: its env override, else the
+/// config dir of the OAuth account it is linked to — where its spawn points
+/// `CLAUDE_CONFIG_DIR` (`resolver::inject`) — else `""`, the shared default
+/// (#3603: an agent with no env override and a linked account resolved to
+/// the shared default, so `MemoryList` listed nothing while its memories sat
+/// in the account's dir).
+fn agent_claude_config_dir(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
+    let from_env = mstore
+        .agent_content_get(agent_id, "env")
+        .ok()
+        .flatten()
+        .map(|c| parse_claude_config_dir(&c.content))
+        .unwrap_or_default();
+    if !from_env.is_empty() {
+        return from_env;
+    }
+    IDENTITY_STORES
+        .get()
+        .and_then(|(id_store, identity_store)| {
+            crate::identity::resolver::resolve_bound_oauth_config_dir_for_agent(
+                mstore, id_store, identity_store, agent_id,
+            )
+        })
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 /// Resolve the memory directory for `agent_id`. Reads the agent definition and
 /// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error only if
 /// the agent cannot be resolved at all — an instance row with a blank
@@ -128,12 +171,7 @@ pub(crate) fn memory_dir_for_agent(
         // intact — the common case, since `working_directory` is blank by
         // default. See SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md.
         if !instance.working_directory.is_empty() {
-            let config_dir = mstore
-                .agent_content_get(&instance.id, "env")
-                .ok()
-                .flatten()
-                .map(|c| parse_claude_config_dir(&c.content))
-                .unwrap_or_default();
+            let config_dir = agent_claude_config_dir(mstore, &instance.id);
             return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
         }
         // Resolve through the DEFINITION, not the instance row: `db_agents`
@@ -277,12 +315,7 @@ fn memory_dir_for_blank_working_dir(
     if agent_name.is_empty() {
         return None;
     }
-    let config_dir = mstore
-        .agent_content_get(definition_id, "env")
-        .ok()
-        .flatten()
-        .map(|c| parse_claude_config_dir(&c.content))
-        .unwrap_or_default();
+    let config_dir = agent_claude_config_dir(mstore, definition_id);
     let work_dir = crate::backend::storage::agents::default_agent_working_dir(agent_name);
     Some(memory_dir_for_cwd(&config_dir, &work_dir))
 }
@@ -645,12 +678,7 @@ pub(crate) fn memory_dir_for_agent_by_id(
     //     bypassed a data-loss guard.
     // Both for the common case, since `working_directory` is blank by default.
     if !agent.working_directory.is_empty() {
-        let config_dir = mstore
-            .agent_content_get(&agent.id, "env")
-            .ok()
-            .flatten()
-            .map(|c| parse_claude_config_dir(&c.content))
-            .unwrap_or_default();
+        let config_dir = agent_claude_config_dir(mstore, &agent.id);
         return Some(memory_dir_for_cwd(&config_dir, &agent.working_directory));
     }
     memory_dir_for_blank_working_dir(mstore, &agent.id, &agent.name, &agent.slug)
@@ -2680,6 +2708,45 @@ mod tests {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
         }
+    }
+
+    /// #3603: an agent with no `CLAUDE_CONFIG_DIR` in its env but a linked
+    /// Claude OAuth account runs Claude in that account's dir, so its
+    /// memories are there — not under the shared default.
+    #[test]
+    fn memory_dir_follows_the_linked_oauth_account_when_env_has_none() {
+        use crate::backend::storage::identities::{IdentityAccount, SecretRef};
+        let store = std::sync::Arc::new(Store::open_in_memory().unwrap());
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-3603", "M", "claude", "agent", 1, "");
+        def.slug = "m-3603".into();
+        def.working_directory = "/work/m-3603".into();
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .identity_upsert(&IdentityAccount {
+                id: "acct-3603".into(),
+                name: "claude-oauth".into(),
+                provider: "claude".into(),
+                kind: "oauth".into(),
+                display_name: String::new(),
+                secret_ref: SecretRef::OAuthConfigDir { dir: "/accounts/acct-3603/claude".into() },
+                context: serde_json::json!({}),
+                status: "valid".into(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        store.agent_identity_link("uid-3603", "acct-3603", "claude").unwrap();
+        // One store plays all three roles here; an in-process OnceLock, so it
+        // is attached once — other tests' agents have no links in it.
+        attach_identity_stores(store.clone(), store.clone());
+
+        let got = memory_dir_for_agent_by_id(&store, &def).unwrap();
+        assert_eq!(got, memory_dir_for_cwd("/accounts/acct-3603/claude", "/work/m-3603"));
+        assert_eq!(
+            memory_dir_for_agent(&store, "m-3603").unwrap(),
+            got,
+            "the slug path resolves the same dir"
+        );
     }
 
     #[test]

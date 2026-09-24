@@ -395,6 +395,28 @@ pub fn resolve_bound_oauth_config_dir(
     block_id: &str,
 ) -> Option<PathBuf> {
     let instance = mstore.instance_get_active_for_block(block_id).ok().flatten()?;
+    bound_oauth_config_dir(mstore, id_store, identity_store, &instance)
+}
+
+/// [`resolve_bound_oauth_config_dir`] for an agent row by its id, with no
+/// block — memory resolution's question (#3603): where does this agent's
+/// Claude run, so where are its memories.
+pub fn resolve_bound_oauth_config_dir_for_agent(
+    mstore: &Store,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    agent_id: &str,
+) -> Option<PathBuf> {
+    let instance = mstore.instance_get(agent_id).ok().flatten()?;
+    bound_oauth_config_dir(mstore, id_store, identity_store, &instance)
+}
+
+fn bound_oauth_config_dir(
+    mstore: &Store,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    instance: &crate::backend::storage::store::AgentInstance,
+) -> Option<PathBuf> {
     let def = mstore.agent_def_get(&instance.definition_id).ok().flatten()?;
     let effective_provider = id_store.resolve_effective_provider_id(&def);
     let canonical_provider = resolve_provider_alias(&effective_provider).to_string();
@@ -403,7 +425,7 @@ pub fn resolve_bound_oauth_config_dir(
     }
 
     let template_parent_id = template_parent_id_if_seeded(mstore, &def.parent_id);
-    let bindings = resolve_bindings_for_instance(identity_store, &instance, &template_parent_id, None);
+    let bindings = resolve_bindings_for_instance(identity_store, instance, &template_parent_id, None);
     let binding = bindings
         .iter()
         .find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;

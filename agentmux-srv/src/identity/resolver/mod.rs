@@ -52,7 +52,7 @@ pub use errors::{ResolverError, SpawnGateError};
 pub(crate) use inject::block_agent_id;
 pub use inject::{
     inject_identity_env, inject_identity_env_async, inject_identity_env_with_broker, resolve_account,
-    resolve_bound_oauth_config_dir,
+    resolve_bound_oauth_config_dir, resolve_bound_oauth_config_dir_for_agent,
 };
 pub use oauth_probe::{oauth_status, probe_oauth_status, OAuthProbeStatus};
 pub use provider::{provider_class, ProviderClass};
