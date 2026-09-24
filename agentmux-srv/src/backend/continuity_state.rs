@@ -238,6 +238,50 @@ fn eligible(meta: &MetaMapType) -> Option<(String, String)> {
     Some((agent_zone_for_block_meta(meta)?, cli_path))
 }
 
+/// The clause `memory-reinjection.ts` (`REASON_CLAUSE.compaction`) puts in a
+/// reinjection sent after the provider compacted the conversation.
+const COMPACTION_CLAUSE: &str = "Your recent conversation was just compacted into a summary.";
+
+/// `message` with the agent's running summary added, when it is the hidden
+/// memory reinjection sent after a compaction (§4.4, "Compaction reuse"): the
+/// provider's own compaction summary can drop commitments, and this is the
+/// backstop. Any other message, or an agent with no summary yet, comes back
+/// unchanged.
+pub(crate) fn with_state_after_compaction(mstore: &Store, block_id: &str, message: String) -> String {
+    if !(crate::server::app_api::session::is_hidden_reinjection_text(&message) && message.contains(COMPACTION_CLAUSE)) {
+        return message;
+    }
+    let state = mstore
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .and_then(|block| eligible(&block.meta))
+        .and_then(|(zone, _)| latest_state(global_transcript_store()?, &zone));
+    match state {
+        Some(state) => append_state_to_reinjection(message, &state),
+        None => message,
+    }
+}
+
+/// Inserts the summary as the reinjection's last section. It's a `#`
+/// heading like the memory sections, so the frontend's replay parser
+/// (`parseReinjectionMessage`) still ends the Personal Memory section where
+/// it did.
+fn append_state_to_reinjection(message: String, state: &StateVersion) -> String {
+    const CLOSE: &str = "</system-reminder>";
+    let Some(at) = message.rfind(CLOSE) else { return message };
+    let written = chrono::DateTime::from_timestamp_millis(state.created_at_ms)
+        .map_or_else(String::new, |t| format!(", written {}", t.format("%Y-%m-%d %H:%M UTC")));
+    let before = &message[..at];
+    let separator = if before.ends_with('\n') { "" } else { "\n" };
+    format!(
+        "{before}{separator}# Running summary of this conversation (kept by AgentMux{written}; your compacted \
+         context wins where it is newer)\n{}\n{}",
+        defuse_delimiters(state.text.trim()),
+        &message[at..],
+    )
+}
+
 /// Called when a turn ends successfully. Returns at once; any update runs in
 /// the background.
 pub(crate) fn after_successful_turn(mstore: Option<Arc<Store>>, block_id: String) {
@@ -441,6 +485,38 @@ mod tests {
         assert!(!s.contains("ghp_abcdef"));
         assert!(!s.to_ascii_lowercase().contains("agentmux-continuation"));
         assert!(s.chars().count() <= STATE_MAX_CHARS + 40);
+    }
+
+    /// `composeReinjectionMessage`'s shape (memory-reinjection.ts).
+    fn reinjection(reason_clause: &str) -> String {
+        format!(
+            "<system-reminder>\nYour memory was reinjected because your working context was just reset. \
+             {reason_clause} Below is your\ncomplete Global Memory and Personal Memory content — read all of it now,\n\
+             not just the index.\n\n# Global Memory (1 entry)\nG\n\n# Personal Memory (1 entry)\nP\n</system-reminder>\n"
+        )
+    }
+
+    #[test]
+    fn the_summary_becomes_the_last_section_of_a_compaction_reinjection() {
+        let out = append_state_to_reinjection(reinjection(COMPACTION_CLAUSE), &version(3, 10, 1_790_000_000_000));
+        let personal = out.find("# Personal Memory (1 entry)\nP\n").unwrap();
+        let summary = out.find("# Running summary of this conversation").unwrap();
+        assert!(personal < summary, "{out}");
+        assert!(out.contains("goal 3"));
+        assert!(out.ends_with("</system-reminder>\n"));
+        assert_eq!(out.matches("</system-reminder>").count(), 1);
+        assert!(crate::server::app_api::session::is_hidden_reinjection_text(&out), "still recognized as hidden");
+    }
+
+    #[test]
+    fn only_a_compaction_reinjection_gets_the_summary() {
+        let mstore = Store::open_in_memory().unwrap();
+        let fresh = reinjection("AgentMux could not resume this agent's prior session");
+        assert_eq!(with_state_after_compaction(&mstore, "b", fresh.clone()), fresh);
+        assert_eq!(with_state_after_compaction(&mstore, "b", "hello".into()), "hello");
+        // A compaction reinjection for a block with no state is unchanged too.
+        let compaction = reinjection(COMPACTION_CLAUSE);
+        assert_eq!(with_state_after_compaction(&mstore, "missing-block", compaction.clone()), compaction);
     }
 
     fn meta(pairs: &[(&str, &str)]) -> MetaMapType {

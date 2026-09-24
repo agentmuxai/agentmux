@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. P1, P2, P4–P6, and P3's resolver ladder, pane chip, compaction reuse and deterministic identifier extraction not started.
+**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1, P2, P4–P6, and P3's resolver ladder, pane chip and deterministic identifier extraction not started.
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -392,6 +392,14 @@ It keeps the design and defers everything that needs P1's segment index.
   "Running summary of the whole conversation", with its timestamp and a note
   that the verbatim exchange below is newer and wins where they differ. Then
   come the last request and the exchange, per §4.4's order.
+- **Compaction reuse.** When the hidden memory reinjection that follows a
+  compaction reaches srv (`agent_handlers/input.rs`, `hidden: true`, carrying
+  `memory-reinjection.ts`'s compaction clause), srv appends the newest version
+  as a final `# Running summary of this conversation` section
+  (`with_state_after_compaction`). It's a `#` section like the memory ones,
+  so the frontend's replay parser still counts the entries right. A
+  fresh-session reinjection doesn't get it, because its continuation packet
+  already leads with the summary.
 - **Live check, 2026-09-24.** Run on a real 101-turn transcript (the account
   switch that prompted this). Haiku took 27 s, which is why the call gets its
   own timeout instead of the 15 s default. The first prompt produced a good
@@ -400,8 +408,7 @@ It keeps the design and defers everything that needs P1's segment index.
   output still had small errors, like a commit id attached to the wrong PR.
   That's the case for the deterministic identifier extraction below.
 
-**Not in v1:** the resolver ladder (R0–R4), the pane chip, compaction reuse
-(adding the state to #3502's reinjection), deterministic identifier
+**Not in v1:** the resolver ladder (R0–R4), the pane chip, deterministic identifier
 extraction, per-version prompt logging, the Armory diff/revert view, and other
 providers.
 
