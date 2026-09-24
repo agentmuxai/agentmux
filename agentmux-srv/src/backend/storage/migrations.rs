@@ -2098,6 +2098,27 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
             PRIMARY KEY (zoneid, name, partidx)
         );",
     )?;
+    // Line counter (Phase 5a-2, SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_
+    // 2026_09_23.md §6.3.7; see `filestore/counter.rs`). Additive and
+    // nullable, and deliberately WITHOUT a FILESTORE_SCHEMA_VERSION bump: the
+    // global transcript store is shared by every srv instance on the machine,
+    // and a bump would make older builds refuse to open it. Older builds
+    // insert rows without these columns (NULL = not counted) and write
+    // without maintaining them, which the counter detects. "duplicate
+    // column" is expected when another instance added them first.
+    for stmt in &[
+        "ALTER TABLE db_wave_file ADD COLUMN gen TEXT",
+        "ALTER TABLE db_wave_file ADD COLUMN lines INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_tail INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_modts INTEGER",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            if !e.to_string().contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
     Ok(())
 }
 
