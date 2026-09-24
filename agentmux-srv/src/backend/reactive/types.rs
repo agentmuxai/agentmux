@@ -94,6 +94,15 @@ pub struct InjectionRequest {
     /// was given or it didn't match.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub sig_verified: Option<bool>,
+    /// Identity M4c-2d (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): the sender's UID, from the request's `Caller` — its
+    /// `X-Agent-Token` — set by the srv handler that received it, and copied
+    /// onto the audit entries this delivery writes. `#[serde(skip)]` both
+    /// ways: a body can never set it, and it never rides a forwarding hop —
+    /// distinct from the `source_uid` wire field §6.5.3 reserves for the MCP
+    /// to set and sign (M4d). Empty = Unattributed.
+    #[serde(skip)]
+    pub audit_source_uid: String,
     /// Base64 Ed25519 signature over the same signed material as `jekt_sig`
     /// (request_id, source_agent, target_agent, ts_secs, message), produced
     /// by an AgentMux-operated WAN-tier service sender (currently only the
@@ -469,6 +478,12 @@ pub struct AuditLogEntry {
     /// this block had no prior tenant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evicted_agent: Option<String>,
+    /// Identity M4c-2d: the sending agent's UID when its request was
+    /// attributed (`InjectionRequest::audit_source_uid`), beside the
+    /// `source_agent` name it claimed. Empty = Unattributed, or not a
+    /// delivery.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub audit_source_uid: String,
 }
 
 fn default_event_kind() -> String {

@@ -643,7 +643,7 @@ async fn handle_incoming_text(
                         Some("urgent") => crate::backend::messagebus::Priority::Urgent,
                         _ => crate::backend::messagebus::Priority::Normal,
                     };
-                    match state.messagebus.inject(from, target, message, priority) {
+                    match state.messagebus.inject(from, "", target, message, priority) {
                         Ok(msg_id) => {
                             // Sender-side echo for the messagebus fallback path.
                             // Tier is unknown here (no ReactiveHandler wrap) — None
@@ -690,7 +690,7 @@ async fn handle_incoming_text(
                         Some("urgent") => crate::backend::messagebus::Priority::Urgent,
                         _ => crate::backend::messagebus::Priority::Normal,
                     };
-                    let _ = state.messagebus.broadcast(from, payload, priority);
+                    let _ = state.messagebus.broadcast(from, "", payload, priority);
                 }
                 return Ok(None);
             }

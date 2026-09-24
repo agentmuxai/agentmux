@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) in #3602. M4c-2c (identity, preset and history owners are the Caller) implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) in #3602. M4c-2c (identity, preset and history owners are the Caller) in #3605. M4c-2d (the sender's UID audited and carried) implemented. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -1214,7 +1214,7 @@ own PR and independently revertible.
 | cron `created_by` | `db_cron_jobs` (shared store; identity-store parity copy, as M1b) | new `created_by_uid` in both | M4c-3 (below); the Swarm view's creator lookup resolves by UID when set |
 | global memory `written_by` | `db_bundle_versions` (shared store; objects and identity parity copies) | new `written_by_uid` | returned beside `written_by` in history/revert; the operator-config seeder keeps comparing the **name** `agentmux-operator-config-seed`, which is not an agent |
 | personal memory owner | versions and the mirror are keyed by the owner's UID, derived from the slug every call (`resolve_agent_id`); the files themselves are found through slug → working directory | — | **owner = the `Caller` UID** when attributed; files found by id (`memory_dir_for_agent_by_id`, which walks the same branches but has no registry-by-slug fallback — a miss is an **error**, never an empty list, the #2901 class); the slug path stays for Unattributed callers, counted. Closes the ambiguous-name case M4a-2 counts (`m4.actor_ambiguous.memory_*`). Recorded: memory an agent wrote under a slug that resolved to *another* agent (#3573 stubs, collision-suffixed backfills) stays where it was written — not migrated |
-| inject / supervisor `source_agent` | in-memory audit ring (`AuditLogEntry`) | new `audit_source_uid` field, **server-set only** (`skip_deserializing`) and distinct from the `source_uid` wire field §6.5.3 reserves for the MCP to set and sign — a srv-written value must never ride a forwarding hop | the Warden audit view shows it; trust and the jekt tier stay name-keyed until M4d |
+| inject / supervisor `source_agent` | in-memory audit ring (`AuditLogEntry`) | new `audit_source_uid` field, **server-set only** (`#[serde(skip)]` on the request: never read from a body, never serialized) and distinct from the `source_uid` wire field §6.5.3 reserves for the MCP to set and sign — a srv-written value must never ride a forwarding hop | returned by `GET /agentmux/reactive/audit` (M4c-2d); the Warden audit view does not display it yet — a UI follow-up; trust and the jekt tier stay name-keyed until M4d |
 | bus `from` | in-memory `BusMessage` | new `from_uid` field | exposed on read |
 | identity accounts/validate, history search, preset get (self) — owner = actor | not persisted; the owner is resolved from the slug each call | — | **owner = the `Caller` UID** when attributed, as for memory — the same colliding-name defect (`IdentityValidate` would live-probe the *other* agent's stored secret); slug path for Unattributed, counted |
 | UI automation `auth.agent_id` | not persisted | — | M4d |
@@ -1262,6 +1262,22 @@ its registry record's by slug and id). A token whose row is gone is an
 error on each. Unattributed: the slug, counted
 (`m4c.identity_owner_by_name`, `m4c.preset_owner_by_name`,
 `m4c.history_owner_by_name`). The WS RPC keeps the slug.
+
+**The sender's UID exposed (M4c-2d).** An attributed `/agentmux/reactive/inject`,
+`/agentmux/reactive/supervisor-decision` or `/api/bus/inject` sets
+`InjectionRequest::audit_source_uid` from its `Caller`; every audit entry
+that delivery writes (and every entry a Supervisor decision writes — a
+decline, a nudge refused at the ceiling) carries it as
+`AuditLogEntry::audit_source_uid` beside the claimed `source_agent`. The
+request field is `#[serde(skip)]` both ways — a body cannot set it and a
+forwarding hop never carries it. An attributed `/api/bus/send`, `/inject`
+fallback or `/broadcast` stamps `BusMessage::from_uid` beside `from` (a bus
+message never leaves its srv); the WebSocket bus has no per-request caller
+and stays empty. Global-memory history and revert now return
+`written_by_uid` beside `written_by`; work items already expose
+`created_by_uid` and `claimed_by_uid`.
+Nothing branches on any of these; trust and the jekt tier stay name-keyed
+until M4d.
 
 **Cron (M4c-3, §6.5.5).** `created_by_uid` is captured at create (M4c-1).
 The fire path stops POSTing an unattributed `/agentmux/reactive/inject` and

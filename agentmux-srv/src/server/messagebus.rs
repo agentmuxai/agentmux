@@ -112,7 +112,8 @@ pub(super) async fn handle_send(
         Some(&req.from),
     );
     let priority = parse_priority(&req.priority);
-    let msg = BusMessage::new(&req.from, &req.to, MessageType::Send, &req.payload, priority);
+    let msg = BusMessage::new(&req.from, &req.to, MessageType::Send, &req.payload, priority)
+        .with_from_uid(&super::caller::attributed_uid(caller.as_deref()));
     let msg_id = msg.id.clone();
 
     match state.messagebus.send(msg) {
@@ -153,6 +154,7 @@ pub(super) async fn handle_inject(
         jekt_tier: None,
         delivery_tier: Some("host".to_string()),
         forward_hops: 0,
+        audit_source_uid: super::caller::attributed_uid(caller.as_deref()),
         ..Default::default()
     };
     // reagentx P0 on PR #2565: this endpoint used to call inject_message
@@ -183,7 +185,8 @@ pub(super) async fn handle_inject(
     }
 
     let priority = parse_priority(&req.priority);
-    match state.messagebus.inject(&req.from, &req.target, &req.message, priority) {
+    let from_uid = super::caller::attributed_uid(caller.as_deref());
+    match state.messagebus.inject(&req.from, &from_uid, &req.target, &req.message, priority) {
         Ok(msg_id) => Json(json!({
             "status": "injected",
             "via": "messagebus",
@@ -211,7 +214,8 @@ pub(super) async fn handle_broadcast(
     );
     let priority = parse_priority(&req.priority);
 
-    match state.messagebus.broadcast(&req.from, &req.payload, priority) {
+    let from_uid = super::caller::attributed_uid(caller.as_deref());
+    match state.messagebus.broadcast(&req.from, &from_uid, &req.payload, priority) {
         Ok(delivered) => Json(json!({
             "status": "broadcast",
             "delivered": delivered,

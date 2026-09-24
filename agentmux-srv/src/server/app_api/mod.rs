@@ -1580,6 +1580,7 @@ fn bundle_version_meta_json(
     source: &str,
     source_detail: &str,
     written_by: &str,
+    written_by_uid: &str,
     created_at: i64,
 ) -> serde_json::Value {
     json!({
@@ -1589,6 +1590,9 @@ fn bundle_version_meta_json(
         "source": source,
         "source_detail": source_detail,
         "written_by": written_by,
+        // Identity M4c-2d (spec §6.5.9): the writer's UID beside its name;
+        // empty when the write was Unattributed.
+        "written_by_uid": written_by_uid,
         "created_at": created_at,
     })
 }
@@ -1634,7 +1638,8 @@ pub(crate) fn global_memory_history_impl(state: &AppState, id: &str) -> Result<s
         .map_err(|e| format!("globalmemory.history: store: {e}"))?
         .iter()
         .map(|v| bundle_version_meta_json(
-            &v.id, &v.content_hash, &v.parent_version_id, &v.source, &v.source_detail, &v.written_by, v.created_at,
+            &v.id, &v.content_hash, &v.parent_version_id, &v.source, &v.source_detail, &v.written_by,
+            &v.written_by_uid, v.created_at,
         ))
         .collect();
     Ok(json!({ "versions": versions }))
@@ -1731,6 +1736,7 @@ pub(crate) fn global_memory_revert_impl(
         &new_version.source,
         &new_version.source_detail,
         &new_version.written_by,
+        &new_version.written_by_uid,
         new_version.created_at,
     ) }))
 }
