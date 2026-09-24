@@ -200,7 +200,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // so it would under-discriminate on a light-theme mixed pane.
         const headerKeyOf = (meta: Block["meta"] | undefined): string =>
             computeBlockColorBg(meta, isLightTheme) ??
-            (meta?.view === "agent" ? " agent-default" : " non-agent-default");
+            (meta?.view === "agent" ? "\u0000agent-default" : "\u0000non-agent-default");
         const distinct = new Set<string>();
         for (const blockId of ids) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
