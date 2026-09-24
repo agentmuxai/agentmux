@@ -258,7 +258,8 @@ applicable) a CI guardrail.
    preserves the first visible node and its offset (§6.3.5).
 3. **No jump.** Nothing visible moves when content is added, migrated or
    evicted.
-4. **No loss.** Only a finished node whose provenance is durable is evicted:
+4. **No loss.** Only a finished content node whose provenance is durable is
+   evicted (`ephemeral` rows — §6.3.2, §6.9 — are not content):
    its **last** contributing transcript line (`src.endLine`) or journal line
    (`journalEnd`) is covered by that file's line count, so the History tab can
    show all of it (§6.3.1–§6.3.2).
@@ -1183,9 +1184,10 @@ prerequisites shrink to what already shipped:
 - **No resurrection.** Since 5a-4 the pane places every transcript record by
   line (`transcript-cursor.ts`): anything below the cursor's `next` is a
   duplicate and dropped, including a reconnect replay. A rolled-off turn is
-  below `next`, so it cannot come back. The live feed only ever removes a
-  **prefix**, so no middle-gap ranges are needed (§6.3.3's multi-range state
-  exists for the detached window, which this plan drops).
+  below `next`, so it cannot come back — whichever turns were removed, so
+  removal need not be a prefix (a blocked turn can stay while turns around it
+  go, below). No accepted-range state is needed: §6.3.3's ranges exist for
+  range reads into a detached window, which this plan drops.
 - **No range parses in the live feed.** It no longer pages older content in,
   so there is no second parser whose counter ids could collide (§6.3.1's
   reason for positional ids in the live pane).
@@ -1231,28 +1233,40 @@ single reducer command, O(nodes kept).
   still only turns that may go (next bullet) — and keeps the first visible row
   at the same offset (the anchor mechanism the virtual list already uses for
   prepends, applied to a front removal).
-- **Only turns whose nodes are all reproducible from the transcript.**
-  Roll-off stops at the first turn holding one that is not:
-  - `shell` nodes (backend memory ring only; §6.3.2),
+- **Only turns whose content is reproducible from the transcript.** A turn
+  holding any of these is **blocked**:
+  - `shell` nodes (AgentMux's in-pane shell runs, `useShellNodeStream.ts` —
+    not the agent's Bash tool, which is a durable `tool` node; backend memory
+    ring only, §6.3.2),
   - AskUserQuestion tools whose answer text was set optimistically
     (`answerText` / `questionText` / `timeoutNote`; replay can't rebuild them),
-  - an optimistic `user_message` not yet paired with its echo.
+  - an optimistic `user_message` not yet paired with its echo, or from a
+    provider whose user messages never reach the transcript (Codex, Kimi,
+    ACP — §6.3.6's durability table).
+- **A blocked turn is never rolled off — and does not stop the others.** It
+  stays where it is; durable finished turns before and after it still roll
+  off. Removing from the middle is as safe as removing a prefix here: the
+  live cursor never re-delivers a line below its position, whatever was
+  removed, and the feed does no range parses (Codex review of this revision:
+  a blocker must not stop every later removal). Where kept turns are no
+  longer contiguous, a small synthetic row between them reads "N turns in
+  History". The feed therefore holds K finished turns plus the blocked ones —
+  bounded by what blocks (the backend keeps at most 64 shells per block
+  anyway) and visible in the dev HUD. The journal (§6.3.2, PR 4 below) makes
+  shells and answers durable and removes the blocked case.
+- **Live-only decoration rows are ephemeral, not content.** stderr rows,
+  system notifications, "Interrupted", heuristic compaction markers and
+  `compaction_started` join §6.3.2's `ephemeral` class (working indicators,
+  synthetic rows): never in the transcript, dropped by every reload today,
+  never shown by History. They roll off with their turn; invariant 4 and its
+  runtime assertion apply to content, and `ephemeral` is outside it by
+  definition (Codex review).
 
-  Live-only decoration rows — stderr, system notifications, "Interrupted",
-  heuristic compaction markers, `compaction_started` — **do** roll off: a
-  reload drops them today anyway, and History never showed them.
-  **A blocked turn is never forced out** — no backstop applies to it, since
-  its nodes could not be rebuilt anywhere (invariant 4; Codex review of this
-  revision). The feed may then hold more than K turns: everything from the
-  blocked turn on stays. The dev HUD shows the count of turns held by a
-  blocker, so a session that grows this way is visible. The journal (§6.3.2,
-  PR 4 below) makes shells and answers durable and removes the blocked case;
-  it is scheduled right after PR 3.
-
-**How.** Reducer command `RollOff { beforeIndex }`
-(`frontend/app/store/agent-document/reducer.ts`): the same prefix cut as
-`clampToSessionScope` in that file (both share one `trimPrefix` helper), emitting
-`turns-rolled-off { removedCount, turns }`. The layout store already prunes
+**How.** Reducer command `RollOff { ranges }`
+(`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as
+index ranges — usually one prefix, more only around a blocked turn — in one
+pass, rebuilding the id set and index as `clampToSessionScope` in that file
+does, and emitting `turns-rolled-off { removedCount, turns }`. The layout store already prunes
 ids no longer present (`NodesChanged` → `pruneMap`,
 `frontend/app/store/agent-pane-layout/reducer.ts`); the document state's
 collapsed / pinned / expanded id sets are pruned in the same pass. The pane
@@ -1304,8 +1318,17 @@ goal):
   (or a read that fails or names a vanished generation) by advancing past it,
   which in History would leave lines missing *below* the loaded range, where
   `loadOlder` can't reach them. History watches the cursor's `linesSkipped`
-  counter and reloads the newest page whenever it moves, so what it shows is
-  always a contiguous range of the transcript.
+  counter; when it moves (and on the reveal-time reload cases above), History
+  stops showing appends — what follows the hole would be out of place — and:
+  - if the reader is following the bottom, reloads the newest page at once
+    (it keeps them at the tail, where they were);
+  - otherwise keeps the reader's pages and position untouched and shows
+    "Newer turns — jump to latest" in the History header; the reload happens
+    when they click it or scroll back to the bottom (Codex review: recovery
+    must not yank an active long-history read).
+
+  Either way what History shows is always a contiguous range of the
+  transcript.
 - `loadOlder` keeps today's wholesale reparse, and the reparse becomes the new
   incremental parser, so appends continue from it.
 - Truncate / replace / delete of the stream: reload from scratch.
@@ -1321,7 +1344,7 @@ kill switch and the top row; (4) the journal for shells and AskUserQuestion
 answers (5d's second half), which lifts the blocked case. Each re-runs the
 full-conversation bench at N = 0 / 25 / 200 and records it in the tracker.
 **Exit criteria for (3):** DOM, JS heap and per-flush cost flat from N = 25 to
-N = 200 with the pane pinned; nothing on screen moves when turns roll off
+N = 200 with the pane pinned, apart from blocked turns (counted in the HUD); nothing on screen moves when turns roll off
 (frame-by-frame recording); kill switch restores paging; no reproducible
 node is lost from History (every rolled-off turn is there).
 
