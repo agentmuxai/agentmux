@@ -1,5 +1,6 @@
 # Report: Agent pane side-by-side quirks — spontaneous scroll to "New Agent", and double-click to focus "Filter agents..."
 
+**Status:** analysis — root causes for the fixes in PR #3621.
 **Date:** 2026-09-23
 **Base:** `main` @ `61231d41c`
 **Method:** static analysis of the frontend focus/layout code paths. Not yet
