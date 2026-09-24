@@ -51,25 +51,36 @@ export function removeMemberFromStack(data: TabLayoutData, blockId: string): boo
  * counterpart to `moveMemberInStack`'s same-leaf reorder. Mirrors the
  * backend's cross-leaf branch of `move_stack_member`
  * (`agentmux-srv/src/backend/layout/mod.rs`): `remove_stack_member` +
- * `push_stack_member`-style append, composed the same way. Returns `false`
- * and changes NEITHER side when `blockId` isn't a member of `sourceData`,
- * or is its only member (removing a leaf's last member is closing the
- * pane, a different operation — the caller's job, same guard
- * `moveMemberInStack`'s sibling `removeMemberFromStack` already enforces
- * for the same-leaf case).
- * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4.
+ * `push_stack_member`-style append, composed the same way.
+ *
+ * - `"moved"`: the source keeps at least one member.
+ * - `"emptied"`: `blockId` was the source's ONLY member. It is now in the
+ *   target, `sourceData` is left as it was, and the caller MUST remove the
+ *   source leaf from the tree (this function only sees leaf data, not the
+ *   tree) — as a move, never a close: see `removeLeafEmptiedByMove`
+ *   (layoutMagnify.ts).
+ * - `false`: `blockId` isn't a member of `sourceData`; neither side touched.
+ *
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4,
+ * SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
  */
 export function moveMemberAcrossStacks(
     sourceData: TabLayoutData,
     targetData: TabLayoutData,
     blockId: string,
     activate: boolean
-): boolean {
+): "moved" | "emptied" | false {
     const sourceMembers = effectiveStack(sourceData);
-    if (!sourceMembers.includes(blockId) || sourceMembers.length <= 1) return false;
+    if (!sourceMembers.includes(blockId)) return false;
+    if (sourceMembers.length <= 1) {
+        // removeMemberFromStack refuses a lone member (that would leave an
+        // empty leaf); the leaf is about to be deleted instead.
+        addMemberToStack(targetData, blockId, activate);
+        return "emptied";
+    }
     if (!removeMemberFromStack(sourceData, blockId)) return false;
     addMemberToStack(targetData, blockId, activate);
-    return true;
+    return "moved";
 }
 
 export function addMemberToStack(data: TabLayoutData, blockId: string, activate: boolean): void {

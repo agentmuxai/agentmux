@@ -1,10 +1,10 @@
 # SPEC: Pane Tab drag — Window-Tab-style landing flash on the destination, moving a pane's last tab closes that pane, and removing `pane:tabstrip = "multi-only"`
 
 **Date:** 2026-09-24
-**Status:** active — §8 (remove `pane:tabstrip = "multi-only"`) implemented
-in PR #3692 (PR C). §3 (flash + landing bounce, PR A) implemented in PR
-#3694. §4 (last-tab close, PR B) in progress. Design decisions in §6 are
-confirmed by the repo owner.
+**Status:** implemented — PR #3692 (§8, remove `pane:tabstrip = "multi-only"`),
+PR #3694 (§3, flash + landing bounce), and PR #3698 (§4, last-tab close).
+Design decisions in §6 are confirmed by the repo owner. Not yet verified in
+a running app (`task dev`); see §5's manual checks.
 **Author:** Camper
 **Trigger:** direct repo-owner request after live use of the shipped Pane Tab
 drag (PRs #3441, #3444, #3447, #3449): "it works well, but we want some
@@ -337,9 +337,9 @@ Dropping a Pane Tab from pane **S** onto the header of a different pane
 - **No close confirmation.** `beforeNodeDelete`'s "something is still
   running" prompt doesn't apply: nothing is being stopped.
 - Focus goes to **D**, since the tab the user just dragged is now visible
-  there. Today's multi-member cross-pane move doesn't explicitly move focus
-  either, so apply the same focus rule to both cases for consistency (§4.2
-  step 4).
+  there. The multi-member cross-pane move didn't explicitly move focus
+  before this change either; it now follows the same rule, for consistency
+  (§4.2 step 4). Same-pane reorders don't touch focus.
 - If S was magnified, it's un-magnified first (the same as `closeNode`
   does).
 
@@ -369,7 +369,10 @@ comment: the "closing the pane is a different operation" rationale is
 replaced by a pointer to this spec.
 
 **One shared helper for the tree step**, used by both the local mutator and
-the other-window mirror so they can't diverge. `layoutStack.ts`:
+the other-window mirror so they can't diverge. As implemented it lives in
+`layoutMagnify.ts`, next to `closeNode` (which both importers can already
+reach without an import cycle), and un-magnifies with `setState=false`
+because the caller commits:
 
 ```ts
 /** Remove a leaf emptied by a cross-pane tab move. A MOVE, not a close:
@@ -378,7 +381,7 @@ the other-window mirror so they can't diverge. `layoutStack.ts`:
  *  the block that was just moved — incident R1 / #1681, see
  *  layoutPersistence.ts's DeleteNode case). */
 function removeLeafEmptiedByMove(model: LayoutModel, nodeId: string): void {
-    if (nodeId === model.magnifiedNodeId) magnifyNodeToggle(model, nodeId);
+    if (nodeId === model.magnifiedNodeId) magnifyNodeToggle(model, nodeId, false);
     model.treeReducer({ type: LayoutTreeActionType.DeleteNode, nodeId } as LayoutTreeDeleteNodeAction, false);
     clearLeafRevealGate(nodeId);
 }
@@ -420,8 +423,7 @@ cost is one frame.
 
 **Other windows/tabs mirroring the move** (`layoutPersistence.ts:316-347`,
 `StackMove`): switch to the new return value. On `"emptied"`, call the same
-`removeLeafEmptiedByMove(model, leaf.id)` (export it from `layoutStack.ts`,
-or put it in a small module both import). This path must also skip
+`removeLeafEmptiedByMove(model, leaf.id)` from `layoutMagnify.ts`. This path must also skip
 `closeNode`/`onNodeDelete`. The block was moved, not closed.
 
 **`canDrop`: no change.** It already accepts the lone-tab case. The change
@@ -456,32 +458,42 @@ Notes:
   clones `source_members` via `leaf_members`, and `id` needs the same
   treatment or it won't compile.
 - **Root case:** S can't be the root, since D is a different leaf in the same
-  tree, so the root has ≥2 descendants. `delete_node`'s root early-return
-  (`mod.rs:945-948`) is unreachable here. Still add a `debug_assert!` so a
-  future caller that breaks this assumption fails loudly and doesn't
-  silently leave the block duplicated.
-- If the delete fails after the push succeeded, returning `false` still
-  leaves `tree` mutated, because the reducer's closure is applied to the live
-  tree. Guard against this: run the whole emptied case on a
-  `clone()` of the root and swap it in only on success, **or** check
-  `find_node(tree, &source_node_id)` before the push. The second is cheaper,
-  and the leaf was just found by walking the tree, so it will be there.
+  tree, so the root has ≥2 descendants. As implemented, an explicit
+  `if tree.id == source_node_id { return false; }` runs *before* any
+  mutation instead of a `debug_assert!`. `delete_node` silently no-ops on
+  the root id, so without the guard a future caller breaking the assumption
+  would leave the block duplicated instead of being refused.
+- The delete can't fail after the push: the source leaf was just found by
+  walking this same tree, and `push_stack_member_at` only edits leaf data,
+  never node ids.
 
-**`handle_layout_stack_move`** (`reducer/layout.rs:608-621`): the tree-only
-`stack_tree_edit` isn't enough once a leaf can disappear. Focus and magnify
-can point at S, or at an id rewritten by the single-child collapse. Either:
-- (a) compute whether the edit emptied a leaf, and in that case run the same
-  focus/magnify **reconciliation walk** `handle_layout_delete_node` already
-  does, emitting slices for any reconciled field. Factor that walk out of
-  `handle_layout_delete_node` into a shared `fn reconcile_focus_magnify(tab)`
-  so both use one implementation. **Recommended.**
-- (b) keep `stack_tree_edit` as-is and document that the frontend owns focus.
-  Rejected: other windows would keep a dangling `focused_node_id` in reducer
-  state, which is the same class of stale-id bug that
-  `handle_layout_delete_node`'s long comment exists to prevent.
+**`handle_layout_stack_move`** (`reducer/layout.rs`): the tree-only
+`stack_tree_edit` isn't enough once a leaf can disappear, because focus and
+magnify can point at S, or at an id rewritten by the single-child collapse.
 
-Update the `not_found` error string (drop "or is its pane's only tab") and
-both doc comments (`move_stack_member`, `handle_layout_stack_move`).
+**As implemented** (this replaces an earlier draft that proposed emitting
+`LayoutTreeReplaced` *slices* for the reconciled fields; that's wrong, since
+slices carry frontend-push semantics, where an absent
+`pending_backend_actions` means "clear the queue". Sending them from here
+would wipe the backend-to-frontend action queue, including the `stackmove`
+this very RPC queues):
+- A new pure `source_leaf_emptied_by_move(tree, block_id, target_block_id)`
+  tells the reducer *before* the edit whether this move will delete a leaf
+  (and which).
+- Every other move keeps the existing tree-only `stack_tree_edit` path,
+  byte-for-byte.
+- The emptied case applies `move_stack_member` to the live tree, then
+  reconciles focus/magnify with `clear_dangling_focus_magnify`, which is
+  factored out of `handle_layout_delete_node` so both share one
+  implementation. It emits a **`LayoutNodeDeleted`** for the source leaf,
+  with the full post-move tree in `new_tree` (`tree_cleared: false`) and the
+  reconciled `was_focused`/`was_magnified`. That's exactly what a node
+  delete emits, so persistence (`persist_subscriber`: writes `new_tree`) and
+  every consumer already handle it. Nothing reads a `LayoutNodeDeleted` as
+  "delete the block".
+
+The `not_found` error string drops "or is its pane's only tab", and both doc
+comments (`move_stack_member`, `handle_layout_stack_move`) are updated.
 
 **Block lifecycle (backend):** unchanged, and this is intentional. No
 `DeleteBlock`, no saga. The block's `tab_id` is the same (both panes are in

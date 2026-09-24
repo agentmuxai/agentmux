@@ -363,23 +363,7 @@ pub(super) fn handle_layout_delete_node(
     // Direct-target match (`pre_focused == node_id`) doesn't catch
     // either case. Reconcile by walking the post-delete tree and
     // clearing any focus/magnify id that no longer resolves.
-    let id_resolves = |id: &str| -> bool {
-        if id.is_empty() {
-            return true;
-        }
-        match tab.rootnode.as_ref() {
-            None => false,
-            Some(root) => crate::backend::layout::find_node_by_id(root, id).is_some(),
-        }
-    };
-    let was_focused = !pre_focused.is_empty() && !id_resolves(&pre_focused);
-    let was_magnified = !pre_magnified.is_empty() && !id_resolves(&pre_magnified);
-    if was_focused {
-        tab.focused_node_id = String::new();
-    }
-    if was_magnified {
-        tab.magnified_node_id = String::new();
-    }
+    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab, &pre_focused, &pre_magnified);
 
     // SPEC_864 site #6 — carry the resulting tree so the persist
     // subscriber can write db_layout without re-running the algebra
@@ -400,6 +384,37 @@ pub(super) fn handle_layout_delete_node(
         correlation_id,
         version: v,
     }]
+}
+
+/// Clear the tab's focus/magnify ids when they no longer resolve to a node
+/// in its (already-edited) tree, given their values from BEFORE the edit.
+/// Returns `(was_focused, was_magnified)`: whether each one was cleared.
+/// Shared by every edit that can remove a leaf — a node delete, and a pane
+/// tab move that empties its source pane — see `handle_layout_delete_node`
+/// for the two ways an id can dangle after a delete.
+fn clear_dangling_focus_magnify(
+    tab: &mut crate::state::TabRecord,
+    pre_focused: &str,
+    pre_magnified: &str,
+) -> (bool, bool) {
+    let id_resolves = |id: &str| -> bool {
+        if id.is_empty() {
+            return true;
+        }
+        match tab.rootnode.as_ref() {
+            None => false,
+            Some(root) => crate::backend::layout::find_node_by_id(root, id).is_some(),
+        }
+    };
+    let was_focused = !pre_focused.is_empty() && !id_resolves(pre_focused);
+    let was_magnified = !pre_magnified.is_empty() && !id_resolves(pre_magnified);
+    if was_focused {
+        tab.focused_node_id = String::new();
+    }
+    if was_magnified {
+        tab.magnified_node_id = String::new();
+    }
+    (was_focused, was_magnified)
 }
 
 /// SPEC_864 site #6 — delete the layout node holding `block_id`.
@@ -602,9 +617,17 @@ pub(super) fn handle_create_block_in_stack(
 /// Reorder `block_id` within its own pane, or move it into a different
 /// pane — a same-leaf reorder never changes which member is visible unless
 /// `activate` is set. Refuses (an `Error` event, tree untouched) when either
-/// block doesn't exist in the tab's tree, or `block_id` is its source leaf's
-/// only member (that's closing the pane, a different command).
-/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1.
+/// block doesn't exist in the tab's tree.
+///
+/// Moving a pane's ONLY tab into another pane empties it, and the emptied
+/// pane is removed (`move_stack_member`). That one case can leave focus or
+/// magnify pointing at a node that's gone, so instead of the tree-only
+/// `LayoutTreeReplaced` it's reported exactly like a node delete: focus and
+/// magnify reconciled, and a `LayoutNodeDeleted` for the source leaf that
+/// carries the full resulting tree (the tab's new member included). No block
+/// is deleted either way — the moved block lives on in its new pane.
+/// SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1,
+/// SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.3.
 pub(super) fn handle_layout_stack_move(
     state: &mut State,
     tab_id: String,
@@ -614,10 +637,47 @@ pub(super) fn handle_layout_stack_move(
     activate: bool,
     correlation_id: String,
 ) -> Vec<Event> {
-    let not_found = format!("block {block_id} or {target_block_id} not found, or {block_id} is its pane's only tab");
-    stack_tree_edit(state, "LayoutStackMove", tab_id, correlation_id, not_found, |root| {
+    let not_found = format!("block {block_id} or {target_block_id} not found");
+    let emptied_source = state
+        .tabs
+        .get(&tab_id)
+        .and_then(|tab| tab.rootnode.as_ref())
+        .and_then(|root| crate::backend::layout::source_leaf_emptied_by_move(root, &block_id, &target_block_id));
+    let Some(source_node_id) = emptied_source else {
+        return stack_tree_edit(state, "LayoutStackMove", tab_id, correlation_id, not_found, |root| {
+            crate::backend::layout::move_stack_member(root, &block_id, &target_block_id, position, activate)
+        });
+    };
+
+    // The emptied-pane case. `source_leaf_emptied_by_move` only returns Some
+    // for a tab that exists with a tree, so both lookups below succeed.
+    let tab = state.tabs.get_mut(&tab_id).expect("resolved above");
+    let pre_focused = tab.focused_node_id.clone();
+    let pre_magnified = tab.magnified_node_id.clone();
+    let applied = tab.rootnode.as_mut().is_some_and(|root| {
         crate::backend::layout::move_stack_member(root, &block_id, &target_block_id, position, activate)
-    })
+    });
+    if !applied {
+        return op_error(state, format!("LayoutStackMove: {not_found} (tab {tab_id})"));
+    }
+    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab, &pre_focused, &pre_magnified);
+    let new_tree = tab.rootnode.clone();
+    let violations = crate::backend::layout::validate_layout_invariants(&new_tree);
+    if !violations.is_empty() {
+        tracing::error!(tab_id = %tab_id, op = "LayoutStackMove", violations = ?violations, "layout-doctor: invariant violation(s) after a pane-tab edit");
+    }
+    let v = state.bump_version();
+    vec![Event::LayoutNodeDeleted {
+        tab_id,
+        node_id: source_node_id,
+        new_tree,
+        // The destination leaf is still there, so the tree is never empty.
+        tree_cleared: false,
+        was_focused,
+        was_magnified,
+        correlation_id,
+        version: v,
+    }]
 }
 
 fn unknown_tab(state: &mut State, op: &str, tab_id: &str) -> Vec<Event> {
@@ -2885,34 +2945,88 @@ mod tests {
         assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("b", "b"));
     }
 
-    #[test]
-    fn layout_stack_move_rejects_stripping_a_pane_to_zero_members() {
-        let (mut state, tab_id) = fresh_tab();
-        seed_block(&mut state, &tab_id, "a");
-        seed_block(&mut state, &tab_id, "c");
-        seed_block(&mut state, &tab_id, "d");
-        let root = agentmux_common::LayoutNode {
+    // Moving a pane's ONLY tab empties the pane, which is removed. Reported
+    // like a node delete so focus/magnify on the gone pane are reconciled.
+    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.3.
+    fn lone_src_and_stacked_dst(state: &mut State, tab_id: &str) {
+        for b in ["a", "c", "d", "z"] {
+            seed_block(state, tab_id, b);
+        }
+        state.tabs.get_mut(tab_id).unwrap().rootnode = Some(agentmux_common::LayoutNode {
             id: "root".into(),
-            children: vec![leaf_node("src", "a"), stacked_leaf("dst", &["c", "d"], "c")],
+            children: vec![leaf_node("src", "a"), stacked_leaf("dst", &["c", "d"], "c"), leaf_node("other", "z")],
             ..Default::default()
-        };
-        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
-        let before = state.tabs[&tab_id].rootnode.clone();
+        });
+    }
 
-        let events = update(
-            &mut state,
+    fn move_lone_a_to_d(state: &mut State, tab_id: &str) -> Vec<Event> {
+        update(
+            state,
             Command::LayoutStackMove {
-                tab_id: tab_id.clone(),
+                tab_id: tab_id.to_string(),
                 block_id: "a".into(),
                 target_block_id: "d".into(),
-                position: agentmux_common::StackMovePosition::After,
-                activate: false,
+                position: agentmux_common::StackMovePosition::End,
+                activate: true,
                 correlation_id: String::new(),
             },
             &ctx(1),
+        )
+    }
+
+    #[test]
+    fn layout_stack_move_of_a_panes_only_tab_removes_the_emptied_pane() {
+        let (mut state, tab_id) = fresh_tab();
+        lone_src_and_stacked_dst(&mut state, &tab_id);
+        let blocks_before = state.blocks.len();
+
+        let events = move_lone_a_to_d(&mut state, &tab_id);
+        let tree = state.tabs[&tab_id].rootnode.clone().unwrap();
+        match events.as_slice() {
+            [Event::LayoutNodeDeleted { node_id, new_tree, tree_cleared, .. }] => {
+                assert_eq!(node_id, "src", "the emptied source pane");
+                assert_eq!(new_tree.as_ref(), Some(&tree), "carries the full post-move tree for persistence");
+                assert!(!tree_cleared);
+            }
+            other => panic!("expected one LayoutNodeDeleted, got {other:?}"),
+        }
+        let ids: Vec<&str> = tree.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["dst", "other"]);
+        let dst = tree.children[0].data.as_ref().unwrap();
+        assert_eq!(dst.block_stack, vec!["c".to_string(), "d".to_string(), "a".to_string()]);
+        assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("a", "a"));
+        assert_eq!(state.blocks.len(), blocks_before, "a move: no block is deleted");
+    }
+
+    #[test]
+    fn layout_stack_move_of_a_panes_only_tab_clears_focus_and_magnify_on_the_gone_pane() {
+        let (mut state, tab_id) = fresh_tab();
+        lone_src_and_stacked_dst(&mut state, &tab_id);
+        {
+            let tab = state.tabs.get_mut(&tab_id).unwrap();
+            tab.focused_node_id = "src".into();
+            tab.magnified_node_id = "src".into();
+        }
+        let events = move_lone_a_to_d(&mut state, &tab_id);
+        assert!(
+            matches!(events.as_slice(), [Event::LayoutNodeDeleted { was_focused: true, was_magnified: true, .. }]),
+            "got {events:?}"
         );
-        assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
-        assert_eq!(state.tabs[&tab_id].rootnode, before, "tree must be untouched on refusal");
+        let tab = &state.tabs[&tab_id];
+        assert!(tab.focused_node_id.is_empty() && tab.magnified_node_id.is_empty());
+    }
+
+    #[test]
+    fn layout_stack_move_of_a_panes_only_tab_keeps_focus_on_a_pane_that_survives() {
+        let (mut state, tab_id) = fresh_tab();
+        lone_src_and_stacked_dst(&mut state, &tab_id);
+        state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "other".into();
+        let events = move_lone_a_to_d(&mut state, &tab_id);
+        assert!(
+            matches!(events.as_slice(), [Event::LayoutNodeDeleted { was_focused: false, was_magnified: false, .. }]),
+            "got {events:?}"
+        );
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "other");
     }
 
     #[test]
