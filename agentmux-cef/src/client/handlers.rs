@@ -444,6 +444,19 @@ wrap_display_handler! {
     }
 
     impl DisplayHandler {
+        // SPIKE — swallow the liveness sentinel (client/liveness.rs).
+        fn on_console_message(
+            &self,
+            browser: Option<&mut Browser>,
+            _level: LogSeverity,
+            message: Option<&CefString>,
+            _source: Option<&CefString>,
+            _line: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let msg = message.map(CefString::to_string).unwrap_or_default();
+            super::liveness::on_console_message(browser, &msg) as ::std::os::raw::c_int
+        }
+
         /// Live capture state for this browser — CEF's own signal, not an
         /// inference from what we granted.
         ///

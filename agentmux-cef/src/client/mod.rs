@@ -59,6 +59,7 @@ mod display;
 pub(crate) mod navigation;
 mod crash_recovery;
 mod unresponsive;
+pub(crate) mod liveness;
 mod recovery_pages;
 pub(crate) mod error_catalog;
 mod context_menu;
