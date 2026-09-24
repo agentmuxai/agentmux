@@ -287,9 +287,15 @@ describe("AgentDocumentVirtualList — stick-to-bottom across pane resize", () =
 // transition neither this file nor anchor.test.ts previously exercised, and
 // exactly the case RO #2 (content-resize observer) exists to catch.
 describe("AgentDocumentVirtualList — first-ever overflow", () => {
+    // Controlled clock for the user-input window (USER_INPUT_WINDOW_MS): only
+    // a scroll batch inside that window after a real gesture may disengage.
+    let clock = 0;
+
     beforeEach(() => {
         roInstances = [];
         rafQueue = [];
+        clock = 0;
+        vi.spyOn(performance, "now").mockImplementation(() => clock);
         vi.stubGlobal("ResizeObserver", FakeResizeObserver);
         vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
             rafQueue.push(cb);
@@ -300,7 +306,19 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
 
     afterEach(() => {
         vi.unstubAllGlobals();
+        vi.restoreAllMocks();
     });
+
+    /** A real user scroll-away: a wheel gesture, then the scroll it causes.
+     *  The clock then moves past the input window, so a LATER scroll event
+     *  in the same test is not the user's. */
+    function userScrollAway(scrollRef: HTMLElement, scrollTop: number): void {
+        scrollRef.dispatchEvent(new Event("wheel"));
+        setGeometry(scrollRef, { scrollTop });
+        scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        clock += 1000;
+    }
 
     it("sticks to true bottom when content grows past a previously non-overflowing viewport", () => {
         const { viewState, scrollRef } = setup();
@@ -364,9 +382,9 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
         // A later, unambiguous user scroll away from bottom must still
         // disengage normally — the fix only protects the one-time
         // first-overflow transition, not every subsequent scroll event.
-        setGeometry(scrollRef, { scrollTop: 0 });
-        scrollRef.dispatchEvent(new Event("scroll"));
-        flushRaf();
+        // (A real user scroll comes with a gesture; a bare scroll event no
+        // longer disengages — SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE §2.2 B2.)
+        userScrollAway(scrollRef, 0);
 
         expect(viewState.stickToBottom()).toBe(false);
     });
@@ -482,9 +500,7 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
         expect(viewState.stickToBottom()).toBe(true);
 
         // User scrolls away to read history — an unambiguous, real disengage.
-        setGeometry(scrollRef, { scrollTop: 0 });
-        scrollRef.dispatchEvent(new Event("scroll"));
-        flushRaf();
+        userScrollAway(scrollRef, 0);
         expect(viewState.stickToBottom()).toBe(false);
 
         // Content collapses to non-overflowing WHILE disengaged (e.g. /clear,

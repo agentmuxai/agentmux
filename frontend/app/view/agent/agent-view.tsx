@@ -2425,6 +2425,7 @@ const AgentPresentationView = ({
                     }}
                     onLoadOlder={history.loadOlder}
                     loadingOlder={history.loadingOlder}
+                    hasOlderHistory={() => history.historyOffset() > 0}
                     scrollCommand={scroll.command}
                     scrollToBottomRef={(fn) => {
                         scrollToBottomFn = fn;

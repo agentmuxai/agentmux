@@ -53,6 +53,8 @@ interface AgentDocumentViewProps {
     onLoadOlder?: () => Promise<void>;
     /** Whether an older-history load is currently in progress. */
     loadingOlder?: Accessor<boolean>;
+    /** Whether there is older history to page in at all. */
+    hasOlderHistory?: Accessor<boolean>;
     /**
      * Signal-based jump command. The parent owns a `useScrollToNode`
      * hook and passes its `command` accessor here; the VirtualList
@@ -197,6 +199,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             onAgentErrorLogin={props.onAgentErrorLogin}
             onLoadOlder={props.onLoadOlder}
             loadingOlder={props.loadingOlder}
+            hasOlderHistory={props.hasOlderHistory}
             highlightNodeId={props.highlightNodeId}
             scrollCommand={props.scrollCommand}
             scrollToBottomRef={props.scrollToBottomRef}
