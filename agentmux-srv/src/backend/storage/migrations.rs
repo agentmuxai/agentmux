@@ -2098,6 +2098,108 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
             PRIMARY KEY (zoneid, name, partidx)
         );",
     )?;
+    // Line counter (Phase 5a-2, SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_
+    // 2026_09_23.md §6.3.7; see `filestore/counter.rs`). Additive and
+    // nullable, and deliberately WITHOUT a FILESTORE_SCHEMA_VERSION bump: the
+    // global transcript store is shared by every srv instance on the machine,
+    // and a bump would make older builds refuse to open it. Older builds
+    // insert rows without these columns (NULL = not counted) and write
+    // without maintaining them, which the counter detects. "duplicate
+    // column" is expected when another instance added them first.
+    for stmt in &[
+        "ALTER TABLE db_wave_file ADD COLUMN gen TEXT",
+        "ALTER TABLE db_wave_file ADD COLUMN lines INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_tail INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_modts INTEGER",
+        // Bumped (by the triggers below) by every write that changes bytes
+        // already in the file — not by appends — and the value an epoch was
+        // counted at. An epoch is valid only while they are equal.
+        "ALTER TABLE db_wave_file ADD COLUMN rev INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_rev INTEGER",
+        // A random identity per row, set by the insert trigger below: a file
+        // deleted and re-created is a different incarnation even if every
+        // other column (and the creation millisecond) comes out the same.
+        "ALTER TABLE db_wave_file ADD COLUMN incarnation BLOB",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            if !e.to_string().contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
+    // `rev` is maintained by triggers, not by this code's writes, because
+    // triggers are part of the database: they fire for every connection,
+    // including older builds that know nothing about the counter. Any write
+    // that changes existing bytes bumps it:
+    //   - a part deleted (write_file's replace, a delete);
+    //   - a part written over with bytes that aren't a pure extension of it
+    //     (REPLACE INTO / UPDATE). Appending extends the last part, which
+    //     keeps it a prefix, so appends — ours or an older build's — don't.
+    // REPLACE INTO doesn't fire DELETE triggers (recursive_triggers is off,
+    // SQLite's default; nothing here enables it), so an append can't reach
+    // the delete trigger. A trigger on a deleted row's parts finds no row.
+    conn.execute_batch(
+        "-- Versioned name: CREATE TRIGGER IF NOT EXISTS never updates an
+         -- existing definition, so a changed rule gets a new name and the
+         -- old one is dropped.
+         DROP TRIGGER IF EXISTS db_file_data_rev_insert;
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_insert_v2
+         BEFORE INSERT ON db_file_data
+         WHEN EXISTS (
+             SELECT 1 FROM db_file_data d
+             WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+               AND substr(NEW.data, 1, length(d.data)) IS NOT d.data
+         )
+         -- A NEW part inside the range the file already claims: bytes the
+         -- file declared (and a reader may have read as missing) are being
+         -- filled in, not appended. Every writer inserts appended parts
+         -- before raising `size`, so an append's new parts always start at
+         -- or past it. Older builds' write_file raises `size` first and
+         -- inserts after (Codex on #3631). 65536 is PART_DATA_SIZE.
+         OR (
+             NOT EXISTS (
+                 SELECT 1 FROM db_file_data d
+                 WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+             )
+             AND NEW.partidx * 65536 < (
+                 SELECT COALESCE(MAX(w.size), 0) FROM db_wave_file w
+                 WHERE w.zoneid = NEW.zoneid AND w.name = NEW.name
+             )
+         )
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_update
+         BEFORE UPDATE OF data ON db_file_data
+         WHEN substr(NEW.data, 1, length(OLD.data)) IS NOT OLD.data
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = OLD.zoneid AND name = OLD.name;
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_delete
+         AFTER DELETE ON db_file_data
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = OLD.zoneid AND name = OLD.name;
+         END;
+
+         -- Every row, whoever inserts it (older builds included), gets 64
+         -- random bits of identity. A delete + re-create in the same
+         -- millisecond with the same size and bytes is still a different
+         -- incarnation (Codex on #3631).
+         CREATE TRIGGER IF NOT EXISTS db_wave_file_incarnation
+         AFTER INSERT ON db_wave_file
+         BEGIN
+             UPDATE db_wave_file SET incarnation = randomblob(8)
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;
+
+         UPDATE db_wave_file SET incarnation = randomblob(8) WHERE incarnation IS NULL;",
+    )?;
     Ok(())
 }
 

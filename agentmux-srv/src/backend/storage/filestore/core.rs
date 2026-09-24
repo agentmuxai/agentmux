@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use super::cache::CacheEntry;
+use super::counter::{new_gen, AppendMode, AppendPos, DROP_EPOCH_SQL};
+use super::lines::count_all;
 use super::types::{FileMeta, FileOpts, MuxFile};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::migrations::{
@@ -98,17 +100,41 @@ impl FileStore {
         Ok(())
     }
 
-    fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA busy_timeout=5000;",
-        )?;
+    fn configure_and_migrate(mut conn: Connection) -> Result<Self, StoreError> {
+        // The global transcript store is opened by every srv instance on the
+        // machine, possibly at the same moment. busy_timeout comes first so
+        // every lock below waits instead of failing.
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        // Switching a rollback-journal database (new, or created by an old
+        // build) to WAL upgrades a read lock to an exclusive one. Two
+        // connections doing that at once deadlock, and SQLite fails one at
+        // once with SQLITE_BUSY rather than calling the busy handler, so
+        // retry. It can't run inside a transaction.
+        const WAL_ATTEMPTS: u32 = 100;
+        for attempt in 1..=WAL_ATTEMPTS {
+            match conn.execute_batch("PRAGMA journal_mode=WAL;") {
+                Ok(()) => break,
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::DatabaseBusy && attempt < WAL_ATTEMPTS =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
         // Safety lock BEFORE migrations — same discipline as mstore /
         // sagas: refuse to touch a newer-schema DB on disk before any
-        // mutating step runs. See `check_schema_compat` doc.
-        check_schema_compat(&conn, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
-        run_filestore_migrations(&conn)?;
-        stamp_version(&conn, FILESTORE_SCHEMA_VERSION)?;
+        // mutating step runs. See `check_schema_compat` doc. All three in
+        // one IMMEDIATE transaction: it takes the write lock up front (with
+        // the busy handler), so a concurrent opener's migration can't
+        // deadlock with this one on a lock upgrade.
+        {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            check_schema_compat(&tx, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
+            run_filestore_migrations(&tx)?;
+            stamp_version(&tx, FILESTORE_SCHEMA_VERSION)?;
+            tx.commit()?;
+        }
         Ok(Self {
             conn: Mutex::new(conn),
             cache: Mutex::new(HashMap::new()),
@@ -234,9 +260,12 @@ impl FileStore {
             if exists {
                 return Err(StoreError::AlreadyExists);
             }
+            // A new, empty file starts a counted epoch (counter.rs).
             tx.execute(
-                "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![file.zoneid, file.name, file.size, file.createdts, file.modts, opts_json, meta_json],
+                "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta,
+                     gen, lines, lines_size, lines_tail, lines_modts, lines_rev)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 0, 0, ?5, 0)",
+                params![file.zoneid, file.name, file.size, file.createdts, file.modts, opts_json, meta_json, new_gen()],
             )?;
             Ok(())
         })?;
@@ -392,10 +421,6 @@ impl FileStore {
                 return Err(StoreError::NotFound);
             }
             tx.execute(
-                "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-                params![data.len() as i64, now, zone_id, name],
-            )?;
-            tx.execute(
                 "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
                 params![zone_id, name],
             )?;
@@ -405,6 +430,16 @@ impl FileStore {
                     params![zone_id, name, idx as i32, part_data],
                 )?;
             }
+            // Replaced content starts a new counted epoch (counter.rs), at the
+            // `rev` the part writes above left (the delete trigger bumps it).
+            let count = count_all(data);
+            tx.execute(
+                "UPDATE db_wave_file SET size = ?1, modts = ?2,
+                     gen = ?3, lines = ?4, lines_size = ?1, lines_tail = ?5, lines_modts = ?2,
+                     lines_rev = COALESCE(rev, 0)
+                 WHERE zoneid = ?6 AND name = ?7",
+                params![data.len() as i64, now, new_gen(), count.lines as i64, count.tail_start as i64, zone_id, name],
+            )?;
             Ok(())
         })?;
 
@@ -503,91 +538,42 @@ impl FileStore {
 
     /// Append data to the end of a file and return the byte offset the
     /// batch actually landed at. Unlike a caller-side stat-then-append,
-    /// the size read and the part writes happen under ONE connection
-    /// lock, so the returned offset is exact even when concurrent
-    /// appenders interleave — codex P2 on PR #2508: the `output.tsidx`
-    /// sidecar keys batch receive-times by offset, and a racy pre-append
-    /// stat could stamp a batch with another batch's position.
+    /// the size read and the part writes happen in ONE transaction, so the
+    /// returned offset is exact even when concurrent appenders interleave —
+    /// codex P2 on PR #2508: the `output.tsidx` sidecar keys batch
+    /// receive-times by offset, and a racy pre-append stat could stamp a
+    /// batch with another batch's position.
     pub fn append_data_at(
         &self,
         zone_id: &str,
         name: &str,
         data: &[u8],
     ) -> Result<i64, StoreError> {
-        let key = (zone_id.to_string(), name.to_string());
+        self.append_data_pos(zone_id, name, data).map(|pos| pos.offset)
+    }
+
+    /// [`Self::append_data_at`], also reporting the line counter's position
+    /// (`filestore/counter.rs`).
+    pub fn append_data_pos(
+        &self,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+    ) -> Result<AppendPos, StoreError> {
         let now = Self::now_ms();
+        let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Raw, now)?;
+        // Nothing written, nothing for the cache to follow (its modts must
+        // keep matching the database's).
+        if new_size > pos.offset {
+            self.note_appended(zone_id, name, new_size, now);
+        }
+        Ok(pos)
+    }
 
-        // Size read + writes in one transaction (self.stat would re-acquire
-        // this non-reentrant mutex, and could answer from a cache another
-        // process has made stale — hence the direct query).
-        let (start_offset, new_size) = self.write_txn(|tx| {
-            let file_size: i64 = tx
-                .query_row(
-                    "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
-                    params![zone_id, name],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .ok_or(StoreError::NotFound)?;
-            if data.is_empty() {
-                return Ok((file_size, None));
-            }
-            let new_size = file_size + data.len() as i64;
-
-            // Figure out which part to start writing at
-            let start_offset = file_size;
-            let start_part = (start_offset / PART_DATA_SIZE as i64) as i32;
-            let offset_in_part = (start_offset % PART_DATA_SIZE as i64) as usize;
-            let mut data_offset = 0usize;
-            let mut current_part = start_part;
-
-            if offset_in_part > 0 {
-                // Load the existing partial part. Keep only the bytes the size
-                // covers: anything past it is not file content.
-                let mut part_data: Vec<u8> = tx
-                    .query_row(
-                        "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
-                        params![zone_id, name, start_part],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .unwrap_or_default();
-                part_data.resize(offset_in_part, 0);
-                let space = PART_DATA_SIZE - part_data.len();
-                let to_copy = space.min(data.len());
-                part_data.extend_from_slice(&data[..to_copy]);
-                data_offset = to_copy;
-
-                tx.execute(
-                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![zone_id, name, current_part, part_data],
-                )?;
-                current_part += 1;
-            }
-
-            // Write remaining full parts
-            while data_offset < data.len() {
-                let end = (data_offset + PART_DATA_SIZE).min(data.len());
-                let part_data = &data[data_offset..end];
-                tx.execute(
-                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                    params![zone_id, name, current_part, part_data],
-                )?;
-                data_offset = end;
-                current_part += 1;
-            }
-
-            tx.execute(
-                "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-                params![new_size, now, zone_id, name],
-            )?;
-            Ok((start_offset, Some(new_size)))
-        })?;
-        let Some(new_size) = new_size else {
-            return Ok(start_offset);
-        };
-
-        // Update cache
+    /// Bring this process's cached row up to an append that just committed
+    /// at `now` (the modts the append wrote, so the cache matches it).
+    pub(super) fn note_appended(&self, zone_id: &str, name: &str, new_size: i64, now: i64) {
+        let key = (zone_id.to_string(), name.to_string());
         {
             let new_size_bytes = (new_size as usize).max(64);
             let mut cache = self.cache.lock().unwrap();
@@ -609,8 +595,6 @@ impl FileStore {
             }
         }
         self.evict_to_cap();
-
-        Ok(start_offset)
     }
 
     /// Write metadata. If `merge` is true, only specified keys are updated;
@@ -651,8 +635,12 @@ impl FileStore {
                 meta
             };
             let meta_json = serde_json::to_string(&new_meta)?;
+            // A metadata write doesn't change content: a valid epoch follows
+            // the new modts (the right-hand sides see the old row).
             tx.execute(
-                "UPDATE db_wave_file SET meta = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                "UPDATE db_wave_file SET meta = ?1, modts = ?2,
+                     lines_modts = CASE WHEN lines_modts = modts AND lines_size = size THEN ?2 ELSE lines_modts END
+                 WHERE zoneid = ?3 AND name = ?4",
                 params![meta_json, now, zone_id, name],
             )?;
             Ok(new_meta)
@@ -763,8 +751,13 @@ impl FileStore {
                 if let Some(ref file) = entry.file {
                     let meta_json = serde_json::to_string(&file.meta)?;
                     self.write_txn(|tx| {
+                        // Rewrites content from the cache: the counter can't
+                        // vouch for it, so the epoch is dropped (counter.rs).
                         tx.execute(
-                            "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3 WHERE zoneid = ?4 AND name = ?5",
+                            &format!(
+                                "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3, {DROP_EPOCH_SQL}
+                                 WHERE zoneid = ?4 AND name = ?5"
+                            ),
                             params![file.size, file.modts, meta_json, file.zoneid, file.name],
                         )?;
                         for data_entry in entry.data_entries.values() {

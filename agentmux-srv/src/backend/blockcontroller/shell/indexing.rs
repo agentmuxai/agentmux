@@ -156,8 +156,9 @@ fn build_output_idx_from(
                       buf: &mut Vec<u8>,
                       line_count: &mut u64,
                       had_newline: bool| {
-        // The reader strips a trailing '\r' (CRLF) and treats trim-empty as blank.
-        let is_blank = String::from_utf8_lossy(line_buf).trim().is_empty();
+        // The reader strips a trailing '\r' (CRLF) and treats trim-empty as
+        // blank. Shared with the FileStore line counter, which must agree.
+        let is_blank = crate::backend::storage::filestore::is_blank_line(line_buf);
         if !is_blank {
             buf.extend_from_slice(&cursor.to_le_bytes());
             *line_count += 1;
