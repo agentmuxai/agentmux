@@ -411,12 +411,6 @@ impl Router {
         self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
     }
 
-    /// Re-evaluate without an event (e.g. pause settings changed) so the tray
-    /// snapshot follows promptly.
-    pub fn refresh(&self) {
-        self.step(Input::Tick);
-    }
-
     pub fn resolve(&self, block_id: &str, family: Family) {
         self.step(Input::Resolve { block_id: block_id.to_string(), family });
     }
