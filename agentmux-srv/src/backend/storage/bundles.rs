@@ -331,7 +331,10 @@ impl Store {
     /// `written_by` is the caller's own TRUSTED identity (an agent's real
     /// `AGENTMUX_AGENT_ID`, or `"armory-ui"` for the human-facing Armory
     /// editor) — see `BundleVersion::written_by`'s own doc comment for why
-    /// this is a separate field from `source`/`source_detail`. Returns
+    /// this is a separate field from `source`/`source_detail`.
+    /// `written_by_uid` is the writer's UID from the request's `Caller`
+    /// (identity M4c-1, spec §6.5.9) — `""` when Unattributed, and for the
+    /// Armory UI. Returns
     /// `None` (no version recorded) when `memory.is_global` is false —
     /// versioning is scoped to Global Memory specifically, matching this
     /// table's whole purpose; a private, per-agent bundle upsert still
@@ -347,6 +350,7 @@ impl Store {
         &self,
         memory: &Bundle,
         written_by: &str,
+        written_by_uid: &str,
         source: &str,
         source_detail: &str,
     ) -> Result<Option<BundleVersion>, StoreError> {
@@ -413,6 +417,7 @@ impl Store {
                 source,
                 source_detail,
                 written_by,
+                written_by_uid,
             )?)
         } else {
             None
@@ -557,6 +562,7 @@ impl Store {
             source,
             source_detail,
             written_by,
+            "", // the system tier is written by seeders, never a Caller
         )?;
 
         tx.commit()?;
@@ -661,6 +667,7 @@ impl Store {
                 source,
                 source_detail,
                 written_by,
+                "", // the system tier is written by seeders, never a Caller
             )?)
         };
 
@@ -797,6 +804,7 @@ impl Store {
                             source,
                             source_detail,
                             seeder_identity,
+                            "",
                         )?;
                         // Returning without an explicit commit drops `tx`,
                         // which rolls back — harmless for every OTHER early
@@ -901,6 +909,7 @@ impl Store {
             source,
             source_detail,
             seeder_identity,
+            "",
         )?;
 
         tx.commit()?;
@@ -1060,7 +1069,7 @@ impl Store {
         let rows = tx.execute("DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1", params![id])?;
         if rows > 0 {
             let tombstone_detail = format!(r#"{{"manifest_version":{caller_manifest_version}}}"#);
-            bundle_version_insert_tx(&tx, id, "", "", RETIREMENT_TOMBSTONE_SOURCE, &tombstone_detail, seeder_identity)?;
+            bundle_version_insert_tx(&tx, id, "", "", RETIREMENT_TOMBSTONE_SOURCE, &tombstone_detail, seeder_identity, "")?;
         }
         tx.commit()?;
         Ok(rows > 0)

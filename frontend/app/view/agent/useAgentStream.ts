@@ -36,7 +36,6 @@
  */
 
 import { getFileSubject } from "@/app/store/mps";
-import { base64ToArray } from "@/util/util";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage } from "./state";
@@ -65,8 +64,14 @@ import { useBackgroundTaskRegistry } from "./hooks/useBackgroundTaskRegistry";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
+import { agentPerfStore } from "./virtualization/perf-probe";
+import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type TranscriptSettleLatch } from "./transcript-cursor";
 
 const OutputFileName = "output";
+/** Longest live records wait for the history load before being placed anyway. */
+const HISTORY_HOLD_MAX_MS = 15_000;
+/** How often a pane on an agent's shared zone checks for lines no event brought. */
+const SHARED_ZONE_POLL_MS = 5_000;
 
 /** Extract the first significant argument from a tool's params for display.
  *  File path for read/write/edit; command string for bash; query for search.
@@ -222,6 +227,13 @@ interface UseAgentStreamOpts {
      * backend picked up), not just from this pane's own composer send.
      */
     onTurnStartFromQueue?: () => void;
+    /**
+     * Where this pane's history load ended (Phase 5a-4,
+     * `transcript-cursor.ts`). Live events are held until it settles, then
+     * placed by line: duplicates of history dropped, gaps read. Absent: no
+     * history load to wait for; events are placed from the first one.
+     */
+    transcriptSettle?: TranscriptSettleLatch;
 }
 
 /**
@@ -239,6 +251,7 @@ export function useAgentStream({
     provider,
     agentName,
     onTurnStartFromQueue,
+    transcriptSettle,
 }: UseAgentStreamOpts): Accessor<BackgroundTaskView[]> {
     // Mutable state that doesn't trigger re-renders. Kept here (not
     // extracted) because it's tightly coupled to the NDJSON parse loop
@@ -377,6 +390,7 @@ export function useAgentStream({
 
         // Promotes accepted pending messages into user_message document
         // nodes. No-ops internally if pendingMessages was not provided.
+        const echoLedger = new EchoLedger();
         usePendingMessageAcceptance({
             blockId,
             model,
@@ -385,6 +399,7 @@ export function useAgentStream({
             hasNodeId,
             addNodeId,
             onTurnStartFromQueue,
+            onAccepted: (text) => echoLedger.accepted(text),
         });
 
         // Seed the in-batch dedup cache from the reducer-maintained
@@ -424,36 +439,35 @@ export function useAgentStream({
         const fileSubject = getFileSubject(blockId, OutputFileName);
 
         console.debug(`[useAgentStream] subscribed blockId=${blockId} format=${outputFormat}`);
-        const subscription = fileSubject.subscribe((msg: { fileop: string; data64: string }) => {
-            if (msg.fileop === "truncate") {
-                // Reducer decides whether to honor — late truncates after
-                // a socket-reconnect race are suppressed. Only reset the
-                // hook-local parser/stats/etc. when the truncate is actually
-                // honored; if suppressed, the live stream is still flowing
-                // and resetting would corrupt in-flight parse state.
-                const events = model.dispatchDoc({
-                    type: "StreamTruncate",
-                    reason: "fileop",
-                });
-                const honored = events.some((e) => e.type === "truncate-applied");
-                if (!honored) return;
-                queue.resetAll();
-                lineBuffer = "";
-                translator.reset();
-                parser.reset();
-                nodeIdSet = new Set();
-                // Reducer clears sessionStats/currentTool/turnTokens
-                // and transitions turnPhase to Idle in one shot.
-                model.dispatchPane({ type: "TurnReset" });
-                return;
-            }
+        // A reset of the stream. `truncate` is today's: the reducer decides
+        // whether to honor it — late truncates after a socket-reconnect race
+        // are suppressed. Only reset the hook-local parser/stats/etc. when the
+        // truncate is actually honored; if suppressed, the live stream is
+        // still flowing and resetting would corrupt in-flight parse state.
+        // `replace` and `delete` (restore, archive) only move the cursor:
+        // they published nothing before Phase 5a-3b, and the pane keeps what
+        // it shows, as it did then.
+        const resetStream = (fileop: "truncate" | "replace" | "delete") => {
+            if (fileop !== "truncate") return;
+            const events = model.dispatchDoc({
+                type: "StreamTruncate",
+                reason: "fileop",
+            });
+            const honored = events.some((e) => e.type === "truncate-applied");
+            if (!honored) return;
+            queue.resetAll();
+            lineBuffer = "";
+            translator.reset();
+            parser.reset();
+            nodeIdSet = new Set();
+            // Reducer clears sessionStats/currentTool/turnTokens
+            // and transitions turnPhase to Idle in one shot.
+            model.dispatchPane({ type: "TurnReset" });
+        };
 
-            if (msg.fileop !== "append" || !msg.data64) return;
-
-            // Decode base64 subprocess data to UTF-8 text
-            const bytes = base64ToArray(msg.data64);
-            const text = new TextDecoder().decode(bytes);
-
+        // Records the transcript cursor (below) has placed, parsed as live
+        // input.
+        const parseRecords = (text: string) => {
             // Accumulate into line buffer and process complete lines
             lineBuffer += text;
             const lines = lineBuffer.split("\n");
@@ -787,9 +801,78 @@ export function useAgentStream({
             if (queue.hasPendingNewOrUpdated()) {
                 queue.scheduleFlush();
             }
+        };
+
+        // Places each transcript record by its line (Phase 5a-4,
+        // transcript-cursor.ts): duplicates dropped, gaps read, and nothing
+        // parsed before the history it follows. An echo — the user message
+        // the controller wrote to the agent's stdin, whose node the pane
+        // already shows — is not parsed; the ledger pairs it with that node.
+        const cursor = new TranscriptCursor({
+            deliver: parseRecords,
+            echo: (text) => echoLedger.echoed(text),
+            isOwnEcho: (line) => echoLedger.isOwnEcho(line),
+            reset: resetStream,
+            readRange: async (offset, limit, expectGen) => {
+                const resp = await RpcApi.BlockfileReadRangeCommand(
+                    TabRpcClient,
+                    { block_id: blockId, filename: OutputFileName, offset, limit, expect_gen: expectGen },
+                    { timeout: 15_000 },
+                );
+                return { lines: resp?.lines ?? [], stream: resp?.stream, gen: resp?.gen, genMismatch: resp?.gen_mismatch };
+            },
+            log: (message, level) =>
+                level === "warn" ? console.warn(`[useAgentStream] ${message}`) : console.debug(`[useAgentStream] ${message}`),
         });
+        const unregisterCursorStats = agentPerfStore.registerTranscriptCursor(blockId, cursor.stats);
+        const subscription = fileSubject.subscribe((msg: TranscriptFileEvent) => cursor.push(msg));
+
+        // Live records wait for the history load (the pane is covered until
+        // then). A load that never reports doesn't hold them for good: after
+        // HISTORY_HOLD_MAX_MS they are placed from the first event on.
+        const stopWaiting = transcriptSettle
+            ? transcriptSettle.onSettle((outcome) => cursor.settle(outcome))
+            : (cursor.settle(null), () => {});
+        const holdTimer = setTimeout(() => {
+            if (cursor.isSettled()) return;
+            console.warn(`[useAgentStream] no history outcome after ${HISTORY_HOLD_MAX_MS}ms; placing live records from the next one`);
+            cursor.settle(null);
+        }, HISTORY_HOLD_MAX_MS);
+
+        // Lines no event brings: another block or srv instance appending to
+        // the agent's shared zone. Filled one poll late, so lines this pane's
+        // own events are still bringing (and its own echoes) arrive by event
+        // first.
+        let lastCount: { count: number; stream: string; gen: string } | null = null;
+        let polling = false;
+        const pollTimer = setInterval(async () => {
+            const pin = cursor.position();
+            if (!pin || !pin.stream.startsWith("g:") || polling || document.hidden) return;
+            polling = true;
+            try {
+                const resp = await RpcApi.BlockfileLineCountCommand(
+                    TabRpcClient,
+                    { block_id: blockId, filename: OutputFileName },
+                    { timeout: 5_000 },
+                );
+                if (!resp?.stream || !resp.gen) return;
+                if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
+                    cursor.observeCount(lastCount.count, resp.stream, resp.gen);
+                }
+                lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
+            } catch {
+                // Soft: the next tick or event catches up.
+            } finally {
+                polling = false;
+            }
+        }, SHARED_ZONE_POLL_MS);
 
         onCleanup(() => {
+            clearTimeout(holdTimer);
+            clearInterval(pollTimer);
+            stopWaiting();
+            cursor.dispose();
+            unregisterCursorStats();
             queue.cancelScheduledFlush();
             subscription.unsubscribe();
             // (the tool_chunk subscription is torn down by its own body-scope

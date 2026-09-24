@@ -980,6 +980,8 @@ impl AgentMuxHandler {
         // accumulate one stale entry per closed browser over a session.
         self.crash_history.remove(&browser.identifier());
         self.memory_pause_history.remove(&browser.identifier());
+        self.unresponsive_reports.remove(&browser.identifier());
+        self.terminated_unresponsive.remove(&browser.identifier());
         // Remove this browser's popup tag HERE (not in do_close — do_close only
         // checks membership). `closing_was_popup` then reliably distinguishes a
         // popup's own self-close (true) from the PANE closing (false), which the

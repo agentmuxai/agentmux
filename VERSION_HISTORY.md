@@ -1,5 +1,42 @@
 # AgentMux Version History
 
+## 0.57.0 — 2026-09-23
+
+- perf(agent-pane): pin-to-bottom without forced synchronous layout — the pin runs after layout in the content ResizeObserver, the scroll event our own pin causes is handled without geometry reads, rows are placed from the stored scroll margin
+- feat(identity): record the acting agent's UID beside the name on work items, cron jobs and Global Memory versions (identity M4c-1)
+- perf(agent-pane): one scheduler for every pane's stream flushes — while the user is typing, at most one pane flushes per frame (oldest first, 100 ms starvation guard), so keystrokes are handled between panes' updates
+- agent.open opens My Agents agents only; templates are refused
+- Work-queue holder checks match by UID when the item and the caller both have one
+- Personal memory calls from an agent with a token act on its own memory, not whichever agent its name resolves to
+- Agent pane: a pause mid-stream no longer re-parses the whole message (streaming markdown stays incremental through settle)
+- IdentityAccounts, IdentityValidate, PresetGet and SearchHistory from an agent with a token act on that agent, not whichever agent its name resolves to
+- Bench: each measurement window starts only once the page is quiet, so history setup is not measured
+- Agent pane: tool logs measure their height only when the rendered branch changes (mounting history ~31% faster)
+- Audit entries and bus messages record the sending agent's UID beside its claimed name
+- Cron jobs fire in process and audit the creating agent's UID, still sending as cron
+- Agent pane: a message moving out of the streaming buffer no longer shifts the content you are reading
+
+## 0.56.14 — 2026-09-23
+
+- perf(agent-pane): stop rebuilding every finished tool result on every stream flush — 4 streaming panes 2.3 fps → 55 fps
+- perf(markdown): keep the frozen prefix's DOM across streaming commits — only the trailing block is rebuilt
+- fix(ci): release auto-tag detection accepts the Agent@host title prefix
+- feat(identity): resolve agent names at the MCP boundary through the one disambiguating entry point; work queue and cron honour UIDs (identity M3)
+- fix(identity): the MCP boundary refuses when the name resolver cannot answer, instead of falling back to name-addressed work (identity M3 follow-up)
+- feat(identity): attribute requests to the calling agent's UID from its token, and measure which agents still run without one (identity M4a)
+- identity M4a-2: count requests whose actor name is not plainly the calling agent's
+- identity M4a-2 follow-up: count a template's slug as ambiguous, PresetGet as an actor site
+- identity M4a-3: deleting an agent deletes the signing keys filed under its slug
+- a pane showing a deleted agent no longer resolves to another agent's stale row
+- identity M4b-1: agent.send spawns carry the agent's UID and token, built like agentinput's
+- identity M4b-2: App Server and ACP spawns carry the agent's UID and token; ACP reads agent.open's array/object cmd meta
+- identity M4b-3: a launch records and stamps its row before the controller resyncs; a template-backed launch whose row cannot be recorded aborts with an error in the picker
+- identity M4b-4: agent.open of a user agent records its launch (lifecycle only) and stamps the block; a cross-channel agent is backfilled before its spawn
+- The picker's 'Launch aborted' notice clears after a later launch that did not abort
+- ci: correct the app-token smoke test comment: GitHub Packages needs a classic PAT, not fine-grained
+- fix(ci): Codex review gate passes a head Codex answered with its out-of-quota notice
+- A pane whose agent was deleted is refused at spawn instead of starting on the shared login with no identity
+
 ## 0.56.13 — 2026-09-23
 
 - docs(report): why agents cannot read @a5af packages from GitHub Packages

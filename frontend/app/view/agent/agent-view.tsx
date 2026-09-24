@@ -38,7 +38,13 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
-import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
+import {
+    accountLabel,
+    loadAccounts,
+    subscribeAccountChanges,
+    type Account,
+    type AgentAccounts,
+} from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ModalLayer } from "@/element/ModalLayer";
@@ -107,6 +113,7 @@ import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
 import { didTurnJustEnd, useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
+import { createTranscriptSettleLatch } from "./transcript-cursor";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
 import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
@@ -870,8 +877,12 @@ const AgentPresentationView = ({
         if (settlePaintRaf1 !== undefined) cancelAnimationFrame(settlePaintRaf1);
         if (settlePaintRaf2 !== undefined) cancelAnimationFrame(settlePaintRaf2);
     });
+    // Where the history load ended, handed to the live stream so it places
+    // its records after that history (Phase 5a-4, transcript-cursor.ts).
+    const transcriptSettle = createTranscriptSettleLatch();
     const history = useHistoryPagination({
         blockId: model.blockId,
+        transcriptSettle,
         model: paneModel,
         outputFormat,
         // Jekt direction detection during replay: FROM == this agent →
@@ -1443,6 +1454,7 @@ const AgentPresentationView = ({
     // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
     const backgroundTasksAtom = useAgentStream({
         blockId: model.blockId,
+        transcriptSettle,
         // Pass the per-pane model so the hook's dispatch sites are
         // default-safe against post-unmount races — the disposed-flag
         // check is centralized in the model rather than per call site.
@@ -1861,7 +1873,9 @@ const AgentPresentationView = ({
         if (!e) return;
         ContextMenuModel.showContextMenu(
             candidates.map((acct) => ({
-                label: acct.name,
+                // The login email, else the name — every Claude account is
+                // named `claude-oauth`, so the name alone cannot tell them apart.
+                label: accountLabel(acct),
                 click: () => void status.bindExistingAccount(acct),
             })),
             e,
@@ -1939,11 +1953,11 @@ const AgentPresentationView = ({
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
-        // context_exceeded recovery — drop the over-full session and return to
-        // the picker for a clean relaunch (resuming would only re-fail).
+        // context_exceeded recovery — archive the over-full session and return
+        // to the picker for a clean relaunch (resuming would only re-fail).
         onNewSession: () => {
-            log("agent", "New session — clearing the over-full context and returning to the picker");
-            void model.backToPicker();
+            log("agent", "New session — archiving the over-full context and returning to the picker");
+            void model.startNewSession();
         },
         // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
         // (e.g. claude's subscription OAuth expired), not an Armory
@@ -1976,7 +1990,8 @@ const AgentPresentationView = ({
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
-        bindCandidates,
+        // Labelled for the failure row's "Bind: <account>" (email, else name).
+        bindCandidates: () => bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) })),
         onBindAccount,
     });
 

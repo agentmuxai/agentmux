@@ -19,7 +19,7 @@
  * (Retro: RETRO_REPLACECHILD_CRASH_2026-06-06.md; see also
  * SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.1.)
  *
- * THIS MODULE OWNS THE ONLY `requestAnimationFrame` CALL SITE AND THE ONLY
+ * THIS MODULE OWNS THE ONLY FLUSH-SCHEDULING CALL SITE AND THE ONLY
  * `batch()` CALL SITE for the whole useAgentStream hook. Do not add a
  * second one anywhere else — give every new producer a `pushXxx` method
  * here instead of scheduling its own flush. See useAgentStream.ts's module
@@ -31,7 +31,13 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
+import { cancelStreamFlush, requestStreamFlush } from "./stream-scheduler";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
+
+// Unique per queue instance, not per block: a pane that remounts briefly has
+// two queues for the same block, and the old one's unmount-time cancel must
+// not withdraw the new one's request.
+let queueSeq = 0;
 
 /**
  * Fire-and-forget push of a `ToolNode`'s current status to srv, for
@@ -135,7 +141,7 @@ export interface StreamFlushQueue {
     pushShellCreate(node: ShellNode): void;
     pushShellChunk(shellId: string, chunk: ToolLogChunk): void;
     pushShellExit(shellId: string, status: ShellNode["status"], exitCode: number, exitedAt: number): void;
-    /** Arm the shared RAF if one isn't already pending. THE single requestAnimationFrame call site for this hook. */
+    /** Request a flush from the app-wide stream scheduler if one isn't already pending. THE single flush-scheduling call site for this hook. */
     scheduleFlush(): void;
     /**
      * Flush everything pending synchronously, right now, instead of waiting
@@ -178,10 +184,9 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
     let pendingShellCreates: PendingShellCreate[] = [];
     let pendingShellChunks: PendingShellChunk[] = [];
     let pendingShellExits: PendingShellExit[] = [];
-    let flushRafId: number | null = null;
+    const schedulerId = `${model.blockId}#${++queueSeq}`;
 
     function flushPendingNodes() {
-        flushRafId = null;
         if (pendingNew.length === 0 && pendingUpdates.length === 0 && pendingChunks.length === 0
             && pendingShellCreates.length === 0 && pendingShellChunks.length === 0 && pendingShellExits.length === 0) return;
 
@@ -266,12 +271,13 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
         });
     }
 
-    // THE single requestAnimationFrame call site for the whole useAgentStream
-    // hook — see module doc comment above.
+    // THE single flush-scheduling call site for the whole useAgentStream hook
+    // — see module doc comment above. The frame it runs in is chosen by the
+    // app-wide stream scheduler (stream-scheduler.ts): the next frame when the
+    // user isn't interacting, or one pane per frame (oldest first, with a
+    // starvation guard) while they are. Idempotent while a request is pending.
     function scheduleFlush() {
-        if (flushRafId == null) {
-            flushRafId = requestAnimationFrame(flushPendingNodes);
-        }
+        requestStreamFlush(schedulerId, flushPendingNodes);
     }
 
     return {
@@ -284,14 +290,13 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
         pushShellExit(shellId, status, exitCode, exitedAt) { pendingShellExits.push({ shellId, status, exitCode, exitedAt }); },
         scheduleFlush,
         flushNow() {
-            // Cancel the armed RAF too (not just rely on its empty-queue
-            // no-op) so the id doesn't linger pointing at an already-served
-            // frame.
-            if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
+            // Withdraw the pending request too (not just rely on its
+            // empty-queue no-op), so the scheduler doesn't hold a slot for it.
+            cancelStreamFlush(schedulerId);
             flushPendingNodes();
         },
         resetAll() {
-            if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
+            cancelStreamFlush(schedulerId);
             pendingNew = [];
             pendingUpdates = [];
             pendingChunks = [];
@@ -304,7 +309,7 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
             pendingUpdates = [];
         },
         cancelScheduledFlush() {
-            if (flushRafId != null) { cancelAnimationFrame(flushRafId); flushRafId = null; }
+            cancelStreamFlush(schedulerId);
         },
     };
 }

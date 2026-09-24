@@ -762,13 +762,14 @@ pub(crate) async fn agent_define_core(
     })
 }
 
-pub(crate) async fn identity_self_accounts_impl(
+pub(crate) async fn identity_self_accounts_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
     // Link rows are keyed by definition id, not the S1 slug callers
-    // authenticate with — see resolve_agent_definition_id.
-    let def_id = resolve_agent_definition_id(state, agent_id)
+    // authenticate with — see resolve_agent_definition_id. Identity M4c-2c:
+    // an attributed caller's is its own row's (`SelfOwner`).
+    let def_id = owner.into().owner_id(&state.mstore)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
     let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
@@ -839,14 +840,16 @@ pub(crate) async fn identity_self_accounts_impl(
 /// Validate one of the agent's own linked accounts by probing the provider with
 /// the stored keychain secret. Ownership is verified (the account must be linked
 /// to `agent_id`) before the secret is read.
-pub(crate) async fn identity_account_validate_stored_impl(
+pub(crate) async fn identity_account_validate_stored_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     account_id: &str,
 ) -> Result<serde_json::Value, String> {
     // Link rows are keyed by definition id, not the S1 slug — without the
     // resolution this ownership check always saw zero links and rejected.
-    let def_id = resolve_agent_definition_id(state, agent_id)
+    // Identity M4c-2c: an attributed caller's is its own row's, so it can
+    // no longer live-probe a same-named agent's stored secret.
+    let def_id = owner.into().owner_id(&state.mstore)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
     let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
@@ -969,10 +972,35 @@ pub(crate) fn bundle_validate_impl(
     Ok(report)
 }
 
-pub(crate) async fn bundle_self_get_impl(
+pub(crate) async fn bundle_self_get_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
+    let agent_id = match owner.into() {
+        SelfOwner::Slug(slug) => slug,
+        // Identity M4c-2c: an attributed caller's own row, and its registry
+        // record only by that row's slug AND id — never a same-named
+        // agent's.
+        SelfOwner::Uid(uid) => {
+            let row = SelfOwner::caller_row(uid, &state.mstore)
+                .map_err(|e| format!("bundle.self.get: {e}"))?;
+            // The launch's bundle (`AgentInstance.memory_id`), as on the slug
+            // path — not `AgentDefinition.memory_id`, the default a launch
+            // inherits (`db_agents.default_memory_id`).
+            let launch = state.mstore.instance_get(uid)
+                .map_err(|e| format!("bundle.self.get: {e}"))?;
+            let memory_id = launch
+                .map(|i| i.memory_id)
+                .filter(|m| !m.is_empty())
+                .or_else(|| {
+                    crate::backend::agent_registry_lookup::find_active_record_by_slug_and_definition(
+                        &row.slug, &row.id,
+                    )
+                    .and_then(|rec| rec.data.memory_id)
+                });
+            return bundle_self_get_by_memory_id(state, memory_id);
+        }
+    };
     let instance = state.mstore.instance_get_by_slug(agent_id)
         .map_err(|e| format!("bundle.self.get: {e}"))?;
     // `instance_get_by_slug` only ever hits the local `db_agents` table — a
@@ -990,6 +1018,14 @@ pub(crate) async fn bundle_self_get_impl(
             crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id)
                 .and_then(|rec| rec.data.memory_id)
         });
+    bundle_self_get_by_memory_id(state, memory_id)
+}
+
+/// The bundle `memory_id` names, or the blank singleton when none is bound.
+fn bundle_self_get_by_memory_id(
+    state: &AppState,
+    memory_id: Option<String>,
+) -> Result<serde_json::Value, String> {
     let memory = if let Some(mid) = memory_id {
         state.id_store.bundle_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
@@ -1005,13 +1041,105 @@ pub(crate) async fn bundle_self_get_impl(
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_list_impl(
+/// The agent a self-scoped App API call is about — whose personal memory
+/// (`memory.*`, M4c-2b), linked accounts (`identity.self.accounts`,
+/// `identity.account.validate`), bound preset (`preset.get` self) and
+/// history (`history.search`, M4c-2c) — identity spec §6.5.9.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SelfOwner<'a> {
+    /// The calling agent's own row, by its token's UID. Versions are keyed by
+    /// it as they are; the files are found by id
+    /// (`memory_dir_for_agent_by_id`), and a UID with no row or no directory
+    /// is an error — never another agent's directory (the #2901 class). A
+    /// directory that resolves but does not exist still lists as empty, as
+    /// on the slug path.
+    Uid(&'a str),
+    /// A slug, resolved as before M4c-2 (`memory_dir_for_agent`,
+    /// `resolve_agent_id`, the registry by slug): an Unattributed HTTP
+    /// caller, and the WS RPC.
+    Slug(&'a str),
+}
+
+impl<'a> From<&'a str> for SelfOwner<'a> {
+    fn from(slug: &'a str) -> Self {
+        Self::Slug(slug)
+    }
+}
+
+impl<'a> From<&'a String> for SelfOwner<'a> {
+    fn from(slug: &'a String) -> Self {
+        Self::Slug(slug)
+    }
+}
+
+impl<'a> SelfOwner<'a> {
+    /// The owner of an HTTP request: the caller's own row when attributed,
+    /// whatever `agent_id` names — a name that is not the caller's is counted
+    /// by M4a-2 — so a name two agents share no longer selects the other's
+    /// memory, accounts or history. An Unattributed request keeps the slug, counted as
+    /// `by_name_counter`.
+    pub(crate) fn of(
+        caller: Option<&'a crate::server::caller::Caller>,
+        slug: &'a str,
+        by_name_counter: &'static str,
+    ) -> Self {
+        match caller.and_then(crate::server::caller::Caller::uid) {
+            Some(uid) => Self::Uid(uid),
+            None => {
+                crate::backend::agent_resolve::record_uid_fallback(by_name_counter);
+                Self::Slug(slug)
+            }
+        }
+    }
+
+    /// The UID or the slug, for messages and logs.
+    fn label(self) -> &'a str {
+        match self {
+            Self::Uid(v) | Self::Slug(v) => v,
+        }
+    }
+
+    /// The calling agent's row — a UID whose row is gone (a token that
+    /// outlived its agent) is an error on every path, never an empty history
+    /// or listing (ReAgent P1 on #3602).
+    pub(crate) fn caller_row(
+        uid: &str,
+        mstore: &crate::backend::storage::store::Store,
+    ) -> Result<crate::backend::storage::AgentDefinition, String> {
+        mstore
+            .agent_def_get(uid)
+            .map_err(|e| format!("store: {e}"))?
+            .ok_or_else(|| format!("calling agent {uid} not found"))
+    }
+
+    /// The owner's live memory directory.
+    fn dir(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
+        match self {
+            Self::Uid(uid) => {
+                let agent = Self::caller_row(uid, mstore).map_err(|e| format!("memory: {e}"))?;
+                crate::server::native_memory_handlers::memory_dir_for_agent_by_id(mstore, &agent)
+                    .ok_or_else(|| format!("memory: memory directory for agent {uid} not found"))
+            }
+            Self::Slug(slug) => crate::server::native_memory_handlers::memory_dir_for_agent(mstore, slug),
+        }
+    }
+
+    /// The owner's definition id (`db_agents.id`) — what its memory versions,
+    /// mirror rows and identity links are keyed by.
+    fn owner_id(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
+        match self {
+            Self::Uid(uid) => Self::caller_row(uid, mstore).map(|row| row.id),
+            Self::Slug(slug) => crate::server::native_memory_handlers::resolve_agent_uuid(mstore, slug),
+        }
+    }
+}
+
+pub(crate) fn memory_list_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
-    let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.list: {e}"))?;
+    let owner = owner.into();
+    let memory_dir = owner.dir(&state.mstore).map_err(|e| format!("memory.list: {e}"))?;
 
     let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
     let entries = match std::fs::read_dir(&memory_dir) {
@@ -1058,16 +1186,15 @@ pub(crate) fn memory_list_impl(
     serde_json::to_value(NativeMemoryListResult { files }).map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_read_impl(
+pub(crate) fn memory_read_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.read: {e}"))?;
-    let path = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.read: {e}"))?.join(filename);
+    let path = owner.dir(&state.mstore).map_err(|e| format!("memory.read: {e}"))?.join(filename);
 
     let file_type = std::fs::symlink_metadata(&path)
         .map_err(|e| format!("memory.read: {filename}: {e}"))?.file_type();
@@ -1094,22 +1221,22 @@ pub(crate) struct MemoryWriteProvenance<'a> {
     pub detail: &'a str,
 }
 
-pub(crate) fn memory_write_impl(
+pub(crate) fn memory_write_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
     content: &str,
     provenance: Option<MemoryWriteProvenance<'_>>,
 ) -> Result<(), String> {
+    let owner = owner.into();
+    let agent_id = owner.label();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.write: {e}"))?;
     const MAX: usize = 10 * 1024 * 1024;
     if content.len() > MAX {
         return Err(format!("memory.write: content too large ({} bytes, max {MAX})", content.len()));
     }
-    let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.write: {e}"))?;
+    let dir = owner.dir(&state.mstore).map_err(|e| format!("memory.write: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.write: mkdir: {e}"))?;
 
     // Version history recorded BEFORE the live-file write below — reagent
@@ -1131,15 +1258,15 @@ pub(crate) fn memory_write_impl(
     // Hard-fails on resolution failure — reagent P2 (re-review): this used
     // to silently fall back to the raw slug via `unwrap_or_else`, while
     // memory_history_impl/memory_diff_impl/memory_revert_impl all hard-fail
-    // on the identical call. `memory_dir_for_agent` above already succeeded
-    // (proving `agent_id` resolves via at least one lookup path), so a
+    // on the identical call. The owner's directory above already resolved
+    // (proving it resolves via at least one lookup path), so a
     // failure here is very likely transient (e.g. a registry-file I/O
     // hiccup) rather than "unknown agent" — but silently keying this
     // version by the raw slug on that failure would reintroduce the exact
     // disjoint-keyspace bug (a write invisible to history/diff/revert) this
     // PR exists to fix. A visible, retriable write failure is strictly
     // safer than a silent data-integrity split.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.write: {e}"))?;
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
@@ -1240,6 +1367,7 @@ pub(crate) struct GlobalMemoryWriteProvenance<'a> {
 pub(crate) fn global_memory_write_impl(
     state: &AppState,
     agent_id: &str,
+    written_by_uid: &str,
     id: Option<&str>,
     name: &str,
     content: &str,
@@ -1330,14 +1458,16 @@ pub(crate) fn global_memory_write_impl(
     // annotation. bundle_upsert_with_version records both, atomically with
     // the bundle write itself (codex P2, PR #3237 — see that method's own
     // doc comment for why two separate calls here would have been unsafe
-    // under concurrent writers).
+    // under concurrent writers). `written_by_uid` is the writer's UID from
+    // the request's `Caller` (identity M4c-1, spec §6.5.9) — its token,
+    // never a body field; `""` when Unattributed.
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
         None => ("agent_inferred", "{}"),
     };
     let source_detail = if detail.is_empty() { "{}" } else { detail };
     state.id_store
-        .bundle_upsert_with_version(&bundle, agent_id, source, source_detail)
+        .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, source, source_detail)
         .map_err(|e| format!("globalmemory.write: {e}"))?;
 
     // New entries sort LAST, matching the Armory UI's own "+ New section"
@@ -1450,6 +1580,7 @@ fn bundle_version_meta_json(
     source: &str,
     source_detail: &str,
     written_by: &str,
+    written_by_uid: &str,
     created_at: i64,
 ) -> serde_json::Value {
     json!({
@@ -1459,6 +1590,9 @@ fn bundle_version_meta_json(
         "source": source,
         "source_detail": source_detail,
         "written_by": written_by,
+        // Identity M4c-2d (spec §6.5.9): the writer's UID beside its name;
+        // empty when the write was Unattributed.
+        "written_by_uid": written_by_uid,
         "created_at": created_at,
     })
 }
@@ -1504,7 +1638,8 @@ pub(crate) fn global_memory_history_impl(state: &AppState, id: &str) -> Result<s
         .map_err(|e| format!("globalmemory.history: store: {e}"))?
         .iter()
         .map(|v| bundle_version_meta_json(
-            &v.id, &v.content_hash, &v.parent_version_id, &v.source, &v.source_detail, &v.written_by, v.created_at,
+            &v.id, &v.content_hash, &v.parent_version_id, &v.source, &v.source_detail, &v.written_by,
+            &v.written_by_uid, v.created_at,
         ))
         .collect();
     Ok(json!({ "versions": versions }))
@@ -1556,11 +1691,14 @@ pub(crate) fn global_memory_diff_impl(
 /// method's own doc comment requires (codex P2, PR #3237). `agent_id` is the
 /// TRUSTED caller identity (an agent's real `AGENTMUX_AGENT_ID`, resolved by
 /// `agentmux-mcp` from its own env, never caller-suppliable) recorded as
-/// `written_by` — never inferred from anything in the request body. Backs
-/// the `GlobalMemoryRevert` MCP tool.
+/// `written_by` — never inferred from anything in the request body.
+/// `written_by_uid` is recorded beside it: the request's `Caller` UID
+/// (identity M4c-1), `""` when Unattributed. Backs the `GlobalMemoryRevert`
+/// MCP tool.
 pub(crate) fn global_memory_revert_impl(
     state: &AppState,
     agent_id: &str,
+    written_by_uid: &str,
     id: &str,
     version_id: &str,
 ) -> Result<serde_json::Value, String> {
@@ -1578,7 +1716,7 @@ pub(crate) fn global_memory_revert_impl(
 
     let detail = json!({ "reverted_to": version_id }).to_string();
     let new_version = state.id_store
-        .bundle_upsert_with_version(&bundle, agent_id, "revert", &detail)
+        .bundle_upsert_with_version(&bundle, agent_id, written_by_uid, "revert", &detail)
         .map_err(|e| format!("globalmemory.revert: {e}"))?
         // `bundle.is_global` is guaranteed true by `load_ordinary_global_bundle`
         // above, and `bundle_upsert_with_version` only ever returns `None` when
@@ -1598,6 +1736,7 @@ pub(crate) fn global_memory_revert_impl(
         &new_version.source,
         &new_version.source_detail,
         &new_version.written_by,
+        &new_version.written_by_uid,
         new_version.created_at,
     ) }))
 }
@@ -1634,7 +1773,7 @@ mod global_memory_impl_tests {
     #[tokio::test]
     async fn write_new_entry_creates_an_ordinary_global_bundle() {
         let state = crate::server::tests::test_state();
-        let result = global_memory_write_impl(&state, "agent-1", None, "New Entry", "hello", None).unwrap();
+        let result = global_memory_write_impl(&state, "agent-1", "", None, "New Entry", "hello", None).unwrap();
         let id = result.get("id").and_then(|v| v.as_str()).unwrap();
         let saved = state.id_store.bundle_get(id).unwrap().unwrap();
         assert!(saved.is_global);
@@ -1652,7 +1791,7 @@ mod global_memory_impl_tests {
         let state = crate::server::tests::test_state();
         state.id_store.bundle_upsert(&ordinary_bundle("blank", false)).unwrap();
 
-        let err = global_memory_write_impl(&state, "agent-1", Some("blank"), "evil", "evil content", None)
+        let err = global_memory_write_impl(&state, "agent-1", "", Some("blank"), "evil", "evil content", None)
             .unwrap_err();
         assert!(err.contains("blank"), "error should mention the blank singleton: {err}");
 
@@ -1674,6 +1813,7 @@ mod global_memory_impl_tests {
         let err = global_memory_write_impl(
             &state,
             "agent-1",
+            "",
             Some("someone-elses-preset"),
             "hijacked",
             "hijacked content",
@@ -1693,7 +1833,7 @@ mod global_memory_impl_tests {
         let state = crate::server::tests::test_state();
         state.id_store.bundle_upsert(&ordinary_bundle("already-global", true)).unwrap();
 
-        global_memory_write_impl(&state, "agent-1", Some("already-global"), "Renamed", "new content", None)
+        global_memory_write_impl(&state, "agent-1", "", Some("already-global"), "Renamed", "new content", None)
             .unwrap();
 
         let updated = state.id_store.bundle_get("already-global").unwrap().unwrap();
@@ -1709,7 +1849,7 @@ mod global_memory_impl_tests {
         sys.is_system = true;
         state.id_store.bundle_upsert_system(&sys).unwrap();
 
-        let err = global_memory_write_impl(&state, "agent-1", Some("sys-1"), "hijacked", "x", None).unwrap_err();
+        let err = global_memory_write_impl(&state, "agent-1", "", Some("sys-1"), "hijacked", "x", None).unwrap_err();
         assert!(err.contains("system"), "unexpected error: {err}");
     }
 
@@ -1723,6 +1863,7 @@ mod global_memory_impl_tests {
         let result = global_memory_write_impl(
             &state,
             "the-real-writer",
+            "",
             None,
             "Versioned",
             "v1",
@@ -1743,10 +1884,10 @@ mod global_memory_impl_tests {
     #[tokio::test]
     async fn editing_an_existing_entry_chains_a_second_version() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "content-1", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "content-1", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
 
-        global_memory_write_impl(&state, "agent-2", Some(&id), "V1", "content-2", None).unwrap();
+        global_memory_write_impl(&state, "agent-2", "", Some(&id), "V1", "content-2", None).unwrap();
 
         let history = state.id_store.bundle_version_list(&id).unwrap();
         assert_eq!(history.len(), 2);
@@ -1851,9 +1992,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn history_lists_versions_newest_first() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "content-1", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "content-1", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-2", Some(&id), "V1", "content-2", None).unwrap();
+        global_memory_write_impl(&state, "agent-2", "", Some(&id), "V1", "content-2", None).unwrap();
 
         let history = global_memory_history_impl(&state, &id).unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -1894,9 +2035,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn diff_shows_line_changes_between_two_versions() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "line one\nline two", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "line one\nline two", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-1", Some(&id), "V1", "line one\nline three", None).unwrap();
+        global_memory_write_impl(&state, "agent-1", "", Some(&id), "V1", "line one\nline three", None).unwrap();
 
         let history = global_memory_history_impl(&state, &id).unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -1915,9 +2056,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn diff_surfaces_a_name_only_change() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "Old Name", "same body", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "Old Name", "same body", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-1", Some(&id), "New Name", "same body", None).unwrap();
+        global_memory_write_impl(&state, "agent-1", "", Some(&id), "New Name", "same body", None).unwrap();
 
         let history = global_memory_history_impl(&state, &id).unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
@@ -1937,9 +2078,9 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn diff_refuses_versions_from_different_bundles() {
         let state = crate::server::tests::test_state();
-        let a = global_memory_write_impl(&state, "agent-1", None, "A", "content-a", None).unwrap();
+        let a = global_memory_write_impl(&state, "agent-1", "", None, "A", "content-a", None).unwrap();
         let a_id = a.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        let b = global_memory_write_impl(&state, "agent-1", None, "B", "content-b", None).unwrap();
+        let b = global_memory_write_impl(&state, "agent-1", "", None, "B", "content-b", None).unwrap();
         let b_id = b.get("id").and_then(|v| v.as_str()).unwrap().to_string();
 
         let a_version = global_memory_history_impl(&state, &a_id).unwrap();
@@ -1964,14 +2105,14 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn revert_restores_content_and_records_a_new_version() {
         let state = crate::server::tests::test_state();
-        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "original", None).unwrap();
+        let created = global_memory_write_impl(&state, "agent-1", "", None, "V1", "original", None).unwrap();
         let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        global_memory_write_impl(&state, "agent-1", Some(&id), "V1", "overwritten", None).unwrap();
+        global_memory_write_impl(&state, "agent-1", "", Some(&id), "V1", "overwritten", None).unwrap();
 
         let history_before = global_memory_history_impl(&state, &id).unwrap();
         let good_version_id = history_before["versions"][1]["id"].as_str().unwrap().to_string();
 
-        let result = global_memory_revert_impl(&state, "agent-revert", &id, &good_version_id).unwrap();
+        let result = global_memory_revert_impl(&state, "agent-revert", "", &id, &good_version_id).unwrap();
         assert_eq!(result["version"]["source"].as_str(), Some("revert"));
         assert_eq!(result["version"]["written_by"].as_str(), Some("agent-revert"));
 
@@ -1992,7 +2133,7 @@ mod global_memory_version_impl_tests {
         state.id_store.bundle_upsert_system(&system_bundle("sys-revert")).unwrap();
         let v = state.id_store.bundle_version_insert("sys-revert", "System (sys-revert)", "system content", "human", "{}", "armory-ui").unwrap();
 
-        let err = global_memory_revert_impl(&state, "agent-1", "sys-revert", &v.id).unwrap_err();
+        let err = global_memory_revert_impl(&state, "agent-1", "", "sys-revert", &v.id).unwrap_err();
         assert!(err.contains("system"), "unexpected error: {err}");
 
         let unchanged = state.id_store.bundle_get("sys-revert").unwrap().unwrap();
@@ -2002,13 +2143,13 @@ mod global_memory_version_impl_tests {
     #[tokio::test]
     async fn revert_refuses_a_version_from_a_different_bundle() {
         let state = crate::server::tests::test_state();
-        let a = global_memory_write_impl(&state, "agent-1", None, "A", "content-a", None).unwrap();
+        let a = global_memory_write_impl(&state, "agent-1", "", None, "A", "content-a", None).unwrap();
         let a_id = a.get("id").and_then(|v| v.as_str()).unwrap().to_string();
-        let b = global_memory_write_impl(&state, "agent-1", None, "B", "content-b", None).unwrap();
+        let b = global_memory_write_impl(&state, "agent-1", "", None, "B", "content-b", None).unwrap();
         let b_id = b.get("id").and_then(|v| v.as_str()).unwrap().to_string();
         let b_version_id = global_memory_history_impl(&state, &b_id).unwrap()["versions"][0]["id"].as_str().unwrap().to_string();
 
-        let err = global_memory_revert_impl(&state, "agent-1", &a_id, &b_version_id).unwrap_err();
+        let err = global_memory_revert_impl(&state, "agent-1", "", &a_id, &b_version_id).unwrap_err();
         assert!(err.contains("does not belong to"), "unexpected error: {err}");
 
         let unchanged = state.id_store.bundle_get(&a_id).unwrap().unwrap();
@@ -2016,16 +2157,17 @@ mod global_memory_version_impl_tests {
     }
 }
 
-pub(crate) fn memory_history_impl(
+pub(crate) fn memory_history_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.history: {e}"))?;
     // See memory_write_impl's own comment — must key by the same resolved
     // canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.history: {e}"))?;
     let versions: Vec<crate::backend::rpc_types::NativeMemoryVersionMeta> = state
         .id_store
@@ -2046,15 +2188,17 @@ pub(crate) fn memory_history_impl(
         .map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_diff_impl(
+pub(crate) fn memory_diff_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     from_version_id: &str,
     to_version_id: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
+    let agent_id = owner.label();
     // See memory_write_impl's own comment — must compare against the same
     // resolved canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.diff: {e}"))?;
     let from = state
         .id_store
@@ -2083,18 +2227,20 @@ pub(crate) fn memory_diff_impl(
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_revert_impl(
+pub(crate) fn memory_revert_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
     target_version_id: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
+    let agent_id = owner.label();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
     // See memory_write_impl's own comment — must key/compare against the
     // same resolved canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
     let target = state
@@ -2108,9 +2254,7 @@ pub(crate) fn memory_revert_impl(
         ));
     }
 
-    let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.revert: {e}"))?;
+    let dir = owner.dir(&state.mstore).map_err(|e| format!("memory.revert: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.revert: mkdir: {e}"))?;
 
     // Version recorded BEFORE the live-file write below — same fs-watch-race
@@ -2568,6 +2712,82 @@ mod memory_version_impl_tests {
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
         assert_eq!(versions.len(), 1);
     }
+
+    fn add_agent(state: &AppState, id: &str, name: &str, slug: &str, dir: &std::path::Path) {
+        let mut def = agent_def(id, &dir.to_string_lossy());
+        def.name = name.to_string();
+        def.slug = slug.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: id.to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", dir.display()),
+                updated_at: 0,
+            })
+            .unwrap();
+    }
+
+    fn version_count(state: &AppState, owner: &str) -> usize {
+        state.id_store.agent_native_memory_version_list(owner, "MEMORY.md").unwrap().len()
+    }
+
+    /// Identity M4c-2b (spec §6.5.9), the colliding-names fixture: the second
+    /// agent ("AGENTY", `agenty-2`) sends the first one's slug `agenty`. When
+    /// attributed, its own row is the owner — its directory, its versions,
+    /// and it cannot read, diff or revert the first agent's; Unattributed,
+    /// the slug still resolves to the first agent, as before.
+    #[tokio::test]
+    async fn an_attributed_memory_owner_is_the_callers_row_not_the_slug() {
+        let (tmp_y, tmp_y2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let state = crate::server::tests::test_state();
+        add_agent(&state, "uid-mo-y", "AgentY", "agenty", tmp_y.path());
+        add_agent(&state, "uid-mo-y2", "AGENTY", "agenty-2", tmp_y2.path());
+        let as_y2 = SelfOwner::Uid("uid-mo-y2");
+
+        memory_write_impl(&state, "agenty", "MEMORY.md", "y's", None).unwrap();
+        memory_write_impl(&state, as_y2, "MEMORY.md", "y2's", None).unwrap();
+        assert_eq!(version_count(&state, "uid-mo-y"), 1);
+        assert_eq!(version_count(&state, "uid-mo-y2"), 1);
+
+        let read = |owner: SelfOwner<'_>| {
+            memory_read_impl(&state, owner, "MEMORY.md").unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(read(as_y2), "y2's");
+        assert_eq!(read("agenty".into()), "y's", "Unattributed: by slug");
+        let listed = memory_list_impl(&state, as_y2).unwrap();
+        assert_eq!(listed["files"].as_array().unwrap().len(), 1);
+
+        let y_version = state
+            .id_store
+            .agent_native_memory_version_list("uid-mo-y", "MEMORY.md")
+            .unwrap()[0]
+            .id
+            .clone();
+        let err = memory_revert_impl(&state, as_y2, "MEMORY.md", &y_version).unwrap_err();
+        assert!(err.contains("does not belong to"), "{err}");
+        let err = memory_diff_impl(&state, as_y2, &y_version, &y_version).unwrap_err();
+        assert!(err.contains("do not belong to"), "{err}");
+        let history = memory_history_impl(&state, as_y2, "MEMORY.md").unwrap();
+        assert_eq!(history["versions"].as_array().unwrap().len(), 1);
+
+        // A caller whose row is gone is an error, never another's directory
+        // and never an empty list.
+        let gone = SelfOwner::Uid("uid-mo-gone");
+        for err in [
+            memory_list_impl(&state, gone).unwrap_err(),
+            memory_history_impl(&state, gone, "MEMORY.md").unwrap_err(),
+            memory_diff_impl(&state, gone, &y_version, &y_version).unwrap_err(),
+            memory_revert_impl(&state, gone, "MEMORY.md", &y_version).unwrap_err(),
+            memory_write_impl(&state, gone, "MEMORY.md", "x", None).unwrap_err(),
+        ] {
+            assert!(err.contains("not found"), "{err}");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2624,31 +2844,23 @@ pub(super) fn global_zone_line_count(
     gfs: &Arc<crate::backend::storage::filestore::FileStore>,
     zone: &str,
 ) -> Option<u64> {
-    use crate::backend::blockcontroller::shell::OUTPUT_IDX_HEADER_LEN;
+    use crate::backend::blockcontroller::shell::{extend_output_idx, output_index};
 
-    let stat = gfs
-        .stat(zone, crate::backend::agent_session::OUTPUT_FILE)
-        .ok()??;
-    if stat.size == 0 {
+    // `output` and its index from one database snapshot: sizes, header and
+    // generation label of the same moment, whatever another srv instance is
+    // writing to this shared zone (Codex on #3634).
+    let view = output_index(gfs, zone)?;
+    if view.output_size == 0 {
         return Some(0);
     }
-    let output_size = stat.size as u64;
-
-    if let Ok(Some(idx_stat)) = gfs.stat(zone, "output.idx") {
-        if idx_stat.size >= OUTPUT_IDX_HEADER_LEN {
-            if let Ok((_, header)) = gfs.read_at(zone, "output.idx", 0, OUTPUT_IDX_HEADER_LEN) {
-                if let Ok(bytes) = <[u8; 8]>::try_from(header.as_slice()) {
-                    if u64::from_le_bytes(bytes) == output_size {
-                        return Some(((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64);
-                    }
-                }
-            }
-        }
+    if let Some(lines) = view.fresh_lines {
+        return Some(lines);
     }
 
     // Stale or missing. `extend_output_idx` scans only the appended bytes when
     // it can anchor on the existing index, and falls back to a full rebuild
-    // when it can't (missing, unreadable, no entries, or `output` shrank).
+    // when it can't (missing, unreadable, no entries, another generation's, or
+    // `output` shrank).
     //
     // The count must stay EXACT. Returning a stale one instead was tried and
     // is wrong: this feeds `useHistoryPagination`'s tail window
@@ -2660,7 +2872,7 @@ pub(super) fn global_zone_line_count(
     // O(file-size) rescan every time — 37 rebuilds in 19 minutes on a 759 MB
     // transcript, mean 3168 ms, ~10% permanent duty cycle. See
     // docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5.
-    crate::backend::blockcontroller::shell::extend_output_idx(gfs, zone, output_size)
+    extend_output_idx(gfs, zone)
 }
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
@@ -3024,15 +3236,65 @@ mod cross_channel_tests {
         idx.extend_from_slice(&(body.len() as u64).to_le_bytes()); // covered_size == output size
         idx.extend_from_slice(&0u64.to_le_bytes()); // fabricated entry 0
         idx.extend_from_slice(&9u64.to_le_bytes()); // fabricated entry 1 (only 2, not 3)
-        global
-            .make_file(zone, "output.idx", FileMeta::default(), FileOpts::default())
-            .unwrap();
-        global.write_file(zone, "output.idx", &idx).unwrap();
+        // Labelled with `output`'s current generation, as the builder labels
+        // a real index (5a-2b) — so it is trusted as fresh.
+        let gen = global.line_state(zone, OUTPUT_FILE).unwrap().unwrap().counted.unwrap().gen;
+        let mut label = FileMeta::default();
+        label.insert("for_gen".into(), serde_json::json!(gen));
+        global.put_file_with_meta(zone, "output.idx", &idx, label).unwrap();
 
         assert_eq!(
             global_zone_line_count(&global, zone),
             Some(2),
             "must trust the fresh cached index rather than rescanning `output`",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_is_exact_when_another_instance_rebuilt_the_index() {
+        // Codex P1 on #3634: store A holds a stale cached `output.idx` row.
+        // Another srv instance (store B, same database file) appends and
+        // rebuilds the index. A's output size comes from the database; the
+        // index size must too, or A under-reports the count.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("global.db");
+        let a = Arc::new(FileStore::open(&path).unwrap());
+        let b = Arc::new(FileStore::open(&path).unwrap());
+        let zone = "agent:def-cc-11:current";
+        seed_output(&a, zone, b"{\"a\":1}\n");
+        assert_eq!(global_zone_line_count(&a, zone), Some(1));
+        // A caches a row for the index (as an older build's make_file would).
+        a.write_file(zone, "output.idx", &[0u8; 16]).ok();
+        a.make_file(zone, "output.idx", FileMeta::default(), FileOpts::default()).ok();
+        let _ = a.stat(zone, "output.idx");
+
+        b.append_data(zone, OUTPUT_FILE, b"{\"b\":2}\n{\"c\":3}\n{\"d\":4}\n").unwrap();
+        let b_size = b.line_state(zone, OUTPUT_FILE).unwrap().unwrap().size as u64;
+        assert_eq!(crate::backend::blockcontroller::shell::rebuild_output_idx(&b, zone, b_size, crate::backend::blockcontroller::shell::output_now(&b, zone).and_then(|(_, g)| g)), Some(4));
+
+        assert_eq!(global_zone_line_count(&a, zone), Some(4), "A must not count from its stale cached index size");
+    }
+
+    #[test]
+    fn global_zone_line_count_does_not_trust_an_index_of_replaced_content_of_the_same_size() {
+        // The coincidence the covered_size check alone can't see: `output`
+        // replaced (restore, backfill) by different content of exactly the
+        // same byte size. The old index then "matches" and serves the old
+        // file's count and offsets. Since 5a-2b the index is labelled with
+        // the generation it was built for, and a replace mints a new one.
+        let global = mem_store();
+        let zone = "agent:def-cc-10:current";
+        let three: &[u8] = b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n";
+        let two: &[u8] = b"{\"x\":11111}\n{\"y\":22222}\n";
+        assert_eq!(three.len(), two.len(), "precondition: same size");
+        seed_output(&global, zone, three);
+        assert_eq!(global_zone_line_count(&global, zone), Some(3));
+
+        replace_output(&global, zone, two);
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(2),
+            "an index built for another generation of `output` must be rebuilt",
         );
     }
 
@@ -4533,5 +4795,89 @@ mod s1_tests {
             assert!(err.contains("mismatch"), "got: {err}");
             assert!(!err.to_lowercase().contains("unknown"), "leaks existence: {err}");
         });
+    }
+}
+
+#[cfg(test)]
+mod self_owner_tests {
+    use super::*;
+    use crate::backend::storage::agents::test_agent_def;
+    use crate::server::tests::test_state;
+
+    /// Identity M4c-2c (spec §6.5.9), the colliding-names fixture: "AgentY"
+    /// (`agenty`, bundle-y, account acct-y) and "AGENTY" (`agenty-2`,
+    /// bundle-y2, no account). The second agent, attributed, sees its own
+    /// accounts and preset whatever slug it sends, and cannot validate the
+    /// first one's account; by slug, `agenty` is still the first agent.
+    #[tokio::test]
+    async fn an_attributed_self_call_is_about_the_callers_row() {
+        let state = test_state();
+        for (id, name, slug, bundle) in [
+            ("uid-so-y", "AgentY", "agenty", "bundle-so-y"),
+            ("uid-so-y2", "AGENTY", "agenty-2", "bundle-so-y2"),
+        ] {
+            let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+            def.slug = slug.to_string();
+            state.mstore.agent_def_insert(&mut def).unwrap();
+            // The launch's bundle (`db_agents.memory_id`), which preset.get
+            // self reads — not the definition's default.
+            state
+                .mstore
+                .conn()
+                .lock()
+                .unwrap()
+                .execute("UPDATE db_agents SET memory_id = ?1 WHERE id = ?2", [bundle, id])
+                .unwrap();
+            let b: crate::backend::storage::bundles::Bundle =
+                serde_json::from_value(json!({"id": bundle, "name": bundle})).unwrap();
+            state.id_store.bundle_upsert(&b).unwrap();
+        }
+        let acct = crate::backend::storage::IdentityAccount {
+            id: "acct-so-y".to_string(),
+            name: "claude-oauth".to_string(),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: crate::backend::storage::SecretRef::OAuthConfigDir {
+                dir: "/tmp/acct-so-y".to_string(),
+            },
+            context: json!({}),
+            status: "ok".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        state.mstore.identity_upsert(&acct).unwrap();
+        state.mstore.agent_identity_link("uid-so-y", "acct-so-y", "claude").unwrap();
+        let y2 = SelfOwner::Uid("uid-so-y2");
+
+        let accounts = |v: serde_json::Value| v["accounts"].as_array().unwrap().len();
+        assert_eq!(accounts(identity_self_accounts_impl(&state, y2).await.unwrap()), 0);
+        assert_eq!(accounts(identity_self_accounts_impl(&state, "agenty").await.unwrap()), 1);
+        let err = identity_account_validate_stored_impl(&state, y2, "acct-so-y").await.unwrap_err();
+        assert!(err.starts_with("FORBIDDEN"), "{err}");
+
+        assert_eq!(bundle_self_get_impl(&state, y2).await.unwrap()["id"], "bundle-so-y2");
+        assert_eq!(bundle_self_get_impl(&state, "agenty").await.unwrap()["id"], "bundle-so-y");
+
+        let gone = SelfOwner::Uid("uid-so-gone");
+        for err in [
+            identity_self_accounts_impl(&state, gone).await.unwrap_err(),
+            identity_account_validate_stored_impl(&state, gone, "acct-so-y").await.unwrap_err(),
+            bundle_self_get_impl(&state, gone).await.unwrap_err(),
+        ] {
+            assert!(err.contains("calling agent uid-so-gone not found"), "{err}");
+        }
+    }
+
+    /// History for an attributed caller is its own row's: its id keys the
+    /// identity links, its working directory finds ambient-credential
+    /// sessions.
+    #[test]
+    fn a_history_owner_of_a_row_is_that_rows() {
+        let mut def = test_agent_def("uid-so-h", "H", "claude", "agent", 1, "");
+        def.working_directory = "/work/h".to_string();
+        let owner = crate::backend::history::HistoryOwner::of_row(&def);
+        assert_eq!(owner.definition_id, "uid-so-h");
+        assert_eq!(owner.working_directory.as_deref(), Some("/work/h"));
     }
 }

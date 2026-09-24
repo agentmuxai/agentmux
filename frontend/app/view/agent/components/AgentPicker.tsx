@@ -82,6 +82,25 @@ function storeSort(sort: AgentSortOption): void {
     }
 }
 
+/**
+ * `next`, but with every definition whose content didn't change replaced by
+ * the object already in `prev`. `<For>` keys by object identity, so without
+ * this every `agents:changed` refetch — which fires for ANY definition edit,
+ * fork or hide app-wide, including other agents calling `agent.define` —
+ * remounted every card in every open picker.
+ */
+export function reuseUnchangedById(prev: AgentDefinition[], next: AgentDefinition[]): AgentDefinition[] {
+    const prevById = new Map(prev.map((a) => [a.id, a]));
+    let changed = prev.length !== next.length;
+    const merged = next.map((a, i) => {
+        const old = prevById.get(a.id);
+        const reused = old != null && JSON.stringify(old) === JSON.stringify(a) ? old : a;
+        if (reused !== prev[i]) changed = true;
+        return reused;
+    });
+    return changed ? merged : prev;
+}
+
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
 /**
@@ -111,7 +130,7 @@ export function useAgentDefinitions(): [() => AgentDefinition[], () => boolean] 
         async function load() {
             try {
                 const result = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
-                if (!cancelled) setAgents(result ?? []);
+                if (!cancelled) setAgents((prev) => reuseUnchangedById(prev, result ?? []));
             } catch {
                 // silently ignore
             } finally {
@@ -1036,6 +1055,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         // pill never appears).
                                         hasCurrentSession={false}
                                         defaultFocus={index() === 0}
+                                        blockId={props.model.blockId}
                                     />
                                 )}
                             </For>

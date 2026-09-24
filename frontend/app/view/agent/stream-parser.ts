@@ -63,6 +63,23 @@ const JEKT_BLOCK_RE = /^\[JEKT:([^\]\n]+)\]\r?\n([\s\S]*?)\r?\n\[\/JEKT\]\s*$/;
 const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
 const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
 
+/**
+ * A held jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4) carries
+ * `HELD_FOR=<secs>` and its original send time in `TS`: show that, not the
+ * replay time, so a late message never reads as current.
+ */
+export function heldTiming(
+    fields: Record<string, string>,
+    deliveredAt: number,
+): { timestamp: number; heldForSecs?: number } {
+    const held = Number.parseInt(fields.HELD_FOR ?? "", 10);
+    const sentSecs = Number.parseInt(fields.TS ?? "", 10);
+    if (!Number.isFinite(held) || held < 0 || !Number.isFinite(sentSecs) || sentSecs <= 0) {
+        return { timestamp: deliveredAt };
+    }
+    return { timestamp: sentSecs * 1000, heldForSecs: held };
+}
+
 /** Parses the `KEY=value` tokens out of a jekt structured-tag string. */
 function parseJektTagFields(tag: string): Record<string, string> {
     const fields: Record<string, string> = {};
@@ -707,7 +724,9 @@ export class ClaudeCodeStreamParser {
             type: "user_message",
             id: this.nextIdOf("user"),
             message: event.message,
-            timestamp: event.timestamp || Date.now(),
+            // Replay: no invented "now" — parseHistoryLines fills the line's
+            // stored receive time (ReAgent P1, #3620).
+            timestamp: event.timestamp || (this.isReplay ? undefined : Date.now()),
             isStartup,
         };
     }
@@ -763,7 +782,7 @@ export class ClaudeCodeStreamParser {
             msgId: fields.MSGID || "",
             priority: fields.PRIORITY === "urgent" ? "urgent" : "normal",
             direction,
-            timestamp: event.timestamp || Date.now(),
+            ...heldTiming(fields, event.timestamp || Date.now()),
         };
     }
 

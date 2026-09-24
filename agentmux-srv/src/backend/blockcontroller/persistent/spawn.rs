@@ -43,6 +43,34 @@ impl PersistentSubprocessController {
             }
         }
 
+        // First spawn with no id, onto a pane that renders prior history:
+        // continue that history's session instead of pairing it with a blank
+        // model (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §1.1, §5 P0a).
+        // A session live in another pane is left alone — adopting it would
+        // turn a plain open into the held-elsewhere refusal below.
+        let first_spawn_without_sid = {
+            let inner = self.inner.lock().unwrap();
+            inner.session_id.is_none() && inner.spawn_generation == 0
+        };
+        if first_spawn_without_sid {
+            if let Some(sid) = self.find_continuation_session_id(&config) {
+                if self.session_held_elsewhere(&sid).is_none() {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        session_id = %sid,
+                        "continuity: first spawn has no session id; continuing the session this pane's history belongs to"
+                    );
+                    self.inner.lock().unwrap().session_id = Some(sid);
+                } else {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        session_id = %sid,
+                        "continuity: prior session is live in another pane; starting fresh"
+                    );
+                }
+            }
+        }
+
         // Append `--resume <sid>` when we have a session id and the provider
         // supports simple-flag resume — same construction as
         // SubprocessController::spawn_turn. This is what makes a model/effort
@@ -162,6 +190,9 @@ impl PersistentSubprocessController {
             // again. Cleared unconditionally rather than only when set: any
             // spawn ends the window by definition, whatever opened it.
             inner.restart_pending = false;
+            // Same for a stop request: it targeted the process this spawn
+            // replaces.
+            inner.stop_pending = false;
             // …and any deferred restart is moot now, for the same reason: this
             // spawn read `cmd:args` fresh from block meta, so the new config is
             // already applied and there is nothing left to restart FOR.
@@ -265,6 +296,7 @@ impl PersistentSubprocessController {
         // `attempted_sid` is empty: there was no id to attempt, which is the
         // whole point. The frontend renders that as "—" rather than a blank
         // (`DocumentRow.tsx`'s session-outcome body).
+        let mut continuation: Option<String> = None;
         if fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)
             && self.has_prior_transcript()
         {
@@ -277,6 +309,17 @@ impl PersistentSubprocessController {
                 String::new(),
                 None,
             );
+            // The provider can't give this process the conversation the pane
+            // shows, so AgentMux's own record rides on its first message
+            // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+            continuation = self.continuation_packet();
+            if let Some(ref packet) = continuation {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    packet_chars = packet.len(),
+                    "continuity: carrying AgentMux's record of the conversation into the fresh session"
+                );
+            }
         }
 
         let pid = child.id().unwrap_or(0);
@@ -559,7 +602,20 @@ impl PersistentSubprocessController {
         // Spawn stdin writer task
         tokio::spawn(async move {
             let mut stdin = stdin;
+            let mut continuation = continuation;
             while let Some(msg) = msg_rx.recv().await {
+                // Only this write carries the packet; the pane's record keeps
+                // the message as typed. Control responses pass through.
+                let msg = match continuation
+                    .as_deref()
+                    .and_then(|packet| crate::backend::continuity::prefix_user_message(&msg, packet))
+                {
+                    Some(with_packet) => {
+                        continuation = None;
+                        with_packet
+                    }
+                    None => msg,
+                };
                 if let Err(e) = stdin.write_all(msg.as_bytes()).await {
                     tracing::warn!("persistent stdin write error: {}", e);
                     break;
@@ -648,6 +704,14 @@ impl PersistentSubprocessController {
                 // `PersistentInner::pending_error_result_line`. `false` for
                 // every other line, matching today's behavior exactly.
                 let mut hold_back_for_resume_retry = false;
+                // A deferred message released at this line's turn boundary.
+                // Its stdin write happens at the boundary (atomically with the
+                // idle decision), but its blockfile append waits until THIS
+                // line — the `result` that ended the previous turn — has been
+                // appended, so the transcript and live consumers see
+                // `result(N)` before `user(N+1)`, never the reverse (codex P1
+                // on #3562).
+                let mut released_deferred_line: Option<String> = None;
 
                 // Parse JSON for control-frame handling, turn-active tracking,
                 // and session ID capture
@@ -685,15 +749,50 @@ impl PersistentSubprocessController {
                         // closes. `restart_pending` is committed in the SAME
                         // acquisition so no send can slip into `DeliverDirect`
                         // between the decision and the kill.
-                        let deferred_restart = {
-                            let mut locked = inner_read.lock().unwrap();
-                            health_read.set_active_turn(false);
-                            let deferred = std::mem::replace(&mut locked.restart_when_idle, false);
-                            if deferred {
-                                locked.restart_pending = true;
-                            }
-                            deferred
+                        // The turn boundary is also the flush point for
+                        // messages deferred by
+                        // `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.4.
+                        //
+                        // Exactly ONE message is released per boundary, never
+                        // the whole queue: writing to stdin starts a new turn,
+                        // so a burst drain would write message #2 while #1's
+                        // turn was already running — the precise mid-turn write
+                        // this exists to prevent. The next queued message goes
+                        // out on *that* new turn's own `result` frame.
+                        //
+                        // Which outcomes end the turn, and when the deferred
+                        // restart may apply: see `turn_boundary_locked`.
+                        let boundary = PersistentSubprocessController::turn_boundary_locked(
+                            &mut inner_read.lock().unwrap(),
+                            &health_read,
+                            &block_id_read,
+                            my_generation_read,
+                        );
+                        // `None`: this reader's process has been replaced. Its
+                        // `result` ends nothing the current process is doing,
+                        // so it must not flush into, idle, or restart that
+                        // process (codex P1 on #3562).
+                        let boundary_is_current = boundary.is_some();
+                        let turn_still_active = boundary.as_ref().is_some_and(|b| b.turn_still_active());
+                        let (flushed, deferred_restart) = match boundary {
+                            Some(b) => (b.flushed, b.apply_deferred_restart),
+                            None => (DeferredFlush::Empty, false),
                         };
+                        match flushed {
+                            DeferredFlush::Released(line) => {
+                                tracing::info!(
+                                    block_id = %block_id_read,
+                                    "turn ended — released one deferred message"
+                                );
+                                released_deferred_line = Some(line);
+                            }
+                            DeferredFlush::Held | DeferredFlush::Failed => {
+                                if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                                    ctrl.ensure_deferred_watchdog();
+                                }
+                            }
+                            DeferredFlush::Empty => {}
+                        }
                         if deferred_restart {
                             tracing::info!(
                                 block_id = %block_id_read,
@@ -709,7 +808,7 @@ impl PersistentSubprocessController {
                         // unrelated status change (or process exit) — see
                         // send_message's matching publish_status() call for
                         // the turn-start side of this pair.
-                        if let Some(ref broker) = broker_read {
+                        if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
                             let status = {
                                 let locked = inner_read.lock().unwrap();
                                 BlockControllerRuntimeStatus {
@@ -722,7 +821,14 @@ impl PersistentSubprocessController {
                                     shellprocname: String::new(),
                                     spawn_ts_ms: None,
                                     is_agent_pane: true,
-                                    turn_active: false,
+                                    // NOT unconditionally false: if a deferred
+                                    // message was just released, or an earlier
+                                    // writer's prompt is still running (`Held`),
+                                    // the turn is live and publishing "idle" here
+                                    // would hand subscribers (the Swarm badge,
+                                    // `trackTurnJustEnded`) a bogus end-of-turn
+                                    // for a turn that is actively in flight.
+                                    turn_active: turn_still_active,
                                 }
                             };
                             super::super::publish_controller_status(broker, &status);
@@ -1069,6 +1175,13 @@ impl PersistentSubprocessController {
                 }
 
                 if hold_back_for_resume_retry {
+                    // This `result` is held back, not persisted — but the
+                    // message already went to stdin, so it must still render.
+                    if let Some(released) = released_deferred_line.take() {
+                        if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                            ctrl.append_delivered_message(&released);
+                        }
+                    }
                     continue;
                 }
 
@@ -1098,6 +1211,11 @@ impl PersistentSubprocessController {
                     );
                 } else {
                     tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");
+                }
+                if let Some(released) = released_deferred_line.take() {
+                    if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                        ctrl.append_delivered_message(&released);
+                    }
                 }
             }
 

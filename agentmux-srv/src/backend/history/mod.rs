@@ -33,6 +33,112 @@ fn registry_record(agent_id: &str) -> Option<crate::registry::NamedAgentRecord> 
     crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)
 }
 
+/// Whose history a lookup is about: the definition id its identity links
+/// are keyed by, and the working directory its transcripts record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryOwner {
+    pub definition_id: String,
+    pub working_directory: Option<String>,
+}
+
+impl HistoryOwner {
+    /// Resolve an App API slug (the pre-M4c-2 path, and the one an
+    /// Unattributed caller keeps).
+    pub fn from_slug(store: &crate::backend::storage::store::Store, agent_id: &str) -> Self {
+        // `agent_id` arrives as the SLUG (`AGENTMUX_AGENT_ID`) from every App
+        // API caller, but `db_agent_identity_links.agent_id` stores the
+        // DEFINITION id — so querying that table with the slug matched zero
+        // rows every time, and the early return on "no links" then reported a
+        // confident, empty history for agents whose transcripts were sitting
+        // on disk. A caller that already holds a definition id passes through
+        // unchanged. Same resolution `app_api::resolve_agent_definition_id`
+        // already documents ("listing links by slug always returns empty").
+        let instance = store.instance_get_by_slug(agent_id).ok().flatten();
+        let definition_from_db = instance.as_ref().map(|i| {
+            if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
+        });
+        let working_dir_from_db = instance
+            .as_ref()
+            .map(|i| i.working_directory.clone())
+            .filter(|w| !w.is_empty());
+
+        // One registry read, shared by both fallbacks below, and skipped
+        // entirely when the `db_agents` row already answered both questions.
+        let record = if definition_from_db.is_none() || working_dir_from_db.is_none() {
+            registry_record(agent_id)
+        } else {
+            None
+        };
+
+        // Without the registry step, a registry-only agent (no `db_agents`
+        // row — the common case) fell through to the raw slug here, and the
+        // link table is keyed by definition id, so the link query matched
+        // nothing and the agent's identity-bound sessions silently vanished.
+        // Same third fallback `app_api::resolve_agent_definition_id` already
+        // has, for the same reason. The raw slug remains the last resort: a
+        // caller that already holds a definition id passes through unchanged.
+        let definition_id = definition_from_db
+            .or_else(|| {
+                record
+                    .as_ref()
+                    .map(|r| r.data.definition_id.clone())
+                    .filter(|d| !d.is_empty())
+            })
+            .unwrap_or_else(|| agent_id.to_string());
+
+        // The ambient-credentials fallback below (`sessions_for_owner`) needs
+        // the working directory: the row's, else the registry record's.
+        let working_directory = working_dir_from_db.or_else(|| {
+            record
+                .as_ref()
+                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
+        });
+        Self { definition_id, working_directory }
+    }
+
+    /// An agent's own row — identity M4c-2c, an attributed caller. Its
+    /// working directory is the row's, else its registry record's found by
+    /// the row's slug **and** id, never by slug alone.
+    pub fn of_row(row: &crate::backend::storage::AgentDefinition) -> Self {
+        let working_directory = Some(row.working_directory.clone())
+            .filter(|w| !w.is_empty())
+            .or_else(|| {
+                crate::backend::agent_registry_lookup::find_active_record_by_slug_and_definition(
+                    &row.slug, &row.id,
+                )
+                .as_ref()
+                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
+            });
+        Self { definition_id: row.id.clone(), working_directory }
+    }
+}
+
+/// Account ids linked to more than one agent (`db_agent_identity_links`).
+fn accounts_linked_to_several_agents(
+    store: &crate::backend::storage::store::Store,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut agents_by_account: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    for link in store
+        .agent_identity_list_all()
+        .map_err(|e| format!("failed to read identity links: {e}"))?
+    {
+        agents_by_account.entry(link.account_id).or_default().insert(link.agent_id);
+    }
+    Ok(agents_by_account
+        .into_iter()
+        .filter(|(_, agents)| agents.len() > 1)
+        .map(|(account, _)| account)
+        .collect())
+}
+
+/// How old the index may be before a search refreshes it.
+const SEARCH_STALE_AFTER_MS: i64 = 30_000;
+
+/// A search's answer while the first index build after srv start is running.
+pub const HISTORY_INDEX_BUILDING: &str = "history index is still being built after AgentMux started \
+     (it reads every transcript once) — this is not an empty history; retry in a minute";
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
@@ -59,6 +165,49 @@ impl HistoryService {
         HistoryService { index: Arc::new(index) }
     }
 
+    /// Build the index off-thread at srv start, so the first search doesn't
+    /// pay for parsing every transcript on the machine inside the MCP's 10 s
+    /// timeout (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.5).
+    pub fn warm_in_background(&self) -> std::thread::JoinHandle<()> {
+        let index = self.index.clone();
+        std::thread::Builder::new()
+            .name("history-index-warm".into())
+            .spawn(move || {
+                let started = std::time::Instant::now();
+                let (discovered, _, _) = index.refresh();
+                tracing::info!(
+                    discovered,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "history: index built"
+                );
+            })
+            .expect("spawn history-index-warm thread")
+    }
+
+    /// Build the index if it never has been. Blocking; for callers without a
+    /// tight deadline.
+    fn ensure_built(&self) {
+        if self.index.refreshed_at_ms() == 0 {
+            self.index.refresh();
+        }
+    }
+
+    /// Make the index current enough for a search without ever waiting on a
+    /// refresh another thread is running — the MCP caller gives up after 10 s.
+    /// Refreshes (incrementally) when older than [`SEARCH_STALE_AFTER_MS`], so
+    /// sessions started since srv start are found.
+    fn fresh_enough_for_search(&self) -> Result<(), String> {
+        let built_at = self.index.refreshed_at_ms();
+        let now = chrono::Utc::now().timestamp_millis();
+        if built_at != 0 && now - built_at < SEARCH_STALE_AFTER_MS {
+            return Ok(());
+        }
+        if self.index.try_refresh().is_some() || built_at != 0 {
+            return Ok(());
+        }
+        Err(HISTORY_INDEX_BUILDING.to_string())
+    }
+
     /// List sessions with pagination and filters.
     /// Lazy-initializes the index on first call.
     pub fn list(
@@ -71,9 +220,7 @@ impl HistoryService {
         sort_dir: &str,
     ) -> serde_json::Value {
         // Lazy init: scan on first request
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
 
         let (sessions, total, has_more) =
             self.index.list(provider, project, offset, limit, sort_by, sort_dir);
@@ -111,60 +258,64 @@ impl HistoryService {
         sort_dir: &str,
         force_refresh: bool,
     ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
-        if force_refresh || self.index.is_empty() {
+        let owner = HistoryOwner::from_slug(store, agent_id);
+        self.sessions_for_owner(store, &owner, offset, limit, sort_by, sort_dir, force_refresh)
+    }
+
+    /// [`Self::sessions_for_agent`] for an owner already resolved — identity
+    /// M4c-2c: an attributed caller's own row (`HistoryOwner::of_row`),
+    /// never a slug another agent may share.
+    pub fn sessions_for_owner(
+        &self,
+        store: &crate::backend::storage::store::Store,
+        owner: &HistoryOwner,
+        offset: usize,
+        limit: usize,
+        sort_by: &str,
+        sort_dir: &str,
+        force_refresh: bool,
+    ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
+        if force_refresh {
             self.index.refresh();
+        } else {
+            self.ensure_built();
         }
 
-        // `agent_id` arrives as the SLUG (`AGENTMUX_AGENT_ID`) from every App
-        // API caller, but `db_agent_identity_links.agent_id` stores the
-        // DEFINITION id — so querying that table with the slug matched zero
-        // rows every time, and the early return on "no links" then reported a
-        // confident, empty history for agents whose transcripts were sitting
-        // on disk. A caller that already holds a definition id passes through
-        // unchanged. Same resolution `app_api::resolve_agent_definition_id`
-        // already documents ("listing links by slug always returns empty").
-        let instance = store.instance_get_by_slug(agent_id).ok().flatten();
-        let definition_from_db = instance.as_ref().map(|i| {
-            if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
-        });
-        let working_dir_from_db = instance
-            .as_ref()
-            .map(|i| i.working_directory.clone())
-            .filter(|w| !w.is_empty());
-
-        // One registry read, shared by both fallbacks below, and skipped
-        // entirely when the `db_agents` row already answered both questions.
-        let record = if definition_from_db.is_none() || working_dir_from_db.is_none() {
-            registry_record(agent_id)
-        } else {
-            None
-        };
-
-        // Without the registry step, a registry-only agent (no `db_agents`
-        // row — the common case) fell through to the raw slug here, and the
-        // link table is keyed by definition id, so the query below matched
-        // nothing and the agent's identity-bound sessions silently vanished.
-        // Same third fallback `app_api::resolve_agent_definition_id` already
-        // has, for the same reason. The raw slug remains the last resort: a
-        // caller that already holds a definition id passes through unchanged.
-        let definition_id = definition_from_db
-            .or_else(|| {
-                record
-                    .as_ref()
-                    .map(|r| r.data.definition_id.clone())
-                    .filter(|d| !d.is_empty())
-            })
-            .unwrap_or_else(|| agent_id.to_string());
-
         let links = store
-            .agent_identity_list_for_agent(&definition_id)
+            .agent_identity_list_for_agent(&owner.definition_id)
             .map_err(|e| format!("failed to resolve agent's linked identities: {e}"))?;
 
+        // An account linked to several agents holds all of their transcripts
+        // under one identity bundle, so its sessions are not all this
+        // owner's: `SearchHistory` would return another agent's conversation,
+        // the ungoverned disclosure `search_for_agent`'s doc rules out. From
+        // such an account keep only sessions in the owner's own working
+        // directory; with no known directory, keep none (counted) rather than
+        // guess. An account only this owner uses keeps every session, so an
+        // agent whose working directory moved keeps its older history.
+        let shared_accounts = accounts_linked_to_several_agents(store)?;
+        let own_dir = owner
+            .working_directory
+            .as_deref()
+            .map(index::normalize_working_dir);
         let mut merged: Vec<SessionMeta> = Vec::new();
         for link in &links {
             let (sessions, _total, _has_more) =
                 self.index.list_for_identity(&link.account_id, 0, usize::MAX, sort_by, sort_dir);
-            merged.extend(sessions);
+            if !shared_accounts.contains(&link.account_id) {
+                merged.extend(sessions);
+                continue;
+            }
+            match &own_dir {
+                Some(dir) => merged.extend(
+                    sessions
+                        .into_iter()
+                        .filter(|s| &index::normalize_working_dir(&s.working_directory) == dir),
+                ),
+                None => crate::backend::agent_resolve::record_uid_fallback(
+                    "history.shared_account_without_working_dir",
+                ),
+            }
         }
 
         // An agent on ambient credentials has no link row at all — its
@@ -174,13 +325,8 @@ impl HistoryService {
         // common case. The working directory is recorded inside the
         // transcript (`cwd`) and on the agent's own row, so it resolves the
         // sessions the identity bundle cannot.
-        let working_directory = working_dir_from_db.or_else(|| {
-            record
-                .as_ref()
-                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
-        });
-        if let Some(dir) = working_directory {
-            merged.extend(self.index.list_for_working_directory(&dir));
+        if let Some(dir) = &owner.working_directory {
+            merged.extend(self.index.list_for_working_directory(dir));
         }
 
         // The two sources legitimately overlap for an agent that is both
@@ -222,15 +368,16 @@ impl HistoryService {
     pub fn search_for_agent(
         &self,
         store: &crate::backend::storage::store::Store,
-        agent_id: &str,
+        owner: &HistoryOwner,
         opts: &index::HistorySearchOptions,
         since_secs: Option<i64>,
         until_secs: Option<i64>,
         max_sessions: usize,
     ) -> Result<index::HistorySearchOutcome, String> {
-        let (all, _total, _has_more) = self.sessions_for_agent(
+        self.fresh_enough_for_search()?;
+        let (all, _total, _has_more) = self.sessions_for_owner(
             store,
-            agent_id,
+            owner,
             0,
             usize::MAX,
             "modified_at",
@@ -283,9 +430,7 @@ impl HistoryService {
     /// Get full conversation for a session.
     pub fn get(&self, session_id: &str) -> serde_json::Value {
         // Lazy init
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
 
         match self.index.get_full(session_id) {
             Ok(Some(session)) => serde_json::json!({ "session": session }),
@@ -306,9 +451,7 @@ impl HistoryService {
 
     /// Delete a single session's on-disk transcript and drop it from the index.
     pub fn delete(&self, session_id: &str) -> serde_json::Value {
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
         match self.index.delete(session_id) {
             Ok(true) => serde_json::json!({ "deleted": true }),
             Ok(false) => serde_json::json!({ "deleted": false, "error": "session not found" }),
@@ -318,11 +461,53 @@ impl HistoryService {
 
     /// Bulk-clear sessions matching the optional provider/project filter.
     pub fn clear(&self, provider: Option<&str>, project: Option<&str>) -> serde_json::Value {
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
+        self.ensure_built();
         let deleted = self.index.clear(provider, project);
         serde_json::json!({ "deleted": deleted })
+    }
+}
+
+#[cfg(test)]
+mod search_freshness_tests {
+    use super::*;
+
+    fn empty_service() -> HistoryService {
+        HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]))
+    }
+
+    /// The MCP gives a search 10 s; a cold build over every transcript on
+    /// the machine takes far longer. While it runs, a search must answer at
+    /// once — and say the index is building, never "no history".
+    #[test]
+    fn a_search_during_the_first_build_says_so_instead_of_waiting() {
+        let svc = empty_service();
+        let _building = svc.index.refresh_lock.lock().unwrap();
+        let err = svc.fresh_enough_for_search().unwrap_err();
+        assert!(err.contains("still being built"), "{err}");
+    }
+
+    #[test]
+    fn a_search_on_a_never_built_idle_index_builds_it() {
+        let svc = empty_service();
+        assert!(svc.fresh_enough_for_search().is_ok());
+        assert!(svc.index.refreshed_at_ms() > 0);
+    }
+
+    /// Once built, a refresh in progress elsewhere doesn't block a search:
+    /// it reads the previous snapshot.
+    #[test]
+    fn a_search_during_a_later_refresh_uses_the_last_snapshot() {
+        let svc = empty_service();
+        svc.index.refresh();
+        let _refreshing = svc.index.refresh_lock.lock().unwrap();
+        assert!(svc.fresh_enough_for_search().is_ok());
+    }
+
+    #[test]
+    fn warm_in_background_builds_the_index() {
+        let svc = empty_service();
+        svc.warm_in_background().join().unwrap();
+        assert!(svc.index.refreshed_at_ms() > 0);
     }
 }
 
@@ -570,6 +755,64 @@ mod tests {
             .unwrap();
         assert_eq!(total, 1, "the agent's own session must be found without any identity link");
         assert_eq!(sessions[0].session_id, "mine-wd");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// One account linked to two agents holds both agents' transcripts. Each
+    /// agent's history is its own working directory's sessions from it —
+    /// never the other agent's — while an account only one agent uses keeps
+    /// every session, including one from an earlier working directory.
+    #[test]
+    fn a_shared_account_contributes_only_the_owners_own_directory() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-shared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = write_session(&dir, "shared-y");
+        let z = write_session(&dir, "shared-z");
+        let y_old = write_session(&dir, "solo-y-old-dir");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter::in_dir(vec![DiscoveredFile { file_path: y, mtime_ms: 1 }], "acct-shared", "/agents/y")),
+                Box::new(MockAdapter::in_dir(vec![DiscoveredFile { file_path: z, mtime_ms: 1 }], "acct-shared", "/agents/z")),
+                Box::new(MockAdapter::in_dir(vec![DiscoveredFile { file_path: y_old, mtime_ms: 1 }], "acct-solo", "/agents/y-before-move")),
+            ],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+        let store = Store::open_in_memory().unwrap();
+        insert_agent(&store, "def-y", "AgentY", "agenty", "/agents/y");
+        insert_agent(&store, "def-z", "AgentZ", "agentz", "/agents/z");
+        for acct in ["acct-shared", "acct-solo"] {
+            store
+                .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                    id: acct.to_string(),
+                    name: format!("claude-{acct}"),
+                    provider: "claude".to_string(),
+                    kind: "oauth".to_string(),
+                    display_name: String::new(),
+                    secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                    context: serde_json::json!({}),
+                    status: "unknown".to_string(),
+                    created_at: 0,
+                    updated_at: 0,
+                })
+                .unwrap();
+        }
+        store.agent_identity_link("def-y", "acct-shared", "claude").unwrap();
+        store.agent_identity_link("def-z", "acct-shared", "claude").unwrap();
+        store.agent_identity_link("def-y", "acct-solo", "codex").unwrap();
+
+        let ids = |slug: &str| {
+            let (sessions, _, _) = service
+                .sessions_for_agent(&store, slug, 0, 10, "created_at", "desc", true)
+                .unwrap();
+            let mut ids: Vec<String> = sessions.into_iter().map(|s| s.session_id).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids("agenty"), ["shared-y", "solo-y-old-dir"], "never AgentZ's session");
+        assert_eq!(ids("agentz"), ["shared-z"], "never AgentY's sessions");
 
         std::fs::remove_dir_all(&dir).ok();
     }

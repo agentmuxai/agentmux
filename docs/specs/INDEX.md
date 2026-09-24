@@ -196,6 +196,7 @@ partial list.
 | [`SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01`](SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md) | Spec: ABF v0.1 — Single-File Format + Importer (Phase 2) |
 | [`SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14`](SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md) | SPEC — honest account-delete semantics: spawn gating, agent reconciliation, Armory truthfulness |
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
+| [`SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) | Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound |
 | [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via the Agent App API |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
 | [`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07`](SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md) | SPEC: GitHub review-notification agent detection — username-first, tag as fallback |
@@ -337,6 +338,7 @@ partial list.
 | [`SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20`](SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md) | SPEC: Real crash-orphan liveness check on macOS/Linux (closes #1569) |
 | [`SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) | Pane block-stack mount flicker — root causes + reveal-gate generalization |
 | [`SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18`](SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md) | SPEC: A pane's chrome must resolve its own tab's LayoutModel, never "whichever tab is globally active" |
+| [`SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23`](SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md) | Clicking an input in an unselected pane should focus that input — in one click |
 | [`SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27`](SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md) | Spec: pane close/reopen must guarantee conversation continuity, or say so |
 | [`SPEC_PANE_DRAG_TO_TAB_2026_07_10`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) | Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop) |
 | [`SPEC_PANE_ENV_ISOLATION_2026_09_17`](SPEC_PANE_ENV_ISOLATION_2026_09_17.md) | SPEC: an instance's identity must not be inheritable by its panes |
@@ -417,6 +419,8 @@ partial list.
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
 | [`SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22`](SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22.md) | SPEC: WebFetch content view |
 | [`SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12`](SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) | SPEC: Widget bar parent widgets (grouped submenus) |
+| [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md) | SPEC — The Windows CEF runtime guard rejects the correct runtime whenever its path contains a backslash |
+| [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md) | SPEC — Windows builds refuse a CEF runtime that isn't the pinned tracer-off build |
 | [`SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04`](SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md) | SPEC: Window-close reliability — fix the `backend_window_id` race |
 | [`SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04`](SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md) | SPEC — Chrome-style window snap: drag-to-top maximize, border-drag vertical snap |
 | [`SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27`](SPEC_WORKING_STATE_AND_SCROLL_FOLLOW_HARDENING_2026_07_27.md) | SPEC: Harden the "Working…" indicator and message-list auto-follow against four related recurring bugs |
@@ -448,6 +452,7 @@ partial list.
 | [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
+| [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
@@ -470,6 +475,8 @@ partial list.
 | [`SPEC_DECISION_PROMPT_2026_04_24`](SPEC_DECISION_PROMPT_2026_04_24.md) | Spec: Per-Tool-Call Permission Decision Prompt |
 | [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) | Docs Lifecycle Audit & Hardening Plan |
 | [`SPEC_DURABLE_BINDINGS_2026_09_10`](SPEC_DURABLE_BINDINGS_2026_09_10.md) | Spec: Durable Bindings |
+| [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) | SPEC: durable conversation memory — one continuous conversation per agent, in every case |
+| [`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24`](SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) | SPEC: durable jekt delivery — a message to an absent agent is held, not dropped |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
@@ -530,7 +537,6 @@ partial list.
 | [`SPEC_AGENT_DELETE_2026_09_16`](SPEC_AGENT_DELETE_2026_09_16.md) | SPEC: Agent Row Actions Menu — Delete + Duplicate (My Agents picker) |
 | [`SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21`](SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) | Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool |
 | [`SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) | SPEC — Versioned model dropdowns (CLI-aware), Claude CLI pin-to-latest, single-toggle Log |
-| [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |
 | [`SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30`](SPEC_AGENT_PANE_MESSAGE_ENTER_ANIMATION_2026_05_30.md) | SPEC: Agent Pane — New Message Enter Animation |
 | [`SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09`](SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO_2026_06_09.md) | SPEC: Responsive Aux Info + Color System for Agent Pane Tool Blocks |
@@ -856,6 +862,7 @@ partial list.
 | [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14`](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | SPEC: Internal-event → frontend WaveObjUpdate bridge |
 | [`SPEC_OPENCLAW_AGENT_2026_05_17`](SPEC_OPENCLAW_AGENT_2026_05_17.md) | SPEC: OpenClaw integration — shared interfaces, distinct flavor |
 | [`SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16`](SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md) | SPEC: OpenEditor — collapsed file-tree + floating-pane support |
+| [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md) | SPEC: OS-level activity indicator when an agent is busy |
 | [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30`](SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md) | SPEC: Pane Icon and Text Visibility Pass |
@@ -972,6 +979,7 @@ partial list.
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 | [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | TRACKING — Agent availability & automatic backgrounding |
+| [`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23`](TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md) | TRACKING — Agent pane bounded live window (phase progress) |
 | [`TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | TRACKING — Typing & terminal input responsiveness |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions |
 

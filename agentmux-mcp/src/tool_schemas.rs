@@ -508,7 +508,7 @@ pub(crate) const FLEET_BROADCAST_TOOL: &str = r#"{
 
 pub(crate) const OPEN_AGENT_TOOL: &str = r#"{
   "name": "OpenAgent",
-  "description": "Launch an agent into a pane by name or definition id (get these from FleetList/DiscoverAgents). Idempotent: if the agent is already open in the target tab, returns its existing pane with created:false instead of opening a second one. This spawns a real provider process (and, for container agents, execs into their container) — it consumes provider tokens like any human-opened pane. Returns JSON {block_id, tab_id, agent_id, provider, controller_type, status, created}. After a successful open the agent becomes addressable for SendMessage.",
+  "description": "Launch an agent from My Agents into a pane by name or definition id (get these from FleetList/DiscoverAgents). Templates are refused (TEMPLATE_NOT_OPENABLE): create an agent from the template in the agent picker first. Opens into a new pane in the target tab — there is no choice of pane or tab stack yet. Idempotent: if the agent is already open in the target tab, returns its existing pane with created:false instead of opening a second one. This spawns a real provider process (and, for container agents, execs into their container) — it consumes provider tokens like any human-opened pane. Returns JSON {block_id, tab_id, agent_id, provider, controller_type, status, created}. After a successful open the agent becomes addressable for SendMessage.",
   "inputSchema": {
     "type": "object",
     "properties": {

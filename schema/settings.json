@@ -291,6 +291,38 @@
           "default": 0.25,
           "description": "Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the shared master gain. Default 0.25."
         },
+        "notify:os:enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for OS desktop notifications (native toasts) from agents. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §8."
+        },
+        "notify:os:when": {
+          "type": "string",
+          "enum": ["unfocused", "always", "never"],
+          "default": "unfocused",
+          "description": "When to show OS notifications. unfocused: only when no AgentMux window is focused (an agent needing input still alerts if you're looking at a different pane). always: unless you're looking at that pane. never: off."
+        },
+        "notify:os:inputwaiting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent asks a question and waits for your answer."
+        },
+        "notify:os:turncompleted": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent's turn completes."
+        },
+        "notify:os:turnerrored": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when an agent's turn ends with an error."
+        },
+        "notify:os:preview": {
+          "type": "string",
+          "enum": ["redacted", "full", "none"],
+          "default": "redacted",
+          "description": "How much of an agent's question appears in the notification body. Credential/destructive keywords always replace the body with a generic message."
+        },
         "notify:tooltones:enabled": {
           "type": "boolean",
           "default": true,
@@ -309,6 +341,11 @@
           "default": "all",
           "description": "Which panes play tool-call tones. 'all' (default) plays for every pane in every window; 'focused' plays only for the focused pane in the focused OS window."
         },
+        "notify:tooltones:flash": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pair every tool-call tone with a brief flash on the source pane's pill in its pane header (a brightened version of the pane's color) and a subtler one on its window tab, so a tone from a pane you can't see can be traced. Follows the tone's own enable/scope gates. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md."
+        },
         "dnd:enabled": {
           "type": "boolean",
           "default": true,
@@ -324,10 +361,20 @@
           "default": true,
           "description": "Insert a file-reference token into the composer on drop (in addition to attaching the file). Default true."
         },
+        "app:runinbackground": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep AgentMux running with a system-tray / menu-bar icon when all windows are closed (background-service mode; implies the tray). Read by agentmux-launcher at startup, so a change applies at the NEXT launch. Env AGENTMUX_BACKGROUND_SERVICE / AGENTMUX_TRAY and the --background flag also enable it. See docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1."
+        },
         "splash:disabled": {
           "type": "boolean",
           "default": false,
           "description": "Suppress the startup splash screen entirely (no window is created). Read by agentmux-launcher BEFORE the host and backend exist, so a change applies at the NEXT launch, not the current one. Env AGENTMUX_SPLASH=0 / AGENTMUX_NO_SPLASH=1 override this for a single run. See docs/specs/SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21.md §6."
+        },
+        "agent:turnscopedtail": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agent panes keep only the turn in flight (plus anything still running) always mounted; older messages are virtualized. Set false to restore the previous behaviour (the last 50 messages always mounted). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2."
         },
         "agent:askquestiontimeoutms": {
           "type": "integer",

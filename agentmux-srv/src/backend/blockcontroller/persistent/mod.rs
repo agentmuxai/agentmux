@@ -40,8 +40,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use super::{
-    BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
-    STATUS_RUNNING,
+    BlockControllerRuntimeStatus, BlockInputUnion, Controller, DeliverPolicy, STATUS_DONE,
+    STATUS_INIT, STATUS_RUNNING,
 };
 use super::core;
 use super::health::TurnActivityTracker;
@@ -175,6 +175,25 @@ fn fresh_start_needs_disclosure(attempted_resume_sid: Option<&str>, generation: 
     attempted_resume_sid.is_none() && generation == 1
 }
 
+/// How much of a transcript's tail `find_continuation_session_id` reads. The
+/// provider stamps its session id on every stream event, so the last few
+/// events suffice; a long-lived agent's transcript runs to many MB.
+const CONTINUATION_TAIL_BYTES: i64 = 256 * 1024;
+
+/// The last non-empty `field` on a complete JSON line of `tail`.
+/// `starts_mid_line`: `tail` was cut from a longer file, so its first line is
+/// a fragment and is dropped.
+fn last_session_id_in_stream(tail: &[u8], starts_mid_line: bool, field: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(tail);
+    let skip = usize::from(starts_mid_line);
+    let lines: Vec<&str> = text.split('\n').skip(skip).collect();
+    lines.into_iter().rev().find_map(|line| {
+        let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+        let sid = v.get(field)?.as_str()?.trim();
+        (!sid.is_empty()).then(|| sid.to_string())
+    })
+}
+
 /// Publish a `mps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
 /// (not a method) for the same reason `session_outcome_line` above is one:
 /// callable from the stdout-reader/process-waiter match arms, which only
@@ -304,6 +323,17 @@ struct PersistentInner {
     /// Set under the same lock that consumes `restart_when_idle`, cleared when
     /// the replacement process spawns.
     restart_pending: bool,
+    /// A kill has been requested for the current process (`request_stop_on`).
+    /// `stdin_tx` stays live until it actually exits, and a `result` already
+    /// in the pipe still reaches the turn-boundary flush. Writing a deferred
+    /// message then would put it into the dying process and lose it (codex
+    /// P2 on #3562 for `stop`, and the same window on the Stop button).
+    /// `try_write_stdin_locked` refuses while this is set, so the message
+    /// stays queued for the next process.
+    ///
+    /// Set under the same lock as the kill request, cleared when the
+    /// replacement process spawns, exactly like `restart_pending`.
+    stop_pending: bool,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -351,6 +381,29 @@ struct PersistentInner {
     /// spawn or arrived while someone else's spawn was already in flight.
     /// Drained by `release_spawn_claim_and_drain_queue`.
     pending_send_messages: VecDeque<QueuedMessage>,
+    /// Non-human messages (jekt, muxbus, bridges, MCP `SendMessage`) that
+    /// arrived while a turn was in flight and were deferred to the next turn
+    /// boundary rather than steering the agent mid-explanation.
+    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.
+    ///
+    /// Distinct from `pending_send_messages`, which orders messages around a
+    /// *spawn*; this one orders them around a *turn*. Entries are the fully
+    /// encoded stream-json stdin lines, ready to write.
+    ///
+    /// This field and the `turn_active` flag it coordinates with MUST be read
+    /// and written under this one mutex — §4.2. `PersistentInner`'s lock is
+    /// what serializes them, because the turn-end handler in `spawn.rs`
+    /// already calls `health_monitor.set_active_turn(false)` while holding it.
+    /// Splitting them across two locks reintroduces the stranding race in
+    /// which a message enqueued just as a flush observes the queue empty has
+    /// no future trigger.
+    deferred_deliveries: VecDeque<String>,
+    /// Whether a deferred-delivery watchdog task is running for this
+    /// controller — see `ensure_deferred_watchdog`. Set and cleared only
+    /// under this lock, and cleared only by the watchdog itself when it
+    /// finds the queue empty, so an enqueue can never observe "armed" from a
+    /// watchdog that has already decided to exit.
+    deferred_watchdog_armed: bool,
     /// Exclusive claim held by a stale-resume retry batch flush (issue
     /// #2367; spec §4 option 2 of
     /// SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09).
@@ -616,8 +669,12 @@ impl PersistentInner {
 /// see its own doc comment and `PersistentInner::spawning_in_progress`.
 enum SendAction {
     /// The process is already running — deliver directly, no spawn
-    /// decision involved at all.
-    DeliverDirect,
+    /// decision involved at all. The turn is already marked active: the
+    /// decision reserves it under the same `inner` acquisition, so an
+    /// automated send cannot see "idle" in the gap before the write (codex P1
+    /// on #3562). `was_active` is the pre-reservation state, for the caller
+    /// to start the heartbeat and to hand the turn back if the write fails.
+    DeliverDirect { was_active: bool },
     /// Nobody else is currently spawning — this caller claimed the
     /// exclusive right to do so and its message has already been enqueued
     /// for the post-spawn drain. `own_seq` is that enqueued message's
@@ -630,6 +687,10 @@ enum SendAction {
     /// the drain claim — issue #2367) — this message has been enqueued
     /// for that claim-holder's own drain to deliver.
     Queued,
+    /// A kill is pending and the dying process still holds stdin: neither
+    /// written nor queued, reported to the sender as this error instead.
+    /// See `decide_send_action`.
+    Refused(String),
 }
 
 /// What `decide_retry_batch_action` determined a stale-resume retry
@@ -794,12 +855,104 @@ pub struct PersistentSubprocessController {
     /// the spawn env carried no UID (no `db_agents` row yet). See
     /// `Controller::stable_agent_uid`.
     stable_agent_uid: Mutex<Option<String>>,
+    /// Reports whatever is still deferred when this controller is dropped.
+    /// See [`DeferredDropReport`].
+    deferred_drop_report: DeferredDropReport,
+}
+
+/// The last line of defence for §4.5: whatever is still deferred when the
+/// controller goes away is reported, not silently discarded with it.
+///
+/// `stop()` and `shutdown()` drain the queue, but a sender that fetched the
+/// controller before it was unregistered can still enqueue after that drain
+/// (codex P2 on #3562). The watchdog holds only a weak reference, so it dies
+/// with the controller and cannot catch it. `stop()` cannot refuse those late
+/// senders instead: the max-runtime watchdog stops controllers that stay
+/// registered and get used again.
+///
+/// A field rather than `Drop` on the controller itself, so struct-update
+/// construction (`..c`, used throughout the tests) keeps working. Holds the
+/// controller's own `inner`; `None` only transiently inside `new()`.
+struct DeferredDropReport(Option<(String, Arc<Mutex<PersistentInner>>)>);
+
+impl Drop for DeferredDropReport {
+    fn drop(&mut self) {
+        let Some((block_id, inner)) = self.0.take() else { return };
+        // Never panic in `drop`: a poisoned lock still holds the queue.
+        let stranded: Vec<String> = match inner.lock() {
+            Ok(mut g) => g.deferred_deliveries.drain(..).collect(),
+            Err(poisoned) => poisoned.into_inner().deferred_deliveries.drain(..).collect(),
+        };
+        PersistentSubprocessController::log_stranded_deferred(&block_id, "controller dropped", &stranded);
+    }
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
 /// the turn did not resume and re-delivering the answer as a follow-up message.
 /// See `answer_question` and SPEC_ASK_USER_QUESTION_2026_06_15.md §10.1.
 const ANSWER_RESUME_FALLBACK_MS: u64 = 4000;
+
+/// Bound on `PersistentInner::deferred_deliveries`. Past this, enqueueing
+/// returns an error instead of a false success, so a caller is never told a
+/// message was delivered and then has it silently dropped
+/// (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.5). Senders already handle
+/// transient delivery failure — the reactive handler, muxbus and the bridges
+/// all have to cope with an unreachable target instance — so surfacing a full
+/// queue as one more retryable failure needs no new machinery on their side.
+///
+/// 64 is chosen to be far above any plausible legitimate backlog for a single
+/// turn while still bounding memory: these are whole messages, and the queue
+/// is per-block.
+pub(super) const MAX_DEFERRED_DELIVERIES: usize = 64;
+
+/// How often the deferred-delivery watchdog re-checks a non-empty queue.
+/// It is the safety net, not the primary path: the `result`-frame flush in
+/// `spawn.rs` releases a message the instant a turn ends, so this only sets
+/// the latency of the cases that have no turn boundary to wait for.
+pub(super) const DEFERRED_WATCHDOG_TICK: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Consecutive watchdog ticks with no process and no spawn in flight before
+/// the queue is declared stranded and reported (spec §4.5). Long enough to
+/// ride out the gap between a process exit and the respawn that follows it
+/// (a stale-`--resume` retry, a fallback respawn); short enough that a dead
+/// agent's backlog is surfaced rather than held forever.
+pub(super) const DEFERRED_ORPHAN_GRACE_TICKS: u32 = 20;
+
+/// Outcome of [`PersistentSubprocessController::flush_one_deferred_locked`].
+/// `Empty`, `Held` and `Failed` all write nothing, but they are not the same:
+/// `Empty` lets the turn go idle, while `Held` (another writer owns stdin) and
+/// `Failed` (the write itself failed) still have an accepted message waiting
+/// and need the watchdog to finish it (codex + reagent P1s on #3562).
+#[derive(Debug, PartialEq)]
+pub(super) enum DeferredFlush {
+    Empty,
+    Released(String),
+    Held,
+    Failed,
+}
+
+/// What a current-generation `result` frame decided — see
+/// [`PersistentSubprocessController::turn_boundary_locked`].
+#[derive(Debug, PartialEq)]
+pub(super) struct TurnBoundary {
+    pub(super) flushed: DeferredFlush,
+    pub(super) apply_deferred_restart: bool,
+}
+
+impl TurnBoundary {
+    /// `Released` started a turn; `Held` means an earlier writer's prompt is
+    /// still running or about to. Either way the turn is not over.
+    pub(super) fn turn_still_active(&self) -> bool {
+        matches!(self.flushed, DeferredFlush::Released(_) | DeferredFlush::Held)
+    }
+}
+
+/// Whether the deferred-delivery watchdog keeps running after a tick.
+#[derive(Debug, PartialEq)]
+pub(super) enum WatchdogStep {
+    Continue,
+    Exit,
+}
 
 /// Compose the directive follow-up message used by the AskUserQuestion dead-air
 /// fallback. `answers` maps each question's text to the selected label(s) or free
@@ -963,7 +1116,7 @@ impl PersistentSubprocessController {
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
-        Self {
+        let mut this = Self {
             tab_id,
             block_id,
             inner: Arc::new(Mutex::new(PersistentInner {
@@ -974,9 +1127,12 @@ impl PersistentSubprocessController {
                 resume_poisoned: None,
                 restart_when_idle: false,
                 restart_pending: false,
+                stop_pending: false,
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
+                deferred_deliveries: VecDeque::new(),
+                deferred_watchdog_armed: false,
                 drain_claim: false,
                 next_message_seq: 0,
                 drain_send_in_flight: false,
@@ -1003,7 +1159,11 @@ impl PersistentSubprocessController {
             agent_id: Mutex::new(None),
             stable_agent_id: Mutex::new(None),
             stable_agent_uid: Mutex::new(None),
-        }
+            deferred_drop_report: DeferredDropReport(None),
+        };
+        this.deferred_drop_report =
+            DeferredDropReport(Some((this.block_id.clone(), Arc::clone(&this.inner))));
+        this
     }
 
     /// Supplies the dependencies `start()`'s eager-resume path needs
@@ -1120,7 +1280,10 @@ impl Controller for PersistentSubprocessController {
     }
 
     fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
-        self.stop_process(true)?;
+        // Not `stop_process` then a separate drain: see
+        // `request_stop_draining_deferred` for the race between the two.
+        let stranded = self.request_stop_draining_deferred(KillRequest::Force);
+        Self::log_stranded_deferred(&self.block_id, "controller stopped", &stranded);
         let mut inner = self.inner.lock().unwrap();
         if inner.proc_status != new_status {
             Self::set_status(&mut inner, new_status);
@@ -1140,20 +1303,39 @@ impl Controller for PersistentSubprocessController {
         let health = Arc::clone(&self.health_monitor);
         let block_id = self.block_id.clone();
         Box::pin(async move {
-            let (generation, stdin_tx) = {
+            let (running, stranded) = {
                 let mut g = inner.lock().unwrap();
-                if g.current_pid.is_none() {
+                // Drained BEFORE the no-process return: a message deferred
+                // behind a spawn that then failed sits here with no process,
+                // and the watchdog holds only a weak ref, so it dies with this
+                // controller. Returning first discarded the message unreported
+                // (codex P2 on #3562).
+                let stranded: Vec<String> = g.deferred_deliveries.drain(..).collect();
+                let running = if g.current_pid.is_none() {
                     // Never spawned (lazy), or already gone. A spawn still in
                     // flight is killed by the caller's tracker drop.
-                    return StopOutcome::NotRunning;
-                }
-                // Nothing queued may start a new turn after the interrupt.
-                g.pending_send_messages.clear();
-                // Before the interrupt: its `is_error` result is our stop,
-                // not a failure (§9.4).
-                g.shutdown_generation = Some(g.spawn_generation);
-                g.stop_exit = None;
-                (g.spawn_generation, g.stdin_tx.clone())
+                    None
+                } else {
+                    // Gate writes now, in the same section as the drain, not
+                    // later in `request_stop_on`: a sender that already holds
+                    // this controller can still enqueue, and the interrupt's
+                    // own `result` would flush that into the process being
+                    // shut down (codex P2 on #3562). The interrupt itself
+                    // goes out on `stdin_tx` directly, not through the gate.
+                    g.stop_pending = true;
+                    // Nothing queued may start a new turn after the interrupt.
+                    g.pending_send_messages.clear();
+                    // Before the interrupt: its `is_error` result is our stop,
+                    // not a failure (§9.4).
+                    g.shutdown_generation = Some(g.spawn_generation);
+                    g.stop_exit = None;
+                    Some((g.spawn_generation, g.stdin_tx.clone()))
+                };
+                (running, stranded)
+            };
+            Self::log_stranded_deferred(&block_id, "pane shutdown", &stranded);
+            let Some((generation, stdin_tx)) = running else {
+                return StopOutcome::NotRunning;
             };
 
             if health.is_active_turn() {
@@ -1308,6 +1490,7 @@ mod input;
 mod lifecycle;
 mod queue;
 mod resume_retry;
+pub(crate) use resume_retry::pane_history_session_id;
 mod spawn;
 mod status;
 

@@ -760,14 +760,21 @@ pub async fn run_agent_turn(
             // Some(&filestore_gate): the frame must be PERSISTED
             // to the block file, not just live-broadcast —
             // otherwise the error vanishes on pane
-            // reload/reconnect (reagent P1, PR #2164 round 2).
+            // reload/reconnect (reagent P1, PR #2164 round 2). And to
+            // the agent's global zone: a pane with an agentId reads
+            // that on reload, so without it the frame still vanished
+            // (Phase 5a-3c).
+            let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+                &Some(mstore.clone()),
+                &block_id,
+            );
             crate::backend::blockcontroller::shell::handle_append_block_file(
                 &broker,
                 &block_id,
                 crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                 format!("{error_frame}\n").as_bytes(),
                 Some(&filestore_gate),
-                None,
+                global_zone.as_deref(),
             );
             // codex P1, PR #2802: the frame above only lands in
             // the block's raw output log, which the recovery
@@ -980,13 +987,18 @@ pub async fn run_agent_turn(
                 // path — codex P1 on PR #2390: muxspect's last_error_frame
                 // (which reads only the persisted `output` file) could
                 // never see this failure after the live moment passed.
+                // The agent's global zone too, for the reload (Phase 5a-3c).
+                let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+                    &Some(mstore.clone()),
+                    &block_id,
+                );
                 crate::backend::blockcontroller::shell::handle_append_block_file(
                     &broker,
                     &block_id,
                     crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                     format!("{error_frame}\n").as_bytes(),
                     Some(&filestore_gate),
-                    None,
+                    global_zone.as_deref(),
                 );
                 return Err(format!("container ensure_running failed: {e}"));
             }

@@ -443,6 +443,16 @@ pub(crate) async fn run_windows(
         }
     };
 
+    // OS notification presenter: subscribe to srv's `notification*` events
+    // and render them as Windows toasts. Independent of the tray — toasts work
+    // whenever the launcher runs (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §3.2).
+    crate::notify::start(
+        &srv_result.ws_endpoint,
+        &srv_result.auth_key,
+        paths.data_dir.clone(),
+        dir_hash.clone(),
+    );
+
     // CRITICAL: tokio::process::Child::wait() proactively drops
     // self.stdin before waiting (tokio source comment: "Ensure stdin
     // is closed so the child can't read from it any more"). agentmux-
@@ -1089,6 +1099,9 @@ pub(crate) async fn run_windows(
                     Ok((new_result, new_child)) => {
                         srv_result = new_result;
                         srv_child = new_child;
+                        // OS notification presenter follows srv to its new
+                        // endpoint + auth key (SPEC_OS_NOTIFICATIONS §3.3).
+                        crate::notify::update_endpoint(&srv_result.ws_endpoint, &srv_result.auth_key);
                         // Park the NEW srv's stdin exactly like cold boot does
                         // (see `srv_stdin_keepalive`'s comment above): the next
                         // `srv_child.wait()` poll would otherwise drop it, and
@@ -1124,6 +1137,11 @@ pub(crate) async fn run_windows(
             }
         }
     };
+
+    // Remove this instance's toasts from the notification center: Phase 1
+    // has no cold-start activation, so a toast outliving us could only be
+    // clicked into nothing (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §6.1).
+    crate::notify::shutdown();
 
     // Close any open saga brackets before J0 is dropped — same reason
     // as the Unix path above (prevent spurious LSD-3 compensation).

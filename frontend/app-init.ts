@@ -1184,6 +1184,12 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     const { installSoundService } = await import("@/app/notification/sound");
     installSoundService();
 
+    // OS notifications (native toasts): forward pane events + focus to the srv
+    // Router and handle toast-click activation. See
+    // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md.
+    const { installOsNotifyBridge } = await import("@/app/notification/os/os-notify-bridge");
+    installOsNotifyBridge();
+
     // Refresh the Claude model catalog from the authoritative /v1/models list
     // (backend `providers.models`, account OAuth token). Fire-and-forget: the
     // model drop-up shows the curated static list until this resolves, then

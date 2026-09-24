@@ -173,6 +173,9 @@
     --zindex-layout-magnify-container: 20;
     --zindex-flash-error-container: 550;
     --zindex-app-background: -1;
+    // Activity-flash overlay: below its host's content, above its host's
+    // background — only inside a host with `isolation: isolate`.
+    --zindex-activity-flash: -1;
 
     // ─── Phantom-token fixes (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2b) ───
     // Each of these was referenced at its call site as `var(--token,

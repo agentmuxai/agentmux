@@ -31,6 +31,7 @@ const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
     recentEstimatorMisses: [],
     recentLayoutShifts: [],
     dispatchByKind: new Map(),
+    transcriptCursors: [],
 };
 
 function formatMs(n: number | undefined): string {
@@ -71,7 +72,8 @@ export function AgentPanePerfSection(): JSX.Element {
         return s.rowMountByKind.size > 0
             || s.recentEstimatorMisses.length > 0
             || s.recentLayoutShifts.length > 0
-            || s.dispatchByKind.size > 0;
+            || s.dispatchByKind.size > 0
+            || s.transcriptCursors.length > 0;
     };
 
     return (
@@ -184,6 +186,28 @@ export function AgentPanePerfSection(): JSX.Element {
                                 </For>
                             </tbody>
                         </table>
+                    </div>
+                </Show>
+
+                {/* Transcript cursors (Phase 5a-4, transcript-cursor.ts): how
+                    each pane's live records were placed. Anything but
+                    delivered/duplicates/echoes is worth a look. */}
+                <Show when={snapshot().transcriptCursors.length > 0}>
+                    <div style={{ "margin-bottom": "6px" }}>
+                        <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
+                            Transcript cursors
+                        </div>
+                        <For each={snapshot().transcriptCursors}>
+                            {({ blockId, stats: c }) => (
+                                <div style={{ "font-size": "10px", color: "#bbb", "padding-left": "8px" }}>
+                                    {blockId.slice(0, 8)}: {c.delivered} delivered, {c.duplicates} dup, {c.echoes} echo,
+                                    gaps {c.gapsFilled} ({c.gapLinesFilled} lines)
+                                    <span style={{ color: c.linesSkipped + c.unpositioned + c.genChanges > 0 ? "#fa6" : "#6c8" }}>
+                                        {" "}· skipped {c.linesSkipped}, unpositioned {c.unpositioned}, gen changes {c.genChanges}, own echoes dropped {c.ownEchoesDropped}
+                                    </span>
+                                </div>
+                            )}
+                        </For>
                     </div>
                 </Show>
 

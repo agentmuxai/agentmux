@@ -31,8 +31,13 @@ vi.mock("@/app/store/global", () => ({
     getBlockComponentModel: (blockId: string) => bcmForBlockId[blockId],
 }));
 
+// Which block (if any) currently holds a real user caret — the
+// SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md guard. focusutil.test.ts
+// covers the DOM logic itself; here it's just a switch.
+let caretInBlock: string | null = null;
 vi.mock("@/util/focusutil", () => ({
     focusedBlockId: () => focusedNode?.data?.blockId ?? null,
+    userCaretInBlock: (blockId: string) => caretInBlock === blockId,
 }));
 
 import { focusManager } from "./focusManager";
@@ -43,6 +48,7 @@ describe("focusManager", () => {
         focusNode.mockClear();
         giveFocus.mockClear().mockReturnValue(true);
         focusedNode = { id: "node-1", data: { blockId: "block-1" } };
+        caretInBlock = null;
         bcmForBlockId = { "block-1": { viewModel: { giveFocus } } };
 
         // jsdom doesn't ship a real dummy-focus target; keep the fallback
@@ -87,6 +93,36 @@ describe("focusManager", () => {
             expect(focusNode).not.toHaveBeenCalled();
             expect(giveFocus).not.toHaveBeenCalled();
         });
+
+        // SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md: the click that
+        // SELECTS a pane must not take the caret from the input it landed in.
+        it("selects the node but keeps the caret when the user already put it in an input in that block", () => {
+            caretInBlock = "block-1";
+            const dummy = { focus: vi.fn() };
+            vi.mocked(document.getElementById).mockReturnValue(dummy as unknown as HTMLElement);
+
+            focusManager.refocusNode();
+
+            expect(focusNode).toHaveBeenCalledWith("node-1");
+            expect(giveFocus).not.toHaveBeenCalled();
+            expect(dummy.focus).not.toHaveBeenCalled();
+        });
+
+        it("still moves the caret when it's in a DIFFERENT block (keyboard nav, #3519)", () => {
+            caretInBlock = "block-2";
+            focusManager.refocusNode();
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("focuses the dummy fallback without scrolling", () => {
+            giveFocus.mockReturnValue(false);
+            const dummy = { focus: vi.fn() };
+            vi.mocked(document.getElementById).mockReturnValue(dummy as unknown as HTMLElement);
+
+            focusManager.refocusNode();
+
+            expect(dummy.focus).toHaveBeenCalledWith({ preventScroll: true });
+        });
     });
 
     describe("claimFocusOnMount", () => {
@@ -107,6 +143,13 @@ describe("focusManager", () => {
 
         it("does NOT call giveFocus while a modal is open, even for the focused block", () => {
             hasOpenModals.mockReturnValue(true);
+            const localGiveFocus = vi.fn(() => true);
+            focusManager.claimFocusOnMount("block-1", localGiveFocus);
+            expect(localGiveFocus).not.toHaveBeenCalled();
+        });
+
+        it("does NOT call giveFocus when the user's caret is already in an input in that block", () => {
+            caretInBlock = "block-1";
             const localGiveFocus = vi.fn(() => true);
             focusManager.claimFocusOnMount("block-1", localGiveFocus);
             expect(localGiveFocus).not.toHaveBeenCalled();

@@ -57,6 +57,13 @@ pub struct BusMessage {
     #[serde(default)]
     pub priority: Priority,
     pub timestamp: u64,
+    /// Identity M4c-2d (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): the sender's UID when its HTTP request was attributed (its
+    /// `X-Agent-Token`), beside the `from` name it claimed. Empty =
+    /// Unattributed (the WebSocket bus has no per-request caller). Set by
+    /// this srv only; a bus message never leaves it for another srv.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub from_uid: String,
 }
 
 impl BusMessage {
@@ -73,7 +80,14 @@ impl BusMessage {
             payload: payload.to_string(),
             priority,
             timestamp: now,
+            from_uid: String::new(),
         }
+    }
+
+    /// The sender's attributed UID (see [`Self::from_uid`]).
+    pub fn with_from_uid(mut self, from_uid: &str) -> Self {
+        self.from_uid = from_uid.to_string();
+        self
     }
 
     fn is_expired(&self) -> bool {
@@ -216,15 +230,22 @@ impl MessageBus {
 
     /// Inject a message into an agent's terminal (jekt).
     /// This is the same as send but with MessageType::Inject.
-    pub fn inject(&self, from: &str, target: &str, message: &str, priority: Priority) -> Result<String, String> {
-        let msg = BusMessage::new(from, target, MessageType::Inject, message, priority);
+    pub fn inject(
+        &self,
+        from: &str,
+        from_uid: &str,
+        target: &str,
+        message: &str,
+        priority: Priority,
+    ) -> Result<String, String> {
+        let msg = BusMessage::new(from, target, MessageType::Inject, message, priority).with_from_uid(from_uid);
         let msg_id = msg.id.clone();
         self.send(msg)?;
         Ok(msg_id)
     }
 
     /// Broadcast a message to all connected agents (except sender).
-    pub fn broadcast(&self, from: &str, payload: &str, priority: Priority) -> Result<usize, String> {
+    pub fn broadcast(&self, from: &str, from_uid: &str, payload: &str, priority: Priority) -> Result<usize, String> {
         // Collect senders under short lock
         let targets: Vec<(String, mpsc::UnboundedSender<BusMessage>)> = {
             let agents = self.agents.lock();
@@ -239,7 +260,8 @@ impl MessageBus {
 
         let mut delivered = 0;
         for (agent_id, tx) in targets {
-            let msg = BusMessage::new(from, &agent_id, MessageType::Broadcast, payload, priority.clone());
+            let msg = BusMessage::new(from, &agent_id, MessageType::Broadcast, payload, priority.clone())
+                .with_from_uid(from_uid);
             if tx.send(msg).is_ok() {
                 delivered += 1;
             }
@@ -330,5 +352,20 @@ impl MessageBus {
             }
             tracing::info!("messagebus: drained {} offline messages to '{}'", count, agent_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Identity M4c-2d: an attributed sender's UID rides the message beside
+    /// its claimed name; an Unattributed one's is omitted.
+    #[test]
+    fn a_bus_message_carries_an_attributed_from_uid() {
+        let m = BusMessage::new("agenty", "b", MessageType::Send, "p", Priority::Normal);
+        assert!(serde_json::to_value(&m).unwrap().get("from_uid").is_none());
+        let m = m.with_from_uid("uid-y");
+        assert_eq!(serde_json::to_value(&m).unwrap()["from_uid"], "uid-y");
     }
 }

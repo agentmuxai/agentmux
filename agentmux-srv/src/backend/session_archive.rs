@@ -140,17 +140,8 @@ pub fn archive_session_output(
         return Err(format!("update_object_meta: {e}"));
     }
 
-    // Meta is now persisted; safe to reclaim the FileStore entry
-    if let Err(e) = filestore.delete_file(block_id, OUTPUT_FILENAME) {
-        tracing::warn!(
-            block_id = %block_id,
-            error = %e,
-            "session_archive: failed to delete filestore entry after archiving (meta already updated)"
-        );
-    }
     // Sidecar follows output: archive its bytes next to the .jsonl.gz
-    // (best-effort — auxiliary timing data), then delete so a restarted
-    // session can't inherit stale offset stamps.
+    // (best-effort — auxiliary timing data) before it is deleted below.
     if let Ok(Some(ts_bytes)) = filestore.read_file(block_id, TSIDX_FILENAME) {
         if !ts_bytes.is_empty() {
             let ts_path = archive_dir.join(format!("{}.tsidx.gz", block_id));
@@ -159,13 +150,16 @@ pub fn archive_session_output(
             }
         }
     }
-    match filestore.stat(block_id, TSIDX_FILENAME) {
-        Ok(Some(_)) => {
-            if let Err(e) = filestore.delete_file(block_id, TSIDX_FILENAME) {
-                tracing::warn!(block_id = %block_id, error = %e, "session_archive: failed to delete tsidx sidecar after archiving");
-            }
-        }
-        _ => {}
+    // Meta is now persisted; safe to reclaim the FileStore entry, with both
+    // sidecars, in one transaction (5a-2b): a restarted session must not
+    // inherit stale offset stamps, and a stale output.idx could pass
+    // read_range's covered_size check by coincidence.
+    if let Err(e) = filestore.delete_files(block_id, &[OUTPUT_FILENAME, TSIDX_FILENAME, "output.idx"]) {
+        tracing::warn!(
+            block_id = %block_id,
+            error = %e,
+            "session_archive: failed to delete filestore entry after archiving (meta already updated)"
+        );
     }
 
     tracing::info!(
@@ -208,14 +202,13 @@ pub fn restore_session_output(
     let raw_bytes = read_gz(&archive_path)?;
     let restored_bytes = raw_bytes.len() as u64;
 
-    // Recreate the FileStore entry (may already be gone after archival)
-    let _ = filestore.delete_file(block_id, OUTPUT_FILENAME); // ignore "not found"
+    // Recreate the FileStore entry (may already be gone after archival) in
+    // one transaction (5a-2b): the restored content with a new generation,
+    // and no sidecar left describing whatever `output` held before. A reader
+    // never sees the file missing or half-restored.
     filestore
-        .make_file(block_id, OUTPUT_FILENAME, FileMeta::default(), FileOpts::default())
-        .map_err(|e| format!("make_file: {e}"))?;
-    filestore
-        .append_data(block_id, OUTPUT_FILENAME, &raw_bytes)
-        .map_err(|e| format!("append_data: {e}"))?;
+        .replace_file(block_id, OUTPUT_FILENAME, &raw_bytes, &[TSIDX_FILENAME, "output.idx"])
+        .map_err(|e| format!("replace_file: {e}"))?;
 
     // Restore the tsidx sidecar when its archive exists (best-effort —
     // pre-sidecar archives simply have none, and restored history without
@@ -224,7 +217,6 @@ pub fn restore_session_output(
         .parent()
         .map(|d| d.join(format!("{}.tsidx.gz", block_id)))
         .filter(|p| p.exists());
-    let _ = filestore.delete_file(block_id, TSIDX_FILENAME); // ignore "not found"
     if let Some(ts_path) = ts_path {
         match read_gz(&ts_path) {
             Ok(ts_bytes) if !ts_bytes.is_empty() => {

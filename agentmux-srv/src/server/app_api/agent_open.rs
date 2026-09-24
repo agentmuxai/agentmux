@@ -207,6 +207,34 @@ mod resolve_cli_args_tests {
     }
 }
 
+/// The agent `agent.open` opens: a user agent (`is_seeded == 0`), named by
+/// definition id or by display name (ASCII case-insensitive) — its id first,
+/// then its name. Only when no user agent answers is a template consulted,
+/// and then only to refuse it with `TEMPLATE_NOT_OPENABLE`: opening one would
+/// launch a session that is no agent's (spec §6.5.8, template sessions); an
+/// agent is created from a template in the picker. A template's id is its
+/// lowercase name (`claude`), which a user agent created from it shares
+/// case-insensitively, so templates must never be matched first.
+fn select_openable_agent<'a>(
+    agents: &'a [AgentDefinition],
+    wanted: &str,
+) -> Result<&'a AgentDefinition, String> {
+    let names = |a: &&AgentDefinition| a.id == wanted || a.name.eq_ignore_ascii_case(wanted);
+    let users = || agents.iter().filter(|a| a.is_seeded == 0);
+    let found = users()
+        .find(|a| a.id == wanted)
+        .or_else(|| users().find(|a| a.name.eq_ignore_ascii_case(wanted)))
+        .or_else(|| agents.iter().find(names))
+        .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{wanted}'"))?;
+    if found.is_seeded != 0 {
+        return Err(format!(
+            "TEMPLATE_NOT_OPENABLE: '{}' is a template; agent.open opens an agent from My Agents — create an agent from this template in the agent picker first",
+            found.name
+        ));
+    }
+    Ok(found)
+}
+
 /// Identity M4b-4 (spec §6.5.8): a user agent's local row, backfilled from
 /// the shared registry if it is another channel's — and **confirmed**, or the
 /// open fails: without a local row the spawn would resolve to nothing, with
@@ -312,10 +340,7 @@ pub(crate) async fn open_agent_impl(
                 // 1. Load the agent definition (by id or name)
                 let agents = mstore.agent_def_list()
                     .map_err(|e| format!("agent.open: {e}"))?;
-                let mut agent = agents.iter()
-                    .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
-                    .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{}'", cmd.agent_id))?
-                    .clone();
+                let mut agent = select_openable_agent(&agents, &cmd.agent_id)?.clone();
 
                 // Shadow `agent.provider` with the bound ABF bundle's copy,
                 // the readonly-once-set source of truth (see
@@ -333,12 +358,9 @@ pub(crate) async fn open_agent_impl(
 
                 // Identity M4b-4 (spec §6.5.8): a user agent known only from
                 // the shared registry (another channel's) gets its local row
-                // before any spawn, so its block resolves to it. A template
-                // is a template session and has no row.
-                let is_user_agent = agent.is_seeded == 0;
-                if is_user_agent {
-                    require_local_agent_row(&mstore, &agent.id)?;
-                }
+                // before any spawn, so its block resolves to it. Templates
+                // were refused above.
+                require_local_agent_row(&mstore, &agent.id)?;
 
                 // 2. Resolve provider
                 let provider = providers::get_provider(&agent.provider)
@@ -370,9 +392,7 @@ pub(crate) async fn open_agent_impl(
                         // during it, and that capture finds the row by
                         // block (Codex P2 on #3584). Only on this branch's
                         // resync, never for a pane that is already live.
-                        if is_user_agent {
-                            record_agent_open_launch(&mstore, &agent.id, &existing.oid)?;
-                        }
+                        record_agent_open_launch(&mstore, &agent.id, &existing.oid)?;
                         // Register controller
                         let block_for_resync = mstore.must_get::<Block>(&existing.oid)
                             .map_err(|e| format!("agent.open: reload block: {e}"))?;
@@ -839,9 +859,7 @@ pub(crate) async fn open_agent_impl(
                 // the resync — a controller can report its session id during
                 // it, and that capture finds the row by block (Codex P2 on
                 // #3584).
-                if is_user_agent {
-                    record_agent_open_launch(&mstore, &agent.id, &block_id)?;
-                }
+                record_agent_open_launch(&mstore, &agent.id, &block_id)?;
 
                 // 9. Register controller (resync)
                 let block_for_resync = mstore.must_get::<Block>(&block_id)
@@ -1541,5 +1559,36 @@ mod record_agent_open_launch_tests {
             .unwrap()
             .map(|r| r.id);
         assert_eq!(resolved.as_deref(), Some("agent-open-x"));
+    }
+
+    fn def(id: &str, name: &str, is_seeded: i64) -> AgentDefinition {
+        let mut d = test_agent_def(id, name, "claude", "agent", 1, "");
+        d.is_seeded = is_seeded;
+        d
+    }
+
+    /// `agent.open` opens user agents only: a template is refused by id or by
+    /// name, and a user agent is preferred over a template it shares a name
+    /// with — including the template's id, which is its lowercase name
+    /// (adversarial review of #3600) — whatever the list order.
+    #[test]
+    fn agent_open_selects_my_agents_and_refuses_templates() {
+        let agents = vec![
+            def("claude", "Claude", 1),
+            def("agent-mine", "Claude", 0),
+            def("codex", "Codex", 1),
+            def("agent-other", "agent-mine", 0),
+        ];
+        let pick = |wanted| select_openable_agent(&agents, wanted).map(|a| a.id.as_str());
+
+        assert_eq!(pick("agent-mine"), Ok("agent-mine"), "an id wins over a name");
+        assert_eq!(pick("claude"), Ok("agent-mine"), "not the template's id");
+        assert_eq!(pick("CLAUDE"), Ok("agent-mine"));
+        for wanted in ["codex", "Codex"] {
+            let err = pick(wanted).unwrap_err();
+            assert!(err.starts_with("TEMPLATE_NOT_OPENABLE"), "{wanted}: {err}");
+        }
+        let err = pick("nobody").unwrap_err();
+        assert!(err.starts_with("AGENT_NOT_FOUND"), "{err}");
     }
 }

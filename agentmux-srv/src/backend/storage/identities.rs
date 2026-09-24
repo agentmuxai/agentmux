@@ -348,6 +348,25 @@ impl Store {
     /// Upsert an identity account. If `account.id` is empty the caller
     /// must generate one first (we don't silently mint ids here — callers
     /// should know whether they're creating vs updating).
+    /// Set one account's `context.email`, and nothing else: no other column,
+    /// no `updated_at`, and no row created — an account deleted since it was
+    /// read stays deleted, and a status or `secret_ref` written meanwhile
+    /// stands (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §4's backfill runs
+    /// inside a list). Returns whether a row was updated.
+    pub fn identity_set_context_email(&self, id: &str, email: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_accounts
+                SET context = json_set(
+                        CASE WHEN json_valid(context) AND json_type(context) = 'object'
+                             THEN context ELSE '{}' END,
+                        '$.email', ?2)
+              WHERE id = ?1",
+            params![id, email],
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn identity_upsert(&self, account: &IdentityAccount) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let secret_ref_json = serde_json::to_string(&account.secret_ref)?;

@@ -107,9 +107,14 @@ type MarkdownProps = {
     nativeScrollbar?: boolean;
     rehype?: boolean;
     /** When false, skip the (expensive) syntax-highlighting rehype plugin
-     *  while keeping every other plugin (sanitize, etc.). Read reactively so
-     *  streaming callers can defer highlighting until the content settles. */
+     *  while keeping every other plugin (sanitize, etc.). */
     highlight?: boolean;
+    /** The text is still growing. Only the trailing open block can still
+     *  change, so only it is rendered cheaply (without syntax highlighting);
+     *  closed blocks before it are rendered at full quality exactly once.
+     *  Flipping this re-renders that trailing block and nothing else. Read
+     *  reactively. */
+    streaming?: boolean;
     fontSizeOverride?: number;
     fixedFontSizeOverride?: number;
 };
@@ -366,23 +371,24 @@ const Markdown = (props: MarkdownProps) => {
     // text, so it is memoized on those and reused. This matters more, not
     // less, once per-commit parse cost comes down: at ~1ms of parse, a 4ms
     // rebuild would dominate what it is rebuilding.
-    // Resolved ONCE as a boolean memo. Callers pass `highlight` as a getter
-    // over their own signal (MarkdownBlock: `highlight={view().highlight}`,
-    // where `view()` is a new object every streaming commit). Reading
-    // `props.highlight` directly inside the processor memo tracked that
-    // upstream signal, so the whole plugin chain was rebuilt once per commit
-    // even though the boolean never changed — live counters read
-    // `processorBuilds == commits` under real streaming while the static-prop
-    // test stayed green. A memo compares the resolved boolean, so only a real
-    // flip propagates. (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.)
+    // Resolved ONCE as boolean memos. Callers pass these as getters over
+    // their own signal (MarkdownBlock: `streaming={view().streaming}`, where
+    // `view()` is a new object every streaming commit). Reading the prop
+    // directly inside the processor memo tracked that upstream signal, so the
+    // whole plugin chain was rebuilt once per commit even though the boolean
+    // never changed — live counters read `processorBuilds == commits` under
+    // real streaming while the static-prop test stayed green. A memo compares
+    // the resolved boolean, so only a real flip propagates.
+    // (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §6.)
     const highlightOn = createMemo<boolean>(() => props.highlight ?? true);
+    const streamingOn = createMemo<boolean>(() => props.streaming ?? false);
 
-    const processor = createMemo(() => {
+    const buildProcessor = (withHighlight: boolean) => {
         stats.processorBuilds++;
         const rehypePlugins: any[] = rehype
             ? [
                   rehypeRaw,
-                  ...(highlightOn() ? [rehypeHighlight] : []),
+                  ...(withHighlight ? [rehypeHighlight] : []),
                   rehypeAlignToClass,
                   rehypeLinkify,
                   () =>
@@ -432,7 +438,28 @@ const Markdown = (props: MarkdownProps) => {
             .use(remarkPlugins as any)
             .use(remarkRehype as any, { allowDangerousHtml: true })
             .use(rehypePlugins as any);
-    });
+    };
+
+    /** Renders closed blocks: the document's final quality. */
+    const processor = createMemo(() => buildProcessor(highlightOn()));
+    /** Built on first need, then kept: it never depends on `highlight`. */
+    let plainProcessor: ReturnType<typeof buildProcessor> | undefined;
+    /**
+     * Renders the trailing open block. While streaming it skips highlighting:
+     * that block is re-rendered on every commit, and highlighting a code block
+     * that is still growing is the expensive part. Everything else about the
+     * two processors is identical, so the tail looks the same apart from
+     * colour until it closes or the stream settles.
+     *
+     * The frozen prefix never uses this. It used to be rendered with whichever
+     * processor the current commit had, so each streaming ↔ settled flip —
+     * which MarkdownBlock infers from a 90 ms quiet gap, and which real
+     * streams cross constantly — invalidated it and re-parsed the WHOLE
+     * message (TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.4;
+     * MarkdownBlock.stream-pauses.test.tsx).
+     */
+    const tailProcessor = () =>
+        highlightOn() && streamingOn() ? (plainProcessor ??= buildProcessor(false)) : processor();
 
     const renderedMarkdown = createMemo(() => {
         const txt = transformedText();
@@ -447,7 +474,11 @@ const Markdown = (props: MarkdownProps) => {
         blocksRef.clear();
         for (const [k, v] of contentBlocksMap()) blocksRef.set(k, v);
 
+        // The frozen prefix's cache key is the FINAL highlight setting only —
+        // never `streaming`, which affects the open tail alone (see
+        // `tailProcessor`). Reading both here keeps this memo tracking both.
         const highlight = highlightOn();
+        const tailProc = tailProcessor();
         const blocks = blocksSignature(contentBlocksMap());
 
         /**
@@ -456,10 +487,10 @@ const Markdown = (props: MarkdownProps) => {
          * segment's headings have to be collected separately before the next
          * call wipes them.
          */
-        const runSegment = (src: string): { children: any[]; toc: TocItem[] } => {
+        const runSegment = (src: string, proc: ReturnType<typeof buildProcessor>): { children: any[]; toc: TocItem[] } => {
             tocRef.length = 0;
             stats.parsedChars += src.length;
-            const hast: any = processor().runSync(processor().parse(src));
+            const hast: any = proc.runSync(proc.parse(src));
             return { children: hast.children ?? [], toc: tocRef.slice() };
         };
 
@@ -477,7 +508,8 @@ const Markdown = (props: MarkdownProps) => {
 
             if (splitAt <= 0) {
                 disposeFrozen();
-                const whole = runSegment(txt);
+                // Nothing is provably closed, so all of it is the open tail.
+                const whole = runSegment(txt, tailProc);
                 // Owned by this memo run, like the tail below: disposed and
                 // replaced wholesale on the next commit.
                 element = hastToElement(whole.children);
@@ -485,8 +517,10 @@ const Markdown = (props: MarkdownProps) => {
             } else {
                 // The cache is only valid if this really is the same document
                 // growing. A non-append edit (history restore, switching
-                // messages) or a highlight flip invalidates it — the frozen
-                // DOM was produced by a different processor in that case.
+                // messages) or a `highlight` flip invalidates it — the frozen
+                // DOM was produced by a different processor in that case. A
+                // `streaming` flip does not: frozen segments are closed, so
+                // they are always rendered with the final processor.
                 // Content-block data is a third input: an `@@@start … @@@end`
                 // block becomes a `<waveblock>` placeholder whose text doesn't
                 // change when the block's body does, and MuxBlock reads its
@@ -497,7 +531,7 @@ const Markdown = (props: MarkdownProps) => {
                 }
                 if (!frozen || splitAt > frozen.end) {
                     const from = frozen ? frozen.end : 0;
-                    const seg = runSegment(txt.slice(from, splitAt));
+                    const seg = runSegment(txt.slice(from, splitAt), processor());
                     const rendered = renderSegment(seg.children);
                     frozen = {
                         end: splitAt,
@@ -513,7 +547,7 @@ const Markdown = (props: MarkdownProps) => {
                 // commit. Its element is owned by this memo run, so the next
                 // commit disposes it and Solid's array reconcile swaps just
                 // these trailing nodes, leaving `frozen.elements` untouched.
-                const tail = runSegment(txt.slice(splitAt));
+                const tail = runSegment(txt.slice(splitAt), tailProc);
                 element = frozen.elements.concat(flatNodes(hastToElement(tail.children)));
                 toc = frozen.toc.concat(tail.toc);
             }

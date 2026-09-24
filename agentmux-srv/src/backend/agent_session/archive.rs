@@ -100,47 +100,27 @@ pub fn archive_session(
         copy_tsidx_best_effort(filestore, &current_zone, filestore, &archive_zone);
     }
 
-    // Archive write succeeded. Now safe to clear the current zone.
+    // Archive write succeeded. Now safe to clear the current zone: the files
+    // that were archived, and both sidecars with `output` — a stale tsidx
+    // under a fresh (offset-0) output would mis-time the next session's lines
+    // (codex P2 on PR #2508), and a stale output.idx could pass
+    // blockfile:read_range's covered_size check by coincidence (reagent P1 on
+    // #2701). One transaction (5a-2b): a crash can't leave a sidecar
+    // describing an `output` that is gone.
+    let mut clear: Vec<&str> = Vec::with_capacity(4);
     if state_stat.is_some() {
-        if let Err(e) = filestore.delete_file(&current_zone, SNAPSHOT_FILE) {
-            tracing::warn!(
-                definition_id = %definition_id,
-                error = %e,
-                "agent_session: failed to clear current snapshot after archive (archive already persisted)"
-            );
-        }
+        clear.push(SNAPSHOT_FILE);
     }
     if output_stat.is_some() {
-        if let Err(e) = filestore.delete_file(&current_zone, OUTPUT_FILE) {
-            tracing::warn!(
-                definition_id = %definition_id,
-                error = %e,
-                "agent_session: failed to clear current output after archive (archive already persisted)"
-            );
-        }
+        clear.push(OUTPUT_FILE);
     }
-    // Clear the sidecar with output — a stale tsidx under a fresh (offset-0)
-    // output would mis-time the next session's lines (codex P2 on PR #2508).
-    if let Ok(Some(_)) = filestore.stat(&current_zone, TSIDX_FILE) {
-        if let Err(e) = filestore.delete_file(&current_zone, TSIDX_FILE) {
-            tracing::warn!(
-                definition_id = %definition_id,
-                error = %e,
-                "agent_session: failed to clear current tsidx after archive"
-            );
-        }
-    }
-    // Clear the output.idx sidecar too (reagent P1 on #2701): same
-    // stale-cache-by-coincidence risk as the tsidx case above, but for
-    // blockfile:read_range's covered_size freshness check.
-    if let Ok(Some(_)) = filestore.stat(&current_zone, "output.idx") {
-        if let Err(e) = filestore.delete_file(&current_zone, "output.idx") {
-            tracing::warn!(
-                definition_id = %definition_id,
-                error = %e,
-                "agent_session: failed to clear current output.idx after archive"
-            );
-        }
+    clear.extend([TSIDX_FILE, "output.idx"]);
+    if let Err(e) = filestore.delete_files(&current_zone, &clear) {
+        tracing::warn!(
+            definition_id = %definition_id,
+            error = %e,
+            "agent_session: failed to clear current zone after archive (archive already persisted)"
+        );
     }
 
     // Clear the GLOBAL current zone in the same lifecycle. Without this, the
@@ -247,16 +227,9 @@ fn copy_tsidx_best_effort(src_store: &FileStore, src_zone: &str, dst_store: &Fil
 /// reach the same byte size, silently serving the old session's cached line
 /// count/offsets.
 pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
-    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"] {
-        match filestore.stat(zone, name) {
-            Ok(Some(_)) => {
-                if let Err(e) = filestore.delete_file(zone, name) {
-                    tracing::warn!(zone = %zone, file = %name, error = %e, "agent_session: failed to clear local current after global archive");
-                }
-            }
-            Ok(None) => {}
-            Err(e) => tracing::warn!(zone = %zone, file = %name, error = %e, "agent_session: stat failed clearing local current"),
-        }
+    // One transaction (5a-2b); absent files are not an error.
+    if let Err(e) = filestore.delete_files(zone, &[SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"]) {
+        tracing::warn!(zone = %zone, error = %e, "agent_session: failed to clear local current after global archive");
     }
 }
 
@@ -279,23 +252,12 @@ pub fn clear_global_current_zone(definition_id: &str) {
     let Ok(zone) = validate_and_current(definition_id) else {
         return;
     };
-    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"] {
-        // Only delete what's present, so an absent file isn't logged as an error.
-        match gfs.stat(&zone, name) {
-            Ok(Some(_)) => {
-                if let Err(e) = gfs.delete_file(&zone, name) {
-                    tracing::warn!(
-                        zone = %zone, file = %name, error = %e,
-                        "global transcripts: failed to clear current zone on archive"
-                    );
-                }
-            }
-            Ok(None) => {}
-            Err(e) => tracing::warn!(
-                zone = %zone, file = %name, error = %e,
-                "global transcripts: stat failed clearing current zone on archive"
-            ),
-        }
+    // One transaction (5a-2b); absent files are not an error.
+    if let Err(e) = gfs.delete_files(&zone, &[SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"]) {
+        tracing::warn!(
+            zone = %zone, error = %e,
+            "global transcripts: failed to clear current zone on archive"
+        );
     }
 }
 

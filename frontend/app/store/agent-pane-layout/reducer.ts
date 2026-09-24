@@ -17,6 +17,7 @@ import {
     AgentPaneLayoutState,
     COLLAPSED,
     DEFAULT_ROW_PX,
+    ROW_GAP_PX,
     Expansion,
     ExpansionState,
     expansionEq,
@@ -329,12 +330,13 @@ export interface RowPosition {
     /** Unzoomed CSS px from the scroll-container top, includes scrollMargin. */
     start: number;
     height: number;
-    /** === start + height === next row's start (INV-1). */
+    /** === start + height; the next row starts ROW_GAP_PX later (INV-1). */
     end: number;
 }
 
 /** Prefix-sum positions over the full virtualized region. O(n).
- *  start[i+1] === end[i] by construction → slots never overlap (INV-1). */
+ *  start[i+1] === end[i] + ROW_GAP_PX by construction → slots never overlap
+ *  and are spaced exactly like streaming-buffer rows (INV-1). */
 export function positions(state: AgentPaneLayoutState): RowPosition[] {
     const out: RowPosition[] = new Array(state.orderedIds.length);
     let cursor = state.scrollMarginPx;
@@ -344,16 +346,18 @@ export function positions(state: AgentPaneLayoutState): RowPosition[] {
         const start = cursor;
         const end = start + height;
         out[i] = { nodeId, index: i, start, height, end };
-        cursor = end;
+        cursor = end + ROW_GAP_PX;
     }
     return out;
 }
 
 /** Total scrollable height of the virtualized region (excludes scrollMargin,
- *  which is contributed by the header element above it). */
+ *  which is contributed by the header element above it): every row plus the
+ *  gap after it. The trailing gap separates the last head row from the
+ *  streaming buffer's first row exactly as buffer rows are separated. */
 export function totalSize(state: AgentPaneLayoutState): number {
     let sum = 0;
-    for (const id of state.orderedIds) sum += effectiveHeight(state, id);
+    for (const id of state.orderedIds) sum += effectiveHeight(state, id) + ROW_GAP_PX;
     return sum;
 }
 
@@ -428,18 +432,24 @@ export interface LayoutView {
     rows: RowPosition[];
     totalSize: number;
     window: WindowRange;
+    /** The scroll margin `rows[].start` includes (the virtualized region's
+     *  offset in the scroll container). Subtract this — not a live
+     *  `offsetTop` read — to place a row inside the region: it is the exact
+     *  value the positions were computed from, and reading it forces no
+     *  layout. */
+    scrollMarginPx: number;
 }
 
 export function computeLayoutView(state: AgentPaneLayoutState): LayoutView {
     const rows = positions(state);
     const total = rows.length === 0
         ? 0
-        : rows[rows.length - 1].end - state.scrollMarginPx;
+        : rows[rows.length - 1].end + ROW_GAP_PX - state.scrollMarginPx;
     const window = windowRangeOf(
         rows,
         state.scrollTop,
         state.viewportPx,
         state.overscan,
     );
-    return { rows, totalSize: total, window };
+    return { rows, totalSize: total, window, scrollMarginPx: state.scrollMarginPx };
 }

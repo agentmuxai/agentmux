@@ -94,6 +94,52 @@ fn parse_claude_config_dir(env_blob: &str) -> String {
     String::new()
 }
 
+/// The identity stores (`id_store`, `identity_store`), attached once at boot,
+/// so memory resolution can find the account an agent is linked to — the
+/// directory its spawn actually runs Claude in. Its callers hold only the
+/// channel store. Unattached (tests): the linked-account step is skipped.
+static IDENTITY_STORES: std::sync::OnceLock<(
+    std::sync::Arc<crate::backend::storage::store::Store>,
+    std::sync::Arc<crate::backend::storage::store::Store>,
+)> = std::sync::OnceLock::new();
+
+pub(crate) fn attach_identity_stores(
+    id_store: std::sync::Arc<crate::backend::storage::store::Store>,
+    identity_store: std::sync::Arc<crate::backend::storage::store::Store>,
+) {
+    let _ = IDENTITY_STORES.set((id_store, identity_store));
+}
+
+/// The Claude config dir an agent runs in, as its spawn decides it: the
+/// config dir of the Claude OAuth account it is linked to — the spawn sets
+/// `CLAUDE_CONFIG_DIR` to it over any env value (`resolver::inject`) — else
+/// its env override, else `""`, the shared default. #3603: an agent with no
+/// env override and a linked account resolved to the shared default, so
+/// `MemoryList` listed nothing while its memories sat in the account's dir.
+fn agent_claude_config_dir(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
+    let linked = IDENTITY_STORES.get().and_then(|(id_store, identity_store)| {
+        // Only an agent with a binding — its own, or its template's (the
+        // spawn's fallback) — reaches the resolver, which logs a warning for
+        // an unbound one; memory is read every sweep.
+        crate::identity::resolver::agent_has_identity_binding(mstore, identity_store, agent_id)
+            .then(|| {
+                crate::identity::resolver::resolve_bound_claude_config_dir_for_agent(
+                    mstore, id_store, identity_store, agent_id,
+                )
+            })
+            .flatten()
+    });
+    if let Some(dir) = linked {
+        return dir.to_string_lossy().into_owned();
+    }
+    mstore
+        .agent_content_get(agent_id, "env")
+        .ok()
+        .flatten()
+        .map(|c| parse_claude_config_dir(&c.content))
+        .unwrap_or_default()
+}
+
 /// Resolve the memory directory for `agent_id`. Reads the agent definition and
 /// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error only if
 /// the agent cannot be resolved at all — an instance row with a blank
@@ -128,12 +174,7 @@ pub(crate) fn memory_dir_for_agent(
         // intact — the common case, since `working_directory` is blank by
         // default. See SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md.
         if !instance.working_directory.is_empty() {
-            let config_dir = mstore
-                .agent_content_get(&instance.id, "env")
-                .ok()
-                .flatten()
-                .map(|c| parse_claude_config_dir(&c.content))
-                .unwrap_or_default();
+            let config_dir = agent_claude_config_dir(mstore, &instance.id);
             return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
         }
         // Resolve through the DEFINITION, not the instance row: `db_agents`
@@ -277,14 +318,15 @@ fn memory_dir_for_blank_working_dir(
     if agent_name.is_empty() {
         return None;
     }
-    let config_dir = mstore
-        .agent_content_get(definition_id, "env")
-        .ok()
-        .flatten()
-        .map(|c| parse_claude_config_dir(&c.content))
-        .unwrap_or_default();
-    let work_dir = crate::backend::storage::agents::default_agent_working_dir(agent_name);
-    Some(memory_dir_for_cwd(&config_dir, &work_dir))
+    let config_dir = agent_claude_config_dir(mstore, definition_id);
+    // Claude records the absolute cwd, so the default `~/.agentmux/agents/…`
+    // must be expanded before it is turned into a project-folder name — the
+    // unexpanded form named a folder (`--agentmux-agents-…`) Claude never
+    // writes (#3603 review).
+    let work_dir = crate::backend::base::expand_home_dir_safe(
+        &crate::backend::storage::agents::default_agent_working_dir(agent_name),
+    );
+    Some(memory_dir_for_cwd(&config_dir, &work_dir.to_string_lossy()))
 }
 
 /// Reconstruct one registry record's absolute memory dir directly (no slug
@@ -645,12 +687,7 @@ pub(crate) fn memory_dir_for_agent_by_id(
     //     bypassed a data-loss guard.
     // Both for the common case, since `working_directory` is blank by default.
     if !agent.working_directory.is_empty() {
-        let config_dir = mstore
-            .agent_content_get(&agent.id, "env")
-            .ok()
-            .flatten()
-            .map(|c| parse_claude_config_dir(&c.content))
-            .unwrap_or_default();
+        let config_dir = agent_claude_config_dir(mstore, &agent.id);
         return Some(memory_dir_for_cwd(&config_dir, &agent.working_directory));
     }
     memory_dir_for_blank_working_dir(mstore, &agent.id, &agent.name, &agent.slug)
@@ -2180,8 +2217,11 @@ mod tests {
         // not merely round-tripped through some other consistent-with-itself
         // location. The sibling test below plants a file directly at this
         // path and proves `list` finds it independently of this write path.
-        let default_dir = crate::backend::storage::agents::default_agent_working_dir("Test Agent");
-        let expected_path = memory_dir_for_cwd(&config.path().display().to_string(), &default_dir).join("MEMORY.md");
+        let default_dir = crate::backend::base::expand_home_dir_safe(
+            &crate::backend::storage::agents::default_agent_working_dir("Test Agent"),
+        );
+        let expected_path =
+            memory_dir_for_cwd(&config.path().display().to_string(), &default_dir.to_string_lossy()).join("MEMORY.md");
         assert!(expected_path.is_file(), "expected the write to land at {expected_path:?}");
     }
 
@@ -2202,8 +2242,10 @@ mod tests {
         let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
         let config = tempfile::tempdir().unwrap();
 
-        let default_dir = crate::backend::storage::agents::default_agent_working_dir("Test Agent");
-        let memory_dir = memory_dir_for_cwd(&config.path().display().to_string(), &default_dir);
+        let default_dir = crate::backend::base::expand_home_dir_safe(
+            &crate::backend::storage::agents::default_agent_working_dir("Test Agent"),
+        );
+        let memory_dir = memory_dir_for_cwd(&config.path().display().to_string(), &default_dir.to_string_lossy());
         std::fs::create_dir_all(&memory_dir).unwrap();
         std::fs::write(memory_dir.join("PRE_EXISTING.md"), "written directly to disk, not via this RPC").unwrap();
 
@@ -2682,6 +2724,86 @@ mod tests {
         }
     }
 
+    /// #3603: an agent with no `CLAUDE_CONFIG_DIR` in its env but a linked
+    /// Claude OAuth account runs Claude in that account's dir, so its
+    /// memories are there — not under the shared default.
+    #[test]
+    fn memory_dir_follows_the_linked_oauth_account_when_env_has_none() {
+        use crate::backend::storage::identities::{IdentityAccount, SecretRef};
+        let store = std::sync::Arc::new(Store::open_in_memory().unwrap());
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-3603", "M", "claude", "agent", 1, "");
+        def.slug = "m-3603".into();
+        def.working_directory = "/work/m-3603".into();
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .identity_upsert(&IdentityAccount {
+                id: "acct-3603".into(),
+                name: "claude-oauth".into(),
+                provider: "claude".into(),
+                kind: "oauth".into(),
+                display_name: String::new(),
+                secret_ref: SecretRef::OAuthConfigDir { dir: "/accounts/acct-3603/claude".into() },
+                context: serde_json::json!({}),
+                status: "valid".into(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        store.agent_identity_link("uid-3603", "acct-3603", "claude").unwrap();
+        // One store plays all three roles here; an in-process OnceLock, so it
+        // is attached once — other tests' agents have no links in it.
+        attach_identity_stores(store.clone(), store.clone());
+
+        let got = memory_dir_for_agent_by_id(&store, &def).unwrap();
+        assert_eq!(got, memory_dir_for_cwd("/accounts/acct-3603/claude", "/work/m-3603"));
+        assert_eq!(
+            memory_dir_for_agent(&store, "m-3603").unwrap(),
+            got,
+            "the slug path resolves the same dir"
+        );
+
+        // The spawn sets CLAUDE_CONFIG_DIR to the linked account's dir over
+        // any env value, so memory follows the account too.
+        store
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: "uid-3603".into(),
+                content_type: "env".into(),
+                content: "CLAUDE_CONFIG_DIR=/somewhere/else\n".into(),
+                updated_at: 0,
+            })
+            .unwrap();
+        assert_eq!(memory_dir_for_agent_by_id(&store, &def).unwrap(), got, "the account wins");
+
+        // An agent with no link of its own inherits its template's, as the
+        // spawn does (ReAgent on #3630).
+        let mut tpl = crate::backend::storage::agents::test_agent_def("tpl-3603", "T", "claude", "agent", 1, "");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        store.agent_identity_link("tpl-3603", "acct-3603", "claude").unwrap();
+        let mut child = crate::backend::storage::agents::test_agent_def("uid-3603-child", "K", "claude", "agent", 1, "");
+        child.slug = "k-3603".into();
+        child.parent_id = "tpl-3603".into();
+        child.working_directory = "/work/k-3603".into();
+        store.agent_def_insert(&mut child).unwrap();
+        assert_eq!(
+            memory_dir_for_agent_by_id(&store, &child).unwrap(),
+            memory_dir_for_cwd("/accounts/acct-3603/claude", "/work/k-3603"),
+            "the template's link"
+        );
+
+        // A non-Claude agent's linked account is not a Claude config dir:
+        // memory keeps today's resolution.
+        let mut codex = crate::backend::storage::agents::test_agent_def("uid-3603-codex", "C", "codex", "agent", 1, "");
+        codex.slug = "c-3603".into();
+        codex.working_directory = "/work/c-3603".into();
+        store.agent_def_insert(&mut codex).unwrap();
+        store.agent_identity_link("uid-3603-codex", "acct-3603", "codex").unwrap();
+        assert_eq!(
+            memory_dir_for_agent_by_id(&store, &codex).unwrap(),
+            memory_dir_for_cwd("", "/work/c-3603"),
+        );
+    }
+
     #[test]
     fn memory_dir_for_cwd_default_root_matches_spawn_layout() {
         // Empty config dir → the default isolated home under shared, with the
@@ -2740,13 +2862,21 @@ mod tests {
             .expect("a blank working_directory must resolve, not error");
 
         // default_agent_working_dir("Blank WD Agent") -> ~/.agentmux/agents/blank-wd-agent,
-        // which memory_dir_for_cwd sanitizes to "---agentmux-agents-blank-wd-agent"
-        // (the leading `~`, `/` and `.` each become their own dash).
+        // expanded to the absolute path Claude records as its cwd, then
+        // sanitized as Claude names project folders (every non-alphanumeric
+        // becomes a dash). The unexpanded form (`---agentmux-agents-…`) named
+        // a folder Claude never writes (#3603 review).
+        let expanded = crate::backend::base::expand_home_dir_safe("~/.agentmux/agents/blank-wd-agent");
+        let folder: String = expanded
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
         let comps: Vec<String> = dir
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
-        let want_tail = ["projects", "---agentmux-agents-blank-wd-agent", "memory"];
+        let want_tail = ["projects", folder.as_str(), "memory"];
         let tail = &comps[comps.len() - want_tail.len()..];
         assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
     }

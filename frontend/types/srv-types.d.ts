@@ -1071,6 +1071,7 @@ declare global {
         "tab:preset"?: string;
         "tab:skipcloseconfirm"?: boolean;
         "splash:disabled"?: boolean;
+        "app:runinbackground"?: boolean;
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
@@ -1116,6 +1117,12 @@ declare global {
         "voice:whisperModelPath"?: string;
         "voice:inputDeviceId"?: string;
         "notify:*"?: boolean;
+        "notify:os:enabled"?: boolean;
+        "notify:os:when"?: "unfocused" | "always" | "never";
+        "notify:os:inputwaiting"?: boolean;
+        "notify:os:turncompleted"?: boolean;
+        "notify:os:turnerrored"?: boolean;
+        "notify:os:preview"?: "redacted" | "full" | "none";
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;
         "notify:sounds:suppresswhenfocused"?: boolean;
@@ -1129,10 +1136,12 @@ declare global {
         "notify:tooltones:enabled"?: boolean;
         "notify:tooltones:volume"?: number;
         "notify:tooltones:scope"?: "all" | "focused";
+        "notify:tooltones:flash"?: boolean;
         "dnd:enabled"?: boolean;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;
         "agent:askquestiontimeoutms"?: number;
+        "agent:turnscopedtail"?: boolean;
     };
 
     // waveobj.StickerClickOptsType
@@ -1418,6 +1427,28 @@ declare global {
         // window against what its own reconnect fetch already covered — see
         // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 follow-up.
         offset?: number;
+        // Agent `output` appends to a counted transcript only: where the
+        // records landed in each stream (the block's file, the agent's
+        // global zone). Pick the entry for the stream the pane reads.
+        // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7.
+        pos?: StreamPos[];
+        // Set when the records echo something the pane already shows:
+        // "stdin" for a user message the controller wrote to the agent's
+        // stdin. In the transcript with its position; the pane adds no node
+        // for it (Phase 5a-3c).
+        echo?: string;
+    };
+
+    // mps.StreamPos
+    type StreamPos = {
+        // "b:<blockId>" (the block's own output) or "g:<zone>" (the agent's
+        // global transcript zone).
+        stream: string;
+        gen: string;
+        // Index of the first record this append wrote.
+        line: number;
+        // The stream's line count after this append.
+        lines: number;
     };
 
     // webcmd.WSRpcCommand

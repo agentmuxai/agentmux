@@ -3,4 +3,10 @@
 /**
  * Request for blockfile:read_range — read a range of lines from a blockfile.
  */
-export type CommandBlockfileReadRangeData = { block_id: string, filename: string, offset: number, limit: number, };
+export type CommandBlockfileReadRangeData = { block_id: string, filename: string, offset: number, limit: number, 
+/**
+ * Read only from this generation of the stream: if the file has been
+ * replaced since (another generation), answer `gen_mismatch` with no
+ * lines rather than lines of another file (Phase 5a-3).
+ */
+expect_gen?: string, };

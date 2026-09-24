@@ -57,6 +57,29 @@
         // `.tab` is allowed by flex sizing (basis → min on shrink).
         min-width: 0;
         width: 100%;
+        // Own stacking context so the activity-flash overlay below can sit
+        // at z-index -1: above this element's background (including a
+        // `.tab-colored` fill, which is `!important` and would beat any
+        // background-based flash) but under the name and close button.
+        isolation: isolate;
+
+        // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
+        // Rests invisible; activity-flash.ts animates its opacity (compositor-
+        // only, no layout/paint of the tab). `::after` is the active stripe.
+        // Fill: deliberately subtle — a faint tint of the theme's text color
+        // over whatever the tab already is (its own `tab:color` included), so
+        // the flash reads as a slight offset of the tab's normal color. Just
+        // above the 0.1 hover tint. The pane's own color is its pill's flash
+        // (PaneTabStrip.scss), not this one.
+        &::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: var(--zindex-activity-flash);
+            background: rgb(from var(--main-text-color) r g b / 0.12);
+            opacity: 0;
+            pointer-events: none;
+        }
     }
 
     &.animate {

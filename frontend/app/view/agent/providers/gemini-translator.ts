@@ -25,6 +25,19 @@ export class GeminiTranslator implements OutputTranslator {
     // Correlates tool_id → tool_name so tool_result reports the right tool name.
     private tools = new ToolCorrelator();
 
+    /**
+     * `replay`: translating stored history rather than a live stream. The CLI
+     * echoes each prompt into the transcript as {"type":"message","role":
+     * "user"}. Live, the pane already shows the message optimistically, so the
+     * echo is dropped there; on replay it is the only record of what the user
+     * said, so it becomes a `user_message` — the same event the Claude
+     * translator emits for its persisted user lines. Without this every user
+     * message vanished when a Gemini-family pane was reloaded (Phase 5
+     * groundwork, SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md
+     * §6.3.6).
+     */
+    constructor(private readonly opts: { replay?: boolean } = {}) {}
+
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
 
@@ -59,6 +72,13 @@ export class GeminiTranslator implements OutputTranslator {
             }
 
             case "message": {
+                if (rawEvent.role === "user") {
+                    const content = rawEvent.content;
+                    if (!this.opts.replay || typeof content !== "string" || !content) return [];
+                    // No invented timestamp: parseHistoryLines stamps the
+                    // node from its line's stored receive time.
+                    return [{ type: "user_message", message: content }];
+                }
                 if (rawEvent.role !== "assistant") return [];
                 const content: string = rawEvent.content ?? "";
                 if (!content) return [];

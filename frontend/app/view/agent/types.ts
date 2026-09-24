@@ -355,7 +355,13 @@ export interface JektMessageNode {
     msgId: string;
     priority: "normal" | "urgent";
     direction: "incoming" | "outgoing";
+    /** When it was sent: for a held message, the original send time from
+     *  the marker's `TS`, not the time it was finally delivered. */
     timestamp: number;
+    /** Seconds the message waited for an absent recipient (`HELD_FOR`,
+     *  SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4); absent when it was
+     *  delivered live. */
+    heldForSecs?: number;
 }
 
 /**
@@ -372,7 +378,10 @@ export interface UserMessageNode {
     type: "user_message";
     id: string;
     message: string;
-    timestamp: number;
+    /** Unix ms. Absent when unknown — a replayed message whose line has no
+     *  stored receive time; never an invented "now" (ReAgent P1, #3620).
+     *  Renderers already treat a missing value as unknown. */
+    timestamp?: number;
     /** True when this row is the auto-generated startup context
      * payload (see `buildStartupPayload.ts` + onReadyFn in
      * `agent-view.tsx`). The renderer surfaces these

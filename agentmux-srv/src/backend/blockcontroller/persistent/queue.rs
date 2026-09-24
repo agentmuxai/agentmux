@@ -70,13 +70,18 @@ impl PersistentSubprocessController {
         // `!restart_pending`: a committed deferred restart leaves `stdin_tx`
         // live until the process actually exits, and writing into a process
         // about to be killed loses the message (codex P1 on PR #2858). Falling
-        // through queues it for the replacement instead.
+        // through queues it for the replacement instead. `!stop_pending`: the
+        // same loss for a requested kill; see the `Refused` branch below.
         if inner.stdin_tx.is_some()
             && !inner.spawning_in_progress
             && !inner.drain_claim
             && !inner.restart_pending
+            && !inner.stop_pending
         {
-            SendAction::DeliverDirect
+            // Reserve the turn before `inner` is released. Lock order is
+            // `inner` → `health_monitor`, as everywhere else.
+            let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+            SendAction::DeliverDirect { was_active }
         } else if inner.spawning_in_progress || inner.drain_claim {
             let already_queued = skip_if_seq_queued
                 .is_some_and(|seq| inner.pending_send_messages.iter().any(|m| m.seq == seq));
@@ -87,6 +92,18 @@ impl PersistentSubprocessController {
                     .push_back(QueuedMessage::fresh(seq, json_str.to_string()));
             }
             SendAction::Queued
+        } else if inner.stop_pending && !inner.restart_pending && inner.stdin_tx.is_some() {
+            // A kill is pending and the dying process still holds stdin
+            // (reagent P1 on #3562). Writing loses the message; spawning is
+            // wrong too, since the stop may be a teardown (`delete_controller`,
+            // pane shutdown) and would start a process for a closing pane.
+            // Refuse it explicitly: the window lasts until the exit, after
+            // which a send respawns as usual. A committed restart also sets
+            // `stop_pending`, and keeps its own rule: the message falls
+            // through and queues for the replacement.
+            SendAction::Refused(
+                "this agent is stopping — send the message again once it has stopped".to_string(),
+            )
         } else {
             inner.spawning_in_progress = true;
             let own_seq = skip_if_seq_queued.unwrap_or_else(|| inner.take_next_message_seq());
@@ -95,6 +112,35 @@ impl PersistentSubprocessController {
                 .push_back(QueuedMessage::fresh(own_seq, json_str.to_string()));
             SendAction::BecomeSpawner { own_seq }
         }
+    }
+
+    /// The write half of [`SendAction::DeliverDirect`], under a second `inner`
+    /// acquisition. On failure nothing was written, and the turn the decision
+    /// reserved is handed back: left active, it would hold every deferred
+    /// message for a `result` that never comes. Nobody else can have started a
+    /// turn meanwhile, since they all saw it reserved and deferred, and the
+    /// watchdog each armed releases them once it reads idle.
+    ///
+    /// Written through [`Self::try_write_stdin_locked`], like every other
+    /// write site, so the gates are re-checked under THIS acquisition: a stop
+    /// or config restart committed after the decision (heartbeat and status
+    /// publish run in between, with `stdin_tx` still live) refuses the write
+    /// instead of putting the message into the dying process (reagent P1 on
+    /// #3562). The same call tracks it into the current generation's retry
+    /// batch (codex P1 on PR #3513: eager resume can reach `DeliverDirect`
+    /// with its `--resume` unconfirmed and no seed tracked), reading the
+    /// generation in this same acquisition (reagentx P1 on PR #2373).
+    pub(super) fn deliver_direct(&self, json_str: &str, was_active: bool) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Err(e) = Self::try_write_stdin_locked(&mut inner, json_str) {
+            if !was_active {
+                self.health_monitor.set_active_turn(false);
+            }
+            drop(inner);
+            self.publish_status();
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Releases the exclusive spawn claim taken by `decide_send_action`
@@ -592,15 +638,16 @@ impl PersistentSubprocessController {
 
     /// Persists a formatted stdin JSON line to the blockfile + global zone
     /// so `parseHistoryLines` can reconstruct the `user_message` node on
-    /// the next pane open. No MPS event is published here — the
-    /// live-display is handled by the `agent-message-accepted` path (UUID
-    /// node), avoiding a duplicate.
+    /// the next pane open. Published as an `echo: "stdin"` transcript event
+    /// (Phase 5a-3c): the pane already shows the message through the
+    /// `agent-message-accepted` path (UUID node), so it doesn't add a second
+    /// node, but its stream keeps no gap where this record sits.
     pub(super) fn persist_message_to_blockfile(&self, json_str: &str) {
         let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         let line_with_newline = format!("{json_str}\n");
-        super::super::shell::persist_to_blockfile_silent(
+        super::super::shell::persist_user_line(
+            self.broker.as_deref(),
             &self.block_id,
-            crate::backend::agent_session::OUTPUT_FILE,
             line_with_newline.as_bytes(),
             self.filestore.as_ref(),
             global_zone.as_deref(),
@@ -619,6 +666,9 @@ impl PersistentSubprocessController {
         let json_str = json_msg.to_string();
 
         match self.decide_send_action(&json_str, None) {
+            // Nothing was written, queued or persisted, so the caller's own
+            // error handling is the whole story.
+            SendAction::Refused(e) => Err(e),
             SendAction::Queued => {
                 // Persistence happens later, inside the drain, at the
                 // exact moment this message is actually delivered — see
@@ -634,17 +684,19 @@ impl PersistentSubprocessController {
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
             }
-            SendAction::DeliverDirect => {
+            SendAction::DeliverDirect { was_active } => {
                 // spawn_process already marks a fresh process's first turn
                 // active (and starts its watchdog); for an already-running
                 // process (the common case — every turn after the first)
                 // this is the only place that re-marks the turn active,
                 // since the persistent process never exits between turns.
                 // Without this, `turn_active` would go stale after turn 1.
-                self.mark_turn_active_and_publish();
-                let mut inner = self.inner.lock().unwrap();
-                let tx = inner.stdin_tx.as_ref()
-                    .ok_or("persistent process not running after spawn")?;
+                // The mark itself happened inside `decide_send_action` (see
+                // `SendAction::DeliverDirect`); this publishes it.
+                if !was_active {
+                    self.spawn_status_heartbeat();
+                }
+                self.publish_status();
                 // Persist only AFTER a successful send — reagentx P1 on PR
                 // #2360 (sixth review pass, round 5): `stdin_tx` can have
                 // gone `None` (process died) between `decide_send_action`'s
@@ -654,37 +706,7 @@ impl PersistentSubprocessController {
                 // never-delivered message" bug the immediately prior
                 // commit fixed for `BecomeSpawner`. Matches
                 // `send_user_message`'s existing (correct) ordering.
-                tx.try_send(json_str.clone())
-                    .map_err(|e| format!("stdin send failed: {e}"))?;
-                // codex P1 on PR #3513: track this message into the CURRENT
-                // generation's retry batch, same as the drain loop already
-                // does for queued deliveries (see that call site's own doc
-                // comment on why every message beyond the seed needs this,
-                // not just the one that triggered the spawn). `DeliverDirect`
-                // itself never did this — harmless for a spawn that never
-                // attempted `--resume` (`MessageAppendedToRetryBatch` is a
-                // no-op on `NotTracking`, see `persistent_resume::update`'s
-                // catch-all) or one whose resume already confirmed success,
-                // but a real gap for a still-unconfirmed one: eager resume
-                // (issue #3463) can reach `DeliverDirect` with its `--resume`
-                // attempt not yet confirmed and NO seed message already
-                // tracked (unlike every other resume-respawn, which always
-                // has one) — this is what actually closes that gap, not just
-                // the `SpawnedWithResume` routing fix above. Read the
-                // generation and apply in this SAME lock acquisition
-                // (already held for `try_send`) — reagentx P1 on PR #2373
-                // via the drain loop's identical concern: a separate
-                // acquisition risks a concurrent respawn bumping
-                // `spawn_generation` in between, making this event carry a
-                // stale generation that `update()`'s catch-all silently
-                // ignores.
-                let generation = inner.spawn_generation;
-                let seq = inner.take_next_message_seq();
-                inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
-                    generation,
-                    entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
-                });
-                drop(inner);
+                self.deliver_direct(&json_str, was_active)?;
                 self.persist_message_to_blockfile(&json_str);
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())

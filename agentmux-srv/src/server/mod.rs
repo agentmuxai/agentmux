@@ -22,6 +22,7 @@ mod messagebus;
 pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;
+pub(crate) mod jekt_held;
 pub(crate) mod actor;
 pub(crate) mod service;
 mod shell_handlers;
@@ -37,6 +38,7 @@ mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
 pub(crate) mod native_memory_handlers;
+mod notify_handlers;
 mod ui_handlers;
 
 #[cfg(test)]
@@ -2077,10 +2079,12 @@ async fn handle_agent_open(
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => {
             // The impl's own error vocabulary: AGENT_NOT_FOUND /
-            // INVALID_PROVIDER / CLI_NOT_AVAILABLE are the caller's problem
-            // (bad target or an uninstalled CLI they must remedy first);
-            // anything else is a server-side failure.
+            // TEMPLATE_NOT_OPENABLE / INVALID_PROVIDER / CLI_NOT_AVAILABLE
+            // are the caller's problem (bad target or an uninstalled CLI
+            // they must remedy first); anything else is a server-side
+            // failure.
             let status = if e.starts_with("AGENT_NOT_FOUND")
+                || e.starts_with("TEMPLATE_NOT_OPENABLE")
                 || e.starts_with("INVALID_PROVIDER")
                 || e.starts_with("CLI_NOT_AVAILABLE")
             {
@@ -2144,7 +2148,7 @@ async fn handle_agent_memory_list(
         actor::ActorSite::MemoryList,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_list_impl(&state, &q.agent_id))
+    app_api_response(app_api::memory_list_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name")))
 }
 
 #[derive(serde::Deserialize)]
@@ -2166,7 +2170,7 @@ async fn handle_agent_memory_read(
         actor::ActorSite::MemoryRead,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_read_impl(&state, &q.agent_id, &q.filename))
+    app_api_response(app_api::memory_read_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.filename))
 }
 
 #[derive(serde::Deserialize)]
@@ -2220,7 +2224,7 @@ async fn handle_agent_memory_write(
     } else {
         None
     };
-    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, provenance) {
+    match app_api::memory_write_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.memory_owner_by_name"), &req.filename, &req.content, provenance) {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
@@ -2279,7 +2283,7 @@ async fn handle_agent_memory_history(
         actor::ActorSite::MemoryHistory,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_history_impl(&state, &q.agent_id, &q.filename))
+    app_api_response(app_api::memory_history_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.filename))
 }
 
 #[derive(serde::Deserialize)]
@@ -2304,7 +2308,7 @@ async fn handle_agent_memory_diff(
         actor::ActorSite::MemoryDiff,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_diff_impl(&state, &q.agent_id, &q.from_version_id, &q.to_version_id))
+    app_api_response(app_api::memory_diff_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.from_version_id, &q.to_version_id))
 }
 
 #[derive(serde::Deserialize)]
@@ -2329,7 +2333,7 @@ async fn handle_agent_memory_revert(
         actor::ActorSite::MemoryRevert,
         Some(&req.agent_id),
     );
-    app_api_response(app_api::memory_revert_impl(&state, &req.agent_id, &req.filename, &req.target_version_id))
+    app_api_response(app_api::memory_revert_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.memory_owner_by_name"), &req.filename, &req.target_version_id))
 }
 
 #[derive(serde::Deserialize)]
@@ -2378,9 +2382,13 @@ async fn handle_agent_globalmemory_write(
     } else {
         None
     };
+    // Identity M4c-1 (§6.5.9): the writer's UID is the request's `Caller` —
+    // its token — never a body field; `""` when Unattributed.
+    let written_by_uid = caller::attributed_uid(caller.as_deref());
     app_api_response(app_api::global_memory_write_impl(
         &state,
         &req.agent_id,
+        &written_by_uid,
         req.id.as_deref(),
         &req.name,
         &req.content,
@@ -2484,7 +2492,15 @@ async fn handle_agent_globalmemory_revert(
         actor::ActorSite::GlobalMemoryRevert,
         Some(&req.agent_id),
     );
-    app_api_response(app_api::global_memory_revert_impl(&state, &req.agent_id, &req.id, &req.version_id))
+    // Identity M4c-1: as for write, the writer's UID is the `Caller`'s.
+    let written_by_uid = caller::attributed_uid(caller.as_deref());
+    app_api_response(app_api::global_memory_revert_impl(
+        &state,
+        &req.agent_id,
+        &written_by_uid,
+        &req.id,
+        &req.version_id,
+    ))
 }
 
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary
@@ -2527,7 +2543,13 @@ async fn handle_agent_preset_get(
             )
                 .into_response();
         }
-        return app_api_response(app_api::bundle_self_get_impl(&state, &q.agent_id).await);
+        return app_api_response(
+            app_api::bundle_self_get_impl(
+                &state,
+                app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.preset_owner_by_name"),
+            )
+            .await,
+        );
     }
     app_api_response(app_api::bundle_get_impl(&state, &q.id, &q.name).await)
 }
@@ -2551,7 +2573,13 @@ async fn handle_agent_identity_accounts(
         actor::ActorSite::IdentityAccounts,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::identity_self_accounts_impl(&state, &q.agent_id).await)
+    app_api_response(
+        app_api::identity_self_accounts_impl(
+            &state,
+            app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.identity_owner_by_name"),
+        )
+        .await,
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -2575,7 +2603,12 @@ async fn handle_agent_identity_validate(
         Some(&req.agent_id),
     );
     app_api_response(
-        app_api::identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await,
+        app_api::identity_account_validate_stored_impl(
+            &state,
+            app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.identity_owner_by_name"),
+            &req.account_id,
+        )
+        .await,
     )
 }
 

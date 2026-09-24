@@ -18,6 +18,7 @@ import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
+import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { buildConfigFiles } from "./agent-config-builder";
 import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
@@ -273,6 +274,19 @@ export class AgentViewModel implements ViewModel {
             // fail silently — user can manually switch via widget bar
         }
     };
+
+    /** Start a fresh conversation for this agent; see `newSessionArchives`. */
+    startNewSession = (): Promise<void> =>
+        archiveThenReturnToPicker(
+            newSessionArchives(
+                this.blockId,
+                this.blockAtom()?.meta?.["agentId"],
+                (blockId) => RpcApi.SessionArchiveCommand(TabRpcClient, { block_id: blockId }),
+                (definitionId) => RpcApi.AgentSessionArchiveCommand(TabRpcClient, { definition_id: definitionId })
+            ),
+            this.backToPicker,
+            (e) => Logger.error("agent", "Archiving the current session before a new one failed", { error: String(e) })
+        );
 
     /**
      * Launch an agent in presentation view.

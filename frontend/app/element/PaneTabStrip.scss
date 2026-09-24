@@ -224,6 +224,30 @@
     font-size: 11px;
     overflow: hidden;
     transition: background 80ms ease, color 80ms ease;
+    // Positioning + own stacking context for the activity-flash overlay
+    // below, which sits at z-index -1: over the pill's (pane-colored)
+    // background, under its icon/label/×.
+    position: relative;
+    isolation: isolate;
+
+    // Activity flash overlay — SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
+    // Only strips with `flashOnActivity` (a Pane's own header) ever animate
+    // it; everywhere else it stays at opacity 0. Fill: a moderately brighter,
+    // more saturated version of this pill's own pane color
+    // (`--pane-tab-underline`, set inline by PaneTabStrip from PaneChrome's
+    // getColor), else accent, at 0.9 alpha — the click's full strength.
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: var(--zindex-activity-flash);
+        background: oklch(
+            from var(--activity-flash-base, var(--pane-tab-underline, var(--accent-color)))
+                min(0.85, calc(l + 0.06)) calc(c * 1.4) h / 0.9
+        );
+        opacity: 0;
+        pointer-events: none;
+    }
 
     &:hover {
         // The white tint is layered ON TOP of the resting neutral

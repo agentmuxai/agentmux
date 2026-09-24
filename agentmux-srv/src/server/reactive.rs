@@ -142,6 +142,7 @@ pub(super) fn echo_jekt_to_sender(
         requires_stop.unwrap_or(true),
         msgid,
         priority,
+        None,
     );
     let line = serde_json::json!({
         "type": "user",
@@ -985,7 +986,7 @@ pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Extension(auth_via): Extension<super::ReactiveAuthVia>,
     caller: Option<Extension<super::caller::Caller>>,
-    Json(mut req): Json<InjectionRequest>,
+    Json(req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
     super::actor::check_actor(
         &state,
@@ -999,8 +1000,28 @@ pub(super) async fn handle_reactive_inject(
         msg_len = req.message.len(),
         "reactive inject request received"
     );
+    let caller_uid = super::caller::attributed_uid(caller.as_deref());
+    Json(deliver(&state, auth_via, &caller_uid, req).await)
+}
 
+/// Deliver an inject — verify, try this instance, then forward
+/// cross-instance, cross-channel, LAN and cloud relay — exactly as
+/// `POST /agentmux/reactive/inject` does. Shared with the cron scheduler's
+/// in-process fire (identity M4c-3, spec §6.5.9), which passes its tier
+/// explicitly (`auth_via`) in place of the route's `ReactiveAuthVia`
+/// extension. `caller_uid` is the sender's attributed UID, audited on this
+/// instance only (`InjectionRequest::audit_source_uid` never rides a hop);
+/// `""` when Unattributed.
+pub(crate) async fn deliver(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    caller_uid: &str,
+    mut req: InjectionRequest,
+) -> serde_json::Value {
     req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
+    // Identity M4c-2d: the sender's UID, for the audit entry only — never
+    // forwarded (`#[serde(skip)]`).
+    req.audit_source_uid = caller_uid.to_string();
 
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
@@ -1011,28 +1032,8 @@ pub(super) async fn handle_reactive_inject(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
     if resp.success {
-        echo_jekt_to_sender(
-            &state,
-            req.source_agent.as_deref(),
-            &req.target_agent,
-            &req.message,
-            &resp.request_id,
-            resp.effective_tier.as_deref(),
-            resp.requires_stop,
-            EchoTrust {
-                delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
-                // Same `req` this call's own `effective_tier`/`requires_stop`
-                // were computed from (via `inject_message` just above) — not
-                // hardcoded, so the echoed marker's TRUST/SIG stays consistent
-                // with its own ESCALATE= (reagentx P1 on PR #2623).
-                sig_verified: req.sig_verified,
-                reagent_verified: req.reagent_verified,
-                lan_verified: req.lan_verified,
-                channel_verified: req.channel_verified,
-            },
-            req.priority.as_deref().unwrap_or("normal"),
-        );
-        return Json(serde_json::to_value(&resp).unwrap_or_default());
+        echo_local_delivery(state, &req, &resp);
+        return serde_json::to_value(&resp).unwrap_or_default();
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.
@@ -1048,7 +1049,7 @@ pub(super) async fn handle_reactive_inject(
             hops = req.forward_hops,
             "reactive inject: forward-hop limit reached, not forwarding further"
         );
-        return Json(serde_json::to_value(&resp).unwrap_or_default());
+        return serde_json::to_value(&resp).unwrap_or_default();
     }
 
     // Every forward below sends this hop-incremented request, not the
@@ -1077,6 +1078,12 @@ pub(super) async fn handle_reactive_inject(
     let mut same_host_req = forwarded_req.clone();
     same_host_req.delivery_tier = Some(same_host_tier.to_string());
 
+    // Whether any forwarding tier found the target alive elsewhere. A target
+    // that is alive but refused is not "absent" and is never held here
+    // (durable jekt spec §2.1, condition 3); a same-host entry whose process
+    // is dead — every entry after an srv restart, which changes its port —
+    // is not a candidate, so the first message after a restart is held.
+    let mut candidate_seen = false;
     if is_not_found {
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
@@ -1103,7 +1110,7 @@ pub(super) async fn handle_reactive_inject(
                 )
                 .await
                 {
-                    ForwardOutcome::Delivered(body) => return Json(body),
+                    ForwardOutcome::Delivered(body) => return body,
                     // A non-delivery here is ambiguous: this entry may be
                     // stale (agent unregistered without a clean shutdown), OR
                     // the owning process may be alive and simply not have
@@ -1134,6 +1141,9 @@ pub(super) async fn handle_reactive_inject(
                             );
                             agent_registry::remove(&data_dir, &req.target_agent);
                         } else {
+                            // Alive but did not take it: the target exists
+                            // elsewhere, so it is not held here.
+                            candidate_seen = true;
                             tracing::warn!(
                                 target = %req.target_agent,
                                 pid = entry.pid,
@@ -1141,8 +1151,9 @@ pub(super) async fn handle_reactive_inject(
                             );
                         }
                     }
-                    // Says nothing about this entry's liveness — leave it be.
-                    ForwardOutcome::Inconclusive => {}
+                    // Says nothing about this entry's liveness — leave it be,
+                    // and do not treat the target as absent.
+                    ForwardOutcome::Inconclusive => candidate_seen = true,
                 }
             }
         }
@@ -1188,7 +1199,7 @@ pub(super) async fn handle_reactive_inject(
                 )
                 .await
                 {
-                    ForwardOutcome::Delivered(body) => return Json(body),
+                    ForwardOutcome::Delivered(body) => return body,
                     // Same ambiguity and same should_evict_on_forward_failure
                     // policy as Tier 2a — PID-liveness alone over-protects an
                     // old, genuinely-dead individual agent whose srv process
@@ -1208,6 +1219,7 @@ pub(super) async fn handle_reactive_inject(
                             );
                             agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
                         } else {
+                            candidate_seen = true;
                             tracing::warn!(
                                 target = %req.target_agent,
                                 channel = %entry.channel,
@@ -1216,7 +1228,7 @@ pub(super) async fn handle_reactive_inject(
                             );
                         }
                     }
-                    ForwardOutcome::Inconclusive => {}
+                    ForwardOutcome::Inconclusive => candidate_seen = true,
                 }
             }
         }
@@ -1251,17 +1263,21 @@ pub(super) async fn handle_reactive_inject(
             )
             .await
             {
-                ForwardOutcome::Delivered(body) => return Json(body),
+                ForwardOutcome::Delivered(body) => return body,
                 // The peer answered "not mine" (agent migrated away since we
                 // cached it) or was unreachable — either way the discovery
                 // cache entry is wrong. Unlike the registry tiers there is no
                 // freshness/PID guard to weigh: the cache is cheap to refill
                 // from mDNS, so evicting on any non-delivery is the right
                 // trade rather than an oversight.
+                // A stale route is evicted as wrong, so it is not a live
+                // candidate (Codex P1 on #3632): the message may still be
+                // held. Only an inconclusive answer leaves the target
+                // possibly alive there.
                 ForwardOutcome::Stale => {
                     state.lan_discovery.evict_agent(&req.target_agent);
                 }
-                ForwardOutcome::Inconclusive => {}
+                ForwardOutcome::Inconclusive => candidate_seen = true,
             }
         }
 
@@ -1276,12 +1292,165 @@ pub(super) async fn handle_reactive_inject(
         // inherits it. See `crate::muxbus::relay` and
         // REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §5.
         if let Some(body) = try_cloud_relay(&state, &req).await {
-            return Json(body);
+            return body;
+        }
+        // 5. No tier knew the target: hold it for the agent's return, when
+        //    the durable jekt conditions hold.
+        if !candidate_seen {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp).await {
+                return held;
+            }
         }
     }
 
-    // 5. Every tier declined — return the original local error.
-    Json(serde_json::to_value(&resp).unwrap_or_default())
+    // 6. Every tier declined — return the original local error.
+    serde_json::to_value(&resp).unwrap_or_default()
+}
+
+/// Echo a locally delivered jekt into the sender's own pane, as every
+/// successful delivery path does.
+fn echo_local_delivery(
+    state: &AppState,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+) {
+    echo_jekt_to_sender(
+        state,
+        req.source_agent.as_deref(),
+        &req.target_agent,
+        &req.message,
+        &resp.request_id,
+        resp.effective_tier.as_deref(),
+        resp.requires_stop,
+        EchoTrust {
+            delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
+            // Same `req` this call's own `effective_tier`/`requires_stop`
+            // were computed from (via `inject_message`) — not hardcoded, so
+            // the echoed marker's TRUST/SIG stays consistent with its own
+            // ESCALATE= (reagentx P1 on PR #2623).
+            sig_verified: req.sig_verified,
+            reagent_verified: req.reagent_verified,
+            lan_verified: req.lan_verified,
+            channel_verified: req.channel_verified,
+        },
+        req.priority.as_deref().unwrap_or("normal"),
+    );
+}
+
+/// Hold a jekt no tier could take, when every condition of
+/// `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.1 holds: a full-key,
+/// host-tier request (a LAN caller never fills the hold); not a periodic
+/// `cron` fire; and a target that is a known agent of this channel —
+/// resolved to its row's UID, so a typo or a name registered later by
+/// another block never receives the backlog. `None` keeps today's error.
+async fn hold_for_absent_target(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+) -> Option<serde_json::Value> {
+    use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
+    if auth_via != super::ReactiveAuthVia::FullAuthKey
+        || req.delivery_tier.as_deref() != Some("host")
+        || req.source_agent.as_deref() == Some("cron")
+        || resp.request_id.is_empty()
+    {
+        return None;
+    }
+    let now = agentmux_common::time::now_ms();
+    let mut held = HeldJekt {
+        request_id: resp.request_id.clone(),
+        target_uid: String::new(),
+        target_agent: req.target_agent.clone(),
+        source_agent: req.source_agent.clone().unwrap_or_default(),
+        audit_source_uid: req.audit_source_uid.clone(),
+        // What the recipient would receive — sanitized and truncated to the
+        // delivery limit — never the unbounded body (Codex P2 on #3632).
+        message: crate::backend::reactive::sanitize::sanitize_message(&req.message),
+        priority: req.priority.clone().unwrap_or_default(),
+        jekt_tier: req
+            .jekt_tier
+            .as_ref()
+            .and_then(|t| serde_json::to_value(t).ok())
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        delivery_tier: "host".to_string(),
+        sig_verified: req.sig_verified,
+        reagent_verified: req.reagent_verified,
+        lan_verified: req.lan_verified,
+        channel_verified: req.channel_verified,
+        is_transcript_request: req.is_transcript_request,
+        transcript_request_escalate_forced: req.transcript_request_escalate_forced,
+        sent_at_ms: now,
+        expires_at_ms: now + HELD_TTL_MS,
+        attempts: 0,
+        last_error: String::new(),
+    };
+    let mstore = state.mstore.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let target = held.target_agent.trim().to_string();
+        let uid = match mstore.instance_get(&target) {
+            Ok(Some(row)) => Some(row.id),
+            _ => match mstore.agents_matching_name(&target) {
+                Ok(rows) if rows.len() == 1 => Some(rows[0].id.clone()),
+                _ => None,
+            },
+        }?;
+        held.target_uid = uid;
+        Some(held)
+    })
+    .await
+    .ok()
+    .flatten()?;
+    // Registered under another of its names (the handler binds only the
+    // display and stable ones): it is running, so deliver by UID now rather
+    // than tell the sender it is not.
+    if state.reactive_handler.has_uid_registration(&outcome.target_uid) {
+        let mut by_uid = req.clone();
+        by_uid.target_agent = outcome.target_uid.clone();
+        let resp = state.reactive_handler.inject_message(by_uid);
+        if resp.success {
+            // As addressed, so the sender's echo names whom it wrote to
+            // (ReAgent P1 on #3632: this path skipped the echo).
+            echo_local_delivery(state, req, &resp);
+        }
+        // A refusal is the target's answer; but if it unregistered between
+        // the check and the delivery, fall through and hold it (Codex P2).
+        let raced_away = resp.error.as_deref().is_some_and(|e| e.starts_with("agent not found"));
+        if !raced_away {
+            return Some(serde_json::to_value(&resp).unwrap_or_default());
+        }
+    }
+    let mstore = state.mstore.clone();
+    let outcome = tokio::task::spawn_blocking(move || mstore.jekt_held_insert(&outcome))
+        .await
+        .ok()?;
+    let target = &req.target_agent;
+    match outcome {
+        Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
+            crate::backend::agent_resolve::record_uid_fallback("jekt.held");
+            Some(json!({
+                "success": false,
+                "held": true,
+                "request_id": resp.request_id,
+                "error": format!(
+                    "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
+                ),
+            }))
+        }
+        Ok(HoldOutcome::Full) => Some(json!({
+            "success": false,
+            "request_id": resp.request_id,
+            "error": format!(
+                "{} (hold full: too many messages already held for {target})",
+                resp.error.clone().unwrap_or_default()
+            ),
+        })),
+        Err(e) => {
+            tracing::warn!(error = %e, target = %target, "durable jekt: hold failed");
+            None
+        }
+    }
 }
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
@@ -2218,6 +2387,11 @@ pub(super) struct HistorySearchQuery {
     /// enforcement, and must not be described as one. Enforcing it needs a
     /// verifiable per-agent identity on local routes, which does not exist
     /// yet. See the spec's §5.
+    ///
+    /// Identity M4c-2c (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): a request carrying a per-agent token searches the token's own
+    /// row's history and ignores this field; only an Unattributed request is
+    /// still self-declared here.
     agent: String,
     query: String,
     #[serde(default)]
@@ -2293,13 +2467,39 @@ pub(super) async fn handle_reactive_history_search(
 
     // Parsing sessions is blocking filesystem work; keep it off the async
     // runtime's worker threads, same posture as other disk-heavy handlers.
+    // Identity M4c-2c (spec §6.5.9): an attributed caller searches its own
+    // row's history, whatever `agent` names; an Unattributed one keeps the
+    // slug, counted.
+    let own_row = match caller.as_deref().and_then(super::caller::Caller::uid) {
+        Some(uid) => match super::app_api::SelfOwner::caller_row(uid, &state.mstore) {
+            Ok(row) => Some(row),
+            Err(e) => {
+                // A gone row is the caller's problem; a store fault is ours.
+                let status = if e.starts_with("store:") {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                return (status, Json(json!({"error": format!("history.search: {e}")})))
+                    .into_response();
+            }
+        },
+        None => {
+            crate::backend::agent_resolve::record_uid_fallback("m4c.history_owner_by_name");
+            None
+        }
+    };
     let history = state.history_service.clone();
     let store = state.identity_store.clone();
     let agent = params.agent.clone();
     let since = params.since;
     let until = params.until;
     let result = tokio::task::spawn_blocking(move || {
-        history.search_for_agent(&store, &agent, &opts, since, until, max_sessions)
+        let owner = match &own_row {
+            Some(row) => crate::backend::history::HistoryOwner::of_row(row),
+            None => crate::backend::history::HistoryOwner::from_slug(&store, &agent),
+        };
+        history.search_for_agent(&store, &owner, &opts, since, until, max_sessions)
     })
     .await;
 
@@ -2413,6 +2613,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
         &reason,
         &request_id,
         req.source_agent.as_deref(),
+        &super::caller::attributed_uid(caller.as_deref()),
     ) {
         Ok(resp) => Json(serde_json::to_value(&resp).unwrap_or_default()).into_response(),
         Err(e) => (

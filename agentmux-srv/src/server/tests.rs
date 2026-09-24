@@ -3613,6 +3613,37 @@ async fn agent_open_unknown_agent_is_a_400_not_a_500() {
     );
 }
 
+/// `agent.open` opens My Agents agents only (identity spec §6.5.8): a
+/// template is the caller's fault — a 400 — and nothing is spawned.
+#[tokio::test]
+async fn agent_open_of_a_template_is_a_400() {
+    let state = test_state();
+    let mut tpl = crate::backend::storage::agents::test_agent_def(
+        "tpl-open-test", "Template Open Test", "claude", "agent", 1, "",
+    );
+    tpl.is_seeded = 1;
+    state.mstore.agent_def_insert(&mut tpl).expect("insert template");
+    let app = build_router(state);
+    for wanted in ["tpl-open-test", "template open test"] {
+        let req = Request::builder()
+            .uri("/api/v1/agent/open")
+            .method("POST")
+            .header("X-AuthKey", "test-secret-key")
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({ "agent_id": wanted }).to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{wanted}");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            json["error"].as_str().unwrap_or("").starts_with("TEMPLATE_NOT_OPENABLE"),
+            "{wanted}: {}",
+            json["error"]
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PTY shell handlers (docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)
 // ---------------------------------------------------------------------------
@@ -5057,6 +5088,11 @@ async fn m4a2_send(
         .status()
 }
 
+/// Serializes the tests that move the per-site `m4.actor_*` counters with a
+/// token: M4a-2's test asserts their exact values, so another test's
+/// attributed request to the same site in parallel would break it.
+static M4_ACTOR_COUNTERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The colliding-names fixture ("AgentY" agenty, "AGENTY" agenty-2) plus a
 /// third agent, "AgentZ"; the caller is the second agent. At every actor
 /// site: naming AgentZ is a mismatch; naming `agenty` or `AGENTY` — which
@@ -5066,6 +5102,7 @@ async fn m4a2_send(
 /// request is served the same with or without the token.
 #[tokio::test]
 async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
     use crate::backend::storage::agents::test_agent_def;
     let state = test_state();
     for (id, name, slug) in [
@@ -5092,10 +5129,20 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
                 expected,
                 "{site}: unattributed is not checked"
             );
-            assert_eq!(
-                with, without,
-                "{site}: counting changes nothing about the response"
-            );
+            // M4a-2's counting changes no response. Since M4c-2 the owner of
+            // a self-scoped site is the Caller when attributed (§6.5.9), so
+            // there the token — not the count — does change it, by design.
+            let owner_is_the_caller = site.starts_with("memory_")
+                || matches!(
+                    site,
+                    "identity_accounts" | "identity_validate" | "preset_get" | "history_search"
+                );
+            if !owner_is_the_caller {
+                assert_eq!(
+                    with, without,
+                    "{site}: counting changes nothing about the response"
+                );
+            }
         }
     }
     for (site, method, uri, body) in m4a2_actor_requests("agenty-2") {
@@ -5207,4 +5254,667 @@ async fn m4a2_a_claims_carried_uid_that_is_not_the_tokens_is_counted() {
     )
     .await;
     assert_eq!(m4a2_count(counter), before + 1);
+
+    // Identity M4c-1 (review of #3597): with a token AND a different carried
+    // `agent_uid`, the token's UID wins — it takes the item addressed to the
+    // token's UID and is what `claimed_by_uid` records. (In this test so the
+    // mismatch counter above is not raced by a parallel test.)
+    let item = crate::backend::storage::work_queue::WorkItem {
+        id: "w-m4c1-precedence".into(),
+        title: "precedence".into(),
+        payload: "do it".into(),
+        kind: "m4c1-precedence".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: crate::backend::storage::work_queue::work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: "uid-m4a2-claim".into(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    state.identity_store.work_queue_enqueue(&item).unwrap();
+    let body = serde_json::json!({
+        "agent_id": "claimer",
+        "agent_uid": "uid-other",
+        "kind": "m4c1-precedence"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/agentmux/work/claim")
+        .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &token)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let stored = state
+        .identity_store
+        .work_queue_get("w-m4c1-precedence")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored.claimed_by_uid, "uid-m4a2-claim",
+        "the token's UID, not the carried one"
+    );
+}
+
+// ---- identity M4c-1: the actor's UID is dual-written from the Caller ----
+
+/// Sends `body` as JSON, with the instance key and, when given, `token` as
+/// `X-Agent-Token`; returns the status and the JSON response body.
+async fn m4c1_send(
+    state: &AppState,
+    token: Option<&str>,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut req = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json");
+    if let Some(t) = token {
+        req = req.header("X-Agent-Token", t);
+    }
+    let resp = build_router(state.clone())
+        .oneshot(req.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// A state with one agent, `uid-m4c1` (slug `m4c1-agent`), whose token the
+/// index knows; returns the token. Every body below names that agent's own
+/// slug, so M4a-2's actor check counts nothing — the `m4.actor_*` counters
+/// are global, and a parallel M4a-2 test asserts them exactly.
+fn m4c1_state() -> (AppState, String) {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let mut def = test_agent_def("uid-m4c1", "M4c1 Agent", "claude", "agent", 1, "");
+    def.slug = "m4c1-agent".to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4c1").unwrap();
+    (state, token)
+}
+
+/// An attributed enqueue records the token's UID as `created_by_uid`; an
+/// Unattributed one records `""`. A UID in the body is never read — the
+/// field does not exist on the request, and a forged one changes nothing.
+#[tokio::test]
+async fn m4c1_work_enqueue_records_the_callers_uid_as_created_by_uid() {
+    let (state, token) = m4c1_state();
+    let body = serde_json::json!({
+        "title": "m4c1", "payload": "do it", "created_by": "m4c1-agent",
+        "created_by_uid": "uid-forged",
+    });
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/work", body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let item = state
+        .identity_store
+        .work_queue_get(v["id"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(item.created_by_uid, "uid-m4c1");
+    assert_eq!(item.created_by, "m4c1-agent", "the name is never rewritten");
+
+    let (status, v) = m4c1_send(&state, None, "/agentmux/work", body).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let item = state
+        .identity_store
+        .work_queue_get(v["id"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        item.created_by_uid, "",
+        "Unattributed: unknown, never guessed"
+    );
+}
+
+/// An attributed claim writes the token's UID as `claimed_by_uid` even when
+/// the body carries no `agent_uid` — and, since that one UID is also M3's
+/// eligibility match, it can claim an item addressed to its UID. The same
+/// claim Unattributed, with no carried UID and no block, has no UID: it
+/// cannot reach the UID-addressed item, and an untargeted one records `""`.
+#[tokio::test]
+async fn m4c1_an_attributed_claim_records_the_tokens_uid_without_a_carried_one() {
+    use crate::backend::storage::work_queue::{work_state, WorkItem};
+    let (state, token) = m4c1_state();
+    let item = |id: &str, target_uid: &str, created_at: i64| WorkItem {
+        id: id.into(),
+        title: id.into(),
+        payload: "do it".into(),
+        kind: "m4c1-claim".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: target_uid.into(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at,
+        updated_at: created_at,
+        not_before: None,
+        result: String::new(),
+    };
+    state
+        .identity_store
+        .work_queue_enqueue(&item("w-m4c1-uid", "uid-m4c1", 1000))
+        .unwrap();
+    let claim =
+        serde_json::json!({"agent_id": "m4c1-agent", "agent_uid": "", "kind": "m4c1-claim"});
+
+    let (status, v) = m4c1_send(&state, None, "/agentmux/work/claim", claim.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(
+        v["claimed"], false,
+        "Unattributed, no UID: not eligible — {v}"
+    );
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/work/claim", claim.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["claimed"], true, "{v}");
+    assert_eq!(v["item"]["id"], "w-m4c1-uid");
+    assert_eq!(v["item"]["claimed_by_uid"], "uid-m4c1");
+    let stored = state
+        .identity_store
+        .work_queue_get("w-m4c1-uid")
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.claimed_by_uid, "uid-m4c1");
+    assert_eq!(
+        stored.claimed_by, "m4c1-agent",
+        "the name is never rewritten"
+    );
+
+    state
+        .identity_store
+        .work_queue_enqueue(&item("w-m4c1-open", "", 2000))
+        .unwrap();
+    let (_, v) = m4c1_send(&state, None, "/agentmux/work/claim", claim).await;
+    assert_eq!(v["item"]["id"], "w-m4c1-open", "{v}");
+    assert_eq!(
+        v["item"]["claimed_by_uid"], "",
+        "Unattributed, nothing carried"
+    );
+}
+
+/// An attributed cron create records the token's UID as `created_by_uid`;
+/// an Unattributed one records `""`.
+#[tokio::test]
+async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
+    let (mut state, token) = m4c1_state();
+    // The cron handlers use the shared store; the test store carries the
+    // identity schema, which has its own `db_cron_jobs`.
+    state.shared_store = Some(state.mstore.clone());
+    let body = serde_json::json!({
+        "name": "m4c1", "expression": "0 0 1 1 *", "prompt": "hi",
+        "target": "m4c1-nobody", "created_by": "m4c1-agent",
+        "created_by_uid": "uid-forged",
+    });
+    let shared = state.shared_store.clone().unwrap();
+
+    let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/cron", body.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    let job = shared.cron_get(&id).unwrap().unwrap();
+    assert_eq!(job.created_by_uid, "uid-m4c1");
+    assert_eq!(job.created_by, "m4c1-agent", "the name is never rewritten");
+
+    let (status, v) = m4c1_send(&state, None, "/agentmux/cron", body).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    assert_eq!(shared.cron_get(&id).unwrap().unwrap().created_by_uid, "");
+}
+
+/// A Global Memory write and a revert record the token's UID as the
+/// version's `written_by_uid`, beside the `written_by` name; Unattributed,
+/// both record `""`.
+#[tokio::test]
+async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
+    let (state, token) = m4c1_state();
+    let write = |id: Option<&str>, content: &str| serde_json::json!({"agent_id": "m4c1-agent", "id": id, "name": "M4c1", "content": content});
+    let latest = |id: &str| {
+        let v = state.id_store.bundle_version_list(id).unwrap();
+        (
+            v[0].id.clone(),
+            v[0].written_by.clone(),
+            v[0].written_by_uid.clone(),
+        )
+    };
+
+    let (status, v) = m4c1_send(
+        &state,
+        Some(&token),
+        "/api/v1/agent/globalmemory/write",
+        write(None, "one"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (first, by, uid) = latest(&id);
+    assert_eq!((by.as_str(), uid.as_str()), ("m4c1-agent", "uid-m4c1"));
+
+    let (status, v) = m4c1_send(
+        &state,
+        None,
+        "/api/v1/agent/globalmemory/write",
+        write(Some(&id), "two"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(latest(&id).2, "", "Unattributed write");
+
+    let revert = serde_json::json!({"agent_id": "m4c1-agent", "id": id, "version_id": first});
+    let (status, v) = m4c1_send(
+        &state,
+        Some(&token),
+        "/api/v1/agent/globalmemory/revert",
+        revert.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(latest(&id).2, "uid-m4c1", "attributed revert");
+    // M4c-2d: returned beside `written_by`, by revert and by history.
+    assert_eq!(v["version"]["written_by_uid"], "uid-m4c1", "{v}");
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/v1/agent/globalmemory/history?id={id}"))
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let history: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let uids: Vec<&str> = history["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["written_by_uid"].as_str().unwrap())
+        .collect();
+    assert_eq!(uids, ["uid-m4c1", "", "uid-m4c1"], "{history}");
+
+    let (status, v) = m4c1_send(&state, None, "/api/v1/agent/globalmemory/revert", revert).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(latest(&id).2, "", "Unattributed revert");
+}
+
+// ---- identity M4c-2: holder checks by UID ----
+
+/// Two agents both answer to `agenty`. The holder's token drives its item;
+/// the other's token, sending the same name, is refused with the existing
+/// 409; an Unattributed request keeps the name path and is counted.
+#[tokio::test]
+async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let holder = state.mstore.agent_token_ensure("uid-m4c2-y").unwrap();
+    let other = state.mstore.agent_token_ensure("uid-m4c2-y2").unwrap();
+    let item = crate::backend::storage::work_queue::WorkItem {
+        id: "w-m4c2-holder".into(),
+        title: "holder".into(),
+        payload: "do it".into(),
+        kind: "m4c2-holder".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: crate::backend::storage::work_queue::work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: String::new(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    state.identity_store.work_queue_enqueue(&item).unwrap();
+    let claim = serde_json::json!({"agent_id": "agenty", "kind": "m4c2-holder"});
+    let (status, v) = m4c1_send(&state, Some(&holder), "/agentmux/work/claim", claim).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let attempt = v["attempt"].as_i64().unwrap();
+    let body = serde_json::json!({"agent_id": "agenty", "attempt": attempt, "result": "r"});
+    // Other work tests take the name path in parallel, so the counter can
+    // only be checked to move; that a UID match is not counted is pinned by
+    // the store's `HolderMatch` (work_queue.rs tests).
+    let counter = "m4c.holder_by_name";
+
+    for op in ["heartbeat", "complete", "release"] {
+        let uri = format!("/agentmux/work/w-m4c2-holder/{op}");
+        let (status, v) = m4c1_send(&state, Some(&other), &uri, body.clone()).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{op}: {v}");
+    }
+    let uri = "/agentmux/work/w-m4c2-holder/heartbeat";
+    let (status, v) = m4c1_send(&state, Some(&holder), uri, body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    let before = m4a2_count(counter);
+    let (status, v) = m4c1_send(&state, None, uri, body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(m4a2_count(counter) > before, "Unattributed: by name, counted");
+
+    let uri = "/agentmux/work/w-m4c2-holder/complete";
+    let (status, v) = m4c1_send(&state, Some(&holder), uri, body).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let stored = state.identity_store.work_queue_get("w-m4c2-holder").unwrap().unwrap();
+    assert_eq!(stored.result, "r");
+}
+
+// ---- identity M4c-2b: the personal-memory owner is the Caller ----
+
+/// The second of two agents answering to `agenty` writes and reads with the
+/// first one's slug. With its token, the owner is its own row — its file,
+/// not the first agent's; Unattributed, the slug decides, counted.
+#[tokio::test]
+async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let (tmp_y, tmp_y2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for (id, name, slug, dir) in [
+        ("uid-m4c2b-y", "AgentY", "agenty", tmp_y.path()),
+        ("uid-m4c2b-y2", "AGENTY", "agenty-2", tmp_y2.path()),
+    ] {
+        let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+        def.slug = slug.to_string();
+        def.working_directory = dir.to_string_lossy().into_owned();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: id.to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", dir.display()),
+                updated_at: 0,
+            })
+            .unwrap();
+    }
+    state.mstore.attach_token_index().unwrap();
+    let y2 = state.mstore.agent_token_ensure("uid-m4c2b-y2").unwrap();
+    let write = |content: &str| {
+        serde_json::json!({"agent_id": "agenty", "filename": "MEMORY.md", "content": content})
+    };
+
+    let (status, v) = m4c1_send(&state, Some(&y2), "/api/v1/agent/memory/write", write("y2's")).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let counter = "m4c.memory_owner_by_name";
+    let before = m4a2_count(counter);
+    let (status, v) = m4c1_send(&state, None, "/api/v1/agent/memory/write", write("y's")).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(m4a2_count(counter) > before, "Unattributed: by slug, counted");
+
+    let versions = |uid: &str| {
+        state
+            .id_store
+            .agent_native_memory_version_list(uid, "MEMORY.md")
+            .unwrap()
+            .into_iter()
+            .map(|v| v.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(versions("uid-m4c2b-y2").len(), 1, "the token's row");
+    assert_eq!(versions("uid-m4c2b-y").len(), 1, "the slug's row");
+
+    let uri = "/api/v1/agent/memory/read?agent_id=agenty&filename=MEMORY.md";
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(uri)
+        .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &y2)
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["content"], "y2's", "the token's row, not the slug's");
+}
+
+// ---- identity M4c-2c: identity, preset and history owners are the Caller ----
+
+/// Each handler takes its owner from the token, not from `agent_id`: a token
+/// whose row is gone is refused with the caller named, while the same
+/// request Unattributed resolves the slug as before and is counted.
+#[tokio::test]
+async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let mut state = test_state();
+    // An empty index: the Unattributed search below must not scan the
+    // developer's real transcripts.
+    state.history_service = std::sync::Arc::new(crate::backend::history::HistoryService::from_index(
+        crate::backend::history::index::SessionIndex::new(vec![]),
+    ));
+    state.mstore.attach_token_index().unwrap();
+    let gone = state.mstore.agent_token_ensure("uid-m4c2c-gone").unwrap();
+    let get = |uri: &'static str, token: Option<String>| {
+        let state = state.clone();
+        async move {
+            let mut req = Request::builder()
+                .method(Method::GET)
+                .uri(uri)
+                .header("X-AuthKey", "test-secret-key");
+            if let Some(t) = token {
+                req = req.header("X-Agent-Token", t);
+            }
+            let resp = build_router(state)
+                .oneshot(req.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let status = resp.status();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            (status, String::from_utf8_lossy(&body).into_owned())
+        }
+    };
+    for (uri, counter) in [
+        ("/api/v1/agent/identity/accounts?agent_id=m4c2c-nobody", "m4c.identity_owner_by_name"),
+        ("/api/v1/agent/preset/get?agent_id=m4c2c-nobody", "m4c.preset_owner_by_name"),
+        (
+            "/agentmux/reactive/history/search?agent=m4c2c-nobody&query=x",
+            "m4c.history_owner_by_name",
+        ),
+    ] {
+        let (status, body) = get(uri, Some(gone.clone())).await;
+        assert!(status.is_client_error(), "{uri}: {status} {body}");
+        assert!(body.contains("calling agent uid-m4c2c-gone not found"), "{uri}: {body}");
+        let before = m4a2_count(counter);
+        let (_, body) = get(uri, None).await;
+        assert!(!body.contains("calling agent"), "{uri}: {body}");
+        assert!(m4a2_count(counter) > before, "{uri}: Unattributed is counted");
+    }
+}
+
+// ---- identity M4c-2d: the sender's UID is exposed beside its name ----
+
+/// An attributed inject is audited with its token's UID; an attributed bus
+/// send carries it as `from_uid`. Unattributed, both stay empty.
+#[tokio::test]
+async fn m4c2d_the_senders_uid_is_audited_and_carried() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-m4c2d").unwrap();
+
+    // A registered target, so the inject resolves at once instead of
+    // searching for peers to forward to: the audit ring is shared by every
+    // test and holds 100 entries, so the entry is read back straight away,
+    // by its own request id.
+    let target = format!("m4c2d-target-{}", uuid::Uuid::new_v4());
+    let request_id = format!("m4c2d-{}", uuid::Uuid::new_v4());
+    state.reactive_handler.register_agent(&target, &format!("{target}-block"), None).unwrap();
+    let inject = serde_json::json!({
+        "target_agent": target, "message": "hi", "source_agent": "m4c2d-sender",
+        "request_id": request_id,
+    });
+    // The rate limiter is shared by every test too (10/s); a limited
+    // request writes no audit entry, so wait for a token.
+    let mut resp = serde_json::Value::Null;
+    for _ in 0..25 {
+        resp = m4c1_send(&state, Some(&token), "/agentmux/reactive/inject", inject.clone()).await.1;
+        if resp["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let audited = state.reactive_handler.get_audit_log(100);
+    let entry = audited.iter().find(|e| e.request_id == request_id);
+    assert_eq!(entry.map(|e| e.audit_source_uid.as_str()), Some("uid-m4c2d"), "{resp}");
+
+    m4c1_send(&state, None, "/api/bus/register", serde_json::json!({"agent_id": "m4c2d-inbox"})).await;
+    let send = |payload: &str| {
+        serde_json::json!({"from": "m4c2d-sender", "to": "m4c2d-inbox", "payload": payload})
+    };
+    m4c1_send(&state, Some(&token), "/api/bus/send", send("attributed")).await;
+    m4c1_send(&state, None, "/api/bus/send", send("unattributed")).await;
+    let messages = state.messagebus.read_messages("m4c2d-inbox", 10);
+    let uid_of = |payload: &str| {
+        messages.iter().find(|m| m.payload == payload).map(|m| m.from_uid.clone())
+    };
+    assert_eq!(uid_of("attributed").as_deref(), Some("uid-m4c2d"), "{messages:?}");
+    assert_eq!(uid_of("unattributed").as_deref(), Some(""), "{messages:?}");
+}
+
+// ---- identity M4c-3: cron fires in process ----
+
+/// Through the real installed delivery: a fire reaches the local inject path
+/// as `"cron"` and is audited with its creator's UID.
+#[tokio::test]
+async fn m4c3_a_cron_fire_is_delivered_in_process_and_audited_with_its_creator() {
+    let state = test_state();
+    crate::bootstrap::install_cron_delivery(&state);
+    let target = format!("m4c3-target-{}", uuid::Uuid::new_v4());
+    state.reactive_handler.register_agent(&target, &format!("{target}-block"), None).unwrap();
+
+    // The reactive handler, its audit ring (100) and its rate limiter (10/s)
+    // are shared by every test: fire until this target's entry appears.
+    let mut entry = None;
+    for _ in 0..25 {
+        state.cron_scheduler.fire("m4c3-job", "tick", &target, "", "uid-m4c3-creator").await;
+        entry = state
+            .reactive_handler
+            .get_audit_log(100)
+            .into_iter()
+            .find(|e| e.target_agent == target);
+        if entry.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let entry = entry.expect("the fire was audited");
+    assert_eq!(entry.source_agent.as_deref(), Some("cron"));
+    assert_eq!(entry.audit_source_uid, "uid-m4c3-creator");
+}
+
+// ---- durable jekt (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) ----
+
+/// A jekt to a known agent that is not running anywhere is held once, by
+/// its UID; an unknown name and a `cron` fire keep today's error; a replay
+/// pass leaves a still-absent target's message where it is, with no attempt
+/// counted.
+#[tokio::test]
+async fn a_jekt_to_an_absent_known_agent_is_held_and_waits() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("heldy-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Held Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+
+    let send = |target: &str, source: &str, id: &str| {
+        serde_json::json!({"target_agent": target, "message": "hi", "source_agent": source, "request_id": id})
+    };
+    let id = format!("req-{slug}");
+    // The global handler's rate limiter is shared by every test (10/s).
+    let mut v = serde_json::Value::Null;
+    for _ in 0..25 {
+        v = m4c1_send(&state, None, "/agentmux/reactive/inject", send(&slug, "sender", &id)).await.1;
+        if v["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(v["success"], false, "held is not delivered: {v}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].request_id, id);
+
+    // Same id again: the same answer, nothing stored twice.
+    let v = m4c1_send(&state, None, "/agentmux/reactive/inject", send(&slug, "sender", &id)).await.1;
+    if v["error"] != "rate limit exceeded" {
+        assert_eq!(v["held"], true, "{v}");
+    }
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().len(), 1);
+
+    // Not held: a name no agent has, and a periodic cron fire.
+    for (target, source) in [(format!("nobody-{slug}"), "sender"), (slug.clone(), "cron")] {
+        let v = m4c1_send(&state, None, "/agentmux/reactive/inject", send(&target, source, &format!("x-{target}-{source}"))).await.1;
+        assert!(v.get("held").is_none(), "{target} from {source}: {v}");
+    }
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().len(), 1);
+
+    // Still absent: the replay pass does not touch it.
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().all(|(r, _)| r != &id), "{outcomes:?}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows[0].attempts, 0);
+}
+
+/// Durable jekt §2.1 condition 5 (review of #3632): a target running under
+/// another of its names — registered with its UID but not bound to the name
+/// addressed — is delivered by UID at once, never held as "not running".
+#[tokio::test]
+async fn a_target_running_under_another_name_is_delivered_by_uid_not_held() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("c5-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "C5", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    // Registered under a display binding other than the slug addressed.
+    state
+        .reactive_handler
+        .register_agent_full(&format!("{slug}-display"), &format!("{slug}-block"), None, 0, None, Some(&uid), "test")
+        .unwrap();
+
+    let body = serde_json::json!({"target_agent": slug, "message": "hi", "source_agent": "sender"});
+    let mut v = serde_json::Value::Null;
+    for _ in 0..25 {
+        v = m4c1_send(&state, None, "/agentmux/reactive/inject", body.clone()).await.1;
+        if v["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert!(v.get("held").is_none(), "running, so not held: {v}");
+    assert!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().is_empty());
+    let err = v["error"].as_str().unwrap_or("");
+    assert!(!err.starts_with("agent not found"), "delivered to the UID's block: {v}");
 }

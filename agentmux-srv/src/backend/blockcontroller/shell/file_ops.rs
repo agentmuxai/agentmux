@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
-use crate::backend::storage::filestore::FileStore;
+use crate::backend::storage::filestore::{AppendPos, FileStore};
 use crate::backend::mps;
 
 /// Current unix time in ms, or 0 if the clock is before the epoch (never in
@@ -50,73 +50,26 @@ fn append_tsidx_entry(fs: &Arc<FileStore>, zone: &str, batch_start: u64, now_ms:
     }
 }
 
-/// Persist `data` to the block's output file and the global transcript zone
-/// **without** publishing a MPS event. Used by the persistent controller to
-/// record user-message lines for future history loads (so that
-/// `parseHistoryLines` can reconstruct `user_message` nodes on reopen) without
-/// triggering a live-stream append that would produce a duplicate node alongside
-/// the `agent-message-accepted` UUID node. Same lazy-create semantics as
-/// `handle_append_block_file`.
-pub fn persist_to_blockfile_silent(
+/// Persist a user message the controller wrote to the agent's stdin, so
+/// `parseHistoryLines` can reconstruct its `user_message` node on reopen.
+///
+/// A transcript record like any other (Phase 5a-3c): written to the block's
+/// file and the global zone with positions, and published — so a pane reading
+/// the stream by line never sees a gap where this record sits — but marked
+/// `echo: "stdin"`, because the pane already shows the message (its
+/// `agent-message-accepted` node) and must not add a second one. Before 5a-3c
+/// this write published nothing at all.
+pub fn persist_user_line(
+    broker: Option<&mps::Broker>,
     block_id: &str,
-    filename: &str,
     data: &[u8],
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
-    if let Some(fs) = filestore {
-        let needs_create: bool = match fs.stat(block_id, filename) {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
-            Err(e) => {
-                tracing::warn!(
-                    block_id = %block_id, filename = %filename, error = %e,
-                    "persist_silent: stat failed; skipping"
-                );
-                return;
-            }
-        };
-        if needs_create {
-            if let Err(e) = fs.make_file(
-                block_id,
-                filename,
-                std::collections::HashMap::new(),
-                crate::backend::storage::filestore::FileOpts::default(),
-            ) {
-                use crate::backend::storage::error::StoreError;
-                if !matches!(e, StoreError::AlreadyExists) {
-                    tracing::warn!(
-                        block_id = %block_id, filename = %filename, error = %e,
-                        "persist_silent: make_file failed; skipping"
-                    );
-                    return;
-                }
-            }
-        }
-        // append_data_at returns the offset the batch ACTUALLY landed at,
-        // read under the store's own lock - a caller-side pre-append stat
-        // can be stale under concurrent appenders (codex P2 on PR #2508).
-        match fs.append_data_at(block_id, filename, data) {
-            Ok(actual_start) => {
-                // Only agent transcript streams carry a global zone; those are
-                // the streams the tsidx sidecar exists for (§4.4).
-                if global_output_zone.is_some() {
-                    append_tsidx_entry(fs, block_id, actual_start.max(0) as u64, unix_ms_now());
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    block_id = %block_id, filename = %filename, error = %e,
-                    "persist_silent: append_data failed"
-                );
-            }
-        }
-    }
-    if let Some(zone) = global_output_zone {
-        if let Some(gfs) = crate::backend::agent_session::global_transcript_store() {
-            mirror_append_to_global(gfs, zone, data);
-        }
-    }
+    let global = global_output_zone.and_then(|zone| {
+        crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
+    });
+    append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), Some("stdin"));
 }
 
 /// Append data to a block's terminal output file, publish a MPS event,
@@ -145,6 +98,17 @@ pub fn handle_append_block_file(
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
+    // Agent transcripts are written first and published with their positions
+    // (Phase 5a-3). Everything else — PTY `term` data — keeps publishing
+    // before the write, below.
+    if filename == crate::backend::agent_session::OUTPUT_FILE {
+        let global = global_output_zone.and_then(|zone| {
+            crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
+        });
+        append_transcript(Some(broker), block_id, data, filestore, global, global_output_zone.is_some(), None);
+        return;
+    }
+
     let data64 = base64::engine::general_purpose::STANDARD.encode(data);
 
     // Stat once, up front — needed both to decide whether make_file() is
@@ -188,6 +152,8 @@ pub fn handle_append_block_file(
         fileop: mps::FILE_OP_APPEND.to_string(),
         data64,
         offset: start_offset,
+        pos: Vec::new(),
+        echo: None,
     };
 
     let event = mps::MuxEvent {
@@ -281,46 +247,186 @@ pub fn handle_append_block_file(
 }
 
 /// Append `data` to the global transcript zone's `output` file, creating it
-/// lazily on first write. Mirrors the per-channel write-through in
-/// [`handle_append_block_file`]; all errors are logged and swallowed so the
-/// hot stdout path is never blocked by the global store.
-pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[u8]) {
+/// lazily on first write, and return where it landed. Mirrors the
+/// per-channel write-through in [`handle_append_block_file`]; all errors are
+/// logged and swallowed (`None`) so the hot stdout path is never blocked by
+/// the global store.
+pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[u8]) -> Option<AppendPos> {
     use crate::backend::agent_session::OUTPUT_FILE;
-    use crate::backend::storage::error::StoreError;
+    // Global zones are agent transcripts by construction — always stamp
+    // (§4.4), keyed at the offset this append actually landed at (codex P2 on
+    // PR #2508), in the same transaction as the append.
+    append_transcript_lines(gfs, zone, OUTPUT_FILE, data, true, "global transcripts")
+}
 
-    match gfs.stat(zone, OUTPUT_FILE) {
-        Ok(None) => {
-            if let Err(e) = gfs.make_file(
-                zone,
-                OUTPUT_FILE,
-                std::collections::HashMap::new(),
-                crate::backend::storage::filestore::FileOpts::default(),
-            ) {
-                if !matches!(e, StoreError::AlreadyExists) {
-                    tracing::warn!(zone = %zone, error = %e, "global transcripts: make_file failed; skipping mirror");
-                    return;
-                }
+/// `append_lines` on a transcript file, creating it on first write (or if
+/// another instance deleted it since). Whole non-blank lines only: a torn
+/// last line is closed, not continued (`filestore/counter.rs`). With `stamp`,
+/// the `output.tsidx` receive-time record is written in the same transaction
+/// (one commit, not two). Errors are logged and swallowed.
+fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[u8], stamp: bool, what: &str) -> Option<AppendPos> {
+    use crate::backend::agent_session::TSIDX_FILE;
+    use crate::backend::storage::error::StoreError;
+    let append = || {
+        if stamp {
+            fs.append_lines_stamped(zone, name, data, TSIDX_FILE)
+        } else {
+            fs.append_lines(zone, name, data)
+        }
+    };
+    match append() {
+        Ok(pos) => return Some(pos),
+        Err(StoreError::NotFound) => {}
+        Err(e) => {
+            tracing::warn!(zone = %zone, error = %e, "{what}: append failed");
+            return None;
+        }
+    }
+    if let Err(e) = fs.make_file(
+        zone,
+        name,
+        std::collections::HashMap::new(),
+        crate::backend::storage::filestore::FileOpts::default(),
+    ) {
+        if !matches!(e, StoreError::AlreadyExists) {
+            tracing::warn!(zone = %zone, error = %e, "{what}: make_file failed; skipping write");
+            return None;
+        }
+    }
+    append()
+        .map_err(|e| tracing::warn!(zone = %zone, error = %e, "{what}: append failed"))
+        .ok()
+}
+
+/// The agent-transcript half of [`handle_append_block_file`] (Phase 5a-3,
+/// SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7 item 5).
+///
+/// The block's `output` and the agent's global zone are written FIRST, and
+/// the event goes out after, carrying where the records landed in each stream
+/// (`pos`) and the exact byte offset in the block's file. The block's order
+/// lock is held from the first write to the publish, so one block's events
+/// leave in line order. Only transcripts come here: publishing after a
+/// database write would add that write to every terminal keystroke echo.
+///
+/// `stamp_tsidx` is whether this is an agent stream (it has a global zone,
+/// even if no global store is installed) — as before, only those get the
+/// receive-time sidecar.
+pub(super) fn append_transcript(
+    broker: Option<&mps::Broker>,
+    block_id: &str,
+    data: &[u8],
+    filestore: Option<&Arc<FileStore>>,
+    global: Option<(&Arc<FileStore>, &str)>,
+    stamp_tsidx: bool,
+    echo: Option<&str>,
+) {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    // The records exactly as they are written (`append_lines` normalizes to
+    // complete, non-blank lines): the event carries these bytes, and its
+    // `offset` is where they landed, so a consumer can match the event to a
+    // byte range read back from the file (review of #3635). Nothing to write,
+    // nothing to announce.
+    let records = crate::backend::storage::filestore::normalized_records(data);
+    if records.is_empty() {
+        return;
+    }
+    let _order = transcript_order_lock(block_id);
+
+    let mut offset = None;
+    let mut pos = Vec::new();
+    if let Some(fs) = filestore {
+        if let Some(p) = append_transcript_lines(fs, block_id, OUTPUT_FILE, &records, stamp_tsidx, "filestore") {
+            // Past the `\n` that closed a torn last line, if one was written.
+            offset = Some(p.records_offset.max(0) as u64);
+            if let Some(c) = p.counted {
+                pos.push(mps::StreamPos { stream: format!("b:{block_id}"), gen: c.gen, line: c.first_line, lines: c.lines });
             }
         }
-        Ok(Some(_)) => {}
-        Err(e) => {
-            tracing::warn!(zone = %zone, error = %e, "global transcripts: stat failed; skipping mirror");
-            return;
+    }
+    if let Some((gfs, zone)) = global {
+        if let Some(c) = mirror_append_to_global(gfs, zone, &records).and_then(|p| p.counted) {
+            pos.push(mps::StreamPos { stream: format!("g:{zone}"), gen: c.gen, line: c.first_line, lines: c.lines });
         }
     }
-    match gfs.append_data_at(zone, OUTPUT_FILE, data) {
-        Ok(actual_start) => {
-            // Global zones are agent transcripts by construction — always
-            // stamp (§4.4), keyed at the offset this append actually
-            // landed at (codex P2 on PR #2508 — cross-channel mirrors from
-            // concurrent srv instances can interleave; the store-lock-read
-            // offset is exact where a pre-append stat is not).
-            append_tsidx_entry(gfs, zone, actual_start.max(0) as u64, unix_ms_now());
-        }
-        Err(e) => {
-            tracing::warn!(zone = %zone, error = %e, "global transcripts: append_data failed");
-        }
+
+    let event_data = mps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: OUTPUT_FILE.to_string(),
+        fileop: mps::FILE_OP_APPEND.to_string(),
+        data64: base64::engine::general_purpose::STANDARD.encode(&records),
+        offset,
+        pos,
+        echo: echo.map(str::to_string),
+    };
+    // No broker (a controller built without one): written, not announced.
+    if let Some(broker) = broker {
+        broker.publish(mps::MuxEvent {
+            event: mps::EVENT_BLOCK_FILE.to_string(),
+            scopes: vec![format!("block:{block_id}")],
+            sender: String::new(),
+            persist: 0,
+            data: serde_json::to_value(&event_data).ok(),
+        });
     }
+}
+
+/// Run `f` holding `block_id`'s transcript order lock — the lock every append
+/// holds from its first write to its publish (see [`append_transcript`]).
+/// A replace or delete of the block's transcript, and its announcement
+/// ([`publish_transcript_changed`]), run inside it, so no append's write and
+/// event can interleave with them and one block's events stay in order
+/// (review of #3636). `f` must not append to the same block: the lock isn't
+/// reentrant.
+pub fn with_transcript_order<T>(block_id: &str, f: impl FnOnce() -> T) -> T {
+    let _order = transcript_order_lock(block_id);
+    f()
+}
+
+/// Tell a block's panes that its transcript `output` was replaced or deleted
+/// as a whole (Phase 5a-3), so an open pane resyncs at once instead of on its
+/// next read. `fileop` is [`mps::FILE_OP_REPLACE`] — with the new generation
+/// and line count read from `filestore` — or [`mps::FILE_OP_DELETE`]. Call it,
+/// with the replace or delete itself, inside [`with_transcript_order`].
+pub fn publish_transcript_changed(broker: &mps::Broker, block_id: &str, fileop: &str, filestore: &FileStore) {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    let pos = match filestore.line_state(block_id, OUTPUT_FILE) {
+        Ok(Some(state)) => state
+            .counted
+            .map(|c| vec![mps::StreamPos { stream: format!("b:{block_id}"), gen: c.gen, line: 0, lines: c.lines }])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let event_data = mps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: OUTPUT_FILE.to_string(),
+        fileop: fileop.to_string(),
+        data64: String::new(),
+        offset: None,
+        pos,
+        echo: None,
+    };
+    broker.publish(mps::MuxEvent {
+        event: mps::EVENT_BLOCK_FILE.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: serde_json::to_value(&event_data).ok(),
+    });
+}
+
+/// Serializes one block's transcript appends with their publish (see
+/// [`append_transcript`]). Striped rather than per block: bounded memory and
+/// nothing to clean up; two blocks that share a stripe only wait for each
+/// other's append.
+fn transcript_order_lock(block_id: &str) -> std::sync::MutexGuard<'static, ()> {
+    use std::hash::{Hash, Hasher};
+    const STRIPES: usize = 64;
+    static LOCKS: [std::sync::Mutex<()>; STRIPES] = [const { std::sync::Mutex::new(()) }; STRIPES];
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    block_id.hash(&mut h);
+    LOCKS[(h.finish() % STRIPES as u64) as usize]
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Resolve a block's GLOBAL transcript zone (`agent:<defId>:current`) from its
@@ -349,6 +455,8 @@ pub fn handle_truncate_block_file(broker: &mps::Broker, block_id: &str, filename
         fileop: mps::FILE_OP_TRUNCATE.to_string(),
         data64: String::new(),
         offset: None,
+        pos: Vec::new(),
+        echo: None,
     };
 
     let event = mps::MuxEvent {

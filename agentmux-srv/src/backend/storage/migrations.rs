@@ -69,7 +69,13 @@ use super::error::StoreError;
 ///        spec §5.4: non-interactive ingress never resolves a name at fire
 ///        time, so the UID has to be captured while a human or model is
 ///        present. Empty when the name did not resolve; never guessed.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 11;
+///   v12 — db_cron_jobs.created_by_uid and db_bundle_versions.written_by_uid:
+///        the actor's UID beside each actor-name column, taken from the
+///        request's `Caller` (its `X-Agent-Token`), never from a body field.
+///        Empty for an Unattributed request; never guessed. Dual-written,
+///        not yet read. Identity M4c-1 of
+///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -436,7 +442,20 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 11;
 ///        keys to UIDs and must never copy a tombstoned name's. Written from
 ///        M4a on, before any copy exists, so the record is complete when M4d
 ///        reads it. Written only — nothing reads it until M4d.
-pub const OBJECT_SCHEMA_VERSION: i64 = 38;
+///   v39 — db_bundle_versions.written_by_uid: the writer's UID beside the
+///        `written_by` name, taken from the request's `Caller` (its
+///        `X-Agent-Token`), never from a body field; empty for an
+///        Unattributed write, the Armory UI and the seeders. Dual-written,
+///        not yet read. Not only parity with the shared store: when that
+///        store is unavailable `id_store` falls back to this one and writes
+///        here. Identity M4c-1 of
+///        `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.9.
+///   v40 — db_jekt_held: a jekt to a known agent of this channel that no
+///        delivery tier could take (the agent was not running anywhere), held
+///        for up to 24 h and replayed when it registers, with the trust
+///        verdicts it was accepted with as explicit columns.
+///        `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` Phase 1.
+pub const OBJECT_SCHEMA_VERSION: i64 = 40;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -958,7 +977,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             source             TEXT NOT NULL DEFAULT 'agent_inferred',
             source_detail      TEXT NOT NULL DEFAULT '{}',
             written_by         TEXT NOT NULL DEFAULT '',
-            created_at         INTEGER NOT NULL DEFAULT 0
+            created_at         INTEGER NOT NULL DEFAULT 0,
+            -- v39 (identity M4c-1): the writer's UID from the request's
+            -- Caller, beside the written_by name. Empty when unattributed.
+            written_by_uid     TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_bundle_versions_lookup
             ON db_bundle_versions(bundle_id, created_at);
@@ -1047,6 +1069,63 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             deleted_uid TEXT NOT NULL,
             deleted_at  INTEGER NOT NULL DEFAULT 0
         );
+
+        -- Identity M4d-1: every display / instance name an agent has had.
+        -- Keys are filed under names (and their fallback ids), and every
+        -- write path that renames an agent — rename, the continuation fold,
+        -- anything later — leaves keys under the old name, so the purge must
+        -- still find them. Recorded by trigger so no write path can miss it;
+        -- never capped; deleted with the row. Additive, applied on every
+        -- open, so no version bump.
+        CREATE TABLE IF NOT EXISTS db_agent_former_names (
+            agent_id    TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            recorded_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, name),
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_agents_former_name
+            AFTER UPDATE OF name ON db_agents
+            WHEN old.is_template = 0 AND old.name <> new.name AND trim(old.name) <> ''
+        BEGIN
+            INSERT OR IGNORE INTO db_agent_former_names (agent_id, name, recorded_at)
+            VALUES (old.id, old.name, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_agents_former_instance_name
+            AFTER UPDATE OF instance_name ON db_agents
+            WHEN old.is_template = 0
+             AND COALESCE(old.instance_name, '') <> COALESCE(new.instance_name, '')
+             AND trim(COALESCE(old.instance_name, '')) <> ''
+        BEGIN
+            INSERT OR IGNORE INTO db_agent_former_names (agent_id, name, recorded_at)
+            VALUES (old.id, old.instance_name, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+        END;
+
+        -- v40: jekts held for an absent agent of this channel
+        -- (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md). Verdict columns are
+        -- NULL (unchecked), 0 (failed) or 1 (verified).
+        CREATE TABLE IF NOT EXISTS db_jekt_held (
+            request_id       TEXT PRIMARY KEY,
+            target_uid       TEXT NOT NULL,
+            target_agent     TEXT NOT NULL DEFAULT '',
+            source_agent     TEXT NOT NULL DEFAULT '',
+            audit_source_uid TEXT NOT NULL DEFAULT '',
+            message          TEXT NOT NULL,
+            priority         TEXT NOT NULL DEFAULT '',
+            jekt_tier        TEXT NOT NULL DEFAULT '',
+            delivery_tier    TEXT NOT NULL DEFAULT '',
+            sig_verified     INTEGER,
+            reagent_verified INTEGER,
+            lan_verified     INTEGER,
+            channel_verified INTEGER,
+            is_transcript_request              INTEGER NOT NULL DEFAULT 0,
+            transcript_request_escalate_forced INTEGER NOT NULL DEFAULT 0,
+            sent_at_ms       INTEGER NOT NULL,
+            expires_at_ms    INTEGER NOT NULL,
+            attempts         INTEGER NOT NULL DEFAULT 0,
+            last_error       TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_jekt_held_target ON db_jekt_held (target_uid, sent_at_ms);
 
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
         -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).
@@ -1260,6 +1339,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN status TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN started_at INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN ended_at INTEGER NOT NULL DEFAULT 0",
+        // v39: identity M4c-1 — the Global Memory writer's UID beside its
+        // name. See OBJECT_SCHEMA_VERSION's v39 doc comment above.
+        "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1469,7 +1551,10 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             -- slug, resolved ONCE at create time (spec §5.4), dual-written,
             -- not yet read -- a job still fires by `target`. Empty when the
             -- name did not resolve; never guessed.
-            target_uid    TEXT NOT NULL DEFAULT ''
+            target_uid    TEXT NOT NULL DEFAULT '',
+            -- v12 (identity M4c-1): the creator's UID from the request's
+            -- Caller, beside the created_by name. Empty when unattributed.
+            created_by_uid TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_ss_cron_jobs_enabled
             ON db_cron_jobs(enabled);
@@ -1545,7 +1630,10 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             source             TEXT NOT NULL DEFAULT 'agent_inferred',
             source_detail      TEXT NOT NULL DEFAULT '{}',
             written_by         TEXT NOT NULL DEFAULT '',
-            created_at         INTEGER NOT NULL DEFAULT 0
+            created_at         INTEGER NOT NULL DEFAULT 0,
+            -- v12 (identity M4c-1): the writer's UID from the request's
+            -- Caller, beside the written_by name. Empty when unattributed.
+            written_by_uid     TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_ss_bundle_versions_lookup
             ON db_bundle_versions(bundle_id, created_at);",
@@ -1578,6 +1666,9 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
         // v11: identity M1b — the cron target's UID beside its slug.
         "ALTER TABLE db_cron_jobs ADD COLUMN target_uid TEXT NOT NULL DEFAULT ''",
+        // v12: identity M4c-1 — the actor's UID beside each actor name.
+        "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1697,7 +1788,15 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        `AGENTMUX_AGENT_UID` (M1a, #3548), falling back to resolving its
 ///        `agent_id` with the fallback counted (spec §9.2). Empty when
 ///        unknown; never guessed.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 10;
+///   v11 — db_work_queue.created_by_uid, and db_cron_jobs.created_by_uid /
+///        db_bundle_versions.written_by_uid (parity with
+///        SHARED_STORE_SCHEMA_VERSION v12): the actor's UID beside each
+///        actor-name column, taken from the request's `Caller` (its
+///        `X-Agent-Token`), never from a body field. Empty for an
+///        Unattributed request; never guessed. Dual-written, not yet read.
+///        Identity M4c-1 of
+///        SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 11;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1835,7 +1934,10 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             -- v10 (identity M1b): UID beside the slug, resolved at create
             -- time, dual-written, not yet read. Parity with the shared-store
             -- copy of this table, which is the one the handlers use today.
-            target_uid    TEXT NOT NULL DEFAULT ''
+            target_uid    TEXT NOT NULL DEFAULT '',
+            -- v11 (identity M4c-1): the creator's UID, parity with the
+            -- shared-store copy.
+            created_by_uid TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_ids_cron_jobs_enabled
             ON db_cron_jobs(enabled);
@@ -1888,7 +1990,10 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             -- claim time); claimed_by_uid is CARRIED from the claimer's own
             -- AGENTMUX_AGENT_UID. Empty when unknown -- never guessed.
             target_agent_uid TEXT NOT NULL DEFAULT '',
-            claimed_by_uid   TEXT NOT NULL DEFAULT ''
+            claimed_by_uid   TEXT NOT NULL DEFAULT '',
+            -- v11 (identity M4c-1): the enqueuer's UID from the request's
+            -- Caller, beside the created_by name. Empty when unattributed.
+            created_by_uid   TEXT NOT NULL DEFAULT ''
         );
         -- The claim query's exact predicate: state + readiness, ordered by
         -- priority then age. Without this the claim UPDATE degrades to a table
@@ -1952,7 +2057,9 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             source             TEXT NOT NULL DEFAULT 'agent_inferred',
             source_detail      TEXT NOT NULL DEFAULT '{}',
             written_by         TEXT NOT NULL DEFAULT '',
-            created_at         INTEGER NOT NULL DEFAULT 0
+            created_at         INTEGER NOT NULL DEFAULT 0,
+            -- v11 (identity M4c-1): parity with the shared-store copy.
+            written_by_uid     TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_ids_bundle_versions_lookup
             ON db_bundle_versions(bundle_id, created_at);
@@ -2013,6 +2120,10 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_work_queue ADD COLUMN target_agent_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_work_queue ADD COLUMN claimed_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_cron_jobs ADD COLUMN target_uid TEXT NOT NULL DEFAULT ''",
+        // v11: identity M4c-1 — the actor's UID beside each actor name.
+        "ALTER TABLE db_work_queue ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -2048,6 +2159,108 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
             data BLOB NOT NULL,
             PRIMARY KEY (zoneid, name, partidx)
         );",
+    )?;
+    // Line counter (Phase 5a-2, SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_
+    // 2026_09_23.md §6.3.7; see `filestore/counter.rs`). Additive and
+    // nullable, and deliberately WITHOUT a FILESTORE_SCHEMA_VERSION bump: the
+    // global transcript store is shared by every srv instance on the machine,
+    // and a bump would make older builds refuse to open it. Older builds
+    // insert rows without these columns (NULL = not counted) and write
+    // without maintaining them, which the counter detects. "duplicate
+    // column" is expected when another instance added them first.
+    for stmt in &[
+        "ALTER TABLE db_wave_file ADD COLUMN gen TEXT",
+        "ALTER TABLE db_wave_file ADD COLUMN lines INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_size INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_tail INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_modts INTEGER",
+        // Bumped (by the triggers below) by every write that changes bytes
+        // already in the file — not by appends — and the value an epoch was
+        // counted at. An epoch is valid only while they are equal.
+        "ALTER TABLE db_wave_file ADD COLUMN rev INTEGER",
+        "ALTER TABLE db_wave_file ADD COLUMN lines_rev INTEGER",
+        // A random identity per row, set by the insert trigger below: a file
+        // deleted and re-created is a different incarnation even if every
+        // other column (and the creation millisecond) comes out the same.
+        "ALTER TABLE db_wave_file ADD COLUMN incarnation BLOB",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            if !e.to_string().contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
+    // `rev` is maintained by triggers, not by this code's writes, because
+    // triggers are part of the database: they fire for every connection,
+    // including older builds that know nothing about the counter. Any write
+    // that changes existing bytes bumps it:
+    //   - a part deleted (write_file's replace, a delete);
+    //   - a part written over with bytes that aren't a pure extension of it
+    //     (REPLACE INTO / UPDATE). Appending extends the last part, which
+    //     keeps it a prefix, so appends — ours or an older build's — don't.
+    // REPLACE INTO doesn't fire DELETE triggers (recursive_triggers is off,
+    // SQLite's default; nothing here enables it), so an append can't reach
+    // the delete trigger. A trigger on a deleted row's parts finds no row.
+    conn.execute_batch(
+        "-- Versioned name: CREATE TRIGGER IF NOT EXISTS never updates an
+         -- existing definition, so a changed rule gets a new name and the
+         -- old one is dropped.
+         DROP TRIGGER IF EXISTS db_file_data_rev_insert;
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_insert_v2
+         BEFORE INSERT ON db_file_data
+         WHEN EXISTS (
+             SELECT 1 FROM db_file_data d
+             WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+               AND substr(NEW.data, 1, length(d.data)) IS NOT d.data
+         )
+         -- A NEW part inside the range the file already claims: bytes the
+         -- file declared (and a reader may have read as missing) are being
+         -- filled in, not appended. Every writer inserts appended parts
+         -- before raising `size`, so an append's new parts always start at
+         -- or past it. Older builds' write_file raises `size` first and
+         -- inserts after (Codex on #3631). 65536 is PART_DATA_SIZE.
+         OR (
+             NOT EXISTS (
+                 SELECT 1 FROM db_file_data d
+                 WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+             )
+             AND NEW.partidx * 65536 < (
+                 SELECT COALESCE(MAX(w.size), 0) FROM db_wave_file w
+                 WHERE w.zoneid = NEW.zoneid AND w.name = NEW.name
+             )
+         )
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_update
+         BEFORE UPDATE OF data ON db_file_data
+         WHEN substr(NEW.data, 1, length(OLD.data)) IS NOT OLD.data
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = OLD.zoneid AND name = OLD.name;
+         END;
+
+         CREATE TRIGGER IF NOT EXISTS db_file_data_rev_delete
+         AFTER DELETE ON db_file_data
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = OLD.zoneid AND name = OLD.name;
+         END;
+
+         -- Every row, whoever inserts it (older builds included), gets 64
+         -- random bits of identity. A delete + re-create in the same
+         -- millisecond with the same size and bytes is still a different
+         -- incarnation (Codex on #3631).
+         CREATE TRIGGER IF NOT EXISTS db_wave_file_incarnation
+         AFTER INSERT ON db_wave_file
+         BEGIN
+             UPDATE db_wave_file SET incarnation = randomblob(8)
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;
+
+         UPDATE db_wave_file SET incarnation = randomblob(8) WHERE incarnation IS NULL;",
     )?;
     Ok(())
 }
@@ -2677,5 +2890,124 @@ mod tests {
         run_saga_log_migrations(&conn).unwrap();
         assert!(table_exists(&conn, "saga"));
         assert!(table_exists(&conn, "saga_step"));
+    }
+
+    /// Identity M4c-1: each store's actor-UID columns exist on a fresh
+    /// store, and an existing store at the previous version gains them on
+    /// reopen — through each store's real `open`, so the flat CREATE, the
+    /// ALTER loop and the version bump are all exercised. A row written
+    /// before the upgrade reads the column's default, `''` (unknown).
+    #[test]
+    fn m4c1_actor_uid_columns_on_fresh_and_upgraded_stores() {
+        use super::super::store::Store;
+        type Open = fn(&std::path::Path) -> Result<Store, StoreError>;
+        let cases: [(&str, Open, i64, i64, &[(&str, &str)]); 3] = [
+            (
+                "identity-store.db",
+                Store::open_identity_store,
+                10,
+                IDENTITY_STORE_SCHEMA_VERSION,
+                &[
+                    ("db_work_queue", "created_by_uid"),
+                    ("db_cron_jobs", "created_by_uid"),
+                    ("db_bundle_versions", "written_by_uid"),
+                ],
+            ),
+            (
+                "store.db",
+                Store::open_shared,
+                11,
+                SHARED_STORE_SCHEMA_VERSION,
+                &[
+                    ("db_cron_jobs", "created_by_uid"),
+                    ("db_bundle_versions", "written_by_uid"),
+                ],
+            ),
+            (
+                "objects.db",
+                Store::open,
+                38,
+                OBJECT_SCHEMA_VERSION,
+                &[("db_bundle_versions", "written_by_uid")],
+            ),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        for (file, open, old, new, cols) in cases {
+            // M4c-1 was one bump each; later bumps (objects v40, durable
+            // jekt) keep the upgrade from `old` covered.
+            assert!(new > old, "{file}: the current version is past M4c-1's base");
+            let user_version = |c: &Connection| -> i64 {
+                c.query_row("PRAGMA user_version", [], |r| r.get(0))
+                    .unwrap()
+            };
+
+            // Fresh.
+            let fresh = dir.path().join(format!("fresh-{file}"));
+            drop(open(&fresh).unwrap());
+            let conn = Connection::open(&fresh).unwrap();
+            for (table, col) in cols {
+                assert!(
+                    column_exists(&conn, table, col),
+                    "fresh {file}: {table}.{col}"
+                );
+            }
+            assert_eq!(user_version(&conn), new);
+            drop(conn);
+
+            // Upgraded: the same store as the previous version left it —
+            // the columns absent, stamped `old` — with a version row in it.
+            let path = dir.path().join(file);
+            drop(open(&path).unwrap());
+            let conn = Connection::open(&path).unwrap();
+            for (table, col) in cols {
+                // Rebuilt without the column: SQLite's `DROP COLUMN` fails
+                // to re-parse these tables' commented CREATE text.
+                let keep: Vec<String> = conn
+                    .prepare(&format!("PRAGMA table_info({table})"))
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(1))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .filter(|c| c != col)
+                    .collect();
+                conn.execute_batch(&format!(
+                    "CREATE TABLE m4c1_old AS SELECT {} FROM {table};
+                     DROP TABLE {table};
+                     ALTER TABLE m4c1_old RENAME TO {table};",
+                    keep.join(", ")
+                ))
+                .unwrap();
+                assert!(!column_exists(&conn, table, col));
+            }
+            conn.execute_batch(&format!(
+                "PRAGMA user_version = {old};
+                 INSERT INTO db_bundle_versions
+                     (id, bundle_id, name, instructions, content_hash)
+                 VALUES ('v-old', 'b', 'n', 'i', 'h');"
+            ))
+            .unwrap();
+            drop(conn);
+
+            drop(open(&path).unwrap());
+            let conn = Connection::open(&path).unwrap();
+            for (table, col) in cols {
+                assert!(
+                    column_exists(&conn, table, col),
+                    "upgraded {file}: {table}.{col}"
+                );
+            }
+            assert_eq!(user_version(&conn), new, "{file}");
+            let uid: String = conn
+                .query_row(
+                    "SELECT written_by_uid FROM db_bundle_versions WHERE id = 'v-old'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                uid, "",
+                "{file}: a pre-upgrade row is unknown, never guessed"
+            );
+        }
     }
 }

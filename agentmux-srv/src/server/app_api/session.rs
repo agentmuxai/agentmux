@@ -21,6 +21,8 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
     // `preflight_input_from_meta`.
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
+    // The pane's own transcript, for the session its rendered history belongs to.
+    let filestore = state.filestore.clone();
 
     engine.register_typed(
         COMMAND_SESSION_RESUME_PREFLIGHT,
@@ -28,6 +30,7 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
             let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
+            let filestore = filestore.clone();
             async move {
 
                 let block = mstore
@@ -40,15 +43,29 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                     &identity_store,
                     &cmd.block_id,
                 );
-                let input = preflight_input_from_meta(&block.meta, bound_config_dir);
+                let mut input = preflight_input_from_meta(&block.meta, bound_config_dir);
+                let session_id_field = obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
+                let block_id = cmd.block_id.clone();
 
-                // Blocking file I/O (one `is_file`, at most one `read_dir` of a
-                // single directory) off the async runtime's worker threads —
-                // small, but a pane open shouldn't be able to stall the
-                // reactor on a cold or network-backed home directory.
-                let result = tokio::task::spawn_blocking(move || crate::backend::resume_preflight::preflight(&input))
-                    .await
-                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+                // Blocking I/O (a transcript tail read, one `is_file`, at most
+                // one `read_dir` of a single directory) off the async runtime's
+                // worker threads — small, but a pane open shouldn't be able to
+                // stall the reactor on a cold or network-backed home directory.
+                let result = tokio::task::spawn_blocking(move || {
+                    if input.session_id.is_empty() {
+                        input.history_session_id =
+                            crate::backend::blockcontroller::persistent::pane_history_session_id(
+                                Some(&filestore),
+                                Some(&mstore),
+                                &block_id,
+                                &session_id_field,
+                            )
+                            .unwrap_or_default();
+                    }
+                    crate::backend::resume_preflight::preflight(&input)
+                })
+                .await
+                .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
                 tracing::info!(
                     block_id = %cmd.block_id,
@@ -138,18 +155,21 @@ fn preflight_input_from_meta(
         session_id: obj::meta_get_string(meta, "agent:sessionid", ""),
         working_dir: obj::meta_get_string(meta, "cmd:cwd", ""),
         config_dir,
+        history_session_id: String::new(),
     }
 }
 
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let broker = state.broker.clone();
 
     engine.register_typed(
         COMMAND_SESSION_ARCHIVE,
         move |cmd: CommandSessionArchiveData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let broker = broker.clone();
             async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:archive");
@@ -157,12 +177,26 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                 let archive_dir = session_archive::default_archive_dir()
                     .ok_or_else(|| "cannot determine home directory".to_string())?;
 
-                let (archived_bytes, archived_at) = session_archive::archive_session_output(
-                    &mstore,
-                    &filestore,
-                    &cmd.block_id,
-                    &archive_dir,
-                )?;
+                // The delete and its announcement under the block's
+                // transcript order lock, so no in-flight append's write and
+                // event can interleave with them (review of #3636).
+                let (archived_bytes, archived_at) =
+                    crate::backend::blockcontroller::shell::with_transcript_order(&cmd.block_id, || {
+                        let archived = session_archive::archive_session_output(
+                            &mstore,
+                            &filestore,
+                            &cmd.block_id,
+                            &archive_dir,
+                        )?;
+                        // The block's transcript is gone: open panes resync now.
+                        crate::backend::blockcontroller::shell::publish_transcript_changed(
+                            &broker,
+                            &cmd.block_id,
+                            crate::backend::mps::FILE_OP_DELETE,
+                            &filestore,
+                        );
+                        Ok::<_, String>(archived)
+                    })?;
 
                 Ok(SessionArchiveResult {
                 block_id: cmd.block_id,
@@ -177,21 +211,39 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let broker = state.broker.clone();
 
     engine.register_typed(
         COMMAND_SESSION_RESTORE,
         move |cmd: CommandSessionRestoreData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let broker = broker.clone();
             async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:restore");
 
-                let restored_bytes = session_archive::restore_session_output(
-                    &mstore,
-                    &filestore,
-                    &cmd.block_id,
-                )?;
+                // The replace and its announcement under the block's
+                // transcript order lock (review of #3636): no append's write
+                // and event can land between them, so a pane sees every
+                // event of the old generation, then the replace, then the
+                // new generation's.
+                let restored_bytes =
+                    crate::backend::blockcontroller::shell::with_transcript_order(&cmd.block_id, || {
+                        let restored = session_archive::restore_session_output(
+                            &mstore,
+                            &filestore,
+                            &cmd.block_id,
+                        )?;
+                        // Replaced content, a new generation: open panes resync now.
+                        crate::backend::blockcontroller::shell::publish_transcript_changed(
+                            &broker,
+                            &cmd.block_id,
+                            crate::backend::mps::FILE_OP_REPLACE,
+                            &filestore,
+                        );
+                        Ok::<_, String>(restored)
+                    })?;
 
                 Ok(SessionRestoreResult {
                 block_id: cmd.block_id,
@@ -1042,6 +1094,16 @@ fn read_recent_activity_digest(
     Some(extracted)
 }
 
+/// Where ambient side calls run: `<data dir>/ambient-calls`, created on
+/// demand; `None` (inherit srv's cwd, as before) only if it cannot be made.
+/// No agent works there, so no agent's history ever matches its transcripts
+/// (#3629).
+pub(crate) fn ambient_call_cwd() -> Option<std::path::PathBuf> {
+    let dir = crate::backend::base::get_mux_data_dir().join("ambient-calls");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
 /// Invoke the Claude CLI with Haiku model for a lightweight ambient call
 /// (activity summary, ghost-text next-prompt suggestion, or any future
 /// purpose routed through the Ambient Model Call gateway). Uses
@@ -1071,10 +1133,19 @@ pub(crate) async fn invoke_ambient_haiku_call(
         _ => std::collections::HashMap::new(),
     };
 
-    let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
-        .args(["-p", "--output-format", "stream-json", "--verbose",
-               "--model", "claude-haiku-4-5-20251001"])
-        .envs(&auth_env)
+    let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
+    cmd.args(["-p", "--output-format", "stream-json", "--verbose",
+              "--model", "claude-haiku-4-5-20251001"])
+        .envs(&auth_env);
+    // Run in a scratch dir of our own, never srv's cwd (the user's home):
+    // Claude files each call's transcript under its cwd's project folder,
+    // and an agent working in that same dir would find every side call —
+    // whose prompts quote other agents' conversations — in its own history
+    // (#3629).
+    if let Some(dir) = ambient_call_cwd() {
+        cmd.current_dir(dir);
+    }
+    let mut child = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -1338,7 +1409,7 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
 /// second sentence differs (`memory-reinjection.ts`'s `REASON_CLAUSE`) — so
 /// this one match suppresses both without needing to track which reason
 /// fired.
-fn is_hidden_reinjection_text(text: &str) -> bool {
+pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
     text.starts_with("<system-reminder>")
         && text.contains("Your memory was reinjected because your working context was just reset.")
 }
@@ -1534,7 +1605,7 @@ mod extract_digest_text_tests {
     /// from `REINJECTION_TEXT`'s compaction wording, sharing only the fixed
     /// leading signature sentence. See `is_hidden_reinjection_text`'s doc
     /// comment for why one match must cover both.
-    const FRESH_SESSION_REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected because your working context was just reset. AgentMux could not resume this agent's prior session, so a fresh one was started — you have none of your prior conversation history, only what is below. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
+    const FRESH_SESSION_REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected because your working context was just reset. AgentMux could not resume this agent's prior session, so a fresh one was started. Any record of the prior conversation AgentMux had came with your first message, in an <agentmux-continuation> block. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
 
     fn user_text_line(text: &str) -> String {
         serde_json::json!({
@@ -2194,5 +2265,19 @@ mod narration_tests {
         // text in a conversation row.
         assert!(p.contains("One sentence"));
         assert!(p.contains("no markdown"));
+    }
+}
+
+#[cfg(test)]
+mod ambient_call_cwd_tests {
+    /// #3629: side calls run in a dir of their own under the data dir —
+    /// never srv's cwd (the user's home), where an agent may work.
+    #[test]
+    fn side_calls_run_in_their_own_scratch_dir() {
+        let dir = super::ambient_call_cwd().expect("the scratch dir can be made");
+        assert!(dir.is_dir());
+        assert!(dir.ends_with("ambient-calls"));
+        assert!(dir.starts_with(crate::backend::base::get_mux_data_dir()));
+        assert_ne!(Some(dir.as_path()), dirs::home_dir().as_deref());
     }
 }

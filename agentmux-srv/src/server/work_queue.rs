@@ -28,7 +28,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::backend::storage::work_queue::{ClaimFilter, WorkItem};
+use crate::backend::storage::work_queue::{ClaimFilter, HolderMatch, WorkItem};
 use crate::backend::mps::MuxEvent;
 
 use super::AppState;
@@ -144,6 +144,9 @@ pub(super) async fn handle_work_enqueue(
         attempts: 0,
         max_attempts: req.max_attempts.unwrap_or(3),
         created_by: req.created_by,
+        // Identity M4c-1 (§6.5.9): the enqueuer's UID is the request's
+        // `Caller` — its token — never a body field; `""` when Unattributed.
+        created_by_uid: super::caller::attributed_uid(caller.as_deref()),
         created_at: now,
         updated_at: now,
         not_before: req.not_before,
@@ -167,8 +170,9 @@ pub(super) struct ClaimRequest {
     /// (identity M1a). Optional: a pre-M1a spawn, a continuation resume, an
     /// App Server agent or a quick-launch pane has none. Since M3 it decides
     /// eligibility for UID-addressed items, and is written to
-    /// `claimed_by_uid`. Until M4 verifies it against the agent's token this
-    /// is an assertion like `agent_id` is — recorded, not trusted.
+    /// `claimed_by_uid` — since M4c-1 only when the claim is Unattributed;
+    /// an attributed claim uses its token's UID instead. It is an assertion
+    /// like `agent_id` is — recorded, not trusted.
     #[serde(default)]
     pub agent_uid: String,
     /// The claimer's block, carried from its `AGENTMUX_BLOCKID`. When no UID
@@ -187,8 +191,9 @@ pub(super) struct ClaimRequest {
     pub lease_ms: Option<i64>,
 }
 
-/// The claimer's UID: carried, else its block's row, else `""` (name path
-/// only). See `handle_work_claim`.
+/// An Unattributed claimer's UID: carried, else its block's row, else `""`
+/// (name path only). An attributed claim uses its `Caller`'s UID instead —
+/// see `handle_work_claim`.
 async fn claimer_uid(state: &AppState, req: &ClaimRequest) -> String {
     let carried = req.agent_uid.trim();
     if !carried.is_empty() {
@@ -240,14 +245,23 @@ pub(super) async fn handle_work_claim(
         tracing::warn!(target: "workqueue", error = %e, "reap before claim failed");
     }
 
-    // Identity M3: the claimer's UID is the one it CARRIED, else the UID of
-    // the row on its own block (the presence path's resolution, §0.1) —
-    // never one derived from its name (§2 rule 1). Deriving it from the name
-    // reached the host-wide slug registry, so a claimer with no UID in its
-    // env could be locked out of its own UID-addressed work, or handed
-    // another channel's (review on #3563). Each fallback is counted (§9.2):
-    // a non-zero count names a launch path that does not carry its UID.
-    let agent_uid = claimer_uid(&state, &req).await;
+    // Identity M4c-1 (§6.5.9): an attributed claim's UID is the request's
+    // `Caller` — its token. Only an Unattributed claim falls back to M3's
+    // path: the UID it CARRIED, else the UID of the row on its own block
+    // (the presence path's resolution, §0.1) — never one derived from its
+    // name (§2 rule 1). Deriving it from the name reached the host-wide slug
+    // registry, so a claimer with no UID in its env could be locked out of
+    // its own UID-addressed work, or handed another channel's (review on
+    // #3563). Each fallback is counted (§9.2): a non-zero count names a
+    // launch path that does not carry its UID. This one UID is both the
+    // `claimed_by_uid` written and the M3 eligibility match
+    // (`target_agent_uid = ?5`) — the one reader change M4c-1 makes; the
+    // carried UID and the token are set together from one row, and a
+    // disagreement is counted just above (`check_carried_uid`).
+    let agent_uid = match caller.as_deref().and_then(super::caller::Caller::uid) {
+        Some(uid) => uid.to_string(),
+        None => claimer_uid(&state, &req).await,
+    };
 
     let filter = ClaimFilter {
         kind: req.kind.filter(|k| !k.is_empty()),
@@ -287,8 +301,22 @@ pub(super) struct HolderRequest {
     pub lease_ms: Option<i64>,
 }
 
-/// Shared shape for the three holder-only transitions. `false` from the store
-/// means the caller is not the current holder OR its fence is stale — both are
+/// The caller's UID for a holder check (identity M4c-2, spec §6.5.9): the
+/// token's, or `""` when Unattributed — the store then matches by name.
+fn holder_uid(caller: Option<&super::caller::Caller>) -> &str {
+    caller.and_then(super::caller::Caller::uid).unwrap_or("")
+}
+
+/// Count a holder check that matched by name — the row or the caller had no
+/// UID. Each is a holder that M5, which drops the name path, would refuse.
+fn count_holder_match(matched: Option<HolderMatch>) {
+    if matched == Some(HolderMatch::Name) {
+        crate::backend::agent_resolve::record_uid_fallback("m4c.holder_by_name");
+    }
+}
+
+/// Shared shape for the three holder-only transitions. No match from the
+/// store means the caller is not the current holder OR its fence is stale — both are
 /// CONFLICT, not NOT_FOUND: the row usually still exists, it just moved on
 /// without this caller.
 fn holder_result(ok: bool, state: &AppState) -> (StatusCode, Json<Value>) {
@@ -322,9 +350,12 @@ pub(super) async fn handle_work_heartbeat(
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
     match state
         .identity_store
-        .work_queue_heartbeat(&id, &req.agent_id, req.attempt, now_ms(), lease)
+        .work_queue_heartbeat(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, now_ms(), lease)
     {
-        Ok(ok) => holder_result(ok, &state),
+        Ok(matched) => {
+            count_holder_match(matched);
+            holder_result(matched.is_some(), &state)
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("heartbeat failed: {e}")),
     }
 }
@@ -343,9 +374,12 @@ pub(super) async fn handle_work_complete(
     );
     match state
         .identity_store
-        .work_queue_complete(&id, &req.agent_id, req.attempt, &req.result, now_ms())
+        .work_queue_complete(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
     {
-        Ok(ok) => holder_result(ok, &state),
+        Ok(matched) => {
+            count_holder_match(matched);
+            holder_result(matched.is_some(), &state)
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("complete failed: {e}")),
     }
 }
@@ -368,9 +402,10 @@ pub(super) async fn handle_work_release(
     );
     match state
         .identity_store
-        .work_queue_release(&id, &req.agent_id, req.attempt, &req.result, now_ms())
+        .work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
     {
-        Ok(true) => {
+        Ok(Some(matched)) => {
+            count_holder_match(Some(matched));
             publish_changed(&state);
             // Read back rather than infer: the store owns the
             // attempts-vs-max_attempts decision, and duplicating that rule
@@ -384,7 +419,7 @@ pub(super) async fn handle_work_release(
                 .unwrap_or_default();
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }
-        Ok(false) => holder_result(false, &state),
+        Ok(None) => holder_result(false, &state),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("release failed: {e}")),
     }
 }

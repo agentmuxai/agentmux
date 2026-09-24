@@ -56,6 +56,9 @@ pub(crate) fn spawn_host_supervised(
         // `background_env_for` also sets `AGENTMUX_TRAY`; see its doc for why
         // the indicator is not optional in this particular context.
         .envs(crate::autostart::background_env_for(args))
+        // Lets the host run launcher CLI verbs (`--autostart-status` etc.)
+        // for the Settings UI. SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1.
+        .envs(launcher_exe_env())
         .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
         // Explicit stdio instead of inheriting the launcher's own —
         // `CreateProcess(..., CREATE_SUSPENDED, ...)` for this GUI-subsystem
@@ -167,6 +170,9 @@ pub(crate) fn spawn_host_unix(
         // inert flag (ReAgent P1 on PR #2999, catching that my first fix for
         // this was wired into the Windows spawn only).
         .envs(crate::autostart::background_env_for(args))
+        // Lets the host run launcher CLI verbs (`--autostart-status` etc.)
+        // for the Settings UI. SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §4.1.
+        .envs(launcher_exe_env())
         // We reap children ourselves on shutdown (SIGTERM, then SIGKILL
         // backstop) — kill_on_drop would SIGKILL the host the moment the
         // Child is dropped, robbing CEF of the chance to reap its render
@@ -476,4 +482,14 @@ pub(crate) fn resume_main_thread(pid: u32) -> Result<(), String> {
         }
         Ok(())
     }
+}
+
+/// `AGENTMUX_LAUNCHER_EXE` for the host: this launcher's own executable, so
+/// the host can invoke launcher CLI verbs (`--autostart-status`,
+/// `--enable-autostart`, `--disable-autostart`) on the user's behalf. Empty
+/// when `current_exe` fails — the host then reports auto-start as unavailable.
+fn launcher_exe_env() -> Vec<(&'static str, std::ffi::OsString)> {
+    std::env::current_exe()
+        .map(|p| vec![("AGENTMUX_LAUNCHER_EXE", p.into_os_string())])
+        .unwrap_or_default()
 }

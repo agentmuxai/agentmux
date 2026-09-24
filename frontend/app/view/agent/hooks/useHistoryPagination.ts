@@ -37,6 +37,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { parseHistoryLines } from "../parseHistoryLines";
 import { lastFreshBoundaryIndex } from "../session-outcome";
+import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
 
@@ -90,6 +91,13 @@ export interface UseHistoryPaginationOptions {
         documentState: Partial<DocumentState>;
         detailsOpen?: boolean;
     }) => void;
+    /**
+     * Told where the initial load ended — the stream, generation and line
+     * its history covers up to — so the live stream places its records
+     * after it (Phase 5a-4, `transcript-cursor.ts`). Settled once on every
+     * outcome: `"empty"` for nothing to show, `null` when the load can't say.
+     */
+    transcriptSettle?: TranscriptSettleLatch;
     log: LogFn;
 }
 
@@ -351,6 +359,9 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         if (!mounted) return;
                         const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps);
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
+                        // Right after the dispatch, before anything else can
+                        // run: live records must land after these nodes.
+                        opts.transcriptSettle?.settle(historyPin(windowStart, rangeResp));
                         // Hydrate the composer strip's context-fill bar from the
                         // resumed conversation's last known usage instead of
                         // leaving it blank until the first live turn — see
@@ -435,6 +446,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     // --- Schema v1: nodes[] embedded (legacy fast path) ---
                     if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) {
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes }));
+                        // A v1 snapshot has no line positions.
+                        opts.transcriptSettle?.settle(null);
                         const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
                             ? snapshot.historyOffset
                             : 0;
@@ -475,6 +488,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
 
                 const total = countResp?.count ?? 0;
                 if (total === 0) {
+                    opts.transcriptSettle?.settle("empty");
                     opts.model.dispatchPane({
                         type: "InitReady",
                         at: Date.now(),
@@ -498,6 +512,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
                 }
+                opts.transcriptSettle?.settle(historyPin(offset, rangeResp));
                 // See the v2-restore branch above for rationale.
                 if (typeof lastSessionStats?.input_tokens === "number") {
                     opts.model.dispatchPane({
@@ -535,6 +550,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 // flip to ready so the user can still send (best-effort).
                 const reason = err?.message ?? String(err);
                 opts.log("history", `could not load history: ${reason}`, "warn");
+                opts.transcriptSettle?.settle(null);
                 // Surface the failure for diagnostics. The reducer's
                 // TurnStart guard treats `InitFailed` as fail-open (only
                 // `InitPending` blocks sends), so no follow-up InitReady
