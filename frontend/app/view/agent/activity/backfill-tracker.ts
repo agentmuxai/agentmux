@@ -3,12 +3,11 @@
 
 /**
  * Tracks which blocks currently have a subagent/dispatch backfill in
- * progress (`subagent:backfill_status`, `subagent_watcher/scan.rs`),
- * globally across every open pane — shared by `dispatch-source.ts` and
- * `subagent-source.ts` so both app-wide singletons can suppress their own
- * per-event refresh WHILE a backfill is running and fire exactly one
- * settle-refresh once it's genuinely done, instead of relying purely on
- * `debounced-refresh.ts`'s timing window to approximate settlement.
+ * progress (`subagent:backfill_status`, `subagent_watcher/scan.rs`), shared by
+ * `dispatch-source.ts` and `subagent-source.ts`. Both fetch ONE app-wide list
+ * per refresh; while a pane backfills, `holdBackfillingRows` keeps THAT pane's
+ * rows at their pre-backfill values and applies everyone else's, and the
+ * trigger fires one refresh when the pane settles.
  *
  * Root cause this closes: per
  * docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md
@@ -16,40 +15,33 @@
  * even the 2-3 refreshes that survive the debounce during a backfill burst
  * are each a genuinely different, real, but still-converging snapshot, so
  * Activity Dock rows still visibly appear-then-vanish as each one lands.
- * Suppressing refreshes entirely until the backend itself reports the
- * backfill done, then firing exactly one, removes those intermediate
- * partial-snapshot renders rather than just reducing their count.
+ *
+ * Per pane, not app-wide (REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md
+ * §6): this used to suppress EVERY refresh while ANY pane backfilled, so
+ * opening one agent pane froze the Activity Dock of every other pane for up
+ * to `PANE_CLOSED_OR_LOST_MS`.
  *
  * Deliberately much simpler than `useSubagentBackfillGate.ts`'s per-block
- * gate (8 review rounds of edge cases closed there, per that file's own
- * history): this is a best-effort refresh-suppression optimization, not a
- * correctness-critical gate blocking pane reveal. If a block's "done" event
- * is somehow missed entirely (e.g. a dropped WS connection, or the owning
- * pane closes mid-backfill with no further activity), `PANE_CLOSED_OR_LOST_MS`
- * below fails that one block open again on a timer — unlike the spinner
- * gate there's no user-visible "stuck forever" failure mode to guard
- * against (worst case without this fallback: dock refreshes stay suppressed
- * app-wide, which `debounced-refresh.ts`'s own `maxWaitMs` ceiling would
- * still eventually override for any consumer that kept receiving events —
- * but a block that stops producing events entirely, e.g. because its pane
- * closed, would never trigger even that ceiling, so the fallback still
- * matters).
+ * gate: this is a best-effort flicker optimization, not a gate blocking pane
+ * reveal. If a block's "done" event is somehow missed entirely (a dropped WS
+ * connection, or the owning pane closing mid-backfill), `PANE_CLOSED_OR_LOST_MS`
+ * below settles that one block on a timer, releasing its held rows.
  */
 
 import { muxEventSubscribe } from "@/app/store/mps";
 
 const backfillingBlocks = new Map<string, ReturnType<typeof setTimeout>>();
-const settleListeners = new Set<() => void>();
+const settleListeners = new Set<(blockId: string) => void>();
 
-/** See this module's doc comment — bounds how long a single block can keep
- *  every dock refresh app-wide suppressed if its own "done" event is lost. */
+/** See this module's doc comment — bounds how long a single block's rows can
+ *  stay held if its own "done" event is lost. */
 const PANE_CLOSED_OR_LOST_MS = 20_000;
 
-function fireSettleListeners(): void {
-    if (settleListeners.size === 0) return;
-    const listeners = Array.from(settleListeners);
-    settleListeners.clear();
-    for (const listener of listeners) listener();
+function settle(blockId: string): void {
+    if (!backfillingBlocks.has(blockId)) return;
+    clearTimeout(backfillingBlocks.get(blockId));
+    backfillingBlocks.delete(blockId);
+    for (const listener of Array.from(settleListeners)) listener(blockId);
 }
 
 /** Pure — exported for direct unit coverage, same rationale as
@@ -67,18 +59,14 @@ export function parseBackfillStatusEvent(scopes: string[] | undefined, data: unk
     return { blockId, status };
 }
 
-/** True while any open pane's subagent/dispatch history is still
- *  backfilling — `dispatch-source.ts`/`subagent-source.ts` consult this to
- *  decide whether to suppress an event-triggered refresh. */
-export function isAnyBlockBackfilling(): boolean {
-    return backfillingBlocks.size > 0;
+/** True while `blockId`'s subagent/dispatch history is still backfilling. */
+export function isBlockBackfilling(blockId: string): boolean {
+    return backfillingBlocks.has(blockId);
 }
 
-/** Register a one-shot callback fired the next time every currently-tracked
- *  backfill finishes (`backfillingBlocks` transitions to empty). A caller
- *  with nothing in flight right now (`isAnyBlockBackfilling()` already
- *  false) has nothing to wait for and should not register. */
-export function onNextBackfillSettle(listener: () => void): () => void {
+/** Register a listener fired with the block id each time ONE block's backfill
+ *  finishes — its "done" event, or the `PANE_CLOSED_OR_LOST_MS` fallback. */
+export function onBackfillSettle(listener: (blockId: string) => void): () => void {
     settleListeners.add(listener);
     return () => settleListeners.delete(listener);
 }
@@ -92,45 +80,47 @@ export function handleBackfillStatusEvent(scopes: string[] | undefined, data: un
         clearTimeout(backfillingBlocks.get(blockId));
         backfillingBlocks.set(
             blockId,
-            setTimeout(() => {
-                backfillingBlocks.delete(blockId);
-                if (backfillingBlocks.size === 0) fireSettleListeners();
-            }, PANE_CLOSED_OR_LOST_MS)
+            setTimeout(() => settle(blockId), PANE_CLOSED_OR_LOST_MS)
         );
         return;
     }
-
-    // status === "done"
-    clearTimeout(backfillingBlocks.get(blockId));
-    backfillingBlocks.delete(blockId);
-    if (backfillingBlocks.size === 0) fireSettleListeners();
+    settle(blockId);
 }
 
 /**
- * Wrap an event-triggered refresh trigger so that, while any block is
- * backfilling, no refresh fires at all for this event — it's silently
- * absorbed — and exactly one refresh fires once every tracked backfill
- * settles. When nothing is backfilling, delegates straight through to
- * `scheduleDebouncedRefresh` (today's existing debounce behavior, unchanged,
- * for live responsiveness once backfill isn't a factor).
+ * Apply a freshly fetched app-wide list, except for panes still backfilling:
+ * their rows stay exactly as they were in `prev` until they settle. Every
+ * other pane's rows come from `next`. This is what keeps one pane's history
+ * replay from both (a) flashing its own converging snapshots and (b) freezing
+ * every OTHER pane's Activity Dock, which the old app-wide suppression did for
+ * up to `PANE_CLOSED_OR_LOST_MS`.
+ */
+export function holdBackfillingRows<T extends { parent_block_id: string }>(prev: readonly T[], next: T[]): T[] {
+    if (backfillingBlocks.size === 0) return next;
+    const fresh = next.filter((r) => !backfillingBlocks.has(r.parent_block_id));
+    const held = prev.filter((r) => backfillingBlocks.has(r.parent_block_id));
+    return [...fresh, ...held];
+}
+
+/**
+ * Wrap an event-triggered refresh: always the debounced refresh (its result
+ * goes through `holdBackfillingRows`, so a backfilling pane's rows don't move),
+ * plus exactly ONE immediate refresh when a pane that saw events during its
+ * backfill settles — so its rows land the moment it's done, without waiting
+ * for any other pane's backfill.
  *
  * Shared by `dispatch-source.ts` and `subagent-source.ts` — each still owns
  * its own `createDebouncedRefresh` instance (passed in as
  * `scheduleDebouncedRefresh`) and its own `refresh()` (passed in as
- * `refreshNow`); this only decides WHICH of the two to call per event.
+ * `refreshNow`).
  */
 export function createBackfillAwareTrigger(scheduleDebouncedRefresh: () => void, refreshNow: () => void): () => void {
-    let pendingSettleUnsub: (() => void) | null = null;
+    const sawEventsDuringBackfill = new Set<string>();
+    onBackfillSettle((blockId) => {
+        if (sawEventsDuringBackfill.delete(blockId)) refreshNow();
+    });
     return function trigger(): void {
-        if (isAnyBlockBackfilling()) {
-            if (!pendingSettleUnsub) {
-                pendingSettleUnsub = onNextBackfillSettle(() => {
-                    pendingSettleUnsub = null;
-                    refreshNow();
-                });
-            }
-            return;
-        }
+        for (const blockId of backfillingBlocks.keys()) sawEventsDuringBackfill.add(blockId);
         scheduleDebouncedRefresh();
     };
 }
