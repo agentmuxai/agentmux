@@ -103,11 +103,15 @@ impl FileStore {
 
     /// Bytes `[offset, offset + len)` of a file, read from the database, not
     /// clamped to this process's cached size (which another process's append
-    /// can make stale). Bytes past the file's end read as zeros; callers bound
-    /// `len` by a size read from the database (`line_state`).
+    /// can make stale); callers bound `len` by a size read from the database
+    /// (`line_state`). An error if any byte of the range isn't stored — a
+    /// file mid-write by a build without transactions claims bytes before it
+    /// holds them — so nothing is ever indexed or served as zeros.
     pub fn read_bytes_db(&self, zone_id: &str, name: &str, offset: i64, len: i64) -> Result<Vec<u8>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        super::counter::read_bytes(&conn, zone_id, name, offset, len)
+        super::counter::read_bytes_exact(&conn, zone_id, name, offset, len)?.ok_or_else(|| {
+            StoreError::Other(format!("{zone_id}/{name}: bytes {offset}..{} not stored yet", offset + len))
+        })
     }
 
     /// A file's metadata, read from the database rather than the cache.

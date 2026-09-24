@@ -104,6 +104,27 @@ fn put_file_with_meta_writes_content_and_merges_metadata() {
 }
 
 #[test]
+fn bytes_a_file_claims_but_does_not_store_are_never_served() {
+    // A build without transactions raises `size` before inserting parts.
+    let fs = mem();
+    fs.make_file(ZONE, "output", FileMeta::new(), FileOpts::default()).unwrap();
+    fs.conn()
+        .lock()
+        .unwrap()
+        .execute("UPDATE db_wave_file SET size = 6 WHERE zoneid = ?1 AND name = 'output'", rusqlite::params![ZONE])
+        .unwrap();
+    assert!(fs.read_bytes_db(ZONE, "output", 0, 6).is_err());
+    // The indexer can't build an index over the hole (callers fall back).
+    assert_eq!(rebuild_output_idx(&fs, ZONE, 6), None);
+    fs.conn()
+        .lock()
+        .unwrap()
+        .execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, 'output', 0, ?2)", rusqlite::params![ZONE, b"a\nb\nc\n".to_vec()])
+        .unwrap();
+    assert_eq!(rebuild_output_idx(&fs, ZONE, 6), Some(3));
+}
+
+#[test]
 fn the_indexer_labels_the_index_with_the_generation_it_read() {
     let fs = mem();
     fs.make_file(ZONE, "output", FileMeta::new(), FileOpts::default()).unwrap();
