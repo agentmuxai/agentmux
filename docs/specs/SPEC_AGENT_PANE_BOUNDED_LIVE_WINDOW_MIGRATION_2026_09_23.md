@@ -1286,7 +1286,18 @@ goal):
   writers to the agent's shared zone while visible. Echoes are parsed (they
   are the user's messages; History has no optimistic copy).
 - Parsing is O(new lines). Publishing to the view is coalesced to at most
-  once a second, and skipped while the tab is dormant — caught up on reveal.
+  once a second.
+- **A dormant tab does no work** (Codex review): events are not handed to the
+  cursor at all, so nothing is decoded or parsed; the tab only notes that one
+  arrived. On reveal it reads the line count once: a gap within
+  `GAP_FILL_MAX_LINES` (5,000) is filled by the cursor's chunked range reads;
+  a larger one reloads the newest page instead.
+- **No silent holes** (Codex review): the cursor skips a gap over 5,000 lines
+  (or a read that fails or names a vanished generation) by advancing past it,
+  which in History would leave lines missing *below* the loaded range, where
+  `loadOlder` can't reach them. History watches the cursor's `linesSkipped`
+  counter and reloads the newest page whenever it moves, so what it shows is
+  always a contiguous range of the transcript.
 - `loadOlder` keeps today's wholesale reparse, and the reparse becomes the new
   incremental parser, so appends continue from it.
 - Truncate / replace / delete of the stream: reload from scratch.
