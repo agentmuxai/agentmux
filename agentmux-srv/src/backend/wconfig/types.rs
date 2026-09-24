@@ -191,6 +191,13 @@ pub struct SettingsType {
     #[serde(rename = "window:savelastwindow", default, skip_serializing_if = "is_false")]
     pub window_save_last_window: bool,
 
+    /// Keep inactive window tabs laid out (`visibility: hidden`) instead of
+    /// skipping their layout (`content-visibility: hidden`), so switching
+    /// back has nothing to catch up on. Opt-in while measured; see
+    /// docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md.
+    #[serde(rename = "window:keepinactivetabslaidout", default, skip_serializing_if = "Option::is_none")]
+    pub window_keep_inactive_tabs_laid_out: Option<bool>,
+
     #[serde(rename = "window:dimensions", default, skip_serializing_if = "String::is_empty")]
     pub window_dimensions: String,
 

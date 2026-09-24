@@ -9,7 +9,8 @@ import { PaneMediaCaptureIndicator } from "@/app/window/pane-media-capture-indic
 import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
-import { atoms } from "@/store/global";
+import { atoms, getSettingsKeyAtom } from "@/store/global";
+import { TAB_VISIBILITY_CHANGED_EVENT, WindowTabHiddenProvider, tabContainerVisibility } from "./window-tab-visibility";
 import { gateTargetTabId, scheduleRevealLift, tabSwitching } from "@/store/tab-reveal";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
@@ -18,6 +19,13 @@ function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
+    // Keep inactive tabs laid out, the way pane tabs keep hidden members
+    // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md §6.1):
+    // `visibility: hidden` instead of `content-visibility: hidden`, so a
+    // returning tab has no layout to catch up on. Opt-in while it's measured
+    // against the default.
+    const keepLaidOutSetting = getSettingsKeyAtom("window:keepinactivetabslaidout");
+    const keepLaidOut = () => keepLaidOutSetting() === true;
 
     // Tab container elements by tab id, for the forced-layout effect below.
     const tabEls = new Map<string, HTMLDivElement>();
@@ -113,6 +121,8 @@ function WorkspaceElem(): JSX.Element {
         const id = displayTabId();
         const el = tabEls.get(id);
         if (el) void el.getBoundingClientRect();
+        // Native browser panes re-sync now rather than on their next poll.
+        window.dispatchEvent(new Event(TAB_VISIBILITY_CHANGED_EVENT));
     });
 
     // Reveal gate, destination-aware (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
@@ -162,10 +172,16 @@ function WorkspaceElem(): JSX.Element {
                         <For each={allTabIds()}>
                             {(tid) => {
                                 onCleanup(() => tabEls.delete(tid));
+                                const shown = createMemo(() =>
+                                    tabContainerVisibility(tid === displayTabId(), keepLaidOut(), gateHides(tid)),
+                                );
                                 return (
                                 <div
                                     ref={(el) => tabEls.set(tid, el)}
                                     class="flex flex-row h-full w-full"
+                                    // Native browser panes read this to collapse while the
+                                    // tab is hidden but laid out (use-pane-rect-sync.ts).
+                                    data-tab-hidden-laid-out={shown().hiddenLaidOut ? "true" : undefined}
                                     style={{
                                         // Absolutely positioned, stacked on top of each other,
                                         // filling the relative-positioned parent above — NOT a
@@ -225,7 +241,10 @@ function WorkspaceElem(): JSX.Element {
                                         // Never needs a `display:none` fallback: AgentMux always
                                         // runs on CEF/Chromium, which has supported
                                         // content-visibility since the property shipped.
-                                        "content-visibility": tid === displayTabId() ? "visible" : "hidden",
+                                        // With `window:keepinactivetabslaidout`, every tab
+                                        // stays `visible` here and inactive ones hide with
+                                        // `visibility` below instead.
+                                        "content-visibility": shown()["content-visibility"],
                                         // content-visibility:hidden skips rendering, but does
                                         // NOT imply pointer-events:none — an inactive tab's div
                                         // is still a real, absolutely-positioned box stacked on
@@ -238,7 +257,7 @@ function WorkspaceElem(): JSX.Element {
                                         // 4 still worked" report from adding position:absolute
                                         // above. Only the active tab may receive pointer events;
                                         // every inactive one lets clicks pass through to it.
-                                        "pointer-events": tid === displayTabId() ? "auto" : "none",
+                                        "pointer-events": shown()["pointer-events"],
                                         // Reveal gate (issue #774): hide the active tab while
                                         // it's still settling so the piecemeal mount cascade
                                         // doesn't paint stage-by-stage. `visibility: hidden`
@@ -258,12 +277,19 @@ function WorkspaceElem(): JSX.Element {
                                         // positioning fix was already chasing. `visibility`
                                         // flips instantly with no animation, so this is a snap,
                                         // not a fade, on every platform including reduced-motion.
-                                        visibility: gateHides(tid) ? "hidden" : null,
+                                        //
+                                        // Kept-laid-out inactive tabs hide here too: layout
+                                        // continues, paint doesn't. Descendants must never set
+                                        // `visibility: visible` unconditionally, or they'd show
+                                        // through (pane stacks use `inherit` for that reason).
+                                        visibility: shown().visibility,
                                     }}
                                 >
-                                    <ErrorBoundary>
-                                        <TabContent tabId={tid} />
-                                    </ErrorBoundary>
+                                    <WindowTabHiddenProvider value={() => shown().hiddenLaidOut}>
+                                        <ErrorBoundary>
+                                            <TabContent tabId={tid} />
+                                        </ErrorBoundary>
+                                    </WindowTabHiddenProvider>
                                 </div>
                                 );
                             }}

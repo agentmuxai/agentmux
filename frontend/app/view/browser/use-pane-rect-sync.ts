@@ -4,6 +4,7 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { invokeCommand } from "@/app/platform/ipc";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
+import { TAB_VISIBILITY_CHANGED_EVENT } from "@/app/workspace/window-tab-visibility";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import type { BrowserViewModel } from "./browser-model";
@@ -23,15 +24,19 @@ export interface PaneRectSync {
 }
 
 /**
- * True if `el` (or an ancestor) is currently `content-visibility: hidden` —
- * i.e. sitting inside an inactive workspace tab (workspace.tsx, PR #3239).
- * Such an element's own `getBoundingClientRect()` keeps returning its
- * last-known real size rather than collapsing to zero — see the call site's
- * comment for why that matters specifically for native browser panes.
+ * True if `el` sits inside an inactive workspace tab (workspace.tsx): an
+ * ancestor that is `content-visibility: hidden` (the default, PR #3239), or
+ * one marked `data-tab-hidden-laid-out` (an inactive tab kept laid out with
+ * `window:keepinactivetabslaidout`, hidden by `visibility` instead). Either
+ * way the element's own `getBoundingClientRect()` keeps returning its real
+ * size, so the native browser pane would stay drawn over the active tab; see
+ * the call site. Keyed on the marker rather than computed `visibility`,
+ * which the reveal gate also sets on the tab being shown (codex P1 on #3686).
  */
-function isInsideHiddenTabContent(el: HTMLElement): boolean {
+export function isInsideHiddenTabContent(el: HTMLElement): boolean {
     let node: HTMLElement | null = el;
     while (node) {
+        if (node.dataset.tabHiddenLaidOut === "true") return true;
         if (getComputedStyle(node).contentVisibility === "hidden") return true;
         node = node.parentElement;
     }
@@ -192,6 +197,10 @@ export function usePaneRectSync(params: {
             resizeObserver = new ResizeObserver(syncPosition);
             resizeObserver.observe(ph);
             positionInterval = setInterval(syncPosition, 200);
+            // Hiding or showing a window tab doesn't change this
+            // placeholder's geometry, so the observer above never sees it.
+            window.addEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition);
+            onCleanup(() => window.removeEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition));
         }
         // macOS/Linux: after a JS-driven drag moves the floating pane window,
         // paneRect() returns the same client coords (unchanged by window

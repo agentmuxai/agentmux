@@ -173,6 +173,9 @@
         "window:savelastwindow": {
           "type": "boolean"
         },
+        "window:keepinactivetabslaidout": {
+          "type": "boolean"
+        },
         "window:dimensions": {
           "type": "string"
         },
