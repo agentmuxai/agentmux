@@ -51,11 +51,14 @@ impl Notification {
     }
 }
 
-/// What the user did with a toast, reported by a backend.
+/// What the user did — on a toast (reported by a backend) or in the tray's
+/// notification menu (`tray_request`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UserAction {
     Clicked(String),
     Dismissed(String),
+    /// Set `notify:pause:until` (epoch ms; 0 = resume).
+    SetPause(i64),
 }
 
 /// A platform notification surface.
@@ -88,6 +91,20 @@ struct Handle {
 
 static HANDLE: OnceLock<Handle> = OnceLock::new();
 
+/// The user-action channel exists from first use, not from `start`: the tray
+/// (and its Pause/Resume/Open menu) comes up before srv does, and a pick made
+/// in that window must queue until the presenter connects rather than vanish
+/// (ReAgent P2 on #3654). `start` takes the receiver.
+type ActionChannel = (mpsc::UnboundedSender<UserAction>, std::sync::Mutex<Option<mpsc::UnboundedReceiver<UserAction>>>);
+static ACTIONS: OnceLock<ActionChannel> = OnceLock::new();
+
+fn actions() -> &'static ActionChannel {
+    ACTIONS.get_or_init(|| {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (tx, std::sync::Mutex::new(Some(rx)))
+    })
+}
+
 fn make_presenter(actions: mpsc::UnboundedSender<UserAction>, data_dir: &std::path::Path) -> Arc<dyn Presenter> {
     #[cfg(target_os = "windows")]
     {
@@ -108,7 +125,10 @@ pub fn start(ws_endpoint: &str, auth_key: &str, data_dir: std::path::PathBuf, di
         let _ = h.endpoint.send(Some(ep));
         return;
     }
-    let (act_tx, act_rx) = mpsc::unbounded_channel();
+    let act_tx = actions().0.clone();
+    let Some(act_rx) = actions().1.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+        return;
+    };
     let presenter = make_presenter(act_tx, &data_dir);
     // A fresh launcher owns nothing on screen yet — anything left over from a
     // previous (crashed) run points at a dead instance.
@@ -125,6 +145,30 @@ pub fn update_endpoint(ws_endpoint: &str, auth_key: &str) {
     if let Some(h) = HANDLE.get() {
         let _ = h.endpoint.send(Some(Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string() }));
     }
+}
+
+/// The tray's notification menu (spec §4.2): open an attention item exactly
+/// as its toast click would, or pause/resume. Non-blocking; callable from the
+/// tray thread.
+pub fn tray_request(action: crate::tray::notify_menu::NotifyMenuAction) {
+    use crate::tray::notify_menu::{resolve_pause, NotifyMenuAction};
+    let ua = match action {
+        NotifyMenuAction::Open(id) => {
+            // The menu pick made us foreground-eligible; hand that to the host
+            // so it can raise its window.
+            #[cfg(target_os = "windows")]
+            unsafe {
+                let _ = ::windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                    ::windows::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+                );
+            }
+            UserAction::Clicked(id)
+        }
+        NotifyMenuAction::Pause(choice) => UserAction::SetPause(resolve_pause(choice, chrono::Local::now())),
+        NotifyMenuAction::Resume => UserAction::SetPause(0),
+    };
+    // Queues even before `start` — delivered once the presenter connects.
+    let _ = actions().0.send(ua);
 }
 
 /// Launcher is exiting: remove our toasts from the notification center.
@@ -150,6 +194,7 @@ pub fn ws_url(endpoint: &str) -> String {
 pub enum Frame {
     Show(Notification),
     Retract(String),
+    State(crate::tray::notify_menu::NotifyTrayState),
     Response { reqid: String, has_window: Option<bool> },
     Other,
 }
@@ -177,6 +222,11 @@ pub fn parse_frame(text: &str) -> Frame {
             .get("data")
             .and_then(|d| serde_json::from_value::<Notification>(d.clone()).ok())
             .map(Frame::Show)
+            .unwrap_or(Frame::Other),
+        Some("notification:state") => ev
+            .get("data")
+            .and_then(|d| serde_json::from_value(d.clone()).ok())
+            .map(Frame::State)
             .unwrap_or(Frame::Other),
         Some("notification:retract") => ev
             .get("data")
@@ -255,7 +305,7 @@ async fn session(
         Err(e) => return SessionEnd::Closed(format!("connect: {e}")),
     };
     let (mut write, mut read) = ws.split();
-    for event in ["notification", "notification:retract"] {
+    for event in ["notification", "notification:retract", "notification:state"] {
         let sub = rpc("eventsub", None, serde_json::json!({ "event": event, "scopes": [], "allscopes": true }));
         if let Err(e) = write.send(Message::Text(sub.into())).await {
             return SessionEnd::Closed(format!("subscribe: {e}"));
@@ -278,6 +328,13 @@ async fn session(
                 let (id, clicked) = match &action {
                     UserAction::Clicked(id) => (id.clone(), true),
                     UserAction::Dismissed(id) => (id.clone(), false),
+                    UserAction::SetPause(until) => {
+                        let msg = rpc("setconfig", Some(&uuid::Uuid::new_v4().to_string()), serde_json::json!({ "notify:pause:until": until }));
+                        if let Err(e) = write.send(Message::Text(msg.into())).await {
+                            return SessionEnd::Closed(format!("send setconfig: {e}"));
+                        }
+                        continue;
+                    }
                 };
                 let reqid = uuid::Uuid::new_v4().to_string();
                 if clicked {
@@ -298,6 +355,7 @@ async fn session(
                 match parse_frame(&text) {
                     Frame::Show(n) => presenter.show(&n),
                     Frame::Retract(tag) => presenter.retract(&tag),
+                    Frame::State(state) => crate::tray::notify_menu::set(state),
                     Frame::Response { reqid, has_window } => {
                         if pending_clicks.remove(&reqid) && has_window == Some(false) {
                             // Clicked with no window open (background mode):
@@ -354,6 +412,14 @@ mod tests {
         assert_eq!(parse_frame(r), Frame::Retract("t1".into()));
         let resp = r#"{"eventtype":"rpc","data":{"resid":"q1","data":{"has_window":false}}}"#;
         assert_eq!(parse_frame(resp), Frame::Response { reqid: "q1".into(), has_window: Some(false) });
+        let st = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification:state","data":{"attention":[{"id":"n1","block_id":"b1","title":"lark needs your input"}],"paused_until_ms":5}}}}"#;
+        match parse_frame(st) {
+            Frame::State(s) => {
+                assert_eq!(s.attention.len(), 1);
+                assert_eq!(s.paused_until_ms, 5);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
         let cfg = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"config","data":{}}}}"#;
         assert_eq!(parse_frame(cfg), Frame::Other);
         assert_eq!(parse_frame(r#"{"type":"ping","stime":1}"#), Frame::Other);
@@ -395,8 +461,8 @@ mod tests {
             })
             .await
             .unwrap();
-            // Two eventsubs first.
-            for _ in 0..2 {
+            // Three eventsubs first.
+            for _ in 0..3 {
                 let m = ws.next().await.unwrap().unwrap();
                 got_tx.send(serde_json::from_str(m.to_text().unwrap()).unwrap()).unwrap();
             }
@@ -418,6 +484,8 @@ mod tests {
 
         let sub1 = got_rx.recv().await.unwrap();
         let sub2 = got_rx.recv().await.unwrap();
+        let sub3 = got_rx.recv().await.unwrap();
+        assert_eq!(sub3["message"]["data"]["event"], "notification:state");
         assert_eq!(sub1["message"]["command"], "eventsub");
         assert_eq!(sub1["message"]["data"]["event"], "notification");
         assert_eq!(sub2["message"]["data"]["event"], "notification:retract");

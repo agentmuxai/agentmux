@@ -86,7 +86,7 @@ pub struct NotifyOk {
 }
 
 fn router_for(state: &AppState) -> Arc<router::Router> {
-    router::init(state.broker.clone(), state.config_watcher.clone(), state.mstore.clone())
+    router::init(state.broker.clone(), state.config_watcher.clone(), state.mstore.clone(), state.reactive_handler)
 }
 
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
