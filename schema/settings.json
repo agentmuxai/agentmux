@@ -337,6 +337,11 @@
           "default": false,
           "description": "While paused, still notify when an agent needs your input or review."
         },
+        "notify:quiethours": {
+          "type": "string",
+          "default": "",
+          "description": "Daily quiet hours for OS notifications, local time, as \"HH:MM-HH:MM\" (may span midnight, e.g. \"22:00-08:00\"). Behaves like a pause; notify:pause:allowattention applies. Empty = off."
+        },
         "notify:taskbar:attention": {
           "type": "boolean",
           "default": true,

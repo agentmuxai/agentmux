@@ -130,6 +130,10 @@ pub struct Settings {
     pub pause_until_ms: i64,
     /// `notify:pause:allowattention` — let Attention through while paused.
     pub pause_allow_attention: bool,
+    /// End of the quiet-hours window we're currently inside (epoch ms), or 0.
+    /// Behaves like a pause, but is NOT shown as one in the tray (it isn't
+    /// something "Resume" can undo — it's a schedule).
+    pub quiet_until_ms: i64,
 }
 
 impl Default for Settings {
@@ -141,6 +145,7 @@ impl Default for Settings {
             kind_enabled: HashMap::new(),
             pause_until_ms: 0,
             pause_allow_attention: false,
+            quiet_until_ms: 0,
         }
     }
 }
@@ -509,7 +514,7 @@ impl PolicyState {
 
     fn paused(&self, n: &Notification, now_ms: i64, s: &Settings) -> bool {
         n.kind != NotifyKind::Test
-            && now_ms < s.pause_until_ms
+            && now_ms < s.pause_until_ms.max(s.quiet_until_ms)
             && !(s.pause_allow_attention && n.priority == Priority::Attention)
     }
 
@@ -842,6 +847,15 @@ mod tests {
         let a = p.step(Input::Tick, 15_000, &s);
         assert_eq!(shows(&a).len(), 1);
         assert_eq!(shows(&a)[0].kind, NotifyKind::InputWaiting);
+    }
+
+    #[test]
+    fn quiet_hours_hold_back_like_a_pause_but_are_not_shown_as_one() {
+        let s = Settings { quiet_until_ms: 100_000, ..Settings::default() };
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b1")), 0, &s);
+        assert!(shows(&p.step(Input::Tick, 20_000, &s)).is_empty());
+        assert_eq!(p.tray_state(&s, 20_000).paused_until_ms, 0);
     }
 
     #[test]
