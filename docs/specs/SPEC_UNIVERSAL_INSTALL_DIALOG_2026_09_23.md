@@ -298,7 +298,7 @@ spawn code so `resolvecli`, `install.start`, and system installs share it.
 | Category | Detected by | Layer 1 message | Action |
 |---|---|---|---|
 | `network` | `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`, HTTP 5xx | "Couldn't reach the package server." | Retry |
-| `permission` | `EACCES`, `EPERM`, declined UAC or polkit | "AgentMux wasn't allowed to write the files." | Retry, or open Details |
+| `permission` | `EACCES`, `EPERM`, declined UAC or polkit (detection per OS in §13.3) | "AgentMux wasn't allowed to write the files." | Retry, or open Details |
 | `disk` | `ENOSPC` | "The disk is full." | — |
 | `missing_prereq` | spawn fails for `npm`, `brew`, `pkexec`, `winget` | "<Tool> is needed first." Names the executable that actually failed to spawn, never a hard-coded Node.js. | If AgentMux can install that tool (Node.js, npm), add its step and offer to install it. If it can't, as with Homebrew, pkexec, or winget (see §3), offer "Open download page" for that tool. |
 | `not_on_path` | exit 0 but verify fails to find the binary | "Installed, but AgentMux can't see it yet." | Restart AgentMux |
@@ -360,9 +360,8 @@ there is:
   `install_progress` event. It creates an install session, emits the standard
   plan and live events on `install:<sessionId>`, and returns the session id
   early through a new optional `onSession` callback event on
-  `block:<blockId>`. On Windows, where `cmd.exe` pipes don't stream, it still
-  emits step transitions at command boundaries. Lines then arrive in one batch
-  per step, which is acceptable.
+  `block:<blockId>`. On Windows, `resolvecli` does not stream today. §13.1
+  explains why one batch per step is not acceptable there and what replaces it.
 - `install_progress` is kept for one release for old frontends, then removed.
 - App update and migrations stay on their CEF events. A small adapter maps them
   into an `InstallSession` so they render with the same component.
@@ -464,7 +463,8 @@ Each phase ships on its own and is useful alone.
    rolling median from past installs on this machine, or nothing?
 3. **Verbose npm output.** Keep `--loglevel=verbose` so Details is complete and
    step derivation has signal, or drop to `http` to shrink the log? This spec
-   keeps verbose, since Layer 1 now hides it.
+   keeps verbose, since Layer 1 now hides it. Whichever is chosen, both npm
+   paths must use it (§13.5).
 4. **Kimi and other non-npm providers.** Their install hint (`pip install
    kimi-cli`) is never run. Should they get a real plan through the system
    installer, or stay link-only?
@@ -497,6 +497,106 @@ Each phase ships on its own and is useful alone.
   800×900 and assert that the footer is visible, the panel has no scrollbar,
   and there is no horizontal overflow. Assert that `replace` from a scrolled
   prereq modal yields `scrollTop === 0`.
-- **Manual.** Install Pi on a machine with Node and without Node, on macOS and
-  Windows. Cancel mid-download. Unplug the network mid-download. Confirm the
-  dialog never scrolls as a whole and every failure names its cause in Layer 1.
+- **Manual.** Install Pi on a machine with Node and without Node, on macOS,
+  Windows, Ubuntu (apt), and Fedora (dnf). Cancel mid-download. Unplug the
+  network mid-download. Confirm the dialog never scrolls as a whole and every
+  failure names its cause in Layer 1. Platform-specific cases are in §13.6.
+
+## 13. Platform notes
+
+The dialog, plans, error categories, and log files are the same on every OS.
+The places where the platforms differ are listed here, because each one can
+silently break the Layer 1 promise on one OS while it holds on the others.
+
+### 13.1 Windows: npm output must stream
+
+Layer 1 only moves if lines arrive while npm runs. On Windows that does not
+happen today on the `resolvecli` path:
+
+- `cli_handlers.rs` runs `cmd /C npm install …` and collects output with
+  `.output()` after exit. Its comment says pipe streaming does not receive data
+  from `cmd.exe /C` batch children.
+- `download`, `setup`, and `scripts` are phases of one `npm install` process
+  (§7.1). "One batch per step" therefore means Layer 1 sits on "Download
+  packages" for the whole install, then ticks everything at once. That is the
+  Pi experience this spec exists to fix, so it is not acceptable.
+- The `install.start` path starts `npm.cmd` with piped output. Rust's standard
+  library runs `.cmd` files through `cmd.exe`, so it may hit the same problem.
+  Nobody has checked whether it streams on Windows.
+
+Required change: on Windows, both paths start npm without the batch shim.
+They run `node <npm-dir>/node_modules/npm/bin/npm-cli.js install …`, resolving
+`<npm-dir>` from the `npm.cmd` found on PATH. This is the command `npm.cmd`
+itself runs. It also removes the `cmd.exe` quoting workaround (`raw_arg`) that
+`cli_handlers.rs` needs today.
+
+**Unverified.** It has not been checked that `node` started directly streams
+through a pipe under `CREATE_NO_WINDOW`, or that the `cmd.exe` claim in
+`cli_handlers.rs` still holds. Check both on a Windows machine before any
+phase is called done on Windows. Phase 1's frontend classifier depends on
+streaming too. If direct `node` does not stream either, fall back to a ConPTY for the
+npm unit and treat its output as one stream.
+
+### 13.2 Windows: pick up PATH changes without a restart
+
+A running process never sees PATH changes made after it started. On macOS and
+Linux this rarely matters here. Homebrew's bin directories are in the
+well-known directories `toolchain_path.rs` adds at launch, and the Linux
+package managers AgentMux drives (apt-get, dnf, pacman, zypper, apk) install
+into `/usr/bin`. On Windows, `toolchain_path.rs` keeps the inherited
+PATH unchanged, and winget's Node and Git installers add their directories to
+the registry PATH. So nearly every Node install through winget ends at the
+`restart` step (§6.2).
+
+Required change: after a system install succeeds on Windows and the PATH
+re-check fails, re-read the Machine and User `Path` values from the registry,
+expand environment variables in them, and merge any new entries into the
+server's PATH. Also pass the merged PATH to processes started afterwards,
+including npm in a chained plan (§8). Run the re-check again. Show `restart`
+only if that second check fails too.
+
+### 13.3 Detecting a declined permission prompt
+
+A user who says no to the OS prompt must see the `permission` message, not
+`unknown`.
+
+| OS | Mechanism | Declined looks like |
+|---|---|---|
+| Linux | `pkexec` | Exit 126 when the user dismissed the auth dialog. Exit 127 when not authorized or on error, so 127 maps to `permission` only if the output has no other error. |
+| Windows | winget raises the installer's own UAC prompt | The exit code winget returns for a declined UAC prompt is not documented here. Record it on a real machine for the Node and Git installers, then map it. Until then, match the declined-elevation text in winget's output. |
+| macOS | brew never elevates (§6.2) | Not applicable. `EACCES` from brew maps to `permission` as usual. |
+
+### 13.4 Linux: no polkit agent
+
+`pkexec` needs a running polkit authentication agent. Minimal window managers
+and some server desktops have none, so `pkexec` fails at once. The existing
+`available` pre-check only confirms that `pkexec` exists. Treat an immediate
+127 before any package-manager output as `missing_prereq` with
+`missingTool: "a polkit authentication agent"`. Keep the existing
+copy-command fallback as the action, showing the `sudo <package manager>
+install …` command, since AgentMux cannot raise the prompt itself.
+
+### 13.5 One npm log level on both paths
+
+`install.start` runs npm with `--loglevel=verbose`. `resolvecli` runs it with
+`--loglevel=http`. At `http` npm prints no `reify` or `extract` lines, so the
+`setup` step would advance differently depending on which path started the
+install. Both paths use one level, set in one place (see §11 question 3). This
+is not an OS difference, but it shows up the same way: the same install looks
+different on different surfaces.
+
+### 13.6 Platform test cases
+
+Add these to §12:
+
+- **Windows streaming.** Install Pi through `install.start` and through
+  `resolvecli`. Assert that Layer 1 moves from `download` to `setup` while
+  npm is still running, not at exit.
+- **Windows PATH.** On a machine without Node, install Node through winget in
+  a chained plan. Assert that the chain continues to `npm install` without a
+  `restart` step.
+- **Declined prompt.** Decline UAC on Windows and polkit on Linux. Assert that
+  Layer 1 shows the `permission` message.
+- **No polkit agent.** On Linux with no polkit agent running, assert the
+  `missing_prereq` message and the terminal command in Details.
+- **Log level.** Assert that both npm paths pass the same `--loglevel`.
