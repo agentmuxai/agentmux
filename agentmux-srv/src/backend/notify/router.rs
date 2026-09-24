@@ -430,8 +430,18 @@ impl Router {
         let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question });
     }
 
-    /// Ordered counterpart of `resolve` for srv-side sources: queued behind any
-    /// `input_waiting_nonblocking` already sent for the same block.
+    /// Queued emit with no body (turn outcomes).
+    pub fn emit_nonblocking(&self, kind: NotifyKind, block_id: &str) {
+        let _ = self.internal.send(Internal::Emit {
+            kind,
+            block_id: block_id.to_string(),
+            body: None,
+            own_blocks_only: false,
+        });
+    }
+
+    /// Ordered counterpart of `resolve`: queued behind any emit already sent
+    /// for the same block.
     pub fn resolve_nonblocking(&self, block_id: &str, family: Family) {
         let _ = self.internal.send(Internal::Resolve { block_id: block_id.to_string(), family });
     }

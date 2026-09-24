@@ -66,6 +66,13 @@ pub fn reapply(hwnd: isize) {
     }
 }
 
+/// The window is being destroyed: drop its cached badge state so a later
+/// window that reuses the numeric HWND starts clean (Codex P2 on #3662).
+#[cfg(target_os = "windows")]
+pub fn forget(hwnd: isize) {
+    win::forget(hwnd);
+}
+
 /// Accessible description for the overlay (also used as its tooltip-ish label).
 pub fn description(count: u32) -> String {
     if count == 1 {
@@ -103,6 +110,12 @@ mod win {
             fn execute(&self) {
                 unsafe { apply(self.hwnd, self.count, self.input) }
             }
+        }
+    }
+
+    pub fn forget(hwnd: isize) {
+        if let Some(m) = LAST.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            m.remove(&hwnd);
         }
     }
 

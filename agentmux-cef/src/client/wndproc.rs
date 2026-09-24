@@ -90,6 +90,9 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
         if msg != 0 && msg == crate::commands::taskbar_attention::taskbar_button_created_msg() {
             crate::commands::taskbar_attention::reapply(hwnd as isize);
         }
+        if msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_NCDESTROY {
+            crate::commands::taskbar_attention::forget(hwnd as isize);
+        }
 
         // ALWAYS pass through. We observe WM_ACTIVATE; CEF still owns it.
         let original = FOCUS_RESTORE_WNDPROCS
