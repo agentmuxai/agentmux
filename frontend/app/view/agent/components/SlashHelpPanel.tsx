@@ -16,6 +16,7 @@
 
 import { type JSX, createMemo, onCleanup, onMount } from "solid-js";
 import { For } from "solid-js/web";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 import type { SlashCommand, SlashCommandCategory } from "../commands/types";
 
 interface SlashHelpPanelProps {
@@ -69,7 +70,10 @@ export function SlashHelpPanel(props: SlashHelpPanelProps): JSX.Element {
         }));
     });
 
+    let rootRef: HTMLDivElement | undefined;
     const handleKeyDown = (e: KeyboardEvent): void => {
+        // Escape in another pane must not close this pane's help.
+        if (!eventBelongsToPaneOf(e, rootRef)) return;
         if (e.key === "Escape") {
             e.preventDefault();
             props.onClose();
@@ -80,7 +84,7 @@ export function SlashHelpPanel(props: SlashHelpPanelProps): JSX.Element {
     onCleanup(() => document.removeEventListener("keydown", handleKeyDown, true));
 
     return (
-        <div class="slash-help" role="dialog" aria-label="Slash command help">
+        <div class="slash-help" role="dialog" aria-label="Slash command help" ref={rootRef}>
             <div class="slash-help__header">
                 <span class="slash-help__title">Slash commands</span>
                 <button

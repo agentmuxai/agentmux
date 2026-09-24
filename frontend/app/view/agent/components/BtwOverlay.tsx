@@ -43,6 +43,7 @@
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 
 export interface BtwOverlayProps {
     /** Block this overlay belongs to — scopes the MPS subscription. */
@@ -153,15 +154,20 @@ export function BtwOverlay(props: BtwOverlayProps): JSX.Element {
         });
     });
 
+    let rootRef: HTMLDivElement | undefined;
     const handleKeyDown = (e: KeyboardEvent): void => {
+        // Escape in another pane must not close this pane's side question.
+        if (!eventBelongsToPaneOf(e, rootRef)) return;
         if (e.key === "Escape") {
             e.preventDefault();
             props.onClose();
         }
     };
 
-    let rootRef: HTMLDivElement | undefined;
     const handlePointerDown = (e: PointerEvent): void => {
+        // "Outside" means elsewhere in THIS pane — clicking into the pane
+        // next to it (to read or type there) leaves this overlay open.
+        if (!eventBelongsToPaneOf(e, rootRef)) return;
         if (rootRef && e.target instanceof Node && !rootRef.contains(e.target)) {
             props.onClose();
         }

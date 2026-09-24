@@ -44,6 +44,7 @@
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -497,8 +498,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         // Scope to this panel's own pane so a question in pane A doesn't
         // react to keystrokes typed in pane B. Mirrors AgentDecisionPanel
         // (codex P1, PR #556).
-        const paneRoot = rootRef?.closest(".agent-view") as HTMLElement | null;
-        if (paneRoot && target && !paneRoot.contains(target)) return;
+        if (!eventBelongsToPaneOf(e, rootRef)) return;
 
         // Whether the keystroke actually originated inside this panel's own
         // DOM (an option, the "Other" input, or the panel root itself) —

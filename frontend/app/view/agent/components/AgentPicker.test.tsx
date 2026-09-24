@@ -18,6 +18,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import type { AgentViewModel } from "../agent-model";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
@@ -121,13 +122,19 @@ vi.mock("../providers", () => ({
     },
 }));
 
+// A Solid component body runs exactly once per mount, so counting calls
+// counts mounts — used to pin that an `agents:changed` refetch does NOT
+// remount every card (each remount re-ran the default card's autofocus).
+const { cardMountSpy } = vi.hoisted(() => ({ cardMountSpy: vi.fn() }));
 vi.mock("./AgentCard", () => ({
     AgentCard: (props: any) => (
+        cardMountSpy(props.agent.id),
         <button
             data-testid={`agent-card-${props.agent.id}`}
             data-is-template={String(props.agent.is_seeded === 1)}
             data-has-session={String(!!props.hasCurrentSession)}
             data-launching={String(!!props.launching)}
+            data-block-id={props.blockId}
             data-has-ctx-menu={String(typeof props.onContextMenu === "function")}
             onClick={(e) => props.onLaunch(props.agent, e)}
             onContextMenu={(e) => {
@@ -657,5 +664,52 @@ describe("AgentPicker — filter bar", () => {
         render(() => <AgentPicker model={model as any} />);
         const input = await screen.findByTestId("agent-picker-filter-input");
         expect(document.activeElement).not.toBe(input);
+    });
+});
+
+describe("AgentPicker — agents:changed refetch", () => {
+    // REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md §2:
+    // every refetch used to hand <For> brand-new objects, remounting every
+    // card and re-running the default card's focus() — the "pane scrolls to
+    // New Agent for no reason" report.
+    const pickerModel = () => makeMockModel() as unknown as AgentViewModel;
+    const fireAgentsChanged = async () => {
+        const { muxEventSubscribe } = await import("@/app/store/mps");
+        for (const [sub] of vi.mocked(muxEventSubscribe).mock.calls) {
+            if (sub.eventType === "agents:changed") sub.handler(undefined as never);
+        }
+    };
+
+    it("keeps unchanged cards mounted across a refetch", async () => {
+        render(() => <AgentPicker model={pickerModel()} />);
+        await screen.findByTestId("agent-card-tpl-claude");
+        expect(cardMountSpy).toHaveBeenCalledTimes(1);
+
+        // Same content, fresh objects — exactly what a real RPC round-trip returns.
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([{ ...claudeTemplate }, { ...userAgent }]);
+        await fireAgentsChanged();
+        await waitFor(() => expect(RpcApi.ListAgentDefinitionsCommand).toHaveBeenCalledTimes(2));
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(cardMountSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("still re-renders a card whose definition actually changed", async () => {
+        render(() => <AgentPicker model={pickerModel()} />);
+        await screen.findByTestId("agent-card-tpl-claude");
+
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
+            { ...claudeTemplate, name: "Claude Code 2" },
+            { ...userAgent },
+        ]);
+        await fireAgentsChanged();
+
+        expect(await screen.findByText("Claude Code 2")).toBeTruthy();
+    });
+
+    it("passes its own blockId to the cards so default focus is pane-scoped", async () => {
+        render(() => <AgentPicker model={pickerModel()} />);
+        await screen.findByTestId("agent-card-tpl-claude");
+        expect(screen.getByTestId("agent-card-tpl-claude").getAttribute("data-block-id")).toBe("blk-1");
     });
 });
