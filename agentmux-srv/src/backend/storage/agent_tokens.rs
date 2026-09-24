@@ -491,6 +491,27 @@ mod tests {
             store.agent_lan_key_load("agent--v2-").unwrap().is_none(),
             "the pre-rename fallback key is purged"
         );
+
+        // Any write path is recorded — a raw UPDATE stands in for the
+        // continuation fold — and never evicted, however many renames
+        // (Codex P1/P2 on #3633).
+        let mut many = test_agent_def("uid-many", "First Name", "claude", "agent", 1, "");
+        many.slug = "many".to_string();
+        store.agent_def_insert(&mut many).unwrap();
+        store.agent_lan_key_ensure("first-name").unwrap();
+        for i in 0..25 {
+            store
+                .conn()
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE db_agents SET name = ?1, instance_name = ?1 WHERE id = 'uid-many'",
+                    rusqlite::params![format!("Name {i}")],
+                )
+                .unwrap();
+        }
+        assert!(store.agent_def_delete("uid-many").unwrap());
+        assert!(store.agent_lan_key_load("first-name").unwrap().is_none(), "the first name, 25 renames ago");
     }
 
     /// Slug ownership is folded as the key tables fold (`to_lowercase`), not
