@@ -152,9 +152,9 @@ pub(crate) fn build_continuation_packet(tail: &[u8], starts_mid_line: bool) -> O
         .rposition(|t| matches!(t, Turn::User(u) if !is_relayed(u)))
         .or_else(|| turns.iter().rposition(|t| matches!(t, Turn::User(_))))?;
     let Turn::User(last_request) = &turns[last_user] else { return None };
-    let answered = turns[last_user + 1..]
-        .iter()
-        .any(|t| matches!(t, Turn::Assistant { text, .. } if !text.is_empty()));
+    // Only the turn right after the request is its reply; anything later
+    // answers some other message.
+    let answered = matches!(turns.get(last_user + 1), Some(Turn::Assistant { text, .. }) if !text.is_empty());
 
     let mut kept: Vec<String> = Vec::new();
     let mut used = 0;
@@ -213,7 +213,10 @@ pub(crate) fn prefix_user_message(line: &str, packet: &str) -> Option<String> {
     Some(v.to_string())
 }
 
-const SECRET_PREFIXES: &[&str] = &["github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "sk-", "xoxb-", "xoxp-", "AKIA"];
+const SECRET_PREFIXES: &[&str] = &[
+    "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "sk-", "xoxa-", "xoxb-", "xoxo-", "xoxp-", "xoxr-", "xoxs-",
+    "AKIA",
+];
 
 /// Blanks credential-shaped tokens and PEM private keys before history is
 /// replayed into a model (§4.7). Deliberately shape-based: it errs toward
@@ -247,16 +250,20 @@ fn redact_secrets(text: &str) -> String {
 
 fn redact_private_keys(text: &str) -> String {
     let mut out = text.to_string();
-    while let Some(start) = out.find("-----BEGIN") {
+    let mut from = 0;
+    while let Some(found) = out[from..].find("-----BEGIN") {
+        let start = from + found;
         let header_end = out[start..].find('\n').map_or(out.len(), |i| start + i);
         if !out[start..header_end].contains("PRIVATE KEY") {
-            break;
+            from = header_end;
+            continue;
         }
         let end = out[start..]
             .find("-----END")
             .and_then(|i| out[start + i..].find("KEY-----").map(|j| start + i + j + "KEY-----".len()))
             .unwrap_or(out.len());
         out.replace_range(start..end, "[redacted private key]");
+        from = start + "[redacted private key]".len();
     }
     out
 }
@@ -387,6 +394,18 @@ mod tests {
         assert!(!request.split("## Recent exchange").next().unwrap().contains("[JEKT:"));
     }
 
+    /// ReAgent P1 on #3643: a reply to a later relayed message is not a
+    /// reply to the person's request.
+    #[test]
+    fn a_reply_to_a_later_relayed_message_does_not_answer_the_request() {
+        let p = packet(&[
+            user("please fix the login bug"),
+            user("[JEKT:FROM=github-consumer TIER=coord]\nPR #9 approved"),
+            say("merging #9"),
+        ]);
+        assert!(p.contains("## Last request from the user (NOT answered"), "{p}");
+    }
+
     #[test]
     fn with_only_relayed_messages_the_last_one_stands_in() {
         let p = packet(&[user("[JEKT:FROM=x TIER=coord]\nping")]);
@@ -422,6 +441,26 @@ mod tests {
         assert!(!p.contains("ghp_abcdef") && !p.contains("sk-ant-api03"));
         assert!(!p.contains("AAAAB3Nza"));
         assert!(p.contains("[redacted secret]") && p.contains("[redacted private key]"));
+    }
+
+    /// ReAgent P0 on #3643: a certificate ahead of a private key must not
+    /// end the scan and let the key through.
+    #[test]
+    fn a_private_key_after_a_certificate_is_still_redacted() {
+        let text = "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n\
+                    -----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----\ndone";
+        let out = redact_private_keys(text);
+        assert!(out.contains("MIIBcert"), "a certificate is public: {out}");
+        assert!(!out.contains("MIIEsecret"), "{out}");
+        assert!(out.contains("[redacted private key]") && out.ends_with("done"));
+    }
+
+    #[test]
+    fn every_slack_token_family_is_redacted() {
+        for prefix in ["xoxa-", "xoxb-", "xoxo-", "xoxp-", "xoxr-", "xoxs-"] {
+            let token = format!("{prefix}1234567890-abcdefghijklmnop");
+            assert_eq!(redact_secrets(&format!("t {token} t")), "t [redacted secret] t", "{prefix}");
+        }
     }
 
     #[test]
