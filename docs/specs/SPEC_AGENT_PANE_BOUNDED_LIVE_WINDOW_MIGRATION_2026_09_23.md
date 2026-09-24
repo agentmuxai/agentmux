@@ -658,7 +658,8 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      the connection lock per window, so appends continue. It then counts
      what they added in one transaction. It gives up if the scanned bytes may
      have changed underneath it:
-     - the row was re-created (`createdts`);
+     - the row was re-created: its `incarnation`, 64 random bits set by an
+       insert trigger for every writer, differs even within one millisecond;
      - any writer, older builds included, rewrote bytes (`rev`, bumped by
        the database's triggers for every write that isn't an append);
      - as a second line of defence, the file shrank or its scanned tail

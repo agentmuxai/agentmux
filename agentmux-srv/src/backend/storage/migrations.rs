@@ -2117,6 +2117,10 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
         // counted at. An epoch is valid only while they are equal.
         "ALTER TABLE db_wave_file ADD COLUMN rev INTEGER",
         "ALTER TABLE db_wave_file ADD COLUMN lines_rev INTEGER",
+        // A random identity per row, set by the insert trigger below: a file
+        // deleted and re-created is a different incarnation even if every
+        // other column (and the creation millisecond) comes out the same.
+        "ALTER TABLE db_wave_file ADD COLUMN incarnation BLOB",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             if !e.to_string().contains("duplicate column") {
@@ -2161,7 +2165,20 @@ pub fn run_filestore_migrations(conn: &Connection) -> Result<(), StoreError> {
          BEGIN
              UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
              WHERE zoneid = OLD.zoneid AND name = OLD.name;
-         END;",
+         END;
+
+         -- Every row, whoever inserts it (older builds included), gets 64
+         -- random bits of identity. A delete + re-create in the same
+         -- millisecond with the same size and bytes is still a different
+         -- incarnation (Codex on #3631).
+         CREATE TRIGGER IF NOT EXISTS db_wave_file_incarnation
+         AFTER INSERT ON db_wave_file
+         BEGIN
+             UPDATE db_wave_file SET incarnation = randomblob(8)
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;
+
+         UPDATE db_wave_file SET incarnation = randomblob(8) WHERE incarnation IS NULL;",
     )?;
     Ok(())
 }

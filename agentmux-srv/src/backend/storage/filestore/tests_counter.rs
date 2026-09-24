@@ -244,8 +244,11 @@ fn init_gives_up_when_bytes_it_scanned_are_rewritten_in_place() {
 
 #[test]
 fn init_gives_up_when_the_file_is_recreated_during_the_scan() {
-    // Deleted and re-created with the same bytes by a writer that doesn't
-    // start an epoch (an older build): a different row, however alike.
+    // Deleted and re-created by a writer that doesn't start an epoch (an
+    // older build, which deletes the row, then its parts, then inserts), in
+    // the same millisecond, with the same size and bytes: every column but
+    // the trigger-set incarnation comes out equal (Codex on #3631), and `rev`
+    // starts over with the new row.
     let fs = mem();
     let content: &[u8] = b"one\ntwo\n";
     uncounted(&fs, content);
@@ -256,11 +259,14 @@ fn init_gives_up_when_the_file_is_recreated_during_the_scan() {
             .query_row("SELECT createdts, modts FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap();
         conn.execute("DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME]).unwrap();
+        conn.execute("DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME]).unwrap();
         conn.execute(
             "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![ZONE, NAME, content.len() as i64, created + 1, modts + 1],
+            params![ZONE, NAME, content.len() as i64, created, modts],
         )
         .unwrap();
+        conn.execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, 0, ?3)", params![ZONE, NAME, content])
+            .unwrap();
     }
     assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
 }

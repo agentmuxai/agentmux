@@ -91,7 +91,9 @@ pub(super) enum AppendMode {
 pub(super) struct Row {
     pub size: i64,
     pub modts: i64,
-    createdts: i64,
+    /// Random per-row identity (insert trigger); differs across a delete +
+    /// re-create even when every other column matches.
+    incarnation: Option<Vec<u8>>,
     /// Bumped by every write that rewrites existing bytes (not appends).
     rev: i64,
     gen: Option<String>,
@@ -141,7 +143,7 @@ impl Row {
 pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<Option<Row>, StoreError> {
     Ok(conn
         .query_row(
-            "SELECT size, modts, gen, lines, lines_size, lines_tail, lines_modts, createdts, rev, lines_rev
+            "SELECT size, modts, gen, lines, lines_size, lines_tail, lines_modts, incarnation, rev, lines_rev
              FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
             params![zone_id, name],
             |r| {
@@ -153,7 +155,7 @@ pub(super) fn read_row(conn: &Connection, zone_id: &str, name: &str) -> Result<O
                     lines_size: r.get(4)?,
                     lines_tail: r.get(5)?,
                     lines_modts: r.get(6)?,
-                    createdts: r.get(7)?,
+                    incarnation: r.get(7)?,
                     rev: r.get::<_, Option<i64>>(8)?.unwrap_or(0),
                     lines_rev: r.get(9)?,
                 })
@@ -426,7 +428,7 @@ impl FileStore {
             count,
             open,
             fingerprint,
-            createdts: row.createdts,
+            incarnation: row.incarnation,
             rev: row.rev,
         }))
     }
@@ -435,7 +437,7 @@ impl FileStore {
     /// row as it is now, count what was appended since, and start the epoch,
     /// all in one transaction.
     pub(super) fn init_finish(&self, zone_id: &str, name: &str, scan: ScanResult) -> Result<Option<LineState>, StoreError> {
-        let ScanResult { scan_to, count, open, fingerprint, createdts, rev } = scan;
+        let ScanResult { scan_to, count, open, fingerprint, incarnation, rev } = scan;
         let fp_len = fingerprint.len() as i64;
         self.write_txn(|tx| {
             let Some(row) = read_row(tx, zone_id, name)? else { return Ok(None) };
@@ -443,12 +445,13 @@ impl FileStore {
                 return Ok(Some(row.state()));
             }
             // The scanned bytes must still be the file's bytes: the same row
-            // (not deleted and re-created) and nothing rewritten since the
+            // (its random incarnation — not deleted and re-created, even
+            // within one millisecond, Codex on #3631) and nothing rewritten since the
             // scan began — `rev` is bumped by the database's triggers for any
             // writer, older builds included (review of #3631). Appends don't
             // bump it, and are counted below. The size and tail checks are
             // redundant with `rev`, kept as a second line of defence.
-            if row.createdts != createdts
+            if row.incarnation != incarnation
                 || row.rev != rev
                 || row.size < scan_to
                 || read_bytes(tx, zone_id, name, scan_to - fp_len, fp_len)? != fingerprint
@@ -482,6 +485,6 @@ pub(super) struct ScanResult {
     count: LineCount,
     open: Vec<u8>,
     fingerprint: Vec<u8>,
-    createdts: i64,
+    incarnation: Option<Vec<u8>>,
     rev: i64,
 }
