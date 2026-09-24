@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5 groundwork recorded in §6.3.6 (2026-09-24); Phases 4–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
+**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5 groundwork recorded in §6.3.6 and the 5a design in §6.3.7 (2026-09-24); Phases 4–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing
@@ -576,8 +576,174 @@ should be treated as a schema reset.
 | 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. | Frontend + backend |
 | 5e | Accepted ranges and the replay filter (§6.3.3). | Frontend |
 
-Order: 5d's Gemini echo fix can land any time; 5a before 5b and 5c; 5e last,
-just before Phase 6.
+Order: 5d's Gemini echo fix can land any time (shipped in #3620); 5a before
+5b and 5c; 5e last, just before Phase 6. 5a's design is §6.3.7.
+
+#### 6.3.7 Phase 5a design: one addressable transcript stream (2026-09-24)
+
+**Goal.** Every record a pane parses has an address `(stream, gen, line)`
+that is the same live, on reconnect replay and in the History tab, and that
+never names different content twice. The pane's parser consumes each
+stream's lines **exactly once, in order, with no gaps**. Live events, replays
+and range reads all deliver into that one contract. Nothing in 5a changes
+node ids (5b), and nothing is evicted.
+
+**What the write path does today** (read-only survey of `main`, in addition
+to §6.3.6; paths under `agentmux-srv/src/`):
+
+- **No transactions.** `FileStore` has one `Mutex<Connection>` per store
+  (`storage/filestore/core.rs:36`) and no SQLite transaction anywhere.
+  `append_data_at` (`core.rs:484`) reads the size, writes the 64 KB parts and
+  updates the size as separate autocommit statements. The comments that say
+  "single-tx" (`helpers.rs:24`, `blockfile.rs:449`, `v1_templates.rs:593`) are
+  wrong.
+- **Several processes append to one global zone.** The global store
+  (`<shared>/agents/transcripts/filestore.db`, `bootstrap.rs:738`) is opened
+  by every srv instance on the machine; the in-process mutex doesn't cover
+  them. Two instances appending to one agent's zone can both read size `S`
+  and overwrite each other's bytes, and a crash between statements leaves a
+  torn append. This is a data-loss risk today, independent of this spec.
+- **`stat()` answers from a per-process cache** (`core.rs:299`) that is never
+  flushed, so one process can see another's append or delete late.
+- **Several writers per block, even in one process.** The controller's stdout
+  reader, the reactive jekt echo (`server/reactive.rs:151`) and error frames
+  all append to the same block. Error frames skip the global zone
+  (`agent_handlers/input.rs:764,983`, `app_api/agent_io.rs:234`,
+  `host_spawn.rs:737`, `container_spawn.rs:326`), and so does the app-server
+  controller (`app_server_controller.rs:181`) whose reads still switch to the
+  global zone. The block file and the global zone therefore hold different
+  line sequences.
+- **The event goes out before the write** (`shell/file_ops.rs:201`) with an
+  offset from a stat taken before it (`:163`). The global mirror publishes
+  nothing, on any scope, so a pane never sees another block's lines live.
+- **Line numbering is the reader's rule:** non-blank lines under
+  `trim().is_empty()`, CRLF-aware (`shell/indexing.rs:14`). `output.idx` is a
+  lazily rebuilt reader cache with no lock around scan-then-write. Live callers
+  append exactly one non-blank, `\n`-terminated line; the RPC
+  `append_session_output` (`agent_session/session_io.rs:137`) takes any text.
+- **Eight paths delete or replace `output`** with no common choke point:
+  `archive_session` and `clear_global_current_zone`
+  (`agent_session/archive.rs:31,275`), `archive_session_output` and
+  `restore_session_output` (`backend/session_archive.rs:99,189`), the
+  transcript backfill (`backend/transcript_backfill.rs:143`), the m0003 zone
+  move (`agent_session/migrations/v1_templates.rs:419`), `blockfile:write_state`
+  (`app_api/blockfile.rs:437`), and the dead `handle_truncate_block_file`.
+  Several leave `output.idx` / `output.tsidx` behind, which then describe
+  content that no longer exists.
+
+**Design.**
+
+1. **Atomic `FileStore` mutations.** Every mutation (`append_data_at`,
+   `make_file`, `write_file`, `delete_file`, `delete_zone`, `write_meta`) runs
+   in one `BEGIN IMMEDIATE` transaction on the store's connection. The existing
+   `busy_timeout=5000` makes a second process wait instead of failing. This
+   alone fixes the cross-process overwrite and the torn append, and ships
+   first.
+2. **Generation = a nonce minted by the store.** A new column
+   `db_wave_file.gen` holds a random 64-bit value, minted in the same
+   transaction whenever a file row is created or its content replaced
+   (`make_file`, `write_file`, and a new `replace_file` used by restore). A
+   delete removes the row, so a re-created file always gets a new `gen`. A
+   nonce, not a counter: a counter kept on the row is lost with the row and
+   would restart, and a nonce needs no coordination between processes.
+   Different files have different nonces, so a pane whose reads move from the
+   global zone to the block file sees a different `(stream, gen)` and treats
+   it as a new generation. Legacy rows get a `gen` lazily
+   (`UPDATE … WHERE gen IS NULL`, then re-select; idempotent under races).
+3. **Line counter on the row.** A new column `db_wave_file.lines` holds the
+   file's line count under the reader's rule, updated inside the append
+   transaction. Transcript writes go through a new
+   `append_lines(zone, name, data) -> AppendPos { gen, first_line, lines,
+   offset }`, which normalizes `data` to complete, non-blank,
+   `\n`-terminated lines (the same `trim` rule as the indexer), so the counter
+   is a sum and never re-scans. If the file ends mid-line (a legacy or
+   crash-torn tail), the transaction first writes `\n`. The torn line keeps its
+   index; today the next record fuses with it and both become unparseable.
+   Legacy rows (`lines IS NULL`) are initialized off the hot path by a
+   housekeeping task: it counts on a read snapshot, then reconciles the bytes
+   appended since in a write transaction, the technique `extend_output_idx`
+   already uses. Until a row is initialized, `append_lines` returns
+   `first_line: None` and that stream keeps today's position-less behaviour.
+   `output.idx` stays a reader cache, but its header gains `gen` so a replaced
+   file never reuses an old index; a debug assertion and a counter check that
+   the index count equals `lines`.
+4. **One replace/delete primitive per transcript.** The eight paths above call
+   `replace_transcript` / `delete_transcript`. In one transaction, these
+   replace or delete `output`, delete `output.idx` and `output.tsidx`, and
+   mint the new `gen`. Each then publishes a stream event
+   (`fileop: "replace" | "delete"`, new `gen`), so an open pane learns at once
+   instead of on its next reload.
+5. **Events carry positions and go out after the write.** `WSFileEventData`
+   gains `pos: [{ stream, gen, line, lines }]`, where `stream` is
+   `b:<blockId>` or `g:<zone>`. It carries one entry for the block file and one
+   for the global zone when the mirror succeeded. `offset` stays for terminal
+   consumers. A per-stream in-process mutex is held across append and publish,
+   so one process publishes a stream's events in line order. The stdout reader
+   already calls both appends inline before it reads the next line
+   (`subprocess/host_spawn.rs:382`), so throughput is unchanged. Each event is
+   delayed by the append time, measured before and after (gate: p99 added
+   latency ≤ 2 ms on the local store; the global store is reported
+   separately). Those inline appends are blocking SQLite calls on a tokio
+   worker, and another process holding the global database can already stall
+   that worker for up to the 5 s busy timeout. If the measurement shows it,
+   each stream gets one writer task fed by a queue (`spawn_blocking`). The
+   queue keeps publish order without the mutex and takes SQLite off the
+   runtime.
+   - **Silent persists publish.** `persist_to_blockfile_silent` becomes a normal
+     `append_lines` whose event carries `echo: { messageId }`, and
+     `agent-message-accepted` carries the same `pos`. The pane advances its
+     cursor past the line without creating a second node. In 5b it gives the
+     optimistic node that line's positional id, so it becomes `transcript`
+     provenance (§6.3.2) with no guessing.
+   - **Every record a pane shows live is in its stream.** Error frames and
+     the app-server controller resolve and mirror to the global zone like
+     every other writer. If the mirror itself fails, the event has no entry
+     for the pane's stream. The pane then renders the record as non-durable
+     (pinned, never evicted) and counts it in the dev HUD.
+6. **Reads name what they served.** `BlockfileLineCountCommand` and
+   `BlockfileReadRangeCommand` responses gain `{ stream, gen }`, read from
+   the database inside a read transaction rather than the per-process
+   cache. `read_range` accepts `expectGen` and answers `genMismatch` rather
+   than returning another generation's lines, so a replace landing between a
+   count and a read can't mix two files.
+7. **Consumer contract (frontend part of 5a).** Per pinned `(stream, gen)`
+   the stream hook keeps `next`, the next line it expects:
+   - `line < next`: duplicate, dropped.
+   - `line == next`: parsed.
+   - `line > next`: gap. The hook reads `[next, line)` from the same stream
+     with `expectGen`, parses it, then continues. Events arriving during the
+     fetch queue behind it.
+   - A new `gen` or `stream`, or a `replace`/`delete` event, goes through
+     today's truncate / session rules (and resets the accepted ranges in 5e).
+   - The existing line-count poll also fills `lines > next`. That is how
+     lines appended by another block, channel or srv instance reach a live
+     pane. Today they only appear after a reload.
+
+   The parser still assigns today's ids in 5a. Its input just becomes
+   `{ stream, gen, line, text }`, ready for 5b.
+
+**Pull requests** (each shippable alone, in order):
+
+| PR | Scope | Proof |
+|---|---|---|
+| 5a-1 | `BEGIN IMMEDIATE` for every `FileStore` mutation; fix the "single-tx" comments | Two `FileStore` instances on one database file, many threads each appending numbered lines: every line present exactly once, intact. Append latency before/after. |
+| 5a-2 | `gen` + `lines` columns and migration, `append_lines`, torn-tail repair, housekeeping initialization, `replace_transcript` / `delete_transcript` on all eight paths, `gen` in the `output.idx` header | Fuzz: `lines` equals the indexer's count for random data (blank, CRLF, unicode, torn tails). Every replace/delete path mints a new `gen` and removes both sidecars. |
+| 5a-3 | Positions on live events and read responses; publish-after-write under the per-stream lock; silent persist with `echo`; error frames and app-server mirrored; `replace`/`delete` events | Backend tests per event source; an event's `line` indexes exactly its record in a range read. |
+| 5a-4 | Frontend consumer contract | Out-of-order, duplicate, gap, `gen` change mid-fetch, cross-process append via the poll; `full-conversation-bench` streaming cost unchanged. |
+
+**Known, not changed here.** Two live sessions of the same agent (for
+example, one in each of two srv instances) interleave records in one global
+zone, and a single parser then sees two sessions' records mixed. Replay does
+this today. 5a makes live do the same instead of hiding it. How often it
+happens in practice isn't measured. 5a-3 counts, per zone, appends whose
+writer (block or process) differs from the previous append's writer less than
+60 s earlier.
+Separating them (a per-writer tag on each record) is a later decision.
+
+**Coordination.** 5a-3 changes the persistent controller's user-line persist
+(`persistent/queue.rs:598`) and its caller in `persistent/input.rs`, the area
+`maricon/no-midturn-delivery-impl` is reworking. 5a-3 goes after that branch
+lands, or rebases onto it. The identity work (M4) doesn't touch these files.
 
 #### 6.3.4 Eviction while pinned
 
