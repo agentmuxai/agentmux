@@ -259,3 +259,199 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
         ta.remove();
     });
 });
+
+// Phase 0 of docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md:
+// the owner's two live reports, each pinned to its root cause.
+//   A  — a new pane never starts following: our own first-overflow pin landed
+//        near the top, ran older-history pagination, whose anchor capture
+//        turned the follow off (and loaded nothing).
+//   B1 — it gets stuck later: a click that scrolled nothing left a sticky
+//        "user input" flag that the next pin (minutes later) inherited.
+//   B2 — a scroll the browser made on its own (clamp, scroll anchoring)
+//        disengaged as if the user had scrolled away.
+describe("scroll-follow Phase 0 regressions", () => {
+    let clock = 0;
+
+    beforeEach(() => {
+        roInstances = [];
+        rafQueue = [];
+        clock = 0;
+        vi.spyOn(performance, "now").mockImplementation(() => clock);
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+            rafQueue.push(cb);
+            return rafQueue.length;
+        });
+        vi.stubGlobal("cancelAnimationFrame", () => {});
+        vi.spyOn(console, "info").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    function setupWithHistory(opts: { hasOlder?: boolean; geo: Geo }) {
+        const [nodes] = createSignal<DocumentNode[]>([md("a")]);
+        const viewState = createAgentViewState(nodes);
+        const [docState] = createSignal(emptyDocumentState());
+        const onLoadOlder = vi.fn(() => Promise.resolve());
+        const utils = render(() => (
+            <AgentDocumentVirtualList
+                viewState={viewState}
+                documentState={docState}
+                onToggleCollapse={() => {}}
+                onTogglePin={() => {}}
+                onLoadOlder={onLoadOlder}
+                hasOlderHistory={opts.hasOlder === undefined ? undefined : () => opts.hasOlder!}
+            />
+        ));
+        const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
+        const buffer = utils.container.querySelector(".agent-document-streaming-buffer") as HTMLElement;
+        const row = document.createElement("div");
+        buffer.appendChild(row); // a content element to click on
+        const g = makeScrollable(scrollRef, opts.geo);
+        return { viewState, scrollRef, buffer, row, g, onLoadOlder };
+    }
+
+    it("A: a new session's first small overflow keeps following and does not page", () => {
+        // 300px viewport; content just starts to overflow by 12px.
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 312, clientHeight: 300 } });
+        triggerResize(s.buffer); // content RO pins: scrollTop = 12 (< 50, "near top")
+        expect(s.g.top).toBe(12);
+        flushRaf(); // the pin's own scroll batch
+        expect(s.onLoadOlder).not.toHaveBeenCalled();
+        expect(s.viewState.stickToBottom()).toBe(true);
+        expect(s.viewState.headAnchor()).toBeNull();
+        // ...and it keeps following as the conversation grows.
+        s.g.set({ scrollHeight: 700 });
+        triggerResize(s.buffer);
+        expect(s.g.top).toBe(400);
+    });
+
+    it("A: with no older history, even a non-pin scroll near the top never pages", () => {
+        const s = setupWithHistory({ hasOlder: false, geo: { scrollTop: 0, scrollHeight: 340, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        // The browser nudges scrollTop (e.g. a clamp) — near the top, no pin.
+        s.g.set({ scrollTop: 20 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.onLoadOlder).not.toHaveBeenCalled();
+        expect(s.viewState.stickToBottom()).toBe(true);
+    });
+
+    it("A: with older history, a browser-made scroll near the top (collapse + regrow) neither pages nor disengages", () => {
+        // ReAgent P1 on #3652: a pane that has already paginated once
+        // (historyOffset > 0) must not be exposed either. The range collapses
+        // (/clear, the whole-pane collapse) and regrows by a few px; the
+        // browser's own clamp/anchoring scroll lands near the top.
+        const s = setupWithHistory({ hasOlder: true, geo: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.g.set({ scrollHeight: 330, scrollTop: 20 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.onLoadOlder).not.toHaveBeenCalled();
+        expect(s.viewState.stickToBottom()).toBe(true);
+        expect(s.viewState.headAnchor()).toBeNull();
+    });
+
+    it("A: a scrollbar drag held to the top still pages when older history exists", () => {
+        const s = setupWithHistory({ hasOlder: true, geo: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.scrollRef.dispatchEvent(new Event("pointerdown")); // grab the scrollbar
+        clock += 3_000; // a slow drag, long past the input window
+        s.g.set({ scrollTop: 5 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+        window.dispatchEvent(new Event("pointerup"));
+    });
+
+    it("A: a real user scroll to the top still pages when older history exists", () => {
+        const s = setupWithHistory({ hasOlder: true, geo: { scrollTop: 0, scrollHeight: 900, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.scrollRef.dispatchEvent(new Event("wheel"));
+        s.g.set({ scrollTop: 10 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.onLoadOlder).toHaveBeenCalledTimes(1);
+        expect(s.viewState.stickToBottom()).toBe(false);
+    });
+
+    it("B1: a click on content is not scroll input; a later pin with a big same-frame flush keeps following", () => {
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 500, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.row.dispatchEvent(new Event("pointerdown", { bubbles: true })); // focus / select text / expand a tool
+        window.dispatchEvent(new Event("pointerup"));
+        clock += 60_000; // minutes later, the next pin...
+        s.g.set({ scrollHeight: 900 });
+        triggerResize(s.buffer);
+        s.g.set({ scrollHeight: 1400 }); // ...with a big tool output landed before its scroll batch
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(true);
+    });
+
+    it("B1: user input expires, so a wheel long ago does not make a later pin batch the user's", () => {
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 500, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.scrollRef.dispatchEvent(new Event("wheel")); // a wheel that scrolled nothing (already at bottom)
+        clock += 5_000;
+        s.g.set({ scrollHeight: 900 });
+        triggerResize(s.buffer);
+        s.g.set({ scrollHeight: 1400 });
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(true);
+    });
+
+    it("B2: a scroll the browser makes on its own (anchoring / clamp) never disengages", () => {
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        expect(s.g.top).toBe(700);
+        // Scroll anchoring moves scrollTop far from the bottom; no user gesture.
+        s.g.set({ scrollTop: 150 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(true);
+        // The next content resize pins right back.
+        s.g.set({ scrollHeight: 1100 });
+        triggerResize(s.buffer);
+        expect(s.g.top).toBe(800);
+    });
+
+    it("a slow scrollbar drag stays the user's for as long as the pointer is held", () => {
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.scrollRef.dispatchEvent(new Event("pointerdown")); // on the scroller itself: its scrollbar
+        clock += 2_000; // still dragging
+        s.g.set({ scrollTop: 200 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(false);
+        window.dispatchEvent(new Event("pointerup"));
+    });
+
+    it("a wheel up disengages; scrolling back to the bottom re-engages", () => {
+        const s = setupWithHistory({ geo: { scrollTop: 0, scrollHeight: 1000, clientHeight: 300 } });
+        triggerResize(s.buffer);
+        flushRaf();
+        s.scrollRef.dispatchEvent(new Event("wheel"));
+        s.g.set({ scrollTop: 300 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(false);
+        clock += 1_000;
+        s.scrollRef.dispatchEvent(new Event("wheel"));
+        s.g.set({ scrollTop: 700 });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(s.viewState.stickToBottom()).toBe(true);
+    });
+});
