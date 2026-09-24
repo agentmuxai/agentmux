@@ -27,9 +27,12 @@ seem like the conversation continued."*
 
 **Evidence rule.** The last spec in this area (identity-carried, §0) recorded
 that its failures came from *"asserting what the code does without running
-it."* Every code claim below has a `file:line` citation checked on
-2026-09-23 against `934b335b6`. Claims about provider CLIs cite the vendor
-docs. Anything unverified is marked **[unverified]**.
+it."* Every code claim below has a `file:line` citation. They were first
+checked against `934b335b6`, then re-checked against `3a6bbde3c` (this PR's
+base) after ReAgent found two that `main` had already shifted. Lines drift
+quickly here, so each citation also names the function or symbol; trust the
+symbol over the line. Claims about provider CLIs cite the vendor docs.
+Anything unverified is marked **[unverified]**.
 
 ---
 
@@ -60,10 +63,10 @@ restored.**
   `…-27a8ae9b`, fresh DB). The account (`72682785…`) and cwd were the same, so
   the old transcript was on disk and reachable.
 - The frontend launch path sets `"agent:sessionid": continueSid`
-  (`frontend/app/view/agent/agent-model.ts:769`). `continueSid` is empty unless
+  (`frontend/app/view/agent/agent-model.ts:815`). `continueSid` is empty unless
   the user picks a "Continue" row. The server-side registry lookup that would
-  have supplied the id (`agentmux-srv/src/server/app_api/agent_open.rs:560-571`)
-  is not on that path.
+  have supplied the id (`agentmux-srv/src/server/app_api/agent_open.rs:647-667`,
+  `agent_live_elsewhere` / `resume_session_id`) is not on that path.
 - With no session id, spawn does **not** scan disk. This is stated in
   `agentmux-srv/src/backend/resume_preflight.rs` (module doc, table row 4):
   *"a spawn with no sid does **not** consult the on-disk transcripts."* The
@@ -74,7 +77,9 @@ restored.**
 - `SearchHistory`, the tool built for exactly this, failed. Its first call
   errored at the transport. A later measurement with `agent=AgentY` (what the
   tool sends) returned `total_sessions: 0, truncated: false`, a confident
-  "no history". Querying by the agent's UID returned 5 sessions.
+  "no history". Querying by the agent's UID returned 5 sessions. The running
+  build was v0.57.0. `main` has since fixed this in #3605 (identity M4c-2c;
+  see §3).
 
 Every link needed for recovery existed: the transcript, the account, and an
 AgentMux-owned copy (§3). None of them was consulted.
@@ -117,16 +122,16 @@ AgentMux-owned copy (§3). None of them was consulted.
 
 | Mechanism | Where | What it gives us | Gap |
 |---|---|---|---|
-| **Global transcript FileStore** | `agentmux-srv/src/backend/agent_session/global_store.rs:10-35`, at `~/.agentmux/shared/agents/transcripts/filestore.db` (7.9 GB on this host) | Every agent stdout append is mirrored in (`backend/blockcontroller/shell/file_ops.rs:116`). Zones are `agent:<defId>:current` and `:archive:<ms>` (`backend/agent_session/zone_naming.rs:29-35`). Keyed by **definition id**, so it already survives account and channel changes | Stores the raw provider stream format. Used only for pane rendering, fresh-start detection and the resume retry (`backend/blockcontroller/persistent/resume_retry.rs:149`). No segment metadata, no normalized view, no read API for the agent |
-| Session-id capture | `backend/blockcontroller/persistent/spawn.rs:798-827` → `blockcontroller/core.rs:125-205` | `agent:sessionid` in block meta and `db_agent_instances.session_id` | Lives in per-pane meta, so it's lost on a new pane or instance (§1.1) |
-| Resume and recovery | `persistent/spawn.rs:99-108, 354-379`, `persistent/resume_retry.rs:173-252` | `--resume <sid>`. On "No conversation found", it retries with the largest other session in the **same** config dir and cwd | Never runs when there's no sid. Never looks outside the current account's dir |
+| **Global transcript FileStore** | `agentmux-srv/src/backend/agent_session/global_store.rs:24-35` (`GLOBAL_TRANSCRIPT_STORE`, `global_transcript_store()`), at `~/.agentmux/shared/agents/transcripts/filestore.db` (7.9 GB on this host) | Every agent stdout append is mirrored in (`backend/blockcontroller/shell/file_ops.rs:116`). Zones are `agent:<defId>:current` and `:archive:<ms>` (`backend/agent_session/zone_naming.rs:21-35`, `agent_current_zone` / `agent_archive_zone`). Keyed by **definition id**, so it already survives account and channel changes | Stores the raw provider stream format. Used only for pane rendering, fresh-start detection and the resume retry (`backend/blockcontroller/persistent/resume_retry.rs:149`). No segment metadata, no normalized view, no read API for the agent |
+| Session-id capture | `backend/blockcontroller/persistent/spawn.rs:835-860` (the `session_id_field` read off each stream event) → `backend/blockcontroller/core.rs:125` (`persist_session_id`) | `agent:sessionid` in block meta and `db_agent_instances.session_id` | Lives in per-pane meta, so it's lost on a new pane or instance (§1.1) |
+| Resume and recovery | `persistent/spawn.rs:97-104` (appends `resume_flag` + sid), `persistent/spawn.rs:365-375` (`poison_resume` on "No conversation found"), `persistent/resume_retry.rs:173` (`find_recovery_session_id`) and `:197` (`retry_after_resume_failure`) | `--resume <sid>`. On "No conversation found", it retries with the largest other session in the **same** config dir and cwd | Never runs when there's no sid. Never looks outside the current account's dir |
 | Resume preflight | `backend/resume_preflight.rs` | Predicts `Resume` / `Recover` / `Fresh` | Advisory only |
 | Eager resume after srv restart | #3463 | Panes that have a sid resume immediately | Needs a sid |
-| Account-dir history link | `identity/resolver/inject.rs:778-790`, `data_paths.rs:405-411, 483-585` | `claude/projects` junctioned to `shared/identities/<account>/claude/projects`, so history survives **channel** changes | Keyed by **account**. A new account starts with an empty dir |
+| Account-dir history link | `agentmux-srv/src/server/identity_auth_dirs.rs:37` (`link_history_if_isolated`, called from `identity/resolver/inject.rs:805`); junction creation in `agentmux-common/src/data_paths.rs:451-500` | `claude/projects` junctioned to `shared/identities/<account>/claude/projects`, so history survives **channel** changes | Keyed by **account**. A new account starts with an empty dir |
 | Hidden injection turn | #3502, frontend `memory-reinjection*.ts` | Model sees full text, user sees a label. Fires on compaction and on a `fresh` outcome | Injects memory files only. Claude only. Never checked on a live instance |
-| SearchHistory | `agentmux-mcp/src/main.rs:1599`, `backend/history/mod.rs:108-184`, `history/claude_adapter.rs:56-118` | Search your own past sessions | Returned 0 for the agent's slug (§1.1). Index refreshes only when empty (`history/mod.rs:114`). Claude only |
+| SearchHistory | `agentmux-mcp/src/main.rs:1706` (`"SearchHistory" =>`), `server/reactive.rs` (`handle_reactive_history_search`), `backend/history/claude_adapter.rs` (project-root discovery) | Search your own past sessions. Since #3605 (identity M4c-2c), an attributed caller (one sending `X-Agent-Token`) searches its own UID row's history, whatever `agent` names. That fixes §1.1's slug miss on `main` | Index refreshes only when empty (`backend/history/mod.rs:154, 211`). Claude only |
 | MCP → srv URL | `agentmux-mcp/src/main.rs:72-73` | Read once from env at MCP startup | No rediscovery if srv restarts on a new port |
-| Activity summaries | `server/app_api/session.rs:283, 426, 1002` | Haiku summarizes the last ~30 lines for titles and status | Not a continuation summary |
+| Activity summaries | `server/app_api/session.rs:237-314` (`invoke_ambient_haiku_call`) | Haiku summarizes the last ~30 lines for titles and status | Not a continuation summary |
 
 **Implication:** the hard part, an account-independent copy of every
 conversation, **already ships**. What's missing is (a) consulting it on every
@@ -207,7 +212,7 @@ It walks a ladder and stops at the first rung that applies:
 
 | Rung | Condition | Action | `continuity_rung` |
 |---|---|---|---|
-| R0 Live | A controller for this agent is already running elsewhere (existing `agent_live_elsewhere`, `agent_open.rs:555-560`) | Don't resume. Existing duplicate-session guard | n/a |
+| R0 Live | A controller for this agent is already running elsewhere (existing `agent_live_elsewhere`, `agent_open.rs:647`) | Don't resume. Existing duplicate-session guard | n/a |
 | R1 Native | Latest segment's transcript is reachable under the **current** config dir (`session_is_reachable`) | `--resume <sid>` (Codex: `exec resume <id>`, Gemini: `-r <id>`) | `native` |
 | R2 Relocate | Transcript exists in the ledger or on disk for the **same account and provider**, but not at the current path (different cwd slug, other channel's dir, swept from the provider dir but still in our raw layer) | Materialize the raw bytes into the current config dir byte-exact. For Claude, prefer `--resume <absolute .jsonl path>` or pin `CLAUDE_CODE_PROJECT_DIR_NAME` (v2.1.234+, documented for hosts that give each session its own config dir) over copying, then native resume. Never create a second file with the same session id | `relocated` |
 | R3 Virtualize | A predecessor segment exists, but native resume is impossible: different account, different provider, different model family, transcript unresumable, or R1/R2 failed at spawn | Fresh provider session, plus a **continuation packet** (§4.4) injected as the first hidden turn | `virtualized` |
@@ -215,7 +220,7 @@ It walks a ladder and stops at the first rung that applies:
 
 Rules:
 - **Fall through, don't fail.** An R1 or R2 spawn that the CLI rejects (the
-  existing `persistent/spawn.rs:354-379` detection) retries at R3 within the
+  existing `persistent/spawn.rs:365-375` `poison_resume` detection) retries at R3 within the
   same launch, not as a separate `fresh`.
 - **Cross-account native resume stays off.** Copying a Claude transcript into
   another account's config dir and running `--resume` is **[unverified]**.
@@ -331,7 +336,7 @@ Available on demand: SearchHistory / ReadHistory (segments <ids>).
   <https://docs.letta.com/guides/agents/memory-blocks/>). It is updated from
   (previous state block + new turns since) on these triggers: `PreCompact`,
   `SessionEnd`, segment close, and after N turns or 10 idle minutes. It uses
-  the same Haiku-class path as activity summaries (`session.rs:283`).
+  the same Haiku-class path as activity summaries (`session.rs`, `invoke_ambient_haiku_call`).
 - Each update is stored as an immutable, timestamped **packet version**,
   `(agent_uid, version, based_on_seq, sha256, created_at)`. Versions are never
   overwritten: facts that change are superseded, not erased (a bi-temporal
@@ -358,18 +363,20 @@ backstop for goals, pending items and user preferences.
 The packet stays small because older detail can be fetched just-in-time
 (Anthropic context-engineering guidance; Letta recall memory).
 - **`SearchHistory` fixes.**
-  - Key on `AGENTMUX_AGENT_UID`, not the slug; §1.1 measured 0 vs 5.
+  - ~~Key on the agent's UID, not the slug~~. **Done in #3605**: the owner
+    is the authenticated Caller's UID row. §1.1 measured 0 sessions by slug
+    and 5 by UID on v0.57.0, before #3605.
   - Search the normalized projection across all segments and providers
     instead of scanning Claude JSONL dirs.
   - Refresh the index incrementally on ledger append, not only when it's
-    empty (`history/mod.rs:114`).
+    empty (`backend/history/mod.rs:154, 211`).
   - Report `segments_scanned` and `accounts_spanned` so "not found" is
     distinguishable from "didn't look". This closes
     `SPEC_CROSS_CHANNEL_AGENT_HISTORY_RESOLUTION` §3.4.
 - **New `ReadHistory(segment_id, from_seq, to_seq)`.** Returns projected turns
   with provenance headers. Own agent only, enforced **server-side** from the
-  caller's authenticated UID, not a client-supplied name. This fixes the
-  "own history only is not enforced" gap in #3321.
+  caller's authenticated UID, not a client-supplied name. Uses the same
+  Caller-owner rule #3605 introduced for `SearchHistory`.
 - **MCP → srv rediscovery.** On connection failure, agentmux-mcp re-reads the
   srv endpoint from a per-channel endpoint file that srv writes atomically at
   bind (`backend/lan_listeners.rs:68` binds a random port today). It then
@@ -381,7 +388,7 @@ The packet stays small because older detail can be fetched just-in-time
 | Provider | Capture | Native resume (R1/R2) | Virtualize (R3) | Notes |
 |---|---|---|---|---|
 | Claude Code | Stdout mirror (exists) + `transcript_path` tail. `transcript_path` lags memory, so tail it, don't read at exit | `--resume <sid>` / `<abs path>`; `CLAUDE_CODE_PROJECT_DIR_NAME` | Hidden turn (#3502) | `SessionStart` hook matchers `startup\|resume\|compact` can also deliver `additionalContext`. Use as a second channel once live-verified |
-| Codex CLI | Stdout mirror + rollout files `$CODEX_HOME/sessions/YYYY/MM/DD/` | `exec resume <id>` | First-turn injection | Dedup duplicate rollouts; the app-server resume failure currently goes straight to DONE (`backend/blockcontroller/app_server_controller.rs:449-457`) and must fall to R3 instead |
+| Codex CLI | Stdout mirror + rollout files `$CODEX_HOME/sessions/YYYY/MM/DD/` | `exec resume <id>` | First-turn injection | Dedup duplicate rollouts; the app-server resume failure currently goes straight to DONE (`backend/blockcontroller/app_server_controller.rs:464-474`, "Codex App Server thread setup failed" → `STATUS_DONE`) and must fall to R3 instead |
 | Gemini CLI | Stdout mirror + `~/.gemini/tmp/<hash>/chats/` | `-r <id>` | First-turn injection | Check whether users now run Antigravity CLI (Gemini CLI replaced for unpaid tiers 2026-06-18 per its docs) **[unverified for our users]** |
 | Kimi | Stdout mirror only | None | First-turn injection | R3 is Kimi's *only* continuity path. It gets packet continuity with no provider work |
 
@@ -428,7 +435,7 @@ the other providers need only an adapter plus an injection hook.
 
 | Phase | Scope | Closes |
 |---|---|---|
-| **P0** Stop the bleeding | (a) Frontend launch calls the server resolver, using the ledger-less version: latest `db_agent_instances.session_id` for the agent UID, scanning the account dir when there's no sid. (b) `SearchHistory` sends the UID. (c) MCP endpoint rediscovery. (d) Set `cleanupPeriodDays` | §1.1 incident, retention sweep |
+| **P0** Stop the bleeding | (a) Ledger-less resolver in the persistent controller's **first spawn**. When it has no sid, it resumes the most recently written top-level transcript for this cwd under the spawn's own config dir: the scan `resume_preflight` already runs, but by recency, not size. It skips sessions live in another pane, and an explicit fresh start opts out. The fix goes in the backend so every launch path gets it. It doesn't trust the registry `session_id`, which `STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20` §3 shows is write-once and can be stale, or a subagent's id. (b) ~~`SearchHistory` by UID~~, done in #3605. (c) MCP endpoint rediscovery. (d) Set `cleanupPeriodDays` | §1.1 incident, retention sweep |
 | **P1** Segment index | `conversation_segments` written at spawn and close. Backfill from existing FileStore zones and `db_agent_instances` | G3, G4 |
 | **P2** Projection + recall | Claude adapter, redaction, dedup. `SearchHistory` over the projection; `ReadHistory` | G5 |
 | **P3** Virtualized continuity (Claude) | Deterministic packet first, then the rolling LLM state block. R3 injection via #3502. Resolver ladder R0–R4 incl. fall-through. Pane chip | G1, G2 for Claude, including account switch |
