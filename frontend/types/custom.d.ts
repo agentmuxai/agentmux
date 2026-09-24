@@ -462,6 +462,8 @@ declare global {
         checked?: boolean;
         // Pre-formatted keyboard shortcut hint shown right-aligned
         // (e.g. "Ctrl+P" or "⌘T"). Not shown on items that have subItems.
+        // For a keymodel binding, render the binding itself with keyutil's
+        // formatKeyDescription rather than hand-writing the label.
         shortcut?: string;
     };
 

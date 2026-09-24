@@ -17,6 +17,7 @@ import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
+import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "./keymodel-bindings";
 import { type KeyHandler, globalChordMap, globalKeyMap } from "./keymodel-dispatch";
 import {
     cyclePaneFocus,
@@ -63,7 +64,7 @@ function registerGlobalKeys() {
         handleCmdN();
         return true;
     });
-    globalKeyMap.set("Ctrl:Shift:n", () => {
+    globalKeyMap.set(NEW_WINDOW_KEY, () => {
         getApi().openNewWindow().catch((e: unknown) => {
             console.error("[keymodel] Failed to open new window:", e);
         });
@@ -81,7 +82,7 @@ function registerGlobalKeys() {
         handleCmdI();
         return true;
     });
-    globalKeyMap.set("Cmd:t", () => {
+    globalKeyMap.set(NEW_TAB_KEY, () => {
         createTab();
         return true;
     });
@@ -286,7 +287,7 @@ function registerGlobalKeys() {
     });
     globalChordMap.set("Ctrl:Shift:s", splitBlockKeys);
 
-    globalKeyMap.set("Ctrl:p", () => {
+    globalKeyMap.set(COMMAND_PALETTE_KEY, () => {
         openModal(CommandPaletteModal);
         return true;
     });
