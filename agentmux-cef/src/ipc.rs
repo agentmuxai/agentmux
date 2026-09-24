@@ -229,6 +229,9 @@ async fn route_command(
         // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
         // _2026_09_24 §4.1). Kept separate from background mode on purpose —
         // tray spec §7.4.
+        // Taskbar badge + flash for "agents need you" (SPEC_OS_NOTIFICATIONS
+        // _SYSTEM_2026_09_24 Phase 4).
+        "set_taskbar_attention" => commands::taskbar_attention::set_taskbar_attention(state, args),
         "autostart_status" => commands::autostart::autostart_status().await,
         "set_autostart" => commands::autostart::set_autostart(args).await,
         // Issue #2977 WS4 — hand the frontend whatever the background

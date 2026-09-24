@@ -91,6 +91,7 @@
     // "notify:os:messageneedsreview":           true,
     // "notify:pause:until":                     0,            // epoch ms; set from the tray
     // "notify:pause:allowattention":            false,
+    // "notify:taskbar:attention":               true,         // badge + flash the taskbar button
     // "notify:os:preview":                      "redacted",   // "redacted" | "full" | "none"
 
     // -- Tool-call tones (subliminal per-tool "voice") --

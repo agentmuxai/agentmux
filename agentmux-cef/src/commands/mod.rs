@@ -6,6 +6,7 @@
 
 pub mod platform;
 pub mod autostart;
+pub mod taskbar_attention;
 pub mod cli_login;
 pub mod window;
 pub mod backend;

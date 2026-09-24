@@ -218,6 +218,9 @@ pub struct AttentionItem {
     pub id: String,
     pub block_id: String,
     pub title: String,
+    /// Lets surfaces treat kinds differently — e.g. only `InputWaiting`
+    /// flashes the taskbar (spec Phase 4).
+    pub kind: NotifyKind,
 }
 
 /// Snapshot the tray renders (§4.2).
@@ -362,8 +365,20 @@ impl PolicyState {
                     return out;
                 }
                 let group = req.kind.group_key(&req.block_id);
-                if let Some(existing) = self.live.get(&group) {
+                if let Some(existing) = self.live.get_mut(&group) {
                     if existing.notification.kind.rank() > req.kind.rank() {
+                        return out;
+                    }
+                    // The same question reported again — srv detected it, then
+                    // the renderer mounts the pane and reports it too (the one
+                    // kind with two reporters). Idempotent: no retract, no
+                    // re-debounce; only fill a body we didn't have. Other kinds
+                    // are distinct events (a second crash is news) and replace
+                    // as before (Codex P2s on #3662).
+                    if existing.notification.kind == req.kind && req.kind == NotifyKind::InputWaiting {
+                        if existing.notification.body.is_none() && s.preview != Preview::None {
+                            existing.notification.body = req.body;
+                        }
                         return out;
                     }
                 }
@@ -542,7 +557,7 @@ impl PolicyState {
         TrayState {
             attention: attention
                 .into_iter()
-                .map(|n| AttentionItem { id: n.id.clone(), block_id: n.block_id.clone(), title: n.title.clone() })
+                .map(|n| AttentionItem { id: n.id.clone(), block_id: n.block_id.clone(), title: n.title.clone(), kind: n.kind })
                 .collect(),
             paused_until_ms: if s.pause_until_ms > now_ms { s.pause_until_ms } else { 0 },
         }
@@ -841,8 +856,46 @@ mod tests {
         assert_eq!(t.attention.len(), 1);
         assert_eq!(t.attention[0].block_id, "b1");
         assert_eq!(t.attention[0].title, "lark needs your input");
+        assert_eq!(t.attention[0].kind, NotifyKind::InputWaiting);
         assert_eq!(t.paused_until_ms, 1_000_000);
         assert_eq!(p.tray_state(&s, 2_000_000).paused_until_ms, 0);
+    }
+
+    #[test]
+    fn repeated_same_kind_report_is_idempotent() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        // srv detects the question (no text), then the renderer reports it too.
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b1")), 0, &s);
+        let a = p.step(Input::Tick, 6_000, &s);
+        let first = shows(&a)[0].clone();
+        let a = p.step(Input::Emit(req(NotifyKind::InputWaiting, "b1")), 7_000, &s);
+        assert!(a.is_empty(), "no retract, no new toast: {a:?}");
+        assert!(p.step(Input::Tick, 20_000, &s).is_empty(), "not re-debounced/re-shown");
+        let t = p.tray_state(&s, 20_000);
+        assert_eq!(t.attention.len(), 1);
+        assert_eq!(t.attention[0].id, first.id, "same notification stays live");
+
+        // Pending (not yet shown) duplicate keeps its original due time and
+        // picks up the body it was missing.
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b2")), 30_000, &s);
+        p.step(Input::Emit(req(NotifyKind::InputWaiting, "b2")), 35_000, &s);
+        let n = shows(&p.step(Input::Tick, 36_000, &s)).into_iter().cloned().collect::<Vec<_>>();
+        assert_eq!(n.len(), 1, "due at 36s from the FIRST report");
+        assert_eq!(n[0].body.as_deref(), Some("Which branch?"));
+    }
+
+    #[test]
+    fn a_second_crash_is_news_not_a_duplicate() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::AgentCrashed, "b1")), 0, &s);
+        let first = shows(&p.step(Input::Tick, 10_000, &s))[0].clone();
+        let a = p.step(Input::Emit(req_b(NotifyKind::AgentCrashed, "b1")), 60_000, &s);
+        assert_eq!(retracts(&a), 1, "old toast pulled for the new crash");
+        let second = shows(&p.step(Input::Tick, 70_000, &s))[0].clone();
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.tag, second.tag);
     }
 
     #[test]

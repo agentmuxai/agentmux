@@ -41,6 +41,11 @@ enum Internal {
     /// is shared by every AppState), so drop blocks this Router's store
     /// doesn't know.
     Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
+    /// Raw question text — redacted by `emit` like a renderer report.
+    InputWaiting { block_id: String, question: Option<String> },
+    /// Resolve through the SAME ordered queue as the srv-side emits, so a
+    /// resolve can never overtake the emit it cancels (Codex P2 on #3662).
+    Resolve { block_id: String, family: Family },
 }
 
 const AGENT_NAME_MAX: usize = 32;
@@ -161,6 +166,13 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     })
                     .await;
                 }
+                Internal::InputWaiting { block_id, question } => {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref())
+                    })
+                    .await;
+                }
+                Internal::Resolve { block_id, family } => r.resolve(&block_id, family),
             }
         }
     });
@@ -409,6 +421,29 @@ impl Router {
     /// BLOCKING on a name-cache miss, like `emit`.
     pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
         self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
+    }
+
+    /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
+    /// from the controller's stdout reader thread. Coalesces with the
+    /// renderer's own report for the same block (same `input:` group).
+    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>) {
+        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question });
+    }
+
+    /// Queued emit with no body (turn outcomes).
+    pub fn emit_nonblocking(&self, kind: NotifyKind, block_id: &str) {
+        let _ = self.internal.send(Internal::Emit {
+            kind,
+            block_id: block_id.to_string(),
+            body: None,
+            own_blocks_only: false,
+        });
+    }
+
+    /// Ordered counterpart of `resolve`: queued behind any emit already sent
+    /// for the same block.
+    pub fn resolve_nonblocking(&self, block_id: &str, family: Family) {
+        let _ = self.internal.send(Internal::Resolve { block_id: block_id.to_string(), family });
     }
 
     pub fn resolve(&self, block_id: &str, family: Family) {

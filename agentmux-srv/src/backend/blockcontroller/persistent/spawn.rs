@@ -723,6 +723,17 @@ impl PersistentSubprocessController {
                     if let Some(kind) = parsed.get("type").and_then(|v| v.as_str()) {
                         if kind == "control_request" || kind == "control_response" {
                             Self::handle_control_frame(kind, &parsed, &block_id_read, &inner_read);
+                            // OS notification: the agent is now blocked on the
+                            // user — known here even with no pane mounted
+                            // (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 Phase 5).
+                            if let (Some(broker), Some(question)) = (
+                                broker_read.as_ref(),
+                                crate::backend::notify::sources::ask_user_question(&parsed),
+                            ) {
+                                if let Some(r) = crate::backend::notify::router::get(broker) {
+                                    r.input_waiting_nonblocking(&block_id_read, question);
+                                }
+                            }
                             continue;
                         }
                     }
@@ -808,6 +819,16 @@ impl PersistentSubprocessController {
                         // unrelated status change (or process exit) — see
                         // send_message's matching publish_status() call for
                         // the turn-start side of this pair.
+                        // The turn ended: any "needs your input" for it is
+                        // moot (answered, or abandoned by a new message / the
+                        // turn finishing). srv never drains
+                        // `pending_questions` on its own, so this boundary is
+                        // the reliable "resolved" signal.
+                        if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
+                            if let Some(r) = crate::backend::notify::router::get(broker) {
+                                r.resolve_nonblocking(&block_id_read, crate::backend::notify::policy::Family::Input);
+                            }
+                        }
                         if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
                             let status = {
                                 let locked = inner_read.lock().unwrap();
@@ -1435,6 +1456,11 @@ impl PersistentSubprocessController {
                     drop(inner);
 
                     if is_current_generation {
+                        // The process is gone — nothing is waiting on the user
+                        // any more (Phase 5 notifications).
+                        if let Some(r) = broker_wait.as_ref().and_then(crate::backend::notify::router::get) {
+                            r.resolve_nonblocking(&block_id_wait, crate::backend::notify::policy::Family::Input);
+                        }
                         // Notify health monitor so Stalled/Dead watchdog stops.
                         health_wait.set_exited(exit_code);
 
