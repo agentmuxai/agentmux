@@ -1364,7 +1364,9 @@ async fn hold_for_absent_target(
         target_agent: req.target_agent.clone(),
         source_agent: req.source_agent.clone().unwrap_or_default(),
         audit_source_uid: req.audit_source_uid.clone(),
-        message: req.message.clone(),
+        // What the recipient would receive — sanitized and truncated to the
+        // delivery limit — never the unbounded body (Codex P2 on #3632).
+        message: crate::backend::reactive::sanitize::sanitize_message(&req.message),
         priority: req.priority.clone().unwrap_or_default(),
         jekt_tier: req
             .jekt_tier
