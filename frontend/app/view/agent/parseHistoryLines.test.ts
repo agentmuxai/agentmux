@@ -575,3 +575,27 @@ describe("HistoryParser (resumable parseHistoryLines)", () => {
         expect((parser.nodes[toolIndex] as ToolNode).status).toBe("success");
     });
 });
+
+describe("user messages persisted for CLIs that don't echo them (spec §6.9)", () => {
+    // What the per-turn subprocess controller writes before each turn
+    // (agentmux-srv subprocess::user_record) — the same line the persistent
+    // Claude controller writes for stdin.
+    const userRecord = (content: string) => JSON.stringify({ type: "user", message: { role: "user", content } });
+
+    it.each(["codex-json", "kimi-stream-json", "claude-stream-json"])(
+        "%s: replays the record as the user's message",
+        (format) => {
+            const { nodes } = parseHistoryLines([userRecord("fix the build")], format);
+            const user = nodes.find((n) => n.type === "user_message") as { message?: string } | undefined;
+            expect(user?.message).toBe("fix the build");
+        }
+    );
+
+    it.each(["codex-json", "kimi-stream-json"])(
+        "%s: a live translator doesn't render it (the pane already shows it)",
+        async (format) => {
+            const { createTranslator } = await import("./providers/translator-factory");
+            expect(createTranslator(format).translate(JSON.parse(userRecord("hi")))).toEqual([]);
+        }
+    );
+});

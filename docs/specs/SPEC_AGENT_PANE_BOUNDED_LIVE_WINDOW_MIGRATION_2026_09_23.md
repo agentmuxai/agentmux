@@ -1279,6 +1279,11 @@ last turn can't leave overdue turns resident waiting for a next trigger
   per-turn subprocess controller (muxcode, container agents) writes the
   prompt to the CLI's stdin without persisting it, so those panes are in the
   "never reach the transcript" group too (found while building PR 3).
+  *PR 4a:* the subprocess controller now writes each message it sends as
+  the same `{"type":"user",...}` record + `echo: "stdin"` event (not for
+  Gemini, whose CLI echoes it), and the Codex and Kimi translators render it
+  on replay — so Codex, Kimi and subprocess-Claude panes roll off too. ACP
+  remains excluded.
 
 **How.** Reducer command `RollOff { ranges }`
 (`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as
