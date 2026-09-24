@@ -190,15 +190,11 @@ pub struct InjectionRequest {
     /// narrower version of this same claim), `handler.rs`'s tier-escalation
     /// block only forces `TIER=sensitive` by delivery tier when this is
     /// `Some(false)` — a `reagent_sig` was present but did NOT
-    /// cryptographically verify, i.e. an active forgery attempt. `None` (no
-    /// signature attempted) and `Some(true)` under the known-exposed
-    /// `reagent-v1-dev` placeholder key are NOT this case — both fall
-    /// through to the declared tier (default `coord`), same as any other
-    /// self-declared sender; `agentmux_common::jekt_sign::is_reagent_trusted_signing_key`
-    /// is no longer consulted by the tier-escalation gate at all (see that
-    /// function's doc comment — it still matters for whether `Some(true)`
-    /// qualifies for the SIG=verified relaxation's rule 1b, just not for
-    /// whether failing to qualify forces sensitive). Declared-sensitive and
+    /// cryptographically verify, i.e. an active forgery attempt, or verified
+    /// only under a key other than the trusted production key (see
+    /// `agentmux_common::jekt_sign::verify_trusted_reagent_jekt`). `None` (no
+    /// signature attempted) falls through to the declared tier (default
+    /// `coord`), same as any other self-declared sender. Declared-sensitive and
     /// keyword-match escalation still apply unconditionally on top of all
     /// of the above.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]

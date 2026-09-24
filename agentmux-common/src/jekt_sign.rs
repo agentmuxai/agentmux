@@ -210,6 +210,22 @@ pub fn verify_reagent_jekt(
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
+/// The verification result a receiver records as `reagent_verified`: the
+/// signature checks out AND its key is the trusted production key. A
+/// signature under any other registered key is not a verified sender.
+pub fn verify_trusted_reagent_jekt(
+    key_id: &str,
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+    sig_b64: &str,
+) -> bool {
+    is_reagent_trusted_signing_key(key_id)
+        && verify_reagent_jekt(key_id, msgid, source_agent, target_agent, ts_secs, message, sig_b64)
+}
+
 // ── LAN-tier per-agent Ed25519 signing (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) ──
 //
 // Asymmetric, not HMAC like host-tier: LAN is multi-party (any receiving
@@ -713,6 +729,47 @@ mod tests {
     #[test]
     fn an_unregistered_key_id_is_not_trusted_for_tier_relaxation() {
         assert!(!is_reagent_trusted_signing_key("reagent-v2-does-not-exist"));
+    }
+
+    // ---- verify_trusted_reagent_jekt ----
+
+    #[test]
+    fn a_production_key_signature_is_a_trusted_verification() {
+        assert!(verify_trusted_reagent_jekt(
+            "reagent-v1",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            PROD_FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn a_valid_dev_key_signature_is_not_a_trusted_verification() {
+        assert!(!verify_trusted_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn a_tampered_production_key_message_is_not_a_trusted_verification() {
+        assert!(!verify_trusted_reagent_jekt(
+            "reagent-v1",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello, tampered",
+            PROD_FIXTURE_SIG_B64,
+        ));
     }
 
     #[test]

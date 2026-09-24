@@ -966,21 +966,12 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_keyword_mat
     );
 }
 
-// reagentx P0 on PR #2576: `reagent-v1-dev`'s private key is documented as
-// exposed since generation (see jekt_sign.rs's `reagent_public_key` doc
-// comment), so a signature verifying under it proves nothing about sender
-// identity beyond "someone who read the source/docs." `is_reagent_trusted_
-// signing_key` (agentmux-common/src/jekt_sign.rs) still distinguishes it
-// from the real production key — that distinction still matters for
-// whether tier relaxation's rule 1b applies to THIS message specifically.
-// But as of SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md, failing to
-// qualify for rule 1b no longer means "forced sensitive" — it just means
-// "no special treatment," same as any other unverified/self-declared WAN
-// sender (rule 5's default). Only an ACTIVE verification failure
-// (SIG=invalid, reagent_verified == Some(false)) still forces sensitive —
-// see the SIG=invalid test below, unchanged, as the negative-control proof.
+// A signature under any key other than the trusted production key is not a
+// verified sender. The verifiers never produce `Some(true)` for one, and the
+// handler downgrades a directly-set `Some(true)` to `Some(false)` — an active
+// verification failure, rendered SIG=invalid and forced sensitive.
 #[tokio::test]
-async fn test_handler_inject_wan_reagent_verified_under_exposed_dev_key_falls_through_to_declared_tier() {
+async fn test_handler_inject_wan_reagent_verified_under_untrusted_key_is_a_failed_verification() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
     let sent_clone = sent.clone();
 
@@ -1000,26 +991,18 @@ async fn test_handler_inject_wan_reagent_verified_under_exposed_dev_key_falls_th
         jekt_tier: None,
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
-        // The signature genuinely verifies (reagent_verified: Some(true)) —
-        // the point of this test is that verifying alone isn't rule 1b's
-        // stronger claim; it's still not an active FAILURE either.
         reagent_verified: Some(true),
         reagent_key_id: Some("reagent-v1-dev".to_string()),
         ..Default::default()
     });
 
     assert!(resp.success);
-    assert_eq!(
-        resp.effective_tier.as_deref(),
-        Some("coord"),
-        "a signature verified under the known-exposed dev key doesn't qualify for the SIG=verified \
-         relaxation, but it's also not a FAILED verification — clean content falls through to the \
-         declared tier (default coord), same as any other unverified network-tier sender"
-    );
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
-    assert!(payload.contains("SIG=verified"), "the signature itself still renders as verified: {payload}");
-    assert!(payload.contains("TIER=coord"), "but no longer forced sensitive on trust alone: {payload}");
+    assert!(payload.contains("SIG=invalid"), "{payload}");
+    assert!(!payload.contains("SIG=verified"), "{payload}");
+    assert!(payload.contains("ESCALATE=required"), "{payload}");
 }
 
 #[tokio::test]
