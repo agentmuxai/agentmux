@@ -1409,7 +1409,7 @@ fn case_insensitive_prefix_byte_len(s: &str, prefix: &str) -> Option<usize> {
 /// second sentence differs (`memory-reinjection.ts`'s `REASON_CLAUSE`) — so
 /// this one match suppresses both without needing to track which reason
 /// fired.
-fn is_hidden_reinjection_text(text: &str) -> bool {
+pub(crate) fn is_hidden_reinjection_text(text: &str) -> bool {
     text.starts_with("<system-reminder>")
         && text.contains("Your memory was reinjected because your working context was just reset.")
 }
@@ -1605,7 +1605,7 @@ mod extract_digest_text_tests {
     /// from `REINJECTION_TEXT`'s compaction wording, sharing only the fixed
     /// leading signature sentence. See `is_hidden_reinjection_text`'s doc
     /// comment for why one match must cover both.
-    const FRESH_SESSION_REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected because your working context was just reset. AgentMux could not resume this agent's prior session, so a fresh one was started — you have none of your prior conversation history, only what is below. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
+    const FRESH_SESSION_REINJECTION_TEXT: &str = "<system-reminder>\nYour memory was reinjected because your working context was just reset. AgentMux could not resume this agent's prior session, so a fresh one was started. Any record of the prior conversation AgentMux had came with your first message, in an <agentmux-continuation> block. Below is your\ncomplete Global Memory and Personal Memory content — read all of it now.\n\n# Global Memory (1 entry)\nsecret memory content\n</system-reminder>\n";
 
     fn user_text_line(text: &str) -> String {
         serde_json::json!({

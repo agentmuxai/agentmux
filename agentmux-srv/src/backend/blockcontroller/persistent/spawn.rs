@@ -296,6 +296,7 @@ impl PersistentSubprocessController {
         // `attempted_sid` is empty: there was no id to attempt, which is the
         // whole point. The frontend renders that as "—" rather than a blank
         // (`DocumentRow.tsx`'s session-outcome body).
+        let mut continuation: Option<String> = None;
         if fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)
             && self.has_prior_transcript()
         {
@@ -308,6 +309,17 @@ impl PersistentSubprocessController {
                 String::new(),
                 None,
             );
+            // The provider can't give this process the conversation the pane
+            // shows, so AgentMux's own record rides on its first message
+            // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+            continuation = self.continuation_packet();
+            if let Some(ref packet) = continuation {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    packet_chars = packet.len(),
+                    "continuity: carrying AgentMux's record of the conversation into the fresh session"
+                );
+            }
         }
 
         let pid = child.id().unwrap_or(0);
@@ -590,7 +602,20 @@ impl PersistentSubprocessController {
         // Spawn stdin writer task
         tokio::spawn(async move {
             let mut stdin = stdin;
+            let mut continuation = continuation;
             while let Some(msg) = msg_rx.recv().await {
+                // Only this write carries the packet; the pane's record keeps
+                // the message as typed. Control responses pass through.
+                let msg = match continuation
+                    .as_deref()
+                    .and_then(|packet| crate::backend::continuity::prefix_user_message(&msg, packet))
+                {
+                    Some(with_packet) => {
+                        continuation = None;
+                        with_packet
+                    }
+                    None => msg,
+                };
                 if let Err(e) = stdin.write_all(msg.as_bytes()).await {
                     tracing::warn!("persistent stdin write error: {}", e);
                     break;
