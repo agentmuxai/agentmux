@@ -147,30 +147,14 @@ fn reagent_public_key(key_id: &str) -> Option<[u8; 32]> {
     }
 }
 
-/// The one `key_id` whose matching private key is believed secret today —
-/// i.e. the only key a caller should treat as *authorization to relax
-/// `TIER=sensitive`* for a WAN jekt via rule 1b (the SIG=verified
-/// exception), as opposed to merely "the signature checks out
-/// cryptographically." `reagent-v1-dev` also verifies successfully via
-/// `verify_reagent_jekt` (its entry stays in `reagent_public_key` so
-/// already-in-flight dev-signed messages don't break), but its private half
-/// is documented above as exposed since the moment it was generated —
-/// anyone holding it can mint a signature that verifies. `reagent_verified
-/// == Some(true)` alone therefore answers "did a registered key sign this,"
-/// not "did a key nobody else has sign this"; callers making a trust
-/// decision for rule 1b specifically (not just rendering `SIG=` in a
-/// marker) must additionally check the key_id against this function.
-///
-/// As of `docs/specs/SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`,
-/// failing this check is no longer itself grounds to force
-/// `TIER=sensitive` (reagentx P0 on PR #2576 addressed a stricter, now-
-/// superseded default — see `agentmux-srv/src/backend/reactive/handler.rs`'s
-/// tier-escalation block, which gates forcing on an ACTIVE verification
-/// failure, `reagent_verified == Some(false)`, not on failing this
-/// trusted-key check). A dev-key-signed message that fails this check
-/// simply doesn't qualify for rule 1b's relaxation — it falls through to
-/// the declared tier like any other unverified sender, same as a WAN jekt
-/// with no signature at all.
+/// The one `key_id` whose matching private key is believed secret today.
+/// `reagent-v1-dev` stays registered in `reagent_public_key` (so
+/// `verify_reagent_jekt` still checks its signatures), but its private half
+/// is documented above as exposed since it was generated, so a signature
+/// under it proves nothing about the sender. Receivers record a reagent
+/// signature as verified only through [`verify_trusted_reagent_jekt`],
+/// which requires this key; any other key yields `reagent_verified =
+/// Some(false)` — an active verification failure, forced sensitive.
 pub fn is_reagent_trusted_signing_key(key_id: &str) -> bool {
     key_id == "reagent-v1"
 }
@@ -182,16 +166,9 @@ pub fn is_reagent_trusted_signing_key(key_id: &str) -> bool {
 /// these identically: "not verified," rendering `SIG=invalid` rather than
 /// `SIG=verified` in the marker (see `wrap_jekt_message`'s doc comment).
 ///
-/// This function alone does NOT tell you whether the message is safe to
-/// treat as more trusted than an ordinary WAN jekt — see
-/// `is_reagent_trusted_signing_key`'s doc comment. A message signed under
-/// `reagent-v1-dev` verifies here (`true`) exactly the same as one signed
-/// under the real production key; only `is_reagent_trusted_signing_key`
-/// tells the two apart, and (as of
-/// `docs/specs/SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`) that
-/// distinction no longer feeds into whether `TIER=sensitive` is forced —
-/// it still matters for whatever future feature wants to lean on genuinely
-/// proven reagent identity, just not that decision.
+/// This function alone does NOT make a verified sender: a message signed
+/// under `reagent-v1-dev` verifies here exactly like one under the
+/// production key. Receivers must use [`verify_trusted_reagent_jekt`].
 pub fn verify_reagent_jekt(
     key_id: &str,
     msgid: &str,

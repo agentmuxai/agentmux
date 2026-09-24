@@ -1005,6 +1005,37 @@ async fn test_handler_inject_wan_reagent_verified_under_untrusted_key_is_a_faile
     assert!(payload.contains("ESCALATE=required"), "{payload}");
 }
 
+// `Some(true)` with no key id at all is downgraded the same way.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_without_key_id_is_a_failed_verification() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1e".to_string()),
+        delivery_tier: Some("wan".to_string()),
+        reagent_verified: Some(true),
+        reagent_key_id: None,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("SIG=invalid"), "{payload}");
+}
+
 #[tokio::test]
 async fn test_handler_inject_wan_reagent_invalid_signature_renders_sig_invalid() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
