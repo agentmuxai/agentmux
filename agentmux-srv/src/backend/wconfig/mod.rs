@@ -117,13 +117,15 @@ mod tests {
 
     #[test]
     fn test_settings_unknown_keys_passthrough() {
-        // Legacy keys (ai:*, autoupdate:*, editor:*, markdown:*) removed from
-        // SettingsType should land in `extra` via the flatten catch-all so
-        // existing user settings.json files don't error.
+        // Legacy keys (ai:*, autoupdate:*, editor:*, markdown:*, and
+        // pane:tabstrip — SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md
+        // §8) removed from SettingsType should land in `extra` via the
+        // flatten catch-all so existing user settings.json files don't error.
         let json_str = r#"{
             "ai:model": "claude-3-opus",
             "autoupdate:enabled": true,
             "editor:wordwrap": true,
+            "pane:tabstrip": "multi-only",
             "term:fontsize": 14
         }"#;
         let s: SettingsType = serde_json::from_str(json_str).unwrap();
@@ -131,6 +133,7 @@ mod tests {
         assert!(s.extra.contains_key("ai:model"));
         assert!(s.extra.contains_key("autoupdate:enabled"));
         assert!(s.extra.contains_key("editor:wordwrap"));
+        assert!(s.extra.contains_key("pane:tabstrip"));
     }
 
     // -- TermThemeType serde --

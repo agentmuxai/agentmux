@@ -120,15 +120,6 @@ pub struct SettingsType {
     #[serde(rename = "tab:preset", default, skip_serializing_if = "String::is_empty")]
     pub tab_preset: String,
 
-    // -- Pane settings --
-    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-    // §4.1/§7 resolution 1). Frontend-typed as "always" | "multi-only"
-    // (frontend/types/srv-types.d.ts); kept as a plain String here, same as
-    // tab_preset above — the backend doesn't validate/consume this value,
-    // only round-trips it.
-    #[serde(rename = "pane:tabstrip", default, skip_serializing_if = "String::is_empty")]
-    pub pane_tabstrip: String,
-
     // -- Widget settings --
     #[serde(rename = "widget:*", default, skip_serializing_if = "is_false")]
     pub widget_clear: bool,

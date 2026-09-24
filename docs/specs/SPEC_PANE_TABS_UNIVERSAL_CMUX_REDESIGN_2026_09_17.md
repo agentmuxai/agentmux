@@ -303,6 +303,10 @@ swap or a second row appearing underneath. This directly removes the "tabs live 
 second row below the header" structure §1 and §2.4 identify as the thing to fix, for
 agent/term as much as for every newly-onboarded widget type.
 
+> **Superseded 2026-09-24:** the `pane:tabstrip` setting described in the rest
+> of this paragraph has been removed — a Pane header always shows its tabs.
+> See `SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md` §8.
+
 Exposed as a setting (`pane:tabstrip = always | multi-only`, default `always`) purely
 for the case of hiding the tab-pill-as-title distinction when a pane has exactly one
 tab and a user prefers the older plain-title look — but note this setting, if
@@ -611,7 +615,10 @@ the implementer ("resolve any open questions before implementing... use best
 judgement"). Resolved as follows, each with the reasoning that makes it a
 defensible default rather than a coin-flip:
 
-1. **Default for `pane:tabstrip`** (§4.1) — **`always`.** Matches the literal
+1. **Default for `pane:tabstrip`** (§4.1) — *superseded 2026-09-24: the
+   setting was removed and `always` is now the only behavior
+   (`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md` §8).*
+   Original resolution: **`always`.** Matches the literal
    original ask verbatim ("the pane header... will be turned into a row of tabs")
    and cmux's own shipped default (every pane always has a strip, regardless of
    tab count). `multi-only` remains available as a user setting (§4.1), just not

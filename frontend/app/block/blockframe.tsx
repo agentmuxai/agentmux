@@ -759,7 +759,6 @@ function BlockFrame_Header(
                     </Show>
                 </div>
             </Show>
-            <Show when={!props.leadingTabStrip}>{props.trailingAddButton}</Show>
             <Show when={manageConnection()}>
                 <ConnectionButton
                     ref={props.connBtnRef}
