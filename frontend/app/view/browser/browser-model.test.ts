@@ -121,6 +121,26 @@ describe("BrowserViewModel lifecycle gating", () => {
         expect(invokeCommand).not.toHaveBeenCalled();
     });
 
+    // Selecting a browser pane by keyboard while the caret sits in ANOTHER
+    // pane's text box used to leave keystrokes there: the view-local
+    // `isMainInput` check treated any focused input anywhere as "the user is
+    // in this pane's URL bar". The shared guard (userCaretInBlock, in
+    // giveBlockFocus) now decides that, scoped to this block, before
+    // giveFocus is ever called (SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS §4.3).
+    it("giveFocus() hands keyboard focus to the pane even with an input focused elsewhere", () => {
+        const vm = makeVM();
+        const other = document.createElement("input");
+        document.body.appendChild(other);
+        other.focus();
+        vi.mocked(invokeCommand).mockClear();
+
+        expect(vm.giveFocus()).toBe(true);
+
+        expect(invokeCommand).toHaveBeenCalledWith("browser_pane_focus", expect.anything());
+        expect(invokeCommand).not.toHaveBeenCalledWith("main_window_focus", expect.anything());
+        other.remove();
+    });
+
     it("goBack() is a no-op after dispose", () => {
         const vm = makeVM();
         // Populate history so goBack would have something to do pre-dispose
