@@ -361,6 +361,11 @@ pub(crate) async fn run_unix(
         }
     };
 
+    // OS notification presenter (Linux: freedesktop notifications over D-Bus).
+    // macOS has no backend yet (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §6.2).
+    #[cfg(target_os = "linux")]
+    crate::notify::start(&srv_result.ws_endpoint, &srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone());
+
     // CRITICAL (same rationale as run_windows): take srv's stdin out of
     // the Child so tokio's wait() can't close it and trip srv's
     // parent-watch EOF. Held until launcher exit.
@@ -756,6 +761,9 @@ pub(crate) async fn run_unix(
             }
         }
     };
+
+    #[cfg(target_os = "linux")]
+    crate::notify::shutdown();
 
     // Close any open saga brackets before tearing down children so the
     // durable log doesn't carry dangling SagaStarted entries into the

@@ -31,6 +31,8 @@ use tokio_tungstenite::tungstenite::{ClientRequestBuilder, Message};
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "linux")]
+mod linux;
 
 /// Mirrors srv's `OsNotification` (`agentmux-srv/src/backend/notify/policy.rs`).
 /// Unknown fields are ignored so srv can grow the payload first.
@@ -68,7 +70,8 @@ pub trait Presenter: Send + Sync {
     fn clear_all(&self);
 }
 
-/// No platform backend yet (macOS / Linux are Phase 3): log and drop.
+/// No platform backend (macOS today — needs a signed bundle and a Mac to
+/// verify, spec §6.2): log and drop.
 struct NullPresenter;
 impl Presenter for NullPresenter {
     fn show(&self, n: &Notification) {
@@ -113,8 +116,14 @@ fn make_presenter(actions: mpsc::UnboundedSender<UserAction>, data_dir: &std::pa
             Err(e) => crate::logging::log(&format!("notify: Windows toast backend unavailable: {e}")),
         }
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = data_dir;
+        return Arc::new(linux::LinuxPresenter::spawn(actions));
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     let _ = (actions, data_dir);
+    #[allow(unreachable_code)]
     Arc::new(NullPresenter)
 }
 
