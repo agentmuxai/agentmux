@@ -180,7 +180,7 @@ describe("height handoff from the streaming buffer to the virtualized head", () 
                 documentState={docState}
                 layoutView={view}
                 zoomFactor={() => 1}
-            tailPolicy="count"
+                tailPolicy="count"
                 onToggleCollapse={() => {}}
                 onTogglePin={() => {}}
             />
