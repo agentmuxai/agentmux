@@ -3,7 +3,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import type { Account, IdentityViewModel } from "./identity-model";
-import { agentsAssignedToAccount, KIND_LABELS, PROVIDER_LABELS } from "./identity-model";
+import { accountLabel, agentsAssignedToAccount, KIND_LABELS, PROVIDER_LABELS } from "./identity-model";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -141,19 +141,16 @@ function AccountRow(props: {
             <span class={`identity-provider-badge provider-${a.provider}`}>
                 <ProviderLogo provider={a.provider} size={16} />
             </span>
-            <span class="identity-account-name">{a.name}</span>
+            {/* The login email is the row's label (spec §3): it is what tells
+                two accounts on one provider apart. The generic name
+                (`claude-oauth`) stays in the tooltip, and a user-set display
+                name still shows beside it. */}
+            <span class="identity-account-name" title={a.name}>
+                {accountLabel(a)}
+            </span>
             <div class="identity-row-meta">
                 <Show when={a.display_name}>
                     <span class="identity-display-name">{a.display_name}</span>
-                </Show>
-                {/* Shown alongside any user-set display name rather than
-                    instead of it: the point of surfacing the email is telling
-                    two accounts on the same provider apart, which a label like
-                    "work" does not do on its own. */}
-                <Show when={a.context?.email}>
-                    <span class="identity-account-email" title={a.context.email}>
-                        {a.context.email}
-                    </span>
                 </Show>
             </div>
             <span class={STATUS_DOT[a.status] ?? STATUS_DOT["unknown"]} title={a.status} />
@@ -199,7 +196,7 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
     };
     return (
         <>
-            <ModalHeader title={account.name} />
+            <ModalHeader title={accountLabel(account)} />
             <ModalBody>
                 <div class="identity-detail-meta-row">
                     <span class={`identity-provider-badge provider-${account.provider}`}>
@@ -314,7 +311,7 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                                 ? `\n\n${used.length} agent(s) use this account: ${used.join(", ")}.` +
                                   ` Any that are running keep its tokens until restarted.`
                                 : "";
-                        if (confirm(`Delete account "${account.name}"?${usage}`)) {
+                        if (confirm(`Delete account "${accountLabel(account)}"?${usage}`)) {
                             model.deleteAccount(account.id);
                         }
                     }}

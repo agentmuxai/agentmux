@@ -147,14 +147,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // version upgrades. Falls back to mstore transparently.
 
     let mstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_typed(
         COMMAND_LIST_IDENTITY_ACCOUNTS,
         move |cmd: CommandListIdentityAccountsData, _ctx| {
             let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
             async move {
-                let accounts = mstore
+                let mut accounts = mstore
                     .identity_list(cmd.provider.as_deref())
                     .map_err(|e| format!("listidentityaccounts: {e}"))?;
+                // SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §4: backfill each
+                // OAuth account's login email from its own config dir, so
+                // accounts signed in before #3541 — and every Claude login,
+                // whose transcript prints no email — show it. Written only
+                // when it changed; a failed write still returns the email.
+                for account in &mut accounts {
+                    if crate::identity::account_email::refresh_account_email(account) {
+                        if let Err(e) = mstore.identity_upsert_with_mirror(&identity_store, account) {
+                            tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");
+                        }
+                    }
+                }
                 Ok(accounts)
             }
         },

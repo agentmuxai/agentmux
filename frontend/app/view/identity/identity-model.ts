@@ -368,6 +368,16 @@ export function primeAccountCache(): void {
 
 // ── ViewModel ────────────────────────────────────────────────────────────────
 
+/**
+ * What an account is called in the Armory: its login email when the provider
+ * recorded one, else its generic name (`claude-oauth`) — the email is what
+ * tells two accounts on one provider apart
+ * (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §3).
+ */
+export function accountLabel(a: Pick<Account, "name" | "context">): string {
+    return a.context?.email || a.name;
+}
+
 export class IdentityViewModel implements ViewModel {
     viewType = "identity";
     blockId: string;
