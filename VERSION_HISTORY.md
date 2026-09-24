@@ -1,5 +1,32 @@
 # AgentMux Version History
 
+## 0.57.1 — 2026-09-24
+
+- Agent pane: only the turn in flight stays always-mounted; long conversations no longer slow down streaming or typing (setting agent:turnscopedtail to disable)
+- Spec: identity M4d design (signing keys by UID, signed source_uid) — design only, gated
+- Armory Accounts: each provider account is labelled with its login email (backfilled from the account's own login) instead of claude-oauth
+- Gemini, Qwen and Antigravity panes keep your messages after a reload (the prompt echo in the transcript is now shown when history is restored)
+- docs(spec): durable conversation memory — one continuous conversation per agent, in every case
+- fix(agent): a reopened pane continues the conversation it shows instead of starting blank
+- SearchHistory and an agent's history list no longer include other agents' sessions from a shared account
+- fix(storage): transcript writes are atomic — two AgentMux instances appending for one agent no longer overwrite each other's lines, and a failed write no longer leaves a torn file
+- Personal memory resolves to the agent's linked account directory, so MemoryList finds memories for agents with no env override
+- fix(storage): transcript files carry a line count and generation, so every record gets a stable address; torn last lines are closed instead of fusing with the next record; concurrent instances can open the transcript store at the same moment
+- Durable jekt: a message to a known agent that is not running is held for up to 24 h and delivered when it starts, instead of being dropped
+- fix(storage): restoring or back-filling a transcript can no longer leave its line index describing the old file, and a transcript and its sidecars are replaced or deleted together
+- Deleting an agent also deletes signing keys filed under its display name, instance name and agent.open fallback id
+- fix(agent): live transcript events carry each record's stable address and go out only after the record is saved
+- perf(storage): transcript writes commit a line and its timestamp together, use SQLite synchronous=NORMAL, and checkpoint in the background, so a live agent line is saved in ~1 ms instead of ~8
+- fix(agent): history counts and reads name the transcript stream and generation they served, the count comes straight from the line counter, and a restored or archived session tells open panes at once
+- fix(identity): keep Claude transcripts 180 days instead of the CLI's 30-day sweep of shared history
+- fix(history): the first SearchHistory after an AgentMux start no longer times out, and new sessions are found without a restart
+- fix(agent): AgentMux error messages in an agent pane survive a reload, and the user's own messages are announced in the transcript stream without showing twice
+- feat(agent): a fresh session that can't resume the pane's conversation receives AgentMux's record of it
+- Background Haiku side calls run in their own scratch directory, so their transcripts never appear in an agent's history
+- fix(agent): the agent pane places live transcript lines by position — no repeats of loaded history, missed lines (socket drops, other writers to the agent's shared history) are read back in order
+- docs(jekt): WAN jekt verification spec — same-account phase W3-S, both sides
+- Desktop notifications: on Windows, AgentMux now shows a system notification when an agent needs your input, finishes, or stops with an error while you're not looking at it. Clicking it opens that agent's pane. Configure it under Settings → Notifications & Tray, which can also keep AgentMux running in the system tray and start it at login.
+
 ## 0.57.0 — 2026-09-23
 
 - perf(agent-pane): pin-to-bottom without forced synchronous layout — the pin runs after layout in the content ResizeObserver, the scroll event our own pin causes is handled without geometry reads, rows are placed from the stored scroll margin
