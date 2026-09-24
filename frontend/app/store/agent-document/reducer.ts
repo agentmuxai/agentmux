@@ -15,6 +15,7 @@
 
 import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog } from "../../view/agent/types";
 import { isAcceptedBackgroundLaunch } from "../../view/agent/activity/tool-adapter";
+import { planRollOff } from "../../view/agent/live-feed";
 import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
 import {
     AgentDocumentCommand,
@@ -784,6 +785,41 @@ export function update(
                         markdownCanceled: scrub.markdownCanceled,
                         toolsCanceled: scrub.toolsCanceled,
                         resolvedToolNodes: scrub.resolvedToolNodes,
+                    },
+                ],
+            };
+        }
+
+        case "RollOff": {
+            const plan = planRollOff(state.nodes, command);
+            if (!plan) return { state, events: [] };
+            const nodes: DocumentNode[] = [];
+            const gapsBefore: string[] = [];
+            let prefixTurns = 0;
+            let from = 0;
+            for (const r of plan.ranges) {
+                if (r.start === 0) prefixTurns = r.turns;
+                else gapsBefore.push(state.nodes[r.end].id);
+                for (let i = from; i < r.start; i++) nodes.push(state.nodes[i]);
+                from = r.end;
+            }
+            for (let i = from; i < state.nodes.length; i++) nodes.push(state.nodes[i]);
+            const nodeIdSet = new Set<string>();
+            const nodeIndexById = new Map<string, number>();
+            for (let i = 0; i < nodes.length; i++) {
+                nodeIdSet.add(nodes[i].id);
+                nodeIndexById.set(nodes[i].id, i);
+            }
+            return {
+                state: { ...state, nodes, nodeIdSet, nodeIndexById },
+                events: [
+                    {
+                        type: "turns-rolled-off",
+                        removedCount: plan.nodes,
+                        turns: plan.turns,
+                        blockedTurns: plan.blockedTurns,
+                        prefixTurns,
+                        gapsBefore,
                     },
                 ],
             };

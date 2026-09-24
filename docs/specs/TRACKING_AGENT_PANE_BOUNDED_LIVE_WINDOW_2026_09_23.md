@@ -25,8 +25,8 @@
 | 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | **deferred** by the §6.9 revision (live feed keeps n small; stores ≤ 8 % at 200 turns, §3.8) |
 | 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663 | **5a done**; 5b, 5c, 5e deferred by §6.9; 5d's journal is §6.9 PR 4 |
-| 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | — | next, after 7 |
-| 7 | History tab follows the transcript (spec §6.9) | — | in progress |
+| 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | this PR | in review; kill switch `agent:livefeed`, K = `agent:livefeedturns` (§2.2d) |
+| 7 | History tab follows the transcript (spec §6.9) | #3695 | merged |
 | 8 | Off-main-thread markdown (decision) | — | not started |
 | 9 | Default on | — | not started |
 | 10 | `content-visibility` experiment | — | not started |
@@ -170,6 +170,30 @@ first version of 3b): synchronous mount 5.5–7.1 s → **2.75–3.14 s**
 last turn (3 nodes) and no head rows; a pane scrolled to the top mounts the
 last turn plus ~10 head rows in view — 5.5k elements, where the count policy
 mounted 33k and the first version of 3b 44k (§3.7).
+
+### 2.2d The live feed: finished turns roll off (spec §6.9, PR 3)
+
+Same dev build, `agent:livefeed` off (every turn stays, paging on) vs on
+(K = 3), 3 panes, bench history injected at N turns (20 KB each).
+
+**After the load, forced GC (`HeapProfiler.collectGarbage` ×3), N = 200, two
+runs each:**
+
+| | off | on |
+|---|---|---|
+| document nodes per pane | 602 | **14–20** (4–6 turns: K finished + the one in flight + any on screen) |
+| JS heap | 68.1 / 67.3 MB | **56.1 / 55.9 MB** (−17 %) |
+| live DOM nodes | 26.8k | 26.7k — unchanged: Phase 3b already mounts only what is on screen |
+
+The heap saving is the rolled-off turns' content (~200 × 20 KB per pane
+here); it grows with what real turns carry (tool output, long replies).
+
+**Streaming + typing, interleaved ×3, medians** (N = 0 / 25 / 200): fps
+59.2–59.8 and key → paint p95 64 ms in every cell, on and off — this machine
+was quiet (§3.9); script time per run 2,137 / 2,013 / 2,088 ms off vs
+2,095 / 1,862 / 1,917 ms on. Heap and live-DOM readings inside those windows
+are GC-timing noise (e.g. off read 127 MB at N = 25 and 87 MB at N = 200), so
+the table above is the memory result.
 
 ### 2.3 `main` baseline, direct mode (Phase 0)
 

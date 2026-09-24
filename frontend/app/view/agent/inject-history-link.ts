@@ -22,11 +22,34 @@ const HISTORY_LINK_NODE: HistoryLinkNode = { type: "history_link", id: "history-
  * history is available, even if the boundary node isn't literally first).
  * No-op — returns `nodes` unchanged — when `show` is false.
  */
-export function injectHistoryLink(nodes: ReadonlyArray<DocumentNode>, show: boolean): DocumentNode[] {
+export function injectHistoryLink(
+    nodes: ReadonlyArray<DocumentNode>,
+    show: boolean,
+    opts?: { earlierTurns?: number },
+): DocumentNode[] {
     if (!show) return nodes as DocumentNode[];
+    const link: HistoryLinkNode =
+        opts?.earlierTurns != null ? { ...HISTORY_LINK_NODE, earlierTurns: opts.earlierTurns } : HISTORY_LINK_NODE;
     const first = nodes[0];
     if (first?.type === "session_outcome" && first.outcome === "fresh") {
-        return [first, HISTORY_LINK_NODE, ...nodes.slice(1)];
+        return [first, link, ...nodes.slice(1)];
     }
-    return [HISTORY_LINK_NODE, ...nodes];
+    return [link, ...nodes];
+}
+
+/**
+ * The live feed's gap rows (spec §6.9): where turns rolled off around one
+ * that had to stay, a row before the first node after the gap says the
+ * missing turns are in History. A gap before the first node is the top
+ * link's job, so none is added there.
+ */
+export function injectGapRows(nodes: ReadonlyArray<DocumentNode>, gapsBefore: ReadonlySet<string>): DocumentNode[] {
+    if (gapsBefore.size === 0) return nodes as DocumentNode[];
+    const out: DocumentNode[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        if (i > 0 && gapsBefore.has(n.id)) out.push({ type: "history_link", id: `history-gap:${n.id}`, gap: true });
+        out.push(n);
+    }
+    return out;
 }

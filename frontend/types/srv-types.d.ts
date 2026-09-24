@@ -1143,6 +1143,8 @@ declare global {
         "dnd:agentinserttoken"?: boolean;
         "agent:askquestiontimeoutms"?: number;
         "agent:turnscopedtail"?: boolean;
+        "agent:livefeed"?: boolean;
+        "agent:livefeedturns"?: number;
     };
 
     // waveobj.StickerClickOptsType
