@@ -1,11 +1,15 @@
 # SPEC: show the provider account's email in the Armory
 
 **Date:** 2026-09-23
-**Status:** active — the capture-and-render path shipped in #3541: the login
-email is recorded on the account and rendered on its Armory row.
-Not yet built: §4's backfill for accounts that authenticated before that PR,
-which keep an empty `context` until they re-authenticate. That is the majority
-of existing accounts, so it is the remaining work rather than a nicety.
+**Status:** active — the capture-and-render path shipped in #3541, but
+Claude's login transcript prints no email, so no Claude account ever had
+one recorded and the Accounts page kept showing `claude-oauth`. The
+follow-up reads the email the CLI records in the account's own config dir
+(`<dir>/.claude.json` → `oauthAccount.emailAddress`): at login when the
+transcript had none, and as §4's backfill each time accounts are listed
+(written only when it differs, so a re-login as another user replaces it).
+The row's label is now the email, falling back to the name
+(`accountLabel`).
 **Trigger:** Repo owner: *"for provider logins (like anthropic) we need the
 email address on the account to show on its entry in the armory."*
 **Scope:** OAuth provider accounts (`kind = "oauth"`). Static key/token
