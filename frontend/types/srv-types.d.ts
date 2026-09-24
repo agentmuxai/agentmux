@@ -1098,6 +1098,7 @@ declare global {
         "window:magnifiedblockblursecondarypx"?: number;
         "window:confirmclose"?: boolean;
         "window:savelastwindow"?: boolean;
+        "window:keepinactivetabslaidout"?: boolean;
         "window:dimensions"?: string;
         "window:zoom"?: number;
         "window:theme"?: string;
