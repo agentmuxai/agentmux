@@ -19,8 +19,10 @@ const IDX: &str = "output.idx";
 
 /// `output`'s size and valid generation, from the database — never this
 /// process's `stat` cache, which another srv instance's append makes stale.
+/// A counter only behind (an older build appended since) is caught up first,
+/// so its generation holds across those appends (`filestore/counter.rs`).
 pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<String>)> {
-    let state = fs.line_state(zone, "output").ok()??;
+    let state = fs.catch_up_line_counter(zone, "output").ok()??;
     Some((state.size.max(0) as u64, state.counted.map(|c| c.gen)))
 }
 
@@ -196,6 +198,11 @@ pub(crate) fn rebuild_output_idx(
 /// P1 on PR #2838. The count has to stay exact; only the cost of keeping it
 /// exact is negotiable.
 pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
+    // A counter merely behind (an older build appended) is caught up first:
+    // otherwise the snapshot below sees no generation, the index is published
+    // unlabelled, and the next reader — once the counter has caught up —
+    // rejects it and rebuilds the whole index.
+    let _ = fs.catch_up_line_counter(block_id, "output");
     // `output` and the whole existing index in one snapshot: the seed entries,
     // the covered size, the label and the output state all describe the same
     // moment, and the guarded write below refuses if `output` has since been

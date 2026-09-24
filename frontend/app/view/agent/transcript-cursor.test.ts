@@ -262,13 +262,32 @@ describe("TranscriptCursor", () => {
         expect(h.cursor.stats.linesSkipped).toBe(2);
     });
 
-    it("ignores a count for another stream or generation", async () => {
+    it("ignores a count for another stream", async () => {
         const h = harness({ lines: ["l0"] });
         h.cursor.settle({ stream: G, gen: "g1", next: 0 });
         h.cursor.observeCount(1, B, "g1");
-        h.cursor.observeCount(1, G, "g0");
         await flush();
         expect(h.reads).toEqual([]);
+    });
+
+    it("follows a re-count seen by the poll, keeping its line", async () => {
+        // An older build's write made a reader re-count: same lines, new gen.
+        const h = harness({ lines: ["l0", "l1", "l2"], gen: "g2" });
+        h.cursor.settle({ stream: G, gen: "g1", next: 1 });
+        h.cursor.observeCount(3, G, "g2");
+        await flush();
+        expect(h.reads).toEqual([[1, 2, "g2"]]);
+        expect(h.delivered).toEqual(["l1", "l2"]);
+        expect(h.cursor.position()).toEqual({ stream: G, gen: "g2", next: 3 });
+    });
+
+    it("leaves a count in a new generation below its line (a recreated file) to the next event", async () => {
+        const h = harness({ lines: ["n0"], gen: "g2" });
+        h.cursor.settle({ stream: G, gen: "g1", next: 40 });
+        h.cursor.observeCount(1, G, "g2");
+        await flush();
+        expect(h.reads).toEqual([]);
+        expect(h.cursor.position()).toEqual({ stream: G, gen: "g1", next: 40 });
     });
 
     it("resets on truncate and delete, and starts the new file from line 0", async () => {

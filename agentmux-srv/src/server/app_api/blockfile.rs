@@ -212,7 +212,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{output_index, read_via_index, rebuild_output_idx};
+                use crate::backend::blockcontroller::shell::{extend_output_idx, read_via_index};
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
                     // streaming scan of `output`, which reaches hundreds of MB
@@ -235,13 +235,18 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // rebuilt once, for the output as a snapshot saw it, and read
                         // again in a new snapshot; if that still doesn't match
                         // (replaced again meanwhile), the slow path below answers.
+                        // A missing or stale index is brought up to date by
+                        // extending it from its last line — scanning only the
+                        // bytes appended since, as `line_count` did before it
+                        // answered from the counter (5a-3b). A full rebuild on
+                        // every read of a grown file cost seconds on a large
+                        // agent zone. `extend_output_idx` still rebuilds when
+                        // the index can't be a base (another generation's,
+                        // shrunk, missing).
                         let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
                             Some(read) => read,
                             None => {
-                                let view = output_index(&filestore, &read_block)?;
-                                if view.fresh_lines.is_none() {
-                                    rebuild_output_idx(&filestore, &read_block, view.output_size, view.output_gen)?;
-                                }
+                                extend_output_idx(&filestore, &read_block)?;
                                 read_via_index(&filestore, &read_block, offset as u64, limit as u64)?
                             }
                         };

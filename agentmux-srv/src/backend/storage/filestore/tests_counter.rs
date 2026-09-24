@@ -31,9 +31,12 @@ fn pos(p: &AppendPos) -> (u64, u64) {
     (c.first_line, c.lines)
 }
 
-/// The reader's addressing, as the read path computes it.
+/// The reader's addressing, as the read path computes it — from the
+/// database, like the read paths: an older build's write (simulated below on
+/// the raw connection) never passes through this store's `stat` cache.
 fn reader_lines(fs: &FileStore) -> Vec<String> {
-    let data = fs.read_file(ZONE, NAME).unwrap().unwrap();
+    let size = fs.line_state(ZONE, NAME).unwrap().unwrap().size;
+    let data = fs.read_bytes_db(ZONE, NAME, 0, size).unwrap();
     String::from_utf8_lossy(&data).lines().filter(|l| !l.trim().is_empty()).map(str::to_string).collect()
 }
 
@@ -56,6 +59,49 @@ fn old_build_append(fs: &FileStore, data: &[u8]) {
         params![size + data.len() as i64, ZONE, NAME],
     )
     .unwrap();
+}
+
+/// An older build's append of any size: parts first (the last one extended,
+/// then new ones from the old size), then `size` — no counter columns.
+fn old_build_append_parts(fs: &FileStore, data: &[u8]) {
+    const PART: usize = 64 * 1024;
+    let conn = fs.conn().lock().unwrap();
+    let size: i64 = conn
+        .query_row("SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| r.get(0))
+        .unwrap();
+    let mut at = size as usize;
+    let mut rest = data;
+    while !rest.is_empty() {
+        let (idx, in_part) = (at / PART, at % PART);
+        let mut part: Vec<u8> = conn
+            .query_row(
+                "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                params![ZONE, NAME, idx as i64],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        part.truncate(in_part);
+        let take = (PART - in_part).min(rest.len());
+        part.extend_from_slice(&rest[..take]);
+        conn.execute("REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)", params![ZONE, NAME, idx as i64, part])
+            .unwrap();
+        at += take;
+        rest = &rest[take..];
+    }
+    conn.execute(
+        "UPDATE db_wave_file SET size = ?1, modts = modts + 1 WHERE zoneid = ?2 AND name = ?3",
+        params![at as i64, ZONE, NAME],
+    )
+    .unwrap();
+}
+
+/// Clear the epoch, as a write this build couldn't vouch for does.
+fn drop_epoch(fs: &FileStore) {
+    fs.conn()
+        .lock()
+        .unwrap()
+        .execute(&format!("UPDATE db_wave_file SET {}", super::counter::DROP_EPOCH_SQL), [])
+        .unwrap();
 }
 
 #[test]
@@ -152,24 +198,112 @@ fn a_metadata_write_keeps_the_epoch() {
 }
 
 #[test]
-fn a_write_by_an_older_build_drops_the_epoch_and_init_starts_a_new_one() {
+fn an_older_builds_append_is_caught_up_and_keeps_the_generation() {
     let fs = mem();
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
     fs.append_lines(ZONE, NAME, b"a\nb\n").unwrap();
     let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
 
     old_build_append(&fs, b"c\n");
+    // Behind, not counted, until someone catches it up.
+    assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted, None);
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()), (g0.clone(), 3));
+
+    // An append catches up inline, in its own transaction.
+    old_build_append(&fs, b"d\n");
+    let p = fs.append_lines(ZONE, NAME, b"e\n").unwrap();
+    assert_eq!(p.counted.as_ref().unwrap().gen, g0);
+    assert_eq!(pos(&p), (4, 5));
+    assert_eq!(reader_lines(&fs), ["a", "b", "c", "d", "e"]);
+    // Already counted: init returns the epoch unchanged.
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()), (g0, 5));
+}
+
+#[test]
+fn a_write_this_build_cant_vouch_for_drops_the_epoch_and_init_starts_a_new_one() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"a\nb\n").unwrap();
+    let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    // A rewrite of counted bytes (here in place, same size): `rev` moves.
+    fs.write_at(ZONE, NAME, 0, b"x").unwrap();
     assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted, None);
     // Appends go on uncounted rather than guess.
     assert_eq!(fs.append_lines(ZONE, NAME, b"d\n").unwrap().counted, None);
-
     let (g1, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
     assert_ne!(g1, g0, "a re-counted epoch must not reuse the old generation");
-    assert_eq!(lines, 4);
-    assert_eq!(pos(&fs.append_lines(ZONE, NAME, b"e\n").unwrap()), (4, 5));
-    assert_eq!(reader_lines(&fs), ["a", "b", "c", "d", "e"]);
-    // Already counted: init returns the epoch unchanged.
-    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()), (g1, 5));
+    assert_eq!(lines, 3);
+    assert_eq!(reader_lines(&fs), ["x", "b", "d"]);
+}
+
+#[test]
+fn a_caught_up_epoch_continues_an_open_line() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_data(ZONE, NAME, b"a\n  ").unwrap(); // a blank open line: not counted
+    let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    // The older build's bytes complete it, and it becomes a line.
+    old_build_append(&fs, b"b\nc");
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()), (g0.clone(), 3));
+    old_build_append(&fs, b"d\n");
+    assert_eq!(pos(&fs.append_data_pos(ZONE, NAME, b"e\n").unwrap()), (3, 4));
+    assert_eq!(reader_lines(&fs), ["a", "  b", "cd", "e"]);
+    assert_eq!(counted(&fs.line_state(ZONE, NAME).unwrap()).0, g0);
+}
+
+#[test]
+fn an_epoch_far_behind_is_left_for_init_not_dropped() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"a\n").unwrap();
+    let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    // More than an append catches up inline, over many parts and windows.
+    let mut big = Vec::new();
+    for i in 0..50_000 {
+        big.extend_from_slice(format!("{i}:{}\n", "q".repeat(i % 80)).as_bytes());
+    }
+    assert!(big.len() > (1 << 20) + (1 << 20) / 2);
+    old_build_append_parts(&fs, &big);
+    // The append isn't counted, but leaves the epoch to catch up.
+    assert_eq!(fs.append_lines(ZONE, NAME, b"z\n").unwrap().counted, None);
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()), (g0, 50_002));
+    assert_eq!(reader_lines(&fs).len(), 50_002);
+}
+
+#[test]
+fn a_catch_up_gives_up_if_the_epoch_moves_during_its_scan() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"a\n").unwrap();
+    let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    old_build_append(&fs, b"b\n");
+    let scan = scanned(&fs);
+    // Another instance catches it up (and appends) first: the scan's base is
+    // gone, and finishing returns that instance's epoch — not one built on
+    // the stale base.
+    fs.append_lines(ZONE, NAME, b"c\n").unwrap();
+    assert_eq!(counted(&fs.init_finish(ZONE, NAME, scan).unwrap()), (g0.clone(), 3));
+    // Behind again, and dropped by a rewrite before a scan finishes: nothing.
+    old_build_append(&fs, b"d\n");
+    let scan = scanned(&fs);
+    drop_epoch(&fs);
+    assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
+}
+
+#[test]
+fn a_catch_up_gives_up_if_the_file_is_rewritten_during_its_scan() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"aaaa\nbbbb\n").unwrap();
+    let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    old_build_append(&fs, b"cccc\n");
+    let scan = scanned(&fs);
+    fs.write_at(ZONE, NAME, 5, b"    ").unwrap(); // "bbbb" becomes blank
+    assert_eq!(fs.init_finish(ZONE, NAME, scan).unwrap(), None);
+    // Rewritten: a new epoch from byte 0, with a new generation.
+    let (g1, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
+    assert_ne!(g1, g0);
+    assert_eq!(lines, 2);
 }
 
 #[test]
@@ -214,11 +348,11 @@ fn a_database_from_an_older_build_gains_the_columns_and_its_rows_can_be_counted(
     assert_eq!(reader_lines(fs), ["one", "two", "three", "four"]);
 }
 
-/// A counted file whose epoch an older build's write dropped, ready for init.
+/// A file without an epoch (dropped, or never counted), ready for init.
 fn uncounted(fs: &FileStore, content: &[u8]) {
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
     fs.append_data(ZONE, NAME, content).unwrap();
-    fs.conn().lock().unwrap().execute("UPDATE db_wave_file SET modts = modts + 1", []).unwrap();
+    drop_epoch(fs);
     assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted, None);
 }
 
@@ -427,8 +561,7 @@ fn init_counts_a_file_larger_than_one_scan_window() {
         fs.append_data(ZONE, NAME, line.as_bytes()).unwrap();
         expected += 1;
     }
-    // Drop the epoch the way an older build's write would.
-    fs.conn().lock().unwrap().execute("UPDATE db_wave_file SET modts = modts + 1", []).unwrap();
+    drop_epoch(&fs);
     let (_, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
     assert_eq!(lines, expected);
 }
@@ -478,8 +611,59 @@ fn concurrent_line_appends_from_two_stores_get_distinct_lines_that_address_them(
     }
 }
 
+#[derive(Debug, Clone)]
+enum MixedOp {
+    /// This build appends raw bytes.
+    New(Vec<u8>),
+    /// This build appends transcript lines.
+    NewLines(Vec<u8>),
+    /// An older build appends raw bytes.
+    Old(Vec<u8>),
+    /// A reader counts (`line_count`).
+    Init,
+}
+
+fn arb_chunk() -> impl Strategy<Value = Vec<u8>> {
+    prop::collection::vec(
+        prop_oneof![4 => Just(b'\n'), 2 => Just(b' '), 1 => Just(b'\r'), 1 => Just(0xe3u8), 1 => Just(0x80u8), 6 => b'a'..=b'z'],
+        0..60,
+    )
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+    /// Builds mixed on one file, appending only: the generation never
+    /// changes, and whenever the file is counted its count is the reader's.
+    #[test]
+    fn mixed_build_appends_keep_one_generation_and_the_readers_count(ops in prop::collection::vec(
+        prop_oneof![
+            arb_chunk().prop_map(MixedOp::New),
+            arb_chunk().prop_map(MixedOp::NewLines),
+            arb_chunk().prop_map(MixedOp::Old),
+            Just(MixedOp::Init),
+        ],
+        1..24,
+    )) {
+        let fs = mem();
+        fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+        let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+        for op in &ops {
+            match op {
+                MixedOp::New(b) => { fs.append_data_pos(ZONE, NAME, b).unwrap(); }
+                MixedOp::NewLines(b) => { fs.append_lines(ZONE, NAME, b).unwrap(); }
+                MixedOp::Old(b) => old_build_append(&fs, b),
+                MixedOp::Init => { fs.init_line_counter(ZONE, NAME).unwrap(); }
+            }
+            if let Some(c) = fs.line_state(ZONE, NAME).unwrap().unwrap().counted {
+                prop_assert_eq!(&c.gen, &g0);
+                prop_assert_eq!(c.lines, reader_lines(&fs).len() as u64);
+            }
+        }
+        let (gen, lines) = counted(&fs.init_line_counter(ZONE, NAME).unwrap());
+        prop_assert_eq!(gen, g0);
+        prop_assert_eq!(lines, reader_lines(&fs).len() as u64);
+    }
 
     /// Raw appends of arbitrary bytes keep the counter equal to the
     /// `output.idx` indexer's count, the addressing reads use.

@@ -295,9 +295,19 @@ export class TranscriptCursor {
 
     private handleCount(item: { count: number; stream: string; gen: string }): Promise<void> | void {
         const pin = this.pin;
-        if (!pin || item.stream !== pin.stream || item.gen !== pin.gen) return;
-        if (item.count <= pin.next) return;
-        return this.fill(pin.next, item.count);
+        if (!pin || item.stream !== pin.stream) return;
+        if (item.gen !== pin.gen) {
+            // The same rule as for an event (handleEvent): a re-count only
+            // grows the file and keeps every line's index. Anything else — a
+            // recreated file, or a record shown without a position since —
+            // waits for an event to join at.
+            if (this.unpositionedSincePin > 0 || item.count < pin.next) return;
+            this.stats.genChanges++;
+            this.deps.log(`transcript cursor: ${pin.stream} re-counted ${pin.gen} → ${item.gen} (keeping line ${pin.next})`);
+            this.pin = { stream: pin.stream, gen: item.gen, next: pin.next };
+        }
+        if (item.count <= this.pin.next) return;
+        return this.fill(this.pin.next, item.count);
     }
 
     /**
