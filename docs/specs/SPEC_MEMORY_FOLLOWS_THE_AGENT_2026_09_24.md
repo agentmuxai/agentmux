@@ -42,6 +42,19 @@ data, and all were accepted.
 - **Imported history:** rows from unproven sources are imported only
   when proven (§2.1.1).
 
+**Third review** (1 P1, 5 P2), all accepted:
+- **First sighting:** the agent's own spawn directory, once proven
+  exclusive, is adopted **automatically** as the baseline, index and
+  topic files together, with an undo. Human adoption remains only for
+  other accounts' directories (§2.1.2, §2.1.4).
+- **Vetoes:** computed from machine-wide sources, counting only a
+  **different** UID, and ignoring retired agents.
+- **Claims:** released when the claiming agent is retired or deleted,
+  and by a human action.
+- **Drift:** re-checks the claim before every capture.
+- **Reconcile:** has a 1 s budget and never blocks a spawn.
+- **History import:** runs per agent, at its first M3 spawn.
+
 **Trigger:** the repo owner, on 2026-09-24, after upgrading to 0.57.2 and
 reopening this agent in the new build:
 > "we are doing work right now regarding conversation history, more
@@ -280,8 +293,8 @@ zone holds three files:
   has zones and files but no blob API (`types.rs:12-25`), so blobs are
   files named by their hash, and writing one is idempotent.
 - **`heads.json`**, a compacted snapshot: per file, the head version, its
-  sha256 and whether it is deleted; per `(instance, dir_id, file)`, the
-  version last projected there. It is rewritten after each append,
+  sha256 and whether it is deleted; per `(dir_id, file)`, the version last
+  projected there (§2.1.3). It is rewritten after each append,
   under the same transaction.
 
 Readers use `heads.json` for current state and read `log.jsonl` only for
@@ -327,17 +340,23 @@ record it once.
 warning). New sources are `provider` (captured from disk), `adopted`,
 `sync` and `legacy-build`.
 
-**Existing history is imported first.** Before any table becomes a cache,
-a one-time import copies `db_agent_native_memory_versions` (from every
-channel store on the machine) into the record, deduplicated by sha256.
+**Existing history is imported per agent, at its first M3 spawn.** Proof
+of exclusivity only exists once the spawn has claimed its directory
+(§2.1.2), so the import can't run earlier. At that spawn, after the claim
+and before the baseline is adopted, `db_agent_native_memory_versions`
+rows for that agent (from every channel store on the machine) are copied
+into the record, deduplicated by sha256. Only then does the per-channel
+table become a cache.
 
 Rows with the sources `agent_inferred` (from m0024) and
 `external_fs_write` (from drift) came from the registry-based
 `list_all_memory_targets` on **every** user's machine (`m0024…rs:132`),
 so they are treated as **unproven**:
-- they are imported only when their hash appears in a directory proven
-  exclusive to that agent (§2.1.2);
+- they are attached as **ancestors** of the baseline (§2.1.2) when their
+  hash matches a file in the agent's own proven directory;
 - otherwise they go to the adoption list (§2.1.4).
+
+On this machine all 50 history rows are of these two kinds.
 
 The rows known to be misattributed on this machine (§1.3) are deleted by
 exact id in M0, by hand.
@@ -383,17 +402,50 @@ has segments yet, so segment history alone can't detect sharing.
 A directory is **exclusive** to an agent only when every one of these
 holds:
 1. **It isn't a known shared location:** not the blank-working-dir or
-   `default_agent_working_dir` path, not `$HOME`, not
-   `shared/providers/claude`, and not an ancestor of another agent's
-   working dir.
-2. **No registry veto.** No other `db_agents` row (in any channel store)
-   or registry record could resolve to the same `dir_id` through its
-   linked account or registry `identity_id` × working dir. These lookups
-   **veto** only; they are never used to *find* a directory (above).
+   `default_agent_working_dir` path, and not `$HOME` or an ancestor of
+   another agent's working dir. Unlinked agents use
+   `shared/providers/claude/projects/<cwd>/memory`, which is still one
+   folder per working dir (`native_memory_handlers.rs:63-72`). So that
+   location is shared only when **another unlinked agent has the same
+   working dir**, not in general.
+2. **No veto from a different UID.** No agent with a **different UID**
+   could resolve to the same `dir_id` through its linked account × its
+   working dir. The check uses machine-wide sources only:
+   - the definitions in `shared/agents/definitions/<defId>.json`, which
+     carry `working_directory`, excluding `retired/`;
+   - the agent-to-account links in `shared/identity-store.db`;
+   - the registry, excluding retired records.
+
+   It does **not** read every per-version `objects.db`: there are 23
+   here, some with older schemas, and their stale rows are never
+   cleaned. Rows and records that carry the **same** UID (stale
+   `identity_id`s, blank working dirs in old channels) never veto. These
+   lookups **veto** only; they are never used to *find* a directory. The
+   veto is precomputed into an index, rebuilt when definitions or links
+   change, never scanned at spawn.
 3. **It holds a machine-wide claim.** Before reconcile, the agent writes a
    claim to zone `memory-dir:<sha(dir_id)>` with the conditional append,
-   and re-reads it afterwards. A second UID's claim makes the directory
-   shared, permanently. Two agents spawning at once both see both claims.
+   and re-reads it afterwards. A live claim by a second UID makes the
+   directory shared. Two agents spawning at once both see both claims.
+   - **Drift capture re-reads the claim before every capture.** An agent
+     that claimed first and was already running learns about a later
+     claimant within one sweep, and stops capturing.
+   - **Claims are released** when the claiming UID is retired or
+     deleted: its definition moves to `retired/`, or the deleted-agent
+     gate from #3591 applies. The Armory also offers a human "release
+     this folder" action.
+
+     This matters in practice: `buildInstanceSlug` adds only month, day
+     and hour (`instance-slug.ts:60,73`), so re-creating a same-named
+     agent within the hour, or on the same date a year later, reuses the
+     working dir.
+   - A UID never changes for an existing agent. M4d re-keys signing keys,
+     not `db_agents.id`.
+
+Measured on this machine: the three real agents each have their own
+working dir. Two share an account, but their working dirs differ, so
+their memory dirs differ. No veto fires, and all three can be proven
+exclusive.
 
 - **Detecting it:** a directory that fails any of the three is
   **shared**.
@@ -406,11 +458,26 @@ holds:
   working directory. The agents keep working exactly as today in the
   meantime.
 
-**Files already there at first sighting are never captured
-automatically.** When a directory first becomes exclusive to an agent,
-the files already in it go to the human-confirmed adoption list
-(§2.1.4). Only files that appear **after** the claim are captured
-automatically.
+**First sighting: the agent's own directory becomes the baseline.** When
+the agent's **own live spawn directory** passes all three checks, its
+current contents are adopted automatically as the baseline:
+- **as one set:** the MEMORY.md index and every topic file together, so
+  an index never points at missing files, and no topic is left without
+  its index line;
+- **labelled:** source `adopted`, detail "first sighting, own spawn dir";
+- **reversible:** the Armory offers an undo, which removes the baseline
+  from the record and leaves the files untouched;
+- **with its history:** unproven history rows whose hash matches a file
+  are attached as its ancestors (§2.1.1).
+
+The baseline is skipped for a file whose hash already sits in **another
+UID's** record. That file goes to the adoption list instead.
+
+This carries no more risk than capturing later writes: any writer that
+shares the folder after the claim would be captured anyway, so refusing
+files that were there first protects nothing.
+
+**Human adoption** (§2.1.4) remains only for other accounts' directories.
 
 **Agents without segments yet** (every agent except one on this machine):
 - `MemoryRead` and `MemoryWrite` resolve the directory from the caller's
@@ -422,7 +489,16 @@ automatically.
 #### 2.1.3 Reconcile
 
 **Where it runs:** in `persistent/spawn.rs`, **before the provider process
-starts** (`cmd.spawn()`, `:165`). `config.env_vars` and
+starts** (`cmd.spawn()`, `:165`), within a **1 s budget**, and it never
+blocks a spawn.
+- `spawn_process` is synchronous, and runs inline from `queue.rs:577`,
+  `eager_resume.rs:234` and `resume_retry.rs:432`, while holding the
+  resume-stripe mutex (`spawn.rs:111-121`).
+- The filestore's busy timeout is 5 s (`core.rs:74`).
+
+**If the budget runs out**, the spawn proceeds without projecting, and
+records "reconcile deferred". The drift sweep finishes the work later. A
+partial pass never writes tombstones. `config.env_vars` and
 `config.working_dir` are already known there. It runs once per process
 spawn, before Claude reads MEMORY.md, so a new account or a new working
 dir starts its first session **with** its memory. The segment write stays
@@ -452,8 +528,8 @@ same head.
 | changed | changed | **conflict** (below) |
 | absent, never projected | exists | write the head (new account, cwd, channel or host) |
 | absent, previously projected | exists | the provider deleted it: capture a **tombstone** whose parent is the last-projected version |
-| exists, never projected | none | the directory is exclusive and the claim is older than the file: capture. Otherwise: the adoption list |
-| exists, never projected | exists (different sha) | **first sighting** (e.g. the first M3 spawn after history import, or after M0): the adoption list, never an automatic overwrite either way |
+| exists, never projected | none | the directory is exclusive: this is the **baseline** at first sighting, or a capture afterwards (§2.1.2) |
+| exists, never projected | exists (different sha) | a head from another directory meets a file here (e.g. after M0): **conflict** (below), never a silent overwrite either way |
 
 **The parent is always the version last projected into that directory**,
 never the record's current head. A version that arrived from another
@@ -485,7 +561,8 @@ disk's sha256 equals the tombstone's parent. Otherwise it is a conflict.
 **Drift capture while the agent runs.** The drift detector
 (`native_memory_drift.rs`) keeps watching the directory. It captures into
 the record with the same rule, using the directory's last-projected
-version as the parent.
+version as the parent. Before every capture it **re-reads the claim**
+(§2.1.2).
 
 #### 2.1.4 Adopting memory from earlier accounts
 
@@ -504,8 +581,10 @@ miss older accounts: `e562b87a` for this agent, and `b43cec34` and
   submits only `(list_id, index, dir hash)` choices, never a path.** A
   directory that changed after the list was issued is refused, and the
   human sees a refreshed list.
-- Nothing is adopted automatically, except directories the agent's own
-  segments prove were its own.
+- The agent's own spawn directory is adopted automatically as the
+  baseline (§2.1.2). **Other directories are never adopted
+  automatically**, including ones older segments point to; they go on
+  this list.
 
 **How files are merged:**
 - A file that exists in several chosen directories is recorded with every
@@ -753,9 +832,9 @@ draft is dirty).
 | Phase | What ships | Depends on |
 |---|---|---|
 | **M0** (manual, with the human's OK) | Restore Maricon's memory. Stop Maricon first. The human confirms all three source accounts are Maricon's (`b43cec34` is the stale id from the m0024 bug). Write the **union** into `1b64d8a3`'s `projects/-home-yas--agentmux-agents-maricon-09101/memory` (empty today; only Maricon is linked to that account, and the folder is keyed by Maricon's working dir, so no other agent is affected): `ee8af73e` (newest, 3 files), plus the two topics only in `b43cec34`, with a unioned MEMORY.md. `d5ba7d63`'s older, superseded `agentmux-contribution-rules.md` goes to the backup only, never as an indexed file. Take a backup first. Also delete this machine's misattributed history rows by exact id. | — |
-| **M1** (fixes) | stop using registry `identity_id`, the blank-working-dir fallback and name-derived dirs to *find* memory, in `list_all_memory_targets` and drift; MemoryRead and MemoryWrite resolve from the caller's live segment, and the Armory shows unverified dirs read-only (§2.1.2); **a new post-attach step** after `attach_identity_stores` replaces m0024's backfill (m0024 has already run in existing channels, so moving it wouldn't help); first sighting recorded as `adopted` | — |
+| **M1** (fixes) | stop using registry `identity_id`, the blank-working-dir fallback and name-derived dirs to *find* memory, in `list_all_memory_targets` and drift; MemoryRead and MemoryWrite resolve from the caller's live segment, and the Armory shows unverified dirs read-only (§2.1.2); **a new post-attach step** after `attach_identity_stores` replaces m0024's backfill (m0024 has already run in existing channels, so moving it wouldn't help), labelling first-seen files in the version table `adopted`, not `external_fs_write` | — |
 | **M2** (UI) | Global Memory tiles and full view; history and content split; editors pinned to the bottom; dirty-draft protection; Personal Memory editing through the existing RPC; Global Memory history RPCs | — |
-| **M3** (record) | the filestore conditional append and database-read sizes; the `agent-uid:<uid>:memory` record (log, blobs, heads); history import; reconcile at spawn; shared-dir detection; drift into the record; server-listed, host-confirmed adoption with index union; opt-out | M1 |
+| **M3** (record) | the filestore conditional append and database-read sizes; the `agent-uid:<uid>:memory` record (log, blobs, heads); the veto index and claim zones with release; the per-agent history import and baseline at first M3 spawn; time-bounded reconcile before spawn; drift into the record with claim re-checks; server-listed, host-confirmed adoption for other accounts' directories, with index union; opt-out | M1 |
 | **M4** (Global Memory record) | `global-memory:<scope>` with entry ids, order events and the import step; legacy-build capture; the bundle sidecar | M3 |
 | **M5** (cloud sync) | the integrations spec's I1 `ws-connect` change and consent flow; the WAN spec's instance keys, with instances enrolled at the relay; relay routes, transactional sequence cursor, presigned S3 bodies, broadcast payload, `MemoryUpdated`; the pending set for quarantine; Global Memory first, then memory groups | M3, M4; integrations I1; WAN instance keys |
 | **M6** (other providers) | project the record into Gemini's memory file | M3 |
@@ -830,11 +909,22 @@ draft is dirty).
 - These are treated as shared:
   - `$HOME`;
   - a blank-working-dir path;
-  - a directory vetoed by a registry match;
-  - a directory claimed by a second UID;
+  - a directory vetoed by a different UID;
+  - a directory claimed by a second live UID;
   - two agents spawning at once.
+- These are **not** vetoes:
+  - the same UID's stale rows and registry records;
+  - an unlinked agent under `shared/providers/claude` with a unique
+    working dir.
+- A retired or deleted UID's claim is released; the human release action
+  works.
+- Drift stops capturing after a second claim appears.
 - A shared directory is neither projected nor captured.
-- Files present at first sighting go to the adoption list.
+- First sighting of the agent's own exclusive directory adopts the index
+  and topic files together as one baseline, with ancestors attached.
+  Undo works.
+- A file whose hash is already in another UID's record goes to the
+  adoption list.
 - A new account dir is filled from the record.
 - A working-dir change projects into the new folder.
 
@@ -845,7 +935,9 @@ draft is dirty).
 - A conflict converges: it is not raised again on the next sweep, and D
   is not overwritten.
 - `__conflict_` files aren't captured; a long stem is truncated.
-- Reconcile runs before the provider process starts.
+- Reconcile runs before the provider process starts, within its budget.
+  A timeout still spawns and records "reconcile deferred". A partial pass
+  writes no tombstones.
 - Two channels on one machine share the projection state.
 - The parent is the last-projected version, so a concurrent remote
   version produces a conflict, never a silent overwrite.
