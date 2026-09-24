@@ -327,6 +327,41 @@ Measured on `main` + 3b (Windows dev build, 3 panes streaming, typing):
   heap 180 → ~65 MB, DOM 223k → ~35k nodes for 200 turns) and Phase 6
   bounds.
 
+### 3.9 Rejected: updating the open block's text in place
+
+§3.8 attributed ~23 % of streaming work to `replaceChild` of the growing last
+block. Tried: when a commit only lengthens the open block's last text run
+(same element shape, same other text), set that DOM text node's `data`
+instead of rebuilding the block. Built behind a setting and A/B-tested on one
+dev build (`main` 8b69b29 + the change), interleaved ×3, 3 panes, N = 0 / 25:
+
+| N = 0 / 25 turns, medians of 3 | rebuild (as `main`) | in place |
+|---|---|---|
+| fps | 59.6 / 59.5 | 59.7 / 59.6 |
+| key → paint p95 | 64 / 64 ms | 64 / 64 ms |
+| script time per run | 1,968 / 1,817 ms | 1,907 / 1,692 ms |
+
+Three CPU-profile pairs (9 s each, 3 panes streaming, typing): `replaceChild`
+0–4 ms per window either way, markdown (inclusive) 483 / 252 / 255 ms in
+place vs 656 / 245 / 270 ms rebuilding — noise. Two reasons: the cost §3.8
+named is not there on current `main` at these sizes (not re-measured at
+N = 200), and the bench's reply (~185 characters per commit, dense inline
+markup, short blocks) changes the open block's shape on most commits, so
+only 41 of 284 commits could be patched at all. Not shipped: a setting and a
+text-node patch path for no measured gain. The machine was quiet (every run
+60 fps), so this bounds the gain rather than proving it zero on a loaded one.
+
+**Found on the way — a real bug.** Frozen segments (#3559) are rendered under
+their own `createRoot` so their components outlive later commits, but
+`solid-js/h` returns elements as lazy thunks that Solid only calls from its
+insert effect — so the components were created under that effect instead and
+disposed on the next commit, while their DOM stayed. Visible effect: a table
+in a long streamed reply never showed "✓ copied" (and never would, since
+frozen segments are kept after the stream ends); an image there would never
+have resolved had a caller passed `resolveOpts` (none does today). Fixed by
+resolving the thunks inside the segment's root; regression tests in
+`markdown-frozen-owner.test.tsx` fail on `main` and pass with the fix.
+
 ## 4. Open follow-ups
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
@@ -341,16 +376,20 @@ Measured on `main` + 3b (Windows dev build, 3 panes streaming, typing):
   expansion on every partition change, and the reducer copies the node array.
   3b made the frontier search itself independent of history (`from`, Codex P2
   on #3611); these are the remaining O(history) costs per stream flush — under
-  ~8 % of streaming work at 200 turns (§3.8), so Phase 4 waits.
+  ~8 % of streaming work at 200 turns (§3.8), so Phase 4 waits. The reducer's
+  copy alone, benched in isolation: 0.056 / 1.14 / 19.3 ms per append at
+  1k / 10k / 100k nodes (200 turns ≈ 600 nodes) — it matters only far beyond
+  the sizes Phase 6 will allow.
 - **Renderer memory after large loads** (§3.8): a resident high-water mark
   from peak loads, not an agent-pane leak. Phase 6 (bounded live document)
   bounds the peak; the 8 h soak verifies it.
 - **Next phase: 5 (stable node identity and durability)**, the prerequisite
   for Phase 6 eviction — what moves old messages out of the live pane and
   into the History tab, bounding memory.
-- **The growing last message's DOM is replaced on every commit** (§3.8:
-  ~23 % of streaming work in `replaceChild`): a per-commit cost independent
-  of history, worth its own look.
+- ~~**The growing last message's DOM is replaced on every commit**~~ —
+  looked at (§3.9): an in-place update was built and measured, no gain on
+  current `main`; not shipped. The look found a real bug instead, fixed
+  alongside (§3.9).
 - **Pane-header chrome retained by block-frame closures** (§3.8): ~13 copies
   of header buttons/icons survive a clear. Small; outside the agent pane.
 - **In-row windowing for one huge node** (spec §6.2) — not in 3b.
