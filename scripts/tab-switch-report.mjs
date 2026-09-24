@@ -80,7 +80,12 @@ for (const r of rows) {
 }
 const withReveal = rows.filter((r) => r.reveal != null);
 if (withReveal.length) {
-  const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  // Even counts average the two middle samples (Codex P2 on #3686).
+  const median = (xs) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+  };
   console.log(
     // Only switches whose reveal was seen: the rest have no "after reveal"
     // window, and their zeros would understate the cost (ReAgent P2 on #3686).
