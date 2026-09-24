@@ -650,8 +650,12 @@ impl PersistentInner {
 /// see its own doc comment and `PersistentInner::spawning_in_progress`.
 enum SendAction {
     /// The process is already running — deliver directly, no spawn
-    /// decision involved at all.
-    DeliverDirect,
+    /// decision involved at all. The turn is already marked active: the
+    /// decision reserves it under the same `inner` acquisition, so an
+    /// automated send cannot see "idle" in the gap before the write (codex P1
+    /// on #3562). `was_active` is the pre-reservation state, for the caller
+    /// to start the heartbeat and to hand the turn back if the write fails.
+    DeliverDirect { was_active: bool },
     /// Nobody else is currently spawning — this caller claimed the
     /// exclusive right to do so and its message has already been enqueued
     /// for the post-spawn drain. `own_seq` is that enqueued message's
@@ -1289,6 +1293,13 @@ impl Controller for PersistentSubprocessController {
                     // flight is killed by the caller's tracker drop.
                     None
                 } else {
+                    // Gate writes now, in the same section as the drain, not
+                    // later in `request_stop_on`: a sender that already holds
+                    // this controller can still enqueue, and the interrupt's
+                    // own `result` would flush that into the process being
+                    // shut down (codex P2 on #3562). The interrupt itself
+                    // goes out on `stdin_tx` directly, not through the gate.
+                    g.stop_pending = true;
                     // Nothing queued may start a new turn after the interrupt.
                     g.pending_send_messages.clear();
                     // Before the interrupt: its `is_error` result is our stop,
