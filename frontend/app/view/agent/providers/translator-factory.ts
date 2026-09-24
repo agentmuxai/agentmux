@@ -23,9 +23,9 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
         case "gemini-json":
             return new GeminiTranslator({ replay: opts.replay });
         case "codex-json":
-            return new CodexTranslator();
+            return new CodexTranslator({ replay: opts.replay });
         case "kimi-stream-json":
-            return new KimiTranslator();
+            return new KimiTranslator({ replay: opts.replay });
         case "acp":
             return new AcpTranslator();
         default:

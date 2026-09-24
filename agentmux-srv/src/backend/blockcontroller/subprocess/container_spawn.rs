@@ -193,6 +193,7 @@ impl SubprocessController {
         };
 
         self.emit_message_accepted(&config);
+        self.persist_user_message(&config.message);
 
         // Derive the exec env from THIS message's own env_vars (apply the
         // container denylist here, per-turn) rather than carrying a pre-filtered

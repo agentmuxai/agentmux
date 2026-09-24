@@ -966,8 +966,7 @@ const AgentPresentationView = ({
     // lacks the user's messages keep today's behaviour (`liveFeedSupported`).
     const liveFeedSetting = untrack(() => getSettingsKeyAtom("agent:livefeed")()) !== false;
     const liveFeedTurns = resolveLiveFeedTurns(untrack(() => getSettingsKeyAtom("agent:livefeedturns")()));
-    const liveFeedOn = (): boolean =>
-        liveFeedSetting && liveFeedSupported(outputFormat(), block()?.meta?.["controller"] as string | undefined);
+    const liveFeedOn = (): boolean => liveFeedSetting && liveFeedSupported(outputFormat());
     // Whether the reader follows the bottom — handed over by the document view.
     let followingBottom: Accessor<boolean> = () => true;
     // Turns rolled off the front since mount, and the gap rows between kept turns.

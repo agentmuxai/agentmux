@@ -130,6 +130,7 @@ impl SubprocessController {
         // reached once the lease claim above has succeeded (or was a
         // no-op) — see that block's comment.
         self.emit_message_accepted(&config);
+        self.persist_user_message(&config.message);
 
         // Update status to running
         {
