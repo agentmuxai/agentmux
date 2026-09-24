@@ -74,11 +74,24 @@ interface ScrollGeometry {
     clientHeight: number;
 }
 
+/**
+ * How long after the last user scroll input (wheel, touch, scroll key,
+ * scrollbar release) a scroll batch still counts as the user's. Long enough
+ * for a wheel/keyboard gesture's scroll events to land (they are rAF-
+ * coalesced), short enough that an unrelated later scroll never inherits it.
+ */
+export const USER_INPUT_WINDOW_MS = 250;
+
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
     documentState: Accessor<DocumentState>;
     onLoadOlder?: () => Promise<void>;
     loadingOlder?: Accessor<boolean>;
+    /** False when there is no older history to page in (a new session, or
+     *  already at the beginning). Pagination is skipped then — capturing its
+     *  anchor would turn stick-to-bottom off for nothing. Absent = assume
+     *  there may be. */
+    hasOlderHistory?: Accessor<boolean>;
     highlightNodeId?: Accessor<string | null>;
     scrollCommand?: Accessor<ScrollCommand | null>;
     /** Wire-up callback so the parent (AgentFooter via AgentDocumentView)
@@ -188,11 +201,24 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // uses this instead. Cleared by every handleScrollNow. Phase 1 of
     // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.1.
     let pinnedGeometry: ScrollGeometry | null = null;
-    // Set by any input that can scroll this container (wheel, touch, pointer
-    // down — including on the scrollbar — or a key while focus is inside it),
-    // consumed by handleScrollNow. A batch with user input always reads live
-    // geometry and is never attributed to the pin.
-    let userScrollInput = false;
+    // User scroll intent is a short WINDOW, not a flag. Opened by any input
+    // that can scroll this container (wheel, touch, scroll keys, or a pointer
+    // held on the scroller itself, i.e. its scrollbar) and closed
+    // USER_INPUT_WINDOW_MS after the last such event. A batch inside the
+    // window reads live geometry, is never attributed to the pin, and is the
+    // ONLY kind of batch that can disengage stick-to-bottom.
+    //
+    // This used to be a boolean consumed by the next scroll batch, however
+    // late it came. A click that scrolled nothing (focusing the pane,
+    // selecting text, expanding a tool) left it set indefinitely, so the next
+    // pin — often minutes later, with new content already landed in the same
+    // frame — read as the user scrolling away and silently stopped the
+    // follow. Phase 0 of
+    // docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §2.2 (B1).
+    let lastUserScrollInputAt = Number.NEGATIVE_INFINITY;
+    let scrollbarPointerHeld = false;
+    const hasRecentUserScrollInput = (): boolean =>
+        scrollbarPointerHeld || performance.now() - lastUserScrollInputAt <= USER_INPUT_WINDOW_MS;
     // Last scrollHeight observed at a pin-correction call — diagnostic only,
     // see docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md.
     // A shrink between two consecutive calls means content that was already
@@ -976,8 +1002,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // auto-scroll, not just the disengage branch specifically.
         const wasProgrammatic = pendingProgrammaticScroll;
         pendingProgrammaticScroll = false;
-        const hadUserInput = userScrollInput;
-        userScrollInput = false;
+        const hadUserInput = hasRecentUserScrollInput();
 
         // A batch that is purely our own pin reuses the geometry the pin read
         // after layout (see pinnedGeometry) — no layout read here. Anything the
@@ -1076,25 +1101,20 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         } else {
             if (props.viewState.stickToBottom()) {
                 const gapPx = scrollHeight - clientHeight - scrollTop;
-                // With no user scroll input in the batch, "not near bottom"
-                // after our own scrollTo() can only be new content landing in
-                // the same tick — keep following. With user input, the user
-                // scrolled away in the same frame as a pin: honour it. (Before
-                // user input was tracked, the two could not be told apart and
-                // both were suppressed.)
-                if (wasProgrammatic && !hadUserInput) {
-                    // This scroll event batch included our own scrollTo()
-                    // call — isNearBottom() reading "not near bottom" here
-                    // means either new content landed in the same tick
-                    // (the pin effect's own reactive deps will re-fire and
-                    // re-scroll) or a user scroll got coalesced into the
-                    // same frame. Either way, disengaging on THIS event
-                    // would be misattributing our own auto-scroll (or a
-                    // same-frame race) as the user scrolling away.
+                // Only the user can stop the follow. With no user scroll input
+                // in the window, "not near bottom" can only be something other
+                // than the user: new content landing before the pin (the
+                // content ResizeObserver re-pins it), our own pin, or a scroll
+                // the browser made on its own — a clamp after a shrink, or a
+                // scroll-anchoring adjustment (`overflow-anchor: auto`). None
+                // of those may disengage. This used to exempt only batches it
+                // could prove were our own pin, so a browser-made scroll
+                // disengaged as if the user had scrolled away (spec §2.2 B2).
+                if (!hadUserInput) {
                     console.info(
                         "[wave-scroll]",
                         `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                        `suppressed disengage — programmatic scroll in this batch, gap=${gapPx}px`,
+                        `suppressed disengage — no user scroll input (${wasProgrammatic ? "own pin" : "browser scroll"}), gap=${gapPx}px`,
                     );
                 } else {
                     console.info(
@@ -1108,8 +1128,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
 
         // Older-history pagination — capture anchor, fetch, restore.
+        //
+        // Never from our own pin (trustPin), and never when there is nothing
+        // older to load. Capturing the anchor turns stick-to-bottom off, and
+        // a new session's first overflow is only a line or two — our own pin
+        // lands at scrollTop < NEAR_TOP_THRESHOLD_PX, so this used to capture
+        // an anchor on the pin's own scroll event, turn the follow off, and
+        // then load nothing (historyOffset 0): the pane silently stopped
+        // following until the user scrolled down by hand (spec §2.1).
         if (
             props.onLoadOlder &&
+            !trustPin &&
+            (props.hasOlderHistory?.() ?? true) &&
             isNearTop(scrollTop) &&
             !loadingOlderInFlight &&
             !(props.loadingOlder?.())
@@ -1201,15 +1231,30 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     };
 
-    // Record user scroll input (see userScrollInput). On the scroller: wheel,
-    // touch, and pointer down — which includes grabbing its scrollbar. On the
-    // document: the scrolling keys, unless typed into an editable element
-    // (typing in the composer never scrolls this container).
+    // Record user scroll input (see lastUserScrollInputAt). On the scroller:
+    // wheel and touch. A pointer counts only when pressed on the scroller
+    // element ITSELF — the scrollbar track/thumb (content clicks target a
+    // child row, and cannot scroll this container) — and keeps the window
+    // open for as long as it is held, so a slow scrollbar drag stays the
+    // user's. On the document: the scrolling keys, unless typed into an
+    // editable element (typing in the composer never scrolls this container).
+    // Target identity, not a clientWidth hit-test: no layout read in an input
+    // handler (tools/lint/check-input-handler-layout-reads.sh).
     onMount(() => {
         if (!scrollRef) return;
         const el = scrollRef;
         const mark = (): void => {
-            userScrollInput = true;
+            lastUserScrollInputAt = performance.now();
+        };
+        const onPointerDown = (e: PointerEvent): void => {
+            if (e.target !== el) return;
+            scrollbarPointerHeld = true;
+            mark();
+        };
+        const onPointerUp = (): void => {
+            if (!scrollbarPointerHeld) return;
+            scrollbarPointerHeld = false;
+            mark(); // the drag's trailing scroll events are still the user's
         };
         const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
         const onKey = (e: KeyboardEvent): void => {
@@ -1218,11 +1263,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (SCROLL_KEYS.has(e.key)) mark();
         };
         const opts: AddEventListenerOptions = { passive: true, capture: true };
-        const types = ["wheel", "touchstart", "touchmove", "pointerdown"] as const;
+        const types = ["wheel", "touchstart", "touchmove"] as const;
         for (const type of types) el.addEventListener(type, mark, opts);
+        el.addEventListener("pointerdown", onPointerDown, opts);
+        window.addEventListener("pointerup", onPointerUp, opts);
+        window.addEventListener("pointercancel", onPointerUp, opts);
         document.addEventListener("keydown", onKey, opts);
         onCleanup(() => {
             for (const type of types) el.removeEventListener(type, mark, opts);
+            el.removeEventListener("pointerdown", onPointerDown, opts);
+            window.removeEventListener("pointerup", onPointerUp, opts);
+            window.removeEventListener("pointercancel", onPointerUp, opts);
             document.removeEventListener("keydown", onKey, opts);
         });
     });
