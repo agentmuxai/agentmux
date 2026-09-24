@@ -63,6 +63,74 @@ pub fn spawn(
 /// Custom message telling the tray thread that service reachability changed.
 /// `WM_APP` is the documented base for application-private messages.
 const WM_AGENTMUX_STATUS: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+/// The srv Router published a new notification snapshot (`notify_menu::set`).
+const WM_AGENTMUX_NOTIFY: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 2;
+
+/// What a menu id maps back to: the original launcher actions, or the
+/// notification hub's (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §4.2).
+#[derive(Clone)]
+enum Act {
+    Tray(TrayAction),
+    Notify(super::notify_menu::NotifyMenuAction),
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Build the whole menu: notification section (if any), then the original
+/// launcher items. Rebuilt wholesale on every change — it is a handful of
+/// items, and rebuilding avoids tracking muda handles across submenus.
+fn build_menu(
+    running: bool,
+    nstate: &super::notify_menu::NotifyTrayState,
+) -> Result<(muda::Menu, Vec<(muda::MenuId, Act)>), String> {
+    use super::notify_menu::NotifyMenuEntry;
+    use muda::{Menu, MenuItem as MudaItem, PredefinedMenuItem, Submenu};
+
+    let menu = Menu::new();
+    let mut ids: Vec<(muda::MenuId, Act)> = Vec::new();
+    for entry in super::notify_menu::menu(nstate, now_ms()) {
+        match entry {
+            NotifyMenuEntry::Item { label, action } => {
+                let item = MudaItem::new(&label, true, None);
+                ids.push((item.id().clone(), Act::Notify(action)));
+                menu.append(&item).map_err(|e| e.to_string())?;
+            }
+            NotifyMenuEntry::Submenu { label, items } => {
+                let sub = Submenu::new(&label, true);
+                for child in items {
+                    if let NotifyMenuEntry::Item { label, action } = child {
+                        let item = MudaItem::new(&label, true, None);
+                        ids.push((item.id().clone(), Act::Notify(action)));
+                        sub.append(&item).map_err(|e| e.to_string())?;
+                    }
+                }
+                menu.append(&sub).map_err(|e| e.to_string())?;
+            }
+            NotifyMenuEntry::Separator => {
+                menu.append(&PredefinedMenuItem::separator()).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    for entry in super::menu_model(running) {
+        let item = MudaItem::new(&entry.label, true, None);
+        ids.push((item.id().clone(), Act::Tray(entry.action)));
+        menu.append(&item).map_err(|e| format!("append menu item {:?}: {}", entry.label, e))?;
+    }
+    Ok((menu, ids))
+}
+
+fn full_tooltip(running: bool, nstate: &super::notify_menu::NotifyTrayState) -> String {
+    let base = super::tooltip(running);
+    match super::notify_menu::tooltip_suffix(nstate, now_ms()) {
+        Some(extra) => format!("{base}\n{extra}"),
+        None => base,
+    }
+}
 
 /// Create the icon and pump messages until the process ends.
 ///
@@ -75,7 +143,7 @@ fn run(
     data_dir: std::path::PathBuf,
     dir_hash: String,
 ) -> Result<(), String> {
-    use muda::{Menu, MenuEvent, MenuItem as MudaItem};
+    use muda::MenuEvent;
     use tray_icon::{TrayIconBuilder, TrayIconEvent};
 
     // Start from the REAL state, not an assumption. The tray is created
@@ -85,30 +153,32 @@ fn run(
     // *reliable* indicator, so it is driven from `service_reachable`
     // throughout (Codex P2 on PR #2996).
     let mut running = super::service_reachable(&data_dir, &dir_hash);
-    let model = super::menu_model(running);
-    let menu = Menu::new();
-    // Keep the muda items alive alongside their action, so a menu event's id
-    // can be mapped back to the action it came from. muda identifies
-    // selections by item id, not by index.
-    let mut items: Vec<(muda::MenuId, TrayAction)> = Vec::new();
-    // The first item's label tracks running-state, so keep a handle to it.
-    let mut open_item: Option<MudaItem> = None;
-    for entry in &model {
-        let item = MudaItem::new(&entry.label, true, None);
-        items.push((item.id().clone(), entry.action));
-        menu.append(&item)
-            .map_err(|e| format!("append menu item {:?}: {}", entry.label, e))?;
-        if entry.action == TrayAction::OpenWindow {
-            open_item = Some(item);
+    let mut nstate = super::notify_menu::get();
+    let (menu, mut items) = build_menu(running, &nstate)?;
+    let base_icon = icon();
+    let badge_icon = attention_icon();
+    let pick_icon = |n: &super::notify_menu::NotifyTrayState| -> tray_icon::Icon {
+        match (&badge_icon, n.attention.is_empty()) {
+            (Some(b), false) => b.clone(),
+            _ => base_icon.clone(),
         }
-    }
+    };
 
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip(super::tooltip(running))
-        .with_icon(icon())
+        .with_tooltip(full_tooltip(running, &nstate))
+        .with_icon(pick_icon(&nstate))
         .build()
         .map_err(|e| format!("build tray icon: {}", e))?;
+
+    // Wake this thread when srv publishes a new notification snapshot.
+    unsafe {
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        let tray_thread = GetCurrentThreadId();
+        super::notify_menu::set_wake(Box::new(move || {
+            windows_sys::Win32::UI::WindowsAndMessaging::PostThreadMessageW(tray_thread, WM_AGENTMUX_NOTIFY, 0, 0);
+        }));
+    }
 
     // Status poller. Runs off the tray thread (it does blocking I/O and must
     // not stall the pump), and nudges the pump via a thread message when the
@@ -169,20 +239,25 @@ fn run(
             // Reachability changed — refresh both surfaces the user reads.
             // Handled here (not in the poller) because muda/tray-icon objects
             // must only be touched on the thread that created them.
-            if msg.message == WM_AGENTMUX_STATUS {
-                running = msg.wParam != 0;
-                let _ = tray.set_tooltip(Some(super::tooltip(running)));
-                if let Some(item) = &open_item {
-                    // Reuse the shared model so the label wording stays in one
-                    // place (and stays covered by `tray_model_tests`).
-                    if let Some(entry) = super::menu_model(running)
-                        .into_iter()
-                        .find(|e| e.action == TrayAction::OpenWindow)
-                    {
-                        item.set_text(entry.label);
-                    }
+            // Reachability or notification state changed — refresh every
+            // surface the user reads. Handled here (not in the poller) because
+            // muda/tray-icon objects must only be touched on the thread that
+            // created them.
+            if msg.message == WM_AGENTMUX_STATUS || msg.message == WM_AGENTMUX_NOTIFY {
+                if msg.message == WM_AGENTMUX_STATUS {
+                    running = msg.wParam != 0;
+                    crate::log(&format!("tray: service_reachable -> {}", running));
                 }
-                crate::log(&format!("tray: service_reachable -> {}", running));
+                nstate = super::notify_menu::get();
+                match build_menu(running, &nstate) {
+                    Ok((menu, ids)) => {
+                        tray.set_menu(Some(Box::new(menu)));
+                        items = ids;
+                    }
+                    Err(e) => crate::log(&format!("tray: menu rebuild failed: {e}")),
+                }
+                let _ = tray.set_tooltip(Some(full_tooltip(running, &nstate)));
+                let _ = tray.set_icon(Some(pick_icon(&nstate)));
                 continue;
             }
 
@@ -194,22 +269,30 @@ fn run(
             // so they are polled here after dispatch rather than decoded from
             // `msg`.
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
-                if let Some(action) = items.iter().find(|(id, _)| *id == ev.id).map(|(_, a)| *a) {
-                    if tx.send(action).is_err() {
-                        // Receiver gone — the supervisor is shutting down.
-                        return Ok(());
+                match items.iter().find(|(id, _)| *id == ev.id).map(|(_, a)| a.clone()) {
+                    Some(Act::Tray(action)) => {
+                        if tx.send(action).is_err() {
+                            // Receiver gone — the supervisor is shutting down.
+                            return Ok(());
+                        }
                     }
+                    Some(Act::Notify(action)) => crate::notify::tray_request(action),
+                    None => {}
                 }
             }
             while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
                 // A left click on the icon is the same intent as the first
                 // menu item; right-click opens the menu and is handled by the
                 // menu path above.
-                if let TrayIconEvent::Click { button, .. } = ev {
-                    if button == tray_icon::MouseButton::Left
-                        && tx.send(TrayAction::OpenWindow).is_err()
-                    {
-                        return Ok(());
+                if let TrayIconEvent::Click { button, button_state, .. } = ev {
+                    if button == tray_icon::MouseButton::Left && button_state == tray_icon::MouseButtonState::Up {
+                        // Something needs you → go straight to the oldest such
+                        // pane, same as clicking its toast (spec §4.2).
+                        if let Some(first) = nstate.attention.first() {
+                            crate::notify::tray_request(super::notify_menu::NotifyMenuAction::Open(first.id.clone()));
+                        } else if tx.send(TrayAction::OpenWindow).is_err() {
+                            return Ok(());
+                        }
                     }
                 }
             }
@@ -286,6 +369,81 @@ fn brand_icon() -> Option<tray_icon::Icon> {
     }
 }
 
+/// Brand mark with an attention dot, for "an agent needs you" (spec §4.2).
+///
+/// Built from the embedded brand PNG (the tray's normal icon comes from the
+/// exe's `.ico` resource, which exposes no pixels), box-downscaled to the
+/// small-icon metric, with an orange dot in the bottom-right quadrant and a
+/// dark ring so it reads on light and dark taskbars. `None` on any decode
+/// failure — the tray then just keeps the normal icon (the tooltip and menu
+/// still carry the state).
+fn attention_icon() -> Option<tray_icon::Icon> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
+    const PNG: &[u8] = include_bytes!("../../../assets/favicon-150x150.png");
+    let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.clamp(16, 64) as u32;
+    let rgba = badge_rgba(PNG, size)?;
+    tray_icon::Icon::from_rgba(rgba, size, size).ok()
+}
+
+/// Decode `png_bytes`, downscale to `size`², and paint the attention dot.
+pub(super) fn badge_rgba(png_bytes: &[u8], size: u32) -> Option<Vec<u8>> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
+    decoder.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (sw, sh) = (info.width as usize, info.height as usize);
+    let chans = match info.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::GrayscaleAlpha => 2,
+        _ => return None,
+    };
+    let n = size as usize;
+    let mut out = vec![0u8; n * n * 4];
+    for y in 0..n {
+        for x in 0..n {
+            // Box filter over the source rectangle this pixel covers.
+            let (x0, x1) = (x * sw / n, ((x + 1) * sw / n).max(x * sw / n + 1));
+            let (y0, y1) = (y * sh / n, ((y + 1) * sh / n).max(y * sh / n + 1));
+            let mut acc = [0u32; 4];
+            let mut cnt = 0u32;
+            for sy in y0..y1.min(sh) {
+                for sx in x0..x1.min(sw) {
+                    let i = (sy * sw + sx) * chans;
+                    let px = if chans == 4 {
+                        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+                    } else {
+                        [buf[i], buf[i], buf[i], buf[i + 1]]
+                    };
+                    for c in 0..4 {
+                        acc[c] += px[c] as u32;
+                    }
+                    cnt += 1;
+                }
+            }
+            let o = (y * n + x) * 4;
+            for c in 0..4 {
+                out[o + c] = (acc[c] / cnt.max(1)) as u8;
+            }
+        }
+    }
+    // Dot: centre in the bottom-right, radius ~ size/4, 1px dark ring.
+    let r = (n as f32) * 0.26;
+    let (cx, cy) = (n as f32 - r - 0.5, n as f32 - r - 0.5);
+    for y in 0..n {
+        for x in 0..n {
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            let o = (y * n + x) * 4;
+            if d <= r - 1.0 {
+                out[o..o + 4].copy_from_slice(&[0xFF, 0x8A, 0x00, 0xFF]);
+            } else if d <= r {
+                out[o..o + 4].copy_from_slice(&[0x1A, 0x1A, 0x1A, 0xFF]);
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Last-resort mark, used only when the exe carries no icon resource.
 ///
 /// Deliberately NOT the brand colour: if this ever shows up it means the
@@ -330,5 +488,22 @@ mod brand_icon_tests {
              would silently fall back",
             path.display()
         );
+    }
+}
+
+#[cfg(test)]
+mod attention_badge_tests {
+    #[test]
+    fn badge_decodes_scales_and_paints_the_dot() {
+        let png = include_bytes!("../../../assets/favicon-150x150.png");
+        for size in [16u32, 20, 24, 32] {
+            let px = super::badge_rgba(png, size).expect("decodes");
+            assert_eq!(px.len(), (size * size * 4) as usize);
+            // Bottom-right-ish pixel inside the dot is the attention orange.
+            let n = size as usize;
+            let (x, y) = (n - 1 - n / 5, n - 1 - n / 5);
+            let o = (y * n + x) * 4;
+            assert_eq!(&px[o..o + 4], &[0xFF, 0x8A, 0x00, 0xFF], "size {size}");
+        }
     }
 }

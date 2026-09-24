@@ -46,6 +46,7 @@
 
 use std::sync::mpsc;
 
+pub(crate) mod notify_menu;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "macos")]
