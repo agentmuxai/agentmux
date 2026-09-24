@@ -40,6 +40,40 @@ pub(crate) fn idx_generation_ok(fs: &FileStore, zone: &str, output_gen: Option<&
     label.as_deref() == Some(gen)
 }
 
+/// `output.idx`'s size, from the database like `output_now` — both sides of a
+/// freshness check must come from the same source, or a stale cached index
+/// size could pass beside a fresh output size and under-report the count
+/// (Codex on #3634).
+fn idx_size(fs: &FileStore, zone: &str) -> Option<u64> {
+    Some(fs.line_state(zone, "output.idx").ok()??.size.max(0) as u64)
+}
+
+/// `[offset, offset + len)` of `output.idx`, from the database.
+pub(crate) fn idx_bytes(fs: &FileStore, zone: &str, offset: u64, len: u64) -> Option<Vec<u8>> {
+    fs.read_bytes_db(zone, "output.idx", offset as i64, len as i64).ok()
+}
+
+/// Byte offset in `output` of line `k`, from `output.idx`.
+pub(crate) fn idx_entry(fs: &FileStore, zone: &str, k: u64) -> Option<u64> {
+    let b = idx_bytes(fs, zone, OUTPUT_IDX_HEADER_LEN as u64 + k * 8, 8)?;
+    Some(u64::from_le_bytes(b.try_into().ok()?))
+}
+
+/// The line count `output.idx` gives, if it describes `output` exactly as it
+/// is now: its covered size is `output_size` and it is labelled with
+/// `output_gen` (see [`idx_generation_ok`]). Everything read from the
+/// database.
+pub(crate) fn fresh_idx_lines(fs: &FileStore, zone: &str, output_size: u64, output_gen: Option<&str>) -> Option<u64> {
+    let size = idx_size(fs, zone)?;
+    if size < OUTPUT_IDX_HEADER_LEN as u64 {
+        return None;
+    }
+    let header = idx_bytes(fs, zone, 0, OUTPUT_IDX_HEADER_LEN as u64)?;
+    let covered = u64::from_le_bytes(header.try_into().ok()?);
+    (covered == output_size && idx_generation_ok(fs, zone, output_gen))
+        .then_some((size - OUTPUT_IDX_HEADER_LEN as u64) / 8)
+}
+
 /// Rebuild `output.idx` from `output` in a single streaming scan and atomically
 /// replace it. The index is the byte offset of every **non-blank** line, matching
 /// the reader's line addressing (`String::lines().filter(!trim().is_empty())`).
@@ -60,7 +94,8 @@ pub(crate) fn rebuild_output_idx(
     block_id: &str,
     output_size: u64,
 ) -> Option<u64> {
-    build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0)
+    let for_gen = output_now(fs, block_id).and_then(|(_, gen)| gen);
+    build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, for_gen)
 }
 
 /// Bring an existing `output.idx` up to `output`'s current size by scanning
@@ -87,21 +122,23 @@ pub(crate) fn extend_output_idx(
     block_id: &str,
     output_size: u64,
 ) -> Option<u64> {
-    const IDX: &str = "output.idx";
-
-    let full = || rebuild_output_idx(fs, block_id, output_size);
+    // The generation this index will describe, taken before any byte of the
+    // old index is read: its seed entries and the appended bytes must both
+    // belong to it, or the guarded write below refuses.
+    let output_gen = output_now(fs, block_id).and_then(|(_, gen)| gen);
+    let full = || build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen.clone());
 
     // An index built for another generation of `output` is no base at all.
-    let output_gen = output_now(fs, block_id).and_then(|(_, gen)| gen);
     if !idx_generation_ok(fs, block_id, output_gen.as_deref()) {
         return full();
     }
-    let Ok(Some(idx_stat)) = fs.stat(block_id, IDX) else { return full() };
-    if idx_stat.size < OUTPUT_IDX_HEADER_LEN {
+    // Size and entries from the database (see `idx_size`).
+    let Some(idx_len) = idx_size(fs, block_id) else { return full() };
+    if idx_len < OUTPUT_IDX_HEADER_LEN as u64 {
         return full();
     }
-    let entry_count = ((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64;
-    let Ok((_, header)) = fs.read_at(block_id, IDX, 0, OUTPUT_IDX_HEADER_LEN) else { return full() };
+    let entry_count = (idx_len - OUTPUT_IDX_HEADER_LEN as u64) / 8;
+    let Some(header) = idx_bytes(fs, block_id, 0, OUTPUT_IDX_HEADER_LEN as u64) else { return full() };
     let Ok(header) = <[u8; 8]>::try_from(header.as_slice()) else { return full() };
     let covered = u64::from_le_bytes(header);
 
@@ -119,10 +156,7 @@ pub(crate) fn extend_output_idx(
     // so its entry has to be re-derived (it may also have been blank then and
     // non-blank now). Everything before it is settled and is reused verbatim.
     let seed_entries = entry_count - 1;
-    let last_entry_at = OUTPUT_IDX_HEADER_LEN + (seed_entries * 8) as i64;
-    let Ok((_, last_bytes)) = fs.read_at(block_id, IDX, last_entry_at, 8) else { return full() };
-    let Ok(last_bytes) = <[u8; 8]>::try_from(last_bytes.as_slice()) else { return full() };
-    let scan_start = u64::from_le_bytes(last_bytes);
+    let Some(scan_start) = idx_entry(fs, block_id, seed_entries) else { return full() };
     if scan_start > output_size {
         return full();
     }
@@ -130,13 +164,13 @@ pub(crate) fn extend_output_idx(
     let seed = if seed_entries == 0 {
         Vec::new()
     } else {
-        match fs.read_at(block_id, IDX, OUTPUT_IDX_HEADER_LEN, (seed_entries * 8) as i64) {
-            Ok((_, bytes)) if bytes.len() == (seed_entries * 8) as usize => bytes,
+        match idx_bytes(fs, block_id, OUTPUT_IDX_HEADER_LEN as u64, seed_entries * 8) {
+            Some(bytes) if bytes.len() == (seed_entries * 8) as usize => bytes,
             _ => return full(),
         }
     };
 
-    build_output_idx_from(fs, block_id, output_size, scan_start, seed, seed_entries)
+    build_output_idx_from(fs, block_id, output_size, scan_start, seed, seed_entries, output_gen.clone())
 }
 
 /// Shared scanner behind both entry points.
@@ -153,6 +187,7 @@ fn build_output_idx_from(
     scan_start: u64,
     seed: Vec<u8>,
     seed_count: u64,
+    for_gen: Option<String>,
 ) -> Option<u64> {
     const IDX: &str = "output.idx";
     const WIN: i64 = 1 << 20; // 1 MiB read window
@@ -166,11 +201,9 @@ fn build_output_idx_from(
     // print — a slow rebuild is exactly the kind of thing worth being able
     // to correlate after the fact, the same way `mem_attribution` already is.
     let started = std::time::Instant::now();
-    // The generation this index will be labelled with, taken BEFORE the
-    // scan: if `output` is replaced mid-scan it gets a new generation, and
-    // this label then marks the index stale instead of vouching for bytes
-    // read from two files.
-    let for_gen = output_now(fs, block_id).and_then(|(_, gen)| gen);
+    // `for_gen`: the generation of `output` this index is built for, taken by
+    // the caller BEFORE anything it builds on (seed entries, scanned bytes)
+    // was read. The write below only lands if it is still current.
     tracing::info!(
         block_id = %block_id,
         covered = output_size,
@@ -247,14 +280,25 @@ fn build_output_idx_from(
         flush_line(&mut line_buf, &mut cursor, &mut buf, &mut line_count, false);
     }
 
-    // Index and its generation label in one transaction (created if missing).
+    // Index and its generation label in one transaction (created if missing),
+    // and only if `output` is still that generation (Codex on #3634): a
+    // replace during the scan must neither publish an index of the old bytes
+    // nor hand this caller offsets it would then apply to the new file.
     let mut label = std::collections::HashMap::new();
     label.insert(
         IDX_GEN_META.to_string(),
-        for_gen.map_or(serde_json::Value::Null, serde_json::Value::String),
+        for_gen.clone().map_or(serde_json::Value::Null, serde_json::Value::String),
     );
-    match fs.put_file_with_meta(block_id, IDX, &buf, label) {
-        Ok(()) => {
+    match fs.put_file_with_meta_if(block_id, IDX, &buf, label, "output", for_gen.as_deref()) {
+        Ok(false) => {
+            tracing::info!(
+                block_id = %block_id,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "output.idx rebuild discarded: output was replaced during the scan"
+            );
+            None
+        }
+        Ok(true) => {
             tracing::info!(
                 block_id = %block_id,
                 lines = line_count,
@@ -273,5 +317,32 @@ fn build_output_idx_from(
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+
+    #[test]
+    fn a_rebuild_for_a_generation_that_is_no_longer_current_publishes_nothing() {
+        // Codex P2 on #3634: `output` replaced after the builder captured its
+        // generation. The index of the old bytes must not be written, and the
+        // caller must not get a count (it would apply those offsets to the new
+        // file).
+        let fs = FileStore::open_in_memory().unwrap();
+        let zone = "blk-idx-guard";
+        fs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, "output", b"a\nb\nc\n").unwrap();
+        let old = output_now(&fs, zone).and_then(|(_, g)| g);
+        fs.write_file(zone, "output", b"x\n").unwrap();
+
+        assert_eq!(build_output_idx_from(&fs, zone, 6, 0, Vec::new(), 0, old), None);
+        assert!(fs.line_state(zone, "output.idx").unwrap().is_none(), "no index may be published");
+
+        // With the current generation it builds and publishes.
+        assert_eq!(rebuild_output_idx(&fs, zone, 2), Some(1));
+        assert!(fs.line_state(zone, "output.idx").unwrap().is_some());
     }
 }

@@ -22,7 +22,7 @@ impl FileStore {
     /// and delete the files in `drop`, in one transaction. The new content
     /// starts a new counted epoch with a fresh `gen` (counter.rs).
     pub fn replace_file(&self, zone_id: &str, name: &str, data: &[u8], drop: &[&str]) -> Result<(), StoreError> {
-        self.replace_inner(zone_id, name, data, None, drop)
+        self.replace_inner(zone_id, name, data, None, drop, None).map(|_| ())
     }
 
     /// Replace `name`'s content with `data` (creating the file if missing)
@@ -30,7 +30,25 @@ impl FileStore {
     /// one transaction — so the metadata can describe the content without a
     /// window where it describes other content.
     pub fn put_file_with_meta(&self, zone_id: &str, name: &str, data: &[u8], meta: FileMeta) -> Result<(), StoreError> {
-        self.replace_inner(zone_id, name, data, Some(meta), &[])
+        self.replace_inner(zone_id, name, data, Some(meta), &[], None).map(|_| ())
+    }
+
+    /// [`Self::put_file_with_meta`], only if `guard`'s valid generation is
+    /// still `expected_gen` — checked in the same transaction as the write.
+    /// For a file derived from `guard` (an index of it): if `guard` was
+    /// replaced while it was being derived, nothing is written and this
+    /// returns `false`. With `expected_gen` `None` (an uncounted `guard`, no
+    /// generation to compare) it always writes.
+    pub fn put_file_with_meta_if(
+        &self,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+        meta: FileMeta,
+        guard: &str,
+        expected_gen: Option<&str>,
+    ) -> Result<bool, StoreError> {
+        self.replace_inner(zone_id, name, data, Some(meta), &[], Some((guard, expected_gen)))
     }
 
     /// Delete several files of one zone in one transaction. Missing files
@@ -54,11 +72,18 @@ impl FileStore {
         data: &[u8],
         meta: Option<FileMeta>,
         drop: &[&str],
-    ) -> Result<(), StoreError> {
+        guard: Option<(&str, Option<&str>)>,
+    ) -> Result<bool, StoreError> {
         debug_assert!(!drop.contains(&name), "replace_file would drop the file it writes");
         let now = Self::now_ms();
         let opts_json = serde_json::to_string(&FileOpts::default())?;
-        self.write_txn(|tx| {
+        let written = self.write_txn(|tx| {
+            if let Some((guard, Some(expected))) = guard {
+                let current = super::counter::read_row(tx, zone_id, guard)?.and_then(|r| r.counter()).map(|(gen, _)| gen);
+                if current.as_deref() != Some(expected) {
+                    return Ok(false);
+                }
+            }
             let current_meta: Option<String> = tx
                 .query_row(
                     "SELECT meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
@@ -93,12 +118,14 @@ impl FileStore {
                 tx.execute("DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, d])?;
                 tx.execute("DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2", params![zone_id, d])?;
             }
-            Ok(())
+            Ok(true)
         })?;
-        let mut forget = vec![name];
-        forget.extend_from_slice(drop);
-        self.forget_cached(zone_id, &forget);
-        Ok(())
+        if written {
+            let mut forget = vec![name];
+            forget.extend_from_slice(drop);
+            self.forget_cached(zone_id, &forget);
+        }
+        Ok(written)
     }
 
     /// Bytes `[offset, offset + len)` of a file, read from the database, not

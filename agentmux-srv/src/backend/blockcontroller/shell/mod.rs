@@ -43,7 +43,8 @@ pub use file_ops::{handle_append_block_file, persist_to_blockfile_silent};
 // rejected (E0364).
 pub(crate) use file_ops::resolve_global_output_zone;
 pub(crate) use indexing::{
-    extend_output_idx, idx_generation_ok, output_now, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
+    extend_output_idx, fresh_idx_lines, idx_bytes, idx_entry, output_now, rebuild_output_idx,
+    OUTPUT_IDX_HEADER_LEN,
 };
 
 #[cfg(test)]

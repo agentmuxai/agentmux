@@ -157,7 +157,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
                 use crate::backend::blockcontroller::shell::{
-                    idx_generation_ok, output_now, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
+                    fresh_idx_lines, idx_bytes, idx_entry, output_now, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
                 };
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
@@ -181,22 +181,11 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // Determine total_lines, rebuilding the index iff it is missing,
                         // its covered-size header doesn't match the current output size,
                         // or it was built for another generation of `output` (5a-2b).
-                        let idx_stat = filestore.stat(&read_block, "output.idx").ok().flatten();
-                        let fresh = match &idx_stat {
-                            Some(s) if s.size >= OUTPUT_IDX_HEADER_LEN => {
-                                let (_, h) = filestore
-                                    .read_at(&read_block, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
-                                    .ok()?;
-                                u64::from_le_bytes(h.try_into().ok()?) == output_size
-                                    && idx_generation_ok(&filestore, &read_block, output_gen.as_deref())
-                            }
-                            _ => false,
-                        };
-                        let total_lines: u64 = if fresh {
-                            let s = idx_stat.unwrap();
-                            ((s.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64
-                        } else {
-                            rebuild_output_idx(&filestore, &read_block, output_size)?
+                        // The index's size and bytes come from the database like the
+                        // output's (Codex on #3634).
+                        let total_lines: u64 = match fresh_idx_lines(&filestore, &read_block, output_size, output_gen.as_deref()) {
+                            Some(lines) => lines,
+                            None => rebuild_output_idx(&filestore, &read_block, output_size)?,
                         };
 
                         // Empty result cases — answered from the index, no output read.
@@ -205,17 +194,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
 
                         // entry(k) = byte offset of non-blank line k (past the 8-byte header).
-                        let entry = |k: u64| -> Option<i64> {
-                            let (_, b) = filestore
-                                .read_at(
-                                    &read_block,
-                                    "output.idx",
-                                    OUTPUT_IDX_HEADER_LEN + (k * 8) as i64,
-                                    8,
-                                )
-                                .ok()?;
-                            Some(u64::from_le_bytes(b.try_into().ok()?) as i64)
-                        };
+                        let entry = |k: u64| -> Option<i64> { idx_entry(&filestore, &read_block, k).map(|o| o as i64) };
 
                         let byte_start = entry(offset as u64)?;
                         let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
@@ -268,14 +247,12 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             // Byte offset of every returned line, read from
                             // output.idx in one slice.
                             let returned = lines.len() as u64;
-                            let (_, idx_raw) = filestore
-                                .read_at(
-                                    &read_block,
-                                    "output.idx",
-                                    OUTPUT_IDX_HEADER_LEN + (offset as u64 * 8) as i64,
-                                    (returned * 8) as i64,
-                                )
-                                .ok()?;
+                            let idx_raw = idx_bytes(
+                                &filestore,
+                                &read_block,
+                                OUTPUT_IDX_HEADER_LEN as u64 + offset as u64 * 8,
+                                returned * 8,
+                            )?;
                             if idx_raw.len() != (returned * 8) as usize {
                                 return None;
                             }
