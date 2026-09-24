@@ -298,6 +298,32 @@ fn a_human_send_while_a_stop_is_pending_is_refused_not_written() {
     assert!(matches!(c.decide_send_action("m2", None), SendAction::BecomeSpawner { .. }));
 }
 
+/// Reagent P1 on #3562: `DeliverDirect` is decided under one `inner`
+/// acquisition and written under a second, with the heartbeat and status
+/// publish in between. A stop or restart committed in that gap (while
+/// `stdin_tx` is still live) must not get the message written into the dying
+/// process: the write re-checks the gates, fails, and hands back the turn.
+#[tokio::test]
+async fn a_stop_or_restart_committed_after_a_direct_decision_refuses_the_write() {
+    let cases: [(&str, fn(&mut PersistentInner)); 2] = [
+        ("stop", |i| i.stop_pending = true),
+        ("restart", |i| i.restart_pending = true),
+    ];
+    for (why, commit) in cases {
+        let (c, mut rx) = idle_controller();
+        let human = PersistentSubprocessController::encode_user_message("human");
+        let SendAction::DeliverDirect { was_active } = c.decide_send_action(&human, None) else {
+            panic!("an idle, running agent takes DeliverDirect");
+        };
+
+        commit(&mut c.inner.lock().unwrap());
+
+        assert!(c.deliver_direct(&human, was_active).is_err(), "{why}");
+        assert!(rx.try_recv().is_err(), "nothing written into the dying process: {why}");
+        assert!(!c.health_monitor.is_active_turn(), "the reserved turn is handed back: {why}");
+    }
+}
+
 /// A deferred config restart also sets `stop_pending` (it goes through
 /// `stop_process`). Its own rule wins: the message queues for the
 /// replacement process instead of being refused.

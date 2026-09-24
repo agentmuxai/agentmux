@@ -114,6 +114,35 @@ impl PersistentSubprocessController {
         }
     }
 
+    /// The write half of [`SendAction::DeliverDirect`], under a second `inner`
+    /// acquisition. On failure nothing was written, and the turn the decision
+    /// reserved is handed back: left active, it would hold every deferred
+    /// message for a `result` that never comes. Nobody else can have started a
+    /// turn meanwhile, since they all saw it reserved and deferred, and the
+    /// watchdog each armed releases them once it reads idle.
+    ///
+    /// Written through [`Self::try_write_stdin_locked`], like every other
+    /// write site, so the gates are re-checked under THIS acquisition: a stop
+    /// or config restart committed after the decision (heartbeat and status
+    /// publish run in between, with `stdin_tx` still live) refuses the write
+    /// instead of putting the message into the dying process (reagent P1 on
+    /// #3562). The same call tracks it into the current generation's retry
+    /// batch (codex P1 on PR #3513: eager resume can reach `DeliverDirect`
+    /// with its `--resume` unconfirmed and no seed tracked), reading the
+    /// generation in this same acquisition (reagentx P1 on PR #2373).
+    pub(super) fn deliver_direct(&self, json_str: &str, was_active: bool) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Err(e) = Self::try_write_stdin_locked(&mut inner, json_str) {
+            if !was_active {
+                self.health_monitor.set_active_turn(false);
+            }
+            drop(inner);
+            self.publish_status();
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// Releases the exclusive spawn claim taken by `decide_send_action`
     /// returning `BecomeSpawner`. `spawn_succeeded` distinguishes two very
     /// different situations:
@@ -667,7 +696,6 @@ impl PersistentSubprocessController {
                     self.spawn_status_heartbeat();
                 }
                 self.publish_status();
-                let mut inner = self.inner.lock().unwrap();
                 // Persist only AFTER a successful send — reagentx P1 on PR
                 // #2360 (sixth review pass, round 5): `stdin_tx` can have
                 // gone `None` (process died) between `decide_send_action`'s
@@ -677,55 +705,7 @@ impl PersistentSubprocessController {
                 // never-delivered message" bug the immediately prior
                 // commit fixed for `BecomeSpawner`. Matches
                 // `send_user_message`'s existing (correct) ordering.
-                let written = match inner.stdin_tx.as_ref() {
-                    None => Err("persistent process not running after spawn".to_string()),
-                    Some(tx) => tx
-                        .try_send(json_str.clone())
-                        .map_err(|e| format!("stdin send failed: {e}")),
-                };
-                if let Err(e) = written {
-                    // Nothing was written, so hand back the turn this send
-                    // reserved. Left active, it would hold every deferred
-                    // message for a `result` that never comes. Nobody else
-                    // can have started a turn meanwhile: they all saw it
-                    // reserved and deferred, and the watchdog each armed
-                    // releases them once it reads idle.
-                    if !was_active {
-                        self.health_monitor.set_active_turn(false);
-                    }
-                    drop(inner);
-                    self.publish_status();
-                    return Err(e);
-                }
-                // codex P1 on PR #3513: track this message into the CURRENT
-                // generation's retry batch, same as the drain loop already
-                // does for queued deliveries (see that call site's own doc
-                // comment on why every message beyond the seed needs this,
-                // not just the one that triggered the spawn). `DeliverDirect`
-                // itself never did this — harmless for a spawn that never
-                // attempted `--resume` (`MessageAppendedToRetryBatch` is a
-                // no-op on `NotTracking`, see `persistent_resume::update`'s
-                // catch-all) or one whose resume already confirmed success,
-                // but a real gap for a still-unconfirmed one: eager resume
-                // (issue #3463) can reach `DeliverDirect` with its `--resume`
-                // attempt not yet confirmed and NO seed message already
-                // tracked (unlike every other resume-respawn, which always
-                // has one) — this is what actually closes that gap, not just
-                // the `SpawnedWithResume` routing fix above. Read the
-                // generation and apply in this SAME lock acquisition
-                // (already held for `try_send`) — reagentx P1 on PR #2373
-                // via the drain loop's identical concern: a separate
-                // acquisition risks a concurrent respawn bumping
-                // `spawn_generation` in between, making this event carry a
-                // stale generation that `update()`'s catch-all silently
-                // ignores.
-                let generation = inner.spawn_generation;
-                let seq = inner.take_next_message_seq();
-                inner.apply_resume_event(persistent_resume::ResumeEvent::MessageAppendedToRetryBatch {
-                    generation,
-                    entry: persistent_resume::QueuedRetryEntry { seq, json: json_str.clone() },
-                });
-                drop(inner);
+                self.deliver_direct(&json_str, was_active)?;
                 self.persist_message_to_blockfile(&json_str);
                 self.emit_message_accepted(config.message_id.as_deref());
                 Ok(())
