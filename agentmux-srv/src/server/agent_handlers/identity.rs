@@ -154,6 +154,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             async move {
+                // On the blocking pool: the backfill below reads each OAuth
+                // account's `.claude.json` and canonicalizes its dir (ReAgent
+                // P1 on #3617), like this file's other fs/keyring calls.
+                tokio::task::spawn_blocking(move || {
                 let mut accounts = mstore
                     .identity_list(cmd.provider.as_deref())
                     .map_err(|e| format!("listidentityaccounts: {e}"))?;
@@ -176,6 +180,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
                 Ok(accounts)
+                })
+                .await
+                .map_err(|e| format!("listidentityaccounts: task: {e}"))?
             }
         },
     );
