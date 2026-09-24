@@ -24,7 +24,7 @@
 | 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | merged |
 | 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | not started |
-| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | this PR (plan) | groundwork investigated |
+| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6); 5a designed in §6.3.7 (PRs 5a-1…5a-4); Gemini-family user echo (5d) shipped | #3619 (plan), #3620 (echo), this PR (5a design) | 5a design in review |
 | 6 | Bounded live document | — | not started |
 | 7 | History tab follows | — | not started |
 | 8 | Off-main-thread markdown (decision) | — | not started |
