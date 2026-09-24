@@ -17,11 +17,12 @@ import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
+import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { buildConfigFiles } from "./agent-config-builder";
-import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
+import { checkNodejsForProvider, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
@@ -310,8 +311,16 @@ export class AgentViewModel implements ViewModel {
         }
 
         const version = getApi().getAboutModalDetails().version;
-        const cliDir = resolveCliDir(version, provider.id);
-        const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
+        // Where the backend actually installed the CLI -- see resolveCliBin.
+        let cliBin: string;
+        try {
+            cliBin = await resolveCliBin(provider, this.blockId);
+        } catch (e) {
+            const t = translateError(e);
+            this.launchError = `${t.title}: ${t.message}`;
+            Logger.error("agent", "Could not resolve the agent CLI", { agentId, error: String(e) });
+            return;
+        }
 
         Logger.info("agent", `Launching agent ${agentId} (v${version})`, {
             agentId,
@@ -439,9 +448,16 @@ export class AgentViewModel implements ViewModel {
             return false;
         }
 
-        const version = getApi().getAboutModalDetails().version;
-        const cliDir = resolveCliDir(version, provider.id);
-        const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
+        // Where the backend actually installed the CLI -- see resolveCliBin.
+        let cliBin: string;
+        try {
+            cliBin = await resolveCliBin(provider, this.blockId);
+        } catch (e) {
+            const t = translateError(e);
+            this.launchError = `${t.title}: ${t.message}`;
+            Logger.error("agent", "Could not resolve the agent CLI for agent definition", { agentId: agent.id, error: String(e) });
+            return false;
+        }
 
         Logger.info("agent", `Launching agent definition ${agent.name} (${effectiveProvider})`, {
             agentId: agent.id,
