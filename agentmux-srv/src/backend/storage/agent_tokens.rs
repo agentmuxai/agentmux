@@ -466,6 +466,31 @@ mod tests {
         store.agent_lan_key_ensure("old--launch-").unwrap();
         assert!(store.agent_def_delete("uid-renamed").unwrap());
         assert!(store.agent_lan_key_load("old--launch-").unwrap().is_none());
+
+        // The picker's rename overwrites both the display name and
+        // instance_name; the old name is remembered, so its fallback key
+        // is still purged at delete (Codex P1 on #3633).
+        let mut v2 = test_agent_def("uid-v2-renamed", "Agent (v2)", "claude", "agent", 1, "");
+        v2.slug = "agent-v2-r".to_string();
+        store.agent_def_insert(&mut v2).unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET instance_name = 'Agent (v2)' WHERE id = 'uid-v2-renamed'", [])
+            .unwrap();
+        // The earlier "Agent (v2)" pair is gone, so nobody else signs as
+        // agent--v2- now except this row's first session.
+        assert!(store.agent_def_delete("uid-v2b").unwrap());
+        store.agent_lan_key_ensure("agent--v2-").unwrap();
+        v2.name = "New Name".to_string();
+        store.agent_def_update(&mut v2).unwrap();
+        assert!(store.instance_rename("uid-v2-renamed", "New Name").unwrap());
+        assert!(store.agent_def_delete("uid-v2-renamed").unwrap());
+        assert!(
+            store.agent_lan_key_load("agent--v2-").unwrap().is_none(),
+            "the pre-rename fallback key is purged"
+        );
     }
 
     /// Slug ownership is folded as the key tables fold (`to_lowercase`), not
