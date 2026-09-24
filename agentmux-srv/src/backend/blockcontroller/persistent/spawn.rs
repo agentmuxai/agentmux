@@ -298,17 +298,6 @@ impl PersistentSubprocessController {
         // (`DocumentRow.tsx`'s session-outcome body).
         let mut continuation: Option<String> = None;
         let fresh_onto_history = attempted_resume_sid.is_none() && self.has_prior_transcript();
-        if fresh_onto_history && fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation) {
-            tracing::info!(
-                block_id = %self.block_id,
-                "spawned with no --resume while prior history exists — disclosing a fresh start"
-            );
-            self.emit_session_outcome_now(
-                persistent_resume::SessionOutcome::Fresh,
-                String::new(),
-                None,
-            );
-        }
         if fresh_onto_history {
             // The provider can't give this process the conversation the pane
             // shows, so AgentMux's own record rides on its first message
@@ -326,6 +315,16 @@ impl PersistentSubprocessController {
                     "continuity: carrying AgentMux's record of the conversation into the fresh session"
                 );
             }
+        }
+        // After the packet is built, so the disclosure can say whether this
+        // fresh session was given the record ("continued") or not.
+        if fresh_onto_history && fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation) {
+            tracing::info!(
+                block_id = %self.block_id,
+                continued = continuation.is_some(),
+                "spawned with no --resume while prior history exists — disclosing a fresh start"
+            );
+            self.emit_fresh_outcome_now(String::new(), continuation.is_some());
         }
 
         let pid = child.id().unwrap_or(0);

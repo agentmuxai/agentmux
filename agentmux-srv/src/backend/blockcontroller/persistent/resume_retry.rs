@@ -95,8 +95,31 @@ impl PersistentSubprocessController {
         attempted_sid: String,
         actual_sid: Option<String>,
     ) {
+        self.emit_session_outcome_now_with(outcome, attempted_sid, actual_sid, false);
+    }
+
+    /// A `Fresh` outcome whose new session will carry AgentMux's record of
+    /// the conversation, so the pane says "continued" rather than "new".
+    pub(super) fn emit_fresh_outcome_now(&self, attempted_sid: String, continued: bool) {
+        self.emit_session_outcome_now_with(persistent_resume::SessionOutcome::Fresh, attempted_sid, None, continued);
+    }
+
+    /// Whether a fresh spawn right now would carry a continuation packet
+    /// (what `spawn` gives any no-`--resume` spawn onto prior history).
+    /// Reads the transcript tail: call it on rare paths, never under `inner`.
+    pub(super) fn fresh_spawn_would_continue(&self) -> bool {
+        self.has_prior_transcript() && self.continuation_packet().is_some()
+    }
+
+    fn emit_session_outcome_now_with(
+        &self,
+        outcome: persistent_resume::SessionOutcome,
+        attempted_sid: String,
+        actual_sid: Option<String>,
+        continued: bool,
+    ) {
         let Some(ref broker) = self.broker else { return };
-        let line = session_outcome_line(outcome, attempted_sid, actual_sid);
+        let line = session_outcome_line_with(outcome, attempted_sid, actual_sid, continued);
         let global_output_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         super::super::shell::handle_append_block_file(
             broker,
@@ -299,11 +322,10 @@ impl PersistentSubprocessController {
             // with the outcome itself.
             None => {
                 publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
-                self.emit_session_outcome_now(
-                    persistent_resume::SessionOutcome::Fresh,
-                    attempted_sid,
-                    None,
-                )
+                // The respawn below carries the continuation packet whenever
+                // there's history (§4.2.1), so say so.
+                let continued = self.fresh_spawn_would_continue();
+                self.emit_fresh_outcome_now(attempted_sid, continued)
             }
         }
         // Non-empty by the guard at the top.
@@ -638,6 +660,8 @@ impl PersistentSubprocessController {
             return;
         }
         let recovered = self.find_recovery_session_id(&config);
+        // Decided before the lock below: it reads the transcript tail.
+        let continued = recovered.is_none() && self.fresh_spawn_would_continue();
         // Second check, mutation, and every side effect under ONE lock
         // acquisition — see the doc comment for why nothing may sit
         // between them.
@@ -665,7 +689,7 @@ impl PersistentSubprocessController {
             Self::set_status(&mut inner, STATUS_DONE);
         }
         if recovered.is_none() {
-            self.emit_session_outcome_now(persistent_resume::SessionOutcome::Fresh, attempted_sid, None);
+            self.emit_fresh_outcome_now(attempted_sid, continued);
         }
         if queued_behind_claim {
             drop(inner);

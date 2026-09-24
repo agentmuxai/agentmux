@@ -517,6 +517,8 @@ export interface SessionOutcomeNode {
     outcome: "resumed" | "fresh";
     attemptedSid: string;
     actualSid: string | null;
+    /** A `fresh` session given AgentMux's record of the conversation (see `SessionOutcomeData.continued`). */
+    continued?: boolean;
     timestamp: number;
 }
 

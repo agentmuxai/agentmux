@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1 v1: every spawn records a segment in an event log in the global store (§4.1.1). First ladder slice: a rejected resume falls through to R3, never to older history (§4.2.1). P2, P4–P6, and P3's resolver ladder and pane chip not started. Exact identifiers are extracted deterministically into the packet (§4.4.1).
+**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1 v1: every spawn records a segment in an event log in the global store (§4.1.1). First ladder slice: a rejected resume falls through to R3, never to older history (§4.2.1). The pane labels a fresh session that carries the record "Session continued · reconstructed context" (§4.8). P2, P4–P6, and P3's resolver ladder and pane chip not started. Exact identifiers are extracted deterministically into the packet (§4.4.1).
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -573,6 +573,14 @@ the other providers need only an adapter plus an injection hook.
   It is persisted on the segment row and replaces the ad-hoc `session:resume_failed` / `fresh` disclosure.
 - Pane chip: `Resumed`, `Resumed (relocated)`, `Continued · reconstructed
   context (<reason>)` with a "view packet" action, or `New conversation`.
+  **v1 shipped:** the existing session-outcome row gains a `continued` flag on
+  its `fresh` frame (`session_outcome_line_with`). It's set whenever the
+  fresh session carries the continuation packet: the first-spawn disclosure,
+  the retry after a rejected resume, and the empty-retry settle. The row
+  reads "Session continued · reconstructed context" and says what was
+  carried over. The outcome stays `fresh`, so scrollback scoping
+  (`lastFreshBoundaryIndex` and friends) is unchanged. The reason text and
+  the "view packet" action aren't built yet.
 - Armory → agent → **Continuity** tab: the segment chain, packet versions
   (diff and revert), and the redaction summary.
 - Metric: the share of launches landing on `fresh` for agents *with* a
