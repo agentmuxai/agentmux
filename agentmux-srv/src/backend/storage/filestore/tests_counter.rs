@@ -100,6 +100,26 @@ fn append_lines_normalizes_and_closes_a_torn_tail() {
 }
 
 #[test]
+fn an_append_that_writes_nothing_leaves_the_cached_row_alone() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"a\n").unwrap();
+    let cached = fs.stat(ZONE, NAME).unwrap().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    fs.append_data_pos(ZONE, NAME, b"").unwrap();
+    fs.append_lines(ZONE, NAME, b"\n \n\r\n").unwrap();
+    let after = fs.stat(ZONE, NAME).unwrap().unwrap();
+    assert_eq!((after.size, after.modts), (cached.size, cached.modts), "the cache must keep matching the database");
+    let db_modts: i64 = fs
+        .conn()
+        .lock()
+        .unwrap()
+        .query_row("SELECT modts FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![ZONE, NAME], |r| r.get(0))
+        .unwrap();
+    assert_eq!(after.modts, db_modts);
+}
+
+#[test]
 fn replacing_or_recreating_a_file_starts_a_new_generation() {
     let fs = mem();
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();

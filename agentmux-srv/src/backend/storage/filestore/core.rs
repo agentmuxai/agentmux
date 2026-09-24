@@ -558,15 +558,20 @@ impl FileStore {
         name: &str,
         data: &[u8],
     ) -> Result<AppendPos, StoreError> {
-        let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Raw)?;
-        self.note_appended(zone_id, name, new_size);
+        let now = Self::now_ms();
+        let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Raw, now)?;
+        // Nothing written, nothing for the cache to follow (its modts must
+        // keep matching the database's).
+        if new_size > pos.offset {
+            self.note_appended(zone_id, name, new_size, now);
+        }
         Ok(pos)
     }
 
-    /// Bring this process's cached row up to an append that just committed.
-    pub(super) fn note_appended(&self, zone_id: &str, name: &str, new_size: i64) {
+    /// Bring this process's cached row up to an append that just committed
+    /// at `now` (the modts the append wrote, so the cache matches it).
+    pub(super) fn note_appended(&self, zone_id: &str, name: &str, new_size: i64, now: i64) {
         let key = (zone_id.to_string(), name.to_string());
-        let now = Self::now_ms();
         {
             let new_size_bytes = (new_size as usize).max(64);
             let mut cache = self.cache.lock().unwrap();

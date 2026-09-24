@@ -218,8 +218,8 @@ impl FileStore {
         name: &str,
         data: &[u8],
         mode: AppendMode,
+        now: i64,
     ) -> Result<(AppendPos, i64), StoreError> {
-        let now = Self::now_ms();
         self.write_txn(|tx| {
             let row = read_row(tx, zone_id, name)?.ok_or(StoreError::NotFound)?;
             let size = row.size;
@@ -339,8 +339,12 @@ impl FileStore {
     /// line's index and `lines - first_line` how many were appended.
     #[allow(dead_code)] // wired into the transcript writers in 5a-3
     pub fn append_lines(&self, zone_id: &str, name: &str, data: &[u8]) -> Result<AppendPos, StoreError> {
-        let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Lines)?;
-        self.note_appended(zone_id, name, new_size);
+        let now = Self::now_ms();
+        let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Lines, now)?;
+        // Blank-only input normalizes to nothing: no write, no cache update.
+        if new_size > pos.offset {
+            self.note_appended(zone_id, name, new_size, now);
+        }
         Ok(pos)
     }
 
