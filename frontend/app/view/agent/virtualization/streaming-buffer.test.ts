@@ -309,7 +309,8 @@ describe("nodeBytes on a long-running tool log (Codex P2, #3611)", () => {
 
     it("still measures a short log exactly", () => {
         const reads = { n: 0 };
-        expect(nodeBytes(runningWith(10, reads))).toBe(64 + 10 * "line of output\n".length);
+        const empty = nodeBytes(runningWith(0, reads));
+        expect(nodeBytes(runningWith(10, reads))).toBe(empty + 10 * "line of output\n".length);
     });
 });
 
@@ -338,5 +339,31 @@ describe("turnScopedFrontier from the current frontier (Codex P2, #3611)", () =>
     it("never returns less than `from`", () => {
         const nodes = [user("u0"), md("a0"), md("a1")];
         expect(turnScopedFrontier(nodes, { from: 2 })).toBe(2);
+    });
+});
+
+describe("nodeBytes on non-string payloads (Codex P2, #3611)", () => {
+    const toolWith = (params: unknown, result?: unknown): DocumentNode =>
+        ({ type: "tool", id: "t", tool: "X", params, status: "success", collapsed: true, summary: "t", result }) as unknown as DocumentNode;
+
+    it("charges numbers, booleans, null and object keys their serialized size", () => {
+        const nums = Array.from({ length: 200_000 }, (_, i) => i * 1.5); // ~1.3 MB as JSON
+        expect(nodeBytes(toolWith({}, { values: nums }))).toBeGreaterThan(TURN_TAIL_MAX_BYTES);
+        const flags = Array.from({ length: 200_000 }, (_, i) => i % 2 === 0);
+        expect(nodeBytes(toolWith({ flags }))).toBeGreaterThan(TURN_TAIL_MAX_BYTES);
+        const rows = Array.from({ length: 50_000 }, () => ({ someLongFieldName: null }));
+        expect(nodeBytes(toolWith({}, rows))).toBeGreaterThan(TURN_TAIL_MAX_BYTES);
+    });
+
+    it("visits a bounded number of values however large the payload", () => {
+        let visits = 0;
+        const counted = new Proxy(Array.from({ length: 1_000_000 }, () => 0), {
+            get(target, prop, receiver) {
+                if (typeof prop === "string" && /^\d+$/.test(prop)) visits++;
+                return Reflect.get(target, prop, receiver);
+            },
+        });
+        nodeBytes(toolWith({}, { counted }));
+        expect(visits).toBeLessThanOrEqual(100_000);
     });
 });

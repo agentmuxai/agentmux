@@ -156,24 +156,56 @@ const NODE_BYTES_CAP = 4 * TURN_TAIL_MAX_BYTES;
  */
 const MAX_LOG_CHUNKS_SCANNED = 4_000;
 
+/** A payload with more values than this counts as big without being walked. */
+const MAX_PAYLOAD_VISITS = 50_000;
+
 /**
- * Sum of string lengths reachable from `value`, walking arrays and plain
- * objects (a tool's params, a structured result: WriteParams.content, edit
- * strings, search-result arrays, records). Bounded: stops once `budget` is
- * spent, below `depth` 6, and on cycles — it only has to tell a big node from
- * a small one. Codex P2 on #3611: counting only top-level result strings let
- * megabyte payloads count as ~64 bytes, so the byte ceiling never moved.
+ * Approximate serialized size of `value` — what a JSON view of a tool's
+ * params or structured result would render: strings, numbers, booleans,
+ * null, object keys, walking arrays and plain objects. It only has to tell a
+ * big node from a small one, so it is bounded three ways: it stops once
+ * `budget` is spent, after MAX_PAYLOAD_VISITS values (charging the rest as
+ * the whole budget), and below depth 6 / on cycles. Codex P2s on #3611:
+ * counting only top-level result strings let megabyte payloads count as ~64
+ * bytes; counting only strings let a large numeric array walk unbounded and
+ * still count as ~64 bytes.
  */
-function payloadBytes(value: unknown, budget: number, depth = 0, seen = new Set<object>()): number {
-    if (typeof value === "string") return Math.min(value.length, budget);
-    if (value == null || typeof value !== "object" || depth > 6 || seen.has(value)) return 0;
-    seen.add(value);
-    let n = 0;
-    for (const v of Array.isArray(value) ? value : Object.values(value as Record<string, unknown>)) {
-        if (n >= budget) break;
-        n += payloadBytes(v, budget - n, depth + 1, seen);
-    }
-    return n;
+function payloadBytes(value: unknown, budget: number): number {
+    let visits = 0;
+    const seen = new Set<object>();
+    const walk = (v: unknown, left: number, depth: number): number => {
+        if (++visits > MAX_PAYLOAD_VISITS) return left; // too many values: it is big
+        switch (typeof v) {
+            case "string":
+                return Math.min(v.length + 2, left);
+            case "number":
+            case "bigint":
+                return Math.min(String(v).length, left);
+            case "boolean":
+                return Math.min(v ? 4 : 5, left);
+            case "object":
+                break;
+            default:
+                return 0;
+        }
+        if (v === null) return Math.min(4, left);
+        if (depth > 6 || seen.has(v)) return 0;
+        seen.add(v);
+        let n = 2;
+        if (Array.isArray(v)) {
+            for (const item of v) {
+                if (n >= left) break;
+                n += 1 + walk(item, left - n, depth + 1);
+            }
+        } else {
+            for (const [k, item] of Object.entries(v as Record<string, unknown>)) {
+                if (n >= left) break;
+                n += k.length + 3 + walk(item, left - n, depth + 1);
+            }
+        }
+        return Math.min(n, left);
+    };
+    return value === undefined ? 0 : walk(value, budget, 0);
 }
 
 /** Rough rendered-content size, for the byte ceiling. Cached per node object. */
