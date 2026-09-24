@@ -714,12 +714,23 @@ pub struct CommandBlockfileLineCountData {
 }
 
 /// Response from blockfile:line_count.
-#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileLineCountResult {
     #[ts(type = "number")]
     pub count: u64,
+    /// The transcript stream `count` is of — `b:<blockId>` (the block's own
+    /// `output`) or `g:<zone>` (the agent's global zone) — and its
+    /// generation, when the file is counted (Phase 5a-3,
+    /// SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7).
+    /// Absent: not a counted transcript; addressing by line is unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gen: Option<String>,
 }
 
 /// Request for blockfile:read_range — read a range of lines from a blockfile.
@@ -733,10 +744,16 @@ pub struct CommandBlockfileReadRangeData {
     pub offset: u64,
     #[ts(type = "number")]
     pub limit: u64,
+    /// Read only from this generation of the stream: if the file has been
+    /// replaced since (another generation), answer `gen_mismatch` with no
+    /// lines rather than lines of another file (Phase 5a-3).
+    #[serde(default)]
+    #[ts(optional)]
+    pub expect_gen: Option<String>,
 }
 
 /// Response from blockfile:read_range.
-#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileReadRangeResult {
@@ -751,6 +768,20 @@ pub struct BlockfileReadRangeResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number[]")]
     pub stamps: Option<Vec<i64>>,
+    /// The stream and generation `lines` were read from, when the file is a
+    /// counted transcript and the read provably saw one generation (it was
+    /// the same before and after the read). Absent otherwise (Phase 5a-3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gen: Option<String>,
+    /// `expect_gen` was given and the file is now another generation (or
+    /// changed during the read): `lines` is empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gen_mismatch: Option<bool>,
 }
 
 /// Request for blockfile:read_state — read a sidecar JSON file
@@ -976,7 +1007,7 @@ mod blockfile_req_shape_tests {
         let without = serde_json::to_value(BlockfileReadRangeResult {
             lines: vec!["a".to_string()],
             total: 1,
-            stamps: None,
+            ..Default::default()
         })
         .expect("serializable");
         assert_eq!(without, json!({"lines": ["a"], "total": 1}));
@@ -985,9 +1016,25 @@ mod blockfile_req_shape_tests {
             lines: vec!["a".to_string()],
             total: 1,
             stamps: Some(vec![7]),
+            ..Default::default()
         })
         .expect("serializable");
         assert_eq!(with, json!({"lines": ["a"], "total": 1, "stamps": [7]}));
+
+        // The Phase 5a-3 fields follow the same rule: omitted when unset.
+        let positioned = serde_json::to_value(BlockfileReadRangeResult {
+            lines: vec![],
+            total: 3,
+            stream: Some("g:agent:x:current".to_string()),
+            gen: Some("0123456789abcdef".to_string()),
+            gen_mismatch: Some(true),
+            ..Default::default()
+        })
+        .expect("serializable");
+        assert_eq!(
+            positioned,
+            json!({"lines": [], "total": 3, "stream": "g:agent:x:current", "gen": "0123456789abcdef", "gen_mismatch": true})
+        );
     }
 
     // `content` is a plain `Option<String>` with NO skip_serializing_if, so the

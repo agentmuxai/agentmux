@@ -126,6 +126,9 @@ pub const FILE_OP_CREATE: &str = "create";
 pub const FILE_OP_DELETE: &str = "delete";
 pub const FILE_OP_APPEND: &str = "append";
 pub const FILE_OP_TRUNCATE: &str = "truncate";
+/// A transcript `output` replaced by other content (restore): `pos` names the
+/// new generation and its line count (Phase 5a-3).
+pub const FILE_OP_REPLACE: &str = "replace";
 #[allow(dead_code)]
 pub const FILE_OP_INVALIDATE: &str = "invalidate";
 

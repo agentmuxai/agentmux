@@ -33,11 +33,17 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if let Some((gfs, zone)) =
                     global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
                 {
-                    // Blocking pool (#2841): this extends or, when it can't
-                    // anchor on the existing index, fully rebuilds `output.idx`
-                    // — a streaming scan proportional to transcript size.
+                    // Blocking pool (#2841). A counted zone answers from its
+                    // counter (O(1), Phase 5a-3); a zone without an epoch gets
+                    // one first (`init_line_counter`, one read of the file,
+                    // once). Only if it can't be counted does this extend or
+                    // rebuild `output.idx`, as before.
                     let count = match tokio::task::spawn_blocking(move || {
-                        global_zone_line_count(&gfs, &zone)
+                        let stream = format!("g:{zone}");
+                        counted_line_count(&gfs, &zone, stream).or_else(|| {
+                            global_zone_line_count(&gfs, &zone)
+                                .map(|count| BlockfileLineCountResult { count, ..Default::default() })
+                        })
                     })
                     .await
                     {
@@ -51,8 +57,25 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             None
                         }
                     };
-                    if let Some(count) = count {
-                        return Ok(BlockfileLineCountResult { count });
+                    if let Some(result) = count {
+                        return Ok(result);
+                    }
+                }
+
+                // The block's own `output`, from its counter when it is a
+                // counted transcript (Phase 5a-3): exact, O(1), and the same
+                // count `read_range` serves lines from.
+                if cmd.filename == crate::backend::agent_session::OUTPUT_FILE {
+                    let (fs, block_id) = (filestore.clone(), cmd.block_id.clone());
+                    let counted = tokio::task::spawn_blocking(move || {
+                        let stream = format!("b:{block_id}");
+                        counted_line_count(&fs, &block_id, stream)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(result) = counted {
+                        return Ok(result);
                     }
                 }
 
@@ -67,7 +90,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if cmd.filename == "output" {
                     if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
                         if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
-                            return Ok(BlockfileLineCountResult { count });
+                            return Ok(BlockfileLineCountResult { count, ..Default::default() });
                         }
                     }
                 }
@@ -101,7 +124,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                Ok(BlockfileLineCountResult { count })
+                Ok(BlockfileLineCountResult { count, ..Default::default() })
             }
         },
     );
@@ -133,9 +156,42 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // (`agent:<defId>:current`) instead. `read_block` is the zone for
                 // every FileStore call below — the local block_id normally, the
                 // agent zone when the agent ran in another build/channel.
-                let (filestore, read_block) =
-                    global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
-                        .unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
+                let source = global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename);
+                let stream = match &source {
+                    Some((_, zone)) => format!("g:{zone}"),
+                    None => format!("b:{}", cmd.block_id),
+                };
+                let (filestore, read_block) = source.unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
+
+                // Generation (Phase 5a-3): read before and after the lines. A
+                // replace always mints a new one, so the same value on both
+                // sides proves every line came from that generation — only then
+                // does the response name it. `expect_gen` turns any other
+                // outcome into `gen_mismatch` instead of lines of another file.
+                let transcript = cmd.filename == crate::backend::agent_session::OUTPUT_FILE;
+                let gen_before = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                let mismatch = |gen: Option<String>| BlockfileReadRangeResult {
+                    stream: Some(stream.clone()),
+                    gen,
+                    gen_mismatch: Some(true),
+                    ..Default::default()
+                };
+                if let Some(expected) = &cmd.expect_gen {
+                    if gen_before.as_deref() != Some(expected.as_str()) {
+                        return Ok(mismatch(gen_before));
+                    }
+                }
+                let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
+                    if gen_before.is_some() && gen_after == gen_before {
+                        result.stream = Some(stream.clone());
+                        result.gen = gen_before.clone();
+                        result
+                    } else if cmd.expect_gen.is_some() {
+                        mismatch(gen_after)
+                    } else {
+                        result
+                    }
+                };
 
                 // Fast path: output.idx — a lazily-built, self-validating byte-offset
                 // index of every non-blank line in `output`. It lets us seek directly
@@ -193,7 +249,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                         // Empty result cases — answered from the index, no output read.
                         if read.line_offsets.is_empty() {
-                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, stamps: None });
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, ..Default::default() });
                         }
                         let raw = read.raw;
                         let text = String::from_utf8_lossy(&raw);
@@ -246,7 +302,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             Some(stamps)
                         })();
 
-                        Some(BlockfileReadRangeResult { lines, total: total_lines, stamps })
+                        Some(BlockfileReadRangeResult { lines, total: total_lines, stamps, ..Default::default() })
                         };
                         // A panic in the scan must degrade to the slow path
                         // below, not fail the read — but it is logged rather
@@ -271,7 +327,8 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             lines = result.lines.len(),
                             "blockfile:read_range via output.idx fast path"
                         );
-                        return Ok(result);
+                        let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                        return Ok(finish(result, gen_after));
                     }
                 }
 
@@ -356,7 +413,8 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     all_lines[clamped_offset..clamped_end].to_vec()
                 };
 
-                Ok(BlockfileReadRangeResult { lines, total, stamps: None })
+                let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                Ok(finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after))
             }
         },
     );
@@ -442,3 +500,36 @@ fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) 
         },
     );
 }
+
+/// A transcript stream's line count from its counter, with the stream and
+/// generation it counts (Phase 5a-3). A file with no epoch yet gets one
+/// first — `init_line_counter`, one read of the file, once per epoch; call on
+/// the blocking pool. `None` when it can't be counted (no such file, or
+/// mid-write by a build without transactions), and the caller falls back.
+fn counted_line_count(
+    fs: &crate::backend::storage::filestore::FileStore,
+    zone: &str,
+    stream: String,
+) -> Option<BlockfileLineCountResult> {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    let state = fs.line_state(zone, OUTPUT_FILE).ok()??;
+    let state = if state.counted.is_some() { state } else { fs.init_line_counter(zone, OUTPUT_FILE).ok()?? };
+    let counted = state.counted?;
+    Some(BlockfileLineCountResult { count: counted.lines, stream: Some(stream), gen: Some(counted.gen) })
+}
+
+/// The valid generation of a transcript's `output`, read from the database on
+/// the blocking pool (the global store can be held by another srv instance).
+async fn db_generation(fs: &Arc<crate::backend::storage::filestore::FileStore>, zone: &str) -> Option<String> {
+    let (fs, zone) = (fs.clone(), zone.to_string());
+    tokio::task::spawn_blocking(move || {
+        crate::backend::blockcontroller::shell::output_now(&fs, &zone).and_then(|(_, gen)| gen)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[cfg(test)]
+#[path = "blockfile_transcript_tests.rs"]
+mod transcript_rpc_tests;
