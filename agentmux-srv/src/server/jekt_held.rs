@@ -70,15 +70,16 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
     .unwrap_or_default();
 
     let mut outcomes = Vec::new();
+    let mut spent = 0;
     for uid in targets {
-        if outcomes.len() >= REPLAY_PER_PASS {
+        if spent >= REPLAY_PER_PASS {
             break;
         }
         if !state.reactive_handler.has_uid_registration(&uid) {
             continue;
         }
         let mstore = state.mstore.clone();
-        let budget = REPLAY_PER_PASS - outcomes.len();
+        let budget = REPLAY_PER_PASS - spent;
         let rows = tokio::task::spawn_blocking(move || mstore.jekt_held_for_target(&uid, budget))
             .await
             .ok()
@@ -88,6 +89,13 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
             let id = row.request_id.clone();
             let outcome = replay_one(state, row).await;
             outcomes.push((id, outcome));
+            // A deferral (queue full, starting) applies to this target's
+            // later rows too: move on, and spend no budget on it, so one
+            // stuck target cannot starve the others.
+            if outcome == ReplayOutcome::Deferred {
+                break;
+            }
+            spent += 1;
         }
     }
     outcomes
@@ -113,16 +121,18 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
     req.reagent_verified = row.reagent_verified;
     req.lan_verified = row.lan_verified;
     req.channel_verified = row.channel_verified;
+    req.is_transcript_request = row.is_transcript_request;
+    req.transcript_request_escalate_forced = row.transcript_request_escalate_forced;
     req.audit_source_uid = row.audit_source_uid.clone();
     req.held_sent_at_ms = Some(row.sent_at_ms);
     req
 }
 
 async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
-    let mut req = request_from_held(&row);
-    // Transcript-request fields are derived, not stored: recompute them as
-    // the cloud subscriber does for its deliveries.
-    super::reactive::resolve_transcript_request_tier_fields(&state.mstore, &mut req);
+    // The transcript-request fields are restored as accepted, never
+    // recomputed: the replay addresses the target by UID, and the slug-keyed
+    // recompute would lose a forced escalation.
+    let req = request_from_held(&row);
     let resp = state.reactive_handler.inject_held(req);
     let mstore = state.mstore.clone();
     let id = row.request_id.clone();
@@ -132,9 +142,12 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
         return ReplayOutcome::Delivered;
     }
     let error = resp.error.unwrap_or_default();
+    // Transient: still absent, rate-limited, its queue full, or the agent
+    // starting, restarting or stopping ("… try again shortly").
     let transient = error.starts_with("agent not found")
         || error.contains("rate limit")
-        || error.contains("queue is full");
+        || error.contains("queue is full")
+        || error.contains("try again shortly");
     if transient {
         return ReplayOutcome::Deferred;
     }
@@ -142,10 +155,11 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
         let mstore = mstore.clone();
         let id = id.clone();
         let error = error.clone();
-        move || mstore.jekt_held_record_failure(&id, &error).unwrap_or(MAX_ATTEMPTS)
+        // A store fault is not a failed delivery: never drop on it.
+        move || mstore.jekt_held_record_failure(&id, &error).unwrap_or(0)
     })
     .await
-    .unwrap_or(MAX_ATTEMPTS);
+    .unwrap_or(0);
     if attempts >= MAX_ATTEMPTS {
         let _ = tokio::task::spawn_blocking(move || mstore.jekt_held_delete(&id)).await;
         crate::backend::agent_resolve::record_uid_fallback("jekt.held_failed");

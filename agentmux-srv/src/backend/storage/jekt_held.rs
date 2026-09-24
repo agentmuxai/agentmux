@@ -34,6 +34,11 @@ pub struct HeldJekt {
     pub reagent_verified: Option<bool>,
     pub lan_verified: Option<bool>,
     pub channel_verified: Option<bool>,
+    /// The accept-time transcript-request fields, restored as they were: a
+    /// replay addresses the target by UID, and recomputing them by slug
+    /// would lose a forced escalation (review of #3632).
+    pub is_transcript_request: bool,
+    pub transcript_request_escalate_forced: bool,
     pub sent_at_ms: i64,
     pub expires_at_ms: i64,
     pub attempts: i64,
@@ -74,6 +79,8 @@ fn row_to_held(row: &Row) -> rusqlite::Result<HeldJekt> {
         reagent_verified: verdict_from_sql(row.get("reagent_verified")?),
         lan_verified: verdict_from_sql(row.get("lan_verified")?),
         channel_verified: verdict_from_sql(row.get("channel_verified")?),
+        is_transcript_request: row.get::<_, i64>("is_transcript_request")? != 0,
+        transcript_request_escalate_forced: row.get::<_, i64>("transcript_request_escalate_forced")? != 0,
         sent_at_ms: row.get("sent_at_ms")?,
         expires_at_ms: row.get("expires_at_ms")?,
         attempts: row.get("attempts")?,
@@ -102,8 +109,9 @@ impl Store {
                 (request_id, target_uid, target_agent, source_agent, audit_source_uid,
                  message, priority, jekt_tier, delivery_tier,
                  sig_verified, reagent_verified, lan_verified, channel_verified,
+                 is_transcript_request, transcript_request_escalate_forced,
                  sent_at_ms, expires_at_ms, attempts, last_error)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, ''
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?18, ?19, ?14, ?15, 0, ''
               WHERE (SELECT COUNT(*) FROM db_jekt_held WHERE target_uid = ?2) < ?16
                 AND (SELECT COUNT(*) FROM db_jekt_held) < ?17",
             params![
@@ -124,6 +132,8 @@ impl Store {
                 held.expires_at_ms,
                 HELD_PER_TARGET,
                 HELD_PER_CHANNEL,
+                i64::from(held.is_transcript_request),
+                i64::from(held.transcript_request_escalate_forced),
             ],
         )?;
         Ok(if n > 0 { HoldOutcome::Held } else { HoldOutcome::Full })
@@ -138,10 +148,12 @@ impl Store {
         )?)
     }
 
-    /// Every target UID with a held message.
+    /// Every target UID with a held message, the one waiting longest first.
     pub fn jekt_held_targets(&self) -> Result<Vec<String>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        let mut stmt = conn.prepare("SELECT DISTINCT target_uid FROM db_jekt_held")?;
+        let mut stmt = conn.prepare(
+            "SELECT target_uid FROM db_jekt_held GROUP BY target_uid ORDER BY MIN(sent_at_ms)",
+        )?;
         let rows = stmt.query_map([], |r| r.get(0))?;
         Ok(rows.collect::<Result<Vec<String>, _>>()?)
     }
@@ -201,6 +213,8 @@ mod tests {
             reagent_verified: None,
             lan_verified: None,
             channel_verified: Some(true),
+            is_transcript_request: true,
+            transcript_request_escalate_forced: true,
             sent_at_ms,
             expires_at_ms: sent_at_ms + HELD_TTL_MS,
             attempts: 0,
@@ -219,6 +233,7 @@ mod tests {
         assert_eq!(rows[0].sig_verified, Some(false), "a failed verdict survives");
         assert_eq!(rows[0].channel_verified, Some(true));
         assert_eq!(rows[0].reagent_verified, None);
+        assert!(rows[0].is_transcript_request && rows[0].transcript_request_escalate_forced);
         assert_eq!(s.jekt_held_targets().unwrap(), ["uid-y"]);
     }
 

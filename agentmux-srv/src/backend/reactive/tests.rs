@@ -3774,11 +3774,29 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
         reagent_verified: None,
         lan_verified: None,
         channel_verified: None,
+        is_transcript_request: false,
+        transcript_request_escalate_forced: false,
         sent_at_ms,
         expires_at_ms: sent_at_ms + 1,
         attempts: 0,
         last_error: String::new(),
     };
+    // A verified transcript request whose escalation was forced at accept
+    // time keeps it: replay restores the fields, never recomputes them by
+    // the UID it addresses (review of #3632).
+    let forced = crate::backend::storage::jekt_held::HeldJekt {
+        request_id: "req-heldz-tr".into(),
+        sig_verified: Some(true),
+        is_transcript_request: true,
+        transcript_request_escalate_forced: true,
+        ..row.clone()
+    };
+    let resp = handler.inject_held(crate::server::jekt_held::request_from_held(&forced));
+    assert!(resp.success, "{:?}", resp.error);
+    let text = delivered.lock().unwrap().join("");
+    assert!(text.contains("TRUST=host-verified") && text.contains("ESCALATE=required"), "{text}");
+    delivered.lock().unwrap().clear();
+
     let req = crate::server::jekt_held::request_from_held(&row);
     let resp = handler.inject_held(req);
     assert!(resp.success, "{:?}", resp.error);
