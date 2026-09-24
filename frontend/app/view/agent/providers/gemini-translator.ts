@@ -75,7 +75,9 @@ export class GeminiTranslator implements OutputTranslator {
                 if (rawEvent.role === "user") {
                     const content = rawEvent.content;
                     if (!this.opts.replay || typeof content !== "string" || !content) return [];
-                    return [{ type: "user_message", message: content, timestamp: Date.now() }];
+                    // No invented timestamp: parseHistoryLines stamps the
+                    // node from its line's stored receive time.
+                    return [{ type: "user_message", message: content }];
                 }
                 if (rawEvent.role !== "assistant") return [];
                 const content: string = rawEvent.content ?? "";

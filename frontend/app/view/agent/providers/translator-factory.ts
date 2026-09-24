@@ -19,7 +19,7 @@ import { KimiTranslator } from "./kimi-translator";
 export function createTranslator(outputFormat: string, opts: { replay?: boolean } = {}): OutputTranslator {
     switch (outputFormat) {
         case "claude-stream-json":
-            return new ClaudeTranslator();
+            return new ClaudeTranslator({ replay: opts.replay });
         case "gemini-json":
             return new GeminiTranslator({ replay: opts.replay });
         case "codex-json":
@@ -30,6 +30,6 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
             return new AcpTranslator();
         default:
             console.warn(`[translator-factory] Unknown output format "${outputFormat}", falling back to Claude translator`);
-            return new ClaudeTranslator();
+            return new ClaudeTranslator({ replay: opts.replay });
     }
 }

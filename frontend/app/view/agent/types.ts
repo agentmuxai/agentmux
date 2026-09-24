@@ -372,7 +372,10 @@ export interface UserMessageNode {
     type: "user_message";
     id: string;
     message: string;
-    timestamp: number;
+    /** Unix ms. Absent when unknown — a replayed message whose line has no
+     *  stored receive time; never an invented "now" (ReAgent P1, #3620).
+     *  Renderers already treat a missing value as unknown. */
+    timestamp?: number;
     /** True when this row is the auto-generated startup context
      * payload (see `buildStartupPayload.ts` + onReadyFn in
      * `agent-view.tsx`). The renderer surfaces these
