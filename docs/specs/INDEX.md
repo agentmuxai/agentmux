@@ -671,6 +671,7 @@ partial list.
 | [`SPEC_WEBSEARCH_RICH_VIEW_2026_06_19`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) | SPEC: Web-search rich result view |
 | [`SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20`](SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md) | SPEC: Widget bar "More" / pinned-parent flyout closes on its first click when hover already opened it |
 | [`SPEC_WIDGET_PINBAR_DND_STATE_2026_06_15`](SPEC_WIDGET_PINBAR_DND_STATE_2026_06_15.md) | Spec: Widget Pin-Bar DnD State Machine — Robustness Rethink |
+| [`SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24`](SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md) | SPEC — Window resize repaints pane content every frame, with no settle delay |
 | [`SPEC_XTERM_PASTE_TRUNCATION_2026_06_12`](SPEC_XTERM_PASTE_TRUNCATION_2026_06_12.md) | SPEC: xterm Terminal Paste Truncation Fix |
 | [`SPIKE_OPENROUTER_ORI_HARNESS_2026_09_02`](SPIKE_OPENROUTER_ORI_HARNESS_2026_09_02.md) | Spike: OpenRouter's Ori harness — does it change our integration story? |
 | [`agent-input-auto-grow`](agent-input-auto-grow.md) | Agent Input Auto-Grow Textarea |
