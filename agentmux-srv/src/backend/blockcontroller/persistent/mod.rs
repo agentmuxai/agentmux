@@ -1490,6 +1490,7 @@ mod input;
 mod lifecycle;
 mod queue;
 mod resume_retry;
+mod segments;
 pub(crate) use resume_retry::pane_history_session_id;
 mod spawn;
 mod status;
