@@ -1,5 +1,21 @@
 # AgentMux Version History
 
+## 0.57.0 — 2026-09-23
+
+- perf(agent-pane): pin-to-bottom without forced synchronous layout — the pin runs after layout in the content ResizeObserver, the scroll event our own pin causes is handled without geometry reads, rows are placed from the stored scroll margin
+- feat(identity): record the acting agent's UID beside the name on work items, cron jobs and Global Memory versions (identity M4c-1)
+- perf(agent-pane): one scheduler for every pane's stream flushes — while the user is typing, at most one pane flushes per frame (oldest first, 100 ms starvation guard), so keystrokes are handled between panes' updates
+- agent.open opens My Agents agents only; templates are refused
+- Work-queue holder checks match by UID when the item and the caller both have one
+- Personal memory calls from an agent with a token act on its own memory, not whichever agent its name resolves to
+- Agent pane: a pause mid-stream no longer re-parses the whole message (streaming markdown stays incremental through settle)
+- IdentityAccounts, IdentityValidate, PresetGet and SearchHistory from an agent with a token act on that agent, not whichever agent its name resolves to
+- Bench: each measurement window starts only once the page is quiet, so history setup is not measured
+- Agent pane: tool logs measure their height only when the rendered branch changes (mounting history ~31% faster)
+- Audit entries and bus messages record the sending agent's UID beside its claimed name
+- Cron jobs fire in process and audit the creating agent's UID, still sending as cron
+- Agent pane: a message moving out of the streaming buffer no longer shifts the content you are reading
+
 ## 0.56.14 — 2026-09-23
 
 - perf(agent-pane): stop rebuilding every finished tool result on every stream flush — 4 streaming panes 2.3 fps → 55 fps
