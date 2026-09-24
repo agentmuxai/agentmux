@@ -832,6 +832,21 @@ pub fn inject_identity_env_with_broker(
                             error: e.to_string(),
                         });
                     }
+                    // Soft-fail: a missing retention setting costs old
+                    // transcripts, not isolation, so it never blocks a spawn.
+                    if let Err(e) =
+                        crate::backend::providers::seed_transcript_retention_if_missing(provider_cfg, &dir)
+                    {
+                        tracing::warn!(
+                            target: "identity",
+                            "account {} for provider {}: could not set transcript retention in {} ({}) — \
+                             Claude Code's 30-day default will sweep this account's shared history",
+                            binding.account_id,
+                            binding.provider,
+                            dir,
+                            e,
+                        );
+                    }
                 }
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
                 // Canonicalized (codex P1 on PR #2377) — see def_provider's

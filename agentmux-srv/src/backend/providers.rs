@@ -868,6 +868,59 @@ pub fn seed_claude_md_placeholder_if_missing(
     Ok(true)
 }
 
+/// Days Claude Code keeps session transcripts in an AgentMux-owned config dir
+/// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.1).
+pub const CLAUDE_TRANSCRIPT_RETENTION_DAYS: u32 = 180;
+
+/// Seeds `cleanupPeriodDays` into an isolated Claude Code config dir's
+/// `settings.json` when it isn't set. Claude Code's default is 30 days, and
+/// its startup sweep deletes transcripts under `<config_dir>/projects`, which
+/// AgentMux junctions to the account's shared history — so any channel that
+/// launched an agent without this setting deleted every channel's month-old
+/// conversations, leaving `--resume` nothing to find.
+///
+/// Claude only. Leaves an explicit `cleanupPeriodDays` alone, and never
+/// rewrites a `settings.json` it can't parse as a JSON object. Callers must
+/// only pass a dir already confirmed not to be the operator's ambient home.
+/// Returns `Ok(true)` only when it wrote the setting.
+pub fn seed_transcript_retention_if_missing(
+    provider: &ProviderConfig,
+    config_dir: &str,
+) -> std::io::Result<bool> {
+    if provider.auth_dir_name != "claude" {
+        return Ok(false);
+    }
+    if config_dir.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "config_dir is empty",
+        ));
+    }
+    let path = std::path::Path::new(config_dir).join("settings.json");
+    let mut settings = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(map)) => map,
+            _ => return Ok(false),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(e) => return Err(e),
+    };
+    if settings.contains_key("cleanupPeriodDays") {
+        return Ok(false);
+    }
+    settings.insert(
+        "cleanupPeriodDays".to_string(),
+        serde_json::json!(CLAUDE_TRANSCRIPT_RETENTION_DAYS),
+    );
+    let body = serde_json::to_string_pretty(&serde_json::Value::Object(settings))
+        .map_err(std::io::Error::other)?;
+    std::fs::create_dir_all(config_dir)?;
+    let tmp = path.with_extension("json.agentmux-tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(true)
+}
+
 /// Prepare an isolated provider auth/config directory for use as
 /// `CLAUDE_CONFIG_DIR` (or a provider's equivalent): create it, then apply
 /// every isolation guarantee that directory needs before a CLI is pointed
@@ -894,6 +947,9 @@ pub fn prepare_provider_auth_dir(
     }
     std::fs::create_dir_all(auth_dir)?;
     seed_claude_md_placeholder_if_missing(provider, auth_dir)?;
+    if let Err(e) = seed_transcript_retention_if_missing(provider, auth_dir) {
+        tracing::warn!(auth_dir, error = %e, "could not set Claude transcript retention");
+    }
     Ok(())
 }
 
@@ -1314,6 +1370,83 @@ mod tests {
         }
     }
 
+    mod transcript_retention_tests {
+        use super::*;
+
+        fn seed(dir: &std::path::Path) -> bool {
+            let claude = get_provider("claude").unwrap();
+            seed_transcript_retention_if_missing(claude, &dir.to_string_lossy()).unwrap()
+        }
+
+        fn settings(dir: &std::path::Path) -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap()
+        }
+
+        #[test]
+        fn creates_settings_with_the_retention_when_missing() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(seed(dir.path()));
+            assert_eq!(
+                settings(dir.path())["cleanupPeriodDays"],
+                serde_json::json!(CLAUDE_TRANSCRIPT_RETENTION_DAYS)
+            );
+        }
+
+        #[test]
+        fn adds_the_retention_and_keeps_existing_settings() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("settings.json"), r#"{"model":"opus","env":{"A":"1"}}"#).unwrap();
+            assert!(seed(dir.path()));
+            let s = settings(dir.path());
+            assert_eq!(s["cleanupPeriodDays"], serde_json::json!(CLAUDE_TRANSCRIPT_RETENTION_DAYS));
+            assert_eq!(s["model"], "opus");
+            assert_eq!(s["env"]["A"], "1");
+        }
+
+        /// An operator who set their own retention keeps it, shorter or longer.
+        #[test]
+        fn an_explicit_retention_is_left_alone() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("settings.json"), r#"{"cleanupPeriodDays":7}"#).unwrap();
+            assert!(!seed(dir.path()));
+            assert_eq!(settings(dir.path())["cleanupPeriodDays"], 7);
+        }
+
+        /// Rewriting a file we can't parse could destroy the operator's settings.
+        #[test]
+        fn an_unparseable_or_non_object_settings_file_is_never_rewritten() {
+            for original in ["{ not json", "[1, 2]", ""] {
+                let dir = tempfile::tempdir().unwrap();
+                std::fs::write(dir.path().join("settings.json"), original).unwrap();
+                assert!(!seed(dir.path()), "{original:?}");
+                assert_eq!(std::fs::read_to_string(dir.path().join("settings.json")).unwrap(), original);
+            }
+        }
+
+        #[test]
+        fn is_idempotent() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(seed(dir.path()));
+            let first = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
+            assert!(!seed(dir.path()));
+            assert_eq!(std::fs::read_to_string(dir.path().join("settings.json")).unwrap(), first);
+        }
+
+        #[test]
+        fn other_providers_are_untouched() {
+            let dir = tempfile::tempdir().unwrap();
+            let codex = get_provider("codex").unwrap();
+            assert!(!seed_transcript_retention_if_missing(codex, &dir.path().to_string_lossy()).unwrap());
+            assert!(!dir.path().join("settings.json").exists());
+        }
+
+        #[test]
+        fn a_blank_config_dir_is_rejected() {
+            let claude = get_provider("claude").unwrap();
+            assert!(seed_transcript_retention_if_missing(claude, "  ").is_err());
+        }
+    }
+
     mod claude_md_placeholder_tests {
         use super::*;
 
@@ -1395,6 +1528,17 @@ mod tests {
             assert!(dir.is_dir(), "auth dir must be created");
             let content = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
             assert!(content.contains("AgentMux: intentionally empty"));
+        }
+
+        #[test]
+        fn a_new_claude_dir_gets_the_transcript_retention() {
+            let base = tempfile::tempdir().unwrap();
+            let dir = base.path().join("fresh");
+            let claude = get_provider("claude").unwrap();
+            prepare_provider_auth_dir(claude, &dir.to_string_lossy()).unwrap();
+            let settings: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+            assert_eq!(settings["cleanupPeriodDays"], serde_json::json!(CLAUDE_TRANSCRIPT_RETENTION_DAYS));
         }
 
         #[test]
