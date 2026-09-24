@@ -40,6 +40,28 @@ pub fn set_taskbar_attention(state: &Arc<AppState>, args: &serde_json::Value) ->
     Ok(serde_json::Value::Null)
 }
 
+/// The registered `TaskbarButtonCreated` message id (0 if unavailable).
+#[cfg(target_os = "windows")]
+pub fn taskbar_button_created_msg() -> u32 {
+    use std::sync::OnceLock;
+    static ID: OnceLock<u32> = OnceLock::new();
+    *ID.get_or_init(|| {
+        let name: Vec<u16> = "TaskbarButtonCreated".encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(name.as_ptr()) }
+    })
+}
+
+/// Re-apply the last badge for `hwnd` after its taskbar button was recreated.
+/// Never flashes: the count hasn't risen.
+#[cfg(target_os = "windows")]
+pub fn reapply(hwnd: isize) {
+    if let Some(count) = win::last_count(hwnd) {
+        if count > 0 {
+            win::post(hwnd, count);
+        }
+    }
+}
+
 /// Accessible description for the overlay (also used as its tooltip-ish label).
 pub fn description(count: u32) -> String {
     if count == 1 {
@@ -76,6 +98,10 @@ mod win {
                 unsafe { apply(self.hwnd, self.count) }
             }
         }
+    }
+
+    pub fn last_count(hwnd: isize) -> Option<u32> {
+        LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&hwnd).copied())
     }
 
     pub fn post(hwnd: isize, count: u32) {
