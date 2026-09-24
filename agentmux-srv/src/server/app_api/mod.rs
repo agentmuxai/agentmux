@@ -762,13 +762,14 @@ pub(crate) async fn agent_define_core(
     })
 }
 
-pub(crate) async fn identity_self_accounts_impl(
+pub(crate) async fn identity_self_accounts_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
     // Link rows are keyed by definition id, not the S1 slug callers
-    // authenticate with — see resolve_agent_definition_id.
-    let def_id = resolve_agent_definition_id(state, agent_id)
+    // authenticate with — see resolve_agent_definition_id. Identity M4c-2c:
+    // an attributed caller's is its own row's (`SelfOwner`).
+    let def_id = owner.into().owner_id(&state.mstore)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
     let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
@@ -839,14 +840,16 @@ pub(crate) async fn identity_self_accounts_impl(
 /// Validate one of the agent's own linked accounts by probing the provider with
 /// the stored keychain secret. Ownership is verified (the account must be linked
 /// to `agent_id`) before the secret is read.
-pub(crate) async fn identity_account_validate_stored_impl(
+pub(crate) async fn identity_account_validate_stored_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     account_id: &str,
 ) -> Result<serde_json::Value, String> {
     // Link rows are keyed by definition id, not the S1 slug — without the
     // resolution this ownership check always saw zero links and rejected.
-    let def_id = resolve_agent_definition_id(state, agent_id)
+    // Identity M4c-2c: an attributed caller's is its own row's, so it can
+    // no longer live-probe a same-named agent's stored secret.
+    let def_id = owner.into().owner_id(&state.mstore)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
     let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
@@ -969,10 +972,35 @@ pub(crate) fn bundle_validate_impl(
     Ok(report)
 }
 
-pub(crate) async fn bundle_self_get_impl(
+pub(crate) async fn bundle_self_get_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
+    let agent_id = match owner.into() {
+        SelfOwner::Slug(slug) => slug,
+        // Identity M4c-2c: an attributed caller's own row, and its registry
+        // record only by that row's slug AND id — never a same-named
+        // agent's.
+        SelfOwner::Uid(uid) => {
+            let row = SelfOwner::caller_row(uid, &state.mstore)
+                .map_err(|e| format!("bundle.self.get: {e}"))?;
+            // The launch's bundle (`AgentInstance.memory_id`), as on the slug
+            // path — not `AgentDefinition.memory_id`, the default a launch
+            // inherits (`db_agents.default_memory_id`).
+            let launch = state.mstore.instance_get(uid)
+                .map_err(|e| format!("bundle.self.get: {e}"))?;
+            let memory_id = launch
+                .map(|i| i.memory_id)
+                .filter(|m| !m.is_empty())
+                .or_else(|| {
+                    crate::backend::agent_registry_lookup::find_active_record_by_slug_and_definition(
+                        &row.slug, &row.id,
+                    )
+                    .and_then(|rec| rec.data.memory_id)
+                });
+            return bundle_self_get_by_memory_id(state, memory_id);
+        }
+    };
     let instance = state.mstore.instance_get_by_slug(agent_id)
         .map_err(|e| format!("bundle.self.get: {e}"))?;
     // `instance_get_by_slug` only ever hits the local `db_agents` table — a
@@ -990,6 +1018,14 @@ pub(crate) async fn bundle_self_get_impl(
             crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id)
                 .and_then(|rec| rec.data.memory_id)
         });
+    bundle_self_get_by_memory_id(state, memory_id)
+}
+
+/// The bundle `memory_id` names, or the blank singleton when none is bound.
+fn bundle_self_get_by_memory_id(
+    state: &AppState,
+    memory_id: Option<String>,
+) -> Result<serde_json::Value, String> {
     let memory = if let Some(mid) = memory_id {
         state.id_store.bundle_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
@@ -1006,7 +1042,9 @@ pub(crate) async fn bundle_self_get_impl(
 }
 
 /// The agent a self-scoped App API call is about — whose personal memory
-/// (`memory.*`) — identity M4c-2b (spec §6.5.9).
+/// (`memory.*`, M4c-2b), linked accounts (`identity.self.accounts`,
+/// `identity.account.validate`), bound preset (`preset.get` self) and
+/// history (`history.search`, M4c-2c) — identity spec §6.5.9.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SelfOwner<'a> {
     /// The calling agent's own row, by its token's UID. Versions are keyed by
@@ -1016,8 +1054,9 @@ pub(crate) enum SelfOwner<'a> {
     /// directory that resolves but does not exist still lists as empty, as
     /// on the slug path.
     Uid(&'a str),
-    /// A slug, resolved as before M4c-2b (`memory_dir_for_agent`,
-    /// `resolve_agent_uuid`): an Unattributed HTTP caller, and the WS RPC.
+    /// A slug, resolved as before M4c-2 (`memory_dir_for_agent`,
+    /// `resolve_agent_id`, the registry by slug): an Unattributed HTTP
+    /// caller, and the WS RPC.
     Slug(&'a str),
 }
 
@@ -1037,7 +1076,7 @@ impl<'a> SelfOwner<'a> {
     /// The owner of an HTTP request: the caller's own row when attributed,
     /// whatever `agent_id` names — a name that is not the caller's is counted
     /// by M4a-2 — so a name two agents share no longer selects the other's
-    /// memory. An Unattributed request keeps the slug, counted as
+    /// memory, accounts or history. An Unattributed request keeps the slug, counted as
     /// `by_name_counter`.
     pub(crate) fn of(
         caller: Option<&'a crate::server::caller::Caller>,
@@ -1063,21 +1102,21 @@ impl<'a> SelfOwner<'a> {
     /// The calling agent's row — a UID whose row is gone (a token that
     /// outlived its agent) is an error on every path, never an empty history
     /// or listing (ReAgent P1 on #3602).
-    fn caller_row(
+    pub(crate) fn caller_row(
         uid: &str,
         mstore: &crate::backend::storage::store::Store,
     ) -> Result<crate::backend::storage::AgentDefinition, String> {
         mstore
             .agent_def_get(uid)
-            .map_err(|e| format!("memory: store: {e}"))?
-            .ok_or_else(|| format!("memory: calling agent {uid} not found"))
+            .map_err(|e| format!("store: {e}"))?
+            .ok_or_else(|| format!("calling agent {uid} not found"))
     }
 
     /// The owner's live memory directory.
     fn dir(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
         match self {
             Self::Uid(uid) => {
-                let agent = Self::caller_row(uid, mstore)?;
+                let agent = Self::caller_row(uid, mstore).map_err(|e| format!("memory: {e}"))?;
                 crate::server::native_memory_handlers::memory_dir_for_agent_by_id(mstore, &agent)
                     .ok_or_else(|| format!("memory: memory directory for agent {uid} not found"))
             }
@@ -1085,8 +1124,9 @@ impl<'a> SelfOwner<'a> {
         }
     }
 
-    /// The id the owner's versions and mirror rows are keyed by.
-    fn version_key(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
+    /// The owner's definition id (`db_agents.id`) — what its memory versions,
+    /// mirror rows and identity links are keyed by.
+    fn owner_id(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
         match self {
             Self::Uid(uid) => Self::caller_row(uid, mstore).map(|row| row.id),
             Self::Slug(slug) => crate::server::native_memory_handlers::resolve_agent_uuid(mstore, slug),
@@ -1226,7 +1266,7 @@ pub(crate) fn memory_write_impl<'o>(
     // disjoint-keyspace bug (a write invisible to history/diff/revert) this
     // PR exists to fix. A visible, retriable write failure is strictly
     // safer than a silent data-integrity split.
-    let version_agent_id = owner.version_key(&state.mstore)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.write: {e}"))?;
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
@@ -2121,7 +2161,7 @@ pub(crate) fn memory_history_impl<'o>(
         .map_err(|e| format!("memory.history: {e}"))?;
     // See memory_write_impl's own comment — must key by the same resolved
     // canonical id that write used, not the raw slug.
-    let version_agent_id = owner.version_key(&state.mstore)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.history: {e}"))?;
     let versions: Vec<crate::backend::rpc_types::NativeMemoryVersionMeta> = state
         .id_store
@@ -2152,7 +2192,7 @@ pub(crate) fn memory_diff_impl<'o>(
     let agent_id = owner.label();
     // See memory_write_impl's own comment — must compare against the same
     // resolved canonical id that write used, not the raw slug.
-    let version_agent_id = owner.version_key(&state.mstore)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.diff: {e}"))?;
     let from = state
         .id_store
@@ -2194,7 +2234,7 @@ pub(crate) fn memory_revert_impl<'o>(
 
     // See memory_write_impl's own comment — must key/compare against the
     // same resolved canonical id that write used, not the raw slug.
-    let version_agent_id = owner.version_key(&state.mstore)
+    let version_agent_id = owner.owner_id(&state.mstore)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
     let target = state
@@ -4707,5 +4747,89 @@ mod s1_tests {
             assert!(err.contains("mismatch"), "got: {err}");
             assert!(!err.to_lowercase().contains("unknown"), "leaks existence: {err}");
         });
+    }
+}
+
+#[cfg(test)]
+mod self_owner_tests {
+    use super::*;
+    use crate::backend::storage::agents::test_agent_def;
+    use crate::server::tests::test_state;
+
+    /// Identity M4c-2c (spec §6.5.9), the colliding-names fixture: "AgentY"
+    /// (`agenty`, bundle-y, account acct-y) and "AGENTY" (`agenty-2`,
+    /// bundle-y2, no account). The second agent, attributed, sees its own
+    /// accounts and preset whatever slug it sends, and cannot validate the
+    /// first one's account; by slug, `agenty` is still the first agent.
+    #[tokio::test]
+    async fn an_attributed_self_call_is_about_the_callers_row() {
+        let state = test_state();
+        for (id, name, slug, bundle) in [
+            ("uid-so-y", "AgentY", "agenty", "bundle-so-y"),
+            ("uid-so-y2", "AGENTY", "agenty-2", "bundle-so-y2"),
+        ] {
+            let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+            def.slug = slug.to_string();
+            state.mstore.agent_def_insert(&mut def).unwrap();
+            // The launch's bundle (`db_agents.memory_id`), which preset.get
+            // self reads — not the definition's default.
+            state
+                .mstore
+                .conn()
+                .lock()
+                .unwrap()
+                .execute("UPDATE db_agents SET memory_id = ?1 WHERE id = ?2", [bundle, id])
+                .unwrap();
+            let b: crate::backend::storage::bundles::Bundle =
+                serde_json::from_value(json!({"id": bundle, "name": bundle})).unwrap();
+            state.id_store.bundle_upsert(&b).unwrap();
+        }
+        let acct = crate::backend::storage::IdentityAccount {
+            id: "acct-so-y".to_string(),
+            name: "claude-oauth".to_string(),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: crate::backend::storage::SecretRef::OAuthConfigDir {
+                dir: "/tmp/acct-so-y".to_string(),
+            },
+            context: json!({}),
+            status: "ok".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+        state.mstore.identity_upsert(&acct).unwrap();
+        state.mstore.agent_identity_link("uid-so-y", "acct-so-y", "claude").unwrap();
+        let y2 = SelfOwner::Uid("uid-so-y2");
+
+        let accounts = |v: serde_json::Value| v["accounts"].as_array().unwrap().len();
+        assert_eq!(accounts(identity_self_accounts_impl(&state, y2).await.unwrap()), 0);
+        assert_eq!(accounts(identity_self_accounts_impl(&state, "agenty").await.unwrap()), 1);
+        let err = identity_account_validate_stored_impl(&state, y2, "acct-so-y").await.unwrap_err();
+        assert!(err.starts_with("FORBIDDEN"), "{err}");
+
+        assert_eq!(bundle_self_get_impl(&state, y2).await.unwrap()["id"], "bundle-so-y2");
+        assert_eq!(bundle_self_get_impl(&state, "agenty").await.unwrap()["id"], "bundle-so-y");
+
+        let gone = SelfOwner::Uid("uid-so-gone");
+        for err in [
+            identity_self_accounts_impl(&state, gone).await.unwrap_err(),
+            identity_account_validate_stored_impl(&state, gone, "acct-so-y").await.unwrap_err(),
+            bundle_self_get_impl(&state, gone).await.unwrap_err(),
+        ] {
+            assert!(err.contains("calling agent uid-so-gone not found"), "{err}");
+        }
+    }
+
+    /// History for an attributed caller is its own row's: its id keys the
+    /// identity links, its working directory finds ambient-credential
+    /// sessions.
+    #[test]
+    fn a_history_owner_of_a_row_is_that_rows() {
+        let mut def = test_agent_def("uid-so-h", "H", "claude", "agent", 1, "");
+        def.working_directory = "/work/h".to_string();
+        let owner = crate::backend::history::HistoryOwner::of_row(&def);
+        assert_eq!(owner.definition_id, "uid-so-h");
+        assert_eq!(owner.working_directory.as_deref(), Some("/work/h"));
     }
 }
