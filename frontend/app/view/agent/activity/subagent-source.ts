@@ -19,7 +19,7 @@ import { callBackendService } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { createSignal, type Accessor } from "solid-js";
 import { mergeSubagentsPreservingIdentity, type ActiveSubagent } from "../../swarm/swarm-model";
-import { createBackfillAwareTrigger } from "./backfill-tracker";
+import { createBackfillAwareTrigger, holdBackfillingRows } from "./backfill-tracker";
 import { createDebouncedRefresh } from "./debounced-refresh";
 
 const [allSubagents, setAllSubagents] = createSignal<ActiveSubagent[]>([]);
@@ -28,7 +28,7 @@ async function refresh(): Promise<void> {
     try {
         const result = await callBackendService("subagent", "ListActive", []);
         const list = (result as ActiveSubagent[]) ?? [];
-        setAllSubagents((prev) => mergeSubagentsPreservingIdentity(prev, list));
+        setAllSubagents((prev) => mergeSubagentsPreservingIdentity(prev, holdBackfillingRows(prev, list)));
     } catch {
         // silently ignore — dock just shows no subagent rows this refresh
     }
@@ -41,8 +41,8 @@ async function refresh(): Promise<void> {
 // (docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md).
 const scheduleRefresh = createDebouncedRefresh(() => void refresh(), 100, 1000);
 
-// Suppresses even the debounced refresh entirely while a backfill is in
-// flight anywhere, firing exactly one refresh once it settles — see
+// Holds a backfilling pane's rows (not the whole app's refresh) until it
+// settles, then refreshes once — see
 // backfill-tracker.ts's doc comment for why the debounce alone isn't
 // sufficient (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md).
 const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh());

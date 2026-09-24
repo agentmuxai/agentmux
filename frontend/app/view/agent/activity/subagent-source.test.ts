@@ -169,43 +169,32 @@ describe("subagent-source — refresh coalescing", () => {
 });
 
 // docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md:
-// the debounce above coalesces request VOLUME, but each surviving call
-// during a burst is still a genuinely different, real, still-converging
-// snapshot — rows still visibly appear/vanish. backfill-tracker.ts closes
-// this by suppressing refresh entirely while ANY block's backfill is
-// reported in flight, firing exactly one once it's genuinely done. Mirrors
-// dispatch-source.test.ts's identical coverage for the sibling singleton.
-describe("subagent-source — backfill-aware suppression", () => {
-    it("suppresses refresh entirely for events arriving while a backfill is in flight, firing exactly one once it settles", async () => {
+// hold a backfilling pane's rows until it settles, and ONLY that pane's —
+// mirrors dispatch-source.test.ts's coverage for the sibling singleton.
+describe("subagent-source — per-pane backfill hold", () => {
+    const s = (id: string, parent: string, name: string): ActiveSubagent =>
+        ({ agent_id: id, parent_block_id: parent, display_name: name }) as unknown as ActiveSubagent;
+
+    it("while pane A backfills, pane B's change still lands and A's rows hold; A lands when it settles", async () => {
         await flushMicrotasks();
-        callBackendServiceSpy.mockClear();
-        callBackendServiceSpy.mockResolvedValue([]);
+        callBackendServiceSpy.mockResolvedValue([s("a", "A", "a0"), s("b", "B", "b0")]);
+        await refreshSubagentsNow();
 
         const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
-        expect(backfillStatus).toBeDefined();
-        backfillStatus({ scopes: ["block:b1"], data: { status: "started" } });
-
-        const spawned = hub.handlers.get("subagent:spawned")!;
-        for (let i = 0; i < 50; i++) spawned({ data: {} });
-        await vi.advanceTimersByTimeAsync(1200); // well past both debounce windows
-        expect(callBackendServiceSpy).not.toHaveBeenCalled(); // suppressed, not just debounced
-
-        backfillStatus({ scopes: ["block:b1"], data: { status: "done" } });
-        await flushMicrotasks();
-        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // exactly one, on settle
-    });
-
-    it("resumes ordinary debounced behavior for events after the backfill settles", async () => {
-        await flushMicrotasks();
-        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
-        backfillStatus({ scopes: ["block:b2"], data: { status: "started" } });
-        backfillStatus({ scopes: ["block:b2"], data: { status: "done" } });
-        await flushMicrotasks();
+        backfillStatus({ scopes: ["block:A"], data: { status: "started" } });
 
         callBackendServiceSpy.mockClear();
-        callBackendServiceSpy.mockResolvedValue([]);
+        callBackendServiceSpy.mockResolvedValue([s("a", "A", "a1"), s("a2", "A", "half"), s("b", "B", "b1")]);
         hub.handlers.get("subagent:spawned")!({ data: {} });
         await vi.advanceTimersByTimeAsync(150);
-        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // not frozen app-wide
+
+        const names = () => Object.fromEntries(allSubagentsAtom().map((x) => [x.agent_id, x.display_name]));
+        expect(names()).toEqual({ a: "a0", b: "b1" }); // B updated, A held (no half-replayed a2)
+
+        backfillStatus({ scopes: ["block:A"], data: { status: "done" } });
+        await flushMicrotasks();
+        await flushMicrotasks();
+        expect(names()).toEqual({ a: "a1", a2: "half", b: "b1" });
     });
 });
