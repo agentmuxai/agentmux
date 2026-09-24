@@ -6,7 +6,8 @@ v0.56.4). Re-verified against `agentmux` @ `90aa773` on 2026-09-18:
 `SearchHistory` in `agentmux-mcp/src/tool_schemas.rs`, `SessionIndex::search_sessions`
 and `HistorySearchHit` in `agentmux-srv/src/backend/history/index.rs`. Phase 2
 (cross-agent search, §5) is deliberately out of scope here and still needs its
-own spec.
+own spec. Revised 2026-09-24: correctness fixes after a confident "no history"
+for sessions that existed (§8), and owner-by-token enforced server-side (§5).
 **Trigger:** Repo owner, after watching this gap cause three concrete failures
 in one session (§1.1). "do agents have a streamlined way to search their
 history?" — they do not.
@@ -215,19 +216,13 @@ Phase 2 (separate spec) should route cross-agent search *through*
 checking another agent's older sessions — stays open, and this spec says so
 rather than implying otherwise.
 
-**What is NOT true, and must not be written down as if it were: that this is
-*enforced*.** The HTTP route takes an `agent` parameter (it has to — the
-server must know whose sessions to resolve), and the route is gated only by
-the instance-wide `auth_key` that every locally-spawned agent shares. The
-server therefore cannot tell which agent is calling, so a local process
-holding that key can pass any name. That is not a regression — the same is
-already true of `/reactive/transcript` — but it means "own history only" is a
-**client-side convention** implemented by the tool exposing no `agent`
-parameter, not a boundary the server upholds. Real enforcement needs a
-verifiable per-agent identity on local routes, which does not exist today;
-`host_reg_secret` is the codebase's existing acknowledgement that `X-AuthKey`
-alone cannot distinguish callers that share it. Anyone extending this should
-fix that rather than assume it was already handled.
+**Enforcement (revised 2026-09-24).** When this was written the route was
+gated only by the instance-wide `auth_key` every local agent shares, so "own
+history only" was a client-side convention. Identity M1a gave every agent
+process its own token and M4c-2c made the owner the token's row. Since
+2026-09-24 the server also **refuses a request without a token (403)** rather
+than resolving the self-declared `agent` name (§8), so the boundary is now
+upheld server-side, as strongly as the per-agent token is kept secret.
 
 Also out of scope:
 
@@ -265,3 +260,28 @@ Also out of scope:
 - Snippet is bounded for a pathologically large message.
 - `agent` naming another agent is rejected in Phase 1, with an error that
   points at the visibility protocol rather than a bare "unsupported".
+
+## 8. Correctness fixes (2026-09-24)
+
+**Trigger.** An agent lost its conversation to an account switch and asked
+SearchHistory for it. The answer was `{hits: [], sessions_scanned: 13,
+total_sessions: 13, truncated: false}` — a confident "no history" — for words
+certainly present in its previous session *and its current one*. Both sessions
+sat under identity bundles created after srv started, and the Claude adapter
+listed bundle directories once, at startup. An audit of the rest of the path
+found more ways to answer confidently and wrongly.
+
+| Defect | Fix |
+|---|---|
+| Bundle / channel directories listed once at srv start, so anything created later was invisible (the incident) | `ClaudeHistoryAdapter` keeps its roots and lists the directories under them on every discovery |
+| `since`/`until` documented as seconds, compared against milliseconds: `until` excluded every session, `since` excluded none | converted at the route; a millisecond value (e.g. a hit's own `timestamp`) is accepted too. Applied to messages, not just sessions; a session is skipped by `until` only if it *started* after it (it used to be by last write) |
+| `tool: "SendMessage"` never matched the recorded `mcp__agentmux__SendMessage` | a bare name matches the MCP-prefixed one |
+| `max_sessions` cut applied before counting; an unreadable file counted as scanned; `truncated` only meant "hit limit" | `total_sessions` counts the whole window; new `sessions_skipped`, `sessions_unreadable`, and **`complete`** with `incomplete_reasons` (`hit_limit`, `max_sessions`, `unreadable_sessions`). Only `complete: true` with no hits means "did not happen" |
+| A request without a token resolved its self-declared name — on the identity store, which has no `db_agents` table, so it guessed | refused with 403 and counted (`history.search_refused_unattributed`) |
+| "Index still building" was HTTP 500 | 503 with `Retry-After` |
+| The MCP parsed the body before the status (a non-JSON error lost its status) and reported every non-timeout transport failure as "error sending request" (#3473) | one helper, `srv_get_json`: status first, srv's own message kept, refused connection / timeout / 401 / 503 told apart |
+
+Still open, and tracked by the history-robustness plan: attribution by the
+agent's UID-keyed record rather than account links + working directory, tool
+arguments beyond the first key, tool results and subagent transcripts, and a
+content index.

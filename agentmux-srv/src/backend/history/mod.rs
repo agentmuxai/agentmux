@@ -139,6 +139,38 @@ const SEARCH_STALE_AFTER_MS: i64 = 30_000;
 pub const HISTORY_INDEX_BUILDING: &str = "history index is still being built after AgentMux started \
      (it reads every transcript once) — this is not an empty history; retry in a minute";
 
+/// Why a history search could not answer.
+#[derive(Debug)]
+pub enum HistorySearchError {
+    /// The first index build after srv start is still running. Retryable,
+    /// and never to be read as "no history".
+    IndexBuilding,
+    /// Anything else, e.g. the store failing to list the owner's accounts.
+    Failed(String),
+}
+
+impl std::fmt::Display for HistorySearchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HistorySearchError::IndexBuilding => f.write_str(HISTORY_INDEX_BUILDING),
+            HistorySearchError::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+/// SearchHistory's `since`/`until` in milliseconds. They're documented as
+/// Unix seconds, but a hit's own `timestamp` is in milliseconds and is the
+/// natural value to pass back; a value this large is already milliseconds
+/// (as seconds it would be the year 5138).
+pub fn unix_time_to_ms(value: i64) -> i64 {
+    const ALREADY_MS: i64 = 100_000_000_000;
+    if value.abs() >= ALREADY_MS {
+        value
+    } else {
+        value.saturating_mul(1000)
+    }
+}
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
@@ -196,7 +228,7 @@ impl HistoryService {
     /// refresh another thread is running — the MCP caller gives up after 10 s.
     /// Refreshes (incrementally) when older than [`SEARCH_STALE_AFTER_MS`], so
     /// sessions started since srv start are found.
-    fn fresh_enough_for_search(&self) -> Result<(), String> {
+    fn fresh_enough_for_search(&self) -> Result<(), HistorySearchError> {
         let built_at = self.index.refreshed_at_ms();
         let now = chrono::Utc::now().timestamp_millis();
         if built_at != 0 && now - built_at < SEARCH_STALE_AFTER_MS {
@@ -205,7 +237,7 @@ impl HistoryService {
         if self.index.try_refresh().is_some() || built_at != 0 {
             return Ok(());
         }
-        Err(HISTORY_INDEX_BUILDING.to_string())
+        Err(HistorySearchError::IndexBuilding)
     }
 
     /// List sessions with pagination and filters.
@@ -361,37 +393,29 @@ impl HistoryService {
     /// dangerous one for looking like an ordinary read tool. Cross-agent
     /// search must route *through* `transcript_request`, as its own phase.
     ///
-    /// `since_secs`/`until_secs` filter on indexed `modified_at` **before** any
-    /// file is opened, so a narrow time window costs nothing on irrelevant
-    /// sessions. `max_sessions` bounds how many of the remaining candidates
-    /// may be parsed, newest first.
+    /// `opts.since_ms`/`until_ms` drop whole sessions on indexed metadata
+    /// **before** any file is opened, so a narrow time window costs nothing on
+    /// irrelevant sessions, and then filter the messages of the sessions that
+    /// remain. `opts.max_sessions` bounds how many of those are parsed, newest
+    /// first; the rest are counted, not dropped.
     pub fn search_for_agent(
         &self,
         store: &crate::backend::storage::store::Store,
         owner: &HistoryOwner,
         opts: &index::HistorySearchOptions,
-        since_secs: Option<i64>,
-        until_secs: Option<i64>,
-        max_sessions: usize,
-    ) -> Result<index::HistorySearchOutcome, String> {
+    ) -> Result<index::HistorySearchOutcome, HistorySearchError> {
         self.fresh_enough_for_search()?;
-        let (all, _total, _has_more) = self.sessions_for_owner(
-            store,
-            owner,
-            0,
-            usize::MAX,
-            "modified_at",
-            "desc",
-            false,
-        )?;
+        let (all, _total, _has_more) = self
+            .sessions_for_owner(store, owner, 0, usize::MAX, "modified_at", "desc", false)
+            .map_err(HistorySearchError::Failed)?;
 
-        // Cheap metadata filtering first — this is the whole reason a time
-        // window is worth offering: it removes candidates without a read.
+        // A session last written before `since` holds nothing after it, and
+        // one started after `until` holds nothing before it. An unknown start
+        // (0) can't rule a session out.
         let in_window: Vec<SessionMeta> = all
             .into_iter()
-            .filter(|s| since_secs.is_none_or(|since| s.modified_at >= since))
-            .filter(|s| until_secs.is_none_or(|until| s.modified_at <= until))
-            .take(max_sessions)
+            .filter(|s| opts.since_ms.is_none_or(|since| s.modified_at >= since))
+            .filter(|s| opts.until_ms.is_none_or(|until| s.created_at == 0 || s.created_at <= until))
             .collect();
 
         Ok(self.index.search_sessions(&in_window, opts))
@@ -483,7 +507,18 @@ mod search_freshness_tests {
         let svc = empty_service();
         let _building = svc.index.refresh_lock.lock().unwrap();
         let err = svc.fresh_enough_for_search().unwrap_err();
-        assert!(err.contains("still being built"), "{err}");
+        assert!(matches!(err, HistorySearchError::IndexBuilding), "{err}");
+        assert!(err.to_string().contains("still being built"), "{err}");
+    }
+
+    #[test]
+    fn since_and_until_accept_seconds_or_milliseconds() {
+        // Documented as seconds …
+        assert_eq!(unix_time_to_ms(1_790_280_000), 1_790_280_000_000);
+        // … but a hit's own timestamp is milliseconds, and passing it back
+        // must not be multiplied into the year 58,000.
+        assert_eq!(unix_time_to_ms(1_790_280_000_123), 1_790_280_000_123);
+        assert_eq!(unix_time_to_ms(0), 0);
     }
 
     #[test]

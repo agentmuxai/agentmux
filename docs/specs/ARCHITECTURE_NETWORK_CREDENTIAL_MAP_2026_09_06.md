@@ -62,17 +62,19 @@ only the live session's tail. It is deliberately a **full-auth** route, never
 in the `lan_key` set: conversation content is exactly what a captured LAN
 credential must not reach.
 
-**Its `agent` parameter is self-declared, and this table is the reason why.**
-`auth_key` is shared by every locally-spawned agent, so the server cannot
-distinguish which agent is calling — the same property that already makes
+**Whose history is searched comes from the per-agent token, never from a
+name.** `auth_key` is shared by every locally-spawned agent, so it cannot say
+which agent is calling — the same property that already makes
 `/reactive/transcript` readable for any agent by any local caller holding the
-key. The `SearchHistory` MCP tool exposes no `agent` parameter and always
-sends the caller's own `AGENTMUX_AGENT_ID` from its trusted spawn-time env,
-but that is a **client-side convention, not server-side enforcement**, and
-must not be documented as one. Enforcing "own history only" needs a verifiable
-per-agent identity on local routes, which does not exist; `host_reg_secret`
-below is the existing precedent for "`X-AuthKey` alone cannot distinguish
-callers that share it."
+key. Since identity M1a every agent process also carries its own
+`AGENTMUX_AGENT_TOKEN`, which the MCP sends as `X-Agent-Token`; the route
+searches that token's row's history (M4c-2c) and, since 2026-09-24, **refuses a
+request without one (403)** rather than resolving the self-declared `agent`
+parameter, which is kept only for the actor counters. "Own history only" is
+therefore as strong as the token's secrecy: it lives in the agent's own
+process environment, never in `.mcp.json` or any other agent's env.
+`host_reg_secret` below is the older precedent for "`X-AuthKey` alone cannot
+distinguish callers that share it."
 
 ### Why `host_reg_secret` exists on top of `auth_key`
 

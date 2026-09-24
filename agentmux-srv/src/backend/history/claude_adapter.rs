@@ -24,14 +24,17 @@ use std::time::UNIX_EPOCH;
 
 use super::adapter::*;
 
+/// Where Claude homes live. The homes under them — identity bundles and
+/// channels — are listed again on every discovery ([`ClaudeHistoryAdapter::base_dirs`]),
+/// because they are created while srv runs: an account added or switched
+/// after srv started used to stay invisible until the next restart.
 pub struct ClaudeHistoryAdapter {
-    /// All base directories to scan for project folders. Deduplicated by
-    /// canonical (symlink/junction-resolved) path at construction time —
-    /// after Step 3 above, a per-channel isolated `projects/` dir may be a
-    /// junction pointing at the exact same physical location as one of the
-    /// global `<shared>/...` entries, and scanning both would surface every
-    /// session twice.
-    base_dirs: Vec<PathBuf>,
+    /// The user's home: `~/.claude` and `~/.config/claude-*`.
+    user_home: Option<PathBuf>,
+    /// `<shared>`: `providers/claude` and `identities/*`.
+    shared_dir: Option<PathBuf>,
+    /// AgentMux's home: `channels/*/identities/*` and `dev/…/identities/*`.
+    agentmux_home: Option<PathBuf>,
 }
 
 impl ClaudeHistoryAdapter {
@@ -54,10 +57,38 @@ impl ClaudeHistoryAdapter {
     }
 
     pub fn new() -> Self {
+        // `AGENTMUX_SHARED_DIR` is exported by the launcher; fall back to
+        // ~/.agentmux/shared so discovery still works in plain/test contexts.
+        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
+            .map(PathBuf::from)
+            .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
+        // `home_dir` is re-derived the same way `DataPaths::from_env()`
+        // itself derives it (AGENTMUX_HOME_OVERRIDE or the OS home dir),
+        // not read from an env var AgentMux doesn't currently export for
+        // this purpose.
+        let agentmux_home = agentmux_common::DataPaths::from_env().map(|paths| paths.home_dir);
+        Self::with_roots(dirs::home_dir(), shared_dir, agentmux_home)
+    }
+
+    pub(crate) fn with_roots(
+        user_home: Option<PathBuf>,
+        shared_dir: Option<PathBuf>,
+        agentmux_home: Option<PathBuf>,
+    ) -> Self {
+        ClaudeHistoryAdapter { user_home, shared_dir, agentmux_home }
+    }
+
+    /// Every Claude `projects/` directory under the roots, as the filesystem
+    /// stands now. Deduplicated by canonical (symlink/junction-resolved) path:
+    /// after Step 3 above, a per-channel isolated `projects/` dir may be a
+    /// junction pointing at the exact same physical location as one of the
+    /// global `<shared>/...` entries, and scanning both would surface every
+    /// session twice.
+    fn base_dirs(&self) -> Vec<PathBuf> {
         let mut base_dirs = Vec::new();
         let mut seen_canonical: HashSet<PathBuf> = HashSet::new();
 
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = &self.user_home {
             // User's personal (non-isolated) Claude sessions
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, home.join(".claude").join("projects"));
 
@@ -82,12 +113,7 @@ impl ClaudeHistoryAdapter {
         // conversation. See docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.
         //   <shared>/providers/claude/projects/              (default, account-wide)
         //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles, global)
-        // `AGENTMUX_SHARED_DIR` is exported by the launcher; fall back to
-        // ~/.agentmux/shared so discovery still works in plain/test contexts.
-        let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
-            .map(PathBuf::from)
-            .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
-        if let Some(shared) = &shared_dir {
+        if let Some(shared) = &self.shared_dir {
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
             if let Ok(entries) = fs::read_dir(shared.join("identities")) {
                 for entry in entries.flatten() {
@@ -100,14 +126,10 @@ impl ClaudeHistoryAdapter {
         // §4.4) — `<home>/channels/*/identities/*/claude/projects` and
         // `<home>/dev/*/identities/*/claude/projects` (or, when a dev clone
         // id is in play, one level deeper: `<home>/dev/*/*/identities/*/...`).
-        // `home_dir` is re-derived the same way `DataPaths::from_env()`
-        // itself derives it (AGENTMUX_HOME_OVERRIDE or the OS home dir),
-        // not read from an env var AgentMux doesn't currently export for
-        // this purpose.
-        if let Some(paths) = agentmux_common::DataPaths::from_env() {
+        if let Some(agentmux_home) = &self.agentmux_home {
             for root_name in ["channels", "dev"] {
                 Self::scan_isolated_identities_under(
-                    &paths.home_dir.join(root_name),
+                    &agentmux_home.join(root_name),
                     &mut base_dirs,
                     &mut seen_canonical,
                     2,
@@ -115,7 +137,7 @@ impl ClaudeHistoryAdapter {
             }
         }
 
-        ClaudeHistoryAdapter { base_dirs }
+        base_dirs
     }
 
     /// Find every `identities/` directory up to `max_depth` levels under
@@ -222,7 +244,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
     fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
         let mut files = Vec::new();
 
-        for base_dir in &self.base_dirs {
+        for base_dir in &self.base_dirs() {
             let entries = match fs::read_dir(base_dir) {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -611,6 +633,50 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// An identity bundle or a channel created after the adapter is built —
+    /// an account added or switched while srv runs — must still be found.
+    /// The adapter used to list these directories once, when srv started, so
+    /// a session under a later bundle stayed invisible until a restart: on
+    /// 2026-09-24 both of an agent's bundles post-dated srv start and
+    /// SearchHistory answered "no history" with `truncated: false`.
+    #[test]
+    fn a_bundle_created_after_the_adapter_is_built_is_discovered() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let agentmux_home = tmp.path().join("agentmux");
+        fs::create_dir_all(&shared).unwrap();
+        fs::create_dir_all(agentmux_home.join("channels")).unwrap();
+        let adapter = ClaudeHistoryAdapter::with_roots(
+            None,
+            Some(shared.clone()),
+            Some(agentmux_home.clone()),
+        );
+
+        let global = shared.join("identities").join("late-bundle").join("claude").join("projects").join("-work");
+        let channel = agentmux_home
+            .join("channels")
+            .join("late-channel")
+            .join("identities")
+            .join("channel-bundle")
+            .join("claude")
+            .join("projects")
+            .join("-work");
+        for dir in [&global, &channel] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(global.join("in-global-bundle.jsonl"), "{}\n").unwrap();
+        fs::write(channel.join("in-channel-bundle.jsonl"), "{}\n").unwrap();
+
+        let found: Vec<String> = adapter
+            .discover_files()
+            .unwrap()
+            .into_iter()
+            .map(|f| f.file_path)
+            .collect();
+        assert!(found.iter().any(|p| p.ends_with("in-global-bundle.jsonl")), "{found:?}");
+        assert!(found.iter().any(|p| p.ends_with("in-channel-bundle.jsonl")), "{found:?}");
+    }
 
     #[test]
     fn push_deduped_dir_skips_a_path_that_is_not_a_real_directory() {

@@ -39,6 +39,13 @@ pub struct HistorySearchOptions {
     pub tool: Option<String>,
     /// Max hits to return before reporting `truncated`.
     pub limit: usize,
+    /// Only messages at or after this instant (Unix ms).
+    pub since_ms: Option<i64>,
+    /// Only messages at or before this instant (Unix ms).
+    pub until_ms: Option<i64>,
+    /// Open at most this many of the candidates, in the order given. The rest
+    /// are counted in `sessions_skipped`, never silently dropped.
+    pub max_sessions: Option<usize>,
 }
 
 /// One match.
@@ -58,14 +65,53 @@ pub struct HistorySearchHit {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HistorySearchOutcome {
     pub hits: Vec<HistorySearchHit>,
-    /// Sessions actually opened and parsed.
+    /// Sessions actually opened and read.
     pub sessions_scanned: u32,
-    /// Candidates offered to the search (after the caller's own filtering).
+    /// Candidates in the caller's window, counted before `max_sessions`.
     pub total_sessions: u32,
     /// True when the scan stopped on `limit` rather than exhausting every
     /// candidate — see `search_sessions`' doc comment for why this must never
     /// be conflated with "no matches".
     pub truncated: bool,
+    /// True only when every candidate was read to the end: nothing cut by
+    /// `max_sessions`, nothing unreadable, no hit limit reached. An empty
+    /// `hits` is evidence that something did not happen only when this is
+    /// true; otherwise the answer is "unknown", and `incomplete_reasons`
+    /// says why.
+    pub complete: bool,
+    /// `"hit_limit"`, `"max_sessions"`, `"unreadable_sessions"`.
+    pub incomplete_reasons: Vec<&'static str>,
+    /// Candidates `max_sessions` left unopened.
+    pub sessions_skipped: u32,
+    /// Candidates that could not be read, and why.
+    pub sessions_unreadable: Vec<UnreadableSession>,
+}
+
+/// A candidate session the search could not read.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UnreadableSession {
+    pub session_id: String,
+    pub reason: String,
+}
+
+/// Whether a recorded tool name is the tool the caller named. Claude records
+/// an MCP tool with its server prefix (`mcp__agentmux__SendMessage`) while
+/// callers — and SearchHistory's own schema — name it bare (`SendMessage`), so
+/// both forms match. Case-insensitive.
+fn tool_name_matches(recorded: &str, wanted: &str) -> bool {
+    let recorded = recorded.to_ascii_lowercase();
+    let wanted = wanted.to_ascii_lowercase();
+    recorded == wanted
+        || (recorded.starts_with("mcp__") && recorded.ends_with(&format!("__{wanted}")))
+}
+
+/// Whether a message falls inside the caller's time window. A message with
+/// no timestamp (0) can't be placed outside it, and dropping it could only
+/// hide evidence, so it's kept.
+fn within_window(timestamp_ms: i64, opts: &HistorySearchOptions) -> bool {
+    timestamp_ms == 0
+        || (opts.since_ms.is_none_or(|since| timestamp_ms >= since)
+            && opts.until_ms.is_none_or(|until| timestamp_ms <= until))
 }
 
 /// Case-insensitive substring search returning a byte offset into the
@@ -149,7 +195,7 @@ fn match_message(
     // Both were reagentx P1s on PR #3321.
     for tu in &msg.tool_uses {
         if let Some(want) = opts.tool.as_deref() {
-            if !tu.name.eq_ignore_ascii_case(want) {
+            if !tool_name_matches(&tu.name, want) {
                 continue;
             }
             // Empty query + tool filter = "every call to this tool", so the
@@ -620,7 +666,9 @@ impl SessionIndex {
     /// truncates and returns nothing reproduces the exact failure this whole
     /// feature exists to prevent — an agent concluding "I never did that" from
     /// an incomplete audit — so "no matches" and "ran out of budget" must never
-    /// look the same to a caller.
+    /// look the same to a caller. The same goes for every other way a
+    /// candidate goes unread (a `max_sessions` cut, a file that won't parse):
+    /// each is counted, and any of them makes the answer not `complete`.
     pub fn search_sessions(
         &self,
         candidates: &[SessionMeta],
@@ -629,25 +677,47 @@ impl SessionIndex {
         let needle = opts.query.to_lowercase();
         let mut hits: Vec<HistorySearchHit> = Vec::new();
         let mut sessions_scanned = 0u32;
+        let mut sessions_unreadable: Vec<UnreadableSession> = Vec::new();
         let mut truncated = false;
 
-        for meta in candidates {
+        let opened = opts.max_sessions.map_or(candidates.len(), |max| max.min(candidates.len()));
+        let sessions_skipped = (candidates.len() - opened) as u32;
+
+        for meta in &candidates[..opened] {
             if hits.len() >= opts.limit {
                 // More candidates remained that were never opened.
                 truncated = true;
                 break;
             }
-            sessions_scanned += 1;
             // A session that fails to parse is skipped, not fatal: one
-            // malformed file must not make the whole audit unanswerable.
-            let Ok(Some(session)) = self.get_full(&meta.session_id) else {
-                continue;
+            // malformed file must not make the whole audit unanswerable. But
+            // it's reported, never counted as read.
+            let session = match self.get_full(&meta.session_id) {
+                Ok(Some(session)) => session,
+                Ok(None) => {
+                    sessions_unreadable.push(UnreadableSession {
+                        session_id: meta.session_id.clone(),
+                        reason: "no longer readable (moved, deleted or emptied)".into(),
+                    });
+                    continue;
+                }
+                Err(e) => {
+                    sessions_unreadable.push(UnreadableSession {
+                        session_id: meta.session_id.clone(),
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
             };
+            sessions_scanned += 1;
             for msg in &session.messages {
                 if let Some(role) = opts.role.as_deref() {
                     if msg.role != role {
                         continue;
                     }
+                }
+                if !within_window(msg.timestamp, opts) {
+                    continue;
                 }
                 if hits.len() >= opts.limit {
                     truncated = true;
@@ -663,11 +733,25 @@ impl SessionIndex {
             }
         }
 
+        let mut incomplete_reasons = Vec::new();
+        if truncated {
+            incomplete_reasons.push("hit_limit");
+        }
+        if sessions_skipped > 0 {
+            incomplete_reasons.push("max_sessions");
+        }
+        if !sessions_unreadable.is_empty() {
+            incomplete_reasons.push("unreadable_sessions");
+        }
         HistorySearchOutcome {
             hits,
             sessions_scanned,
             total_sessions: candidates.len() as u32,
             truncated,
+            complete: incomplete_reasons.is_empty(),
+            incomplete_reasons,
+            sessions_skipped,
+            sessions_unreadable,
         }
     }
 
@@ -1139,6 +1223,9 @@ mod tests {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            if id.starts_with("corrupt") {
+                return Err(HistoryError::Other("unexpected end of JSON".into()));
+            }
             let Some(messages) = self.sessions.get(&id) else { return Ok(None) };
             let meta = self.extract_meta(file_path)?.unwrap();
             Ok(Some(HistorySession { meta, messages: messages.clone() }))
@@ -1169,7 +1256,98 @@ mod tests {
     }
 
     fn opts(query: &str) -> HistorySearchOptions {
-        HistorySearchOptions { query: query.into(), role: None, tool: None, limit: 50 }
+        HistorySearchOptions { query: query.into(), limit: 50, ..Default::default() }
+    }
+
+    fn at(timestamp: i64, content: &str) -> HistoryMessage {
+        HistoryMessage { timestamp, ..msg("assistant", content, vec![]) }
+    }
+
+    #[test]
+    fn a_bare_tool_name_matches_the_mcp_prefixed_call() {
+        // Claude records an MCP tool with its server prefix, while callers —
+        // and SearchHistory's own schema — name it bare. "Did I call
+        // SendMessage" must find the AgentMux tool, not only the built-in one.
+        let idx = search_index(vec![(
+            "s1",
+            vec![msg("assistant", "sent", vec![("mcp__agentmux__SendMessage", r#"{"to":"Agent4"}"#)])],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        for wanted in ["SendMessage", "sendmessage", "mcp__agentmux__SendMessage"] {
+            let mut o = opts("");
+            o.tool = Some(wanted.into());
+            let out = idx.search_sessions(&cands, &o);
+            assert_eq!(out.hits.len(), 1, "tool: {wanted}");
+            assert_eq!(out.hits[0].tool_name.as_deref(), Some("mcp__agentmux__SendMessage"));
+        }
+        let mut other = opts("");
+        other.tool = Some("Message".into());
+        assert!(idx.search_sessions(&cands, &other).hits.is_empty(), "a suffix alone is not a name");
+    }
+
+    #[test]
+    fn messages_outside_the_time_window_are_not_hits() {
+        let idx = search_index(vec![(
+            "s1",
+            vec![at(1_000, "deploy early"), at(5_000, "deploy late"), at(0, "deploy undated")],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let mut o = opts("deploy");
+        o.since_ms = Some(2_000);
+        let snippets: Vec<String> = idx.search_sessions(&cands, &o).hits.into_iter().map(|h| h.snippet).collect();
+        // An undated message can't be placed outside the window, and dropping
+        // it could only hide evidence.
+        assert_eq!(snippets, vec!["deploy late", "deploy undated"]);
+
+        let mut o = opts("deploy");
+        o.until_ms = Some(2_000);
+        let snippets: Vec<String> = idx.search_sessions(&cands, &o).hits.into_iter().map(|h| h.snippet).collect();
+        assert_eq!(snippets, vec!["deploy early", "deploy undated"]);
+    }
+
+    #[test]
+    fn a_full_search_says_it_is_complete() {
+        let idx = search_index(vec![("s1", vec![msg("assistant", "nothing relevant", vec![])])]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("never said"));
+        assert!(out.hits.is_empty());
+        assert!(out.complete, "every candidate was read to the end");
+        assert!(out.incomplete_reasons.is_empty());
+    }
+
+    #[test]
+    fn a_max_sessions_cut_is_counted_and_makes_the_answer_incomplete() {
+        let idx = search_index(vec![
+            ("a", vec![msg("assistant", "x", vec![])]),
+            ("b", vec![msg("assistant", "x", vec![])]),
+            ("c", vec![msg("assistant", "x", vec![])]),
+        ]);
+        let cands: Vec<SessionMeta> = ["a", "b", "c"].iter().map(|id| idx.get_meta(id).unwrap()).collect();
+        let mut o = opts("absent");
+        o.max_sessions = Some(1);
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!(out.total_sessions, 3, "counted before the cut");
+        assert_eq!(out.sessions_scanned, 1);
+        assert_eq!(out.sessions_skipped, 2);
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["max_sessions"]);
+    }
+
+    #[test]
+    fn an_unreadable_session_is_reported_not_counted_as_scanned() {
+        let idx = search_index(vec![
+            ("good", vec![msg("assistant", "x", vec![])]),
+            ("corrupt-1", vec![]),
+        ]);
+        let cands: Vec<SessionMeta> =
+            ["good", "corrupt-1"].iter().map(|id| idx.get_meta(id).unwrap()).collect();
+        let out = idx.search_sessions(&cands, &opts("absent"));
+        assert_eq!(out.sessions_scanned, 1, "only the session actually read");
+        assert_eq!(out.sessions_unreadable.len(), 1);
+        assert_eq!(out.sessions_unreadable[0].session_id, "corrupt-1");
+        assert!(out.sessions_unreadable[0].reason.contains("unexpected end of JSON"));
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["unreadable_sessions"]);
     }
 
     #[test]
@@ -1226,10 +1404,13 @@ mod tests {
         let out = idx.search_sessions(&cands, &limited);
         assert_eq!(out.hits.len(), 3);
         assert!(out.truncated, "stopping on budget must be reported");
+        assert!(!out.complete);
+        assert_eq!(out.incomplete_reasons, vec!["hit_limit"]);
 
         let absent = idx.search_sessions(&cands, &opts("never appears anywhere"));
         assert!(absent.hits.is_empty());
         assert!(!absent.truncated, "genuinely-no-matches must NOT look truncated");
+        assert!(absent.complete);
     }
 
     #[test]

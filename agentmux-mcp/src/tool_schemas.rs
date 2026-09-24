@@ -181,24 +181,24 @@ pub(crate) const GET_AGENT_TRANSCRIPT_TOOL: &str = r#"{
 
 // Own-history search (SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md).
 //
-// Deliberately exposes NO `agent` parameter: the tool always sends this
-// process's own AGENTMUX_AGENT_ID. Reading another agent's conversation is
+// Deliberately exposes NO `agent` parameter: srv searches the history of the
+// agent whose per-agent token this process carries. Reading another agent's conversation is
 // already governed by conversation_visibility + the transcript_request tier
 // rules, and a search verb that reached other agents' transcripts directly
 // would be a second, ungoverned disclosure path around that machinery —
 // more dangerous for looking like an ordinary read tool.
 pub(crate) const SEARCH_HISTORY_TOOL: &str = r#"{
   "name": "SearchHistory",
-  "description": "Search YOUR OWN past conversations — including sessions that have ended or been compacted away from your current context. Use it before asserting anything about what you previously did, said, or sent: your context window is a lossy view of your own history, so after a reset or compaction you can confidently misreport your own actions. Typical questions it answers: 'did I already message X', 'have I made this change before', 'what did I conclude about Y last week'. Matches message text, and — via the `tool` filter — actual tool calls, so 'did I call SendMessage to Agent4' is answered structurally rather than by hoping the prose mentions it. Scans your most recently modified sessions first; `since`/`until` narrow the window cheaply before any file is read. Returns {hits: [{session_id, timestamp, role, snippet, tool_name}], sessions_scanned, total_sessions, truncated}. IMPORTANT: `truncated: true` means the scan hit its budget before exhausting your history — treat that as 'unknown', never as 'it didn't happen'. Read-only. Searches only your own history; another agent's conversation is governed by the transcript_request visibility protocol instead.",
+  "description": "Search YOUR OWN past conversations — including sessions that have ended or been compacted away from your current context. Use it before asserting anything about what you previously did, said, or sent: your context window is a lossy view of your own history, so after a reset or compaction you can confidently misreport your own actions. Typical questions it answers: 'did I already message X', 'have I made this change before', 'what did I conclude about Y last week'. Matches message text, and — via the `tool` filter — actual tool calls, so 'did I call SendMessage to Agent4' is answered structurally rather than by hoping the prose mentions it. Scans your most recently modified sessions first; `since`/`until` narrow the window cheaply before any file is read. Returns {hits: [{session_id, timestamp, role, snippet, tool_name}], complete, incomplete_reasons, total_sessions, sessions_scanned, sessions_skipped, sessions_unreadable, truncated}. IMPORTANT: only `complete: true` with no hits means it did not happen (within your window). `complete: false` means unknown, never 'it didn't happen' — `incomplete_reasons` says why (hit_limit, max_sessions, unreadable_sessions). Read-only. Searches only your own history; another agent's conversation is governed by the transcript_request visibility protocol instead.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "query":        { "type": "string",  "description": "Case-insensitive substring to find in message text and tool arguments. May be empty ONLY when `tool` is set (meaning: every call to that tool)." },
-      "tool":         { "type": "string",  "description": "Only match calls to this tool, e.g. \"SendMessage\". Structural — matches the recorded tool name, not prose mentioning it." },
+      "tool":         { "type": "string",  "description": "Only match calls to this tool, e.g. \"SendMessage\" — matches the built-in tool and MCP tools recorded with a server prefix (mcp__agentmux__SendMessage) alike. Structural — matches the recorded tool name, not prose mentioning it." },
       "role":         { "type": "string",  "enum": ["user", "assistant"], "description": "Restrict to your own messages (assistant) or what you were told (user)." },
-      "since":        { "type": "integer", "description": "Unix seconds. Skips sessions last modified before this WITHOUT opening them." },
-      "until":        { "type": "integer", "description": "Unix seconds upper bound, same cheap pre-filter." },
-      "max_sessions": { "type": "integer", "description": "Max sessions to open, newest first (default 20, cap 100)." },
+      "since":        { "type": "integer", "description": "Unix time in seconds (milliseconds, e.g. a hit's `timestamp`, also accepted). Only messages at or after it; sessions last written earlier are skipped WITHOUT opening them." },
+      "until":        { "type": "integer", "description": "Unix time upper bound, seconds or milliseconds. Only messages at or before it; sessions started later are skipped without opening them." },
+      "max_sessions": { "type": "integer", "description": "Max sessions to open, newest first (default 20, cap 100). Sessions beyond it are counted in sessions_skipped and make the answer incomplete." },
       "limit":        { "type": "integer", "description": "Max hits before reporting truncated (default 50, cap 200)." }
     },
     "required": ["query"]
