@@ -33,6 +33,86 @@ fn registry_record(agent_id: &str) -> Option<crate::registry::NamedAgentRecord> 
     crate::backend::agent_registry_lookup::find_active_record_by_slug(agent_id)
 }
 
+/// Whose history a lookup is about: the definition id its identity links
+/// are keyed by, and the working directory its transcripts record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryOwner {
+    pub definition_id: String,
+    pub working_directory: Option<String>,
+}
+
+impl HistoryOwner {
+    /// Resolve an App API slug (the pre-M4c-2 path, and the one an
+    /// Unattributed caller keeps).
+    pub fn from_slug(store: &crate::backend::storage::store::Store, agent_id: &str) -> Self {
+        // `agent_id` arrives as the SLUG (`AGENTMUX_AGENT_ID`) from every App
+        // API caller, but `db_agent_identity_links.agent_id` stores the
+        // DEFINITION id — so querying that table with the slug matched zero
+        // rows every time, and the early return on "no links" then reported a
+        // confident, empty history for agents whose transcripts were sitting
+        // on disk. A caller that already holds a definition id passes through
+        // unchanged. Same resolution `app_api::resolve_agent_definition_id`
+        // already documents ("listing links by slug always returns empty").
+        let instance = store.instance_get_by_slug(agent_id).ok().flatten();
+        let definition_from_db = instance.as_ref().map(|i| {
+            if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
+        });
+        let working_dir_from_db = instance
+            .as_ref()
+            .map(|i| i.working_directory.clone())
+            .filter(|w| !w.is_empty());
+
+        // One registry read, shared by both fallbacks below, and skipped
+        // entirely when the `db_agents` row already answered both questions.
+        let record = if definition_from_db.is_none() || working_dir_from_db.is_none() {
+            registry_record(agent_id)
+        } else {
+            None
+        };
+
+        // Without the registry step, a registry-only agent (no `db_agents`
+        // row — the common case) fell through to the raw slug here, and the
+        // link table is keyed by definition id, so the link query matched
+        // nothing and the agent's identity-bound sessions silently vanished.
+        // Same third fallback `app_api::resolve_agent_definition_id` already
+        // has, for the same reason. The raw slug remains the last resort: a
+        // caller that already holds a definition id passes through unchanged.
+        let definition_id = definition_from_db
+            .or_else(|| {
+                record
+                    .as_ref()
+                    .map(|r| r.data.definition_id.clone())
+                    .filter(|d| !d.is_empty())
+            })
+            .unwrap_or_else(|| agent_id.to_string());
+
+        // The ambient-credentials fallback below (`sessions_for_owner`) needs
+        // the working directory: the row's, else the registry record's.
+        let working_directory = working_dir_from_db.or_else(|| {
+            record
+                .as_ref()
+                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
+        });
+        Self { definition_id, working_directory }
+    }
+
+    /// An agent's own row — identity M4c-2c, an attributed caller. Its
+    /// working directory is the row's, else its registry record's found by
+    /// the row's slug **and** id, never by slug alone.
+    pub fn of_row(row: &crate::backend::storage::AgentDefinition) -> Self {
+        let working_directory = Some(row.working_directory.clone())
+            .filter(|w| !w.is_empty())
+            .or_else(|| {
+                crate::backend::agent_registry_lookup::find_active_record_by_slug_and_definition(
+                    &row.slug, &row.id,
+                )
+                .as_ref()
+                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
+            });
+        Self { definition_id: row.id.clone(), working_directory }
+    }
+}
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
@@ -111,53 +191,29 @@ impl HistoryService {
         sort_dir: &str,
         force_refresh: bool,
     ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
+        let owner = HistoryOwner::from_slug(store, agent_id);
+        self.sessions_for_owner(store, &owner, offset, limit, sort_by, sort_dir, force_refresh)
+    }
+
+    /// [`Self::sessions_for_agent`] for an owner already resolved — identity
+    /// M4c-2c: an attributed caller's own row (`HistoryOwner::of_row`),
+    /// never a slug another agent may share.
+    pub fn sessions_for_owner(
+        &self,
+        store: &crate::backend::storage::store::Store,
+        owner: &HistoryOwner,
+        offset: usize,
+        limit: usize,
+        sort_by: &str,
+        sort_dir: &str,
+        force_refresh: bool,
+    ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
         if force_refresh || self.index.is_empty() {
             self.index.refresh();
         }
 
-        // `agent_id` arrives as the SLUG (`AGENTMUX_AGENT_ID`) from every App
-        // API caller, but `db_agent_identity_links.agent_id` stores the
-        // DEFINITION id — so querying that table with the slug matched zero
-        // rows every time, and the early return on "no links" then reported a
-        // confident, empty history for agents whose transcripts were sitting
-        // on disk. A caller that already holds a definition id passes through
-        // unchanged. Same resolution `app_api::resolve_agent_definition_id`
-        // already documents ("listing links by slug always returns empty").
-        let instance = store.instance_get_by_slug(agent_id).ok().flatten();
-        let definition_from_db = instance.as_ref().map(|i| {
-            if i.definition_id.is_empty() { i.id.clone() } else { i.definition_id.clone() }
-        });
-        let working_dir_from_db = instance
-            .as_ref()
-            .map(|i| i.working_directory.clone())
-            .filter(|w| !w.is_empty());
-
-        // One registry read, shared by both fallbacks below, and skipped
-        // entirely when the `db_agents` row already answered both questions.
-        let record = if definition_from_db.is_none() || working_dir_from_db.is_none() {
-            registry_record(agent_id)
-        } else {
-            None
-        };
-
-        // Without the registry step, a registry-only agent (no `db_agents`
-        // row — the common case) fell through to the raw slug here, and the
-        // link table is keyed by definition id, so the query below matched
-        // nothing and the agent's identity-bound sessions silently vanished.
-        // Same third fallback `app_api::resolve_agent_definition_id` already
-        // has, for the same reason. The raw slug remains the last resort: a
-        // caller that already holds a definition id passes through unchanged.
-        let definition_id = definition_from_db
-            .or_else(|| {
-                record
-                    .as_ref()
-                    .map(|r| r.data.definition_id.clone())
-                    .filter(|d| !d.is_empty())
-            })
-            .unwrap_or_else(|| agent_id.to_string());
-
         let links = store
-            .agent_identity_list_for_agent(&definition_id)
+            .agent_identity_list_for_agent(&owner.definition_id)
             .map_err(|e| format!("failed to resolve agent's linked identities: {e}"))?;
 
         let mut merged: Vec<SessionMeta> = Vec::new();
@@ -174,13 +230,8 @@ impl HistoryService {
         // common case. The working directory is recorded inside the
         // transcript (`cwd`) and on the agent's own row, so it resolves the
         // sessions the identity bundle cannot.
-        let working_directory = working_dir_from_db.or_else(|| {
-            record
-                .as_ref()
-                .and_then(crate::backend::agent_registry_lookup::working_dir_from_record)
-        });
-        if let Some(dir) = working_directory {
-            merged.extend(self.index.list_for_working_directory(&dir));
+        if let Some(dir) = &owner.working_directory {
+            merged.extend(self.index.list_for_working_directory(dir));
         }
 
         // The two sources legitimately overlap for an agent that is both
@@ -222,15 +273,15 @@ impl HistoryService {
     pub fn search_for_agent(
         &self,
         store: &crate::backend::storage::store::Store,
-        agent_id: &str,
+        owner: &HistoryOwner,
         opts: &index::HistorySearchOptions,
         since_secs: Option<i64>,
         until_secs: Option<i64>,
         max_sessions: usize,
     ) -> Result<index::HistorySearchOutcome, String> {
-        let (all, _total, _has_more) = self.sessions_for_agent(
+        let (all, _total, _has_more) = self.sessions_for_owner(
             store,
-            agent_id,
+            owner,
             0,
             usize::MAX,
             "modified_at",
