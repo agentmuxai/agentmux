@@ -15,6 +15,7 @@
 
 import { type JSX, createSignal, onCleanup, onMount } from "solid-js";
 import { For } from "solid-js/web";
+import { eventBelongsToPaneOf } from "@/util/focusutil";
 import type { SlashChoice, SlashPickerSpec } from "../commands/types";
 
 interface SlashCommandPickerProps {
@@ -45,6 +46,10 @@ export function SlashCommandPicker(props: SlashCommandPickerProps): JSX.Element 
     };
 
     const handleKeyDown = (e: KeyboardEvent): void => {
+        // Keys typed in ANOTHER pane are not for this picker — without this,
+        // an open picker here swallowed arrows/letters/Enter from a composer
+        // in the pane next to it.
+        if (!eventBelongsToPaneOf(e, containerRef)) return;
         if (e.key === "ArrowDown") {
             e.preventDefault();
             move(1);
