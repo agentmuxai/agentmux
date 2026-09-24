@@ -199,7 +199,8 @@ documents as unreliable.
 
 `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md:36` asserts `AGENTMUX_AUTH_KEY` is
 "*not* a PTY env var for trust reasons". `docs/MUXSH.md:40`,
-`docs/agent-identity-bootstrap.md:49` and
+`agent-identity-bootstrap.md:49` (since moved to the private
+shared-infrastructure repo) and
 `SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md:169-178` all state it is
 present in panes. The code resolves it: absent from shell panes, present in agent
 panes. One spec is stale and should be corrected rather than left to mislead the
@@ -280,7 +281,7 @@ Ranked, and deliberately separable.
    three was actually wrong: `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28`
    claimed the key is "not a PTY env var for trust reasons", sourced to
    `internals/env-vars.md` — a file that does not exist in this repo.
-   `docs/MUXSH.md` and `docs/agent-identity-bootstrap.md` were both accurate:
+   `docs/MUXSH.md` and `agent-identity-bootstrap.md` were both accurate:
    they describe agent panes, which is exactly where the key is injected. The
    stale paragraph now carries a dated correction rather than being deleted, so
    the next reader sees what changed and why.
