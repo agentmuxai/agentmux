@@ -1,8 +1,8 @@
 # SPEC: durable jekt delivery — a message to an absent agent is held, not dropped
 
 **Date:** 2026-09-24
-**Status:** draft — Phase 1 designed here, to be built in the same PR after an
-adversarial pass; Phase 2 recorded.
+**Status:** draft — Phase 1 designed here and revised after an adversarial
+pass (§2); to be built in the same PR. Phase 2 recorded.
 **Trigger:** Repo owner: *"the durable jekt messaging was another thing we
 couldn't get working."*
 **Related:**
@@ -40,104 +40,139 @@ running yet, or across an upgrade restart. It is Phase 1.
 
 ## 2. Phase 1 — hold what no tier could take
 
-### 2.1 When a message is held
+*Revised after an adversarial pass on the first draft (no P0, four P1s: the
+stored trust verdicts do not survive a JSON round-trip; replay spent the
+global rate limit and flooded the audit ring; "agent not found" also covers
+a peer's refusal; the delivered header showed replay time as send time. Its
+P2s — name squatting and typos, a LAN caller filling the hold, periodic
+senders, idempotency — are folded in too).*
 
-In `deliver`, when the final outcome is `success: false` with an error
-starting `agent not found` **and** the request is local in origin
-(`forward_hops == 0` — a forwarded hop is the originating srv's to hold, never
-the peer's), the request is written to `db_jekt_held` and the response
-becomes:
+### 2.1 When a message is held — all of these
+
+1. **Full-key, host-tier origin:** the request authenticated with the instance
+   key (`ReactiveAuthVia::FullAuthKey`) and its resolved `delivery_tier` is
+   `host`. A LAN-key caller, a cross-channel or LAN forward, and WAN delivery
+   (which never reaches `deliver`) are never held — `forward_hops` is in the
+   body and proves nothing.
+2. **The target is a known agent of this channel:** it resolves — by UID, or
+   by a name that selects exactly one row (`Store::agents_matching_name`) —
+   to a non-template `db_agents` row. The row is held **by its UID**. An
+   unknown or ambiguous name keeps today's error: a typo is not held for 24 h,
+   and a name another block registers later can never receive the backlog
+   (any full-key caller can register any display name).
+3. **No tier found a candidate:** the local handler said `agent not found`
+   **and** no same-host, cross-channel or LAN lookup found an entry for the
+   name (a `candidate_seen` flag set wherever a tier finds one). A target
+   that is alive elsewhere but refused — rate limit, queue full, a restarting
+   peer — keeps today's error rather than being held here and never replayed
+   there. A sender signed in to muxbus never reaches this point for an
+   absent name: the cloud relay takes it as QUEUED first (recorded).
+4. **Not a periodic sender:** `source_agent == "cron"` is never held — a job
+   fires again on its schedule, and a stale backlog of fires would each start
+   a turn.
+
+The response is then:
 
 ```json
-{ "success": false, "held": true, "held_id": "<request_id>",
-  "error": "agent not found: X — held for delivery here for up to 24 h" }
+{ "success": false, "held": true, "request_id": "<id>",
+  "error": "agent X is not running — held for delivery on this AgentMux instance for up to 24 h" }
 ```
 
-`success` stays `false` — it was not delivered — so a pre-Phase-1 MCP still
-reports a failure, with a message that says it is held. The Phase 1 MCP
-reports `HELD for X — not delivered yet; delivered if X registers on this
-machine within 24 h.` Only the absent case is held: an ambiguous name, a
-rate limit, a queue-full or a delivery error keep today's response, since
-retrying them blindly could deliver to the wrong agent or amplify a fault.
+`success` stays `false` (it was not delivered): an older MCP reports a
+failure whose text says it is held; the Phase 1 MCP reports
+`HELD for X — not delivered yet; delivered when X starts on this AgentMux
+instance (channel) within 24 h.`
 
 ### 2.2 The table
 
-`db_jekt_held` in the per-channel object store (`mstore`), next schema version:
+`db_jekt_held` in the channel's object store, next schema version:
 
 | column | meaning |
 |---|---|
-| `request_id` TEXT PK | the MCP's msgid — **idempotency**: a retried send with the same id returns the existing row's `held` response, never a second row |
-| `target_agent` TEXT | as addressed (name or UID) |
-| `request_json` TEXT | the `InjectionRequest` **after** verification: carries `sig_verified`, `reagent_verified`, `lan_verified`, `channel_verified`, `delivery_tier`, `jekt_tier`, `priority`, `source_agent`, message |
-| `audit_source_uid` TEXT | the sender's attributed UID (M4c-2d), `''` when Unattributed — kept apart because `InjectionRequest` never serializes it |
-| `created_at`, `expires_at` INTEGER | ms; `expires_at = created_at + 24 h` |
-| `attempts` INTEGER, `last_error` TEXT | replay bookkeeping |
+| `request_id` TEXT PK | `resp.request_id` — the handler mints one when the sender sent none, and it is written back into the stored request so the delivered `MSGID` is stable. A second request with the same id while held returns the same `held` response and stores nothing. |
+| `target_uid` TEXT | the resolved row's UID |
+| `target_agent` TEXT | as addressed, for display |
+| `source_agent`, `audit_source_uid` TEXT | the sender's claimed name and attributed UID (M4c-2d) |
+| `message`, `priority`, `jekt_tier`, `delivery_tier` | the request as delivered |
+| `sig_verified`, `reagent_verified`, `lan_verified`, `channel_verified` INTEGER NULL | the **verdicts** computed at accept time, as explicit columns: on `InjectionRequest` they are `skip_deserializing` (so a client can never set them), so they would not survive a JSON round-trip — a forged message would come back as merely unsigned |
+| `sent_at_ms`, `expires_at_ms` INTEGER | accept time; `+ 24 h` |
+| `attempts`, `last_error` | replay bookkeeping |
 
-**Caps:** at most 64 held per target (folded name) and 1000 per channel; past
-either, the response is today's failure with `"hold full"` in the error —
-never a false hold.
+Insert and cap check are one statement under the store lock (an
+`INSERT … SELECT … WHERE (SELECT count …) < cap`), run on the blocking pool.
+**Caps:** 64 held per target UID, 1000 per channel; past either, today's
+error plus `"hold full"` — never a false hold. The hold itself is audited
+(`outcome: "held"`).
 
 ### 2.3 Replay
 
-One background task (installed after `AppState`, like cron delivery) runs
-every **5 s** while any row exists, and once at srv start:
+A replay pass runs **when an agent registers** (a `tokio::sync::Notify` the
+registration paths fire — no store I/O under the handler lock), every 30 s
+as a sweep, and once at srv start:
 
-1. Delete rows past `expires_at` (log + `jekt.held_expired` counter).
-2. For each row, oldest first: rebuild the request from `request_json`,
-   restore `audit_source_uid`, and call `ReactiveHandler::inject_message` —
-   the **local tier only**, and **no re-verification**: the stored outcome is
-   authoritative (a signature is valid for 5 minutes, `JEKT_SIG_MAX_AGE_SECS`,
-   so re-verifying a held message would mark every one forged).
-   - success → delete the row, count `jekt.held_delivered`, and echo to the
-     sender as a live delivery does (`echo_jekt_to_sender`, best effort);
-   - `agent not found` → keep (the target is still absent);
-   - any other error → `attempts += 1`, `last_error`; after 20 attempts the
-     row is dropped and counted `jekt.held_failed` (a target that is present
-     but keeps refusing is not "absent").
-
-Registration by any path (HTTP register, persistent spawn, register-tail) is
-picked up by the next tick — no hook into the handler lock, which forbids
-store I/O (`persistent/spawn.rs` registration runs under it).
-
-Delivery then follows the target's own rules, including the turn-boundary
-queue for a busy Claude agent (the replay is ordinary automated traffic).
+1. Delete expired rows (`jekt.held_expired`).
+2. For each target UID with held rows, oldest first, **check presence
+   without side effects** (`ReactiveHandler` lookup of the UID's
+   registration). Absent → skip: no rate-limit token, no audit entry, no
+   attempt counted.
+3. Present → rebuild the request from the columns: set the stored verdicts
+   directly (never re-verify — a signature is valid for 5 minutes), restore
+   `audit_source_uid`, recompute the transcript-request fields
+   (`resolve_transcript_request_tier_fields`, as the cloud subscriber does),
+   set `held_sent_at_ms`, and deliver through the handler's local path with
+   audit outcome `held_delivered`. At most 8 deliveries per pass.
+   - success → delete the row (`jekt.held_delivered`);
+   - rate limit, queue full, spawn in flight → leave it, **no attempt
+     counted** (transient);
+   - any other error → `attempts += 1`; after 20 the row is dropped
+     (`jekt.held_failed`).
 
 ### 2.4 Trust and display
 
-A held message is delivered with exactly the trust it was accepted with —
-never raised. It gains no new field; its audit entry's `outcome` is
-`held_delivered` so the Warden audit view can tell it apart. The recipient
-sees it as the jekt it was, arriving late; the message header already carries
-the send timestamp.
+Delivered with exactly the verdicts it was accepted with — never raised, and
+a forged one stays forced-sensitive. The recipient must not mistake a late
+message for a current one: `InjectionRequest` gains a server-set
+`held_sent_at_ms` (`#[serde(skip)]` both ways), and the delivered header
+renders `TS=` as the **original** send time plus `DELIVERY=held` and
+`HELD_FOR=<duration>`. The audit entry's outcome is `held_delivered`.
 
-### 2.5 What Phase 1 does not do
+### 2.5 Residuals, recorded
 
-- **Other channels / LAN.** A held message is replayed only into this
-  instance. If the target later comes up in another channel, it is not
-  forwarded (the stored signatures would be stale at the far side, which
-  would mark it forged). Phase 2.
-- **Stranded turn-boundary messages.** The #3562 queue holds encoded stdin
-  lines with no sender metadata; persisting those needs the queue to carry
-  the request. Phase 2.
-- **Delivery receipts** to a sender that has since stopped.
+- **"Delivered" means handed to the target's delivery path.** If that is the
+  turn-boundary queue (#3562, in memory) and the agent stops before its turn
+  ends, the message is lost as any queued message is today. Phase 2.
+- **Ordering:** a live message sent between the target's registration and
+  the replay pass (which the registration wakes) can overtake held ones.
+- **First-contact spawn:** replaying into a registered-but-unspawned agent
+  starts it, synchronously under the handler lock (#2960's path); the
+  8-per-pass limit bounds the burst.
+- **At rest:** held message bodies live in `objects.db` for up to 24 h, and
+  a pre-migration snapshot can keep them longer. Held rows cannot yet be
+  listed or cancelled from the UI (Phase 2).
+- **Echo to the sender** is best effort and name-keyed, as for live
+  delivery; a stopped sender gets none.
 
 ## 3. Phase 2 (recorded, not designed)
 
 Cross-channel replay (re-signed or explicitly marked as replayed), persisting
-the turn-boundary queue on stop/crash, sender receipts, and addressing held
-rows by canonical UID once #3497 lands.
+the turn-boundary queue on stop/crash, sender receipts by UID, and a UI to
+list and cancel held messages.
 
 ## 4. Testing (Phase 1)
 
-- `deliver` holds an absent-target jekt (row written with the verified trust
-  fields and `audit_source_uid`), returns `held: true`, and does not hold an
-  ambiguous name, a rate limit or a forwarded hop.
-- Same `request_id` twice → one row, same response.
-- Caps: the 65th message to one target is refused with "hold full".
-- Replay: a row for an absent target stays; after the target registers, one
-  tick delivers it with the stored trust (`sig_verified` unchanged even though
-  its `ts_secs` is stale), deletes the row, audits `held_delivered`.
-- Expiry deletes; 20 non-absent failures drop.
+- Held only when all four §2.1 conditions hold; each one failing alone keeps
+  today's error (LAN-key caller, unknown name, ambiguous name, a candidate
+  seen on another tier, `cron`).
+- Row stores the verdicts as columns: a `sig_verified = Some(false)` message
+  is still forced-sensitive after replay; a `Some(true)` one stays verified
+  with a stale `ts_secs`.
+- Same `request_id` twice → one row; a request with no id gets the minted id
+  back and delivers with it.
+- Caps: the 65th held message for one target → "hold full".
+- Replay: an absent target consumes no rate-limit token and writes no audit
+  entry; after it registers, the notify pass delivers with `DELIVERY=held`,
+  the original `TS`, outcome `held_delivered`, and deletes the row.
+- Rate-limited replay leaves the row with no attempt counted; expiry deletes.
 - Restart: rows survive a store reopen and are delivered by the start-up pass.
 
 ## 5. Checklist from the 09-10 review
