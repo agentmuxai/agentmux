@@ -177,6 +177,9 @@ function WorkspaceElem(): JSX.Element {
                                 <div
                                     ref={(el) => tabEls.set(tid, el)}
                                     class="flex flex-row h-full w-full"
+                                    // Native browser panes read this to collapse while the
+                                    // tab is hidden but laid out (use-pane-rect-sync.ts).
+                                    data-tab-hidden-laid-out={shown().hiddenLaidOut ? "true" : undefined}
                                     style={{
                                         // Absolutely positioned, stacked on top of each other,
                                         // filling the relative-positioned parent above — NOT a
