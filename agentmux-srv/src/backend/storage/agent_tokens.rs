@@ -450,6 +450,22 @@ mod tests {
             store.agent_lan_key_load("agent--v2-").unwrap().is_some(),
             "the same-named sibling still signs under it"
         );
+
+        // Renamed after its first launch: the launch name, kept as
+        // `instance_name`, keyed its first session's fallback — purged too
+        // (Codex P1 on #3633).
+        let mut renamed = test_agent_def("uid-renamed", "New Name", "claude", "agent", 1, "");
+        renamed.slug = "new-name".to_string();
+        store.agent_def_insert(&mut renamed).unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET instance_name = 'Old (launch)' WHERE id = 'uid-renamed'", [])
+            .unwrap();
+        store.agent_lan_key_ensure("old--launch-").unwrap();
+        assert!(store.agent_def_delete("uid-renamed").unwrap());
+        assert!(store.agent_lan_key_load("old--launch-").unwrap().is_none());
     }
 
     /// Slug ownership is folded as the key tables fold (`to_lowercase`), not

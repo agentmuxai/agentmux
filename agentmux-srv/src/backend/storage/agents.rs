@@ -2780,8 +2780,15 @@ fn key_names_of(slug: &str, name: &str, instance_name: &str) -> Vec<String> {
     push(slug.to_lowercase());
     push(name.trim().to_lowercase());
     push(instance_name.trim().to_lowercase());
-    push(agent_open_fallback_id(name));
-    push(frontend_fallback_id(name));
+    // Both fallbacks of the display name and of `instance_name`: an agent
+    // renamed after its first launch keeps its launch name there, and that
+    // name's fallback may still key its signing material (Codex P1 on #3633).
+    for n in [name, instance_name] {
+        if !n.trim().is_empty() {
+            push(agent_open_fallback_id(n));
+            push(frontend_fallback_id(n));
+        }
+    }
     names
 }
 
@@ -2813,7 +2820,8 @@ fn frontend_fallback_id(name: &str) -> String {
 }
 
 /// Whether another row may sign under `folded`: holds it as its slug, or its
-/// display name gives that fallback id (`agent.open`'s or the frontend's).
+/// display name or `instance_name` gives that fallback id (`agent.open`'s or
+/// the frontend's).
 /// Any row, whatever its slug: a template-created agent's first session
 /// signs under the fallback id although its row has a derived slug (review
 /// of #3633), so two same-named agents share that key. Such a key is left.
@@ -2826,14 +2834,17 @@ fn key_name_used_by_another(
     id: &str,
     folded: &str,
 ) -> Result<bool, StoreError> {
-    let mut stmt = conn.prepare("SELECT slug, name FROM db_agents WHERE id != ?1")?;
-    let rows = stmt.query_map(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut stmt =
+        conn.prepare("SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id != ?1")?;
+    let rows = stmt.query_map(params![id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    })?;
     for row in rows {
-        let (slug, name) = row?;
-        if slug.to_lowercase() == folded
-            || agent_open_fallback_id(&name) == folded
-            || frontend_fallback_id(&name) == folded
-        {
+        let (slug, name, instance_name) = row?;
+        let fallback_of = |n: &str| {
+            !n.trim().is_empty() && (agent_open_fallback_id(n) == folded || frontend_fallback_id(n) == folded)
+        };
+        if slug.to_lowercase() == folded || fallback_of(&name) || fallback_of(&instance_name) {
             return Ok(true);
         }
     }
