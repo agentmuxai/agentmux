@@ -156,7 +156,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
+                use crate::backend::blockcontroller::shell::{
+                    idx_generation_ok, output_now, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
+                };
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
                     // streaming scan of `output`, which reaches hundreds of MB
@@ -172,10 +174,13 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
                         }
-                        let output_size = out_stat.size as u64;
+                        // Size and generation from the database: the cached
+                        // `stat` size lags another srv instance's appends.
+                        let (output_size, output_gen) = output_now(&filestore, &read_block)?;
 
-                        // Determine total_lines, rebuilding the index iff it is missing or
-                        // its covered-size header doesn't match the current output size.
+                        // Determine total_lines, rebuilding the index iff it is missing,
+                        // its covered-size header doesn't match the current output size,
+                        // or it was built for another generation of `output` (5a-2b).
                         let idx_stat = filestore.stat(&read_block, "output.idx").ok().flatten();
                         let fresh = match &idx_stat {
                             Some(s) if s.size >= OUTPUT_IDX_HEADER_LEN => {
@@ -183,6 +188,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     .read_at(&read_block, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
                                     .ok()?;
                                 u64::from_le_bytes(h.try_into().ok()?) == output_size
+                                    && idx_generation_ok(&filestore, &read_block, output_gen.as_deref())
                             }
                             _ => false,
                         };
@@ -218,8 +224,10 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             entry((offset + limit) as u64)?
                         };
                         let read_len = (byte_end - byte_start).max(0);
-                        let (_, raw) = filestore
-                            .read_at(&read_block, "output", byte_start, read_len)
+                        // Bounded by the database size above; `read_at` would
+                        // clamp to a possibly stale cached size.
+                        let raw = filestore
+                            .read_bytes_db(&read_block, "output", byte_start, read_len)
                             .ok()?;
                         let text = String::from_utf8_lossy(&raw);
                         let lines: Vec<String> = text
@@ -441,6 +449,17 @@ fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) 
             async move {
                 if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
                     return Err("blockfile:write_state: filename must not contain path separators".to_string());
+                }
+                // The transcript and its sidecars are written only by the
+                // transcript paths, which keep its generation and sidecars
+                // consistent (5a-2b). This RPC is for pane state files; letting
+                // it replace `output` would leave `output.idx` / `output.tsidx`
+                // describing other bytes.
+                if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
+                    return Err(format!(
+                        "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
+                        cmd.filename
+                    ));
                 }
                 let bytes = cmd.content.as_bytes();
                 let bytes_written = bytes.len() as u64;

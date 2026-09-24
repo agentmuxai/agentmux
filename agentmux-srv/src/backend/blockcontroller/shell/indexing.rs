@@ -10,6 +10,36 @@ use crate::backend::storage::filestore::FileStore;
 /// size; otherwise it is stale and must be rebuilt.
 pub(crate) const OUTPUT_IDX_HEADER_LEN: i64 = 8;
 
+/// Key in `output.idx`'s file metadata naming the `output` generation the
+/// index was built for (Phase 5a-2b; `filestore/counter.rs`). Written in the
+/// same transaction as the index, so the label always describes the bytes.
+const IDX_GEN_META: &str = "for_gen";
+
+/// `output`'s size and valid generation, from the database — never this
+/// process's `stat` cache, which another srv instance's append makes stale.
+pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<String>)> {
+    let state = fs.line_state(zone, "output").ok()??;
+    Some((state.size.max(0) as u64, state.counted.map(|c| c.gen)))
+}
+
+/// Whether an existing `output.idx` may describe `output`'s current content,
+/// apart from its covered-size header (callers check that).
+///
+/// A size match alone is not proof: `output` replaced or restored with
+/// content that happens to reach the old covered size would have its lines
+/// read at another file's offsets. When `output` has a valid generation the
+/// index must be labelled with it; any mismatch — unlabelled (older build),
+/// or built for another generation — means rebuild, which is always safe.
+/// An uncounted `output` (legacy or written by an older build) keeps the
+/// covered-size rule alone, as before.
+pub(crate) fn idx_generation_ok(fs: &FileStore, zone: &str, output_gen: Option<&str>) -> bool {
+    let Some(gen) = output_gen else { return true };
+    let label = fs.meta_db(zone, "output.idx").ok().flatten().and_then(|m| {
+        m.get(IDX_GEN_META).and_then(|v| v.as_str()).map(str::to_string)
+    });
+    label.as_deref() == Some(gen)
+}
+
 /// Rebuild `output.idx` from `output` in a single streaming scan and atomically
 /// replace it. The index is the byte offset of every **non-blank** line, matching
 /// the reader's line addressing (`String::lines().filter(!trim().is_empty())`).
@@ -61,6 +91,11 @@ pub(crate) fn extend_output_idx(
 
     let full = || rebuild_output_idx(fs, block_id, output_size);
 
+    // An index built for another generation of `output` is no base at all.
+    let output_gen = output_now(fs, block_id).and_then(|(_, gen)| gen);
+    if !idx_generation_ok(fs, block_id, output_gen.as_deref()) {
+        return full();
+    }
     let Ok(Some(idx_stat)) = fs.stat(block_id, IDX) else { return full() };
     if idx_stat.size < OUTPUT_IDX_HEADER_LEN {
         return full();
@@ -131,6 +166,11 @@ fn build_output_idx_from(
     // print — a slow rebuild is exactly the kind of thing worth being able
     // to correlate after the fact, the same way `mem_attribution` already is.
     let started = std::time::Instant::now();
+    // The generation this index will be labelled with, taken BEFORE the
+    // scan: if `output` is replaced mid-scan it gets a new generation, and
+    // this label then marks the index stale instead of vouching for bytes
+    // read from two files.
+    let for_gen = output_now(fs, block_id).and_then(|(_, gen)| gen);
     tracing::info!(
         block_id = %block_id,
         covered = output_size,
@@ -169,7 +209,11 @@ fn build_output_idx_from(
     };
 
     while read_pos < output_size as i64 {
-        let (_, chunk) = match fs.read_at(block_id, "output", read_pos, WIN) {
+        // From the database, bounded by `output_size`: `read_at` clamps to
+        // this process's cached size, which another instance's append can
+        // leave behind — the index would then claim lines it never scanned.
+        let len = WIN.min(output_size as i64 - read_pos);
+        let chunk = match fs.read_bytes_db(block_id, "output", read_pos, len) {
             Ok(v) => v,
             Err(e) => {
                 // codex P2 on #2724: every exit path must log a terminal
@@ -203,15 +247,13 @@ fn build_output_idx_from(
         flush_line(&mut line_buf, &mut cursor, &mut buf, &mut line_count, false);
     }
 
-    if let Ok(None) = fs.stat(block_id, IDX) {
-        let _ = fs.make_file(
-            block_id,
-            IDX,
-            std::collections::HashMap::new(),
-            crate::backend::storage::filestore::FileOpts::default(),
-        );
-    }
-    match fs.write_file(block_id, IDX, &buf) {
+    // Index and its generation label in one transaction (created if missing).
+    let mut label = std::collections::HashMap::new();
+    label.insert(
+        IDX_GEN_META.to_string(),
+        for_gen.map_or(serde_json::Value::Null, serde_json::Value::String),
+    );
+    match fs.put_file_with_meta(block_id, IDX, &buf, label) {
         Ok(()) => {
             tracing::info!(
                 block_id = %block_id,

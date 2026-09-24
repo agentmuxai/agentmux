@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags};
 
 use crate::backend::agent_session::{
-    agent_current_zone, is_valid_definition_id, OUTPUT_FILE, SNAPSHOT_FILE,
+    agent_current_zone, is_valid_definition_id, OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE,
 };
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 
@@ -141,7 +141,12 @@ pub fn backfill_transcripts_once(
 /// Write `bytes` as the zone's `output` and a v2 snapshot overlay
 /// (`sourceBlockId: ""`) so the open path restores it cross-channel.
 fn seed_global_zone(global: &FileStore, zone: &str, bytes: &[u8]) -> Result<(), String> {
-    overwrite_zone_file(global, zone, OUTPUT_FILE, bytes)?;
+    // Replace `output` and drop both sidecars in one transaction (5a-2b):
+    // they describe the bytes being replaced (offsets, receive times), and a
+    // stale output.idx could pass the covered_size check by coincidence.
+    global
+        .replace_file(zone, OUTPUT_FILE, bytes, &[TSIDX_FILE, "output.idx"])
+        .map_err(|e| format!("replace_file: {e}"))?;
     let hwm = count_nonblank_lines(bytes);
     let overlay = serde_json::json!({
         "schemaVersion": 2,

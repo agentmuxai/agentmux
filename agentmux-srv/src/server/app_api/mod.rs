@@ -2844,21 +2844,22 @@ pub(super) fn global_zone_line_count(
     gfs: &Arc<crate::backend::storage::filestore::FileStore>,
     zone: &str,
 ) -> Option<u64> {
-    use crate::backend::blockcontroller::shell::OUTPUT_IDX_HEADER_LEN;
+    use crate::backend::blockcontroller::shell::{idx_generation_ok, output_now, OUTPUT_IDX_HEADER_LEN};
 
-    let stat = gfs
-        .stat(zone, crate::backend::agent_session::OUTPUT_FILE)
-        .ok()??;
-    if stat.size == 0 {
+    // Size and generation from the database: the cached `stat` size lags
+    // another srv instance's appends to this shared zone.
+    let (output_size, output_gen) = output_now(gfs, zone)?;
+    if output_size == 0 {
         return Some(0);
     }
-    let output_size = stat.size as u64;
 
     if let Ok(Some(idx_stat)) = gfs.stat(zone, "output.idx") {
         if idx_stat.size >= OUTPUT_IDX_HEADER_LEN {
             if let Ok((_, header)) = gfs.read_at(zone, "output.idx", 0, OUTPUT_IDX_HEADER_LEN) {
                 if let Ok(bytes) = <[u8; 8]>::try_from(header.as_slice()) {
-                    if u64::from_le_bytes(bytes) == output_size {
+                    if u64::from_le_bytes(bytes) == output_size
+                        && idx_generation_ok(gfs, zone, output_gen.as_deref())
+                    {
                         return Some(((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64);
                     }
                 }
@@ -3244,15 +3245,40 @@ mod cross_channel_tests {
         idx.extend_from_slice(&(body.len() as u64).to_le_bytes()); // covered_size == output size
         idx.extend_from_slice(&0u64.to_le_bytes()); // fabricated entry 0
         idx.extend_from_slice(&9u64.to_le_bytes()); // fabricated entry 1 (only 2, not 3)
-        global
-            .make_file(zone, "output.idx", FileMeta::default(), FileOpts::default())
-            .unwrap();
-        global.write_file(zone, "output.idx", &idx).unwrap();
+        // Labelled with `output`'s current generation, as the builder labels
+        // a real index (5a-2b) — so it is trusted as fresh.
+        let gen = global.line_state(zone, OUTPUT_FILE).unwrap().unwrap().counted.unwrap().gen;
+        let mut label = FileMeta::default();
+        label.insert("for_gen".into(), serde_json::json!(gen));
+        global.put_file_with_meta(zone, "output.idx", &idx, label).unwrap();
 
         assert_eq!(
             global_zone_line_count(&global, zone),
             Some(2),
             "must trust the fresh cached index rather than rescanning `output`",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_does_not_trust_an_index_of_replaced_content_of_the_same_size() {
+        // The coincidence the covered_size check alone can't see: `output`
+        // replaced (restore, backfill) by different content of exactly the
+        // same byte size. The old index then "matches" and serves the old
+        // file's count and offsets. Since 5a-2b the index is labelled with
+        // the generation it was built for, and a replace mints a new one.
+        let global = mem_store();
+        let zone = "agent:def-cc-10:current";
+        let three: &[u8] = b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n";
+        let two: &[u8] = b"{\"x\":11111}\n{\"y\":22222}\n";
+        assert_eq!(three.len(), two.len(), "precondition: same size");
+        seed_output(&global, zone, three);
+        assert_eq!(global_zone_line_count(&global, zone), Some(3));
+
+        replace_output(&global, zone, two);
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(2),
+            "an index built for another generation of `output` must be rebuilt",
         );
     }
 
