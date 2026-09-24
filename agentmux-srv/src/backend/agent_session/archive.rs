@@ -253,7 +253,17 @@ pub fn clear_global_current_zone(definition_id: &str) {
         return;
     };
     // One transaction (5a-2b); absent files are not an error.
-    if let Err(e) = gfs.delete_files(&zone, &[SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"]) {
+    if let Err(e) = gfs.delete_files(
+        &zone,
+        &[
+            SNAPSHOT_FILE,
+            OUTPUT_FILE,
+            TSIDX_FILE,
+            "output.idx",
+            // The running summary describes the conversation being archived.
+            crate::backend::continuity_state::STATE_FILE,
+        ],
+    ) {
         tracing::warn!(
             zone = %zone, error = %e,
             "global transcripts: failed to clear current zone on archive"

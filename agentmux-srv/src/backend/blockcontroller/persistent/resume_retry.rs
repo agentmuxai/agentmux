@@ -173,7 +173,21 @@ impl PersistentSubprocessController {
             &self.block_id,
             crate::backend::continuity::PACKET_TAIL_BYTES,
         )?;
-        crate::backend::continuity::build_continuation_packet(&tail, starts_mid_line)
+        // The agent's running summary, kept beside its global transcript
+        // (`continuity_state.rs`). Missing for panes that aren't anchored to
+        // an agent, or until the first update has run.
+        let state = global_prior_zone(self.mstore.as_deref(), &self.block_id).and_then(|zone| {
+            let gfs = crate::backend::agent_session::global_transcript_store()?;
+            crate::backend::continuity_state::latest_state(gfs, &zone)
+        });
+        crate::backend::continuity::build_continuation_packet(
+            &tail,
+            starts_mid_line,
+            state.as_ref().map(|s| crate::backend::continuity::RunningState {
+                text: &s.text,
+                created_at_ms: s.created_at_ms,
+            }),
+        )
     }
 
     /// After a confirmed-stale `--resume` failure, try to recover a REAL

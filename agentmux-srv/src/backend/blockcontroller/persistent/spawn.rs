@@ -1192,6 +1192,14 @@ impl PersistentSubprocessController {
                         // same tick — that state must survive, not be
                         // immediately wiped by this frame's own success.
                         core::persist_last_failure(&block_id_read, None, &mstore_read, &event_bus_read);
+                        // A completed turn is when the agent's running
+                        // summary may be due for an update. Background, and
+                        // a no-op unless enough happened since the last one
+                        // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+                        crate::backend::continuity_state::after_successful_turn(
+                            mstore_read.clone(),
+                            block_id_read.clone(),
+                        );
                     }
                 }
 
