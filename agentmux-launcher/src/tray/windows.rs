@@ -236,9 +236,6 @@ fn run(
                 break;
             }
 
-            // Reachability changed — refresh both surfaces the user reads.
-            // Handled here (not in the poller) because muda/tray-icon objects
-            // must only be touched on the thread that created them.
             // Reachability or notification state changed — refresh every
             // surface the user reads. Handled here (not in the poller) because
             // muda/tray-icon objects must only be touched on the thread that
