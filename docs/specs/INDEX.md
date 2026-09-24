@@ -501,7 +501,6 @@ partial list.
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
-| [`SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16`](SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16.md) | SPEC: Split local-machine credentials out of `services/infra` into `services/local` |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16`](SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md) | SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring |
@@ -806,7 +805,6 @@ partial list.
 | [`SPEC_FLOATING_PANE_REDOCK_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) | Spec: Floating pane re-dock (with multi-window + drop-target highlighting) |
 | [`SPEC_FORGE_AGENT_IDENTITY_2026_04_13`](SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md) | Spec: Forge Agent Identity — GitHub + AWS + Git |
 | [`SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20`](SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md) | Spec: Forge + Identity + Agent Instances Refinement |
-| [`SPEC_GITHUB_APP_IDENTITY_MIGRATION_2026_09_18`](SPEC_GITHUB_APP_IDENTITY_MIGRATION_2026_09_18.md) | SPEC: Migrate agent GitHub authentication from long-lived PATs to GitHub App installation tokens |
 | [`SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13`](SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md) | SPEC — Graceful Crash Handling |
 | [`SPEC_GRACEFUL_OOM_EXIT_2026_06_29`](SPEC_GRACEFUL_OOM_EXIT_2026_06_29.md) | Graceful OOM Exit — Own the Death, Explain the Reason |
 | [`SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20`](SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md) | SPEC: Host-side CLI login capture is broken for Claude Code v2.1.183 |
