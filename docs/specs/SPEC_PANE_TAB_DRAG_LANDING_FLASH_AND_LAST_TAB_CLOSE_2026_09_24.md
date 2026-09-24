@@ -3,7 +3,7 @@
 **Date:** 2026-09-24
 **Status:** active — §8 (remove `pane:tabstrip = "multi-only"`) implemented
 in PR #3692 (PR C). §3 (flash + landing bounce, PR A) implemented in PR
-#PRA. §4 (last-tab close, PR B) in progress. Design decisions in §6 are
+#3694. §4 (last-tab close, PR B) in progress. Design decisions in §6 are
 confirmed by the repo owner.
 **Author:** Camper
 **Trigger:** direct repo-owner request after live use of the shipped Pane Tab
