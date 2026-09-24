@@ -53,6 +53,7 @@ pub mod schema;
 pub mod service;
 pub mod session_archive;
 pub mod session_backfill;
+pub mod continuity;
 pub mod shellexec;
 pub mod transcript_backfill;
 pub mod pane_env;
