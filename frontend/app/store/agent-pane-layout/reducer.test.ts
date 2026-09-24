@@ -1,6 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
     effectiveHeight,
@@ -13,6 +16,7 @@ import {
     AgentPaneLayoutCommand,
     AgentPaneLayoutState,
     DEFAULT_ROW_PX,
+    ROW_GAP_PX,
     initialState,
 } from "./types";
 
@@ -32,7 +36,7 @@ function rng(seed: number): () => number {
 }
 
 describe("agent-pane-layout reducer", () => {
-    describe("INV-1 — positions are a flush, non-overlapping prefix-sum", () => {
+    describe("INV-1 — positions are a non-overlapping prefix-sum, ROW_GAP_PX apart", () => {
         const assertPrefixSum = (s: AgentPaneLayoutState): void => {
             const pos = positions(s);
             expect(pos.length).toBe(s.orderedIds.length);
@@ -45,13 +49,27 @@ describe("agent-pane-layout reducer", () => {
                 // slot is self-consistent
                 expect(p.start).toBe(cursor);
                 expect(p.end).toBe(p.start + p.height);
-                // flush with the previous row → no overlap, no gap
-                if (i > 0) expect(p.start).toBe(pos[i - 1].end);
-                cursor = p.end;
+                // exactly one gap after the previous row → no overlap, and the
+                // same spacing the streaming buffer's flex gap gives its rows
+                if (i > 0) expect(p.start).toBe(pos[i - 1].end + ROW_GAP_PX);
+                cursor = p.end + ROW_GAP_PX;
             }
-            // totalSize equals the accumulated height (independent of margin)
+            // totalSize is every row plus the gap after it (independent of
+            // margin) — the trailing gap separates the last head row from the
+            // streaming buffer's first row the way buffer rows are separated.
             expect(totalSize(s)).toBe(cursor - s.scrollMarginPx);
         };
+
+        it("ROW_GAP_PX matches the streaming buffer's CSS gap, so a row keeps its position when it migrates", () => {
+            const scss = readFileSync(
+                join(dirname(fileURLToPath(import.meta.url)), "../../view/agent/styles/_document.scss"),
+                "utf8",
+            );
+            const block = /\.agent-document-streaming-buffer\s*\{([^}]*)\}/.exec(scss)?.[1] ?? "";
+            const gap = /(?:^|\s)gap:\s*(\d+(?:\.\d+)?)px/.exec(block)?.[1];
+            expect(gap, "no `gap: <n>px` in .agent-document-streaming-buffer").toBeDefined();
+            expect(Number(gap)).toBe(ROW_GAP_PX);
+        });
 
         it("holds for a hand-built mixed state", () => {
             let s = initialState();
@@ -370,10 +388,12 @@ describe("agent-pane-layout reducer", () => {
 
         it("returns the rows overlapping the viewport, padded by overscan", () => {
             let s = build(); // 20 rows × 100px = 2000px; overscan default 5
-            s = apply(s, { type: "Scrolled", scrollTop: 1000, viewportPx: 300 }); // rows 10..12 visible
+            s = apply(s, { type: "Scrolled", scrollTop: 1000, viewportPx: 300 });
             const w = windowRange(s);
-            // first visible = 10, last visible = 12; ±5 overscan, clamped
-            expect(w.startIndex).toBe(5);
+            // Rows are 100px + ROW_GAP_PX apart: row 9 spans 936..1036 and
+            // row 12 starts at 1248, so rows 9..12 overlap [1000, 1300);
+            // ±5 overscan, clamped.
+            expect(w.startIndex).toBe(4);
             expect(w.endIndex).toBe(17);
         });
 
