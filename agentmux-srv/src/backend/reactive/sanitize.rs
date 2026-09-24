@@ -356,6 +356,10 @@ pub fn wrap_jekt_message(
 
     let from = marker_field(source_agent.unwrap_or("unknown"));
     let target_agent = marker_field(target_agent);
+    let msg_id = marker_field(msg_id);
+    let priority = marker_field(priority);
+    let delivery_tier = marker_field(delivery_tier);
+    let delivery_tier = delivery_tier.as_str();
     let msg = neutralize_markers(msg);
     let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
         "lan-verified"
@@ -404,37 +408,91 @@ pub fn wrap_jekt_message(
     )
 }
 
-/// A value rendered into the marker as one `KEY=value` field: characters
-/// that would end the field or the tag (whitespace, `=`, `[`, `]`, control
-/// characters) become `_`, so a sender name can't add fields of its own.
+/// A value rendered into the marker as one `KEY=value` field. Only
+/// printable ASCII survives (agent ids are ASCII); `=`, `[`, `]`, spaces and
+/// everything else — including invisible and bidi-control characters —
+/// become `_`, so a sender-controlled value can't add or disguise fields.
 fn marker_field(value: &str) -> String {
     let cleaned: String = value
         .chars()
-        .map(|c| if c.is_whitespace() || c.is_control() || matches!(c, '=' | '[' | ']') { '_' } else { c })
+        .map(|c| if c.is_ascii_graphic() && !matches!(c, '=' | '[' | ']') { c } else { '_' })
         .collect();
     if cleaned.is_empty() { "unknown".to_string() } else { cleaned }
 }
 
-/// Marker delimiters inside a message body are quoted, so the body can't
-/// close the real block and open one of its own. Matched ASCII
-/// case-insensitively; everything else is left as sent.
+/// Characters a reader can't see but a model may still read: zero-width and
+/// word-joiner characters, BOM, soft hyphen, bidi controls, and the Unicode
+/// tag block. ZWJ/ZWNJ (U+200C/U+200D) are kept — emoji and several
+/// scripts need them — and are skipped when matching delimiters instead.
+fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{180E}' | '\u{200B}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}'
+        | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{E0000}'..='\u{E007F}')
+}
+
+/// ASCII view of a character for delimiter matching: fullwidth forms
+/// (U+FF01–U+FF5E) fold to ASCII, ASCII letters to lowercase.
+fn fold(c: char) -> char {
+    let c = match c as u32 {
+        0xFF01..=0xFF5E => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+        _ => c,
+    };
+    c.to_ascii_lowercase()
+}
+
+/// If `chars[i..]` starts a marker delimiter — `[`, optional `/`, `jekt`,
+/// then `:` or `]`, with whitespace/ZWJ/ZWNJ allowed between the parts and
+/// fullwidth forms accepted — returns its length and whether it closes.
+fn match_delimiter(chars: &[char], i: usize) -> Option<(usize, bool, char)> {
+    let skippable = |c: char| c.is_whitespace() || c == '\u{200C}' || c == '\u{200D}';
+    if fold(*chars.get(i)?) != '[' {
+        return None;
+    }
+    let mut j = i + 1;
+    while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+    let closing = chars.get(j).is_some_and(|&c| fold(c) == '/');
+    if closing {
+        j += 1;
+        while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+    }
+    for want in ['j', 'e', 'k', 't'] {
+        while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+        if fold(*chars.get(j)?) != want {
+            return None;
+        }
+        j += 1;
+    }
+    while chars.get(j).is_some_and(|&c| skippable(c)) { j += 1; }
+    let end = fold(*chars.get(j)?);
+    if end != ':' && end != ']' {
+        return None;
+    }
+    Some((j + 1 - i, closing, end))
+}
+
+/// The message body as it goes inside the block: invisible characters
+/// dropped, carriage returns normalised (a lone `\r` can act as Enter in a
+/// terminal-based agent), and marker delimiters quoted, so the body can't
+/// close the real block or open one of its own.
 fn neutralize_markers(msg: &str) -> String {
-    const OPEN: &str = "[jekt:";
-    const CLOSE: &str = "[/jekt]";
-    let lower = msg.to_ascii_lowercase();
+    let chars: Vec<char> = msg
+        .replace("\r\n", "\n")
+        .chars()
+        .filter(|&c| c != '\r' && !is_invisible(c))
+        .collect();
     let mut out = String::with_capacity(msg.len());
     let mut i = 0;
-    while i < msg.len() {
-        if lower[i..].starts_with(OPEN) {
-            out.push_str("[JEKT-QUOTED:");
-            i += OPEN.len();
-        } else if lower[i..].starts_with(CLOSE) {
-            out.push_str("[/JEKT-QUOTED]");
-            i += CLOSE.len();
+    while i < chars.len() {
+        if let Some((len, closing, end)) = match_delimiter(&chars, i) {
+            out.push_str(match (closing, end) {
+                (true, _) => "[/JEKT-QUOTED]",
+                (false, ':') => "[JEKT-QUOTED:",
+                _ => "[JEKT-QUOTED]",
+            });
+            i += len;
         } else {
-            let ch = msg[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
+            out.push(chars[i]);
+            i += 1;
         }
     }
     out
