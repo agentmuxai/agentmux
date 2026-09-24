@@ -695,6 +695,13 @@ async fn an_empty_queue_eager_resume_releases_its_claim_before_returning() {
         "an empty-queue eager resume must release its spawn claim before start() returns"
     );
 
+    // Checked before the probe below: a `DeliverDirect` decision reserves
+    // the turn itself.
+    assert!(
+        !c.health_monitor.is_active_turn(),
+        "an eager resume with nothing queued must still not report an active turn"
+    );
+
     // What that release buys: the next message is delivered by its own
     // caller — and `DeliverDirect` publishes turn-active itself —
     // instead of being queued behind a claim whose holder has already
@@ -702,14 +709,9 @@ async fn an_empty_queue_eager_resume_releases_its_claim_before_returning() {
     assert!(
         matches!(
             c.decide_send_action("{\"probe\":true}", None),
-            SendAction::DeliverDirect
+            SendAction::DeliverDirect { was_active: false }
         ),
         "with the claim released and stdin live, the next send must go direct"
-    );
-
-    assert!(
-        !c.health_monitor.is_active_turn(),
-        "an eager resume with nothing queued must still not report an active turn"
     );
 }
 

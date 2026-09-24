@@ -113,6 +113,81 @@ async fn never_spawned_is_not_running() {
     assert_eq!(outcome, StopOutcome::NotRunning);
 }
 
+/// Codex P2 on #3562: a message deferred behind a spawn that then failed
+/// leaves the queue non-empty with no process. Closing the pane inside the
+/// watchdog's grace window must still report it: the no-process return used
+/// to skip the reporting, and the watchdog (weak ref) died with the
+/// controller, so the accepted message vanished without a trace.
+#[tokio::test]
+async fn shutdown_with_no_process_still_reports_deferred_messages() {
+    let c = PersistentSubprocessController::new("tab".into(), "blk-orphan".into(), None, None, None, None);
+    c.inner
+        .lock()
+        .unwrap()
+        .deferred_deliveries
+        .push_back(PersistentSubprocessController::encode_user_message("behind a failed spawn"));
+
+    let outcome = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(1)).await;
+
+    assert_eq!(outcome, StopOutcome::NotRunning);
+    assert!(
+        c.inner.lock().unwrap().deferred_deliveries.is_empty(),
+        "drained and reported, not left for a watchdog that dies with the controller"
+    );
+}
+
+/// Codex P2 on #3562: `shutdown` drained the queue up front but only gated
+/// writes (`stop_pending`) after the interrupt's turn had ended. A sender that
+/// already held the controller could enqueue in between, and the interrupt's
+/// own `result` then flushed that message into the process being shut down,
+/// leaving the drop report an empty queue. The gate now goes up in the same
+/// locked section as the drain, before the interrupt is sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_deferred_during_the_shutdown_interrupt_is_not_written_into_the_dying_process() {
+    let c = PersistentSubprocessController::new("tab".into(), "blk-late".into(), None, None, None, None);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);
+    {
+        let mut g = c.inner.lock().unwrap();
+        g.current_pid = Some(4242); // never signalled: there is no kill_tx
+        g.stdin_tx = Some(tx);
+    }
+    c.health_monitor.set_active_turn(true);
+    let generation = c.inner.lock().unwrap().spawn_generation;
+    let shutdown = tokio::spawn(c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(10)));
+
+    // The interrupt has gone out, so shutdown's first locked section is done.
+    let interrupt = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("shutdown sends the interrupt")
+        .unwrap();
+    assert!(interrupt.contains("interrupt"), "{interrupt}");
+
+    // A sender that already held the controller arrives now…
+    c.send_user_message("late".to_string()).unwrap();
+    // …and then the interrupted turn's `result` lands.
+    let boundary = PersistentSubprocessController::turn_boundary_locked(
+        &mut c.inner.lock().unwrap(),
+        &c.health_monitor,
+        "blk-late",
+        generation,
+    )
+    .expect("same generation");
+    assert!(
+        !matches!(boundary.flushed, DeferredFlush::Released(_)),
+        "must not flush into the process being shut down: {:?}",
+        boundary.flushed
+    );
+    assert!(rx.try_recv().is_err(), "nothing written after the interrupt");
+    assert_eq!(c.inner.lock().unwrap().deferred_deliveries.len(), 1, "kept for the drop report");
+
+    // Let shutdown finish: the process "exits".
+    c.inner.lock().unwrap().stop_exit = Some((generation, false));
+    tokio::time::timeout(std::time::Duration::from_secs(5), shutdown)
+        .await
+        .expect("shutdown completes")
+        .unwrap();
+}
+
 /// Mid-turn: EOF alone would let the turn run on (§5.1). The interrupt
 /// ends it, the process exits well inside the deadline, and the
 /// interrupted turn's `is_error` result is NOT reported as a failure.

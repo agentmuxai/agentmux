@@ -21,10 +21,10 @@
 | 2b | A mid-stream pause no longer re-parses the whole message (§3.4) | #3604 | merged |
 | 2c | Tool logs measure height only when their branch changes (§3.4, §2.2a) | #3607 | merged |
 | 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | merged |
-| 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | open |
-| 3 | Tail holds only the turn in flight | 3a + 3b | done once 3b merges; kill switch `agent:turnscopedtail` |
+| 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | merged |
+| 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | not started |
-| 5 | Node identity and durability | — | not started |
+| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6); 5a designed in §6.3.7 (PRs 5a-1…5a-4); Gemini-family user echo (5d) shipped | #3619 (plan), #3620 (echo), this PR (5a design) | 5a design in review |
 | 6 | Bounded live document | — | not started |
 | 7 | History tab follows | — | not started |
 | 8 | Off-main-thread markdown (decision) | — | not started |
@@ -299,6 +299,34 @@ keeps invariant 1 trivially (one memo), and each move is cheap and jump-free
 after 3a. The spec's per-node in-row windowing for single huge nodes (§6.2)
 is not part of 3b.
 
+### 3.8 After Phase 3: what the cost is now, and what it is not
+
+Measured on `main` + 3b (Windows dev build, 3 panes streaming, typing):
+
+- **History length up to 200 turns (~600 nodes per pane) does not move
+  streaming cost.** One N = 0/25/100/200 run read 28.3/32.0/35.7/25.5 fps;
+  three more runs of 0/100/200 showed the cost falling *through each run and
+  across runs* (N = 0 went 27 → 18 fps from the first run to the third) —
+  an order effect, not a history effect. Rendered DOM stays 14.8k at every
+  N ≥ 25. A CPU profile of the streaming work at N = 200 puts the stores and
+  the per-flush list bookkeeping at ≲ 8 %; rendering the growing last
+  message dominates (markdown ~35 %, `replaceChild` of the open block ~23 %).
+  Phase 4 (O(log n) stores) is therefore not the next bottleneck at these
+  sizes.
+- **The run-to-run drift is environmental and peak-driven, not a leak.** Six
+  identical N = 0 runs back to back right after a reload did not degrade
+  (31 → 35 fps; JS heap flat at 68–94 MB; renderer RSS +250 MB after the
+  first run, then ~15 MB per run). The machine is shared (another app's
+  audio engine, ~20 CEF processes from other dev instances, 25–45 % CPU load
+  between runs). Five load-200-turns/clear cycles with forced GC: JS heap
+  after clear 37.9 → 42.9 MB — identical with and without 3b, so it
+  predates this work; a heap snapshot after three cycles holds only 749
+  detached DOM objects, mostly pane-header chrome retained by block-frame
+  closures (not the agent pane). What does grow is the renderer's resident
+  high-water mark after large loads — which 3b already lowers a lot (loaded:
+  heap 180 → ~65 MB, DOM 223k → ~35k nodes for 200 turns) and Phase 6
+  bounds.
+
 ## 4. Open follow-ups
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
@@ -312,10 +340,19 @@ is not part of 3b.
   feeding effect re-maps every head id and `JSON.stringify`s each head row's
   expansion on every partition change, and the reducer copies the node array.
   3b made the frontier search itself independent of history (`from`, Codex P2
-  on #3611); these are the remaining O(history) costs per stream flush.
-- **Renderer memory grows across consecutive bench runs regardless of
-  variant** (3.7 → 5.1 GB over one §2.2c session): process-lifetime growth,
-  not per-window. Phase 6 (bounded live document) and the 8 h soak target it.
+  on #3611); these are the remaining O(history) costs per stream flush — under
+  ~8 % of streaming work at 200 turns (§3.8), so Phase 4 waits.
+- **Renderer memory after large loads** (§3.8): a resident high-water mark
+  from peak loads, not an agent-pane leak. Phase 6 (bounded live document)
+  bounds the peak; the 8 h soak verifies it.
+- **Next phase: 5 (stable node identity and durability)**, the prerequisite
+  for Phase 6 eviction — what moves old messages out of the live pane and
+  into the History tab, bounding memory.
+- **The growing last message's DOM is replaced on every commit** (§3.8:
+  ~23 % of streaming work in `replaceChild`): a per-commit cost independent
+  of history, worth its own look.
+- **Pane-header chrome retained by block-frame closures** (§3.8): ~13 copies
+  of header buttons/icons survive a clear. Small; outside the agent pane.
 - **In-row windowing for one huge node** (spec §6.2) — not in 3b.
 - **macOS and Linux baselines** (spec §7 Phase 0).
 - **Fault-suite runner** (spec §8) — a later Phase 0 PR.

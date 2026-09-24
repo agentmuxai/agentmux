@@ -38,7 +38,13 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { createPaneReadiness } from "@/app/store/pane-readiness";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
-import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
+import {
+    accountLabel,
+    loadAccounts,
+    subscribeAccountChanges,
+    type Account,
+    type AgentAccounts,
+} from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ModalLayer } from "@/element/ModalLayer";
@@ -1861,7 +1867,9 @@ const AgentPresentationView = ({
         if (!e) return;
         ContextMenuModel.showContextMenu(
             candidates.map((acct) => ({
-                label: acct.name,
+                // The login email, else the name — every Claude account is
+                // named `claude-oauth`, so the name alone cannot tell them apart.
+                label: accountLabel(acct),
                 click: () => void status.bindExistingAccount(acct),
             })),
             e,
@@ -1976,7 +1984,8 @@ const AgentPresentationView = ({
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
-        bindCandidates,
+        // Labelled for the failure row's "Bind: <account>" (email, else name).
+        bindCandidates: () => bindCandidates().map((a) => ({ id: a.id, name: accountLabel(a) })),
         onBindAccount,
     });
 

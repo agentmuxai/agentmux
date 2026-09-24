@@ -147,15 +147,42 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // version upgrades. Falls back to mstore transparently.
 
     let mstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_typed(
         COMMAND_LIST_IDENTITY_ACCOUNTS,
         move |cmd: CommandListIdentityAccountsData, _ctx| {
             let mstore = mstore.clone();
+            let identity_store = identity_store.clone();
             async move {
-                let accounts = mstore
+                // On the blocking pool: the backfill below reads each OAuth
+                // account's `.claude.json` and canonicalizes its dir (ReAgent
+                // P1 on #3617), like this file's other fs/keyring calls.
+                tokio::task::spawn_blocking(move || {
+                let mut accounts = mstore
                     .identity_list(cmd.provider.as_deref())
                     .map_err(|e| format!("listidentityaccounts: {e}"))?;
+                // SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md §4: backfill each
+                // OAuth account's login email from its own config dir, so
+                // accounts signed in before #3541 — and every Claude login,
+                // whose transcript prints no email — show it. Written only
+                // when it changed, and only that one field, in this store and
+                // the global mirror (a full upsert here could re-create an
+                // account deleted since the list, undo a status written
+                // meanwhile, or repoint the mirror's `secret_ref`). A failed
+                // write still returns the email.
+                for account in &mut accounts {
+                    if let Some(email) = crate::identity::account_email::refresh_account_email(account) {
+                        for store in [&mstore, &identity_store] {
+                            if let Err(e) = store.identity_set_context_email(&account.id, &email) {
+                                tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");
+                            }
+                        }
+                    }
+                }
                 Ok(accounts)
+                })
+                .await
+                .map_err(|e| format!("listidentityaccounts: task: {e}"))?
             }
         },
     );
