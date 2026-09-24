@@ -8,9 +8,10 @@
 //! effects (publishing, the tick task). Keeping it pure is what makes the
 //! debounce / dedupe / focus-gate / retract rules table-testable.
 //!
-//! Phase 1 scope: kinds `InputWaiting` / `TurnCompleted` / `TurnErrored` /
-//! `Test`, per-kind enable, debounce, dedupe-by-group, focus gate, retract.
-//! Rate limiting + summaries are Phase 2 (§10).
+//! Phase 1: kinds `InputWaiting` / `TurnCompleted` / `TurnErrored` / `Test`,
+//! per-kind enable, debounce, dedupe-by-group, focus gate, retract.
+//! Phase 2: `AgentCrashed` / `MessageNeedsReview` / `Summary`, pause, rate
+//! limits folding into a summary, and a tray state snapshot (§4.2, §5.1).
 
 use std::collections::HashMap;
 
@@ -23,6 +24,13 @@ pub enum NotifyKind {
     InputWaiting,
     TurnCompleted,
     TurnErrored,
+    /// srv-observed `agentfailure` (not a user stop).
+    AgentCrashed,
+    /// A jekt that requires a human's review before the agent acts
+    /// (`ESCALATE=required`). Body is fixed text — never message content.
+    MessageNeedsReview,
+    /// Rate-limit overflow digest (§5.1 step 6).
+    Summary,
     Test,
 }
 
@@ -33,7 +41,9 @@ impl NotifyKind {
             NotifyKind::InputWaiting => Some("inputwaiting"),
             NotifyKind::TurnCompleted => Some("turncompleted"),
             NotifyKind::TurnErrored => Some("turnerrored"),
-            NotifyKind::Test => None,
+            NotifyKind::AgentCrashed => Some("agentcrashed"),
+            NotifyKind::MessageNeedsReview => Some("messageneedsreview"),
+            NotifyKind::Summary | NotifyKind::Test => None,
         }
     }
 
@@ -43,14 +53,18 @@ impl NotifyKind {
     pub fn delay_ms(self) -> i64 {
         match self {
             NotifyKind::InputWaiting => 6_000,
-            NotifyKind::TurnCompleted | NotifyKind::TurnErrored => 10_000,
-            NotifyKind::Test => 0,
+            // Same window as TurnErrored so the two coalesce into one toast.
+            NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => 10_000,
+            NotifyKind::MessageNeedsReview => 2_000,
+            NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
 
     pub fn priority(self) -> Priority {
         match self {
-            NotifyKind::InputWaiting => Priority::Attention,
+            NotifyKind::InputWaiting | NotifyKind::AgentCrashed | NotifyKind::MessageNeedsReview => {
+                Priority::Attention
+            }
             _ => Priority::Normal,
         }
     }
@@ -59,8 +73,23 @@ impl NotifyKind {
     pub fn group_key(self, block_id: &str) -> String {
         match self {
             NotifyKind::InputWaiting => format!("input:{block_id}"),
-            NotifyKind::TurnCompleted | NotifyKind::TurnErrored => format!("turn:{block_id}"),
+            // AgentCrashed shares the turn group: one failure, one toast.
+            NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => {
+                format!("turn:{block_id}")
+            }
+            NotifyKind::MessageNeedsReview => format!("review:{block_id}"),
+            NotifyKind::Summary => "summary".to_string(),
             NotifyKind::Test => "test".to_string(),
+        }
+    }
+
+    /// Within one group, a later event must not replace a more informative
+    /// earlier one: srv's `AgentCrashed` (with a reason) outranks the
+    /// renderer's generic `TurnErrored`, which often arrives just after it.
+    fn rank(self) -> u8 {
+        match self {
+            NotifyKind::AgentCrashed => 2,
+            _ => 1,
         }
     }
 }
@@ -97,13 +126,31 @@ pub struct Settings {
     pub when: When,
     pub preview: Preview,
     pub kind_enabled: HashMap<NotifyKind, bool>,
+    /// `notify:pause:until` — epoch ms; toasts are held back until then.
+    pub pause_until_ms: i64,
+    /// `notify:pause:allowattention` — let Attention through while paused.
+    pub pause_allow_attention: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, when: When::Unfocused, preview: Preview::Redacted, kind_enabled: HashMap::new() }
+        Settings {
+            enabled: true,
+            when: When::Unfocused,
+            preview: Preview::Redacted,
+            kind_enabled: HashMap::new(),
+            pause_until_ms: 0,
+            pause_allow_attention: false,
+        }
     }
 }
+
+/// Rate limits (§5.1 step 6). Attention is exempt from the per-block limit
+/// (an agent that finished and then immediately asks something must still
+/// reach you) but not from the global one.
+pub const PER_BLOCK_WINDOW_MS: i64 = 30_000;
+pub const GLOBAL_WINDOW_MS: i64 = 60_000;
+pub const GLOBAL_MAX: usize = 4;
 
 impl Settings {
     fn kind_on(&self, kind: NotifyKind) -> bool {
@@ -156,9 +203,30 @@ impl Family {
     fn matches(self, kind: NotifyKind) -> bool {
         match self {
             Family::Input => kind == NotifyKind::InputWaiting,
-            Family::Turn => matches!(kind, NotifyKind::TurnCompleted | NotifyKind::TurnErrored),
+            Family::Turn => {
+                matches!(kind, NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed)
+            }
         }
     }
+}
+
+/// One shown Attention item, for the tray's "needs you" submenu. Titles are
+/// app-controlled templates, so they are safe to show in a native menu.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NotifyAttentionItem")]
+pub struct AttentionItem {
+    pub id: String,
+    pub block_id: String,
+    pub title: String,
+}
+
+/// Snapshot the tray renders (§4.2).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/", rename = "NotifyTrayState")]
+pub struct TrayState {
+    pub attention: Vec<AttentionItem>,
+    #[ts(type = "number")]
+    pub paused_until_ms: i64,
 }
 
 /// The payload Presenters render. Every string here is app-controlled or
@@ -192,6 +260,10 @@ struct Live {
     notification: Notification,
     due_at_ms: i64,
     shown: bool,
+    /// Replaces a toast of the same group that was already on screen — it
+    /// swaps one toast for another rather than adding one, so the per-block
+    /// limit doesn't apply.
+    replaces_shown: bool,
 }
 
 #[derive(Default)]
@@ -200,6 +272,12 @@ pub struct PolicyState {
     live: HashMap<String, Live>,
     focus: HashMap<String, FocusReport>,
     next_seq: u64,
+    /// block_id → last time a toast for it was shown (per-block limit).
+    last_shown: HashMap<String, i64>,
+    /// Show times inside the global window.
+    recent: std::collections::VecDeque<i64>,
+    /// Notifications folded into the current summary.
+    summarized: u32,
 }
 
 /// Title from a closed template set (§9.1). Only the agent name is
@@ -209,7 +287,19 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::InputWaiting => format!("{agent_name} needs your input"),
         NotifyKind::TurnCompleted => format!("{agent_name} finished"),
         NotifyKind::TurnErrored => format!("{agent_name} stopped with an error"),
+        NotifyKind::AgentCrashed => format!("{agent_name} stopped unexpectedly"),
+        NotifyKind::MessageNeedsReview => format!("A message for {agent_name} needs your review"),
+        // Count-bearing; see `summary_title`.
+        NotifyKind::Summary => "More agent updates".to_string(),
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
+    }
+}
+
+pub fn summary_title(count: u32) -> String {
+    if count == 1 {
+        "1 more agent update".to_string()
+    } else {
+        format!("{count} more agent updates")
     }
 }
 
@@ -272,6 +362,11 @@ impl PolicyState {
                     return out;
                 }
                 let group = req.kind.group_key(&req.block_id);
+                if let Some(existing) = self.live.get(&group) {
+                    if existing.notification.kind.rank() > req.kind.rank() {
+                        return out;
+                    }
+                }
                 let tag = tag_for(&group);
                 // Replace in place: a newer event in the same family supersedes
                 // the older one (e.g. completed → errored), same OS tag.
@@ -301,7 +396,12 @@ impl PolicyState {
                 }
                 self.live.insert(
                     group,
-                    Live { notification, due_at_ms: now_ms + req.kind.delay_ms(), shown: false },
+                    Live {
+                        notification,
+                        due_at_ms: now_ms + req.kind.delay_ms(),
+                        shown: false,
+                        replaces_shown: replaced_shown,
+                    },
                 );
                 if is_test {
                     out.extend(self.release_due(now_ms, s));
@@ -312,7 +412,13 @@ impl PolicyState {
             }
             Input::Focus { conn_id, report } => {
                 let looking = report.window_focused.then(|| report.block_id.clone()).flatten();
+                let app_focused = report.window_focused;
                 self.focus.insert(conn_id, report);
+                // Back in the app: the digest of what you missed is moot.
+                if app_focused {
+                    self.summarized = 0;
+                    self.drop_where(&mut out, |n| n.kind == NotifyKind::Summary);
+                }
                 // The user just looked at the block: its notifications are moot.
                 if let Some(b) = looking {
                     self.drop_where(&mut out, |n| n.block_id == b && n.kind != NotifyKind::Test);
@@ -329,6 +435,9 @@ impl PolicyState {
                     .map(|(g, _)| g.clone());
                 if let Some(g) = group {
                     let l = self.live.remove(&g).expect("present");
+                    if l.notification.kind == NotifyKind::Summary {
+                        self.summarized = 0;
+                    }
                     out.push(Action::Retract { id: l.notification.id.clone(), tag: l.notification.tag.clone() });
                     if clicked && !l.notification.block_id.is_empty() {
                         out.push(Action::Activate { id: l.notification.id, block_id: l.notification.block_id });
@@ -342,26 +451,101 @@ impl PolicyState {
 
     fn release_due(&mut self, now_ms: i64, s: &Settings) -> Vec<Action> {
         let mut out = Vec::new();
-        let due: Vec<String> = self
+        while self.recent.front().is_some_and(|t| now_ms - *t >= GLOBAL_WINDOW_MS) {
+            self.recent.pop_front();
+        }
+        let mut due: Vec<String> = self
             .live
             .iter()
             .filter(|(_, l)| !l.shown && l.due_at_ms <= now_ms)
             .map(|(g, _)| g.clone())
             .collect();
+        // Deterministic order: oldest first, so the limits keep the earliest.
+        due.sort_by_key(|g| (self.live[g].notification.created_at_ms, g.clone()));
+        let mut folded = 0u32;
         for g in due {
-            let show = self.should_show(&self.live[&g].notification, s);
-            if show {
-                let l = self.live.get_mut(&g).expect("present");
-                l.shown = true;
-                out.push(Action::Show(l.notification.clone()));
-            } else {
+            let n = self.live[&g].notification.clone();
+            if !self.should_show(&n, s) || self.paused(&n, now_ms, s) {
                 // Gated out at due time → gone for good. Not re-offered later:
                 // a "finished" toast an hour after the user already saw the
                 // pane would be noise.
                 self.live.remove(&g);
+                continue;
             }
+            if self.rate_limited(&n, now_ms, self.live[&g].replaces_shown) {
+                self.live.remove(&g);
+                folded += 1;
+                continue;
+            }
+            let l = self.live.get_mut(&g).expect("present");
+            l.shown = true;
+            if n.kind != NotifyKind::Test && n.kind != NotifyKind::Summary {
+                self.last_shown.insert(n.block_id.clone(), now_ms);
+                self.recent.push_back(now_ms);
+            }
+            out.push(Action::Show(n));
+        }
+        if folded > 0 {
+            self.summarized += folded;
+            out.extend(self.show_summary(now_ms));
         }
         out
+    }
+
+    fn paused(&self, n: &Notification, now_ms: i64, s: &Settings) -> bool {
+        n.kind != NotifyKind::Test
+            && now_ms < s.pause_until_ms
+            && !(s.pause_allow_attention && n.priority == Priority::Attention)
+    }
+
+    fn rate_limited(&self, n: &Notification, now_ms: i64, replaces_shown: bool) -> bool {
+        if matches!(n.kind, NotifyKind::Test | NotifyKind::Summary) {
+            return false;
+        }
+        if self.recent.len() >= GLOBAL_MAX {
+            return true;
+        }
+        n.priority != Priority::Attention
+            && !replaces_shown
+            && self.last_shown.get(&n.block_id).is_some_and(|t| now_ms - *t < PER_BLOCK_WINDOW_MS)
+    }
+
+    /// Show (or replace in place) the one summary toast.
+    fn show_summary(&mut self, now_ms: i64) -> Vec<Action> {
+        let group = NotifyKind::Summary.group_key("");
+        self.next_seq += 1;
+        let n = Notification {
+            id: format!("n{}-{}", now_ms, self.next_seq),
+            kind: NotifyKind::Summary,
+            priority: Priority::Normal,
+            block_id: String::new(),
+            agent_name: String::new(),
+            title: summary_title(self.summarized),
+            body: Some("Open AgentMux to catch up.".to_string()),
+            tag: tag_for(&group),
+            created_at_ms: now_ms,
+        };
+        self.live.insert(group, Live { notification: n.clone(), due_at_ms: now_ms, shown: true, replaces_shown: false });
+        vec![Action::Show(n)]
+    }
+
+    /// What the tray shows: every on-screen Attention notification, oldest
+    /// first, plus the pause deadline.
+    pub fn tray_state(&self, s: &Settings, now_ms: i64) -> TrayState {
+        let mut attention: Vec<&Notification> = self
+            .live
+            .values()
+            .filter(|l| l.shown && l.notification.priority == Priority::Attention)
+            .map(|l| &l.notification)
+            .collect();
+        attention.sort_by_key(|n| (n.created_at_ms, n.id.clone()));
+        TrayState {
+            attention: attention
+                .into_iter()
+                .map(|n| AttentionItem { id: n.id.clone(), block_id: n.block_id.clone(), title: n.title.clone() })
+                .collect(),
+            paused_until_ms: if s.pause_until_ms > now_ms { s.pause_until_ms } else { 0 },
+        }
     }
 
     fn drop_where(&mut self, out: &mut Vec<Action>, pred: impl Fn(&Notification) -> bool) {
@@ -548,5 +732,127 @@ mod tests {
         assert_eq!(tag_for("input:b1"), tag_for("input:b1"));
         assert_ne!(tag_for("input:b1"), tag_for("turn:b1"));
         assert_eq!(tag_for("x").len(), 16);
+    }
+    fn req_b(kind: NotifyKind, block: &str) -> Request {
+        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: None }
+    }
+
+    #[test]
+    fn crash_outranks_later_generic_error_in_same_group() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(Request { kind: NotifyKind::AgentCrashed, block_id: "b1".into(), agent_name: "lark".into(), body: Some("Needs you to sign in again".into()) }), 0, &s);
+        p.step(Input::Emit(req_b(NotifyKind::TurnErrored, "b1")), 500, &s);
+        let a = p.step(Input::Tick, 10_000, &s);
+        let n = shows(&a);
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].kind, NotifyKind::AgentCrashed);
+        assert_eq!(n[0].title, "lark stopped unexpectedly");
+        assert_eq!(n[0].body.as_deref(), Some("Needs you to sign in again"));
+    }
+
+    #[test]
+    fn generic_error_is_upgraded_by_crash() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::TurnErrored, "b1")), 0, &s);
+        p.step(Input::Emit(req_b(NotifyKind::AgentCrashed, "b1")), 500, &s);
+        let n = shows(&p.step(Input::Tick, 10_500, &s)).into_iter().cloned().collect::<Vec<_>>();
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].kind, NotifyKind::AgentCrashed);
+    }
+
+    #[test]
+    fn pause_holds_back_everything_but_optionally_attention() {
+        let mut s = Settings { pause_until_ms: 100_000, ..Settings::default() };
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b1")), 0, &s);
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b2")), 0, &s);
+        assert!(shows(&p.step(Input::Tick, 20_000, &s)).is_empty());
+
+        s.pause_allow_attention = true;
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b3")), 30_000, &s);
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b4")), 30_000, &s);
+        let a = p.step(Input::Tick, 45_000, &s);
+        let n = shows(&a);
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].block_id, "b4");
+
+        // Pause expired → normal again.
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b5")), 100_000, &s);
+        assert_eq!(shows(&p.step(Input::Tick, 110_000, &s)).len(), 1);
+    }
+
+    #[test]
+    fn burst_folds_into_one_summary_and_focus_clears_it() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        for i in 0..20 {
+            p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, &format!("b{i:02}"))), i, &s);
+        }
+        let a = p.step(Input::Tick, 10_100, &s);
+        let n = shows(&a);
+        let normal: Vec<_> = n.iter().filter(|x| x.kind == NotifyKind::TurnCompleted).collect();
+        let summaries: Vec<_> = n.iter().filter(|x| x.kind == NotifyKind::Summary).collect();
+        assert_eq!(normal.len(), GLOBAL_MAX, "global limit");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].title, "16 more agent updates");
+
+        // A second burst replaces the same summary (same tag), counting up.
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "c1")), 11_000, &s);
+        let n2 = shows(&p.step(Input::Tick, 21_000, &s)).into_iter().cloned().collect::<Vec<_>>();
+        assert_eq!(n2.len(), 1);
+        assert_eq!(n2[0].title, "17 more agent updates");
+        assert_eq!(n2[0].tag, summaries[0].tag);
+
+        // Focusing the app retracts the summary and resets the count.
+        let a = p.step(focus(true, None), 22_000, &s);
+        assert_eq!(retracts(&a), 1);
+        p.step(focus(false, None), 23_000, &s);
+        for i in 0..6 {
+            p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, &format!("d{i}"))), 100_000 + i, &s);
+        }
+        let n3 = shows(&p.step(Input::Tick, 110_100, &s)).into_iter().cloned().collect::<Vec<_>>();
+        assert!(n3.iter().any(|x| x.title == "2 more agent updates"), "{n3:?}");
+    }
+
+    #[test]
+    fn per_block_limit_spares_attention() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b1")), 0, &s);
+        assert_eq!(shows(&p.step(Input::Tick, 10_000, &s)).len(), 1);
+        // Same block, 5s later: a Normal would be limited, Attention is not.
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b1")), 9_000, &s);
+        let a = p.step(Input::Tick, 15_000, &s);
+        assert_eq!(shows(&a).len(), 1);
+        assert_eq!(shows(&a)[0].kind, NotifyKind::InputWaiting);
+    }
+
+    #[test]
+    fn tray_state_lists_shown_attention_only() {
+        let s = Settings { pause_until_ms: 1_000_000, pause_allow_attention: true, ..Settings::default() };
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b1")), 0, &s);
+        p.step(Input::Emit(req_b(NotifyKind::TurnCompleted, "b2")), 0, &s);
+        assert!(p.tray_state(&s, 1_000).attention.is_empty(), "pending isn't shown yet");
+        p.step(Input::Tick, 10_000, &s);
+        let t = p.tray_state(&s, 10_000);
+        assert_eq!(t.attention.len(), 1);
+        assert_eq!(t.attention[0].block_id, "b1");
+        assert_eq!(t.attention[0].title, "lark needs your input");
+        assert_eq!(t.paused_until_ms, 1_000_000);
+        assert_eq!(p.tray_state(&s, 2_000_000).paused_until_ms, 0);
+    }
+
+    #[test]
+    fn needs_review_is_attention_with_its_own_group() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::MessageNeedsReview, "b1")), 0, &s);
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b1")), 0, &s);
+        let a = p.step(Input::Tick, 6_000, &s);
+        assert_eq!(shows(&a).len(), 2);
+        assert!(shows(&a).iter().any(|n| n.title == "A message for lark needs your review"));
     }
 }

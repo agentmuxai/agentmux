@@ -256,7 +256,14 @@ struct PersistEventWrap {
 /// The central pub/sub broker for MuxEvents.
 pub struct Broker {
     inner: Mutex<BrokerInner>,
+    /// In-process observers, called on every `publish` BEFORE the inner lock
+    /// is taken. They must be cheap and must not publish synchronously — the
+    /// notification Router's observer only parses and enqueues.
+    observers: std::sync::RwLock<Vec<BrokerObserver>>,
 }
+
+/// See [`Broker::add_observer`].
+pub type BrokerObserver = std::sync::Arc<dyn Fn(&MuxEvent) + Send + Sync>;
 
 /// Tracks `(route_id, event_name, scope)` tuples whose persisted
 /// history has already been replayed to a given route. Skipping
@@ -282,7 +289,15 @@ impl Broker {
                 persist_map: HashMap::new(),
                 replayed: HashSet::new(),
             }),
+            observers: std::sync::RwLock::new(Vec::new()),
         }
+    }
+
+    /// Observe every published event in-process (the broker otherwise has a
+    /// single fan-out client — the WS bridge). Used by the notification
+    /// Router to watch `agentfailure` without touching its publish sites.
+    pub fn add_observer(&self, f: BrokerObserver) {
+        self.observers.write().unwrap_or_else(|e| e.into_inner()).push(f);
     }
 
     pub fn set_client(&self, client: Box<dyn WpsClient>) {
@@ -437,6 +452,9 @@ impl Broker {
 
     /// Publish an event to all matching subscribers.
     pub fn publish(&self, event: MuxEvent) {
+        for o in self.observers.read().unwrap_or_else(|e| e.into_inner()).iter() {
+            o(&event);
+        }
         let mut inner = self.inner.lock().unwrap();
 
         // Persist if requested
@@ -640,6 +658,18 @@ pub fn publish_block_activity(broker: &Broker, block_id: &str, activity: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn observers_see_every_publish_even_without_a_client() {
+        let b = Broker::new();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        b.add_observer(std::sync::Arc::new(move |e: &MuxEvent| s2.lock().unwrap().push(e.event.clone())));
+        for name in ["agentfailure", "config"] {
+            b.publish(MuxEvent { event: name.into(), scopes: vec![], sender: String::new(), persist: 0, data: None });
+        }
+        assert_eq!(*seen.lock().unwrap(), vec!["agentfailure".to_string(), "config".to_string()]);
+    }
+
     use super::*;
     use std::sync::Arc;
 

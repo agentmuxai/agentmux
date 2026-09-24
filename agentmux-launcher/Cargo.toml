@@ -113,12 +113,13 @@ windows = { version = "0.61", features = [
 # off; those are Linux-only concerns and would drag GTK in.
 tray-icon = { version = "0.24", default-features = false }
 muda = { version = "0.19", default-features = false }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# Decodes the embedded menu-bar template glyph (`resources/menubar-template.png`)
-# into the RGBA buffer `tray_icon::Icon::from_rgba` wants. Same crate/version
-# tray-icon itself already pulls in on macOS, so this adds nothing to the graph.
+# Decodes embedded PNGs into the RGBA buffer `tray_icon::Icon::from_rgba`
+# wants: the macOS menu-bar template glyph (`resources/menubar-template.png`),
+# and on Windows the brand mark behind the tray's attention badge
+# (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §4.2). Already in the graph via
+# tray-icon, so this adds nothing new.
 png = "0.18"
+
 
 [target.'cfg(unix)'.dependencies]
 # Phase 1 macOS/Linux dev integration (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_

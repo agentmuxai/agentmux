@@ -87,6 +87,10 @@
     // "notify:os:inputwaiting":                 true,
     // "notify:os:turncompleted":                true,
     // "notify:os:turnerrored":                  true,
+    // "notify:os:agentcrashed":                 true,
+    // "notify:os:messageneedsreview":           true,
+    // "notify:pause:until":                     0,            // epoch ms; set from the tray
+    // "notify:pause:allowattention":            false,
     // "notify:os:preview":                      "redacted",   // "redacted" | "full" | "none"
 
     // -- Tool-call tones (subliminal per-tool "voice") --

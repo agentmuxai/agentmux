@@ -67,6 +67,27 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["error", "failure", "crash", "notify:os:turnerrored"],
     },
+    osAgentCrashed: {
+        id: "notifications.os_agent_crashed",
+        label: "Agent stopped unexpectedly",
+        description: "Sign-in expired, usage limit, crash — not when you stop it yourself",
+        section: "notifications",
+        keywords: ["crash", "auth expired", "usage limit", "notify:os:agentcrashed"],
+    },
+    osNeedsReview: {
+        id: "notifications.os_needs_review",
+        label: "Message needs your review",
+        description: "An agent received a message it must not act on without you. The notification never shows the message.",
+        section: "notifications",
+        keywords: ["jekt", "sensitive", "escalate", "review", "notify:os:messageneedsreview"],
+    },
+    pauseAllowAttention: {
+        id: "notifications.pause_allow_attention",
+        label: "While paused, still alert when an agent needs me",
+        description: "Pause from the tray icon's menu. Input requests and review requests still get through.",
+        section: "notifications",
+        keywords: ["pause", "snooze", "do not disturb", "notify:pause:allowattention"],
+    },
     osPreview: {
         id: "notifications.os_preview",
         label: "Notification content",
@@ -155,6 +176,20 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osInputWaiting, "notify:os:inputwaiting")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnCompleted, "notify:os:turncompleted")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnErrored, "notify:os:turnerrored")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
+                <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.pauseAllowAttention.id}
+                    indent
+                    label={NOTIFICATIONS_SETTINGS.pauseAllowAttention.label}
+                    description={NOTIFICATIONS_SETTINGS.pauseAllowAttention.description}
+                    control={
+                        <ToggleControl
+                            checked={!!(s()["notify:pause:allowattention"] as boolean)}
+                            onChange={(v) => set("notify:pause:allowattention", v)}
+                        />
+                    }
+                />
                 <SettingRow
                     id={NOTIFICATIONS_SETTINGS.osPreview.id}
                     indent
