@@ -27,10 +27,10 @@ CACHE_DIR="${AGENTMUX_BUILD_TOOLS:-$HOME/.agentmux/build-tools}"
 RCEDIT="$CACHE_DIR/rcedit-x64.exe"
 mkdir -p "$CACHE_DIR"
 
-if [ ! -f "$RCEDIT" ] || [ "$(sha256sum "$RCEDIT" | cut -d' ' -f1)" != "$RCEDIT_SHA" ]; then
+if [ ! -f "$RCEDIT" ] || [ "$(sha256sum < "$RCEDIT" | cut -d' ' -f1)" != "$RCEDIT_SHA" ]; then
     echo "  [icon] downloading rcedit (v2.0.0)…"
     curl -fsSL "$RCEDIT_URL" -o "$RCEDIT"
-    got="$(sha256sum "$RCEDIT" | cut -d' ' -f1)"
+    got="$(sha256sum < "$RCEDIT" | cut -d' ' -f1)"
     if [ "$got" != "$RCEDIT_SHA" ]; then
         echo "inject-exe-icon: rcedit sha256 mismatch (expected $RCEDIT_SHA got $got)" >&2
         rm -f "$RCEDIT"

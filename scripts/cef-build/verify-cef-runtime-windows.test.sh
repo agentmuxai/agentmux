@@ -24,7 +24,9 @@ bad() { fail=$((fail+1)); printf '  FAIL  %s\n     -> %s\n' "$1" "${2:-}"; }
 GUARD_DIR="$TMP/guard"; mkdir -p "$GUARD_DIR"
 cp "$HERE/verify-cef-runtime-windows.sh" "$GUARD_DIR/"
 printf 'known-good libcef bytes\n' > "$TMP/good.dll"
-GOOD_SHA="$(sha256sum "$TMP/good.dll" | cut -d' ' -f1)"
+# From stdin, like the guard: given a file name containing a backslash,
+# coreutils prefixes the hash with one (see the backslash cases below).
+GOOD_SHA="$(sha256sum < "$TMP/good.dll" | cut -d' ' -f1)"
 cat > "$GUARD_DIR/windows-runtime-pin.sh" <<EOF
 CEF_WINDOWS_RELEASE_TAG="cef-windows-x86_64-test-r9"
 CEF_WINDOWS_ASSET="cef-windows-x86_64-test-r9.zip"
@@ -59,7 +61,31 @@ expect 1 "missing libcef.dll fails" "$(runtime empty -)"
 
 out="$(bash "$GUARD" "$TMP/rt-stale" 2>&1)"
 case "$out" in *"gh auth login"*"AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"*"args-windows.gn"*) ok "failure names every fix";; *) bad "failure names every fix" "$out";; esac
-case "$out" in *"sha256 $(sha256sum "$TMP/stale.dll" | cut -c1-12)"*) ok "failure shows the hash it found";; *) bad "failure shows the hash it found" "$out";; esac
+STALE_SHA12="$(sha256sum < "$TMP/stale.dll" | cut -c1-12)"
+case "$out" in *"sha256 $STALE_SHA12"*) ok "failure shows the hash it found";; *) bad "failure shows the hash it found" "$out";; esac
+
+# Windows paths contain backslashes: Taskfile's `$HOME` is C:\Users\<user>, and
+# CI's runtime dir is `${{ github.workspace }}/...` = D:\a\.... Given such a
+# file name, GNU coreutils prefixes the hash with a backslash on every OS, so a
+# directory NAMED with one reproduces it here on Linux. The guard refused the
+# correct r2 runtime this way on 2026-09-23
+# (docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md).
+BS='\'
+if mkdir "$TMP/rt-win${BS}pinned" 2>/dev/null && [ -d "$TMP/rt-win${BS}pinned" ]; then
+  cp "$TMP/good.dll" "$TMP/rt-win${BS}pinned/libcef.dll"
+  mkdir "$TMP/rt-win${BS}stale"; cp "$TMP/stale.dll" "$TMP/rt-win${BS}stale/libcef.dll"
+  expect 0 "pinned libcef.dll under a path with a backslash passes" "$TMP/rt-win${BS}pinned"
+  expect 1 "any other libcef.dll under a path with a backslash still fails" "$TMP/rt-win${BS}stale"
+  out="$(bash "$GUARD" "$TMP/rt-win${BS}stale" 2>&1)"
+  case "$out" in
+    *"sha256 $STALE_SHA12"*) ok "backslash path: failure shows the real hash, not a backslash-prefixed one";;
+    *) bad "backslash path: failure shows the real hash, not a backslash-prefixed one" "$out";;
+  esac
+else
+  # Git Bash on Windows: a backslash is a separator, not a name character.
+  # ci-pr runs this file on Linux, where these cases do run.
+  echo "  SKIP  backslash-path cases (this filesystem can't put a backslash in a name)"
+fi
 
 # No local-build exception: args.gn text can't prove what the DLL contains.
 # Each shape below was accepted by an earlier revision and broken in review

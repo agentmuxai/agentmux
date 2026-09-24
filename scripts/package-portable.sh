@@ -216,7 +216,7 @@ bundle_tool() {
     # Use cached download if present and sha256 matches
     if [ -f "$cache_key" ]; then
         local actual
-        actual=$(sha256sum "$cache_key" | cut -d' ' -f1)
+        actual=$(sha256sum < "$cache_key" | cut -d' ' -f1)
         if [ "$actual" = "$sha256_expected" ]; then
             echo "  [tools] $name: using cached download"
         else
@@ -229,7 +229,7 @@ bundle_tool() {
         echo "  [tools] $name: downloading from $url"
         curl -fsSL "$url" -o "$cache_key"
         local actual
-        actual=$(sha256sum "$cache_key" | cut -d' ' -f1)
+        actual=$(sha256sum < "$cache_key" | cut -d' ' -f1)
         if [ "$actual" != "$sha256_expected" ]; then
             echo "ERROR: sha256 mismatch for $name! expected=$sha256_expected got=$actual" >&2
             rm -f "$cache_key"
