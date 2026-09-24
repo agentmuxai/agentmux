@@ -10,8 +10,13 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getSettingsKeyAtom } from "@/store/global";
-import { TAB_VISIBILITY_CHANGED_EVENT, WindowTabHiddenProvider, tabContainerVisibility } from "./window-tab-visibility";
-import { gateTargetTabId, scheduleRevealLift, tabSwitching } from "@/store/tab-reveal";
+import {
+    TAB_VISIBILITY_CHANGED_EVENT,
+    WindowTabHiddenProvider,
+    keepInactiveTabsLaidOut,
+    tabContainerVisibility,
+} from "./window-tab-visibility";
+import { gateTargetTabId, markTabShown, scheduleRevealLift, tabSwitching, tabWasShown } from "@/store/tab-reveal";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -80,7 +85,10 @@ function WorkspaceElem(): JSX.Element {
             setDisplayTabId(next);
             if (tabSwitching()) scheduleRevealLift();
         };
-        if (!prefersReducedMotion() && typeof document.startViewTransition === "function") {
+        // A tab already shown and kept laid out swaps in one frame, as a
+        // pane tab does: a cross-fade would only delay it (§6.4).
+        const instant = keepInactiveTabsLaidOut() && tabWasShown(next);
+        if (!instant && !prefersReducedMotion() && typeof document.startViewTransition === "function") {
             document.startViewTransition(apply);
         } else {
             apply();
@@ -138,6 +146,12 @@ function WorkspaceElem(): JSX.Element {
         if (tid !== tabId() || !tabSwitching()) return false;
         return gateTargetTabId() === tid;
     };
+
+    // A tab counts as shown once it's displayed and no gate is hiding it.
+    createEffect(() => {
+        const id = displayTabId();
+        if (id && !gateHides(id)) markTabShown(id);
+    });
 
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.
