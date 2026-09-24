@@ -639,34 +639,66 @@ to §6.3.6; paths under `agentmux-srv/src/`):
    `busy_timeout=5000` makes a second process wait instead of failing. This
    alone fixes the cross-process overwrite and the torn append, and ships
    first.
-2. **Generation = a nonce minted by the store.** A new column
-   `db_wave_file.gen` holds a random 64-bit value, minted in the same
-   transaction whenever a file row is created or its content replaced
-   (`make_file`, `write_file`, and a new `replace_file` used by restore). A
-   delete removes the row, so a re-created file always gets a new `gen`. A
-   nonce, not a counter: a counter kept on the row is lost with the row and
-   would restart, and a nonce needs no coordination between processes.
+2. **Generation = a nonce minted by the store** (as built in 5a-2a,
+   `filestore/counter.rs`). `db_wave_file.gen` holds 64 random bits. It
+   isn't a counter, because a counter kept on the row is lost with the row
+   and would restart, and a nonce needs no coordination between processes.
    Different files have different nonces, so a pane whose reads move from the
    global zone to the block file sees a different `(stream, gen)` and treats
-   it as a new generation. Legacy rows get a `gen` lazily
-   (`UPDATE … WHERE gen IS NULL`, then re-select; idempotent under races).
-3. **Line counter on the row.** A new column `db_wave_file.lines` holds the
-   file's line count under the reader's rule, updated inside the append
-   transaction. Transcript writes go through a new
-   `append_lines(zone, name, data) -> AppendPos { gen, first_line, lines,
-   offset }`, which normalizes `data` to complete, non-blank,
-   `\n`-terminated lines (the same `trim` rule as the indexer), so the counter
-   is a sum and never re-scans. If the file ends mid-line (a legacy or
-   crash-torn tail), the transaction first writes `\n`. The torn line keeps its
-   index; today the next record fuses with it and both become unparseable.
-   Legacy rows (`lines IS NULL`) are initialized off the hot path by a
-   housekeeping task: it counts on a read snapshot, then reconciles the bytes
-   appended since in a write transaction, the technique `extend_output_idx`
-   already uses. Until a row is initialized, `append_lines` returns
-   `first_line: None` and that stream keeps today's position-less behaviour.
-   `output.idx` stays a reader cache, but its header gains `gen` so a replaced
-   file never reuses an old index; a debug assertion and a counter check that
-   the index count equals `lines`.
+   it as a new generation.
+3. **Line counter on the row, as one epoch with `gen`.** The columns `gen`,
+   `lines` (the count under the reader's rule, one shared predicate with the
+   indexer), `lines_size`, `lines_tail` (where the last, possibly
+   unterminated, line starts) and `lines_modts` are one **epoch**: all
+   valid, or all NULL.
+   - **Starting an epoch.** An epoch starts, with a fresh `gen`, only when the
+     count can be vouched for from byte 0: `make_file` (empty), `write_file`
+     (counts the data), and `init_line_counter` for a row that has none.
+     `init_line_counter` scans the file one 1 MiB window at a time, holding
+     the connection lock per window, so appends continue. It then counts
+     what they added in one transaction. It gives up if the scanned bytes may
+     have changed underneath it:
+     - the row was re-created: its `incarnation`, 64 random bits set by an
+       insert trigger for every writer, differs even within one millisecond;
+     - any writer, older builds included, rewrote bytes (`rev`, bumped by
+       the database's triggers for every write that isn't an append);
+     - as a second line of defence, the file shrank or its scanned tail
+       changed.
+   - **Appends** advance the epoch in the same transaction as the write,
+     re-reading only the unterminated last line (normally empty).
+   - **`append_lines`** normalizes to complete, non-blank, `\n`-terminated
+     lines. It first closes a torn tail with `\n`: the torn line keeps its
+     index, whereas today the next record fuses with it and both become
+     unparseable. It returns `AppendPos { offset, counted: { gen, first_line,
+     lines } }`.
+   - **Mixed versions.** Older builds share the global store and write
+     without maintaining the epoch. There is no `FILESTORE_SCHEMA_VERSION`
+     bump: a bump would make them refuse to open the store. The columns are
+     added with `ALTER TABLE ADD COLUMN`, so an older build's rows are
+     NULL, i.e. not counted.
+     - **Detecting their writes.** Older builds can't avoid the database's
+       own triggers, which fire for every connection. Any write that changes
+       bytes already in a file bumps `rev`: a part deleted, overwritten with
+       anything but a pure extension, or inserted inside the size the file
+       already claims (an older build's `write_file` raises the size before
+       inserting parts). Appends extend the last part, or add parts at or
+       past the size, so they don't bump it.
+     - **Bytes must be stored.** The counter never counts a byte that the
+       size claims but no part holds yet. A missing part makes init give up,
+       and makes an append drop the epoch.
+     - **Validity.** An epoch records the `rev` and size it was counted at,
+       so an append by someone else (size moved) or a rewrite (`rev` moved)
+       invalidates it.
+     - **Timestamps alone were not enough.** Two writes can share a
+       millisecond, so an older build's same-size replace could go unnoticed
+       (Codex on #3631).
+     - **Recovery.** The epoch is dropped, never patched, and the next one
+       gets a new `gen`, so no line index is reused for different content.
+       The cost is a resync while builds are mixed.
+   - **Legacy rows.** 5a-3 calls `init_line_counter` from the line-count path
+     (off the runtime) the first time a pane opens a legacy row. That costs
+     one read of the file per epoch. Until then, events for that stream carry
+     no position.
 4. **One replace/delete primitive per transcript.** The eight paths above call
    `replace_transcript` / `delete_transcript`. In one transaction, these
    replace or delete `output`, delete `output.idx` and `output.tsidx`, and
@@ -727,7 +759,8 @@ to §6.3.6; paths under `agentmux-srv/src/`):
 | PR | Scope | Proof |
 |---|---|---|
 | 5a-1 | `BEGIN IMMEDIATE` for every `FileStore` mutation; fix the "single-tx" comments | Two `FileStore` instances on one database file, many threads each appending numbered lines: every line present exactly once, intact. Append latency before/after. |
-| 5a-2 | `gen` + `lines` columns and migration, `append_lines`, torn-tail repair, housekeeping initialization, `replace_transcript` / `delete_transcript` on all eight paths, `gen` in the `output.idx` header | Fuzz: `lines` equals the indexer's count for random data (blank, CRLF, unicode, torn tails). Every replace/delete path mints a new `gen` and removes both sidecars. |
+| 5a-2a | `gen` + counter epoch columns (no schema bump), `append_lines`, torn-tail repair, `init_line_counter`, the shared line rule | Property test: the counter equals the `output.idx` indexer on random bytes (blank, CRLF, VT, broken UTF-8, torn tails). Concurrent `append_lines` from two stores hand out distinct indices that address their records. An older build's write drops the epoch; a re-count gets a new `gen`. A database created by an older build opens concurrently, gains the columns and counts. |
+| 5a-2b | `replace_transcript` / `delete_transcript` on all eight paths; `gen` in the `output.idx` header | Every replace/delete path mints a new `gen` and removes both sidecars. |
 | 5a-3 | Positions on live events and read responses; publish-after-write under the per-stream lock; silent persist with `echo`; error frames and app-server mirrored; `replace`/`delete` events | Backend tests per event source; an event's `line` indexes exactly its record in a range read. |
 | 5a-4 | Frontend consumer contract | Out-of-order, duplicate, gap, `gen` change mid-fetch, cross-process append via the poll; `full-conversation-bench` streaming cost unchanged. |
 

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use rusqlite::{params, OptionalExtension};
 
 use super::core::{FileStore, PART_DATA_SIZE};
+use super::counter::DROP_EPOCH_SQL;
 use super::FileOpts;
 use crate::backend::storage::error::StoreError;
 
@@ -130,8 +131,13 @@ impl FileStore {
                 data_pos += to_copy;
             }
 
+            // An in-place overwrite can change any line: the counter can't
+            // follow it, so the epoch is dropped (counter.rs).
             tx.execute(
-                "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                &format!(
+                    "UPDATE db_wave_file SET size = ?1, modts = ?2, {DROP_EPOCH_SQL}
+                     WHERE zoneid = ?3 AND name = ?4"
+                ),
                 params![new_size, now, zone_id, name],
             )?;
             Ok(Some((new_size, start_part, end_part)))
