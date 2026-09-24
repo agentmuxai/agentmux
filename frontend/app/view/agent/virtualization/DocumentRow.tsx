@@ -24,7 +24,8 @@ import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
-import type { DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../types";
+import { historyLinkLabel } from "../live-feed";
+import type { DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
@@ -553,7 +554,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     }}
                 >
                     <span class="agent-history-link-sigil">⌛</span>
-                    <span class="agent-history-link-label">Earlier conversations preserved —</span>
+                    <span class="agent-history-link-label">{historyLinkLabel(props.node() as HistoryLinkNode)}</span>
                     <span class="agent-history-link-cta">Open Agent History →</span>
                 </div>
             </Show>

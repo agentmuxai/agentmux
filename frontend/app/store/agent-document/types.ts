@@ -162,7 +162,25 @@ export type AgentDocumentCommand =
      * tracked tool node — already resolved, or a stale/duplicate event.
      * Spec: docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.2.
      */
-    | { type: "ForceCancelToolNode"; nodeId: string };
+    | { type: "ForceCancelToolNode"; nodeId: string }
+    /**
+     * Roll finished turns off the live feed (spec
+     * SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9). The
+     * reducer plans against its CURRENT nodes (`planRollOff`), so what the
+     * pane saw when it scheduled the pass can't be stale; the pane supplies
+     * only what the reducer can't know — what is on screen, and whether the
+     * reader follows the bottom. The removed turns stay in the transcript,
+     * where History shows them.
+     */
+    | {
+          type: "RollOff";
+          keepTurns: number;
+          visibleIds: ReadonlySet<string>;
+          /** Nodes the user pinned: their turns stay, like visible ones. */
+          keepIds?: ReadonlySet<string>;
+          pinned: boolean;
+          maxFinishedBytes?: number;
+      };
 
 /**
  * Audit events emitted by the reducer. v1 logs them via the dispatcher's
@@ -205,6 +223,22 @@ export type AgentDocumentEvent =
           reason: "unknown-tool-id" | "node-not-tool" | "duplicate";
       }
     | { type: "user-cleared"; clearedCount: number }
+    | {
+          /** Finished turns left the live feed (`RollOff`, spec §6.9). */
+          type: "turns-rolled-off";
+          removedCount: number;
+          turns: number;
+          /** Older turns kept only because the transcript can't rebuild them. */
+          blockedTurns: number;
+          /** Turns removed from the very front of the feed. */
+          prefixTurns: number;
+          /**
+           * For each range removed from the MIDDLE (around a kept turn), the id
+           * of the first node after it — where the pane shows a "turns in
+           * History" row.
+           */
+          gapsBefore: string[];
+      }
     | {
           /**
            * The working scrollback was clamped at a `session_outcome`/
