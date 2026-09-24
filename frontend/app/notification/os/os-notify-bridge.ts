@@ -116,16 +116,24 @@ export function attentionCount(data: unknown): number {
     return Array.isArray(a) ? a.length : 0;
 }
 
+/** Of those, how many are "agent is waiting on your input" — the only kind
+ *  that flashes the taskbar (spec Phase 4); crashes / review requests badge
+ *  without flashing. */
+export function inputWaitingCount(data: unknown): number {
+    const a = (data as { attention?: { kind?: string }[] } | undefined)?.attention;
+    return Array.isArray(a) ? a.filter((x) => x?.kind === "input_waiting").length : 0;
+}
+
 /**
  * Taskbar badge + flash (spec Phase 4). Each window badges its own taskbar
  * button; the host ignores the call on platforms without an implementation.
  */
-async function applyTaskbarAttention(count: number): Promise<void> {
+async function applyTaskbarAttention(count: number, inputCount: number): Promise<void> {
     try {
         const label = await getApi().getWindowLabel();
         if (!label) return;
         const { invokeCommand } = await import("@/app/platform/ipc");
-        await invokeCommand("set_taskbar_attention", { label, count });
+        await invokeCommand("set_taskbar_attention", { label, count, input_count: inputCount });
     } catch {
         /* older host without the verb */
     }
@@ -173,19 +181,24 @@ export function installOsNotifyBridge(): () => void {
         },
     });
 
-    let lastCount = -1;
+    let lastKey = "";
     let latestCount = 0;
+    let latestInput = 0;
     const taskbarOn = () => (getSettingsKeyAtom("notify:taskbar:attention" as any)() as boolean | undefined) ?? true;
     const syncTaskbar = () => {
-        const count = taskbarOn() ? latestCount : 0;
-        if (count === lastCount) return;
-        lastCount = count;
-        void applyTaskbarAttention(count);
+        const on = taskbarOn();
+        const count = on ? latestCount : 0;
+        const input = on ? latestInput : 0;
+        const key = `${count}|${input}`;
+        if (key === lastKey) return;
+        lastKey = key;
+        void applyTaskbarAttention(count, input);
     };
     const stateUnsub = muxEventSubscribe({
         eventType: EVENT_NOTIFICATION_STATE,
         handler: (event) => {
             latestCount = attentionCount(event.data);
+            latestInput = inputWaitingCount(event.data);
             syncTaskbar();
         },
     });

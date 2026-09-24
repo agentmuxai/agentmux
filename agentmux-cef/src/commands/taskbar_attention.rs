@@ -11,7 +11,9 @@
 // - count > 0 → an overlay badge on the window's taskbar button
 //   (`ITaskbarList3::SetOverlayIcon`), with an accessible description
 //   ("2 agents need you") that screen readers announce;
-// - count rose and the window isn't foreground → flash the taskbar button
+// - the number of agents WAITING ON INPUT (`input_count`) rose and the
+//   window isn't foreground → flash the taskbar button (crashes / review
+//   requests badge but never flash — spec Phase 4)
 //   (`FLASHW_TRAY | FLASHW_TIMERNOFG`: stops by itself once the window is
 //   focused). Only on a *rise* — Microsoft: "the more often you use the flash
 //   capability, the less likely it will be effective";
@@ -27,16 +29,18 @@ use crate::state::AppState;
 pub fn set_taskbar_attention(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).ok_or("set_taskbar_attention: label required")?;
     let count = args.get("count").and_then(|v| v.as_u64()).ok_or("set_taskbar_attention: count required")?;
+    // Older frontends omit it: treat every attention item as flash-worthy.
+    let input_count = args.get("input_count").and_then(|v| v.as_u64()).unwrap_or(count);
     #[cfg(target_os = "windows")]
     {
         let hwnd = state.window_hwnds.lock().get(label).copied();
         match hwnd {
-            Some(h) => win::post(h, count.min(99) as u32),
+            Some(h) => win::post(h, count.min(99) as u32, input_count.min(99) as u32),
             None => tracing::debug!(label, "set_taskbar_attention: no HWND for label"),
         }
     }
     #[cfg(not(target_os = "windows"))]
-    let _ = (state, label, count);
+    let _ = (state, label, count, input_count);
     Ok(serde_json::Value::Null)
 }
 
@@ -55,9 +59,9 @@ pub fn taskbar_button_created_msg() -> u32 {
 /// Never flashes: the count hasn't risen.
 #[cfg(target_os = "windows")]
 pub fn reapply(hwnd: isize) {
-    if let Some(count) = win::last_count(hwnd) {
+    if let Some((count, input)) = win::last_count(hwnd) {
         if count > 0 {
-            win::post(hwnd, count);
+            win::post(hwnd, count, input);
         }
     }
 }
@@ -71,7 +75,8 @@ pub fn description(count: u32) -> String {
     }
 }
 
-/// Flash only when attention grew and the window isn't already in front.
+/// Flash only when the number of agents waiting on input grew and the window
+/// isn't already in front.
 pub fn should_flash(prev: u32, next: u32, is_foreground: bool) -> bool {
     next > prev && !is_foreground
 }
@@ -84,28 +89,29 @@ mod win {
     use cef::*;
     use windows_sys::core::GUID;
 
-    /// Last count applied per HWND (for the flash-on-rise rule).
-    static LAST: Mutex<Option<HashMap<isize, u32>>> = Mutex::new(None);
+    /// Last (count, input_count) applied per HWND (flash-on-rise + replay).
+    static LAST: Mutex<Option<HashMap<isize, (u32, u32)>>> = Mutex::new(None);
 
     wrap_task! {
         pub struct SetAttentionTask {
             hwnd: isize,
             count: u32,
+            input: u32,
         }
 
         impl Task {
             fn execute(&self) {
-                unsafe { apply(self.hwnd, self.count) }
+                unsafe { apply(self.hwnd, self.count, self.input) }
             }
         }
     }
 
-    pub fn last_count(hwnd: isize) -> Option<u32> {
+    pub fn last_count(hwnd: isize) -> Option<(u32, u32)> {
         LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&hwnd).copied())
     }
 
-    pub fn post(hwnd: isize, count: u32) {
-        let mut task = SetAttentionTask::new(hwnd, count);
+    pub fn post(hwnd: isize, count: u32, input: u32) {
+        let mut task = SetAttentionTask::new(hwnd, count, input);
         post_task(ThreadId::UI, Some(&mut task));
     }
 
@@ -156,15 +162,15 @@ mod win {
         set_overlay_icon: unsafe extern "system" fn(*mut ITaskbarList3, Ptr, Ptr, *const u16) -> i32,
     }
 
-    unsafe fn apply(hwnd: isize, count: u32) {
+    unsafe fn apply(hwnd: isize, count: u32, input: u32) {
         use windows_sys::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             FlashWindowEx, GetForegroundWindow, FLASHWINFO, FLASHW_TIMERNOFG, FLASHW_TRAY,
         };
 
-        let prev = {
+        let prev_input = {
             let mut g = LAST.lock().unwrap_or_else(|e| e.into_inner());
-            g.get_or_insert_with(HashMap::new).insert(hwnd, count).unwrap_or(0)
+            g.get_or_insert_with(HashMap::new).insert(hwnd, (count, input)).map(|(_, i)| i).unwrap_or(0)
         };
 
         let mut tbl: *mut ITaskbarList3 = std::ptr::null_mut();
@@ -193,7 +199,7 @@ mod win {
         }
 
         let foreground = GetForegroundWindow() as isize == hwnd;
-        if super::should_flash(prev, count, foreground) {
+        if super::should_flash(prev_input, input, foreground) {
             let fi = FLASHWINFO {
                 cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
                 hwnd: hwnd as _,

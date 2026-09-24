@@ -218,6 +218,9 @@ pub struct AttentionItem {
     pub id: String,
     pub block_id: String,
     pub title: String,
+    /// Lets surfaces treat kinds differently — e.g. only `InputWaiting`
+    /// flashes the taskbar (spec Phase 4).
+    pub kind: NotifyKind,
 }
 
 /// Snapshot the tray renders (§4.2).
@@ -542,7 +545,7 @@ impl PolicyState {
         TrayState {
             attention: attention
                 .into_iter()
-                .map(|n| AttentionItem { id: n.id.clone(), block_id: n.block_id.clone(), title: n.title.clone() })
+                .map(|n| AttentionItem { id: n.id.clone(), block_id: n.block_id.clone(), title: n.title.clone(), kind: n.kind })
                 .collect(),
             paused_until_ms: if s.pause_until_ms > now_ms { s.pause_until_ms } else { 0 },
         }
@@ -841,6 +844,7 @@ mod tests {
         assert_eq!(t.attention.len(), 1);
         assert_eq!(t.attention[0].block_id, "b1");
         assert_eq!(t.attention[0].title, "lark needs your input");
+        assert_eq!(t.attention[0].kind, NotifyKind::InputWaiting);
         assert_eq!(t.paused_until_ms, 1_000_000);
         assert_eq!(p.tray_state(&s, 2_000_000).paused_until_ms, 0);
     }
