@@ -398,17 +398,30 @@ pub fn resolve_bound_oauth_config_dir(
     bound_oauth_config_dir(mstore, id_store, identity_store, &instance)
 }
 
-/// [`resolve_bound_oauth_config_dir`] for an agent row by its id, with no
-/// block — memory resolution's question (#3603): where does this agent's
-/// Claude run, so where are its memories.
-pub fn resolve_bound_oauth_config_dir_for_agent(
+/// [`resolve_bound_oauth_config_dir`] for a **Claude** agent row by its id,
+/// with no block — memory resolution's question (#3603): where does this
+/// agent's Claude run, so where are its memories (`projects/<cwd>/memory`,
+/// a Claude layout). `None` for any other provider, and for an account bound
+/// to the ambient `~/.claude` — the spawn refuses that dir, and memory
+/// writes must never land in the user's own Claude projects.
+pub fn resolve_bound_claude_config_dir_for_agent(
     mstore: &Store,
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
     agent_id: &str,
 ) -> Option<PathBuf> {
     let instance = mstore.instance_get(agent_id).ok().flatten()?;
-    bound_oauth_config_dir(mstore, id_store, identity_store, &instance)
+    let def = mstore.agent_def_get(&instance.definition_id).ok().flatten()?;
+    let provider = id_store.resolve_effective_provider_id(&def);
+    if resolve_provider_alias(&provider) != "claude" {
+        return None;
+    }
+    let dir = bound_oauth_config_dir(mstore, id_store, identity_store, &instance)?;
+    let claude = crate::backend::providers::get_provider("claude")?;
+    if crate::backend::providers::is_provider_ambient_home_dir(claude, &dir.to_string_lossy()) {
+        return None;
+    }
+    Some(dir)
 }
 
 fn bound_oauth_config_dir(
