@@ -2702,18 +2702,20 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         return Ok(());
     };
     let now = agentmux_common::time::now_secs();
-    for n in [slug, name, instance_name] {
-        // Folded as the key tables fold their names (`to_lowercase`); M4d
-        // compares in Rust, never with SQLite's ASCII-only `lower()`.
-        let n = n.trim().to_lowercase();
-        if n.is_empty() {
-            continue;
-        }
-        // Signing keys are keyed by slug (`AGENTMUX_AGENT_ID`), so a name
-        // another agent holds as its slug is that agent's key, not this
-        // one's: deleting the second "AgentY" must not tombstone the first
-        // one's `agenty` (adversarial review of #3571).
-        if slug_held_by_another(conn, id, &n)? {
+    // The same names, and the same "another agent may sign under it" rule,
+    // as the key purge (M4d-1): a tombstone records a name whose keys were
+    // the dead agent's, so it must never be planted against a live agent's
+    // (ReAgent on #3633). Folded as the key tables fold (`to_lowercase`);
+    // compared in Rust, never with SQLite's ASCII-only `lower()`. Deleting
+    // the second "AgentY" must not tombstone the first one's `agenty`
+    // (adversarial review of #3571).
+    let mut candidates = key_names_of(&slug, &name, &instance_name);
+    for former in former_names(conn, id)? {
+        candidates.extend(key_names_of("", &former, ""));
+    }
+    for n in candidates {
+        let n = n.trim().to_string();
+        if n.is_empty() || key_name_used_by_another(conn, id, &n)? {
             continue;
         }
         conn.execute(
@@ -2724,62 +2726,166 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
     Ok(())
 }
 
-/// Whether any row other than `id` holds `folded` as its slug, folded as the
-/// key tables fold their names (`to_lowercase`).
-///
-/// - **Templates count.** `agent.open` of a template, and template-based
-///   continuations, sign under the template's slug, and the old
-///   consolidation copied a template's slug verbatim onto ordinary rows —
-///   so deleting the last such row must not purge keys the template's live
-///   launches use (adversarial review of #3575).
-/// - **Folded in Rust**, not with SQLite's `lower()`, which folds ASCII only:
-///   slugs `Ä` and `ä` share the key filed under `ä` (Codex P2 on #3575).
-fn slug_held_by_another(
-    conn: &rusqlite::Connection,
-    id: &str,
-    folded: &str,
-) -> Result<bool, StoreError> {
-    let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE id != ?1")?;
-    let slugs = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
-    for slug in slugs {
-        if slug?.to_lowercase() == folded {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// Delete the signing keys filed under `id`'s slug — its jekt HMAC key and
-/// its LAN and WAN keypairs, which are keyed by name, not UID (identity
-/// M4a-3, spec §6.5.4). Without this a later agent that takes the name is
+/// Delete the signing keys filed under every name `id` may have signed as —
+/// its jekt HMAC key and its LAN and WAN keypairs, which are keyed by name,
+/// not UID. M4a-3 (spec §6.5.4) deleted them under the slug; M4d-1
+/// (§6.5.10) also under the display name, `instance_name` and the fallback
+/// ids ([`key_names_of`]). Without this a later agent that takes a name is
 /// handed the dead agent's keys by `ensure`'s `INSERT OR IGNORE`, and signs
-/// as it. Read before the row is deleted; a name another row holds as its
-/// slug is that agent's key and is left alone. The slug only: it is the
-/// name the MCP signs as (`AGENTMUX_AGENT_ID`). Folded as the key tables
-/// fold (`to_lowercase`). A template row is skipped, as in
-/// [`tombstone_key_names`]. Idempotent.
+/// as it. Read before the row is deleted; a name another row may sign under
+/// ([`key_name_used_by_another`]) is that agent's key and is left alone.
+/// Folded as the key tables fold (`to_lowercase`). A template row is
+/// skipped, as in [`tombstone_key_names`]. Idempotent.
 fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
-    let slug: Option<String> = conn
+    let names: Option<(String, String, String)> = conn
         .query_row(
-            "SELECT slug FROM db_agents WHERE id = ?1 AND is_template = 0",
+            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
             params![id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map(Some)
         .or_else(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             e => Err(e),
         })?;
-    // Not trimmed: the key tables file the name exactly as sent, folded.
-    let Some(name) = slug
-        .map(|s| s.to_lowercase())
-        .filter(|s| !s.trim().is_empty())
-    else {
+    let Some((slug, name, instance_name)) = names else {
         return Ok(0);
     };
-    if slug_held_by_another(conn, id, &name)? {
-        return Ok(0);
+    let mut removed = 0;
+    let mut candidates = key_names_of(&slug, &name, &instance_name);
+    for former in former_names(conn, id)? {
+        for n in key_names_of("", &former, "") {
+            if !candidates.contains(&n) {
+                candidates.push(n);
+            }
+        }
     }
+    for key_name in candidates {
+        if key_name_used_by_another(conn, id, &key_name)? {
+            continue;
+        }
+        removed += delete_key_rows(conn, &key_name)?;
+    }
+    if removed > 0 {
+        tracing::info!(
+            agent = id,
+            removed,
+            "identity M4d-1: deleted the dead agent's name-keyed signing keys"
+        );
+    }
+    Ok(removed)
+}
+
+/// Every name a key row could be filed under for this agent, folded as the
+/// key tables fold (`to_lowercase`) — identity M4d-1 (spec §6.5.10). The
+/// slug exactly as sent (M4a-3); the display name and `instance_name`,
+/// trimmed, as the tombstone records them; and `agent.open`'s fallback id,
+/// the display name lowercased with non-alphanumerics made `-` (used when a
+/// definition has no slug: `Zed Bot` is keyed `zed-bot`).
+fn key_names_of(slug: &str, name: &str, instance_name: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut push = |n: String| {
+        if !n.trim().is_empty() && !names.contains(&n) {
+            names.push(n);
+        }
+    };
+    push(slug.to_lowercase());
+    push(name.trim().to_lowercase());
+    push(instance_name.trim().to_lowercase());
+    // Both fallbacks of the display name and of `instance_name`: an agent
+    // renamed after its first launch keeps its launch name there, and that
+    // name's fallback may still key its signing material (Codex P1 on #3633).
+    for n in [name, instance_name] {
+        if !n.trim().is_empty() {
+            push(agent_open_fallback_id(n));
+            push(frontend_fallback_id(n));
+        }
+    }
+    names
+}
+
+/// `agent.open`'s id for a definition with no slug (`agent_open.rs`).
+fn agent_open_fallback_id(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect()
+}
+
+/// The frontend's id for a launch with no slug — a template-created agent's
+/// first session (`agent-config-builder.ts`: `/[^a-z0-9-_]/g` → `-`, ASCII
+/// only, unlike `agent.open`'s).
+///
+/// JavaScript's non-`u` regex replaces each UTF-16 **code unit**, so a
+/// character outside the BMP becomes two dashes (`Agent 🚀` → `agent---`),
+/// not one (Codex P1 on #3633).
+fn frontend_fallback_id(name: &str) -> String {
+    let mut id = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' {
+            id.push(c);
+        } else {
+            id.extend(std::iter::repeat('-').take(c.len_utf16()));
+        }
+    }
+    id
+}
+
+/// Every display / instance name `id` has had before its current ones
+/// (`db_agent_former_names`, recorded by trigger on every rename path).
+fn former_names(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, StoreError> {
+    let mut stmt = conn.prepare("SELECT name FROM db_agent_former_names WHERE agent_id = ?1")?;
+    let rows = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Whether another row may sign under `folded`: holds it as its slug, or its
+/// display name or `instance_name` gives that fallback id (`agent.open`'s or
+/// the frontend's).
+/// Any row, whatever its slug: a template-created agent's first session
+/// signs under the fallback id although its row has a derived slug (review
+/// of #3633), so two same-named agents share that key. Such a key is left.
+/// **Templates count**: `agent.open` of a template and template-based
+/// continuations sign under the template's slug. Folded as the key tables
+/// fold (`to_lowercase`), not SQLite's ASCII-only `lower()`: slugs `Ä` and
+/// `ä` share the key filed under `ä` (Codex P2 on #3575).
+fn key_name_used_by_another(
+    conn: &rusqlite::Connection,
+    id: &str,
+    folded: &str,
+) -> Result<bool, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id != ?1")?;
+    let rows = stmt.query_map(params![id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    })?;
+    for row in rows {
+        let (slug, name, instance_name) = row?;
+        let fallback_of = |n: &str| {
+            !n.trim().is_empty() && (agent_open_fallback_id(n) == folded || frontend_fallback_id(n) == folded)
+        };
+        if slug.to_lowercase() == folded || fallback_of(&name) || fallback_of(&instance_name) {
+            return Ok(true);
+        }
+    }
+    // A live agent's former names too: its running session may still sign
+    // under an earlier name's fallback until it relaunches.
+    let mut stmt = conn.prepare("SELECT name FROM db_agent_former_names WHERE agent_id != ?1")?;
+    let formers = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+    for n in formers {
+        let n = n?;
+        if n.trim().to_lowercase() == folded
+            || agent_open_fallback_id(&n) == folded
+            || frontend_fallback_id(&n) == folded
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Delete one name's rows from the three name-keyed key tables.
+fn delete_key_rows(conn: &rusqlite::Connection, name: &str) -> Result<usize, StoreError> {
     let mut removed = 0;
     for table in [
         "db_agent_jekt_keys",
@@ -2798,13 +2904,6 @@ fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize,
                 params![name],
             )?;
         }
-    }
-    if removed > 0 {
-        tracing::info!(
-            agent = id,
-            removed,
-            "identity M4a-3: deleted the dead agent's name-keyed signing keys"
-        );
     }
     Ok(removed)
 }
@@ -3655,5 +3754,20 @@ mod bundle_provisioning_store_separation_tests {
 
         assert_eq!(id_store.resolve_effective_provider_id(&agent), "codex", "must find it via the store it was actually provisioned into");
         assert_eq!(mstore.resolve_effective_provider_id(&agent), "claude", "an unrelated store must fall back to agent.provider, not silently succeed");
+    }
+}
+
+#[cfg(test)]
+mod fallback_id_tests {
+    use super::*;
+
+    /// Byte-for-byte with `agent-config-builder.ts`'s
+    /// `name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")` (UTF-16 units).
+    #[test]
+    fn the_frontend_fallback_matches_javascript_utf16_semantics() {
+        assert_eq!(frontend_fallback_id("Agent 🚀"), "agent---");
+        assert_eq!(frontend_fallback_id("Agent (v2)"), "agent--v2-");
+        assert_eq!(frontend_fallback_id("Café Bot"), "caf--bot");
+        assert_eq!(agent_open_fallback_id("Café Bot"), "café-bot");
     }
 }

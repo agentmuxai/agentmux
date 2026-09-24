@@ -1065,6 +1065,37 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             deleted_at  INTEGER NOT NULL DEFAULT 0
         );
 
+        -- Identity M4d-1: every display / instance name an agent has had.
+        -- Keys are filed under names (and their fallback ids), and every
+        -- write path that renames an agent — rename, the continuation fold,
+        -- anything later — leaves keys under the old name, so the purge must
+        -- still find them. Recorded by trigger so no write path can miss it;
+        -- never capped; deleted with the row. Additive, applied on every
+        -- open, so no version bump.
+        CREATE TABLE IF NOT EXISTS db_agent_former_names (
+            agent_id    TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            recorded_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, name),
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_agents_former_name
+            AFTER UPDATE OF name ON db_agents
+            WHEN old.is_template = 0 AND old.name <> new.name AND trim(old.name) <> ''
+        BEGIN
+            INSERT OR IGNORE INTO db_agent_former_names (agent_id, name, recorded_at)
+            VALUES (old.id, old.name, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_agents_former_instance_name
+            AFTER UPDATE OF instance_name ON db_agents
+            WHEN old.is_template = 0
+             AND COALESCE(old.instance_name, '') <> COALESCE(new.instance_name, '')
+             AND trim(COALESCE(old.instance_name, '')) <> ''
+        BEGIN
+            INSERT OR IGNORE INTO db_agent_former_names (agent_id, name, recorded_at)
+            VALUES (old.id, old.instance_name, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+        END;
+
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
         -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).
         -- Distinct from db_agent_lan_keys (this instance's OWN agents'

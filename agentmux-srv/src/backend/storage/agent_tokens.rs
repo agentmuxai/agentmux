@@ -400,6 +400,120 @@ mod tests {
         }
     }
 
+    /// Identity M4d-1 (spec §6.5.10): deleting an agent also deletes keys
+    /// filed under the other names it answered to — display name,
+    /// `instance_name`, and `agent.open`'s fallback id — except a name another
+    /// agent signs under (here: another row holds `zed-bot` as its slug).
+    #[test]
+    fn deleting_an_agent_deletes_the_keys_under_all_its_names() {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = object_store();
+        let mut zed = test_agent_def("uid-zed", "Zed Bot", "claude", "agent", 1, "");
+        zed.slug = "zb".to_string();
+        store.agent_def_insert(&mut zed).unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET instance_name = 'Zeddy' WHERE id = 'uid-zed'", [])
+            .unwrap();
+        let mut other = test_agent_def("uid-other", "Other", "claude", "agent", 1, "");
+        other.slug = "zed-bot".to_string();
+        store.agent_def_insert(&mut other).unwrap();
+        for name in ["zb", "zed bot", "zeddy", "zed-bot"] {
+            store.agent_lan_key_ensure(name).unwrap();
+            store.agent_jekt_key_ensure(name).unwrap();
+        }
+
+        assert!(store.agent_def_delete("uid-zed").unwrap());
+        for gone in ["zb", "zed bot", "zeddy"] {
+            assert!(store.agent_lan_key_load(gone).unwrap().is_none(), "{gone}");
+            assert!(store.agent_jekt_key_load(gone).unwrap().is_none(), "{gone}");
+        }
+        assert!(
+            store.agent_lan_key_load("zed-bot").unwrap().is_some(),
+            "the fallback id another agent holds as its slug stays"
+        );
+        assert!(store.agent_jekt_key_load("zed-bot").unwrap().is_some());
+
+        // Two template-created agents named "Agent (v2)" (slugs agent-v2,
+        // agent-v2-2) both sign their first session as the fallback id
+        // `agent--v2-`: deleting one leaves it for the other (review of #3633).
+        for (id, slug) in [("uid-v2a", "agent-v2"), ("uid-v2b", "agent-v2-2")] {
+            let mut def = test_agent_def(id, "Agent (v2)", "claude", "agent", 1, "");
+            def.slug = slug.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+        }
+        store.agent_lan_key_ensure("agent--v2-").unwrap();
+        assert!(store.agent_def_delete("uid-v2a").unwrap());
+        assert!(
+            store.agent_lan_key_load("agent--v2-").unwrap().is_some(),
+            "the same-named sibling still signs under it"
+        );
+
+        // Renamed after its first launch: the launch name, kept as
+        // `instance_name`, keyed its first session's fallback — purged too
+        // (Codex P1 on #3633).
+        let mut renamed = test_agent_def("uid-renamed", "New Name", "claude", "agent", 1, "");
+        renamed.slug = "new-name".to_string();
+        store.agent_def_insert(&mut renamed).unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET instance_name = 'Old (launch)' WHERE id = 'uid-renamed'", [])
+            .unwrap();
+        store.agent_lan_key_ensure("old--launch-").unwrap();
+        assert!(store.agent_def_delete("uid-renamed").unwrap());
+        assert!(store.agent_lan_key_load("old--launch-").unwrap().is_none());
+
+        // The picker's rename overwrites both the display name and
+        // instance_name; the old name is remembered, so its fallback key
+        // is still purged at delete (Codex P1 on #3633).
+        let mut v2 = test_agent_def("uid-v2-renamed", "Agent (v2)", "claude", "agent", 1, "");
+        v2.slug = "agent-v2-r".to_string();
+        store.agent_def_insert(&mut v2).unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET instance_name = 'Agent (v2)' WHERE id = 'uid-v2-renamed'", [])
+            .unwrap();
+        // The earlier "Agent (v2)" pair is gone, so nobody else signs as
+        // agent--v2- now except this row's first session.
+        assert!(store.agent_def_delete("uid-v2b").unwrap());
+        store.agent_lan_key_ensure("agent--v2-").unwrap();
+        v2.name = "New Name".to_string();
+        store.agent_def_update(&mut v2).unwrap();
+        assert!(store.instance_rename("uid-v2-renamed", "New Name").unwrap());
+        assert!(store.agent_def_delete("uid-v2-renamed").unwrap());
+        assert!(
+            store.agent_lan_key_load("agent--v2-").unwrap().is_none(),
+            "the pre-rename fallback key is purged"
+        );
+
+        // Any write path is recorded — a raw UPDATE stands in for the
+        // continuation fold — and never evicted, however many renames
+        // (Codex P1/P2 on #3633).
+        let mut many = test_agent_def("uid-many", "First Name", "claude", "agent", 1, "");
+        many.slug = "many".to_string();
+        store.agent_def_insert(&mut many).unwrap();
+        store.agent_lan_key_ensure("first-name").unwrap();
+        for i in 0..25 {
+            store
+                .conn()
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE db_agents SET name = ?1, instance_name = ?1 WHERE id = 'uid-many'",
+                    rusqlite::params![format!("Name {i}")],
+                )
+                .unwrap();
+        }
+        assert!(store.agent_def_delete("uid-many").unwrap());
+        assert!(store.agent_lan_key_load("first-name").unwrap().is_none(), "the first name, 25 renames ago");
+    }
+
     /// Slug ownership is folded as the key tables fold (`to_lowercase`), not
     /// with SQLite's ASCII-only `lower()`: agents with slugs `Ä` and `ä`
     /// share the key filed under `ä`, so deleting one must leave it for the
