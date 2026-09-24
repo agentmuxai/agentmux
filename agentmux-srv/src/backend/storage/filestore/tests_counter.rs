@@ -389,6 +389,34 @@ fn an_older_builds_append_order_does_not_bump_rev() {
 }
 
 #[test]
+fn a_stamped_append_writes_the_line_and_its_stamp_together() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"{\"a\":1}\n").unwrap();
+    let p = fs.append_lines_stamped(ZONE, NAME, b"{\"b\":2}\n", "output.tsidx").unwrap();
+    assert_eq!((p.offset, pos(&p)), (8, (1, 2)));
+    let stamps = fs.read_file(ZONE, "output.tsidx").unwrap().unwrap();
+    let stamp: serde_json::Value = serde_json::from_slice(&stamps[..stamps.len() - 1]).unwrap();
+    assert_eq!(stamp["off"], serde_json::json!(8));
+    // Nothing appended: no stamp.
+    fs.append_lines_stamped(ZONE, NAME, b"\n \n", "output.tsidx").unwrap();
+    assert_eq!(fs.read_file(ZONE, "output.tsidx").unwrap().unwrap(), stamps);
+
+    // If the stamp can't be written, the line isn't either.
+    fs.conn()
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER no_stamp BEFORE INSERT ON db_file_data WHEN NEW.name = 'output.tsidx'
+             BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+        )
+        .unwrap();
+    let before = fs.line_state(ZONE, NAME).unwrap().unwrap();
+    assert!(fs.append_lines_stamped(ZONE, NAME, b"{\"c\":3}\n", "output.tsidx").is_err());
+    assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap(), before);
+}
+
+#[test]
 fn init_counts_a_file_larger_than_one_scan_window() {
     let fs = mem();
     fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();

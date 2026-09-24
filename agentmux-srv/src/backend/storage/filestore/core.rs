@@ -42,13 +42,26 @@ pub struct FileStore {
     pub(super) cache_total_bytes: Mutex<usize>,
     /// Maximum bytes the cache may hold before LRU eviction kicks in.
     pub(super) cache_max_bytes: usize,
+    /// Background WAL checkpoints for a file-backed store (checkpointer.rs);
+    /// `None` in memory, or if it couldn't start (SQLite's automatic
+    /// checkpoints stay on then).
+    pub(super) _checkpointer: Option<super::checkpointer::Checkpointer>,
 }
 
 impl FileStore {
     /// Open a FileStore backed by a file on disk.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
-        Self::configure_and_migrate(conn)
+        let mut store = Self::configure_and_migrate(conn)?;
+        // Checkpoints off the write path: a thread with its own connection
+        // runs them, and this connection stops running them inside whichever
+        // write crosses the threshold (checkpointer.rs). Only if the thread
+        // started — otherwise SQLite's automatic checkpoints stay.
+        if let Some(checkpointer) = super::checkpointer::Checkpointer::start(path) {
+            store.conn.lock().unwrap().execute_batch("PRAGMA wal_autocheckpoint=0;")?;
+            store._checkpointer = Some(checkpointer);
+        }
+        Ok(store)
     }
 
     /// Open an existing filestore **read-only** — the `Store::open_read_only`
@@ -64,6 +77,7 @@ impl FileStore {
             cache: Mutex::new(HashMap::new()),
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
+            _checkpointer: None,
         })
     }
 
@@ -122,6 +136,14 @@ impl FileStore {
                 Err(e) => return Err(e.into()),
             }
         }
+        // WAL + NORMAL, as the object store and saga log already are: a commit
+        // no longer waits for an fsync (the WAL is synced at checkpoints), so a
+        // transcript event — which waits for its writes since 5a-3 — isn't held
+        // ~2.5 ms per commit on Windows. It cannot corrupt the database; an OS
+        // crash or power cut (not an app crash) can lose the last commits.
+        // Chosen by the user over full fsync durability (2026-09-24, measured
+        // in SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7).
+        conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
         // Safety lock BEFORE migrations — same discipline as mstore /
         // sagas: refuse to touch a newer-schema DB on disk before any
         // mutating step runs. See `check_schema_compat` doc. All three in
@@ -140,6 +162,7 @@ impl FileStore {
             cache: Mutex::new(HashMap::new()),
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
+            _checkpointer: None,
         })
     }
 

@@ -732,7 +732,42 @@ to §6.3.6; paths under `agentmux-srv/src/`):
    - **Replace/delete stream events** (`fileop: "replace" | "delete"`, new
      `gen`, so an open pane learns at once) move to 5a-3, with the other
      events.
-5. **Events carry positions and go out after the write.** `WSFileEventData`
+5. **Events carry positions and go out after the write.** As built in
+   5a-3a, in `shell/file_ops.rs::append_transcript`:
+   - **Transcripts only.** Terminal (`term`) data still publishes before its
+     write: publishing after would add a database write to every keystroke
+     echo.
+   - **Whole lines.** Both writes use `append_lines`, so a torn tail is
+     closed rather than continued. The k-th non-blank line of the event's
+     `data64` is record `line + k`.
+   - **Ordering and offset.** The per-block lock is striped (64 mutexes):
+     bounded memory, nothing to clean up. The event's `offset` is now the
+     exact landing offset, not a pre-append stat.
+   - **Latency (measured, release build, Windows, 3 × 3,000 lines of ~1 KB,
+     `transcript_event_latency`).** Three changes were needed to meet the
+     gate:
+     - **One commit per stream.** Each line and its `output.tsidx` stamp are
+       written in one transaction (`append_lines_stamped`), so two commits
+       per line instead of four.
+     - **`synchronous=NORMAL`** for `FileStore`, as the object store and saga
+       log already use. The user chose this over full fsync durability on
+       2026-09-24: it can't corrupt the database, but an OS crash or power
+       cut can lose the last commits.
+     - **Background checkpoints.** Every append rewrites a whole 64 KB part,
+       so SQLite's automatic checkpoint ran about every 60 lines, inside a
+       write. `FileStore` connections now run `wal_autocheckpoint=0`, and a
+       thread with its own connection runs PASSIVE checkpoints past 4 MB.
+
+     | per line | p50 | p99 |
+     |---|---|---|
+     | before 5a-3a: four commits (the event went out first; the stdout reader waited this long before its next line), `synchronous=FULL` | 7.1–8.1 ms | 21–41 ms |
+     | 5a-3a, event waits: block file only | 0.69–0.74 ms | **1.6–1.7 ms** |
+     | 5a-3a, event waits: block file + global zone | 1.25–1.30 ms | 3.0 ms |
+
+     Gate met: p99 added latency ≤ 2 ms on the local store. Rare single
+     outliers of 1–2 s occur with and without these changes.
+
+   `WSFileEventData`
    gains `pos: [{ stream, gen, line, lines }]`, where `stream` is
    `b:<blockId>` or `g:<zone>`. It carries one entry for the block file and one
    for the global zone when the mirror succeeded. `offset` stays for terminal
@@ -788,7 +823,9 @@ to §6.3.6; paths under `agentmux-srv/src/`):
 | 5a-1 | `BEGIN IMMEDIATE` for every `FileStore` mutation; fix the "single-tx" comments | Two `FileStore` instances on one database file, many threads each appending numbered lines: every line present exactly once, intact. Append latency before/after. |
 | 5a-2a | `gen` + counter epoch columns (no schema bump), `append_lines`, torn-tail repair, `init_line_counter`, the shared line rule | Property test: the counter equals the `output.idx` indexer on random bytes (blank, CRLF, VT, broken UTF-8, torn tails). Concurrent `append_lines` from two stores hand out distinct indices that address their records. An older build's write drops the epoch; a re-count gets a new `gen`. A database created by an older build opens concurrently, gains the columns and counts. |
 | 5a-2b | `replace_file` / `delete_files` (one transaction) on the archive, clear, restore and backfill paths; `output.idx` labelled with its generation and trusted only on a match; index sizes and scans read from the database; `write_state` refuses transcript names | A same-size replace is no longer served the old index (reproduced first). A failed replace or delete changes nothing. The indexer labels what it read. Full `agentmux-srv` suite. |
-| 5a-3 | Positions on live events and read responses; publish-after-write under the per-stream lock; silent persist with `echo`; error frames and app-server mirrored; `replace`/`delete` events | Backend tests per event source; an event's `line` indexes exactly its record in a range read. |
+| 5a-3a | Transcript appends written first (`append_lines`, block file and global zone) and published after under a striped per-block lock, with `pos` per stream and the exact offset; terminal data unchanged | Each event carries both streams' positions, numbered independently; the record is on disk when its event arrives; concurrent writers to one block publish in line order and each `line` addresses its record; a torn tail is closed and keeps its index. |
+| 5a-3b | Read responses name `{ stream, gen }`; `read_range` takes `expectGen`; the line count answers from the counter; a legacy row gets `init_line_counter` off the runtime; `replace` / `delete` events | Count from the counter equals the indexer's; a replace between count and read returns `genMismatch`. |
+| 5a-3c | The silent user-line persist publishes with `echo: { messageId }` and `agent-message-accepted` carries its `pos`; error frames and the app-server controller mirror to the global zone (touches the persistent controller: coordinate with `maricon/no-midturn-delivery-impl`) | Every record a pane shows live is in its stream. |
 | 5a-4 | Frontend consumer contract | Out-of-order, duplicate, gap, `gen` change mid-fetch, cross-process append via the poll; `full-conversation-bench` streaming cost unchanged. |
 
 **Known, not changed here.** Two live sessions of the same agent (for

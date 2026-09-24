@@ -1419,6 +1419,23 @@ declare global {
         // window against what its own reconnect fetch already covered — see
         // SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1 follow-up.
         offset?: number;
+        // Agent `output` appends to a counted transcript only: where the
+        // records landed in each stream (the block's file, the agent's
+        // global zone). Pick the entry for the stream the pane reads.
+        // SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7.
+        pos?: StreamPos[];
+    };
+
+    // mps.StreamPos
+    type StreamPos = {
+        // "b:<blockId>" (the block's own output) or "g:<zone>" (the agent's
+        // global transcript zone).
+        stream: string;
+        gen: string;
+        // Index of the first record this append wrote.
+        line: number;
+        // The stream's line count after this append.
+        lines: number;
     };
 
     // webcmd.WSRpcCommand
