@@ -55,7 +55,13 @@ say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*"; }
 is_fork_clone() {
   local d="$1"
   [ -n "$d" ] && [ -d "$d" ] || return 1
-  [ "$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$d" 2>/dev/null && pwd -P)" ] || return 1
+  # "Is $d the work-tree root?" asked of git itself: --show-cdup is empty exactly
+  # at the root ("../.." below it; an error outside any work tree). Comparing
+  # --show-toplevel with `pwd -P` instead never matched on Git for Windows,
+  # where git prints C:/Users/... and bash prints /c/Users/... or /tmp/...
+  local cdup
+  cdup="$(git -C "$d" rev-parse --show-cdup 2>/dev/null)" || return 1
+  [ -z "$cdup" ] || return 1
   git -C "$d" remote -v 2>/dev/null | grep -q 'agentmuxai/cef'
 }
 
