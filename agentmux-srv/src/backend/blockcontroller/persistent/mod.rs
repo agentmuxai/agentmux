@@ -128,6 +128,20 @@ fn session_outcome_line(
     attempted_sid: String,
     actual_sid: Option<String>,
 ) -> String {
+    session_outcome_line_with(outcome, attempted_sid, actual_sid, false)
+}
+
+/// [`session_outcome_line`], plus whether the fresh session was given
+/// AgentMux's record of the conversation (`continued`, SPEC_DURABLE_
+/// CONVERSATION_MEMORY_2026_09_23.md §4.8). The outcome stays `fresh`: the
+/// provider session is new, and every consumer that scopes scrollback on
+/// `fresh` keeps doing so. Only the pane's label changes.
+fn session_outcome_line_with(
+    outcome: persistent_resume::SessionOutcome,
+    attempted_sid: String,
+    actual_sid: Option<String>,
+    continued: bool,
+) -> String {
     let outcome_str = match outcome {
         persistent_resume::SessionOutcome::Resumed => "resumed",
         persistent_resume::SessionOutcome::Fresh => "fresh",
@@ -140,6 +154,7 @@ fn session_outcome_line(
             "outcome": outcome_str,
             "attempted_sid": attempted_sid,
             "actual_sid": actual_sid,
+            "continued": continued,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })
     )
