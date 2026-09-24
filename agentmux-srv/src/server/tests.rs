@@ -5123,10 +5123,15 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
                 expected,
                 "{site}: unattributed is not checked"
             );
-            assert_eq!(
-                with, without,
-                "{site}: counting changes nothing about the response"
-            );
+            // M4a-2's counting changes no response. Since M4c-2b the memory
+            // sites' owner is the Caller when attributed (§6.5.9), so there
+            // the token — not the count — does change it, by design.
+            if !site.starts_with("memory_") {
+                assert_eq!(
+                    with, without,
+                    "{site}: counting changes nothing about the response"
+                );
+            }
         }
     }
     for (site, method, uri, body) in m4a2_actor_requests("agenty-2") {
