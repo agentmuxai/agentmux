@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0a in #3626 (a first spawn continues the session its pane renders); P0b was already done by #3605; P0d in #3637 (180-day transcript retention). P0c (cold history index) and P1–P6 not started.
+**Status:** active — P0a in #3626 (a first spawn continues the session its pane renders); P0b was already done by #3605; P0c in #3638 (history index warmed at start, incremental refresh); P0d in #3637 (180-day transcript retention). P1–P6 not started.
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -447,7 +447,7 @@ the other providers need only an adapter plus an injection hook.
 
 | Phase | Scope | Closes |
 |---|---|---|
-| **P0** Stop the bleeding | (a) **Done in #3626.** A persistent controller's first spawn with no sid continues the session of the history its pane renders: the last provider session id in the pane's own transcript, else the agent's global zone. It's used only when `--resume` can reach it and no other pane holds it. It reads AgentMux's own record, not a provider-dir scan, so archived conversations and subagent transcripts are never picked up. It doesn't trust the registry `session_id` either, which `STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20` §3 shows is write-once and can be stale or a subagent's id. (b) ~~`SearchHistory` by UID~~, done in #3605. (c) Cold history index vs the MCP's 10 s timeout (§4.5, revised). (d) **In #3637.** Seed `cleanupPeriodDays: 180` into AgentMux-owned Claude config dirs. They junction `projects` to shared history, so the CLI's 30-day default swept every channel's history | §1.1 incident, retention sweep |
+| **P0** Stop the bleeding | (a) **Done in #3626.** A persistent controller's first spawn with no sid continues the session of the history its pane renders: the last provider session id in the pane's own transcript, else the agent's global zone. It's used only when `--resume` can reach it and no other pane holds it. It reads AgentMux's own record, not a provider-dir scan, so archived conversations and subagent transcripts are never picked up. It doesn't trust the registry `session_id` either, which `STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20` §3 shows is write-once and can be stale or a subagent's id. (b) ~~`SearchHistory` by UID~~, done in #3605. (c) **In #3638.** Cold history index vs the MCP's 10 s timeout (§4.5, revised): warm at srv start, re-parse only changed files, answer "still building" rather than time out. (d) **In #3637.** Seed `cleanupPeriodDays: 180` into AgentMux-owned Claude config dirs. They junction `projects` to shared history, so the CLI's 30-day default swept every channel's history | §1.1 incident, retention sweep |
 | **P1** Segment index | `conversation_segments` written at spawn and close. Backfill from existing FileStore zones and `db_agent_instances` | G3, G4 |
 | **P2** Projection + recall | Claude adapter, redaction, dedup. `SearchHistory` over the projection; `ReadHistory` | G5 |
 | **P3** Virtualized continuity (Claude) | Deterministic packet first, then the rolling LLM state block. R3 injection via #3502. Resolver ladder R0–R4 incl. fall-through. Pane chip | G1, G2 for Claude, including account switch |

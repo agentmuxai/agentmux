@@ -281,6 +281,16 @@ pub struct SessionIndex {
     /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
     /// §4.4.
     by_identity: Mutex<HashMap<String, Vec<String>>>,
+    /// file path -> (mtime it was parsed at, what it parsed to). A cold
+    /// refresh JSON-parses every line of every transcript on the machine
+    /// (42k files / 3.8 GB on one real host), so later refreshes reuse this
+    /// for files whose mtime hasn't moved. Only touched under `refresh_lock`.
+    meta_cache: Mutex<HashMap<String, (i64, Option<SessionMeta>)>>,
+    /// Serializes refreshes. Held for a whole refresh, never while taking any
+    /// lock above, so it adds no ordering constraint.
+    pub(super) refresh_lock: Mutex<()>,
+    /// Unix ms when the last refresh finished; 0 = never.
+    refreshed_at_ms: std::sync::atomic::AtomicI64,
     /// Adapters for all registered providers
     adapters: Vec<Box<dyn HistoryAdapter>>,
     /// Roots under which destructive ops (delete/clear) are allowed.
@@ -301,9 +311,28 @@ impl SessionIndex {
             sessions: Mutex::new(HashMap::new()),
             by_working_dir: Mutex::new(HashMap::new()),
             by_identity: Mutex::new(HashMap::new()),
+            meta_cache: Mutex::new(HashMap::new()),
+            refresh_lock: Mutex::new(()),
+            refreshed_at_ms: std::sync::atomic::AtomicI64::new(0),
             adapters,
             isolated_roots,
         }
+    }
+
+    /// Unix ms when the last refresh finished; 0 if none has.
+    pub fn refreshed_at_ms(&self) -> i64 {
+        self.refreshed_at_ms.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// [`Self::refresh`], unless another refresh is already running — then
+    /// `None` at once instead of waiting it out.
+    pub fn try_refresh(&self) -> Option<(u32, u32, u32)> {
+        let guard = match self.refresh_lock.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        Some(self.refresh_holding(guard))
     }
 
     /// True if `path` lives under an AgentMux-isolated provider home and is
@@ -315,9 +344,16 @@ impl SessionIndex {
     /// Full scan: discover all files and extract metadata.
     /// Returns (discovered, updated, new) counts.
     pub fn refresh(&self) -> (u32, u32, u32) {
+        let guard = self.refresh_lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.refresh_holding(guard)
+    }
+
+    fn refresh_holding(&self, _refreshing: std::sync::MutexGuard<'_, ()>) -> (u32, u32, u32) {
         let mut discovered: u32 = 0;
         let mut updated: u32 = 0;
         let mut new_count: u32 = 0;
+        let old_cache = std::mem::take(&mut *self.meta_cache.lock().unwrap());
+        let mut new_cache: HashMap<String, (i64, Option<SessionMeta>)> = HashMap::with_capacity(old_cache.len());
 
         let mut new_sessions: HashMap<String, SessionMeta> = HashMap::new();
         let mut new_by_identity: HashMap<String, Vec<String>> = HashMap::new();
@@ -339,7 +375,14 @@ impl SessionIndex {
             discovered += files.len() as u32;
 
             for file in &files {
-                match adapter.extract_meta(&file.file_path) {
+                let extracted = match old_cache.get(&file.file_path) {
+                    Some((mtime, cached)) if *mtime == file.mtime_ms => Ok(cached.clone()),
+                    _ => adapter.extract_meta(&file.file_path),
+                };
+                if let Ok(ref meta) = extracted {
+                    new_cache.insert(file.file_path.clone(), (file.mtime_ms, meta.clone()));
+                }
+                match extracted {
                     Ok(Some(meta)) => {
                         if !meta.identity_id.is_empty() {
                             new_by_identity
@@ -380,6 +423,12 @@ impl SessionIndex {
         *sessions = new_sessions;
         *self.by_identity.lock().unwrap() = new_by_identity;
         *self.by_working_dir.lock().unwrap() = new_by_working_dir;
+        drop(sessions);
+        *self.meta_cache.lock().unwrap() = new_cache;
+        self.refreshed_at_ms.store(
+            chrono::Utc::now().timestamp_millis().max(1),
+            std::sync::atomic::Ordering::Release,
+        );
 
         (discovered, updated, new_count)
     }
@@ -1306,5 +1355,148 @@ mod tests {
         let s = "İX";
         assert_eq!(find_case_insensitive(s, "x"), Some(2));
         assert!(s.is_char_boundary(find_case_insensitive(s, "x").unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    //! Incremental refresh (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md
+    //! §4.5): a cold refresh parses every transcript on the machine, so a
+    //! refresh must only re-parse what changed.
+    use super::*;
+    use std::sync::Arc;
+
+    /// Files whose mtimes a test can change between refreshes, counting every
+    /// `extract_meta` call per path.
+    struct ChangingAdapter {
+        files: Mutex<Vec<DiscoveredFile>>,
+        extracted: Mutex<Vec<String>>,
+    }
+
+    impl ChangingAdapter {
+        fn new(files: &[(&str, i64)]) -> Arc<Self> {
+            Arc::new(Self {
+                files: Mutex::new(
+                    files
+                        .iter()
+                        .map(|(p, m)| DiscoveredFile { file_path: p.to_string(), mtime_ms: *m })
+                        .collect(),
+                ),
+                extracted: Mutex::new(Vec::new()),
+            })
+        }
+        fn set(&self, files: &[(&str, i64)]) {
+            *self.files.lock().unwrap() = files
+                .iter()
+                .map(|(p, m)| DiscoveredFile { file_path: p.to_string(), mtime_ms: *m })
+                .collect();
+        }
+        fn take_extracted(&self) -> Vec<String> {
+            let mut v = std::mem::take(&mut *self.extracted.lock().unwrap());
+            v.sort();
+            v
+        }
+    }
+
+    impl HistoryAdapter for Arc<ChangingAdapter> {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            Ok(self
+                .files
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|f| DiscoveredFile { file_path: f.file_path.clone(), mtime_ms: f.mtime_ms })
+                .collect())
+        }
+        fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            self.extracted.lock().unwrap().push(file_path.to_string());
+            let id = PathBuf::from(file_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(Some(SessionMeta {
+                session_id: id,
+                file_path: file_path.to_string(),
+                provider: "mock".into(),
+                model: String::new(),
+                slug: String::new(),
+                working_directory: "/proj".into(),
+                created_at: 0,
+                modified_at: 0,
+                message_count: 0,
+                first_user_message: String::new(),
+                file_size_bytes: 0,
+                git_branch: String::new(),
+                total_tokens: 0,
+                subagent_count: 0,
+                identity_id: String::new(),
+            }))
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    fn index_over(adapter: &Arc<ChangingAdapter>) -> SessionIndex {
+        SessionIndex::with_isolated_roots(vec![Box::new(adapter.clone())], vec![])
+    }
+
+    #[test]
+    fn a_second_refresh_reparses_only_what_changed() {
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1), ("/h/b.jsonl", 1)]);
+        let idx = index_over(&a);
+        idx.refresh();
+        assert_eq!(a.take_extracted(), vec!["/h/a.jsonl", "/h/b.jsonl"]);
+
+        idx.refresh();
+        assert!(a.take_extracted().is_empty(), "unchanged files must not be re-parsed");
+
+        a.set(&[("/h/a.jsonl", 2), ("/h/b.jsonl", 1), ("/h/c.jsonl", 1)]);
+        idx.refresh();
+        assert_eq!(a.take_extracted(), vec!["/h/a.jsonl", "/h/c.jsonl"]);
+        assert!(idx.get_meta("c").is_some());
+    }
+
+    #[test]
+    fn a_file_gone_from_disk_leaves_the_index() {
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1), ("/h/b.jsonl", 1)]);
+        let idx = index_over(&a);
+        idx.refresh();
+        a.set(&[("/h/a.jsonl", 1)]);
+        idx.refresh();
+        assert!(idx.get_meta("b").is_none());
+        assert!(idx.get_meta("a").is_some());
+        assert!(a.take_extracted().len() == 2, "only the first refresh parsed");
+    }
+
+    #[test]
+    fn refreshed_at_is_zero_until_the_first_refresh_completes() {
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1)]);
+        let idx = index_over(&a);
+        assert_eq!(idx.refreshed_at_ms(), 0);
+        idx.refresh();
+        assert!(idx.refreshed_at_ms() > 0);
+    }
+
+    /// A search must never wait out a cold build behind the MCP's 10 s
+    /// timeout: while another refresh runs, `try_refresh` returns at once.
+    #[test]
+    fn try_refresh_does_not_wait_for_a_refresh_in_progress() {
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1)]);
+        let idx = index_over(&a);
+        let _running = idx.refresh_lock.lock().unwrap();
+        assert!(idx.try_refresh().is_none());
+        assert!(a.take_extracted().is_empty());
+    }
+
+    #[test]
+    fn try_refresh_refreshes_when_nothing_else_is() {
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1)]);
+        let idx = index_over(&a);
+        assert!(idx.try_refresh().is_some());
+        assert!(idx.get_meta("a").is_some());
     }
 }

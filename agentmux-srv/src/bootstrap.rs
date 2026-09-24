@@ -1419,6 +1419,7 @@ pub fn spawn_background_subsystems(
 
     // History service — discovers and indexes past CLI agent conversations
     let history_service = Arc::new(backend::history::HistoryService::new());
+    history_service.warm_in_background();
 
     // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB.
     // Skip if home directory can't be determined (would otherwise fall back to a
