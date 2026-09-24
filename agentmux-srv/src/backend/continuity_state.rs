@@ -45,6 +45,9 @@ const STATE_MAX_CHARS: usize = 12_000;
 /// A state version is well under this; reading the file's last window finds
 /// the newest without reading every version.
 const LATEST_WINDOW_BYTES: i64 = 64 * 1024;
+/// Ambient Model Call gateway purpose tag (`crate::ambient`), also the
+/// usage-dashboard category for this call site.
+const AMBIENT_PURPOSE: &str = "continuity_state";
 /// Off the launch path, so it can take longer than a pane-header summary.
 const SUMMARIZER_TIMEOUT: Duration = Duration::from_secs(90);
 /// The heading the summarizer must produce. Output without it is rejected
@@ -59,6 +62,11 @@ pub(crate) struct StateVersion {
     pub based_on: i64,
     pub sha256: String,
     pub text: String,
+    /// What the summarizer call cost, kept with the version it produced so
+    /// ambient usage stays auditable (`invoke_ambient_haiku_call`'s
+    /// accounting contract). `None` when the CLI reported no usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<crate::agents::TokenCounts>,
 }
 
 /// The newest state version for `zone`, when it describes the conversation
@@ -294,6 +302,9 @@ pub(crate) fn after_successful_turn(mstore: Option<Arc<Store>>, block_id: String
                 version = v.version,
                 based_on = v.based_on,
                 chars = v.text.len(),
+                purpose = AMBIENT_PURPOSE,
+                input_tokens = v.tokens.as_ref().map_or(0, |t| t.input),
+                output_tokens = v.tokens.as_ref().map_or(0, |t| t.output),
                 "continuity: state block updated"
             ),
             Ok(None) => {}
@@ -322,15 +333,25 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
         return Ok(None);
     }
 
+    // Through the Ambient Model Call gateway like every other ambient call.
+    // The transcript size is this agent's generation: it only grows. The
+    // `InFlight` claim above already keeps a second update from starting, so
+    // the gateway never has an older call of ours to cancel.
+    let key = crate::ambient::AmbientCallKey::new(zone.clone(), AMBIENT_PURPOSE);
+    let guard = match crate::ambient::gateway().admit(key, size as u64) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return Ok(None),
+    };
     let prompt = summarizer_prompt(latest.as_ref().map(|v| v.text.as_str()), &turns);
-    let (raw, _tokens) = crate::server::app_api::session::invoke_ambient_haiku_call_with_timeout(
+    let (raw, tokens) = crate::server::app_api::session::invoke_ambient_haiku_call_with_timeout(
         &cli_path,
         &prompt,
         &block.meta,
-        tokio_util::sync::CancellationToken::new(),
+        guard.cancellation(),
         SUMMARIZER_TIMEOUT,
     )
     .await?;
+    drop(guard);
     let text = accept_state(&raw).ok_or("summarizer reply is not a state block")?;
     let version = StateVersion {
         version: latest.as_ref().map_or(1, |v| v.version + 1),
@@ -338,6 +359,7 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
         based_on: size,
         sha256: sha256_hex(&text),
         text,
+        tokens,
     };
     append_version(gfs, &zone, &version)?;
     Ok(Some(version))
@@ -351,7 +373,7 @@ mod tests {
 
     fn version(n: u64, based_on: i64, created_at_ms: i64) -> StateVersion {
         let text = format!("## Current goal\ngoal {n}\n{REQUIRED_HEADING}\n\"q\" ANSWERED");
-        StateVersion { version: n, created_at_ms, based_on, sha256: sha256_hex(&text), text }
+        StateVersion { version: n, created_at_ms, based_on, sha256: sha256_hex(&text), text, tokens: None }
     }
 
     fn store_with_output(bytes: usize) -> FileStore {
@@ -368,6 +390,21 @@ mod tests {
         append_version(&fs, ZONE, &version(1, 100, 1)).unwrap();
         append_version(&fs, ZONE, &version(2, 500, 2)).unwrap();
         assert_eq!(latest_state(&fs, ZONE).unwrap().version, 2);
+    }
+
+    /// Usage is recorded with the version, and a line written without it
+    /// (the CLI reported none) still reads back.
+    #[test]
+    fn token_usage_round_trips_and_is_optional() {
+        let fs = store_with_output(1_000);
+        let mut v = version(1, 100, 1);
+        v.tokens = Some(crate::agents::TokenCounts { input: 7_000, output: 800, ..Default::default() });
+        append_version(&fs, ZONE, &v).unwrap();
+        assert_eq!(latest_state(&fs, ZONE).unwrap().tokens.unwrap().output, 800);
+        fs.append_data(ZONE, STATE_FILE, b"{\"version\":2,\"created_at_ms\":2,\"based_on\":200,\"sha256\":\"x\",\"text\":\"t\"}\n")
+            .unwrap();
+        let latest = latest_state(&fs, ZONE).unwrap();
+        assert_eq!((latest.version, latest.tokens), (2, None));
     }
 
     #[test]

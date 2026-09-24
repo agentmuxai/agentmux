@@ -365,7 +365,7 @@ It keeps the design and defers everything that needs P1's segment index.
 
 - **Storage.** Versions are appended to `continuity.state.jsonl` in the
   agent's global `agent:<defId>:current` zone, one JSON line each:
-  `{version, created_at_ms, based_on, sha256, text}`. `based_on` is the byte
+  `{version, created_at_ms, based_on, sha256, text, tokens?}`. `based_on` is the byte
   length of `output` the version covers, standing in for `based_on_seq` until
   P1. Versions are never rewritten. "New conversation" clears the file with
   the rest of the zone (`archive.rs`, `clear_global_current_zone`). A version
@@ -381,7 +381,10 @@ It keeps the design and defers everything that needs P1's segment index.
   claude`, valid `agentId`). Opt out per agent with `agent:continuity = off`
   (§4.7).
 - **Summarizer.** One Haiku call through the agent's own CLI and account
-  (`invoke_ambient_haiku_call_with_timeout`, 90 s). Input: the previous state,
+  (`invoke_ambient_haiku_call_with_timeout`, 90 s). It's admitted through the
+  Ambient Model Call gateway (purpose `continuity_state`, keyed by agent
+  zone, with the transcript size as the generation). Its token usage is
+  stored on the version it produced. Input: the previous state,
   plus the newest ~30k characters of new turns, redacted, with tool output
   omitted. The reply must contain `## Last user request`. Any closing
   paragraph addressed to the reader is cut, then the reply is capped at 12k
