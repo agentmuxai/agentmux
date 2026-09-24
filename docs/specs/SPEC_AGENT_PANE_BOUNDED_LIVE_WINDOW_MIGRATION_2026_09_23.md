@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** active — Phase 0 (bench + `main` baseline) in #3593; Phases 1 and 2 in #3599; Phases 3–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
+**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5 groundwork recorded in §6.3.6 (2026-09-24); Phases 4–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing
@@ -511,6 +511,74 @@ generation**:
 - The ranges are part of the pane's persisted state, so a remount doesn't
   reset them.
 
+#### 6.3.6 Phase 5 groundwork: what exists today (investigated 2026-09-24)
+
+§6.3.1–§6.3.3 assumed a transcript line number is already a stable address.
+A read-only investigation of `main` (four parallel code surveys) found it is
+not, and found durability gaps that exist today independent of eviction.
+Phase 5 is re-planned on these facts.
+
+**The transcript has no stable line identity.**
+
+- Reads (`BlockfileLineCountCommand` / `BlockfileReadRangeCommand`) are served
+  from the agent's **global zone** (`agent:<defId>:current`) whenever it is
+  non-empty, else from the block's own `output` (`global_output_source`,
+  `server/app_api/mod.rs`). The source can flip (zone cleared, `agentId` meta
+  change, archive), and the two files number lines differently.
+- Some records are appended **without an MPS event**
+  (`persist_to_blockfile_silent` — the Claude persistent controller's own
+  stdin user lines), so the live pane never sees them. Every block and channel
+  of the same agent appends to the shared global zone, and concurrent mirrors
+  can interleave.
+- There is no generation or epoch. `output` is replaced or deleted by
+  `session:archive` / `session:restore`, `agent:session:archive` and the
+  one-time transcript backfill. There is no ring window: `total` is the
+  all-time count (the "ring buffer window" comments in
+  `useHistoryPagination.ts` are stale).
+- Live events (`WSFileEventData`) carry a **byte** offset of the block's own
+  file — not a line index, and not of the file reads come from — and the
+  frontend drops it. History and live are joined only by node-id dedup.
+- No generic per-block append RPC exists (`blockfile:write_state` replaces a
+  whole file; `fileappend` has no backend handler).
+
+**Node ids already differ between live and replay.** The live parser's
+`skipIds` consumes counter values replay does not; replay does not flush text
+accumulators at `session_end` (live does); several ids and timestamps come
+from `Date.now()`. Positional ids are therefore also a correctness fix, not
+only an eviction prerequisite.
+
+**Tool node ids must not change.** `ToolNode.id` is the provider's
+`tool_use_id`, and several joins depend on it: tool output chunks, the dock,
+AskUserQuestion, replay merge, and the durable `db_background_tasks` table (a
+mismatch leaves rows "running" forever, silently). Positional ids apply only
+to the counter-minted kinds (text, thinking, agent and user messages, jekt,
+errors). Nothing parses the id format; persisted collapse/pin sets fail
+silently (a documented reset is enough); snapshot v1 embedded `nodes[]`
+should be treated as a schema reset.
+
+**Durability gaps today (independent of eviction):**
+
+| What | Lost when |
+|---|---|
+| User messages, Gemini-family providers | Always on reload: the CLI's echo is in `output`, the translator drops it |
+| User messages, Codex / Kimi / ACP | Always on reload: never persisted (ACP never even creates the node) |
+| Shell blocks and their output | srv restart, or more than 64 shells in a block (memory-only MPS rings) |
+| AskUserQuestion answer text | Always on reload (optimistic update only) |
+| Heuristic compaction marker, `compaction_started`, stderr rows, system notifications, "Interrupted" | Always on reload (live-only) |
+
+**Revised Phase 5 plan** (each a separate PR, each shippable alone):
+
+| Step | What | Where |
+|---|---|---|
+| 5a | Fix the transcript address at the source: one authoritative stream per pane, a **generation** that changes whenever it is replaced, deleted or re-sourced, and the **absolute line index** (of that stream) on every live event, including records written today without an event. Line-count and range-read responses carry the generation. | Backend (+ event type) |
+| 5b | Positional ids `G<gen>L<line>[.k]` for counter-minted kinds only; `src` / `endLine` / `turn`; replay flushes like live; `skipIds` removed; persisted collapse/pin reset; snapshot v1 treated as a schema reset. | Frontend parser |
+| 5c | Parser and translator `checkpoint()` / `restore()` with the completeness test; checkpoints persisted per block (needs an append RPC, added in 5a or here). | Frontend (+ RPC) |
+| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. | Frontend + backend |
+| 5e | Accepted ranges and the replay filter (§6.3.3). | Frontend |
+
+Order: 5d's Gemini echo fix can land any time; 5a before 5b and 5c; 5e last,
+just before Phase 6.
+
 #### 6.3.4 Eviction while pinned
 
 - **When:** at turn end (housekeeping priority, §6.5) while pinned.
@@ -723,7 +791,7 @@ Every phase:
 | **2 — Scheduler (E)** | §6.5 | key→paint targets met at N=0 with 4 panes streaming; starvation guard verified; no stream content lost (byte-for-byte transcript vs rendered comparison) |
 | **3 — Turn-scoped tail (B)** | §6.2 | Tail DOM independent of N; replaceChild crash repro suite and streaming-buffer tests green; zero invariant-1/3 assertions in soak; frame-by-frame screen recording shows no movement at turn end |
 | **4 — O(log n) stores (D)** | §6.6 | Property tests: 100k random sequences per run in CI, 10M locally, 0 divergences; reducer bench flat from 1k to 100k nodes |
-| **5 — Node identity and durability (C prerequisites)** | §6.3.1–§6.3.3: positional ids with file generation, `src`/`endLine`/`turn`, full-pipeline parser checkpoints + `parser-checkpoints.jsonl` + one-time index rebuild, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range restored from any checkpoint, in any page order, yields the same ids, nodes and turn ordinals as a parse from line 0 (100k random splits per CI run, every provider format, hidden reinjection included); the checkpoint-schema key test is in CI; replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
+| **5 — Node identity and durability (C prerequisites)** — re-planned as 5a–5e in §6.3.6 | §6.3.1–§6.3.3: positional ids with file generation, `src`/`endLine`/`turn`, full-pipeline parser checkpoints + `parser-checkpoints.jsonl` + one-time index rebuild, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range restored from any checkpoint, in any page order, yields the same ids, nodes and turn ordinals as a parse from line 0 (100k random splits per CI run, every provider format, hidden reinjection included); the checkpoint-schema key test is in CI; replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
 | **6 — Bounded live document (C)** | §6.3.4–§6.3.5 | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
 | **7 — History tab follows (C)** | §6.4 | Visible tab shows new turns ≤ 1 s after turn end; appends cost O(new lines) (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
 | **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
