@@ -869,7 +869,7 @@ fn find_recovery_session_id_recovers_the_largest_on_disk_session() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -921,7 +921,7 @@ fn find_recovery_session_id_refuses_an_already_poisoned_candidate() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = "/agents/agentx".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("dead-sid.jsonl"), vec![b'x'; 1_000]).unwrap();
@@ -961,7 +961,7 @@ fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_sessi
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -1011,7 +1011,7 @@ fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_witho
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -1096,7 +1096,7 @@ fn retry_after_resume_failure_with_no_entries_hands_a_queued_prompt_and_its_cand
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -2355,7 +2355,7 @@ fn retry_after_resume_failure_does_not_emit_an_outcome_yet_when_recovery_is_foun
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -2458,7 +2458,7 @@ fn retry_after_resume_failure_only_publishes_retrying_when_recovery_is_found() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();

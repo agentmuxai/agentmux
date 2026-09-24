@@ -65,7 +65,7 @@ mod tests;
 
 #[allow(unused_imports)]
 pub use parse::{
-    derive_claude_config_dir, encode_workspace_path, resolve_claude_config_dir,
+    derive_claude_config_dir, resolve_claude_config_dir,
     spawn_block_prune_subscriber,
 };
 pub(crate) use parse::read_task_prompt;
