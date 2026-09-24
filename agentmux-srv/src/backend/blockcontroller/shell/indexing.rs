@@ -168,6 +168,7 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
 /// Returns the number of indexed (non-blank) lines on success, or `None` if
 /// `output` is unreadable, was replaced during the scan, or the index write
 /// fails (caller falls back to slow path).
+#[cfg(test)]
 pub(crate) fn rebuild_output_idx(
     fs: &FileStore,
     block_id: &str,
