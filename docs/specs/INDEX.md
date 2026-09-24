@@ -846,6 +846,7 @@ partial list.
 | [`SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21`](SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md) | SPEC: Magnify & Zoom — Implementation Plan |
 | [`SPEC_MAGNIFY_ZOOM_REGRESSION_AND_DEFAULTS_2026-05-21`](SPEC_MAGNIFY_ZOOM_REGRESSION_AND_DEFAULTS_2026-05-21.md) | SPEC: Magnify zoom regression + magnified-pane defaults |
 | [`SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21`](SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21.md) | SPEC: Maximize & Zoom — Architecture Analysis |
+| [`SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24`](SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md) | SPEC: Memory follows the agent — an agent's memory survives upgrades, channel changes and account switches, as its conversation now does |
 | [`SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20`](SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md) | SPEC: Menu positioning framework — offset every menu into the paintable area |
 | [`SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24`](SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md) | Spec: Messaging App Integrations — Unified Plan |
 | [`SPEC_MESSAGING_INTEGRATION_DISCORD_POC_2026_06_24`](SPEC_MESSAGING_INTEGRATION_DISCORD_POC_2026_06_24.md) | Spec: Messaging App Integration — Discord POC |
