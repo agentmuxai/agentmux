@@ -5526,3 +5526,68 @@ async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(latest(&id).2, "", "Unattributed revert");
 }
+
+// ---- identity M4c-2: holder checks by UID ----
+
+/// Two agents both answer to `agenty`. The holder's token drives its item;
+/// the other's token, sending the same name, is refused with the existing
+/// 409; an Unattributed request keeps the name path and is counted.
+#[tokio::test]
+async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
+    let state = test_state();
+    state.mstore.attach_token_index().unwrap();
+    let holder = state.mstore.agent_token_ensure("uid-m4c2-y").unwrap();
+    let other = state.mstore.agent_token_ensure("uid-m4c2-y2").unwrap();
+    let item = crate::backend::storage::work_queue::WorkItem {
+        id: "w-m4c2-holder".into(),
+        title: "holder".into(),
+        payload: "do it".into(),
+        kind: "m4c2-holder".into(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: crate::backend::storage::work_queue::work_state::OPEN.into(),
+        claimed_by: String::new(),
+        target_agent_uid: String::new(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: String::new(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    state.identity_store.work_queue_enqueue(&item).unwrap();
+    let claim = serde_json::json!({"agent_id": "agenty", "kind": "m4c2-holder"});
+    let (status, v) = m4c1_send(&state, Some(&holder), "/agentmux/work/claim", claim).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let attempt = v["attempt"].as_i64().unwrap();
+    let body = serde_json::json!({"agent_id": "agenty", "attempt": attempt, "result": "r"});
+    // Other work tests take the name path in parallel, so the counter can
+    // only be checked to move; that a UID match is not counted is pinned by
+    // the store's `HolderMatch` (work_queue.rs tests).
+    let counter = "m4c.holder_by_name";
+
+    for op in ["heartbeat", "complete", "release"] {
+        let uri = format!("/agentmux/work/w-m4c2-holder/{op}");
+        let (status, v) = m4c1_send(&state, Some(&other), &uri, body.clone()).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{op}: {v}");
+    }
+    let uri = "/agentmux/work/w-m4c2-holder/heartbeat";
+    let (status, v) = m4c1_send(&state, Some(&holder), uri, body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    let before = m4a2_count(counter);
+    let (status, v) = m4c1_send(&state, None, uri, body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(m4a2_count(counter) > before, "Unattributed: by name, counted");
+
+    let uri = "/agentmux/work/w-m4c2-holder/complete";
+    let (status, v) = m4c1_send(&state, Some(&holder), uri, body).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let stored = state.identity_store.work_queue_get("w-m4c2-holder").unwrap().unwrap();
+    assert_eq!(stored.result, "r");
+}
