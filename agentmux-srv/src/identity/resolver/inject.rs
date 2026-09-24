@@ -395,6 +395,64 @@ pub fn resolve_bound_oauth_config_dir(
     block_id: &str,
 ) -> Option<PathBuf> {
     let instance = mstore.instance_get_active_for_block(block_id).ok().flatten()?;
+    bound_oauth_config_dir(mstore, id_store, identity_store, &instance)
+}
+
+/// [`resolve_bound_oauth_config_dir`] for a **Claude** agent row by its id,
+/// with no block — memory resolution's question (#3603): where does this
+/// agent's Claude run, so where are its memories (`projects/<cwd>/memory`,
+/// a Claude layout). `None` for any other provider, and for an account bound
+/// to the ambient `~/.claude` — the spawn refuses that dir, and memory
+/// writes must never land in the user's own Claude projects.
+pub fn resolve_bound_claude_config_dir_for_agent(
+    mstore: &Store,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    agent_id: &str,
+) -> Option<PathBuf> {
+    let instance = mstore.instance_get(agent_id).ok().flatten()?;
+    let def = mstore.agent_def_get(&instance.definition_id).ok().flatten()?;
+    let provider = id_store.resolve_effective_provider_id(&def);
+    if resolve_provider_alias(&provider) != "claude" {
+        return None;
+    }
+    let dir = bound_oauth_config_dir(mstore, id_store, identity_store, &instance)?;
+    let claude = crate::backend::providers::get_provider("claude")?;
+    if crate::backend::providers::is_provider_ambient_home_dir(claude, &dir.to_string_lossy()) {
+        return None;
+    }
+    Some(dir)
+}
+
+/// Whether an agent has any identity binding — its own links, or its
+/// template's when it has none — checked without the binding resolver's
+/// "no links" warning. For callers that ask on every sweep (memory), so an
+/// unlinked agent costs a lookup, not a log line.
+pub fn agent_has_identity_binding(mstore: &Store, identity_store: &Store, agent_id: &str) -> bool {
+    let direct = identity_store
+        .agent_identity_list_for_agent(agent_id)
+        .map(|l| !l.is_empty())
+        .unwrap_or(false);
+    if direct {
+        return true;
+    }
+    let Some(def) = mstore.agent_def_get(agent_id).ok().flatten() else {
+        return false;
+    };
+    let parent = template_parent_id_if_seeded(mstore, &def.parent_id);
+    !parent.is_empty()
+        && identity_store
+            .agent_identity_list_for_agent(&parent)
+            .map(|l| !l.is_empty())
+            .unwrap_or(false)
+}
+
+fn bound_oauth_config_dir(
+    mstore: &Store,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    instance: &crate::backend::storage::store::AgentInstance,
+) -> Option<PathBuf> {
     let def = mstore.agent_def_get(&instance.definition_id).ok().flatten()?;
     let effective_provider = id_store.resolve_effective_provider_id(&def);
     let canonical_provider = resolve_provider_alias(&effective_provider).to_string();
@@ -403,7 +461,7 @@ pub fn resolve_bound_oauth_config_dir(
     }
 
     let template_parent_id = template_parent_id_if_seeded(mstore, &def.parent_id);
-    let bindings = resolve_bindings_for_instance(identity_store, &instance, &template_parent_id, None);
+    let bindings = resolve_bindings_for_instance(identity_store, instance, &template_parent_id, None);
     let binding = bindings
         .iter()
         .find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;

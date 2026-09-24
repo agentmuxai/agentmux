@@ -841,6 +841,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             mstore.clone()
         }
     };
+    // #3603: memory resolution finds the account an agent is linked to (the
+    // directory its spawn runs Claude in) through these, read-only.
+    crate::server::native_memory_handlers::attach_identity_stores(id_store.clone(), identity_store.clone());
 
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
