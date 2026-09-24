@@ -1276,8 +1276,9 @@ goal):
   incremental parser, so appends continue from it.
 - Truncate / replace / delete of the stream: reload from scratch.
 
-**Deferred by this plan:** Phase 4 (n is now small; §3.8 measured the stores
-at ≤ 8 % at 200 turns), 5b, 5c, 5e, the detached reading window (§6.3.5) and
+**Deferred by this plan:** Phase 4 (n is now small;
+`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md` §3.8 measured the
+stores at ≤ 8 % at 200 turns), 5b, 5c, 5e, the detached reading window (§6.3.5) and
 opening History at a position. None is needed for a bounded live feed; each
 comes back if we want scroll-back in the feed or History anchored to a turn.
 
