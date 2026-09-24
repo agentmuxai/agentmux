@@ -140,7 +140,6 @@ const MEMORY_WORKSPACE_RULES = `## Workspace Rules
 |------|------|---------|
 | 1 | MCP \`mcp__github__*\` tools | Primary — tokens auto-refresh |
 | 2 | \`gh\` CLI | MCP unavailable |
-| 3 | Admin PAT via \`secrets\` | Package publish, admin ops only |
 
 ### Safety
 
