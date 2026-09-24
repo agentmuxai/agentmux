@@ -66,7 +66,7 @@ interface AgentDocumentViewProps {
      * bring the document to the latest content when the user starts typing.
      * Re-engages stick-to-bottom as a side effect.
      */
-    scrollToBottomRef?: (fn: () => void) => void;
+    scrollToBottomRef?: (fn: (reason?: string) => void) => void;
     /** The node id of the currently highlighted search match (if any). */
     highlightNodeId?: Accessor<string | null>;
     /**

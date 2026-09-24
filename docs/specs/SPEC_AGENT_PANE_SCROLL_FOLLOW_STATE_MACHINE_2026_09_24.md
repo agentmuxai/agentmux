@@ -1,6 +1,6 @@
 # Agent pane scroll-follow: one owner, one intent-based state machine
 
-**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) ships with this spec in PR #3652; Phases 1–5 not started.
+**Status:** active — Phase 0 (the hotfix for both reported symptoms, §8) shipped with this spec in PR #3652; invariant I4 (follow-transition logging, §5.3) shipped ahead of Phase 1 as Phase 0b; Phases 1–5 not started. Tracking: issue #3655.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi): "rock solid scrollbar for agent panes … this may need an architecture rethink, perhaps a DRY round."
 **Author:** Agent2.
@@ -247,11 +247,17 @@ Out of scope: the content-resize contract's pending steps 4–6 (shrinks at the 
    Regression tests are in `AgentDocumentVirtualList.pin.test.tsx` ("scroll-follow Phase 0 regressions"). The six bug tests (A ×3, including the post-review "collapse + regrow with older history" case; B1 ×2; B2) fail against the code before them and pass with it, and the four still-works tests (a real user page-up, a scrollbar drag held to the top that still pages, a scrollbar drag, wheel away and back) pass on both. Two older tests in `.resize.test.tsx` that faked a user scroll-away with a bare `scroll` event now send a `wheel` gesture first, with a controlled clock.
 
    Not covered by Phase 0 (left to Phase 2): middle-click autoscroll mode (no gesture event while it scrolls), text-selection drags that scroll the transcript, and the threshold halving.
-2. **Phase 1:** the pure reducer and its table tests. No behavior change.
-3. **Phase 2:** `createFollowScroll` binding, wired into `AgentDocumentVirtualList` behind a setting, `agent:followcontroller` (default **on** in dev builds, off in release). Keep the old path for one release as a kill switch, the same pattern as `agent:turnscopedtail`.
-4. **Phase 3:** move `ToolOverlayLog` and `SystemToolInstallInline` onto the primitive.
-5. **Phase 4:** live soak passes; default on everywhere; delete the old path, `anchor.ts`'s threshold helpers, and the dead flags. The history catalog in §3 becomes this spec's status note.
-6. **Phase 5:** the "↓ New activity" pill (§5.7).
+2. **Phase 0b: I4 telemetry, shipped ahead of Phase 1.**
+   - **One line per change.** Every `stickToBottom` change logs one `[scroll-follow] pane=<7> <from>→<to> cause=<cause> [detail]` line, plus `mount <state>` when a pane mounts.
+   - **Causes:** `user-scroll` (or `user-scroll:scrollbar`) with the gap, `user-scroll-to-bottom`, `reached-bottom`, `jump-to-bottom:<typing|sent|queued-turn>`, `jump-to-node`, `load-older`, `external`.
+   - **Implementation:** every call site in VL goes through `transitionFollow()`. A safety-net effect logs any change that bypasses it as `cause=external`, so no disengage path can be silent again.
+   - **Scroller attribute:** `.agent-document` carries `data-follow-state="following|detached"`.
+   - **Tests:** "follow-state transition log (I4)" in `AgentDocumentVirtualList.pin.test.tsx`.
+3. **Phase 1:** the pure reducer and its table tests. No behavior change.
+4. **Phase 2:** `createFollowScroll` binding, wired into `AgentDocumentVirtualList` behind a setting, `agent:followcontroller` (default **on** in dev builds, off in release). Keep the old path for one release as a kill switch, the same pattern as `agent:turnscopedtail`.
+5. **Phase 3:** move `ToolOverlayLog` and `SystemToolInstallInline` onto the primitive.
+6. **Phase 4:** live soak passes; default on everywhere; delete the old path, `anchor.ts`'s threshold helpers, and the dead flags. The history catalog in §3 becomes this spec's status note.
+7. **Phase 5:** the "↓ New activity" pill (§5.7).
 
 ## 9. Decisions (owner, 2026-09-24: "proceed" on the recommendations)
 
