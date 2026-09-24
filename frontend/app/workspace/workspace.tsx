@@ -9,7 +9,7 @@ import { PaneMediaCaptureIndicator } from "@/app/window/pane-media-capture-indic
 import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
-import { atoms, getSettingsKeyAtom } from "@/store/global";
+import { atoms } from "@/store/global";
 import {
     TAB_VISIBILITY_CHANGED_EVENT,
     WindowTabHiddenProvider,
@@ -35,10 +35,9 @@ function WorkspaceElem(): JSX.Element {
     // Keep inactive tabs laid out, the way pane tabs keep hidden members
     // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md §6.1):
     // `visibility: hidden` instead of `content-visibility: hidden`, so a
-    // returning tab has no layout to catch up on. Opt-in while it's measured
-    // against the default.
-    const keepLaidOutSetting = getSettingsKeyAtom("window:keepinactivetabslaidout");
-    const keepLaidOut = () => keepLaidOutSetting() === true;
+    // returning tab has no layout to catch up on. The default; set
+    // `window:keepinactivetabslaidout` to `false` for the old behavior.
+    const keepLaidOut = keepInactiveTabsLaidOut;
 
     // Tab container elements by tab id, for the forced-layout effect below.
     const tabEls = new Map<string, HTMLDivElement>();

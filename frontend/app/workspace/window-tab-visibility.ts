@@ -12,15 +12,19 @@
  * lets them pause rendering the way hidden pane-stack members already do
  * (`agent-dormancy.tsx`).
  *
- * Always `false` with the setting off: `content-visibility: hidden` already
+ * Always `false` with the setting set to `false`: `content-visibility: hidden` already
  * skips a hidden tab's rendering, so there is nothing extra to pause.
  */
 import { getSettingsKeyAtom } from "@/store/global";
 import { createContext, useContext, type Accessor } from "solid-js";
 
-/** `window:keepinactivetabslaidout` (opt-in; see this file's header). */
+/**
+ * `window:keepinactivetabslaidout`: on unless set to `false`. The default
+ * since the A/B on #3686/#3687 (analysis doc §7); `false` restores the
+ * previous `content-visibility: hidden` behavior.
+ */
 export function keepInactiveTabsLaidOut(): boolean {
-    return getSettingsKeyAtom("window:keepinactivetabslaidout")() === true;
+    return getSettingsKeyAtom("window:keepinactivetabslaidout")() !== false;
 }
 
 const WindowTabHiddenContext = createContext<Accessor<boolean>>(() => false);
