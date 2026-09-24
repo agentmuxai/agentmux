@@ -2983,6 +2983,12 @@ fn purge_agent_dependents(
             params![id],
         )?;
     }
+    // v40, durable jekt: messages held for the deleted agent die with it —
+    // their bodies must not linger, nor be delivered if the UID is ever
+    // recreated (Codex P1 on #3632).
+    if present.contains("db_jekt_held") {
+        removed += conn.execute("DELETE FROM db_jekt_held WHERE target_uid=?1", params![id])?;
+    }
     Ok(removed)
 }
 

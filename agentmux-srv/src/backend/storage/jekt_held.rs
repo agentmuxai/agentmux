@@ -237,6 +237,30 @@ mod tests {
         assert_eq!(s.jekt_held_targets().unwrap(), ["uid-y"]);
     }
 
+    /// Deleting the target agent purges what is held for it, through both
+    /// deletion paths (Codex P1 on #3632); another agent's held rows stay.
+    #[test]
+    fn deleting_the_target_purges_its_held_messages() {
+        use crate::backend::storage::agents::test_agent_def;
+        for via_instance_delete in [false, true] {
+            let s = Store::open_in_memory().unwrap();
+            for id in ["uid-y", "uid-z"] {
+                let mut def = test_agent_def(id, id, "claude", "agent", 1, "");
+                s.agent_def_insert(&mut def).unwrap();
+            }
+            s.jekt_held_insert(&held("for-y", "uid-y", 1)).unwrap();
+            s.jekt_held_insert(&held("for-z", "uid-z", 1)).unwrap();
+            let deleted = if via_instance_delete {
+                s.instance_delete("uid-y").unwrap()
+            } else {
+                s.agent_def_delete("uid-y").unwrap()
+            };
+            assert!(deleted);
+            assert!(s.jekt_held_for_target("uid-y", 10).unwrap().is_empty(), "instance_delete={via_instance_delete}");
+            assert_eq!(s.jekt_held_for_target("uid-z", 10).unwrap().len(), 1);
+        }
+    }
+
     #[test]
     fn caps_refuse_rather_than_overflow() {
         let s = Store::open_in_memory().unwrap();
