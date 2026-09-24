@@ -210,7 +210,8 @@ fn identifier(token: &str) -> Option<String> {
         return None;
     }
     if t.starts_with("https://") || t.starts_with("http://") {
-        return (t.len() > "https://".len()).then(|| t.to_string());
+        let has_host = t.split_once("://").is_some_and(|(_, rest)| !rest.is_empty());
+        return has_host.then(|| t.to_string());
     }
     // `#3671` or `owner/repo#3671`.
     if let Some((repo, num)) = t.rsplit_once('#') {
@@ -685,6 +686,13 @@ mod tests {
     fn ordinary_words_numbers_and_headings_are_not_identifiers() {
         let got = ids("We added a decade of 1234567 changes ## heading and/or a/b paths //x /abs/file.rs #1 #12345678");
         assert!(got.is_empty(), "{got:?}");
+    }
+
+    /// ReAgent P2 on #3674: an http URL was measured against "https://".
+    #[test]
+    fn a_short_http_url_counts_and_a_bare_scheme_does_not() {
+        assert_eq!(ids("http://x"), vec!["http://x".to_string()]);
+        assert!(ids("http:// https://").is_empty());
     }
 
     #[test]
