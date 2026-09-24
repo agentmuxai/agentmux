@@ -1331,7 +1331,8 @@ step ships until M4b's agent-path `spawn.no_token.*` counters and the
 `live.tokenless_or_unknown` gauge read zero on every channel's srv,
 sustained over a release cycle (`GET /agentmux/identity/fallbacks`, first
 shipped in v0.56.14; the cycle starts with v0.57.0). Design may land
-before the gate; code does not.
+before the gate; code does not, except the two ungated fixes named under
+"Gating per step".
 
 **Rules carried from §6.5.3–§6.5.4, and one added.** Names on the wire and in
 display are never replaced; name-keyed key rows stay until M5, so reverting
@@ -1406,89 +1407,115 @@ forged.
 
 ##### Steps
 
-Each its own PR, independently revertible; order matters only where noted.
+Each its own PR, independently revertible, in this order. An adversarial
+pass on the first draft found three P1s and one latent P1 (UID pins weaker
+than name pins; publishing a UID key before its agent signs with it; name
+drift between `AGENTMUX_AGENT_ID` and the row's slug; a slug match that was
+not exact), folded in below.
 
-1. **M4d-1 — purge finishes the job by name (no UID needed).** Extends
-   M4a-3's delete to every name the tombstone records (slug, display name,
-   `instance_name`), trimmed and folded as the tombstone folds them (J), in
-   all three key tables, and deletes `db_conversation_trust_grants` rows
-   (`agent_id` or `granted_peer_agent_id`) under those names — each only
-   where no other row holds the name as its slug, the tombstone's own rule.
-   Removes the dead UID-keyed deletes that match nothing, or keeps them
-   commented as M4d-2's. Counted per table. *Cost, recorded:* a live agent
-   whose display name another deleted agent shared, and that signs under
-   that display name instead of its slug, loses that key (the M4a-3 cost,
-   widened to fallback names).
+**Two rules for every step.** (i) **v1 signatures are made with the
+name-keyed keys, always, until M5** — the ones peers already pin and
+verify; UID-keyed keys sign only the new v2 (M4d-6). (ii) **A name matches a
+row only as that row's slug, exactly** — never its display name or
+`instance_name` (`actor::names_the_row` also matches those, and the
+colliding-names fixture shows `AGENTY` (`agenty-2`) answering to
+`agenty`).
+
+1. **M4d-1 — purge finishes the job by name.** *Ungated* (no token logic).
+   Extends M4a-3's key delete to every name the tombstone records (slug,
+   display name, `instance_name`), trimmed and folded as the tombstone
+   folds them (J), in all three key tables — each only where no other row
+   holds the name as its slug. **Trust grants are not touched:** there is
+   no production writer of `db_conversation_trust_grants` today, and its
+   `granted_peer_agent_id` names a *remote* requester, so a delete by local
+   names would revoke unrelated grants. *Cost, recorded:* a live agent that
+   signs under a display name a deleted agent shared, rather than its slug,
+   loses that key (M4a-3's cost, widened to fallback names).
 2. **M4d-2 — UID-keyed keys, copied on ownership evidence.** New tables
    `db_agent_lan_keys_by_uid`, `db_agent_wan_keys_by_uid` (object schema
    v40: `uid` PK, `public_key`, `private_key`, `created_at` seconds,
-   `copied_from` = the name, or `''` when freshly minted). One new store
-   function, **one critical section** under the connection lock (I):
-   return the UID's row if present; else copy the name-keyed row when **all**
-   hold — the name is the row's persisted slug, folded; **no other row holds
-   that slug folded** (B: slug uniqueness is case-sensitive, the key tables
-   are not, so "Aria" and "aria" share a key row); the key's `created_at * 1000`
-   ≥ the row's `created_at` **and** the row's `created_at` > 0 (A: a zero is
-   no evidence); and the name is not tombstoned at or after the row's
-   creation — else mint fresh. Called from `persisted_agent_identity` (every
-   token-carrying spawn) and the HTTP register handler's existing
-   `spawn_blocking`, never under the handler lock. Jekt HMAC keys are not
-   copied. Counted: `m4d.key_copied`, `m4d.key_fresh.<reason>`.
-3. **M4d-3 — publication by the resolved agent.** `/reactive/agent` returns
-   the LAN public key of the **registration it resolved to** — the UID-keyed
-   key when the registration has a UID and a M4d-2 row, else the name-keyed
-   key of the registration's own name — never of the query id (F). Registry
-   entries gain `uid`, and `jekt_public_key` is resolved the same way
-   (the registry writers gain a UID argument). **Pins:** a new
-   `db_lan_peer_uid_pins (peer_id, uid, public_key, first_seen_at)` keyed by
-   the answering peer's instance id and the UID (G: LAN discovery must
-   report which peer answered); a key change under a `(peer, uid)` pin is a
-   forgery alarm, a new `(peer, uid)` is pinned on first sight, and the name
-   pin stays as the legacy fallback for entries without a UID. *Recorded:*
-   `/reactive/agent` already exposes `uid` and `block_id` to LAN-key holders;
-   a UID is an identifier, not a credential.
-4. **M4d-4 — the MCP fetches its keys; injection stops for token rows.**
-   `GET /agentmux/agents/self/keys`, `Caller::Agent(uid)` only (else 401 —
-   the endpoint serves secrets, so this one refusal is the endpoint's own,
-   not a behaviour change): the UID-keyed LAN/WAN keys (M4d-2, created on
-   demand by the same function) and the jekt HMAC key ensured under the
-   row's slug, as injection ensures it today. The MCP reads keys from env
-   when present, else fetches once, lazily, with retry, and **keeps signing
-   every v1 signature** (rule above); UI automation signs with the fetched
-   jekt key (E). Injection stops only when the row is known to carry a
-   token: in `agent.open`, the opened row's (D: not the opener's
-   `Caller`); in `WriteAgentConfig`, the row the content's slug selects
-   unambiguously (`instance_get_by_slug`) having a token — an ambiguous or
-   unknown slug keeps injecting (fail-safe to today). A first launch has no
-   token yet, so it is injected; later launches fetch.
-   *Ships in one PR with its MCP side*: the MCP and srv are one release, and
-   an MCP started from a config written without keys is always the new one.
-5. **M4d-5 — token callers verified by token at the host tier.** In
-   `verify_jekt_signature` and `verified_block_id`: when the request is
-   `Caller::Agent(uid)` and the claimed name selects that row by its slug
-   (as `actor::names_the_row` with the slug rule), the request is treated as
-   verified **without consulting the HMAC** — `sig_verified = Some(true)`,
-   and the UI block is the UID's registration; otherwise today's name-keyed
-   HMAC path, counted `m4d.host_hmac_by_name`. `verified_block_id`'s "no key
-   on file" refusal no longer applies to token callers. The same-instance
-   guard becomes "the claimed name is registered on this instance with a
-   block" (a registration check), so a channel that also holds a key under
-   the name no longer skips cross-channel verification of a correctly
-   signed jekt. Signatures keep being sent (rule above), so far-side
-   receivers are unaffected.
-6. **M4d-6 — signed `source_uid` (v2).** `InjectRequest` / `InjectionRequest`
-   gain `source_uid` and `lan_sig_v2` / `channel_sig_v2` (new fields, v1
-   fields unchanged): Ed25519 over the v1 material plus `source_uid`, with
-   the UID-keyed key. The MCP sets `source_uid` from `AGENTMUX_AGENT_UID`.
-   A forwarding srv never sets or changes it; it compares it with its own
-   `Caller` and counts `m4.source_uid_mismatch`. A receiver records it as
-   attribution only when a v2 signature over it verifies against the key
-   pinned for `(peer, uid)` (LAN) or published for that UID in the shared
-   registry (cross-channel); an unverified one is recorded as claimed and
-   counted. Over LAN it is attributed as `(peer, uid)`, never matched to a
-   local row. **WAN: nothing** — `wan_sig` is not relayed at all today (H),
-   so a WAN `source_uid` is never attribution; relaying it is a separate
-   change.
+   `copied_from` = the name, `''` when minted fresh), purged **by UID** in
+   `purge_agent_dependents`. One store function, **one critical section**
+   under the connection lock (I), which **re-reads the row inside the lock**
+   (a row purged since the caller read it gets nothing — no orphaned
+   private key): return the UID's key if present; else copy the name-keyed
+   key when all hold — the name equals the row's slug, folded; no other row
+   holds that slug folded (B); the row's `created_at` > 0 and the key's
+   `created_at` (seconds) ≥ `row.created_at / 1000` floored (A; a key
+   minted in the same second after its row passes); the name is not
+   tombstoned — else mint fresh. Called from `persisted_agent_identity`
+   (token-carrying spawns only) — not from HTTP register, so a tokenless row
+   never gets a UID key it will not use. Counted `m4d.key_copied`,
+   `m4d.key_fresh.<reason>`. *Residual, recorded:* a row backfilled from
+   another channel keeps that channel's older `created_at`, so a key left
+   locally by a same-named agent deleted **before M4a** (no tombstone) can
+   pass the test; since v1 still signs with the name key (rule i), this
+   changes only which key M4d-6's v2 uses.
+3. **M4d-3 — the MCP fetches its keys; injection stops only on an exact
+   match.** `GET /agentmux/agents/self/keys` (`Caller::Agent(uid)` only; it
+   serves secrets, so its 401 is the endpoint's own, not a behaviour
+   change) returns the **name-keyed** jekt/LAN/WAN keys **for the row's slug
+   only** (ensured as injection ensures them) and the UID-keyed LAN/WAN keys
+   (M4d-2). The MCP prefers fetched keys when it holds a token, falls back
+   to env keys, fetches lazily with retry, and keeps signing every v1
+   signature with the name keys (rule i); UI automation signs with the
+   fetched jekt key (E). **Injection stops only when the config's
+   `AGENTMUX_AGENT_ID` equals the row's slug exactly and the row carries a
+   token** (P1: where they differ — a collision-renamed cross-channel
+   backfill, a #3573 stub — the MCP signs as a name whose keys the row does
+   not own, so it keeps today's injection). In `agent.open` the row is the
+   opened one (D: not the opener's `Caller`); in `WriteAgentConfig`, the one
+   row whose slug equals the content's id **folded** (a case variant finds
+   the row, so it cannot dodge the check by case); ambiguous or unknown
+   keeps injecting. `AGENTMUX_CHANNEL` and `AGENTMUX_HOST_LABEL` are always
+   written (the MCP falls back to `stable`/`unknown` without them).
+   **Additionally gated** on `m4.actor_{mismatch,ambiguous}.{inject,ui_auth}`
+   reading zero, or #3573 fixed. *Recorded:* agent working directories are
+   shared across channels, so an older channel's MCP can read a keyless
+   `.mcp.json` — no worse than today, where it reads another channel's keys
+   and fails. The 24 h jekt rotation now runs at each fetch (each MCP start;
+   per turn in subprocess mode), as it runs at each config write today.
+4. **M4d-4 — token callers verified by token at the host tier.** When the
+   request is `Caller::Agent(uid)` and the claimed name **equals that row's
+   slug** (rule ii): `verify_jekt_signature` sets `sig_verified =
+   Some(true)` without the HMAC, and `verified_block_id` resolves the UID's
+   registration (the handler's UID→block map is one-to-one, M2) with no "no
+   key on file" refusal. Otherwise today's name-keyed HMAC, counted
+   `m4d.host_hmac_by_name`. **Channel tier:** when `channel_sig` verifies,
+   `verify_jekt_signature` does not run the local name-keyed HMAC (a
+   channel that also holds a key under the name today forces `sensitive`
+   on a correctly signed cross-channel jekt, `reactive.rs:1025`,
+   `handler.rs:1195`). The same-instance guard becomes "the claimed name is
+   registered on this instance with a block". Signatures keep being sent,
+   so far-side receivers, which have no `Caller`, run today's checks.
+5. **M4d-5 — publication by the resolved agent, UID additive.** *The fix to
+   `/reactive/agent` is ungated:* it returns the name-keyed LAN public key
+   of the **registration it resolved to**, never of the query id (F).
+   Registry entries and `/reactive/agent` gain `uid` and a **separate**
+   `uid_public_key` (M4d-2's key); `jekt_public_key` keeps the name-keyed
+   key, so v1 verification is unchanged for every peer (P1: publishing the
+   UID key in place of the name key would fail the agent's own v1
+   signatures).
+6. **M4d-6 — signed `source_uid` (v2).** New fields `source_uid`,
+   `lan_sig_v2`, `channel_sig_v2` (v1 fields unchanged): Ed25519 over the v1
+   material plus `source_uid`, **only with the fetched UID-keyed key** (never
+   an env key). A forwarding srv never sets or changes `source_uid`; it
+   compares it with its own `Caller` and counts `m4.source_uid_mismatch`.
+   Verifier key sources: **cross-channel** — the shared registry's
+   `uid_public_key` looked up **by UID** (a new lookup; today's is by name);
+   **LAN** — the answering peer's `uid_public_key`, accepted only when the
+   answer's `uid` equals the message's `source_uid` **and** the v1 name pin
+   also matches (P1: LAN peers and their instance ids are unauthenticated —
+   mDNS-published keys, first answer wins — so a UID pin may only add a
+   check, never replace the name pin; a UID pin is set on first sight only
+   together with a matching name pin, and a changed key under it is an
+   alarm). Attribution: a verified v2 is recorded as the sender's UID
+   *as claimed by that path* — over LAN it is never matched to a local row.
+   **WAN: nothing** — `wan_sig` is not relayed today (H).
+
+**Gating per step.** M4d-1 and M4d-5's `/reactive/agent` fix contain no
+token logic and may ship before the gate; M4d-2, M4d-3, M4d-4 and M4d-6 wait
+for it, and M4d-3 also for the actor counters above.
 
 ##### Recorded costs
 
@@ -1498,8 +1525,8 @@ Each its own PR, independently revertible; order matters only where noted.
   revocation (§6.5.4). Old peers alarm until they pin by `(peer, uid)`.
 - Existing `.mcp.json` files keep holding plaintext keys until their agent
   is relaunched; copying keeps those keys alive (§6.5.4).
-- `db_conversation_trust_grants` stay name-keyed (M4d-1 revokes by name);
-  UID-keyed grants are M5's.
+- `db_conversation_trust_grants` are untouched by M4d (no production writer
+  today); keying them by UID is M5's.
 
 ## 7. Performance
 
