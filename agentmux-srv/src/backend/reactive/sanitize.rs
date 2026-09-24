@@ -354,7 +354,9 @@ pub fn wrap_jekt_message(
         _ => (now_secs, String::new()),
     };
 
-    let from = source_agent.unwrap_or("unknown");
+    let from = marker_field(source_agent.unwrap_or("unknown"));
+    let target_agent = marker_field(target_agent);
+    let msg = neutralize_markers(msg);
     let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
         "lan-verified"
     } else if delivery_tier == "channel" && channel_verified == Some(true) {
@@ -400,6 +402,42 @@ pub fn wrap_jekt_message(
     format!(
         "{structured_tag}\n────────────────────────────────────────────────────────────\nFrom: {from} | To: {target_agent} | ts={ts_secs}{sensitive_warning}\n{msg}\n────────────────────────────────────────────────────────────\n{reply_hint}\n[/JEKT]"
     )
+}
+
+/// A value rendered into the marker as one `KEY=value` field: characters
+/// that would end the field or the tag (whitespace, `=`, `[`, `]`, control
+/// characters) become `_`, so a sender name can't add fields of its own.
+fn marker_field(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .map(|c| if c.is_whitespace() || c.is_control() || matches!(c, '=' | '[' | ']') { '_' } else { c })
+        .collect();
+    if cleaned.is_empty() { "unknown".to_string() } else { cleaned }
+}
+
+/// Marker delimiters inside a message body are quoted, so the body can't
+/// close the real block and open one of its own. Matched ASCII
+/// case-insensitively; everything else is left as sent.
+fn neutralize_markers(msg: &str) -> String {
+    const OPEN: &str = "[jekt:";
+    const CLOSE: &str = "[/jekt]";
+    let lower = msg.to_ascii_lowercase();
+    let mut out = String::with_capacity(msg.len());
+    let mut i = 0;
+    while i < msg.len() {
+        if lower[i..].starts_with(OPEN) {
+            out.push_str("[JEKT-QUOTED:");
+            i += OPEN.len();
+        } else if lower[i..].starts_with(CLOSE) {
+            out.push_str("[/JEKT-QUOTED]");
+            i += CLOSE.len();
+        } else {
+            let ch = msg[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
 }
 
 /// Validate an AgentMux URL for SSRF protection.
