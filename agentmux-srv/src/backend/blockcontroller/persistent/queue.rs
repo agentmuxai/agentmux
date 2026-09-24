@@ -638,15 +638,16 @@ impl PersistentSubprocessController {
 
     /// Persists a formatted stdin JSON line to the blockfile + global zone
     /// so `parseHistoryLines` can reconstruct the `user_message` node on
-    /// the next pane open. No MPS event is published here — the
-    /// live-display is handled by the `agent-message-accepted` path (UUID
-    /// node), avoiding a duplicate.
+    /// the next pane open. Published as an `echo: "stdin"` transcript event
+    /// (Phase 5a-3c): the pane already shows the message through the
+    /// `agent-message-accepted` path (UUID node), so it doesn't add a second
+    /// node, but its stream keeps no gap where this record sits.
     pub(super) fn persist_message_to_blockfile(&self, json_str: &str) {
         let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         let line_with_newline = format!("{json_str}\n");
-        super::super::shell::persist_to_blockfile_silent(
+        super::super::shell::persist_user_line(
+            self.broker.as_deref(),
             &self.block_id,
-            crate::backend::agent_session::OUTPUT_FILE,
             line_with_newline.as_bytes(),
             self.filestore.as_ref(),
             global_zone.as_deref(),

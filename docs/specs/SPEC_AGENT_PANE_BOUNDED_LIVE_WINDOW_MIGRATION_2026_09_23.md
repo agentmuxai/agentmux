@@ -783,17 +783,30 @@ to §6.3.6; paths under `agentmux-srv/src/`):
    each stream gets one writer task fed by a queue (`spawn_blocking`). The
    queue keeps publish order without the mutex and takes SQLite off the
    runtime.
-   - **Silent persists publish.** `persist_to_blockfile_silent` becomes a normal
-     `append_lines` whose event carries `echo: { messageId }`, and
-     `agent-message-accepted` carries the same `pos`. The pane advances its
-     cursor past the line without creating a second node. In 5b it gives the
-     optimistic node that line's positional id, so it becomes `transcript`
-     provenance (§6.3.2) with no guessing.
-   - **Every record a pane shows live is in its stream.** Error frames and
-     the app-server controller resolve and mirror to the global zone like
-     every other writer. If the mirror itself fails, the event has no entry
-     for the pane's stream. The pane then renders the record as non-durable
-     (pinned, never evicted) and counts it in the dev HUD.
+   - **Silent persists publish.** As built in 5a-3c:
+     - `persist_to_blockfile_silent` becomes `persist_user_line`: a normal
+       transcript append (positions, `append_lines`) whose event carries
+       `echo: "stdin"`.
+     - The pane (`useAgentStream`) skips echo events, so it adds no second
+       node, but the stream has no gap where the record sits.
+     - The event carries no message id. A queued message is persisted at the
+       moment the drain delivers it, where only its JSON is held, and
+       threading the id through the delivery queue would change retry and
+       drain code that isn't this spec's.
+     - In 5b the pane matches the echo to its optimistic node by content and
+       gives that node the line's positional id, so it becomes `transcript`
+       provenance (§6.3.2).
+   - **Every record a pane shows live is in its stream.** As built in 5a-3c:
+     - Error frames at all seven sites (`agent_handlers/input.rs` ×2,
+       `app_api/agent_io.rs`, `subprocess/host_spawn.rs`,
+       `subprocess/container_spawn.rs` ×2) and the app-server controller now
+       resolve and mirror to the global zone like every other writer.
+     - This was a bug before: a pane with an `agentId` reloads from the global
+       zone, so frames written only to the block file vanished on reload,
+       despite comments saying they must persist.
+     - If the mirror itself fails, the event has no entry for the pane's
+       stream. The pane then renders the record as non-durable (pinned, never
+       evicted) and counts it in the dev HUD (5a-4).
 6. **Reads name what they served.** `BlockfileLineCountCommand` and
    `BlockfileReadRangeCommand` responses gain `{ stream, gen }`, read from
    the database inside a read transaction rather than the per-process
@@ -842,7 +855,7 @@ to §6.3.6; paths under `agentmux-srv/src/`):
 | 5a-2b | `replace_file` / `delete_files` (one transaction) on the archive, clear, restore and backfill paths; `output.idx` labelled with its generation and trusted only on a match; index sizes and scans read from the database; `write_state` refuses transcript names | A same-size replace is no longer served the old index (reproduced first). A failed replace or delete changes nothing. The indexer labels what it read. Full `agentmux-srv` suite. |
 | 5a-3a | Transcript appends written first (`append_lines`, block file and global zone) and published after under a striped per-block lock, with `pos` per stream and the exact offset; terminal data unchanged | Each event carries both streams' positions, numbered independently; the record is on disk when its event arrives; concurrent writers to one block publish in line order and each `line` addresses its record; a torn tail is closed and keeps its index. |
 | 5a-3b | Read responses name `{ stream, gen }`; `read_range` takes `expectGen`; the line count answers from the counter; a legacy row gets `init_line_counter` off the runtime; `replace` / `delete` events | Count from the counter equals the indexer's; a replace between count and read returns `genMismatch`. |
-| 5a-3c | The silent user-line persist publishes with `echo: { messageId }` and `agent-message-accepted` carries its `pos`; error frames and the app-server controller mirror to the global zone (touches the persistent controller: coordinate with `maricon/no-midturn-delivery-impl`) | Every record a pane shows live is in its stream. |
+| 5a-3c | The stdin user-line persist publishes as an `echo: "stdin"` transcript event with positions (the pane skips it); error frames (seven sites) and the app-server controller mirror to the global zone | The persisted user line fills its line (no gap) and is marked as an echo; the full suite; `tsc`. |
 | 5a-4 | Frontend consumer contract | Out-of-order, duplicate, gap, `gen` change mid-fetch, cross-process append via the poll; `full-conversation-bench` streaming cost unchanged. |
 
 **Known, not changed here.** Two live sessions of the same agent (for
