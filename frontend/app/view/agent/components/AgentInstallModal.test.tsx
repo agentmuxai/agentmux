@@ -48,7 +48,7 @@ const { terminals, FakeTerminal, fake } = vi.hoisted(() => {
         cols = fake.cols;
         written: string[] = [];
         scrolledTo: number | null = null;
-        constructor() {
+        constructor(public ctorOptions: Record<string, unknown> = {}) {
             terminals.push(this);
         }
         onSelectionChange(): void {}
@@ -374,6 +374,21 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
         expect(terminals[0].scrolledTo).toBe(Math.max(0, errorRow - 2));
 
         const details = document.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+    });
+
+    it("keeps as much scrollback in the console as the dialog retains in its log", async () => {
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+        await screen.findByText("Install now");
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        details.open = true;
+        fireEvent(details, new Event("toggle"));
+        await waitFor(() => expect(terminals).toHaveLength(1));
+        expect(terminals[0].ctorOptions.scrollback).toBeGreaterThanOrEqual(20_000);
         details.open = false;
         fireEvent(details, new Event("toggle"));
     });

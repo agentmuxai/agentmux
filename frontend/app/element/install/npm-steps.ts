@@ -68,6 +68,17 @@ const NPM_CODE_CATEGORY: Record<string, InstallErrorCategory> = {
     ENOSPC: "disk",
 };
 
+// Registry HTTP 5xx responses (`npm error code E503`) mean the package
+// server is unavailable — the same next step as a network failure.
+const NPM_HTTP_5XX_RE = /^E5\d\d$/;
+
+// The backend's typed `AgentMuxError` codes (agentmux-common errors.rs),
+// sent when creating the install directory fails before npm is spawned.
+const TYPED_CODE_CATEGORY: Record<string, InstallErrorCategory> = {
+    "AMX-IO-001": "disk",
+    "AMX-IO-002": "permission",
+};
+
 // `npm http fetch GET 200 <url> …` and `npm http cache <name>@<url> …`.
 // Tarball URLs look like `<registry>/<name>/-/<file>.tgz`, where <name> may
 // be scoped (`@scope/name`).
@@ -210,7 +221,7 @@ export class NpmStepTracker {
 
         if (text === "cancelled") {
             category = "cancelled";
-            failedStep = this.activeStep() ?? "requirements";
+            failedStep = this.activeStep() ?? this.firstPendingStep() ?? "requirements";
         } else if (text.startsWith("spawn npm")) {
             category = "missing_prereq";
             missingTool = "npm";
@@ -219,8 +230,8 @@ export class NpmStepTracker {
             category = "not_on_path";
             failedStep = "verify";
         } else {
-            category = (this.npmErrorCode && NPM_CODE_CATEGORY[this.npmErrorCode]) || "unknown";
-            failedStep = this.activeStep() ?? "requirements";
+            category = typedCategory(error) ?? npmCodeCategory(this.npmErrorCode) ?? "unknown";
+            failedStep = this.activeStep() ?? this.firstPendingStep() ?? "requirements";
         }
 
         const failedLabel = this.steps.find((s) => s.id === failedStep)?.label ?? "installing";
@@ -277,6 +288,15 @@ export class NpmStepTracker {
         return this.steps.find((s) => s.status === "active")?.id;
     }
 
+    /**
+     * npm can start (completing requirements) and fail before any line
+     * starts a later step, e.g. EACCES opening its cache. The failure then
+     * belongs to the next step, not the requirements check that passed.
+     */
+    private firstPendingStep(): NpmStepId | undefined {
+        return this.steps.find((s) => s.status === "pending")?.id;
+    }
+
     private status(id: NpmStepId): InstallStepStatus {
         return this.steps.find((s) => s.id === id)!.status;
     }
@@ -303,6 +323,18 @@ export class NpmStepTracker {
     private set(id: NpmStepId, patch: Partial<InstallStep>): void {
         this.steps = this.steps.map((s) => (s.id === id ? { ...s, ...patch } : s));
     }
+}
+
+function npmCodeCategory(code: string | undefined): InstallErrorCategory | undefined {
+    if (!code) return undefined;
+    if (NPM_HTTP_5XX_RE.test(code)) return "network";
+    return NPM_CODE_CATEGORY[code];
+}
+
+function typedCategory(error: unknown): InstallErrorCategory | undefined {
+    if (error == null || typeof error !== "object") return undefined;
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? TYPED_CODE_CATEGORY[code] : undefined;
 }
 
 function decodeName(raw: string): string {

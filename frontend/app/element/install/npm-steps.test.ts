@@ -234,6 +234,41 @@ describe("NpmStepTracker", () => {
         expect(failure.message).toBe('Something went wrong while running "Run setup scripts".');
     });
 
+    it("treats registry 5xx responses as a network problem", () => {
+        for (const code of ["E500", "E502", "E503", "E504"]) {
+            const t = new NpmStepTracker("Pi");
+            t.start();
+            t.line(`npm error code ${code}`, 0);
+            expect(t.fail("npm exited Some(1)").category).toBe("network");
+        }
+    });
+
+    it("classifies the backend's typed disk-full and permission errors", () => {
+        for (const [code, category, message] of [
+            ["AMX-IO-001", "disk", "The disk is full."],
+            ["AMX-IO-002", "permission", "AgentMux wasn't allowed to write the files."],
+        ] as const) {
+            const t = new NpmStepTracker("Pi");
+            t.start();
+            // The install directory is created before npm is spawned.
+            const failure = t.fail({ code, message: "raw", details: { path: "/x" } });
+            expect(failure.category).toBe(category);
+            expect(failure.message).toBe(message);
+            expect(statuses(t).requirements).toBe("failed");
+        }
+    });
+
+    it("blames the first install step, not the passed requirements check, when npm fails early", () => {
+        const t = new NpmStepTracker("Pi");
+        t.start();
+        // npm started (so requirements passed) but died before any download.
+        t.line("npm verbose cli /usr/bin/node /usr/bin/npm", 0);
+        t.line("npm error code EACCES", 1);
+        const failure = t.fail("npm exited Some(1)");
+        expect(failure.category).toBe("permission");
+        expect(statuses(t)).toMatchObject({ requirements: "done", download: "failed" });
+    });
+
     it("start() resets a failed run for Retry", () => {
         const t = new NpmStepTracker("Pi");
         t.start();

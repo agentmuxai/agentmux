@@ -377,7 +377,12 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // wrapped into 2-column rows and pushed out of scrollback.
         const term = new Terminal({
             cursorBlink: false,
-            scrollback: 5000,
+            // Match the retained log so a late-opened Details can show all
+            // of it and the first-error search can reach it. xterm allocates
+            // rows only as they're used, so a normal install costs no more.
+            // Heavily wrapped output can still exceed it; phase 2 renders
+            // from the log itself instead of xterm (codex P2 on #3661).
+            scrollback: MAX_LOG_LINES,
             fontSize: 12,
             fontFamily: termFont,
             theme: initialTheme,
