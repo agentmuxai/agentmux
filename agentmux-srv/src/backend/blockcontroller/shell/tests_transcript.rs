@@ -257,6 +257,40 @@ fn a_replaced_or_deleted_transcript_is_announced_with_its_new_generation() {
 }
 
 #[test]
+fn an_append_during_a_replace_is_published_after_it() {
+    // Review of #3636: a restore running while the agent writes must not let
+    // an append's write and event interleave with the replace and its event.
+    let block = "blk-order-replace";
+    let (broker, rec, fs, _gfs) = setup(block);
+    let broker = Arc::new(broker);
+    append_transcript(&broker, block, b"{\"old\":1}\n", Some(&fs), None, true);
+
+    let (holding, held) = std::sync::mpsc::channel();
+    let replacer = {
+        let (broker, fs) = (broker.clone(), fs.clone());
+        std::thread::spawn(move || {
+            super::with_transcript_order(block, || {
+                holding.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                fs.write_file(block, "output", b"{\"new\":1}\n").unwrap();
+                super::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
+            })
+        })
+    };
+    held.recv().unwrap();
+    // Waits for the replace to finish, then lands in the new generation.
+    append_transcript(&broker, block, b"{\"new\":2}\n", Some(&fs), None, true);
+    replacer.join().unwrap();
+
+    let seen = rec.seen.lock().unwrap();
+    let ops: Vec<&str> = seen.iter().map(|(e, _)| e.fileop.as_str()).collect();
+    assert_eq!(ops, ["append", "replace", "append"]);
+    let after = pos_of(&seen[2].0, "b:");
+    assert_eq!((after.line, after.gen.clone()), (1, gen_of(&fs, block)));
+    assert_eq!(pos_of(&seen[1].0, "b:").gen, after.gen);
+}
+
+#[test]
 fn without_a_filestore_the_event_still_goes_out_without_positions() {
     let block = "blk-nofs";
     let (broker, rec, _fs, _gfs) = setup(block);

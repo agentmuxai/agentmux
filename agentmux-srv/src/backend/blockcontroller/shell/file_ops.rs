@@ -411,10 +411,23 @@ pub(super) fn append_transcript(
     });
 }
 
+/// Run `f` holding `block_id`'s transcript order lock — the lock every append
+/// holds from its first write to its publish (see [`append_transcript`]).
+/// A replace or delete of the block's transcript, and its announcement
+/// ([`publish_transcript_changed`]), run inside it, so no append's write and
+/// event can interleave with them and one block's events stay in order
+/// (review of #3636). `f` must not append to the same block: the lock isn't
+/// reentrant.
+pub fn with_transcript_order<T>(block_id: &str, f: impl FnOnce() -> T) -> T {
+    let _order = transcript_order_lock(block_id);
+    f()
+}
+
 /// Tell a block's panes that its transcript `output` was replaced or deleted
 /// as a whole (Phase 5a-3), so an open pane resyncs at once instead of on its
 /// next read. `fileop` is [`mps::FILE_OP_REPLACE`] — with the new generation
-/// and line count read from `filestore` — or [`mps::FILE_OP_DELETE`].
+/// and line count read from `filestore` — or [`mps::FILE_OP_DELETE`]. Call it,
+/// with the replace or delete itself, inside [`with_transcript_order`].
 pub fn publish_transcript_changed(broker: &mps::Broker, block_id: &str, fileop: &str, filestore: &FileStore) {
     use crate::backend::agent_session::OUTPUT_FILE;
     let pos = match filestore.line_state(block_id, OUTPUT_FILE) {

@@ -177,19 +177,26 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                 let archive_dir = session_archive::default_archive_dir()
                     .ok_or_else(|| "cannot determine home directory".to_string())?;
 
-                let (archived_bytes, archived_at) = session_archive::archive_session_output(
-                    &mstore,
-                    &filestore,
-                    &cmd.block_id,
-                    &archive_dir,
-                )?;
-                // The block's transcript is gone: open panes resync now.
-                crate::backend::blockcontroller::shell::publish_transcript_changed(
-                    &broker,
-                    &cmd.block_id,
-                    crate::backend::mps::FILE_OP_DELETE,
-                    &filestore,
-                );
+                // The delete and its announcement under the block's
+                // transcript order lock, so no in-flight append's write and
+                // event can interleave with them (review of #3636).
+                let (archived_bytes, archived_at) =
+                    crate::backend::blockcontroller::shell::with_transcript_order(&cmd.block_id, || {
+                        let archived = session_archive::archive_session_output(
+                            &mstore,
+                            &filestore,
+                            &cmd.block_id,
+                            &archive_dir,
+                        )?;
+                        // The block's transcript is gone: open panes resync now.
+                        crate::backend::blockcontroller::shell::publish_transcript_changed(
+                            &broker,
+                            &cmd.block_id,
+                            crate::backend::mps::FILE_OP_DELETE,
+                            &filestore,
+                        );
+                        Ok::<_, String>(archived)
+                    })?;
 
                 Ok(SessionArchiveResult {
                 block_id: cmd.block_id,
@@ -216,18 +223,27 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 
                 tracing::info!(block_id = %cmd.block_id, "session:restore");
 
-                let restored_bytes = session_archive::restore_session_output(
-                    &mstore,
-                    &filestore,
-                    &cmd.block_id,
-                )?;
-                // Replaced content, a new generation: open panes resync now.
-                crate::backend::blockcontroller::shell::publish_transcript_changed(
-                    &broker,
-                    &cmd.block_id,
-                    crate::backend::mps::FILE_OP_REPLACE,
-                    &filestore,
-                );
+                // The replace and its announcement under the block's
+                // transcript order lock (review of #3636): no append's write
+                // and event can land between them, so a pane sees every
+                // event of the old generation, then the replace, then the
+                // new generation's.
+                let restored_bytes =
+                    crate::backend::blockcontroller::shell::with_transcript_order(&cmd.block_id, || {
+                        let restored = session_archive::restore_session_output(
+                            &mstore,
+                            &filestore,
+                            &cmd.block_id,
+                        )?;
+                        // Replaced content, a new generation: open panes resync now.
+                        crate::backend::blockcontroller::shell::publish_transcript_changed(
+                            &broker,
+                            &cmd.block_id,
+                            crate::backend::mps::FILE_OP_REPLACE,
+                            &filestore,
+                        );
+                        Ok::<_, String>(restored)
+                    })?;
 
                 Ok(SessionRestoreResult {
                 block_id: cmd.block_id,
