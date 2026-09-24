@@ -2218,6 +2218,11 @@ pub(super) struct HistorySearchQuery {
     /// enforcement, and must not be described as one. Enforcing it needs a
     /// verifiable per-agent identity on local routes, which does not exist
     /// yet. See the spec's §5.
+    ///
+    /// Identity M4c-2c (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): a request carrying a per-agent token searches the token's own
+    /// row's history and ignores this field; only an Unattributed request is
+    /// still self-declared here.
     agent: String,
     query: String,
     #[serde(default)]
@@ -2293,13 +2298,39 @@ pub(super) async fn handle_reactive_history_search(
 
     // Parsing sessions is blocking filesystem work; keep it off the async
     // runtime's worker threads, same posture as other disk-heavy handlers.
+    // Identity M4c-2c (spec §6.5.9): an attributed caller searches its own
+    // row's history, whatever `agent` names; an Unattributed one keeps the
+    // slug, counted.
+    let own_row = match caller.as_deref().and_then(super::caller::Caller::uid) {
+        Some(uid) => match super::app_api::SelfOwner::caller_row(uid, &state.mstore) {
+            Ok(row) => Some(row),
+            Err(e) => {
+                // A gone row is the caller's problem; a store fault is ours.
+                let status = if e.starts_with("store:") {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                return (status, Json(json!({"error": format!("history.search: {e}")})))
+                    .into_response();
+            }
+        },
+        None => {
+            crate::backend::agent_resolve::record_uid_fallback("m4c.history_owner_by_name");
+            None
+        }
+    };
     let history = state.history_service.clone();
     let store = state.identity_store.clone();
     let agent = params.agent.clone();
     let since = params.since;
     let until = params.until;
     let result = tokio::task::spawn_blocking(move || {
-        history.search_for_agent(&store, &agent, &opts, since, until, max_sessions)
+        let owner = match &own_row {
+            Some(row) => crate::backend::history::HistoryOwner::of_row(row),
+            None => crate::backend::history::HistoryOwner::from_slug(&store, &agent),
+        };
+        history.search_for_agent(&store, &owner, &opts, since, until, max_sessions)
     })
     .await;
 

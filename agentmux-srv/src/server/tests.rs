@@ -5088,6 +5088,11 @@ async fn m4a2_send(
         .status()
 }
 
+/// Serializes the tests that move the per-site `m4.actor_*` counters with a
+/// token: M4a-2's test asserts their exact values, so another test's
+/// attributed request to the same site in parallel would break it.
+static M4_ACTOR_COUNTERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The colliding-names fixture ("AgentY" agenty, "AGENTY" agenty-2) plus a
 /// third agent, "AgentZ"; the caller is the second agent. At every actor
 /// site: naming AgentZ is a mismatch; naming `agenty` or `AGENTY` — which
@@ -5097,6 +5102,7 @@ async fn m4a2_send(
 /// request is served the same with or without the token.
 #[tokio::test]
 async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
     use crate::backend::storage::agents::test_agent_def;
     let state = test_state();
     for (id, name, slug) in [
@@ -5123,10 +5129,15 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
                 expected,
                 "{site}: unattributed is not checked"
             );
-            // M4a-2's counting changes no response. Since M4c-2b the memory
-            // sites' owner is the Caller when attributed (§6.5.9), so there
-            // the token — not the count — does change it, by design.
-            if !site.starts_with("memory_") {
+            // M4a-2's counting changes no response. Since M4c-2 the owner of
+            // a self-scoped site is the Caller when attributed (§6.5.9), so
+            // there the token — not the count — does change it, by design.
+            let owner_is_the_caller = site.starts_with("memory_")
+                || matches!(
+                    site,
+                    "identity_accounts" | "identity_validate" | "preset_get" | "history_search"
+                );
+            if !owner_is_the_caller {
                 assert_eq!(
                     with, without,
                     "{site}: counting changes nothing about the response"
@@ -5604,6 +5615,7 @@ async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
 /// not the first agent's; Unattributed, the slug decides, counted.
 #[tokio::test]
 async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
     use crate::backend::storage::agents::test_agent_def;
     let state = test_state();
     let (tmp_y, tmp_y2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -5664,4 +5676,57 @@ async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["content"], "y2's", "the token's row, not the slug's");
+}
+
+// ---- identity M4c-2c: identity, preset and history owners are the Caller ----
+
+/// Each handler takes its owner from the token, not from `agent_id`: a token
+/// whose row is gone is refused with the caller named, while the same
+/// request Unattributed resolves the slug as before and is counted.
+#[tokio::test]
+async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let mut state = test_state();
+    // An empty index: the Unattributed search below must not scan the
+    // developer's real transcripts.
+    state.history_service = std::sync::Arc::new(crate::backend::history::HistoryService::from_index(
+        crate::backend::history::index::SessionIndex::new(vec![]),
+    ));
+    state.mstore.attach_token_index().unwrap();
+    let gone = state.mstore.agent_token_ensure("uid-m4c2c-gone").unwrap();
+    let get = |uri: &'static str, token: Option<String>| {
+        let state = state.clone();
+        async move {
+            let mut req = Request::builder()
+                .method(Method::GET)
+                .uri(uri)
+                .header("X-AuthKey", "test-secret-key");
+            if let Some(t) = token {
+                req = req.header("X-Agent-Token", t);
+            }
+            let resp = build_router(state)
+                .oneshot(req.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let status = resp.status();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            (status, String::from_utf8_lossy(&body).into_owned())
+        }
+    };
+    for (uri, counter) in [
+        ("/api/v1/agent/identity/accounts?agent_id=m4c2c-nobody", "m4c.identity_owner_by_name"),
+        ("/api/v1/agent/preset/get?agent_id=m4c2c-nobody", "m4c.preset_owner_by_name"),
+        (
+            "/agentmux/reactive/history/search?agent=m4c2c-nobody&query=x",
+            "m4c.history_owner_by_name",
+        ),
+    ] {
+        let (status, body) = get(uri, Some(gone.clone())).await;
+        assert!(status.is_client_error(), "{uri}: {status} {body}");
+        assert!(body.contains("calling agent uid-m4c2c-gone not found"), "{uri}: {body}");
+        let before = m4a2_count(counter);
+        let (_, body) = get(uri, None).await;
+        assert!(!body.contains("calling agent"), "{uri}: {body}");
+        assert!(m4a2_count(counter) > before, "{uri}: Unattributed is counted");
+    }
 }
