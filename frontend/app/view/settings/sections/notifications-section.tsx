@@ -95,6 +95,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["taskbar", "badge", "flash", "overlay", "notify:taskbar:attention"],
     },
+    quietHours: {
+        id: "notifications.quiet_hours",
+        label: "Quiet hours",
+        description: "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none.",
+        section: "notifications",
+        keywords: ["do not disturb", "night", "schedule", "sleep", "notify:quiethours"],
+    },
     osPreview: {
         id: "notifications.os_preview",
         label: "Notification content",
@@ -186,6 +193,21 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
+                <SettingRow
+                    id={NOTIFICATIONS_SETTINGS.quietHours.id}
+                    indent
+                    label={NOTIFICATIONS_SETTINGS.quietHours.label}
+                    description={NOTIFICATIONS_SETTINGS.quietHours.description}
+                    control={
+                        <input
+                            class="setting-text"
+                            type="text"
+                            value={(s()["notify:quiethours"] as string) ?? ""}
+                            placeholder="22:00-08:00"
+                            onBlur={(e) => set("notify:quiethours", e.currentTarget.value.trim() || null)}
+                        />
+                    }
+                />
                 <SettingRow
                     id={NOTIFICATIONS_SETTINGS.pauseAllowAttention.id}
                     indent

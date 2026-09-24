@@ -92,6 +92,7 @@
     // "notify:pause:until":                     0,            // epoch ms; set from the tray
     // "notify:pause:allowattention":            false,
     // "notify:taskbar:attention":               true,         // badge + flash the taskbar button
+    // "notify:quiethours":                      "",           // e.g. "22:00-08:00" (local time)
     // "notify:os:preview":                      "redacted",   // "redacted" | "full" | "none"
 
     // -- Tool-call tones (subliminal per-tool "voice") --
