@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createComputed, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -266,15 +266,30 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // smooth. offsetHeight is what the user actually sees change size.
     const measureRenderedHeight = (el: HTMLElement): number => el.offsetHeight;
 
-    // `lastBranch`/`pendingCommit` hold what the PREVIOUS run of this
-    // effect captured — Solid effects always run after the DOM has already
-    // been patched for the change that triggered them, so a run can only
-    // ever see its OWN "after" state; the "before" has to come from
-    // whatever the last run left behind. `beginHeightContinuity` is called
-    // on every invocation (not just branch changes) so the eventually-
-    // committed "from" height is always the most recent one, not whatever
-    // it was when the current branch started — matching the old
-    // `lastMeasuredHeight` field's unconditional per-tick update.
+    // Measure only when the rendered branch changes, and capture the "from"
+    // height BEFORE this update's DOM patch rather than carrying a baseline
+    // from the previous update.
+    //
+    // A `createComputed` is a pure computation: Solid runs those before any
+    // render effect in the same update, so when it sees the branch change,
+    // the DOM still shows the OLD branch — exactly the height to FLIP from.
+    // The user effect below runs after the patch and commits (measures the
+    // new branch, starts the FLIP).
+    //
+    // This used to re-baseline on EVERY run of an effect that tracked
+    // `props.node` — and every stream flush hands each mounted tool log a
+    // new node object, changed or not. Each baseline was `getComputedStyle`
+    // up the whole ancestor chain plus `scrollHeight`/`offsetHeight`: forced
+    // style and layout inside the flush, per tool log in the streaming
+    // buffer, per flush (~5 % of main-thread time with three panes
+    // streaming — TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md
+    // §3.4). Same-branch updates now read nothing.
+    //
+    // It also means a same-branch update no longer cancels a FLIP in flight
+    // (the old re-baseline did, as a side effect): a per-flush identity
+    // change used to cut most 150 ms transitions short. The next branch
+    // change still cancels a running one (resize-contract.ts's
+    // cancelInFlight), before measuring.
     let lastBranch: LogBranch | undefined;
     // Guards the same `<Index>` slot-position hazard `ToolBlock.tsx` guards
     // via `prevNodeId` (PR #1317, `AgentDocumentVirtualList.tsx:193-194`): a
@@ -286,37 +301,31 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let lastNodeId: string = props.node.id;
     let pendingCommit: (() => void) | undefined;
 
-    createEffect(() => {
+    createComputed(() => {
         const b = branch();
-        chunks(); // also re-measure as chunks stream in, not just on branch changes
-        const el = scrollRef;
-        if (!el) return;
-
         const nodeId = props.node.id;
         if (nodeId !== lastNodeId) {
             // Different node reused this slot — never animate across the
-            // swap; discard whatever was pending and start fresh for the
-            // incoming node.
+            // swap; drop anything pending and start fresh for the incoming
+            // node.
             lastNodeId = nodeId;
             lastBranch = b;
-            pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
+            pendingCommit = undefined;
             return;
         }
-
-        const branchChanged = lastBranch !== undefined && b !== lastBranch;
+        const el = scrollRef;
+        // `el` is unset only on the very first run, during setup.
+        if (el && lastBranch !== undefined && b !== lastBranch) {
+            pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
+        }
         lastBranch = b;
+    });
 
-        // Re-baseline for the NEXT invocation BEFORE committing this one.
-        // beginHeightContinuity cancels any transition already in flight as
-        // part of capturing a trustworthy "from" height (resize-contract.ts's
-        // cancelInFlight) — doing that AFTER committing would immediately
-        // cancel the flip this same tick is about to start. Capturing first
-        // means the only thing it can cancel is a PRIOR, now-stale
-        // transition, which is exactly what should happen once content has
-        // moved on again.
+    createEffect(() => {
+        branch(); // re-run after the DOM patch for a branch change
         const commit = pendingCommit;
-        pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
-        if (branchChanged) commit?.();
+        pendingCommit = undefined;
+        commit?.();
     });
     // No onCleanup here (the old code had one, cancelling any in-flight
     // flip on unmount) — resize-contract.ts doesn't expose a per-element
