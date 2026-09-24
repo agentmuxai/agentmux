@@ -374,6 +374,7 @@ fn build_output_idx_from(
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,16 +399,14 @@ mod tests {
         // With the current generation it builds and publishes.
         assert_eq!(rebuild_output_idx(&fs, zone, 2, output_now(&fs, zone).and_then(|(_, g)| g)), Some(1));
         assert!(fs.line_state(zone, "output.idx").unwrap().is_some());
+    }
 
     #[test]
     fn a_read_through_the_index_comes_from_one_snapshot_or_not_at_all() {
         let fs = FileStore::open_in_memory().unwrap();
         let zone = "blk-idx-read";
         fs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
-        fs.append_lines(zone, "output", b"{\"a\":1}
-{\"b\":2}
-{\"c\":3}
-").unwrap();
+        fs.append_lines(zone, "output", b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n").unwrap();
         // No index yet: nothing to read through.
         assert!(read_via_index(&fs, zone, 0, 10).is_none());
         let view = output_index(&fs, zone).unwrap();
@@ -415,21 +414,15 @@ mod tests {
 
         let r = read_via_index(&fs, zone, 1, 10).unwrap();
         assert_eq!((r.total, r.line_offsets.clone()), (3, vec![8, 16]));
-        assert_eq!(r.raw, b"{\"b\":2}
-{\"c\":3}
-");
+        assert_eq!(r.raw, b"{\"b\":2}\n{\"c\":3}\n");
         let r = read_via_index(&fs, zone, 0, 1).unwrap();
-        assert_eq!((r.line_offsets.clone(), r.raw), (vec![0], b"{\"a\":1}
-".to_vec()));
+        assert_eq!((r.line_offsets.clone(), r.raw), (vec![0], b"{\"a\":1}\n".to_vec()));
         assert!(read_via_index(&fs, zone, 5, 10).unwrap().line_offsets.is_empty());
 
         // Replaced by content of the same size and a different layout: the
         // index no longer describes it, so nothing is read through it.
-        fs.write_file(zone, "output", b"{\"x\":11111}
-{\"y\":222}
-").unwrap();
+        fs.write_file(zone, "output", b"{\"x\":11111}\n{\"y\":22222}\n").unwrap();
         assert_eq!(fs.line_state(zone, "output").unwrap().unwrap().size, 24);
         assert!(read_via_index(&fs, zone, 0, 10).is_none());
-    }
     }
 }
