@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** Proposed. Nothing in §5 is built.
+**Status:** active — P0a in #3626 (a first spawn continues the session its pane renders); P0b was already done by #3605. P0c, P0d and P1–P6 not started.
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
