@@ -174,6 +174,53 @@ describe("discover", () => {
     });
 });
 
+describe("waitQuiet", () => {
+    // Manual frames on a manual clock: each `frames(gap, n)` runs n animation
+    // frames `gap` ms apart, the way a busy or idle page would schedule them.
+    let clock;
+    let queue;
+    beforeEach(() => {
+        clock = 0;
+        queue = [];
+        vi.spyOn(performance, "now").mockImplementation(() => clock);
+        vi.stubGlobal("requestAnimationFrame", (cb) => queue.push(cb));
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+    const frames = (gap, n) => {
+        for (let i = 0; i < n && queue.length; i++) {
+            clock += gap;
+            const due = queue;
+            queue = [];
+            for (const cb of due) cb(clock);
+        }
+    };
+
+    it("resolves once frames have been short for the whole quiet period", async () => {
+        const p = window.__fcb.waitQuiet({ quietMs: 1000 });
+        frames(16, 70); // 1,120 ms of 16 ms frames
+        await expect(p).resolves.toEqual({ quiet: true, ms: 1008 });
+    });
+
+    it("a long frame restarts the quiet period", async () => {
+        const p = window.__fcb.waitQuiet({ quietMs: 1000 });
+        frames(16, 30); // 480 ms quiet...
+        frames(400, 1); // ...then the page is busy for a frame
+        frames(16, 70);
+        const r = await p;
+        expect(r.quiet).toBe(true);
+        expect(r.ms).toBeGreaterThanOrEqual(480 + 400 + 1000);
+    });
+
+    it("gives up after the timeout and says so", async () => {
+        const p = window.__fcb.waitQuiet({ quietMs: 1000, timeoutMs: 3000 });
+        frames(100, 40); // never quiet
+        await expect(p).resolves.toEqual({ quiet: false, ms: 3000 });
+    });
+});
+
 describe("visibility", () => {
     it("a window cannot start while the page is hidden", () => {
         vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
