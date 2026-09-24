@@ -20,6 +20,7 @@
  */
 
 import { createMemo, onMount, Show, type JSX } from "solid-js";
+import { focusManager } from "@/app/store/focusManager";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import type { PinDrift } from "../providers/version-drift";
@@ -72,6 +73,9 @@ interface AgentCardProps {
      *  most-recently-used agent) — focus it on mount so Enter launches
      *  it and the focus ring marks it as the default. */
     defaultFocus?: boolean;
+    /** The pane this card renders in. Scopes `defaultFocus` to "only if this
+     *  is the selected pane and the user isn't already typing in it". */
+    blockId?: string;
 }
 
 export const AgentCard = (props: AgentCardProps): JSX.Element => {
@@ -81,7 +85,16 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
 
     let cardEl: HTMLDivElement | undefined;
     onMount(() => {
-        if (props.defaultFocus && !props.disabled) cardEl?.focus();
+        if (!props.defaultFocus || props.disabled || !props.blockId) return;
+        // Through the shared guard, never a bare focus(): this used to take
+        // the caret from whichever pane the user was typing in, and scroll the
+        // picker down to the "New Agent" header — on every `agents:changed`
+        // refetch, since those used to remount the card
+        // (REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md §2).
+        focusManager.claimFocusOnMount(props.blockId, () => {
+            cardEl?.focus({ preventScroll: true });
+            return true;
+        });
     });
 
     const handleCardClick = (e: MouseEvent) => {

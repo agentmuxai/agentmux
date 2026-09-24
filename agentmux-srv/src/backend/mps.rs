@@ -126,6 +126,9 @@ pub const FILE_OP_CREATE: &str = "create";
 pub const FILE_OP_DELETE: &str = "delete";
 pub const FILE_OP_APPEND: &str = "append";
 pub const FILE_OP_TRUNCATE: &str = "truncate";
+/// A transcript `output` replaced by other content (restore): `pos` names the
+/// new generation and its line count (Phase 5a-3).
+pub const FILE_OP_REPLACE: &str = "replace";
 #[allow(dead_code)]
 pub const FILE_OP_INVALIDATE: &str = "invalidate";
 
@@ -182,6 +185,34 @@ pub struct WSFileEventData {
     /// "always new" (the pre-existing, always-write behavior).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub offset: Option<u64>,
+    /// Where this append landed, per transcript stream, for agent `output`
+    /// appends to a counted file (Phase 5a-3,
+    /// SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7).
+    /// Empty for anything else (terminal data, uncounted files). Consumers
+    /// pick the entry for the stream they read from.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub pos: Vec<StreamPos>,
+    /// Set when the records are an echo of something the pane already shows:
+    /// `"stdin"` for a user message the controller wrote to the agent's stdin
+    /// (the pane has its optimistic node). Written to the transcript like any
+    /// record, with positions, so the stream has no gap; the pane doesn't add
+    /// a second node for it (Phase 5a-3c).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub echo: Option<String>,
+}
+
+/// One transcript stream's position for an append: the records it wrote are
+/// lines `line .. lines` of generation `gen` of `stream`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamPos {
+    /// `b:<blockId>` for the block's own `output`, `g:<zone>` for the
+    /// agent's global transcript zone.
+    pub stream: String,
+    pub gen: String,
+    /// Index of the first record this append wrote.
+    pub line: u64,
+    /// The stream's line count after this append.
+    pub lines: u64,
 }
 
 // ---- Client trait ----

@@ -491,7 +491,7 @@ use std::sync::Arc;
         fs.make_file(bid, "output", Default::default(), Default::default()).unwrap();
         fs.append_data(bid, "output", data).unwrap();
 
-        let n = rebuild_output_idx(&fs, bid, data.len() as u64).unwrap();
+        let n = rebuild_output_idx(&fs, bid, data.len() as u64, crate::backend::blockcontroller::shell::output_now(&fs, bid).and_then(|(_, g)| g)).unwrap();
         assert_eq!(n, 3);
         let (covered, offsets) = read_idx(&fs, bid);
         assert_eq!(covered, data.len() as u64);
@@ -516,7 +516,7 @@ use std::sync::Arc;
         fs.make_file(bid, "output", Default::default(), Default::default()).unwrap();
         fs.append_data(bid, "output", data).unwrap();
 
-        let n = rebuild_output_idx(&fs, bid, data.len() as u64).unwrap();
+        let n = rebuild_output_idx(&fs, bid, data.len() as u64, crate::backend::blockcontroller::shell::output_now(&fs, bid).and_then(|(_, g)| g)).unwrap();
         assert_eq!(n, 3, "a, b(crlf), tail are the 3 non-blank lines");
         let (_covered, offsets) = read_idx(&fs, bid);
         assert_eq!(offsets, vec![0, 6, 10]);
@@ -534,7 +534,7 @@ use std::sync::Arc;
         let fs = FileStore::open_in_memory().expect("filestore");
         let bid = "idx-empty";
         fs.make_file(bid, "output", Default::default(), Default::default()).unwrap();
-        let n = rebuild_output_idx(&fs, bid, 0).unwrap();
+        let n = rebuild_output_idx(&fs, bid, 0, crate::backend::blockcontroller::shell::output_now(&fs, bid).and_then(|(_, g)| g)).unwrap();
         assert_eq!(n, 0);
         let (covered, offsets) = read_idx(&fs, bid);
         assert_eq!(covered, 0);
@@ -836,7 +836,7 @@ use std::sync::Arc;
         assert_eq!(stat.size as u64, expected);
     }
 
-    /// `persist_to_blockfile_silent` (user-message lines) stamps the
+    /// `persist_user_line` (user-message lines) stamps the
     /// per-channel sidecar too — those lines are transcript content.
     #[test]
     fn tsidx_stamped_by_persist_silent() {
@@ -847,9 +847,9 @@ use std::sync::Arc;
         let block_id = "tsidx-silent-block";
         let line = b"{\"type\":\"user_message\"}\n";
 
-        super::file_ops::persist_to_blockfile_silent(
+        super::file_ops::persist_user_line(
+            None,
             block_id,
-            "output",
             line,
             Some(&fs),
             Some("agent:tsidx-silent:current"),

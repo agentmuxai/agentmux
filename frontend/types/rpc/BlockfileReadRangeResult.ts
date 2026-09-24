@@ -11,4 +11,15 @@ export type BlockfileReadRangeResult = { lines: Array<string>, total: number,
  * fast path — old frontends ignore it, new frontends tolerate absence.
  * Spec: SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
  */
-stamps?: number[], };
+stamps?: number[], 
+/**
+ * The stream and generation `lines` were read from, when the file is a
+ * counted transcript and the read provably saw one generation (it was
+ * the same before and after the read). Absent otherwise (Phase 5a-3).
+ */
+stream?: string, gen?: string, 
+/**
+ * `expect_gen` was given and the file is now another generation (or
+ * changed during the read): `lines` is empty.
+ */
+gen_mismatch?: boolean, };

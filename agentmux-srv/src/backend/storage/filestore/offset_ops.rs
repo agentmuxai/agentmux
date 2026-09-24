@@ -6,9 +6,11 @@
 
 use std::collections::HashMap;
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::core::{FileStore, PART_DATA_SIZE};
+use super::counter::DROP_EPOCH_SQL;
+use super::FileOpts;
 use crate::backend::storage::error::StoreError;
 
 impl FileStore {
@@ -29,102 +31,120 @@ impl FileStore {
         let key = (zone_id.to_string(), name.to_string());
         let now = Self::now_ms();
 
-        let file = self.stat(zone_id, name)?.ok_or(StoreError::NotFound)?;
-        if offset > file.size {
-            return Err(StoreError::Other(format!(
-                "offset {} exceeds file size {}",
-                offset, file.size
-            )));
-        }
-
-        let new_size = std::cmp::max(file.size, offset + data.len() as i64);
         let pds = PART_DATA_SIZE as i64;
 
-        // Handle circular file data truncation
-        let (actual_offset, actual_data) = if file.opts.circular && file.opts.maxsize > 0 {
-            let start_cir_offset = new_size - file.opts.maxsize;
-            if start_cir_offset > 0 {
-                let end = offset + data.len() as i64;
-                if end <= start_cir_offset {
-                    // Entire write is before the circular window — no-op
-                    return Ok(());
-                }
-                if offset < start_cir_offset {
-                    let skip = (start_cir_offset - offset) as usize;
-                    (start_cir_offset, &data[skip..])
+        // Size and opts read from the database in the same transaction as the
+        // writes (see `write_txn`): a cached size can predate another
+        // process's append, and writing with it would shrink the file.
+        let written = self.write_txn(|tx| {
+            let (size, opts_json): (i64, String) = tx
+                .query_row(
+                    "SELECT size, opts FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, name],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?
+                .ok_or(StoreError::NotFound)?;
+            let opts: FileOpts = serde_json::from_str(&opts_json).unwrap_or_default();
+            if offset > size {
+                return Err(StoreError::Other(format!(
+                    "offset {} exceeds file size {}",
+                    offset, size
+                )));
+            }
+
+            let new_size = std::cmp::max(size, offset + data.len() as i64);
+
+            // Handle circular file data truncation
+            let (actual_offset, actual_data) = if opts.circular && opts.maxsize > 0 {
+                let start_cir_offset = new_size - opts.maxsize;
+                if start_cir_offset > 0 {
+                    let end = offset + data.len() as i64;
+                    if end <= start_cir_offset {
+                        // Entire write is before the circular window — no-op
+                        return Ok(None);
+                    }
+                    if offset < start_cir_offset {
+                        let skip = (start_cir_offset - offset) as usize;
+                        (start_cir_offset, &data[skip..])
+                    } else {
+                        (offset, data)
+                    }
                 } else {
                     (offset, data)
                 }
             } else {
                 (offset, data)
-            }
-        } else {
-            (offset, data)
-        };
-
-        // Compute affected parts
-        let start_part = (actual_offset / pds) as i32;
-        let end_part = ((actual_offset + actual_data.len() as i64 - 1) / pds) as i32;
-
-        let conn = self.conn.lock().unwrap();
-        let mut data_pos = 0usize;
-
-        for part_idx in start_part..=end_part {
-            let part_start = part_idx as i64 * pds;
-            let offset_in_part = if part_idx == start_part {
-                (actual_offset - part_start) as usize
-            } else {
-                0
             };
 
-            // Load existing part if needed
-            let existing: Option<Vec<u8>> = conn
-                .query_row(
-                    "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
-                    params![zone_id, name, part_idx],
-                    |row| row.get(0),
-                )
-                .ok();
+            // Compute affected parts
+            let start_part = (actual_offset / pds) as i32;
+            let end_part = ((actual_offset + actual_data.len() as i64 - 1) / pds) as i32;
+            let mut data_pos = 0usize;
 
-            let mut part_data = existing.unwrap_or_default();
-            // Ensure part is large enough
-            if part_data.len() < offset_in_part {
-                part_data.resize(offset_in_part, 0);
-            }
+            for part_idx in start_part..=end_part {
+                let part_start = part_idx as i64 * pds;
+                let offset_in_part = if part_idx == start_part {
+                    (actual_offset - part_start) as usize
+                } else {
+                    0
+                };
 
-            // Copy data into part
-            let remaining = actual_data.len() - data_pos;
-            let space = PART_DATA_SIZE - offset_in_part;
-            let to_copy = remaining.min(space);
-
-            if offset_in_part < part_data.len() {
-                // Overwrite existing bytes
-                let overwrite_end = (offset_in_part + to_copy).min(part_data.len());
-                let overwrite_len = overwrite_end - offset_in_part;
-                part_data[offset_in_part..offset_in_part + overwrite_len]
-                    .copy_from_slice(&actual_data[data_pos..data_pos + overwrite_len]);
-                if to_copy > overwrite_len {
-                    part_data.extend_from_slice(
-                        &actual_data[data_pos + overwrite_len..data_pos + to_copy],
-                    );
+                // Load existing part if needed
+                let mut part_data: Vec<u8> = tx
+                    .query_row(
+                        "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                        params![zone_id, name, part_idx],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or_default();
+                // Ensure part is large enough
+                if part_data.len() < offset_in_part {
+                    part_data.resize(offset_in_part, 0);
                 }
-            } else {
-                part_data.extend_from_slice(&actual_data[data_pos..data_pos + to_copy]);
+
+                // Copy data into part
+                let remaining = actual_data.len() - data_pos;
+                let space = PART_DATA_SIZE - offset_in_part;
+                let to_copy = remaining.min(space);
+
+                if offset_in_part < part_data.len() {
+                    // Overwrite existing bytes
+                    let overwrite_end = (offset_in_part + to_copy).min(part_data.len());
+                    let overwrite_len = overwrite_end - offset_in_part;
+                    part_data[offset_in_part..offset_in_part + overwrite_len]
+                        .copy_from_slice(&actual_data[data_pos..data_pos + overwrite_len]);
+                    if to_copy > overwrite_len {
+                        part_data.extend_from_slice(
+                            &actual_data[data_pos + overwrite_len..data_pos + to_copy],
+                        );
+                    }
+                } else {
+                    part_data.extend_from_slice(&actual_data[data_pos..data_pos + to_copy]);
+                }
+
+                tx.execute(
+                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                    params![zone_id, name, part_idx, part_data],
+                )?;
+                data_pos += to_copy;
             }
 
-            conn.execute(
-                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, part_idx, part_data],
+            // An in-place overwrite can change any line: the counter can't
+            // follow it, so the epoch is dropped (counter.rs).
+            tx.execute(
+                &format!(
+                    "UPDATE db_wave_file SET size = ?1, modts = ?2, {DROP_EPOCH_SQL}
+                     WHERE zoneid = ?3 AND name = ?4"
+                ),
+                params![new_size, now, zone_id, name],
             )?;
-            data_pos += to_copy;
-        }
-
-        // Update file size
-        conn.execute(
-            "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-            params![new_size, now, zone_id, name],
-        )?;
-        drop(conn);
+            Ok(Some((new_size, start_part, end_part)))
+        })?;
+        let Some((new_size, start_part, end_part)) = written else {
+            return Ok(());
+        };
 
         // Update cache
         let mut cache = self.cache.lock().unwrap();

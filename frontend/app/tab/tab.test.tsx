@@ -30,23 +30,26 @@ vi.mock("@/app/store/services", () => ({
 vi.mock("@/app/store/mos", () => ({
     makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
     useMuxObjectValue: () => [
-        () => ({ otype: "tab", oid: "tab-1", version: 1, name: "Tab One", meta: {} }),
+        () => ({ otype: "tab", oid: "tab-1", version: 1, name: "Tab One", meta: {}, blockids: ["blk-1"] }),
         () => false,
     ],
 }));
 vi.mock("@/app/tab/tab-measure", () => ({ measureTabWidth: () => 100 }));
 
+import { emitActivityFlash } from "@/app/notification/activity-flash";
 import { Tab } from "./tab";
 
 afterEach(() => cleanup());
 
-function renderTab(overrides: { onSelect?: () => void; onClose?: (e: MouseEvent | null) => void } = {}) {
+function renderTab(
+    overrides: { onSelect?: () => void; onClose?: (e: MouseEvent | null) => void; active?: boolean } = {}
+) {
     const onSelect = overrides.onSelect ?? vi.fn();
     const onClose = overrides.onClose ?? vi.fn();
     const utils = render(() => (
         <Tab
             id="tab-1"
-            active={false}
+            active={overrides.active ?? false}
             isFirst={false}
             isBeforeActive={false}
             isDragging={false}
@@ -82,5 +85,54 @@ describe("Tab close button", () => {
 
         expect(onSelect).toHaveBeenCalledTimes(1);
         expect(onClose).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a tab clicks, subtly, on
+// every tone from one of ITS panes, active or not. Its fill is a tint of its
+// own color (tab.scss), never the pane's, so no base color is set.
+describe("Tab activity flash", () => {
+    function stubAnimate() {
+        const animate = vi.fn((..._args: unknown[]) => ({ cancel: vi.fn() }) as unknown as Animation);
+        const original = HTMLElement.prototype.animate;
+        HTMLElement.prototype.animate = animate as unknown as typeof HTMLElement.prototype.animate;
+        return { animate, restore: () => (HTMLElement.prototype.animate = original) };
+    }
+
+    it("clicks the tab's overlay for a block in this tab, without a pane color", () => {
+        const { animate, restore } = stubAnimate();
+        const { container } = renderTab();
+        emitActivityFlash({ blockId: "blk-1" });
+        const inner = container.querySelector<HTMLDivElement>(".tab-inner")!;
+        expect(animate).toHaveBeenCalledTimes(1);
+        expect(animate.mock.instances[0]).toBe(inner);
+        expect(animate.mock.calls[0][1]).toMatchObject({ pseudoElement: "::before" });
+        expect(inner.style.getPropertyValue("--activity-flash-base")).toBe("");
+        restore();
+    });
+
+    it("the active tab clicks too", () => {
+        const { animate, restore } = stubAnimate();
+        renderTab({ active: true });
+        emitActivityFlash({ blockId: "blk-1" });
+        expect(animate).toHaveBeenCalledTimes(1);
+        restore();
+    });
+
+    it("ignores a block that lives in another tab", () => {
+        const { animate, restore } = stubAnimate();
+        renderTab();
+        emitActivityFlash({ blockId: "blk-elsewhere" });
+        expect(animate).not.toHaveBeenCalled();
+        restore();
+    });
+
+    it("unsubscribes on unmount", () => {
+        const { animate, restore } = stubAnimate();
+        const { unmount } = renderTab();
+        unmount();
+        emitActivityFlash({ blockId: "blk-1" });
+        expect(animate).not.toHaveBeenCalled();
+        restore();
     });
 });

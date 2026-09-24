@@ -82,7 +82,7 @@ export type ReinjectionReason = "compaction" | "fresh_session";
 const REASON_CLAUSE: Record<ReinjectionReason, string> = {
     compaction: "Your recent conversation was just compacted into a summary.",
     fresh_session:
-        "AgentMux could not resume this agent's prior session, so a fresh one was started — you have none of your prior conversation history, only what is below.",
+        "AgentMux could not resume this agent's prior session, so a fresh one was started. Any record of the prior conversation AgentMux had came with your first message, in an <agentmux-continuation> block.",
 };
 
 /**

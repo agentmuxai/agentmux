@@ -53,48 +53,64 @@ const terminalNode: ToolNode = {
     result: { exitCode: 0, stdout: "line 1\ndone", stderr: "" } as any,
 };
 
-/** Stub `scrollHeight` on every HTMLDivElement instance for this test. */
-function stubScrollHeight(px: number) {
-    return vi.spyOn(HTMLDivElement.prototype, "scrollHeight", "get").mockReturnValue(px);
+interface Heights {
+    /** `scrollHeight` — the FLIP's own from/to measure (true content height). */
+    scroll: number;
+    /** `offsetHeight` — the rendered box, what magnitude gating uses (codex
+     *  P2, PR #2962). jsdom's own default is 0, which shouldAnimate's
+     *  fromPx<=0 guard would treat as "nothing to FLIP from". */
+    offset: number;
 }
 
-/** Stub `offsetHeight` independently of `scrollHeight` — needed to model
- *  `.agent-tool-overlay-log`'s real shape (an internally-scrolling box
- *  bounded by its ancestor panel's max-height), where the two genuinely
- *  diverge. Defaults to 0 (jsdom's own default) unless stubbed. */
-function stubOffsetHeight(px: number) {
-    return vi.spyOn(HTMLDivElement.prototype, "offsetHeight", "get").mockReturnValue(px);
+/**
+ * Heights as a function of what the log currently RENDERS, the way a real
+ * layout engine answers — not of when the stub was installed.
+ *
+ * The FLIP captures its "from" height just before a branch change is patched
+ * into the DOM (a pure computation, ahead of Solid's render effects), and its
+ * "to" height just after. Earlier versions of these tests swapped a
+ * fixed-value stub right before changing the node, which only modelled an
+ * implementation that re-measured a baseline on every update; that per-update
+ * re-measure was the cost removed in
+ * TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §3.4.
+ *
+ * `heightsFor` receives the `.agent-tool-overlay-log` element; any other div
+ * reads 0.
+ */
+function stubHeights(heightsFor: (el: HTMLElement) => Heights) {
+    const forLog = (el: HTMLElement, pick: keyof Heights) =>
+        el.classList.contains("agent-tool-overlay-log") ? heightsFor(el)[pick] : 0;
+    vi.spyOn(HTMLDivElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return forLog(this, "scroll");
+    });
+    vi.spyOn(HTMLDivElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return forLog(this, "offset");
+    });
+}
+
+/** True while the log shows the streaming chunk feed rather than a result view. */
+const showsChunkFeed = (el: HTMLElement): boolean => el.querySelector(".agent-tool-log-line") != null;
+
+/** One height while the chunk feed is shown, another for the result view. */
+function stubHeightsByBranch(chunkFeed: Heights, result: Heights) {
+    stubHeights((el) => (showsChunkFeed(el) ? chunkFeed : result));
 }
 
 describe("ToolOverlayLog — height-FLIP transition", () => {
     it("freezes at the previous height then eases to the new height on a branch change", async () => {
         vi.useFakeTimers();
-        const heightStub = stubScrollHeight(40); // streaming-branch height
-        // The magnitude-gating measure (offsetHeight) is independent of
-        // scrollHeight (codex P2, PR #2962) — jsdom's own default is 0,
-        // which would make shouldAnimate's fromPx<=0 guard block every FLIP
-        // in this file. Must genuinely change value across the branch swap
-        // too (not just be nonzero): shouldAnimate's magnitude check needs
-        // a real gate DELTA, and a constant offsetHeight stub produces a
-        // zero gate delta regardless of how the (irrelevant to this test)
-        // absolute value is chosen — this test doesn't care what the
-        // rendered values actually are, only that SOME real change is
-        // present so scrollHeight (the FLIP's own from/to) is what actually
-        // drives the outcome, same as before this parameter existed.
-        const offsetStub = stubOffsetHeight(50);
+        // The result view is taller. The rendered (offset) heights must
+        // genuinely differ too, not just be nonzero: shouldAnimate's
+        // magnitude check needs a real gate DELTA, so scrollHeight (the
+        // FLIP's own from/to) is what drives the outcome.
+        stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 120, offset: 80 });
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
 
-        // Let the streaming-branch effect run and record 40px as the
-        // "last measured height" before anything transitions.
         await vi.runOnlyPendingTimersAsync();
         expect(el.style.height).toBe("");
 
-        heightStub.mockRestore();
-        offsetStub.mockRestore();
-        stubOffsetHeight(80);
-        stubScrollHeight(120); // terminal-branch (result view) is taller
         setNode(terminalNode);
 
         // Synchronously (Solid effects run synchronously with the signal
@@ -121,29 +137,30 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
     });
 
     it("does not animate on initial mount", () => {
-        stubScrollHeight(40);
+        stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 120, offset: 80 });
         const { container } = render(() => <ToolOverlayLog node={streamingNode} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
         expect(el.style.height).toBe("");
     });
 
     it("does not animate when the branch is unchanged (only chunks growing)", async () => {
-        // The height genuinely differs across the two ticks (40 -> 500) —
-        // a constant stub can't distinguish "correctly gated on branch
-        // staying the same" from "shouldAnimate's own zero-delta check
-        // happened to block it anyway" (the growth never produced a real
-        // height difference to react to either way). A prior version of
-        // this test used a constant stub and stayed green even after
-        // deliberately removing the branch-change gate from the source.
+        // The height genuinely differs across the two ticks (40 -> 80 per
+        // chunk line, by what is rendered) — a constant stub can't
+        // distinguish "correctly gated on branch staying the same" from
+        // "shouldAnimate's own zero-delta check happened to block it
+        // anyway". A prior version of this test used a constant stub and
+        // stayed green even after deliberately removing the branch-change
+        // gate from the source.
         vi.useFakeTimers();
-        const heightStub = stubScrollHeight(40);
+        stubHeights((el) => {
+            const lines = el.querySelectorAll(".agent-tool-log-line").length;
+            return { scroll: 40 * lines, offset: 50 * lines };
+        });
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
         await vi.runOnlyPendingTimersAsync();
 
-        heightStub.mockRestore();
-        stubScrollHeight(500);
         setNode({
             ...streamingNode,
             log: {
@@ -159,7 +176,7 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
 
     it("does not animate when heights are equal", async () => {
         vi.useFakeTimers();
-        stubScrollHeight(60);
+        stubHeightsByBranch({ scroll: 60, offset: 60 }, { scroll: 60, offset: 60 });
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
@@ -210,7 +227,10 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
             return realGetComputedStyle(el);
         });
 
-        stubScrollHeight(40);
+        // The branch change's real height differs sharply WHILE hidden —
+        // if the hidden-gate weren't working, this is exactly the delta
+        // that would produce a visible FLIP.
+        stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 900, offset: 400 });
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => (
             <div class="agent-tool-panel agent-tool-panel--hidden">
@@ -219,10 +239,6 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         ));
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
 
-        // The branch change's real height differs sharply WHILE hidden —
-        // if the hidden-gate weren't working, this is exactly the delta
-        // that would produce a visible FLIP.
-        stubScrollHeight(900);
         setNode(terminalNode);
         expect(el.style.height).toBe(""); // never measured/animated while hidden
         expect(el.style.transition).toBe(""); // nothing armed either — no leftover to resolve once visible
@@ -235,12 +251,18 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         // `prevNodeId` guard `ToolBlock.tsx` already applies for the
         // analogous slot-reuse hazard on `onHoldOpen` (PR #1317).
         vi.useFakeTimers();
-        stubScrollHeight(40); // tc-1's "streaming" height
-        // offsetHeight (the magnitude-gating measure, codex P2 PR #2962)
-        // must genuinely differ across the THIRD phase's compared reads
-        // below, same reasoning as the previous test — a constant value
-        // produces a zero gate delta regardless of how scrollHeight moves.
-        stubOffsetHeight(50);
+        // tc-1 streaming 40px; tc-2's result view 500px; tc-2 streaming (its
+        // one chunk is "x") 120px. offsetHeight (the magnitude-gating
+        // measure, codex P2 PR #2962) genuinely differs across the third
+        // phase's compared reads — a constant value produces a zero gate
+        // delta regardless of how scrollHeight moves.
+        stubHeights((el) =>
+            !showsChunkFeed(el)
+                ? { scroll: 500, offset: 55 }
+                : el.textContent?.includes("line 1")
+                  ? { scroll: 40, offset: 50 }
+                  : { scroll: 120, offset: 90 },
+        );
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
@@ -253,20 +275,15 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
             ...terminalNode,
             id: "tc-2",
         };
-        stubScrollHeight(500);
-        stubOffsetHeight(55); // tc-2's fresh baseline gate value
         setNode(otherNode);
         await vi.runOnlyPendingTimersAsync();
-        // Must resync silently — NOT FLIP from tc-1's stale 40px baseline.
+        // Must resync silently — NOT FLIP from tc-1's 40px.
         expect(el.style.height).toBe("");
 
         // A genuine branch change on the NEW node (tc-2) afterwards must
         // still be able to FLIP correctly — the reset must not poison the
-        // baseline for the node going forward. Its baseline height is now
-        // 500px (tc-2's own terminal-branch height, recorded at the swap),
-        // so this eases from 500px down to the new 120px.
-        stubScrollHeight(120);
-        stubOffsetHeight(90); // genuinely differs from the 55 baseline above
+        // node going forward. It eases from what tc-2 showed (its 500px
+        // result view) down to its 120px chunk feed.
         setNode({ ...otherNode, log: { open: true, chunks: [{ kind: "stdout", content: "x", timestamp: 1 }] } });
         expect(el.style.height).toBe("500px"); // frozen "from" synchronously
         await vi.runOnlyPendingTimersAsync();
@@ -275,22 +292,84 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         vi.useRealTimers();
     });
 
-    it("does not animate when the user prefers reduced motion", async () => {
-        reducedMotion = true;
+    it("a different node swapping in mid-FLIP cancels the outgoing node's transition at once", async () => {
+        // ReAgent P1 on #3607: the old per-update re-baseline cancelled any
+        // FLIP in flight as a side effect; the swap path must do so itself,
+        // or the outgoing tool's pinned height and transition keep running
+        // against the incoming tool's content until transitionend (150 ms).
         vi.useFakeTimers();
-        const heightStub = stubScrollHeight(40);
+        stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 120, offset: 80 });
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
         await vi.runOnlyPendingTimersAsync();
 
-        heightStub.mockRestore();
-        stubScrollHeight(120);
+        setNode(terminalNode); // tc-1: running -> result, a FLIP starts
+        expect(el.style.height).toBe("40px");
+        await vi.runOnlyPendingTimersAsync();
+        expect(el.style.height).toBe("120px"); // mid-transition: no transitionend yet
+
+        setNode({ ...terminalNode, id: "tc-2" }); // slot reuse while the FLIP is in flight
+        expect(el.style.height).toBe("");
+        expect(el.style.transition).toBe("");
+        expect(el.style.overflowY).toBe("");
+
+        vi.useRealTimers();
+    });
+
+    it("does not animate when the user prefers reduced motion", async () => {
+        reducedMotion = true;
+        vi.useFakeTimers();
+        stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 120, offset: 80 });
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        await vi.runOnlyPendingTimersAsync();
+
         setNode(terminalNode);
         await vi.runOnlyPendingTimersAsync();
         expect(el.style.height).toBe(""); // branch changed + heights differ, but motion is disabled
 
         vi.useRealTimers();
+    });
+});
+
+/**
+ * Every stream flush hands each mounted tool log a new `node` object, whether
+ * or not anything about that tool changed. The height FLIP used to re-baseline
+ * on every one of those updates: `getComputedStyle` on every ancestor (to rule
+ * out `content-visibility: hidden`) plus `scrollHeight` and `offsetHeight` —
+ * forced style and layout inside the flush, for every tool log in the
+ * streaming buffer, every flush. Profiled at ~5 % of main-thread time with
+ * three panes streaming (TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md
+ * §3.4). Measuring is only needed when the rendered branch changes.
+ */
+describe("ToolOverlayLog — no layout or style reads unless the branch changes", () => {
+    it("node updates within the same branch read no geometry and no computed style", () => {
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        expect(container.querySelector(".agent-tool-overlay-log")).not.toBeNull();
+
+        const reads = { geometry: 0, style: 0 };
+        const realGetComputedStyle = window.getComputedStyle;
+        vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) => {
+            reads.style++;
+            return realGetComputedStyle(el, pseudo);
+        });
+        for (const prop of ["scrollHeight", "offsetHeight", "clientHeight"] as const) {
+            vi.spyOn(HTMLElement.prototype, prop, "get").mockImplementation(() => (reads.geometry++, 0));
+        }
+
+        // Twenty flushes: a fresh node object each time, sometimes with a new
+        // chunk, never leaving the "streaming" branch.
+        let chunks = streamingNode.log!.chunks;
+        for (let i = 0; i < 20; i++) {
+            if (i % 2 === 0) chunks = [...chunks, { kind: "stdout", content: `line ${i + 2}`, timestamp: i + 2 }];
+            setNode({ ...streamingNode, log: { open: true, chunks } });
+        }
+
+        expect(reads.style, "getComputedStyle calls across same-branch updates").toBe(0);
+        expect(reads.geometry, "scroll/offset/client height reads across same-branch updates").toBe(0);
     });
 });
 
@@ -303,16 +382,15 @@ describe("ToolOverlayLog — magnitude gating uses the rendered height, not scro
         // max-height to a few hundred px. Gating the magnitude cap on
         // scrollHeight would skip animating exactly this case.
         vi.useFakeTimers();
-        const scrollStub = stubScrollHeight(15000); // huge raw chunk log
-        stubOffsetHeight(500); // but rendered/clamped to the panel's own cap
+        stubHeightsByBranch(
+            { scroll: 15000, offset: 500 }, // huge raw chunk log, rendered/clamped to the panel's own cap
+            { scroll: 200, offset: 220 }, // compact terminal result: rendered delta 280px, well under the cap
+        );
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
         await vi.runOnlyPendingTimersAsync();
 
-        scrollStub.mockRestore();
-        stubScrollHeight(200); // compact terminal result
-        stubOffsetHeight(220); // rendered delta: 500 -> 220 = 280px, well under the cap
         setNode(terminalNode);
 
         // Synchronous: frozen at the scrollHeight-based FROM value. Checked

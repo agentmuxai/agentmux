@@ -841,6 +841,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             mstore.clone()
         }
     };
+    // #3603: memory resolution finds the account an agent is linked to (the
+    // directory its spawn runs Claude in) through these, read-only.
+    crate::server::native_memory_handlers::attach_identity_stores(id_store.clone(), identity_store.clone());
 
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
@@ -1416,6 +1419,7 @@ pub fn spawn_background_subsystems(
 
     // History service — discovers and indexes past CLI agent conversations
     let history_service = Arc::new(backend::history::HistoryService::new());
+    history_service.warm_in_background();
 
     // Session archiver — auto-archive sessions inactive for >7 days, cap at 2 GB.
     // Skip if home directory can't be determined (would otherwise fall back to a
@@ -2046,6 +2050,30 @@ pub fn spawn_wal_checkpoint_loop(
             }
         }
     });
+}
+
+/// Deliver cron fires in process, through the server's shared inject path
+/// (`server::reactive::deliver`) on the instance-key tier — identity M4c-3
+/// (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9). The fire
+/// keeps every tier the route has (this instance, cross-instance,
+/// cross-channel, LAN, cloud) and audits the job's creator UID here only.
+///
+/// Must run AFTER `build_app_state` and BEFORE `cron_scheduler.start()`, so
+/// no fire takes the HTTP fallback.
+pub fn install_cron_delivery(state: &AppState) {
+    let st = state.clone();
+    state.cron_scheduler.install_delivery(Arc::new(move |req, creator_uid| {
+        let st = st.clone();
+        Box::pin(async move {
+            crate::server::reactive::deliver(
+                &st,
+                crate::server::ReactiveAuthVia::FullAuthKey,
+                &creator_uid,
+                req,
+            )
+            .await
+        })
+    }));
 }
 
 /// Give the reactive handler a delivery route to `SubprocessController` agents.

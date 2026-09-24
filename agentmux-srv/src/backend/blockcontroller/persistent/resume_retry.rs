@@ -128,22 +128,7 @@ impl PersistentSubprocessController {
                 return true;
             }
         }
-        let Some(ref store) = self.mstore else {
-            return false;
-        };
-        let Ok(block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) else {
-            return false;
-        };
-        let archived = block
-            .meta
-            .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
-            .and_then(|v| v.as_i64())
-            .map(|v| v > 0)
-            .unwrap_or(false);
-        if archived {
-            return false;
-        }
-        let Some(zone) = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta) else {
+        let Some(zone) = global_prior_zone(self.mstore.as_deref(), &self.block_id) else {
             return false;
         };
         let Some(gfs) = crate::backend::agent_session::global_transcript_store() else {
@@ -153,6 +138,42 @@ impl PersistentSubprocessController {
             gfs.stat(&zone, crate::backend::agent_session::OUTPUT_FILE),
             Ok(Some(ref f)) if f.size > 0
         )
+    }
+
+    /// The session to continue on a first spawn that holds no id of its own
+    /// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §5 P0a): the session
+    /// of the history this pane renders ([`pane_history_session_id`]), when
+    /// `--resume` would find it under this spawn's config dir and it isn't
+    /// already poisoned.
+    pub(super) fn find_continuation_session_id(&self, config: &PersistentSpawnConfig) -> Option<String> {
+        if config.resume_flag.is_empty() {
+            return None;
+        }
+        let config_dir = config.env_vars.get("CLAUDE_CONFIG_DIR")?;
+        let sid = pane_history_session_id(
+            self.filestore.as_deref(),
+            self.mstore.as_deref(),
+            &self.block_id,
+            &config.session_id_field,
+        )?;
+        if self.inner.lock().unwrap().resume_poisoned.as_deref() == Some(sid.as_str()) {
+            return None;
+        }
+        crate::backend::session_backfill::session_is_reachable(config_dir, &config.working_dir, &sid)
+            .then_some(sid)
+    }
+
+    /// AgentMux's record of the conversation this pane renders, as a
+    /// continuation packet for a process that starts without it
+    /// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+    pub(super) fn continuation_packet(&self) -> Option<String> {
+        let (tail, starts_mid_line) = pane_history_tail(
+            self.filestore.as_deref(),
+            self.mstore.as_deref(),
+            &self.block_id,
+            crate::backend::continuity::PACKET_TAIL_BYTES,
+        )?;
+        crate::backend::continuity::build_continuation_packet(&tail, starts_mid_line)
     }
 
     /// After a confirmed-stale `--resume` failure, try to recover a REAL
@@ -640,4 +661,71 @@ impl PersistentSubprocessController {
         }
         drop(inner);
     }
+}
+
+/// The session id of the conversation a pane renders: the last provider
+/// session id in its own transcript, else in the agent's global transcript
+/// zone. Same sources, same order, as `has_prior_transcript`, so "the pane
+/// shows history" and "the spawn continues it" can't disagree.
+///
+/// Taken from AgentMux's own record rather than a scan of the provider's
+/// dir, so an archived conversation (every explicit "start fresh" action
+/// archives) is never picked up, and a subagent's transcript can't pass for
+/// the agent's own. No reachability check; callers decide what an
+/// unreachable id means.
+pub(crate) fn pane_history_session_id(
+    filestore: Option<&FileStore>,
+    mstore: Option<&Store>,
+    block_id: &str,
+    session_id_field: &str,
+) -> Option<String> {
+    if session_id_field.is_empty() {
+        return None;
+    }
+    let (tail, starts_mid_line) = pane_history_tail(filestore, mstore, block_id, CONTINUATION_TAIL_BYTES)?;
+    last_session_id_in_stream(&tail, starts_mid_line, session_id_field)
+}
+
+/// The last `max_bytes` of the history a pane renders: its own transcript,
+/// else the agent's global zone. The `bool` is whether the window starts
+/// partway into the file (so its first line is a fragment).
+pub(crate) fn pane_history_tail(
+    filestore: Option<&FileStore>,
+    mstore: Option<&Store>,
+    block_id: &str,
+    max_bytes: i64,
+) -> Option<(Vec<u8>, bool)> {
+    if let Some(tail) = filestore.and_then(|fs| read_transcript_tail(fs, block_id, PERSISTENT_OUTPUT_SUBJECT, max_bytes)) {
+        return Some(tail);
+    }
+    let zone = global_prior_zone(mstore, block_id)?;
+    let gfs = crate::backend::agent_session::global_transcript_store()?;
+    read_transcript_tail(gfs, &zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes)
+}
+
+/// The agent's global transcript zone, when this pane would render it:
+/// agent-anchored and not archived.
+fn global_prior_zone(mstore: Option<&Store>, block_id: &str) -> Option<String> {
+    let block = mstore?.must_get::<crate::backend::obj::Block>(block_id).ok()?;
+    let archived = block
+        .meta
+        .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
+        .and_then(|v| v.as_i64())
+        .is_some_and(|v| v > 0);
+    if archived {
+        return None;
+    }
+    crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)
+}
+
+/// The last `max_bytes` of a transcript, and whether that window starts
+/// partway into the file (so its first line is a fragment).
+fn read_transcript_tail(fs: &FileStore, zone: &str, name: &str, max_bytes: i64) -> Option<(Vec<u8>, bool)> {
+    let file = fs.stat(zone, name).ok()??;
+    if file.size <= 0 {
+        return None;
+    }
+    let offset = (file.size - max_bytes).max(0);
+    let (actual_offset, data) = fs.read_at(zone, name, offset, file.size - offset).ok()?;
+    (!data.is_empty()).then_some((data, actual_offset > 0))
 }

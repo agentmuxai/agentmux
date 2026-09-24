@@ -209,6 +209,9 @@ pub(super) async fn handle_cron_create(
         target: req.target.clone(),
         target_uid,
         created_by: req.created_by.clone(),
+        // Identity M4c-1 (§6.5.9): the creator's UID is the request's
+        // `Caller` — its token — never a body field; `""` when Unattributed.
+        created_by_uid: super::caller::attributed_uid(caller.as_deref()),
         enabled: true,
         last_fired: None,
         fire_count: 0,
@@ -314,6 +317,7 @@ mod tests {
             target: "target-agent".to_string(),
             target_uid: String::new(),
             created_by: "creator-agent".to_string(),
+            created_by_uid: String::new(),
             enabled,
             last_fired: Some(1_700_000_000),
             fire_count,

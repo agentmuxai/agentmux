@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, test, expect, beforeEach } from "vitest";
-import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
+import { ClaudeCodeStreamParser, STARTUP_HEADING_RE, heldTiming } from "./stream-parser";
 import { buildStartupPayload } from "./startup/buildStartupPayload";
 import type { StreamEvent, MarkdownNode, ToolNode, UserMessageNode } from "./types";
 
@@ -608,5 +608,21 @@ describe("error_result event", () => {
         expect(text2).not.toBeNull();
         expect(text!.id).not.toBe(text2!.id);
         expect(errNode!.type).toBe("agent_error");
+    });
+});
+
+// SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md §2.4: a held jekt shows when it was
+// sent and how long it waited, never the replay time as if it were current.
+describe("heldTiming", () => {
+    test("uses the marker's original TS and HELD_FOR for a held jekt", () => {
+        expect(heldTiming({ TS: "1000000", HELD_FOR: "3600" }, 9_999_999_000)).toEqual({
+            timestamp: 1_000_000_000,
+            heldForSecs: 3600,
+        });
+    });
+
+    test("keeps the delivery time for a live jekt", () => {
+        expect(heldTiming({ TS: "1000000" }, 42)).toEqual({ timestamp: 42 });
+        expect(heldTiming({ TS: "0", HELD_FOR: "5" }, 42)).toEqual({ timestamp: 42 });
     });
 });

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use cef::*;
 use parking_lot::Mutex;
 
+use super::unresponsive::UnresponsiveAction;
 use super::AgentMuxHandler;
 
 // ---------------------------------------------------------------------------
@@ -612,8 +613,9 @@ wrap_load_handler! {
 // ---------------------------------------------------------------------------
 //
 // Overrides here: `on_before_browse` (external-protocol / OS-handoff guard for
-// browser panes), `on_render_process_terminated` (white-screen recovery), and
-// `auth_credentials` (HTTP Basic/Digest → BrowserAuthModal). Everything else
+// browser panes), `on_render_process_terminated` (white-screen recovery),
+// `on_render_process_unresponsive` / `_responsive` (hung-renderer recovery),
+// and `auth_credentials` (HTTP Basic/Digest → BrowserAuthModal). Everything else
 // inherits the default (no-op) implementations from the cef-rs trait.
 // See SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
 
@@ -648,6 +650,34 @@ wrap_request_handler! {
         ) {
             let mut inner = self.inner.lock();
             inner.on_render_process_terminated(browser, status, error_code, error_string);
+        }
+
+        // Hung-renderer auto-recovery — see client/unresponsive.rs. The
+        // decision is made under the handler lock, but the callback runs
+        // after the lock is released: terminate() leads back into
+        // on_render_process_terminated above, which takes the same lock.
+        fn on_render_process_unresponsive(
+            &self,
+            browser: Option<&mut Browser>,
+            callback: Option<&mut UnresponsiveProcessCallback>,
+        ) -> ::std::os::raw::c_int {
+            let Some(callback) = callback else { return 0 };
+            let action = self.inner.lock().on_render_process_unresponsive(browser);
+            match action {
+                UnresponsiveAction::Default => 0,
+                UnresponsiveAction::Wait => {
+                    callback.wait();
+                    1
+                }
+                UnresponsiveAction::Terminate => {
+                    callback.terminate();
+                    1
+                }
+            }
+        }
+
+        fn on_render_process_responsive(&self, browser: Option<&mut Browser>) {
+            self.inner.lock().on_render_process_responsive(browser);
         }
 
         // HTTP Basic / Digest auth challenge. Phase α of

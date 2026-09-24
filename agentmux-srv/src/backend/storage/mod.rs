@@ -13,6 +13,7 @@ pub mod agent_lan_keys;
 pub mod agent_wan_keys;
 pub mod agent_native_memory;
 pub mod agent_native_memory_versions;
+pub mod jekt_held;
 pub mod lan_peer_pubkey_pins;
 pub mod agents;
 pub mod agents_consolidate;

@@ -58,6 +58,7 @@ mod service_call;
 mod display;
 pub(crate) mod navigation;
 mod crash_recovery;
+mod unresponsive;
 mod recovery_pages;
 pub(crate) mod error_catalog;
 mod context_menu;
@@ -182,6 +183,12 @@ pub struct AgentMuxHandler {
     /// removed on clean close, exactly like `crash_history`.
     /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.B.
     memory_pause_history: HashMap<i32, VecDeque<Instant>>,
+    /// Consecutive CEF "renderer unresponsive" reports per browser, reset when
+    /// the renderer becomes responsive again. See `unresponsive.rs`.
+    unresponsive_reports: HashMap<i32, u32>,
+    /// Browsers whose renderer the host killed for hanging, so the
+    /// termination that follows is reported as a hang, not a crash.
+    terminated_unresponsive: std::collections::HashSet<i32>,
     /// Count of browser-pane OAuth popups allowed by `on_before_popup` (return
     /// false) whose `on_after_created` hasn't fired yet. A COUNTER, not a bool:
     /// if a pane opens two popups before the first's `on_after_created` runs,
@@ -211,6 +218,8 @@ impl AgentMuxHandler {
             is_browser_pane,
             crash_history: HashMap::new(),
             memory_pause_history: HashMap::new(),
+            unresponsive_reports: HashMap::new(),
+            terminated_unresponsive: std::collections::HashSet::new(),
             pending_popups: 0,
             popup_browser_ids: std::collections::HashSet::new(),
         }))

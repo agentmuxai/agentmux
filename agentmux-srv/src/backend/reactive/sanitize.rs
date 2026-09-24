@@ -337,12 +337,22 @@ pub fn wrap_jekt_message(
     requires_stop: bool,
     msg_id: &str,
     priority: &str,
+    held_sent_at_ms: Option<i64>,
 ) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let ts_secs = SystemTime::now()
+    let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    // A held message shows when it was sent, and how long it waited — never
+    // the replay time as if it were current (durable jekt spec §2.4).
+    let (ts_secs, held_field) = match held_sent_at_ms {
+        Some(ms) if ms > 0 => {
+            let sent = (ms / 1000) as u64;
+            (sent, format!(" HELD_FOR={}s", now_secs.saturating_sub(sent)))
+        }
+        _ => (now_secs, String::new()),
+    };
 
     let from = source_agent.unwrap_or("unknown");
     let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
@@ -372,7 +382,7 @@ pub fn wrap_jekt_message(
     };
 
     let structured_tag = format!(
-        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier} TRUST={trust}{sig_field}{escalate_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
+        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{sig_field}{escalate_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
     );
 
     let sensitive_warning = if effective_tier == "sensitive" {

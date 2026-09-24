@@ -114,7 +114,10 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         const hasAny = qs.length > 0;
         if (hasAny && !hadAny) {
             waitingToneActive = true;
-            firePaneEvent(opts.blockId, { type: "waiting-for-input" });
+            firePaneEvent(opts.blockId, {
+                type: "waiting-for-input",
+                question: qs[0]?.question?.questions?.[0]?.question,
+            });
         } else if (!hasAny && hadAny) {
             waitingToneActive = false;
             firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "submitted" });

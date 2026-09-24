@@ -5,7 +5,9 @@
 //!
 //! Backs each enabled `CronJob` with a tokio task that sleeps until the
 //! next scheduled fire time (computed from the 5-field UTC cron expression),
-//! POSTs to `/agentmux/reactive/inject`, and records the fire in the DB.
+//! delivers the prompt as `/agentmux/reactive/inject` would — in process
+//! since identity M4c-3 (see [`FireDelivery`]) — and records the fire in the
+//! DB.
 //!
 //! On startup, runs one catch-up fire for any job whose next scheduled time
 //! after `last_fired` is already in the past (FIRE_ONCE_NOW misfire policy —
@@ -24,9 +26,26 @@ use cron::Schedule;
 use crate::backend::storage::store::Store;
 use crate::backend::storage::cron::CronJob;
 use crate::backend::mps::{Broker, MuxEvent, EVENT_CRON_CHANGED};
+use crate::backend::reactive::types::InjectionRequest;
 
 /// Abort handles for every currently scheduled cron task.
 type HandleMap = Mutex<HashMap<String, tokio::task::AbortHandle>>;
+
+/// In-process delivery of a fire: the server's shared inject path
+/// (`server::reactive::deliver`, on the instance-key tier), given the job's
+/// request and its creator's UID. Identity M4c-3
+/// (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.9): the
+/// scheduler is built before `AppState`, so the server installs this once
+/// `AppState` exists ([`CronScheduler::install_delivery`]), as it installs
+/// agent-turn delivery. Until then a fire POSTs to the route, as before.
+pub type FireDelivery = Arc<
+    dyn Fn(
+            InjectionRequest,
+            String,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = serde_json::Value> + Send>>
+        + Send
+        + Sync,
+>;
 
 pub struct CronScheduler {
     handles: HandleMap,
@@ -35,6 +54,7 @@ pub struct CronScheduler {
     local_url: String,
     auth_key: String,
     broker: Arc<Broker>,
+    delivery: std::sync::OnceLock<FireDelivery>,
 }
 
 impl CronScheduler {
@@ -52,7 +72,14 @@ impl CronScheduler {
             local_url,
             auth_key,
             broker,
+            delivery: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Deliver fires in process from now on (see [`FireDelivery`]). Once;
+    /// a second install is ignored.
+    pub fn install_delivery(&self, delivery: FireDelivery) {
+        let _ = self.delivery.set(delivery);
     }
 
     fn publish_changed(&self) {
@@ -98,8 +125,11 @@ impl CronScheduler {
                 let job_prompt = job.prompt.clone();
                 let job_target = job.target.clone();
                 let job_target_uid = job.target_uid.clone();
+                let job_created_by_uid = job.created_by_uid.clone();
                 tokio::spawn(async move {
-                    sched.fire(&job_id, &job_prompt, &job_target, &job_target_uid).await;
+                    sched
+                        .fire(&job_id, &job_prompt, &job_target, &job_target_uid, &job_created_by_uid)
+                        .await;
                 });
             }
 
@@ -133,6 +163,7 @@ impl CronScheduler {
         let job_prompt = job.prompt.clone();
         let job_target = job.target.clone();
         let job_target_uid = job.target_uid.clone();
+        let job_created_by_uid = job.created_by_uid.clone();
         let job_max_fires = job.max_fires;
         let job_created_at = job.created_at;
         let job_max_age_secs = job.max_age_secs;
@@ -179,7 +210,9 @@ impl CronScheduler {
                 }
                 let delay = (next - Utc::now()).to_std().unwrap_or_default();
                 tokio::time::sleep(delay).await;
-                sched.fire(&job_id, &job_prompt, &job_target, &job_target_uid).await;
+                sched
+                    .fire(&job_id, &job_prompt, &job_target, &job_target_uid, &job_created_by_uid)
+                    .await;
                 fires += 1;
                 // Post-fire check: enforce max_fires. The top-of-loop guard
                 // handles the restart/seeded-at-cap case; this handles the
@@ -217,50 +250,59 @@ impl CronScheduler {
         self.publish_changed();
     }
 
-    /// Fire a cron job: POST to reactive inject and record the fire in DB.
+    /// Fire a cron job: deliver the prompt and record the fire in DB.
     ///
     /// Identity M3 (spec §5.4): a job that captured its target's UID at
     /// creation fires BY UID — a job firing at 03:00 must never resolve a
     /// name. A job with no UID (created before M3, or by a caller that did
     /// not carry one) fires by name as before, counted.
-    async fn fire(&self, id: &str, prompt: &str, target: &str, target_uid: &str) {
-        if self.local_url.is_empty() || self.auth_key.is_empty() {
-            tracing::warn!(id, "cron: no local_url/auth_key — skipping fire");
-            return;
+    ///
+    /// Identity M4c-3 (§6.5.9): delivered in process ([`FireDelivery`]), with
+    /// the creator's UID as attribution on this instance only — a forwarded
+    /// hop never carries it. **The sender name stays `"cron"`**: showing the
+    /// creator's name unsigned would make every fire of an agent-created job
+    /// look forged (its key is on file under that name) and echo each fire
+    /// into the creator's pane. A job with no captured creator UID fires as
+    /// before, counted.
+    pub(crate) async fn fire(&self, id: &str, prompt: &str, target: &str, target_uid: &str, created_by_uid: &str) {
+        if created_by_uid.is_empty() {
+            crate::backend::agent_resolve::record_uid_fallback("m4c.cron_fire_unattributed");
         }
-
-        let url = format!("{}/agentmux/reactive/inject", self.local_url.trim_end_matches('/'));
-        let req = InjectRequest {
-            target_agent: fire_target(target, target_uid).to_string(),
-            message: prompt.to_string(),
-            source_agent: Some("cron".to_string()),
-            ..Default::default()
-        };
-
-        match self.http_client.post(&url).header("X-AuthKey", &self.auth_key).json(&req).send().await {
-            Ok(r) if r.status().is_success() => {
-                // Inject answers 200 with `success: false` when the target is
-                // not reachable — since M3 that includes a UID nobody is
-                // registered under. A fire that reached no one is a failure,
-                // and a firing job has nobody to tell but the log (§5.4).
-                let body: serde_json::Value = r.json().await.unwrap_or_default();
-                if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
-                    tracing::warn!(
-                        id,
-                        target,
-                        target_uid,
-                        error = body.get("error").and_then(|v| v.as_str()).unwrap_or(""),
-                        "cron: fire was not delivered"
-                    );
-                } else {
-                    tracing::debug!(id, target, "cron: fired");
+        let target_agent = fire_target(target, target_uid).to_string();
+        let body = match self.delivery.get() {
+            Some(deliver) => {
+                let req = InjectionRequest {
+                    target_agent,
+                    message: prompt.to_string(),
+                    source_agent: Some("cron".to_string()),
+                    ..Default::default()
+                };
+                Some(deliver(req, created_by_uid.to_string()).await)
+            }
+            None => {
+                if self.local_url.is_empty() || self.auth_key.is_empty() {
+                    tracing::warn!(id, "cron: no local_url/auth_key — skipping fire");
+                    return;
                 }
+                crate::backend::agent_resolve::record_uid_fallback("m4c.cron_fire_http");
+                self.post_fire(id, target_agent, prompt).await
             }
-            Ok(r) => {
-                tracing::warn!(id, status = %r.status(), "cron: inject returned non-2xx");
-            }
-            Err(e) => {
-                tracing::warn!(id, error = %e, "cron: inject request failed");
+        };
+        if let Some(body) = body {
+            // Inject answers `success: false` when the target is not
+            // reachable — since M3 that includes a UID nobody is registered
+            // under. A fire that reached no one is a failure, and a firing
+            // job has nobody to tell but the log (§5.4).
+            if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
+                tracing::warn!(
+                    id,
+                    target,
+                    target_uid,
+                    error = body.get("error").and_then(|v| v.as_str()).unwrap_or(""),
+                    "cron: fire was not delivered"
+                );
+            } else {
+                tracing::debug!(id, target, "cron: fired");
             }
         }
 
@@ -271,6 +313,30 @@ impl CronScheduler {
             }
         }
         self.publish_changed();
+    }
+
+    /// The pre-M4c-3 fire: POST to the local inject route with the instance
+    /// key. Only until [`Self::install_delivery`] runs. `None` when the POST
+    /// itself failed (logged here).
+    async fn post_fire(&self, id: &str, target_agent: String, prompt: &str) -> Option<serde_json::Value> {
+        let url = format!("{}/agentmux/reactive/inject", self.local_url.trim_end_matches('/'));
+        let req = InjectRequest {
+            target_agent,
+            message: prompt.to_string(),
+            source_agent: Some("cron".to_string()),
+            ..Default::default()
+        };
+        match self.http_client.post(&url).header("X-AuthKey", &self.auth_key).json(&req).send().await {
+            Ok(r) if r.status().is_success() => Some(r.json().await.unwrap_or_default()),
+            Ok(r) => {
+                tracing::warn!(id, status = %r.status(), "cron: inject returned non-2xx");
+                None
+            }
+            Err(e) => {
+                tracing::warn!(id, error = %e, "cron: inject request failed");
+                None
+            }
+        }
     }
 }
 
@@ -378,5 +444,42 @@ mod identity_m3_tests {
         assert_eq!(fire_target("AgentY", "4f3c-a91"), "4f3c-a91");
         assert_eq!(fire_target("AgentY", ""), "AgentY");
         assert_eq!(fire_target("AgentY", "   "), "AgentY");
+    }
+}
+
+#[cfg(test)]
+mod identity_m4c3_tests {
+    use super::*;
+
+    /// Identity M4c-3 (spec §6.5.9): with delivery installed, a fire goes in
+    /// process — by target UID, as `"cron"`, with the creator's UID beside
+    /// it — and never over HTTP.
+    #[tokio::test]
+    async fn a_fire_is_delivered_in_process_as_cron_with_the_creators_uid() {
+        let sched = CronScheduler::new(
+            None,
+            reqwest::Client::new(),
+            // Unreachable: a fire that fell back to HTTP could not succeed.
+            "http://127.0.0.1:1".to_string(),
+            "test".to_string(),
+            Arc::new(Broker::new()),
+        );
+        let seen: Arc<Mutex<Vec<(InjectionRequest, String)>>> = Arc::default();
+        let sink = seen.clone();
+        sched.install_delivery(Arc::new(move |req, creator_uid| {
+            sink.lock().unwrap().push((req, creator_uid));
+            Box::pin(async { serde_json::json!({"success": true}) })
+        }));
+
+        sched.fire("job-1", "check in", "AgentY", "uid-target", "uid-creator").await;
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        let (req, creator_uid) = &seen[0];
+        assert_eq!(req.target_agent, "uid-target");
+        assert_eq!(req.message, "check in");
+        assert_eq!(req.source_agent.as_deref(), Some("cron"), "the sender name stays cron");
+        assert_eq!(creator_uid, "uid-creator");
+        assert_eq!(req.audit_source_uid, "", "the delivery path sets it, on this instance only");
     }
 }

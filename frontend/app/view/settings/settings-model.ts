@@ -8,6 +8,7 @@ export type SettingsSection =
     | "window"
     | "terminal"
     | "sounds"
+    | "notifications"
     | "recording"
     | "advanced";
 
@@ -34,6 +35,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     window: "Window & Panes",
     terminal: "Terminal",
     sounds: "Sounds",
+    notifications: "Notifications & Tray",
     recording: "Recording",
     advanced: "Advanced",
 };

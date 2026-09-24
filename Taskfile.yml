@@ -694,9 +694,10 @@ tasks:
                   # tier — the ~3-6 hour local Chromium compile in that doc
                   # only needs to happen once per CEF version, ever, on any
                   # machine (scripts/cef-build/fetch-patched-cef-windows.sh).
-                  # Non-fatal: any failure here (gh missing/unauthenticated,
-                  # network) just leaves cefBuildDefault empty and we fall
-                  # through to tier 3 exactly as before.
+                  # Non-fatal here: a failed fetch leaves whatever runtime was
+                  # already cached (or none, falling through to tier 3). The
+                  # verify-cef-runtime-windows.sh guard below is what refuses
+                  # a runtime that isn't the pinned tracer-off build.
                   bash scripts/cef-build/fetch-patched-cef-windows.sh "$cefBuildDefault" || true
                   if [ -f "$cefBuildDefault/libcef.dll" ] && [ -f "$cefBuildDefault/icudtl.dat" ]; then
                     echo "Found codec-enabled CEF at default cef-build location — using $cefBuildDefault"
@@ -771,6 +772,15 @@ tasks:
                 # leaving GFX permanently "off" with no build-time signal.
                 # See scripts/verify-angle-libs.sh.
                 bash scripts/verify-angle-libs.sh "$cefDir" libEGL.dll libGLESv2.dll || exit 1
+                # Guard: the runtime must be the pinned tracer-off build (or a
+                # local CEF build whose args.gn turns the tracer off), whichever
+                # tier resolved it. A tracer-on libcef.dll builds and runs fine,
+                # then deadlocks the app at a random later moment -- a failed
+                # fetch used to fall through to a stale cached runtime or the
+                # stock (also tracer-on) one without stopping the build.
+                # AGENTMUX_ALLOW_UNVERIFIED_CEF=1 is the deliberate opt-out.
+                # See docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md.
+                bash scripts/cef-build/verify-cef-runtime-windows.sh "$cefDir" || exit 1
                 # Advisory-only, same posture as bundle:darwin's unpatched-
                 # framework warning: don't fail `task dev`/`task package` on
                 # the stock cef-dll-sys fallback (that's still a legitimate,

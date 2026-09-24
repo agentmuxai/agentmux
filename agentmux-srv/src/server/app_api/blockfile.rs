@@ -33,11 +33,17 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if let Some((gfs, zone)) =
                     global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
                 {
-                    // Blocking pool (#2841): this extends or, when it can't
-                    // anchor on the existing index, fully rebuilds `output.idx`
-                    // — a streaming scan proportional to transcript size.
+                    // Blocking pool (#2841). A counted zone answers from its
+                    // counter (O(1), Phase 5a-3); a zone without an epoch gets
+                    // one first (`init_line_counter`, one read of the file,
+                    // once). Only if it can't be counted does this extend or
+                    // rebuild `output.idx`, as before.
                     let count = match tokio::task::spawn_blocking(move || {
-                        global_zone_line_count(&gfs, &zone)
+                        let stream = format!("g:{zone}");
+                        counted_line_count(&gfs, &zone, stream).or_else(|| {
+                            global_zone_line_count(&gfs, &zone)
+                                .map(|count| BlockfileLineCountResult { count, ..Default::default() })
+                        })
                     })
                     .await
                     {
@@ -51,8 +57,25 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             None
                         }
                     };
-                    if let Some(count) = count {
-                        return Ok(BlockfileLineCountResult { count });
+                    if let Some(result) = count {
+                        return Ok(result);
+                    }
+                }
+
+                // The block's own `output`, from its counter when it is a
+                // counted transcript (Phase 5a-3): exact, O(1), and the same
+                // count `read_range` serves lines from.
+                if cmd.filename == crate::backend::agent_session::OUTPUT_FILE {
+                    let (fs, block_id) = (filestore.clone(), cmd.block_id.clone());
+                    let counted = tokio::task::spawn_blocking(move || {
+                        let stream = format!("b:{block_id}");
+                        counted_line_count(&fs, &block_id, stream)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some(result) = counted {
+                        return Ok(result);
                     }
                 }
 
@@ -67,7 +90,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if cmd.filename == "output" {
                     if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
                         if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
-                            return Ok(BlockfileLineCountResult { count });
+                            return Ok(BlockfileLineCountResult { count, ..Default::default() });
                         }
                     }
                 }
@@ -101,7 +124,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                Ok(BlockfileLineCountResult { count })
+                Ok(BlockfileLineCountResult { count, ..Default::default() })
             }
         },
     );
@@ -133,9 +156,42 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // (`agent:<defId>:current`) instead. `read_block` is the zone for
                 // every FileStore call below — the local block_id normally, the
                 // agent zone when the agent ran in another build/channel.
-                let (filestore, read_block) =
-                    global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
-                        .unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
+                let source = global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename);
+                let stream = match &source {
+                    Some((_, zone)) => format!("g:{zone}"),
+                    None => format!("b:{}", cmd.block_id),
+                };
+                let (filestore, read_block) = source.unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
+
+                // Generation (Phase 5a-3): read before and after the lines. A
+                // replace always mints a new one, so the same value on both
+                // sides proves every line came from that generation — only then
+                // does the response name it. `expect_gen` turns any other
+                // outcome into `gen_mismatch` instead of lines of another file.
+                let transcript = cmd.filename == crate::backend::agent_session::OUTPUT_FILE;
+                let gen_before = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                let mismatch = |gen: Option<String>| BlockfileReadRangeResult {
+                    stream: Some(stream.clone()),
+                    gen,
+                    gen_mismatch: Some(true),
+                    ..Default::default()
+                };
+                if let Some(expected) = &cmd.expect_gen {
+                    if gen_before.as_deref() != Some(expected.as_str()) {
+                        return Ok(mismatch(gen_before));
+                    }
+                }
+                let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
+                    if gen_before.is_some() && gen_after == gen_before {
+                        result.stream = Some(stream.clone());
+                        result.gen = gen_before.clone();
+                        result
+                    } else if cmd.expect_gen.is_some() {
+                        mismatch(gen_after)
+                    } else {
+                        result
+                    }
+                };
 
                 // Fast path: output.idx — a lazily-built, self-validating byte-offset
                 // index of every non-blank line in `output`. It lets us seek directly
@@ -156,7 +212,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
+                use crate::backend::blockcontroller::shell::{output_index, read_via_index, rebuild_output_idx};
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
                     // streaming scan of `output`, which reaches hundreds of MB
@@ -172,55 +228,30 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
                         }
-                        let output_size = out_stat.size as u64;
-
-                        // Determine total_lines, rebuilding the index iff it is missing or
-                        // its covered-size header doesn't match the current output size.
-                        let idx_stat = filestore.stat(&read_block, "output.idx").ok().flatten();
-                        let fresh = match &idx_stat {
-                            Some(s) if s.size >= OUTPUT_IDX_HEADER_LEN => {
-                                let (_, h) = filestore
-                                    .read_at(&read_block, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
-                                    .ok()?;
-                                u64::from_le_bytes(h.try_into().ok()?) == output_size
+                        // Everything the answer rests on — the index judged fresh,
+                        // its entries, the output bytes they point at — comes from
+                        // ONE database snapshot (Codex on #3634), never the stale
+                        // per-process `stat` cache. A missing or stale index is
+                        // rebuilt once, for the output as a snapshot saw it, and read
+                        // again in a new snapshot; if that still doesn't match
+                        // (replaced again meanwhile), the slow path below answers.
+                        let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
+                            Some(read) => read,
+                            None => {
+                                let view = output_index(&filestore, &read_block)?;
+                                if view.fresh_lines.is_none() {
+                                    rebuild_output_idx(&filestore, &read_block, view.output_size, view.output_gen)?;
+                                }
+                                read_via_index(&filestore, &read_block, offset as u64, limit as u64)?
                             }
-                            _ => false,
                         };
-                        let total_lines: u64 = if fresh {
-                            let s = idx_stat.unwrap();
-                            ((s.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64
-                        } else {
-                            rebuild_output_idx(&filestore, &read_block, output_size)?
-                        };
+                        let total_lines = read.total;
 
                         // Empty result cases — answered from the index, no output read.
-                        if limit == 0 || total_lines == 0 || (offset as u64) >= total_lines {
-                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, stamps: None });
+                        if read.line_offsets.is_empty() {
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, ..Default::default() });
                         }
-
-                        // entry(k) = byte offset of non-blank line k (past the 8-byte header).
-                        let entry = |k: u64| -> Option<i64> {
-                            let (_, b) = filestore
-                                .read_at(
-                                    &read_block,
-                                    "output.idx",
-                                    OUTPUT_IDX_HEADER_LEN + (k * 8) as i64,
-                                    8,
-                                )
-                                .ok()?;
-                            Some(u64::from_le_bytes(b.try_into().ok()?) as i64)
-                        };
-
-                        let byte_start = entry(offset as u64)?;
-                        let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
-                            output_size as i64
-                        } else {
-                            entry((offset + limit) as u64)?
-                        };
-                        let read_len = (byte_end - byte_start).max(0);
-                        let (_, raw) = filestore
-                            .read_at(&read_block, "output", byte_start, read_len)
-                            .ok()?;
+                        let raw = read.raw;
                         let text = String::from_utf8_lossy(&raw);
                         let lines: Vec<String> = text
                             .lines()
@@ -235,13 +266,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // byte offset. Best-effort — any failure yields no
                         // stamps, never a failed read.
                         let stamps: Option<Vec<i64>> = (|| {
-                            use crate::backend::agent_session::TSIDX_FILE;
-                            let ts_stat = filestore.stat(&read_block, TSIDX_FILE).ok().flatten()?;
-                            if ts_stat.size == 0 {
-                                return None;
-                            }
-                            let raw_ts = filestore.read_file(&read_block, TSIDX_FILE).ok().flatten()?;
-                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(&raw_ts)
+                            // Read in the same snapshot as the lines (Codex on #3634).
+                            let raw_ts = read.tsidx.as_deref()?;
+                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(raw_ts)
                                 .lines()
                                 .filter_map(|l| {
                                     let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
@@ -257,24 +284,15 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             // zone).
                             entries.sort_by_key(|(off, _)| *off);
 
-                            // Byte offset of every returned line, read from
-                            // output.idx in one slice.
-                            let returned = lines.len() as u64;
-                            let (_, idx_raw) = filestore
-                                .read_at(
-                                    &read_block,
-                                    "output.idx",
-                                    OUTPUT_IDX_HEADER_LEN + (offset as u64 * 8) as i64,
-                                    (returned * 8) as i64,
-                                )
-                                .ok()?;
-                            if idx_raw.len() != (returned * 8) as usize {
+                            // Byte offset of every returned line: from the same
+                            // snapshot as the lines themselves.
+                            if read.line_offsets.len() != lines.len() {
                                 return None;
                             }
-                            let stamps = idx_raw
-                                .chunks_exact(8)
-                                .map(|b| {
-                                    let line_off = u64::from_le_bytes(b.try_into().unwrap());
+                            let stamps = read
+                                .line_offsets
+                                .iter()
+                                .map(|&line_off| {
                                     match entries.partition_point(|(off, _)| *off <= line_off) {
                                         0 => 0,
                                         p => entries[p - 1].1,
@@ -284,7 +302,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             Some(stamps)
                         })();
 
-                        Some(BlockfileReadRangeResult { lines, total: total_lines, stamps })
+                        Some(BlockfileReadRangeResult { lines, total: total_lines, stamps, ..Default::default() })
                         };
                         // A panic in the scan must degrade to the slow path
                         // below, not fail the read — but it is logged rather
@@ -309,7 +327,8 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             lines = result.lines.len(),
                             "blockfile:read_range via output.idx fast path"
                         );
-                        return Ok(result);
+                        let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                        return Ok(finish(result, gen_after));
                     }
                 }
 
@@ -394,7 +413,8 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     all_lines[clamped_offset..clamped_end].to_vec()
                 };
 
-                Ok(BlockfileReadRangeResult { lines, total, stamps: None })
+                let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                Ok(finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after))
             }
         },
     );
@@ -442,6 +462,17 @@ fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
                     return Err("blockfile:write_state: filename must not contain path separators".to_string());
                 }
+                // The transcript and its sidecars are written only by the
+                // transcript paths, which keep its generation and sidecars
+                // consistent (5a-2b). This RPC is for pane state files; letting
+                // it replace `output` would leave `output.idx` / `output.tsidx`
+                // describing other bytes.
+                if matches!(cmd.filename.as_str(), "output" | "output.idx" | "output.tsidx") {
+                    return Err(format!(
+                        "blockfile:write_state: {} is a transcript file and can't be written through this RPC",
+                        cmd.filename
+                    ));
+                }
                 let bytes = cmd.content.as_bytes();
                 let bytes_written = bytes.len() as u64;
                 tracing::debug!(block_id = %cmd.block_id, filename = %cmd.filename, bytes = bytes_written, "blockfile:write_state");
@@ -469,3 +500,36 @@ fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) 
         },
     );
 }
+
+/// A transcript stream's line count from its counter, with the stream and
+/// generation it counts (Phase 5a-3). A file with no epoch yet gets one
+/// first — `init_line_counter`, one read of the file, once per epoch; call on
+/// the blocking pool. `None` when it can't be counted (no such file, or
+/// mid-write by a build without transactions), and the caller falls back.
+fn counted_line_count(
+    fs: &crate::backend::storage::filestore::FileStore,
+    zone: &str,
+    stream: String,
+) -> Option<BlockfileLineCountResult> {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    let state = fs.line_state(zone, OUTPUT_FILE).ok()??;
+    let state = if state.counted.is_some() { state } else { fs.init_line_counter(zone, OUTPUT_FILE).ok()?? };
+    let counted = state.counted?;
+    Some(BlockfileLineCountResult { count: counted.lines, stream: Some(stream), gen: Some(counted.gen) })
+}
+
+/// The valid generation of a transcript's `output`, read from the database on
+/// the blocking pool (the global store can be held by another srv instance).
+async fn db_generation(fs: &Arc<crate::backend::storage::filestore::FileStore>, zone: &str) -> Option<String> {
+    let (fs, zone) = (fs.clone(), zone.to_string());
+    tokio::task::spawn_blocking(move || {
+        crate::backend::blockcontroller::shell::output_now(&fs, &zone).and_then(|(_, gen)| gen)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[cfg(test)]
+#[path = "blockfile_transcript_tests.rs"]
+mod transcript_rpc_tests;

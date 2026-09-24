@@ -52,7 +52,28 @@ impl PersistentSubprocessController {
     /// [`request_stop`] over just the shared state, for the `'static`
     /// future [`Controller::shutdown`] returns.
     pub(super) fn request_stop_on(inner_arc: &Arc<Mutex<PersistentInner>>, request: KillRequest) -> Result<(), String> {
-        let kill_tx = {
+        Self::request_stop_inner(inner_arc, request, false);
+        Ok(())
+    }
+
+    /// A kill for teardown: drains the deferred queue in the SAME `inner`
+    /// acquisition that issues the kill, and returns what it drained for the
+    /// caller to report. Draining in a second acquisition left a window
+    /// after the kill request where the stdout reader could handle the
+    /// turn's `result`, flush a deferred message into the process being
+    /// killed, and leave the report an empty queue: lost, with no stranded
+    /// warning (codex P2 on #3562). Once this lock is released, a boundary
+    /// flush finds the queue empty.
+    pub(super) fn request_stop_draining_deferred(&self, request: KillRequest) -> Vec<String> {
+        Self::request_stop_inner(&self.inner, request, true)
+    }
+
+    fn request_stop_inner(
+        inner_arc: &Arc<Mutex<PersistentInner>>,
+        request: KillRequest,
+        drain_deferred: bool,
+    ) -> Vec<String> {
+        let (kill_tx, drained) = {
             let mut inner = inner_arc.lock().unwrap();
             // Recorded unconditionally, not only when `kill_tx` is already
             // `None` — codex P1 on PR #2360 (round 16, commit ce1642d90):
@@ -70,12 +91,18 @@ impl PersistentSubprocessController {
             // the user explicitly asked to stop.
             let generation = inner.spawn_generation;
             inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
-            inner.kill_tx.take()
+            inner.stop_pending = true;
+            let drained = if drain_deferred {
+                inner.deferred_deliveries.drain(..).collect()
+            } else {
+                Vec::new()
+            };
+            (inner.kill_tx.take(), drained)
         };
         if let Some(tx) = kill_tx {
             let _ = tx.send(request);
         }
-        Ok(())
+        drained
     }
 
     pub fn session_id(&self) -> Option<String> {

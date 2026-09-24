@@ -23,7 +23,7 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
-import { beginHeightContinuity, withHeightContinuity } from "./resize-contract";
+import { beginHeightContinuity, cancelHeightContinuity, withHeightContinuity } from "./resize-contract";
 
 /** Elements whose computed content-visibility should read "hidden". The
  *  module under test only ever reads THIS one property off
@@ -280,6 +280,37 @@ describe("withHeightContinuity", () => {
         flushRaf();
         expect(a.style.height).toBe("80px");
         expect(b.style.height).toBe("20px");
+    });
+});
+
+describe("cancelHeightContinuity", () => {
+    it("clears a FLIP in flight immediately, without reading any geometry or style", () => {
+        const el = document.createElement("div");
+        setOffset(el, 40);
+        withHeightContinuity(el, () => setOffset(el, 120));
+        flushRaf();
+        expect(el.style.height).toBe("120px"); // mid-transition
+
+        const reads = { style: 0, geometry: 0 };
+        const gcs = vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
+            reads.style++;
+            return {} as CSSStyleDeclaration;
+        });
+        Object.defineProperty(el, "offsetHeight", { configurable: true, get: () => (reads.geometry++, 120) });
+        cancelHeightContinuity(el);
+
+        expect(el.style.height).toBe("");
+        expect(el.style.transition).toBe("");
+        expect(el.style.overflowY).toBe("");
+        expect(reads).toEqual({ style: 0, geometry: 0 });
+        gcs.mockRestore();
+    });
+
+    it("is a no-op on an element with nothing in flight", () => {
+        const el = document.createElement("div");
+        el.style.height = "33px"; // someone else's inline height: not ours to clear
+        cancelHeightContinuity(el);
+        expect(el.style.height).toBe("33px");
     });
 });
 

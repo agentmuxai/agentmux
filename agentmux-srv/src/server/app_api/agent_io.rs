@@ -230,14 +230,20 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // Some(filestore): the frame must be PERSISTED to the
                         // block file, not just live-broadcast — otherwise the
                         // error vanishes on pane reload/reconnect (reagent P1,
-                        // PR #2164 round 2).
+                        // PR #2164 round 2). And to the agent's global zone,
+                        // which is what a pane with an agentId reloads from
+                        // (Phase 5a-3c).
+                        let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+                            &Some(mstore.clone()),
+                            &cmd.block_id,
+                        );
                         crate::backend::blockcontroller::shell::handle_append_block_file(
                             &broker,
                             &cmd.block_id,
                             crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
                             format!("{error_frame}\n").as_bytes(),
                             Some(&filestore),
-                            None,
+                            global_zone.as_deref(),
                         );
                         // codex P1, PR #2802: same fix as agent_handlers/
                         // input.rs's agentinput handler — the frame above

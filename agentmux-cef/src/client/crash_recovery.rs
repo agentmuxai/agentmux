@@ -29,7 +29,15 @@ impl AgentMuxHandler {
         error_code: i32,
         error_string: Option<&CefString>,
     ) {
-        let reason = if status == TerminationStatus::PROCESS_OOM {
+        // The host itself killed this renderer for hanging (unresponsive.rs).
+        // It still goes through the crash budget below like any other
+        // termination; only the reported reason differs.
+        let killed_for_hang = browser
+            .as_ref()
+            .is_some_and(|b| self.terminated_unresponsive.remove(&b.identifier()));
+        let reason = if killed_for_hang {
+            "renderer stopped responding"
+        } else if status == TerminationStatus::PROCESS_OOM {
             "out of memory"
         } else if status == TerminationStatus::PROCESS_CRASHED {
             "renderer process crashed"

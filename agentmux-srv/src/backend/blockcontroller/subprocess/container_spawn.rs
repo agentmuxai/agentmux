@@ -323,10 +323,14 @@ impl SubprocessController {
                             "subtype": "error_during_execution",
                             "error": {"message": format!("[AgentMux] container exec failed: {e}")}
                         }).to_string();
+                        // Into the agent's global zone too, like every other
+                        // record: that is what the pane reads on reload
+                        // (Phase 5a-3c).
+                        let global_zone = shell::resolve_global_output_zone(&mstore, &block_id);
                         shell::handle_append_block_file(
                             b, &block_id, SUBPROCESS_OUTPUT_SUBJECT,
                             format!("{error_frame}\n").as_bytes(),
-                            filestore.as_ref(), None,
+                            filestore.as_ref(), global_zone.as_deref(),
                         );
                     }
                     // A failed exec must still run the SAME completion + queue
@@ -373,6 +377,7 @@ impl SubprocessController {
                                     &e,
                                     &broker,
                                     &filestore,
+                                    &mstore,
                                 );
                             }
                         }
@@ -642,6 +647,7 @@ impl SubprocessController {
                             &e,
                             &broker,
                             &filestore,
+                            &mstore,
                         );
                     }
                 }
@@ -660,6 +666,7 @@ impl SubprocessController {
         error: &str,
         broker: &Option<Arc<crate::backend::mps::Broker>>,
         filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
+        mstore: &Option<Arc<crate::backend::storage::store::Store>>,
     ) {
         let Some(broker) = broker else {
             return;
@@ -670,13 +677,16 @@ impl SubprocessController {
             "subtype": "error_during_execution",
             "error": {"message": format!("[AgentMux] queued message could not be sent: {error}")}
         }).to_string();
+        // Into the agent's global zone too: that is what the pane reads on
+        // reload (Phase 5a-3c).
+        let global_zone = shell::resolve_global_output_zone(mstore, block_id);
         shell::handle_append_block_file(
             broker,
             block_id,
             SUBPROCESS_OUTPUT_SUBJECT,
             format!("{error_frame}\n").as_bytes(),
             filestore.as_ref(),
-            None,
+            global_zone.as_deref(),
         );
     }
 

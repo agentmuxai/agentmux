@@ -27,10 +27,10 @@ CACHE_DIR="${AGENTMUX_BUILD_TOOLS:-$HOME/.agentmux/build-tools}"
 RCEDIT="$CACHE_DIR/rcedit-x64.exe"
 mkdir -p "$CACHE_DIR"
 
-if [ ! -f "$RCEDIT" ] || [ "$(sha256sum "$RCEDIT" | cut -d' ' -f1)" != "$RCEDIT_SHA" ]; then
+if [ ! -f "$RCEDIT" ] || [ "$(sha256sum < "$RCEDIT" | cut -d' ' -f1)" != "$RCEDIT_SHA" ]; then
     echo "  [icon] downloading rcedit (v2.0.0)…"
     curl -fsSL "$RCEDIT_URL" -o "$RCEDIT"
-    got="$(sha256sum "$RCEDIT" | cut -d' ' -f1)"
+    got="$(sha256sum < "$RCEDIT" | cut -d' ' -f1)"
     if [ "$got" != "$RCEDIT_SHA" ]; then
         echo "inject-exe-icon: rcedit sha256 mismatch (expected $RCEDIT_SHA got $got)" >&2
         rm -f "$RCEDIT"
@@ -38,16 +38,20 @@ if [ ! -f "$RCEDIT" ] || [ "$(sha256sum "$RCEDIT" | cut -d' ' -f1)" != "$RCEDIT_
     fi
 fi
 
-# rcedit is a native Windows exe — feed it Windows paths.
-win() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
+# rcedit is a native Windows exe — feed it ABSOLUTE Windows paths (-a). Given a
+# relative one (Taskfile passes dist/cef/agentmux-cef.exe), rcedit fails every
+# time with "Unable to commit changes" -- so every `task dev`/`task build` exe
+# shipped without its icon, while package-portable.sh (absolute path) worked.
+win() { cygpath -aw "$1" 2>/dev/null || echo "$1"; }
 win_exe="$(win "$EXE")"
 win_ico="$(win "$ICO")"
 
-# rcedit can transiently fail with "Unable to commit changes" when a scanner
-# (Defender / Search indexer) still holds a handle on the just-copied exe — the
-# same handle race that bites CEF extraction. Retry, then degrade to a warning:
+# rcedit can also fail transiently when a scanner (Defender / Search indexer)
+# still holds a handle on the just-copied exe. Retry, then degrade to a warning:
 # a missed exe-file icon stamp must NOT break packaging (the runtime WINDOW icon
-# is set independently at startup via set_window_icon → WM_SETICON).
+# is set independently at startup via set_window_icon → WM_SETICON). A failure
+# on EVERY attempt is not that race -- check the path handed to rcedit first
+# (see win() above).
 err="$(mktemp)"
 attempt=0
 max=6

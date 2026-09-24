@@ -96,9 +96,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // which has no per-request trusted AGENT identity the way
                 // the REST/MCP path does (see BundleVersion::written_by's
                 // own doc comment) — a human via the UI is the only thing
-                // this code path can honestly claim.
+                // this code path can honestly claim. No writer UID either
+                // (identity M4c-1): the WebSocket is always Unattributed.
                 mstore
-                    .bundle_upsert_with_version(&memory, "armory-ui", "human", "{}")
+                    .bundle_upsert_with_version(&memory, "armory-ui", "", "human", "{}")
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),

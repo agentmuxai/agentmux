@@ -64,8 +64,9 @@
  * the settle decision on a "done" event used to be a blind
  * `DOCK_SETTLE_BUFFER_MS` (250ms) timer, guessed to give
  * `subagent-source.ts`/`dispatch-source.ts`'s own independently-triggered,
- * debounced refresh (`backfill-tracker.ts`'s `onNextBackfillSettle` →
- * fire-and-forget `refreshNow()`) time to land before revealing the pane.
+ * debounced refresh (`backfill-tracker.ts`'s settle listener — then
+ * `onNextBackfillSettle`, now the per-block `onBackfillSettle` → fire-and-forget
+ * `refreshNow()`) time to land before revealing the pane.
  * There was no actual relationship between that guess and the real refresh
  * — for a heavy agent (verified live: ~20 subagents replayed on reopen),
  * the refresh's own RPC round trip could still be in flight well past

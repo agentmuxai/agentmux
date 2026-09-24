@@ -39,6 +39,15 @@ vi.mock("@/element/DualProviderLogo", () => ({
     },
 }));
 
+const { claimFocusOnMount } = vi.hoisted(() => ({
+    claimFocusOnMount: vi.fn((_blockId: string, give: () => boolean): void => {
+        give();
+    }),
+}));
+vi.mock("@/app/store/focusManager", () => ({
+    focusManager: { claimFocusOnMount },
+}));
+
 import { AgentCard } from "./AgentCard";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
@@ -155,5 +164,50 @@ describe("AgentCard upgrade badge", () => {
         // stale CLI if you are not running one at all.
         renderWith({ installed: false, drift: "behind-pin" });
         expect(screen.queryByText(/Update available/)).toBeNull();
+    });
+});
+
+// REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md §2: the
+// default card used to call a bare `focus()` on mount — scrolling its picker
+// down to the "New Agent" header and taking the caret from whatever pane the
+// user was typing in.
+describe("AgentCard default focus", () => {
+    const renderDefault = (over: { disabled?: boolean } = {}) =>
+        render(() => (
+            <AgentCard
+                agent={makeAgent()}
+                launching={false}
+                disabled={over.disabled ?? false}
+                installed={true}
+                onLaunch={() => {}}
+                blockId="blk-1"
+                defaultFocus={true}
+            />
+        ));
+
+    it("claims focus through the shared pane guard, scoped to its own block", () => {
+        renderDefault();
+        expect(claimFocusOnMount).toHaveBeenCalledTimes(1);
+        expect(claimFocusOnMount.mock.calls[0][0]).toBe("blk-1");
+    });
+
+    it("never scrolls its picker when it takes focus", () => {
+        const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");
+        renderDefault();
+        expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+        focusSpy.mockRestore();
+    });
+
+    it("does not take focus when the pane's guard declines (another pane selected, or caret in an input)", () => {
+        claimFocusOnMount.mockImplementationOnce(() => {});
+        const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");
+        renderDefault();
+        expect(focusSpy).not.toHaveBeenCalled();
+        focusSpy.mockRestore();
+    });
+
+    it("does not claim focus while disabled", () => {
+        renderDefault({ disabled: true });
+        expect(claimFocusOnMount).not.toHaveBeenCalled();
     });
 });

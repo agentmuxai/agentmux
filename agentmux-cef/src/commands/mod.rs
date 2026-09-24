@@ -5,6 +5,7 @@
 // Each module corresponds to a category of commands ported from src-tauri/src/commands/.
 
 pub mod platform;
+pub mod autostart;
 pub mod cli_login;
 pub mod window;
 pub mod backend;
@@ -52,8 +53,7 @@ use crate::state::AppState;
 /// (accidentally) providing all along, minus the error line and the risk.
 /// SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.6.
 pub fn create_isolated_request_context(_state: &Arc<AppState>, label: &str) -> Option<cef::RequestContext> {
-    // Phase 1 diagnostic tracing (added 2026-05-02 freeze investigation, see
-    // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md). The freeze
+    // Phase 1 diagnostic tracing (added 2026-05-02 freeze investigation). The freeze
     // wedges the UI thread inside CEF's Chrome profile-init under concurrent
     // load; we need to find the EXACT line that silences before committing
     // to the runner-based serialization fix.

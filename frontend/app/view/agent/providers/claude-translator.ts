@@ -22,6 +22,14 @@ import type { OutputTranslator } from "./translator";
  * Events that already match StreamEvent format are passed through directly.
  */
 export class ClaudeTranslator implements OutputTranslator {
+    /**
+     * `replay`: translating stored history. A replayed user line has no wire
+     * timestamp; inventing Date.now() here would win over parseHistoryLines'
+     * batch stamp for that line and show every restored user message as sent
+     * "just now" (ReAgent P1, #3620). Replay leaves it unset.
+     */
+    constructor(private readonly opts: { replay?: boolean } = {}) {}
+
     private currentToolCallId: string | null = null;
     private currentToolName: string | null = null;
     private toolInputBuffer: string = "";
@@ -296,7 +304,7 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Handle string content
         if (typeof content === "string") {
-            return [{ type: "user_message", message: content, timestamp: Date.now() }];
+            return [{ type: "user_message", message: content, timestamp: this.opts.replay ? undefined : Date.now() }];
         }
 
         // Handle array content with tool_result blocks

@@ -82,9 +82,10 @@ pub struct WorkItem {
     /// path applies.
     #[serde(default)]
     pub target_agent_uid: String,
-    /// The claimer's UID — carried from its own `AGENTMUX_AGENT_UID`, else
-    /// its block's row. Recorded, empty when unknown; not read for
-    /// eligibility (holder transitions still match `claimed_by` until M4).
+    /// The claimer's UID — its token's (M4c-1), else carried from its own
+    /// `AGENTMUX_AGENT_UID`, else its block's row. Empty when unknown. Since
+    /// M4c-2 the holder transitions match it against the caller's UID when
+    /// both are known, and `claimed_by` otherwise (`HolderMatch`).
     #[serde(default)]
     pub claimed_by_uid: String,
     /// ms epoch; `None` unless `state == claimed`.
@@ -96,6 +97,13 @@ pub struct WorkItem {
     pub max_attempts: i64,
     #[serde(default)]
     pub created_by: String,
+    /// Identity M4c-1 (SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md
+    /// §6.5.9): the enqueuer's UID, taken from the request's `Caller` — its
+    /// `X-Agent-Token` — never from a body field. Empty = the enqueue was
+    /// Unattributed; never guessed. Dual-written beside `created_by`;
+    /// nothing branches on it.
+    #[serde(default)]
+    pub created_by_uid: String,
     pub created_at: i64,
     pub updated_at: i64,
     /// ms epoch; not claimable before this. `None` = claimable immediately.
@@ -142,6 +150,7 @@ fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
         attempts: row.get("attempts")?,
         max_attempts: row.get("max_attempts")?,
         created_by: row.get("created_by")?,
+        created_by_uid: row.get("created_by_uid")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         not_before: row.get("not_before")?,
@@ -149,10 +158,51 @@ fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
     })
 }
 
+/// How a holder-only transition (heartbeat, complete, release) matched the
+/// item's holder — identity M4c-2 (spec §6.5.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HolderMatch {
+    /// The row's `claimed_by_uid` is the caller's UID.
+    Uid,
+    /// The row's `claimed_by` is the request's name: the row or the caller
+    /// has no UID, as before M4c-2.
+    Name,
+}
+
+/// The holder predicates, tried in order. When the row's `claimed_by_uid`
+/// and the caller's UID (`?6`) are both known, only the UID decides — a name
+/// two agents share no longer lets either drive the other's item. Otherwise
+/// the name (`?2`) decides, as it always has: a tokenless holder keeps
+/// working. Each is its own conditional UPDATE, so each is a complete
+/// authorization on its own; the second runs only when the first matched
+/// nothing.
+const HOLDER_BY_UID: &str = "(claimed_by_uid <> '' AND claimed_by_uid = ?6)";
+const HOLDER_BY_NAME: &str = "((claimed_by_uid = '' OR ?6 = '') AND claimed_by = ?2)";
+
+/// Run a holder-only UPDATE (`sql` renders it around a holder predicate)
+/// with the UID predicate, then the name one. Every holder statement binds
+/// `?1` id, `?2` the request's name, `?3` the fence and `?6` the caller's UID
+/// (`''` when Unattributed).
+fn holder_update(
+    conn: &rusqlite::Connection,
+    sql: impl Fn(&str) -> String,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<Option<HolderMatch>, StoreError> {
+    for (holder, how) in [
+        (HOLDER_BY_UID, HolderMatch::Uid),
+        (HOLDER_BY_NAME, HolderMatch::Name),
+    ] {
+        if conn.execute(&sql(holder), params)? > 0 {
+            return Ok(Some(how));
+        }
+    }
+    Ok(None)
+}
+
 const COLS: &str = "id, title, payload, kind, target_agent, target_group, priority, state, \
                     claimed_by, claim_expires, attempts, max_attempts, created_by, \
                     created_at, updated_at, not_before, result, \
-                    target_agent_uid, claimed_by_uid";
+                    target_agent_uid, claimed_by_uid, created_by_uid";
 
 impl Store {
     /// Insert a new `open` item. `id` is caller-supplied so an enqueue can be
@@ -165,14 +215,14 @@ impl Store {
                 (id, title, payload, kind, target_agent, target_group, priority, state,
                  claimed_by, claim_expires, attempts, max_attempts, created_by,
                  created_at, updated_at, not_before, result,
-                 target_agent_uid, claimed_by_uid)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'')",
+                 target_agent_uid, claimed_by_uid, created_by_uid)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'',?19)",
             params![
                 item.id, item.title, item.payload, item.kind, item.target_agent,
                 item.target_group, item.priority, work_state::OPEN, "",
                 None::<i64>, 0i64, if item.max_attempts > 0 { item.max_attempts } else { 3 },
                 item.created_by, item.created_at, item.updated_at, item.not_before, "",
-                item.target_agent_uid,
+                item.target_agent_uid, item.created_by_uid,
             ],
         )?;
         Ok(())
@@ -289,22 +339,25 @@ impl Store {
         &self,
         id: &str,
         agent_id: &str,
+        caller_uid: &str,
         attempt: i64,
         now_ms: i64,
         lease_ms: i64,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<HolderMatch>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        let n = conn.execute(
-            &format!(
-                "UPDATE db_work_queue
-                    SET claim_expires = ?4, updated_at = ?5
-                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
-                    AND state = '{c}'",
-                c = work_state::CLAIMED
-            ),
-            params![id, agent_id, attempt, now_ms + lease_ms, now_ms],
-        )?;
-        Ok(n > 0)
+        holder_update(
+            &conn,
+            |holder| {
+                format!(
+                    "UPDATE db_work_queue
+                        SET claim_expires = ?4, updated_at = ?5
+                      WHERE id = ?1 AND {holder} AND attempts = ?3
+                        AND state = '{c}'",
+                    c = work_state::CLAIMED
+                )
+            },
+            params![id, agent_id, attempt, now_ms + lease_ms, now_ms, caller_uid],
+        )
     }
 
     /// Mark a claimed item finished. Same holder + fence guard as heartbeat —
@@ -314,23 +367,26 @@ impl Store {
         &self,
         id: &str,
         agent_id: &str,
+        caller_uid: &str,
         attempt: i64,
         result: &str,
         now_ms: i64,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<HolderMatch>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        let n = conn.execute(
-            &format!(
-                "UPDATE db_work_queue
-                    SET state = '{done}', result = ?4, claim_expires = NULL, updated_at = ?5
-                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
-                    AND state = '{c}'",
-                done = work_state::DONE,
-                c = work_state::CLAIMED
-            ),
-            params![id, agent_id, attempt, result, now_ms],
-        )?;
-        Ok(n > 0)
+        holder_update(
+            &conn,
+            |holder| {
+                format!(
+                    "UPDATE db_work_queue
+                        SET state = '{done}', result = ?4, claim_expires = NULL, updated_at = ?5
+                      WHERE id = ?1 AND {holder} AND attempts = ?3
+                        AND state = '{c}'",
+                    done = work_state::DONE,
+                    c = work_state::CLAIMED
+                )
+            },
+            params![id, agent_id, attempt, result, now_ms, caller_uid],
+        )
     }
 
     /// Give a claim back voluntarily.
@@ -348,27 +404,30 @@ impl Store {
         &self,
         id: &str,
         agent_id: &str,
+        caller_uid: &str,
         attempt: i64,
         reason: &str,
         now_ms: i64,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<HolderMatch>, StoreError> {
         let conn = self.conn().lock().unwrap();
-        let n = conn.execute(
-            &format!(
-                "UPDATE db_work_queue
-                    SET state = CASE WHEN attempts >= max_attempts
-                                     THEN '{failed}' ELSE '{open}' END,
-                        claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
-                        result = ?4, updated_at = ?5
-                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
-                    AND state = '{c}'",
-                failed = work_state::FAILED,
-                open = work_state::OPEN,
-                c = work_state::CLAIMED
-            ),
-            params![id, agent_id, attempt, reason, now_ms],
-        )?;
-        Ok(n > 0)
+        holder_update(
+            &conn,
+            |holder| {
+                format!(
+                    "UPDATE db_work_queue
+                        SET state = CASE WHEN attempts >= max_attempts
+                                         THEN '{failed}' ELSE '{open}' END,
+                            claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
+                            result = ?4, updated_at = ?5
+                      WHERE id = ?1 AND {holder} AND attempts = ?3
+                        AND state = '{c}'",
+                    failed = work_state::FAILED,
+                    open = work_state::OPEN,
+                    c = work_state::CLAIMED
+                )
+            },
+            params![id, agent_id, attempt, reason, now_ms, caller_uid],
+        )
     }
 
     /// Reclaim every item whose lease expired: back to `open`, or to `failed`
@@ -483,6 +542,7 @@ mod tests {
             attempts: 0,
             max_attempts: 3,
             created_by: "tester".into(),
+            created_by_uid: String::new(),
             created_at: 1000,
             updated_at: 1000,
             not_before: None,
@@ -526,6 +586,41 @@ mod tests {
         assert_eq!(claimed.claimed_by, "agenty-2");
         assert_eq!(claimed.claimed_by_uid, "4f3c-a91");
         assert_eq!(claimed.target_agent_uid, "4f3c-a91");
+    }
+
+    /// Identity M4c-1: the enqueuer's UID is stored beside `created_by` and
+    /// read back by every read path (get, claim's RETURNING, list).
+    #[test]
+    fn created_by_uid_round_trips_through_enqueue_claim_and_list() {
+        let (s, _d) = store();
+        let mut w = item("w-cbu", "attributed");
+        w.created_by_uid = "uid-enqueuer".into();
+        s.work_queue_enqueue(&w).unwrap();
+        let mut later = item("w-cbu-none", "unattributed");
+        later.created_at = 1001;
+        s.work_queue_enqueue(&later).unwrap();
+
+        let stored = s.work_queue_get("w-cbu").unwrap().unwrap();
+        assert_eq!(stored.created_by, "tester");
+        assert_eq!(stored.created_by_uid, "uid-enqueuer");
+        assert_eq!(
+            s.work_queue_get("w-cbu-none")
+                .unwrap()
+                .unwrap()
+                .created_by_uid,
+            ""
+        );
+
+        let claimed = s
+            .work_queue_claim(&any("a1"), 2000, 60_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.id, "w-cbu");
+        assert_eq!(claimed.created_by_uid, "uid-enqueuer");
+        let listed = s.work_queue_list("", 10).unwrap();
+        assert!(listed
+            .iter()
+            .any(|i| i.id == "w-cbu" && i.created_by_uid == "uid-enqueuer"));
     }
 
     /// Identity M3: an item addressed by UID is claimable by the agent with
@@ -610,8 +705,9 @@ mod tests {
         let c = s.work_queue_claim(&filter, 2000, 60_000).unwrap().unwrap();
         assert_eq!(c.claimed_by_uid, "uid-a1");
         assert!(s
-            .work_queue_release("w-rel", "a1", c.attempts, "later", 3000)
-            .unwrap());
+            .work_queue_release("w-rel", "a1", "", c.attempts, "later", 3000)
+            .unwrap()
+            .is_some());
         assert_eq!(
             s.work_queue_get("w-rel").unwrap().unwrap().claimed_by_uid,
             ""
@@ -770,16 +866,61 @@ mod tests {
         s.work_queue_enqueue(&item("w", "held")).unwrap();
         let c = s.work_queue_claim(&any("owner"), 2000, 60_000).unwrap().unwrap();
 
-        assert!(!s.work_queue_heartbeat("w", "impostor", c.attempts, 3000, 60_000).unwrap());
-        assert!(s.work_queue_heartbeat("w", "owner", c.attempts, 3000, 60_000).unwrap());
+        assert!(s.work_queue_heartbeat("w", "impostor", "", c.attempts, 3000, 60_000).unwrap().is_none());
+        assert!(s.work_queue_heartbeat("w", "owner", "", c.attempts, 3000, 60_000).unwrap().is_some());
 
-        assert!(!s.work_queue_complete("w", "impostor", c.attempts, "nope", 4000).unwrap());
-        assert!(s.work_queue_complete("w", "owner", c.attempts, "shipped", 4000).unwrap());
+        assert!(s.work_queue_complete("w", "impostor", "", c.attempts, "nope", 4000).unwrap().is_none());
+        assert!(s.work_queue_complete("w", "owner", "", c.attempts, "shipped", 4000).unwrap().is_some());
 
         let done = s.work_queue_get("w").unwrap().unwrap();
         assert_eq!(done.state, work_state::DONE);
         assert_eq!(done.result, "shipped");
         assert!(done.claim_expires.is_none());
+    }
+
+    /// Identity M4c-2 (spec §6.5.9), the colliding-names fixture: two
+    /// agents both answer to `agenty`. When the row and the caller both have
+    /// a UID, only the UID decides; otherwise the name does, as before.
+    #[test]
+    fn a_holder_is_matched_by_uid_when_both_are_known() {
+        let (s, _d) = store();
+        s.work_queue_enqueue(&item("w", "held")).unwrap();
+        let mut by_y = any("agenty");
+        by_y.agent_uid = "uid-y".into();
+        let c = s.work_queue_claim(&by_y, 2000, 60_000).unwrap().unwrap();
+        let n = c.attempts;
+
+        // The other `agenty`, attributed: its name matches, its UID does not.
+        assert_eq!(s.work_queue_heartbeat("w", "agenty", "uid-y2", n, 3000, 60_000).unwrap(), None);
+        assert_eq!(s.work_queue_complete("w", "agenty", "uid-y2", n, "no", 3000).unwrap(), None);
+        assert_eq!(s.work_queue_release("w", "agenty", "uid-y2", n, "no", 3000).unwrap(), None);
+        // The holder's UID decides, whatever name the request carries.
+        assert_eq!(
+            s.work_queue_heartbeat("w", "AgentY", "uid-y", n, 3000, 60_000).unwrap(),
+            Some(HolderMatch::Uid)
+        );
+        // An Unattributed request keeps the name path.
+        assert_eq!(
+            s.work_queue_heartbeat("w", "agenty", "", n, 3000, 60_000).unwrap(),
+            Some(HolderMatch::Name)
+        );
+        assert_eq!(s.work_queue_heartbeat("w", "AgentY", "", n, 3000, 60_000).unwrap(), None);
+        assert_eq!(
+            s.work_queue_complete("w", "AgentY", "uid-y", n, "done", 4000).unwrap(),
+            Some(HolderMatch::Uid)
+        );
+        assert_eq!(s.work_queue_get("w").unwrap().unwrap().result, "done");
+
+        // A row claimed with no UID keeps the name path for an attributed
+        // caller too.
+        s.work_queue_enqueue(&item("w2", "held by name")).unwrap();
+        let c = s.work_queue_claim(&any("agenty"), 5000, 60_000).unwrap().unwrap();
+        assert_eq!(c.claimed_by_uid, "");
+        assert_eq!(
+            s.work_queue_release("w2", "agenty", "uid-y2", c.attempts, "back", 6000).unwrap(),
+            Some(HolderMatch::Name)
+        );
+        assert_eq!(s.work_queue_get("w2").unwrap().unwrap().state, work_state::OPEN);
     }
 
     /// Codex P1 on PR #2898 — the ABA case. `agent_id` is stable across
@@ -802,15 +943,15 @@ mod tests {
 
         // Everything below is the FIRST claim's fence arriving late.
         assert!(
-            !s.work_queue_complete("w", "a1", first.attempts, "stale result", 4_000).unwrap(),
+            s.work_queue_complete("w", "a1", "", first.attempts, "stale result", 4_000).unwrap().is_none(),
             "a stale completion must not close out the newer claim"
         );
         assert!(
-            !s.work_queue_heartbeat("w", "a1", first.attempts, 4_000, 60_000).unwrap(),
+            s.work_queue_heartbeat("w", "a1", "", first.attempts, 4_000, 60_000).unwrap().is_none(),
             "a stale heartbeat must not extend the newer claim"
         );
         assert!(
-            !s.work_queue_release("w", "a1", first.attempts, "stale release", 4_000).unwrap(),
+            s.work_queue_release("w", "a1", "", first.attempts, "stale release", 4_000).unwrap().is_none(),
             "a stale release must not reopen the newer claim"
         );
 
@@ -819,7 +960,7 @@ mod tests {
         assert_eq!(live.result, "");
 
         // And the CURRENT fence still works.
-        assert!(s.work_queue_complete("w", "a1", second.attempts, "real result", 5_000).unwrap());
+        assert!(s.work_queue_complete("w", "a1", "", second.attempts, "real result", 5_000).unwrap().is_some());
         assert_eq!(s.work_queue_get("w").unwrap().unwrap().result, "real result");
     }
 
@@ -873,8 +1014,8 @@ mod tests {
         s.work_queue_enqueue(&item("w", "hot potato")).unwrap();
         let c = s.work_queue_claim(&any("a1"), 1_000, 60_000).unwrap().unwrap();
 
-        assert!(!s.work_queue_release("w", "impostor", c.attempts, "not mine", 2_000).unwrap());
-        assert!(s.work_queue_release("w", "a1", c.attempts, "cannot do this", 2_000).unwrap());
+        assert!(s.work_queue_release("w", "impostor", "", c.attempts, "not mine", 2_000).unwrap().is_none());
+        assert!(s.work_queue_release("w", "a1", "", c.attempts, "cannot do this", 2_000).unwrap().is_some());
 
         let back = s.work_queue_get("w").unwrap().unwrap();
         assert_eq!(back.state, work_state::OPEN);
@@ -895,13 +1036,13 @@ mod tests {
         s.work_queue_enqueue(&hot).unwrap();
 
         let c1 = s.work_queue_claim(&any("a1"), 1_000, 60_000).unwrap().unwrap();
-        assert!(s.work_queue_release("w", "a1", c1.attempts, "not for me", 1_500).unwrap());
+        assert!(s.work_queue_release("w", "a1", "", c1.attempts, "not for me", 1_500).unwrap().is_some());
         assert_eq!(s.work_queue_get("w").unwrap().unwrap().state, work_state::OPEN,
                    "attempt 1 of 2 — still has a life left");
 
         let c2 = s.work_queue_claim(&any("a2"), 2_000, 60_000).unwrap().unwrap();
         assert_eq!(c2.attempts, 2, "final allowed attempt");
-        assert!(s.work_queue_release("w", "a2", c2.attempts, "nor me", 2_500).unwrap());
+        assert!(s.work_queue_release("w", "a2", "", c2.attempts, "nor me", 2_500).unwrap().is_some());
 
         let dead = s.work_queue_get("w").unwrap().unwrap();
         assert_eq!(dead.state, work_state::FAILED, "exhausted release must park, not reopen");
@@ -959,7 +1100,7 @@ mod tests {
         let (s, _d) = store();
         s.work_queue_enqueue(&item("w", "finished")).unwrap();
         let c = s.work_queue_claim(&any("a1"), 1_000, 1_000).unwrap().unwrap();
-        assert!(s.work_queue_complete("w", "a1", c.attempts, "ok", 1_500).unwrap());
+        assert!(s.work_queue_complete("w", "a1", "", c.attempts, "ok", 1_500).unwrap().is_some());
 
         assert_eq!(s.work_queue_reap(9_999).unwrap(), (0, 0), "a done row has no live lease");
         assert!(s.work_queue_claim(&any("a2"), 9_999, 60_000).unwrap().is_none());

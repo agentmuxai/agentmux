@@ -3,4 +3,12 @@
 /**
  * Response from blockfile:line_count.
  */
-export type BlockfileLineCountResult = { count: number, };
+export type BlockfileLineCountResult = { count: number, 
+/**
+ * The transcript stream `count` is of — `b:<blockId>` (the block's own
+ * `output`) or `g:<zone>` (the agent's global zone) — and its
+ * generation, when the file is counted (Phase 5a-3,
+ * SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.3.7).
+ * Absent: not a counted transcript; addressing by line is unavailable.
+ */
+stream?: string, gen?: string, };
