@@ -4,6 +4,7 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { invokeCommand } from "@/app/platform/ipc";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
+import { TAB_VISIBILITY_CHANGED_EVENT } from "@/app/workspace/window-tab-visibility";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import type { BrowserViewModel } from "./browser-model";
@@ -196,6 +197,10 @@ export function usePaneRectSync(params: {
             resizeObserver = new ResizeObserver(syncPosition);
             resizeObserver.observe(ph);
             positionInterval = setInterval(syncPosition, 200);
+            // Hiding or showing a window tab doesn't change this
+            // placeholder's geometry, so the observer above never sees it.
+            window.addEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition);
+            onCleanup(() => window.removeEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition));
         }
         // macOS/Linux: after a JS-driven drag moves the floating pane window,
         // paneRect() returns the same client coords (unchanged by window

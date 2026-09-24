@@ -26,6 +26,15 @@ export function useWindowTabHidden(): Accessor<boolean> {
     return useContext(WindowTabHiddenContext);
 }
 
+/**
+ * Fired on `window` after the displayed window tab changes. Native browser
+ * panes composite above the DOM and only learn they're hidden or shown by
+ * re-syncing their rect; hiding a tab doesn't change their placeholder's
+ * geometry, so without this they'd wait for their 200 ms poll
+ * (`use-pane-rect-sync.ts`; codex P2 on #3686).
+ */
+export const TAB_VISIBILITY_CHANGED_EVENT = "agentmux:tab-visibility-changed";
+
 /** How a window tab's container hides or shows (`workspace.tsx`). */
 export interface TabContainerVisibility {
     "content-visibility": "visible" | "hidden";

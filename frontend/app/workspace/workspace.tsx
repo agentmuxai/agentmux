@@ -10,7 +10,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getSettingsKeyAtom } from "@/store/global";
-import { WindowTabHiddenProvider, tabContainerVisibility } from "./window-tab-visibility";
+import { TAB_VISIBILITY_CHANGED_EVENT, WindowTabHiddenProvider, tabContainerVisibility } from "./window-tab-visibility";
 import { gateTargetTabId, scheduleRevealLift, tabSwitching } from "@/store/tab-reveal";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
@@ -121,6 +121,8 @@ function WorkspaceElem(): JSX.Element {
         const id = displayTabId();
         const el = tabEls.get(id);
         if (el) void el.getBoundingClientRect();
+        // Native browser panes re-sync now rather than on their next poll.
+        window.dispatchEvent(new Event(TAB_VISIBILITY_CHANGED_EVENT));
     });
 
     // Reveal gate, destination-aware (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
