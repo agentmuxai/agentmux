@@ -424,6 +424,29 @@ pub fn resolve_bound_claude_config_dir_for_agent(
     Some(dir)
 }
 
+/// Whether an agent has any identity binding — its own links, or its
+/// template's when it has none — checked without the binding resolver's
+/// "no links" warning. For callers that ask on every sweep (memory), so an
+/// unlinked agent costs a lookup, not a log line.
+pub fn agent_has_identity_binding(mstore: &Store, identity_store: &Store, agent_id: &str) -> bool {
+    let direct = identity_store
+        .agent_identity_list_for_agent(agent_id)
+        .map(|l| !l.is_empty())
+        .unwrap_or(false);
+    if direct {
+        return true;
+    }
+    let Some(def) = mstore.agent_def_get(agent_id).ok().flatten() else {
+        return false;
+    };
+    let parent = template_parent_id_if_seeded(mstore, &def.parent_id);
+    !parent.is_empty()
+        && identity_store
+            .agent_identity_list_for_agent(&parent)
+            .map(|l| !l.is_empty())
+            .unwrap_or(false)
+}
+
 fn bound_oauth_config_dir(
     mstore: &Store,
     id_store: &Arc<Store>,
