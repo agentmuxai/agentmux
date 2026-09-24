@@ -19,6 +19,7 @@
  * Installed once from app-init via `installSoundService()`.
  */
 
+import { emitActivityFlash } from "@/app/notification/activity-flash";
 import { focusManager } from "@/app/store/focusManager";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
@@ -325,6 +326,12 @@ function playToolToneIfAllowed(blockId: string, tool: string): void {
         }
     }
     // "window" mode (v1.5) falls through to "all" for now; see spec §8.5.
+    // The visual twin fires here — after the policy gates, before the
+    // AudioContext check — so it works before priming and at volume 0.
+    // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2.
+    if (getSettingsKeyAtom("notify:tooltones:flash")() !== false) {
+        emitActivityFlash({ blockId });
+    }
     const ctx = player.getAudioContext();
     if (!ctx || !toolTones.isAttached()) return; // not primed yet
     try {

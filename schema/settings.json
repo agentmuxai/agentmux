@@ -309,6 +309,11 @@
           "default": "all",
           "description": "Which panes play tool-call tones. 'all' (default) plays for every pane in every window; 'focused' plays only for the focused pane in the focused OS window."
         },
+        "notify:tooltones:flash": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pair every tool-call tone with a brief flash on the source pane's pill in its pane header (a brightened version of the pane's color) and a subtler one on its window tab, so a tone from a pane you can't see can be traced. Follows the tone's own enable/scope gates. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md."
+        },
         "dnd:enabled": {
           "type": "boolean",
           "default": true,

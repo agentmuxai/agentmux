@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { emitActivityFlash } from "@/app/notification/activity-flash";
 import { dropPositionForPointerX, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
 
 afterEach(() => cleanup());
@@ -779,5 +780,53 @@ describe("PaneTabStrip — animateWidth (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_202
         vi.advanceTimersByTime(200);
         expect(strip.style.width).toBe("");
         expect(strip.style.transition).toBe("");
+    });
+});
+
+// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md — a Pane header's pill clicks
+// on every tone from its own block; strips that don't opt in never do.
+describe("PaneTabStrip activity flash", () => {
+    let animate: ReturnType<typeof vi.fn>;
+    let original: typeof HTMLElement.prototype.animate;
+    beforeEach(() => {
+        animate = vi.fn((..._args: unknown[]) => ({ cancel: vi.fn() }) as unknown as Animation);
+        original = HTMLElement.prototype.animate;
+        HTMLElement.prototype.animate = animate as unknown as typeof HTMLElement.prototype.animate;
+    });
+    afterEach(() => {
+        HTMLElement.prototype.animate = original;
+        cleanup();
+    });
+
+    function renderStrip(flashOnActivity: boolean) {
+        return render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                flashOnActivity={flashOnActivity}
+            />
+        ));
+    }
+
+    it("clicks only the matching pill, including a background stack member", () => {
+        const { container } = renderStrip(true);
+        emitActivityFlash({ blockId: "b" });
+        expect(animate).toHaveBeenCalledTimes(1);
+        expect(animate.mock.instances[0]).toBe(container.querySelectorAll(".pane-tab")[1]);
+    });
+
+    it("ignores other blocks", () => {
+        renderStrip(true);
+        emitActivityFlash({ blockId: "zzz" });
+        expect(animate).not.toHaveBeenCalled();
+    });
+
+    it("a strip without flashOnActivity never clicks", () => {
+        renderStrip(false);
+        emitActivityFlash({ blockId: "b" });
+        expect(animate).not.toHaveBeenCalled();
     });
 });

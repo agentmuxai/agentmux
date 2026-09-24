@@ -92,6 +92,9 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             getAttention={props.getAttention}
             getTabClass={props.getTabClass}
             getColor={props.getColor}
+            // A Pane's own header: ids are blockIds, so a pill can be the
+            // target of an activity flash (SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md).
+            flashOnActivity
             onActivate={props.onActivate}
             onClose={props.onClose}
             onTabDoubleClick={props.onTabDoubleClick}

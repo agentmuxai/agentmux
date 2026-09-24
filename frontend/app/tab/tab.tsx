@@ -11,6 +11,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
+import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { ObjectService } from "../store/services";
 import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
@@ -123,6 +124,7 @@ function Tab(props: TabProps): JSX.Element {
 
     let editableRef!: HTMLDivElement;
     let tabRef!: HTMLDivElement;
+    let tabInnerRef!: HTMLDivElement;
     let editableTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let loadedRef = false;
 
@@ -225,6 +227,16 @@ function Tab(props: TabProps): JSX.Element {
     // their content via flex layout. See the analysis at
     // docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 
+    // Visual twin of a tool-call tone from any pane in THIS tab, active or
+    // not — docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md. A subtle
+    // lift of the tab's own color (tab.scss); the pane's color is its pill's.
+    onMount(() => {
+        const unsubscribe = onActivityFlash(({ blockId }) => {
+            if (tabData()?.blockids?.includes(blockId)) flashElement(tabInnerRef);
+        });
+        onCleanup(unsubscribe);
+    });
+
     const handleMouseDownOnClose = (event: MouseEvent) => {
         event.stopPropagation();
     };
@@ -276,7 +288,7 @@ function Tab(props: TabProps): JSX.Element {
                 data-tab-id={props.id}
                 data-drag-region="false"
             >
-                <div class="tab-inner">
+                <div ref={tabInnerRef!} class="tab-inner">
                     <div
                         ref={editableRef!}
                         class={clsx("name", { focused: isEditable() })}

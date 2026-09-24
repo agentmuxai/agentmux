@@ -24,6 +24,7 @@
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { atoms } from "@/store/global";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
@@ -150,6 +151,12 @@ export interface PaneTabStripProps<T> {
      *  editor file tabs and the agent History strip, omits it and gets
      *  zero behavior change). See `PaneTabColors`' own doc comment. */
     getColor?: (tab: T) => PaneTabColors | undefined;
+    /** Pulse a pill when its tab's id is the source of an activity flash
+     *  (the visual twin of a tool-call tone —
+     *  docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md). Only
+     *  meaningful where `getId` returns a blockId, i.e. a Pane's own header;
+     *  editor file tabs and the agent History strip omit it. */
+    flashOnActivity?: boolean;
 
     onActivate: (id: string) => void;
     /** Omit entirely (not just disable) to render tabs with no close ×. */
@@ -445,6 +452,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             getAttention={props.getAttention}
                             getTabClass={props.getTabClass}
                             getColor={props.getColor}
+                            flashOnActivity={props.flashOnActivity}
                             onActivate={props.onActivate}
                             onClose={props.onClose}
                             onDoubleClick={props.onTabDoubleClick}
@@ -498,6 +506,7 @@ interface PaneTabStripItemProps<T> {
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
     getColor?: (tab: T) => PaneTabColors | undefined;
+    flashOnActivity?: boolean;
     onActivate: (id: string) => void;
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
@@ -512,6 +521,18 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     let pillRef: HTMLDivElement | undefined;
     const [isDragging, setIsDragging] = createSignal(false);
     const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
+
+    // Activity flash: click this pill on every tone from its own block,
+    // whether or not its window tab is showing. The color comes from the
+    // pill's own `--pane-tab-underline` in the stylesheet, so no base
+    // color is passed here.
+    onMount(() => {
+        if (!props.flashOnActivity) return;
+        const unsubscribe = onActivityFlash(({ blockId }) => {
+            if (blockId === id() && pillRef) flashElement(pillRef);
+        });
+        onCleanup(unsubscribe);
+    });
 
     // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.1/§3.2). Gated entirely on `onReorder` being passed — every existing
