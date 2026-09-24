@@ -19,7 +19,7 @@ import { For, Match, Show, Switch, createComputed, createEffect, createMemo, cre
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import { beginHeightContinuity } from "../resize-contract";
+import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contract";
 import { Markdown } from "@/app/element/markdown";
 import { BashOutputViewer } from "./BashOutputViewer";
 import { CompactResult } from "./CompactResult";
@@ -306,11 +306,14 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         const nodeId = props.node.id;
         if (nodeId !== lastNodeId) {
             // Different node reused this slot — never animate across the
-            // swap; drop anything pending and start fresh for the incoming
-            // node.
+            // swap: drop anything pending, and stop a FLIP still running for
+            // the outgoing node, or its pinned height keeps animating
+            // against the incoming node's content until transitionend
+            // (ReAgent P1, #3607). No measuring: cancelling reads nothing.
             lastNodeId = nodeId;
             lastBranch = b;
             pendingCommit = undefined;
+            if (scrollRef) cancelHeightContinuity(scrollRef);
             return;
         }
         const el = scrollRef;

@@ -292,6 +292,31 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         vi.useRealTimers();
     });
 
+    it("a different node swapping in mid-FLIP cancels the outgoing node's transition at once", async () => {
+        // ReAgent P1 on #3607: the old per-update re-baseline cancelled any
+        // FLIP in flight as a side effect; the swap path must do so itself,
+        // or the outgoing tool's pinned height and transition keep running
+        // against the incoming tool's content until transitionend (150 ms).
+        vi.useFakeTimers();
+        stubHeightsByBranch({ scroll: 40, offset: 50 }, { scroll: 120, offset: 80 });
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        await vi.runOnlyPendingTimersAsync();
+
+        setNode(terminalNode); // tc-1: running -> result, a FLIP starts
+        expect(el.style.height).toBe("40px");
+        await vi.runOnlyPendingTimersAsync();
+        expect(el.style.height).toBe("120px"); // mid-transition: no transitionend yet
+
+        setNode({ ...terminalNode, id: "tc-2" }); // slot reuse while the FLIP is in flight
+        expect(el.style.height).toBe("");
+        expect(el.style.transition).toBe("");
+        expect(el.style.overflowY).toBe("");
+
+        vi.useRealTimers();
+    });
+
     it("does not animate when the user prefers reduced motion", async () => {
         reducedMotion = true;
         vi.useFakeTimers();

@@ -201,6 +201,18 @@ function cancelInFlight(el: HTMLElement): void {
     inFlight.get(el)?.();
 }
 
+/**
+ * Cancel any FLIP in flight on `el` right now — clear its pinned height,
+ * transition and overflow override — without measuring anything. For a
+ * caller whose element is about to show unrelated content (a different node
+ * reusing the same DOM slot), where finishing the old transition would
+ * animate the outgoing content's height against the incoming content.
+ * Reads no layout or style, so it is safe on any update path.
+ */
+export function cancelHeightContinuity(el: HTMLElement): void {
+    cancelInFlight(el);
+}
+
 /** Default height read — `offsetHeight`, the rendered box. Correct for the
  *  common case (a row that simply grows/shrinks with its own content, e.g.
  *  `AgentDocumentVirtualList`'s row-height sampling), wrong for an element
