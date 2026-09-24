@@ -60,15 +60,46 @@ describe("agent-pane-layout reducer", () => {
             expect(totalSize(s)).toBe(cursor - s.scrollMarginPx);
         };
 
-        it("ROW_GAP_PX matches the streaming buffer's CSS gap, so a row keeps its position when it migrates", () => {
+        it("ROW_GAP_PX agrees with the CSS on both sides of the head/buffer seam, so a row keeps its position when it migrates", () => {
             const scss = readFileSync(
                 join(dirname(fileURLToPath(import.meta.url)), "../../view/agent/styles/_document.scss"),
                 "utf8",
             );
-            const block = /\.agent-document-streaming-buffer\s*\{([^}]*)\}/.exec(scss)?.[1] ?? "";
-            const gap = /(?:^|\s)gap:\s*(\d+(?:\.\d+)?)px/.exec(block)?.[1];
-            expect(gap, "no `gap: <n>px` in .agent-document-streaming-buffer").toBeDefined();
-            expect(Number(gap)).toBe(ROW_GAP_PX);
+            const rule = (selector: string): string => {
+                const m = new RegExp(`${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`).exec(scss);
+                expect(m, `no rule for ${selector}`).not.toBeNull();
+                return m![1];
+            };
+            const px = (block: string, prop: string): number | undefined => {
+                const v = new RegExp(`(?:^|\\s)${prop}:\\s*(-?\\d+(?:\\.\\d+)?)px`).exec(block)?.[1];
+                return v === undefined ? undefined : Number(v);
+            };
+            // Rows inside the buffer are spaced by its flex gap.
+            expect(px(rule(".agent-document-streaming-buffer"), "gap")).toBe(ROW_GAP_PX);
+            // The head and the buffer are siblings in .agent-document's flex
+            // column; its gap would ADD a second gap at the seam (totalSize
+            // already ends with one) unless the virtualizer cancels it.
+            const containerGap = px(rule(".agent-document "), "gap") ?? 0;
+            expect(px(rule(".agent-document-virtualizer"), "margin-bottom") ?? 0).toBe(-containerGap);
+        });
+
+        it("the head/buffer seam is exactly one ROW_GAP_PX: a migrating row lands where it was", () => {
+            // Buffer row b0 sits right after the head: at scrollMargin +
+            // totalSize (+ container gap − the virtualizer's cancelling margin,
+            // which sum to 0). After it migrates it is the head's next row.
+            let s = initialState();
+            s = apply(s, { type: "ScrollMarginChanged", px: 10 });
+            for (const heads of [[], ["h0"], ["h0", "h1"]]) {
+                let before = apply(s, { type: "NodesChanged", orderedIds: heads });
+                for (const id of heads) before = apply(before, { type: "RowMeasured", nodeId: id, state: "collapsed", cssPx: 30 });
+                const b0At = before.scrollMarginPx + totalSize(before);
+                let after = apply(before, { type: "NodesChanged", orderedIds: [...heads, "b0"] });
+                after = apply(after, { type: "RowMeasured", nodeId: "b0", state: "collapsed", cssPx: 55 });
+                const pos = positions(after);
+                expect(pos[pos.length - 1].start, `head of ${heads.length}`).toBe(b0At);
+                // …and the next buffer row (b1) is still where it was: b0At + 55 + gap.
+                expect(after.scrollMarginPx + totalSize(after), `head of ${heads.length}`).toBe(b0At + 55 + ROW_GAP_PX);
+            }
         });
 
         it("holds for a hand-built mixed state", () => {
