@@ -1,8 +1,7 @@
 # Clicking an input in an unselected pane should focus that input — in one click
 
-**Status:** implemented on branch `agent1/pane-click-through-input-focus`
-(Agent1). Spec authored by Agent2. See §8 for where the implementation departs
-from or extends §4.
+**Status:** implemented — PR #3621 (Agent1; spec authored by Agent2).
+See §8 for where the implementation departs from or extends §4.
 **Date:** 2026-09-23.
 **Severity:** Medium — nothing is lost, but every first interaction with a
 secondary control in an unselected pane takes two clicks: one that is
