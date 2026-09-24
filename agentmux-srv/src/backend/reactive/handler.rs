@@ -1203,9 +1203,10 @@ impl Handler {
         // forge it. `reagent_verified` is WAN-only by construction
         // (`sync_agent_reactive`/`verify_reagent_signature` never compute it
         // off the WAN tier, so it's always `None` for LAN — reagent is a
-        // WAN-only service sender, this never applied to LAN) — absence of a
-        // signature attempt (`None`), or a signature that verified but only
-        // under the known-exposed dev key, is NOT this case; both fall
+        // WAN-only service sender, this never applied to LAN). A signature
+        // that verified only under a key other than the trusted production
+        // key IS this case (it arrives as `Some(false)`, see
+        // `deliver_audited`); absence of a signature attempt (`None`) falls
         // through to rule 5 like any other self-declared sender.
         let is_network_tier_sig_invalid = is_network_tier && req.reagent_verified == Some(false);
         // A lan_sig that was PRESENT, whose claimed sender's public key WAS
