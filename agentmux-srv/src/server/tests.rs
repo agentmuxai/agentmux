@@ -5591,3 +5591,72 @@ async fn m4c2_a_work_holder_is_checked_by_uid_when_both_are_known() {
     let stored = state.identity_store.work_queue_get("w-m4c2-holder").unwrap().unwrap();
     assert_eq!(stored.result, "r");
 }
+
+// ---- identity M4c-2b: the personal-memory owner is the Caller ----
+
+/// The second of two agents answering to `agenty` writes and reads with the
+/// first one's slug. With its token, the owner is its own row — its file,
+/// not the first agent's; Unattributed, the slug decides, counted.
+#[tokio::test]
+async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let (tmp_y, tmp_y2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for (id, name, slug, dir) in [
+        ("uid-m4c2b-y", "AgentY", "agenty", tmp_y.path()),
+        ("uid-m4c2b-y2", "AGENTY", "agenty-2", tmp_y2.path()),
+    ] {
+        let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+        def.slug = slug.to_string();
+        def.working_directory = dir.to_string_lossy().into_owned();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: id.to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", dir.display()),
+                updated_at: 0,
+            })
+            .unwrap();
+    }
+    state.mstore.attach_token_index().unwrap();
+    let y2 = state.mstore.agent_token_ensure("uid-m4c2b-y2").unwrap();
+    let write = |content: &str| {
+        serde_json::json!({"agent_id": "agenty", "filename": "MEMORY.md", "content": content})
+    };
+
+    let (status, v) = m4c1_send(&state, Some(&y2), "/api/v1/agent/memory/write", write("y2's")).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let counter = "m4c.memory_owner_by_name";
+    let before = m4a2_count(counter);
+    let (status, v) = m4c1_send(&state, None, "/api/v1/agent/memory/write", write("y's")).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(m4a2_count(counter) > before, "Unattributed: by slug, counted");
+
+    let versions = |uid: &str| {
+        state
+            .id_store
+            .agent_native_memory_version_list(uid, "MEMORY.md")
+            .unwrap()
+            .into_iter()
+            .map(|v| v.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(versions("uid-m4c2b-y2").len(), 1, "the token's row");
+    assert_eq!(versions("uid-m4c2b-y").len(), 1, "the slug's row");
+
+    let uri = "/api/v1/agent/memory/read?agent_id=agenty&filename=MEMORY.md";
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(uri)
+        .header("X-AuthKey", "test-secret-key")
+        .header("X-Agent-Token", &y2)
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["content"], "y2's", "the token's row, not the slug's");
+}
