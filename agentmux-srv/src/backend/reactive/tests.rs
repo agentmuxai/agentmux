@@ -3687,8 +3687,8 @@ mod identity_m2 {
 /// Identity M4c-2d (spec §6.5.9): the sender's UID set by the srv handler
 /// reaches every audit entry its delivery writes, is gone before the next
 /// delivery, and never crosses the wire either way.
-#[test]
-fn an_attributed_delivery_audits_its_sender_uid_and_only_its_own() {
+#[tokio::test]
+async fn an_attributed_delivery_audits_its_sender_uid_and_only_its_own() {
     let mut handler = Handler::new();
     let attributed = InjectionRequest {
         target_agent: "m4c2d-nobody".into(),
@@ -3722,4 +3722,23 @@ fn an_attributed_delivery_audits_its_sender_uid_and_only_its_own() {
     let last = handler.get_audit_log(1).pop().unwrap();
     assert_eq!(last.outcome.as_deref(), Some("nudge_declined"));
     assert_eq!(last.audit_source_uid, "uid-sup");
+
+    // Nudges up to the ceiling and the refusal past it (ReAgent P1 on
+    // #3608): every entry carries the Supervisor's UID, and nothing after.
+    handler.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+    handler.register_agent("m4c2d-nudged", "m4c2d-nudged-block", None).unwrap();
+    let mut refused = false;
+    for i in 0..=MAX_CONSECUTIVE_AUTO_CONTINUES + 1 {
+        let r = handler.record_supervisor_decision(
+            "m4c2d-nudged", SupervisorAction::Nudge, "stalled", &format!("req-n{i}"), None, "uid-sup",
+        );
+        refused |= r.is_err();
+    }
+    assert!(refused, "the ceiling was reached");
+    let entries = handler.get_audit_log(AUDIT_LOG_MAX);
+    let nudges: Vec<_> = entries.iter().filter(|e| e.request_id.starts_with("req-n")).collect();
+    assert!(nudges.iter().any(|e| e.reason.as_deref() == Some("consecutive-nudge ceiling reached")));
+    assert!(nudges.iter().all(|e| e.audit_source_uid == "uid-sup"), "{nudges:?}");
+    handler.inject_message(InjectionRequest { audit_source_uid: String::new(), ..attributed });
+    assert_eq!(handler.get_audit_log(1)[0].audit_source_uid, "", "restored after the decision");
 }

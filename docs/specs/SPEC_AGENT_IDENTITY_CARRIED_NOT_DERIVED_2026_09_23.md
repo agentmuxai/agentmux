@@ -1214,7 +1214,7 @@ own PR and independently revertible.
 | cron `created_by` | `db_cron_jobs` (shared store; identity-store parity copy, as M1b) | new `created_by_uid` in both | M4c-3 (below); the Swarm view's creator lookup resolves by UID when set |
 | global memory `written_by` | `db_bundle_versions` (shared store; objects and identity parity copies) | new `written_by_uid` | returned beside `written_by` in history/revert; the operator-config seeder keeps comparing the **name** `agentmux-operator-config-seed`, which is not an agent |
 | personal memory owner | versions and the mirror are keyed by the owner's UID, derived from the slug every call (`resolve_agent_id`); the files themselves are found through slug → working directory | — | **owner = the `Caller` UID** when attributed; files found by id (`memory_dir_for_agent_by_id`, which walks the same branches but has no registry-by-slug fallback — a miss is an **error**, never an empty list, the #2901 class); the slug path stays for Unattributed callers, counted. Closes the ambiguous-name case M4a-2 counts (`m4.actor_ambiguous.memory_*`). Recorded: memory an agent wrote under a slug that resolved to *another* agent (#3573 stubs, collision-suffixed backfills) stays where it was written — not migrated |
-| inject / supervisor `source_agent` | in-memory audit ring (`AuditLogEntry`) | new `audit_source_uid` field, **server-set only** (`skip_deserializing`) and distinct from the `source_uid` wire field §6.5.3 reserves for the MCP to set and sign — a srv-written value must never ride a forwarding hop | the Warden audit view shows it; trust and the jekt tier stay name-keyed until M4d |
+| inject / supervisor `source_agent` | in-memory audit ring (`AuditLogEntry`) | new `audit_source_uid` field, **server-set only** (`#[serde(skip)]` on the request: never read from a body, never serialized) and distinct from the `source_uid` wire field §6.5.3 reserves for the MCP to set and sign — a srv-written value must never ride a forwarding hop | returned by `GET /agentmux/reactive/audit` (M4c-2d); the Warden audit view does not display it yet — a UI follow-up; trust and the jekt tier stay name-keyed until M4d |
 | bus `from` | in-memory `BusMessage` | new `from_uid` field | exposed on read |
 | identity accounts/validate, history search, preset get (self) — owner = actor | not persisted; the owner is resolved from the slug each call | — | **owner = the `Caller` UID** when attributed, as for memory — the same colliding-name defect (`IdentityValidate` would live-probe the *other* agent's stored secret); slug path for Unattributed, counted |
 | UI automation `auth.agent_id` | not persisted | — | M4d |
@@ -1266,7 +1266,8 @@ error on each. Unattributed: the slug, counted
 **The sender's UID exposed (M4c-2d).** An attributed `/agentmux/reactive/inject`,
 `/agentmux/reactive/supervisor-decision` or `/api/bus/inject` sets
 `InjectionRequest::audit_source_uid` from its `Caller`; every audit entry
-that delivery writes (and a Supervisor decline's) carries it as
+that delivery writes (and every entry a Supervisor decision writes — a
+decline, a nudge refused at the ceiling) carries it as
 `AuditLogEntry::audit_source_uid` beside the claimed `source_agent`. The
 request field is `#[serde(skip)]` both ways — a body cannot set it and a
 forwarding hop never carries it. An attributed `/api/bus/send`, `/inject`

@@ -148,10 +148,11 @@ pub struct Handler {
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
     audit_log: Vec<AuditLogEntry>,
-    /// The UID of the delivery in flight (`InjectionRequest::
-    /// audit_source_uid`), copied onto every audit entry it writes. Set and
-    /// cleared around one `inject_message_inner` call, under this handler's
-    /// mutex, so no other delivery can see it.
+    /// The UID of the delivery or Supervisor decision in flight
+    /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
+    /// it writes. Set and restored around one `inject_message_inner` or
+    /// `record_supervisor_decision` call, under this handler's mutex, so no
+    /// other delivery can see it.
     delivery_source_uid: String,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
@@ -871,9 +872,12 @@ impl Handler {
         outcome_on_failure: Option<&str>,
         reason: Option<&str>,
     ) -> InjectionResponse {
-        self.delivery_source_uid = std::mem::take(&mut req.audit_source_uid);
+        let uid = std::mem::take(&mut req.audit_source_uid);
+        let outer = std::mem::replace(&mut self.delivery_source_uid, uid);
         let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure, reason);
-        self.delivery_source_uid.clear();
+        // Restore, not clear: a Supervisor nudge runs this inside its own
+        // decision, whose UID stays set for the rest of it.
+        self.delivery_source_uid = outer;
         resp
     }
 
@@ -1515,6 +1519,27 @@ impl Handler {
         source_agent: Option<&str>,
         source_uid: &str,
     ) -> Result<InjectionResponse, String> {
+        // Every entry this decision writes — a decline, a nudge refused at
+        // the ceiling, the nudge's own delivery — carries the Supervisor's
+        // UID (ReAgent P1 on #3608: the ceiling refusal used to miss it).
+        let outer = std::mem::replace(&mut self.delivery_source_uid, source_uid.to_string());
+        let result =
+            self.decide_audited(target_agent, action, reason, request_id, source_agent, source_uid);
+        self.delivery_source_uid = outer;
+        result
+    }
+
+    /// The body of [`Self::record_supervisor_decision`], with the
+    /// Supervisor's UID in `delivery_source_uid`.
+    fn decide_audited(
+        &mut self,
+        target_agent: &str,
+        action: SupervisorAction,
+        reason: &str,
+        request_id: &str,
+        source_agent: Option<&str>,
+        source_uid: &str,
+    ) -> Result<InjectionResponse, String> {
         let now = now_unix_millis();
         let target_key = target_agent.to_lowercase();
         // Same resolution as delivery (identity M2, §10 constraint 4 — this
@@ -1529,8 +1554,6 @@ impl Handler {
 
         match action {
             SupervisorAction::Decline => {
-                // No delivery to carry the UID: set it around this one entry.
-                self.delivery_source_uid = source_uid.to_string();
                 self.log_audit(
                     source_agent,
                     target_agent,
@@ -1542,7 +1565,6 @@ impl Handler {
                     Some("nudge_declined"),
                     Some(reason),
                 );
-                self.delivery_source_uid.clear();
                 Ok(InjectionResponse {
                     success: true,
                     request_id: request_id.to_string(),
