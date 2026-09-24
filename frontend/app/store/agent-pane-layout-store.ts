@@ -71,6 +71,10 @@ const slots = new Map<string, Slot>();
  *  field-wise because `computeLayoutView` returns fresh objects each call. */
 function viewsEqual(a: LayoutView, b: LayoutView): boolean {
     if (a.totalSize !== b.totalSize) return false;
+    // Rows are placed at `start - scrollMarginPx`, so a margin change alone is
+    // a visible change (rows' starts move with it, but compare it explicitly
+    // rather than rely on that).
+    if (a.scrollMarginPx !== b.scrollMarginPx) return false;
     if (a.window.startIndex !== b.window.startIndex) return false;
     if (a.window.endIndex !== b.window.endIndex) return false;
     if (a.rows.length !== b.rows.length) return false;
@@ -204,7 +208,8 @@ export function dispatch(
                 slot.state.viewportPx,
                 slot.state.overscan,
             );
-            view = { rows: slot.cachedRows, totalSize: slot.cachedTotalSize, window };
+            // scrollMarginPx is a position input, so it is unchanged on this path.
+            view = { rows: slot.cachedRows, totalSize: slot.cachedTotalSize, window, scrollMarginPx: slot.state.scrollMarginPx };
         }
         if (slot.lastView === null || !viewsEqual(view, slot.lastView)) {
             slot.lastView = view;

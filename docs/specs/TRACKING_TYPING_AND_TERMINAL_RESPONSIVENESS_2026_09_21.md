@@ -79,13 +79,16 @@ Three layers found and fixed in three days, each measured before and after:
 |---|---|---|
 | Streaming markdown re-parsed the whole message every commit (O(n²)) | #3521 — incremental parse | `ANALYSIS_AGENT_PANE_TYPING_UNDER_LOAD_2026_09_22.md` §2 |
 | Backgrounded keep-alive panes kept rendering markdown on the same thread | #3536 — dormancy gate | same doc, §4 |
-| **Every finished tool result in the streaming buffer was rebuilt on every flush** (new `dispatchMatches` Map identity read through an inline prop getter; `.md` previews re-parsed + rebuilt an OverlayScrollbars each time). 4 visible streaming panes: 2.3 fps → 55 fps, forced layout 5.9 s → 48 ms per 15 s | this PR — equality-gated memo in `DocumentRow`, `scrollable={false}` on the previews | `ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md` |
+| **Every finished tool result in the streaming buffer was rebuilt on every flush** (new `dispatchMatches` Map identity read through an inline prop getter; `.md` previews re-parsed + rebuilt an OverlayScrollbars each time). 4 visible streaming panes: 2.3 fps → 55 fps, forced layout 5.9 s → 48 ms per 15 s | #3555 — equality-gated memo in `DocumentRow`, `scrollable={false}` on the previews | `ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md` |
+| The streaming message's markdown DOM was rebuilt per commit (parse was incremental, DOM was not) | #3559 — frozen-prefix DOM reuse, processor built once | same doc, §6 |
+| Pin-to-bottom forced layout on every flush, and every pane's flush landed in the same frame | Phase 1 + 2 of the bounded-live-window spec (pin after layout in a ResizeObserver; cross-pane scheduler, one pane per frame while typing): key → paint p95 −32 %, blocking −12–26 % | `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md` §2.1 |
 
-Still open, with numbers, in that last doc's §6: the streaming message's DOM is
-rebuilt per commit (parse is incremental, DOM is not), and pin-to-bottom forces
-layout up to 3× per flush. Re-measure with
-`scripts/ui-screenshots/typing-under-load-experiment.mjs` (#3569) — it needs no
-human at the keyboard.
+The remaining agent-pane work — cost that grows with conversation length, and
+the ~40 ms per-flush cost of the real stream pipeline — is planned in
+`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md` and tracked phase
+by phase in `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`. Measure
+with `scripts/ui-screenshots/full-conversation-bench.mjs` (#3593) — no human
+at the keyboard and no agent tokens needed.
 
 ### 2.2 Decided but never built
 
