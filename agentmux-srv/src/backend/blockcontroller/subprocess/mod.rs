@@ -326,40 +326,17 @@ impl SubprocessController {
         );
     }
 
-    /// Writes the user's message to the transcript, as the record the
-    /// persistent Claude controller writes for each stdin line (Phase 5a-3c):
-    /// a `{"type":"user","message":{...}}` line in the block's file and the
-    /// agent's global zone, published as an `echo: "stdin"` event — the pane
-    /// already shows the message (its `agent-message-accepted` node), so the
-    /// event only keeps its stream gap-free. Without it these CLIs' transcripts
-    /// hold no trace of what the user sent: gone on reload, absent from
-    /// History, and a turn the live feed can't roll off
-    /// (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9).
-    ///
-    /// Only for output formats whose CLI doesn't echo the prompt itself — see
-    /// `persists_user_record`. Called right after `emit_message_accepted`,
-    /// i.e. once per message, when it is actually sent (a queued message is
-    /// written when its turn starts, keeping transcript order).
-    pub(super) fn persist_user_message(&self, message: &str) {
-        let Some(store) = self.mstore.as_ref() else {
-            return;
-        };
-        let Ok(block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) else {
-            return;
-        };
-        let format = crate::backend::obj::meta_get_string(&block.meta, "agentOutputFormat", "");
-        if !persists_user_record(&format) {
-            return;
+    /// A handle that writes the user's message to the transcript — see
+    /// [`UserRecordSink`]. Cloned out so the delivery paths (the stdin writer
+    /// thread, the container exec task) can write it once the prompt has
+    /// actually reached the CLI.
+    pub(super) fn user_record_sink(&self) -> UserRecordSink {
+        UserRecordSink {
+            broker: self.broker.clone(),
+            block_id: self.block_id.clone(),
+            filestore: self.filestore.clone(),
+            mstore: self.mstore.clone(),
         }
-        let global_zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta);
-        let line = format!("{}\n", user_record(message));
-        super::shell::persist_user_line(
-            self.broker.as_deref(),
-            &self.block_id,
-            line.as_bytes(),
-            self.filestore.as_ref(),
-            global_zone.as_deref(),
-        );
     }
 
     /// Get the stored session ID (if any).
@@ -478,4 +455,51 @@ pub(crate) fn user_record(message: &str) -> serde_json::Value {
         "type": "user",
         "message": { "role": "user", "content": message }
     })
+}
+
+/// Writes the user's message to the transcript, as the record the persistent
+/// Claude controller writes for each stdin line (Phase 5a-3c): a
+/// `{"type":"user","message":{...}}` line in the block's file and the agent's
+/// global zone, published as an `echo: "stdin"` event — the pane already shows
+/// the message (its `agent-message-accepted` node), so the event only keeps
+/// its stream gap-free. Without it these CLIs' transcripts hold no trace of
+/// what the user sent: gone on reload, absent from History, and a turn the
+/// live feed can't roll off
+/// (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9).
+///
+/// Written only AFTER the prompt was delivered — the stdin write succeeded,
+/// or the container exec started — like the persistent controller's
+/// delivery-before-persistence order: a failed spawn, pipe or exec must not
+/// leave the transcript claiming a turn that never happened (Codex review).
+/// Only for output formats whose CLI doesn't echo the prompt itself (see
+/// [`persists_user_record`]).
+pub(super) struct UserRecordSink {
+    broker: Option<Arc<mps::Broker>>,
+    block_id: String,
+    filestore: Option<Arc<FileStore>>,
+    mstore: Option<Arc<Store>>,
+}
+
+impl UserRecordSink {
+    pub(super) fn write(&self, message: &str) {
+        let Some(store) = self.mstore.as_ref() else {
+            return;
+        };
+        let Ok(block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) else {
+            return;
+        };
+        let format = crate::backend::obj::meta_get_string(&block.meta, "agentOutputFormat", "");
+        if !persists_user_record(&format) {
+            return;
+        }
+        let global_zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta);
+        let line = format!("{}\n", user_record(message));
+        super::shell::persist_user_line(
+            self.broker.as_deref(),
+            &self.block_id,
+            line.as_bytes(),
+            self.filestore.as_ref(),
+            global_zone.as_deref(),
+        );
+    }
 }
