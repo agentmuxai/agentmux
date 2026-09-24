@@ -118,13 +118,10 @@ pub(crate) fn attach_identity_stores(
 /// `MemoryList` listed nothing while its memories sat in the account's dir.
 fn agent_claude_config_dir(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> String {
     let linked = IDENTITY_STORES.get().and_then(|(id_store, identity_store)| {
-        // Only an agent with links reaches the resolver, which logs a
-        // warning for an unlinked one — memory is read every sweep.
-        let has_links = identity_store
-            .agent_identity_list_for_agent(agent_id)
-            .map(|l| !l.is_empty())
-            .unwrap_or(false);
-        has_links
+        // Only an agent with a binding — its own, or its template's (the
+        // spawn's fallback) — reaches the resolver, which logs a warning for
+        // an unbound one; memory is read every sweep.
+        crate::identity::resolver::agent_has_identity_binding(mstore, identity_store, agent_id)
             .then(|| {
                 crate::identity::resolver::resolve_bound_claude_config_dir_for_agent(
                     mstore, id_store, identity_store, agent_id,
@@ -2776,6 +2773,23 @@ mod tests {
             })
             .unwrap();
         assert_eq!(memory_dir_for_agent_by_id(&store, &def).unwrap(), got, "the account wins");
+
+        // An agent with no link of its own inherits its template's, as the
+        // spawn does (ReAgent on #3630).
+        let mut tpl = crate::backend::storage::agents::test_agent_def("tpl-3603", "T", "claude", "agent", 1, "");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        store.agent_identity_link("tpl-3603", "acct-3603", "claude").unwrap();
+        let mut child = crate::backend::storage::agents::test_agent_def("uid-3603-child", "K", "claude", "agent", 1, "");
+        child.slug = "k-3603".into();
+        child.parent_id = "tpl-3603".into();
+        child.working_directory = "/work/k-3603".into();
+        store.agent_def_insert(&mut child).unwrap();
+        assert_eq!(
+            memory_dir_for_agent_by_id(&store, &child).unwrap(),
+            memory_dir_for_cwd("/accounts/acct-3603/claude", "/work/k-3603"),
+            "the template's link"
+        );
 
         // A non-Claude agent's linked account is not a Claude config dir:
         // memory keeps today's resolution.
