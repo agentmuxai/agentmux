@@ -312,7 +312,7 @@
         "notify:tooltones:flash": {
           "type": "boolean",
           "default": true,
-          "description": "Pair every tool-call tone with a brief fade on the tab it came from (or its pane-header pill, when that tab is already active), so a tone from a pane you can't see can be traced. Follows the tone's own enable/scope gates. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md."
+          "description": "Pair every tool-call tone with a brief flash, in a brightened version of the source pane's color, on both the source's window tab and its pill in its pane header, so a tone from a pane you can't see can be traced. Follows the tone's own enable/scope gates. Default true. See docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md."
         },
         "dnd:enabled": {
           "type": "boolean",
