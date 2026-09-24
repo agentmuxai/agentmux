@@ -65,6 +65,7 @@ import {
     setReplayMode,
 } from "../sound-service";
 import { __resetSoundListeners } from "../sound-events";
+import { __resetActivityFlash, onActivityFlash, type FlashTarget } from "../../activity-flash";
 
 describe("sound-service policy", () => {
     let playSpy: ReturnType<typeof vi.spyOn>;
@@ -317,5 +318,79 @@ describe("sound-service tool-tones policy", () => {
         attachedSpy.mockReturnValueOnce(false);
         fireToolStarted("blk-1", "Read");
         expect(toolPlaySpy).not.toHaveBeenCalled();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Activity flash — the visual twin of a tool tone: one event per tone that
+// passes the gates, from any pane, focused or not.
+// SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2. The player is left
+// UNPRIMED here on purpose: the flash must not depend on audio.
+// ──────────────────────────────────────────────────────────────────────
+describe("sound-service activity flash", () => {
+    let flashes: FlashTarget[];
+    let unsubscribe: () => void;
+    let cleanup: () => void;
+
+    beforeEach(() => {
+        resetSettings();
+        focusState.focusedBlockId = null;
+        focusState.windowFocused = true;
+        __resetSoundService();
+        __resetSoundListeners();
+        __resetActivityFlash();
+        captured = null;
+        flashes = [];
+        unsubscribe = onActivityFlash((t) => flashes.push(t));
+        cleanup = installSoundService();
+    });
+
+    afterEach(() => {
+        cleanup();
+        unsubscribe();
+        setReplayMode(false);
+    });
+
+    function fireToolStarted(blockId: string): void {
+        if (!captured) throw new Error("multicast listener was never installed");
+        captured(blockId, { type: "tool-started", name: "Read" });
+    }
+
+    it("emits one flash per tone, even before audio is primed", () => {
+        fireToolStarted("blk-1");
+        fireToolStarted("blk-2");
+        expect(flashes).toEqual([{ blockId: "blk-1" }, { blockId: "blk-2" }]);
+    });
+
+    it("flashes for the focused pane in a focused window too", () => {
+        focusState.focusedBlockId = "blk-1";
+        focusState.windowFocused = true;
+        fireToolStarted("blk-1");
+        expect(flashes).toEqual([{ blockId: "blk-1" }]);
+    });
+
+    it("notify:tooltones:flash=false removes the flash", () => {
+        setSetting("notify:tooltones:flash", false);
+        fireToolStarted("blk-1");
+        expect(flashes).toEqual([]);
+    });
+
+    it("follows the tone's gates: master off, tool tones off, focused scope", () => {
+        setSetting("notify:sounds:enabled", false);
+        fireToolStarted("blk-1");
+        resetSettings();
+        setSetting("notify:tooltones:enabled", false);
+        fireToolStarted("blk-1");
+        resetSettings();
+        setSetting("notify:tooltones:scope", "focused");
+        focusState.focusedBlockId = "blk-OTHER";
+        fireToolStarted("blk-1");
+        expect(flashes).toEqual([]);
+    });
+
+    it("replay mode drops the flash with the tone", () => {
+        setReplayMode(true);
+        fireToolStarted("blk-1");
+        expect(flashes).toEqual([]);
     });
 });
