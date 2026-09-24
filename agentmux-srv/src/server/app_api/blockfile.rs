@@ -157,7 +157,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
                 use crate::backend::blockcontroller::shell::{
-                    fresh_idx_lines, idx_bytes, idx_entry, output_now, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
+                    idx_bytes, idx_entry, output_index, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
                 };
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
@@ -176,16 +176,18 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                         // Size and generation from the database: the cached
                         // `stat` size lags another srv instance's appends.
-                        let (output_size, output_gen) = output_now(&filestore, &read_block)?;
+                        // Its size, generation and index freshness in one snapshot.
+                        let view = output_index(&filestore, &read_block)?;
+                        let output_size = view.output_size;
 
                         // Determine total_lines, rebuilding the index iff it is missing,
                         // its covered-size header doesn't match the current output size,
                         // or it was built for another generation of `output` (5a-2b).
                         // The index's size and bytes come from the database like the
                         // output's (Codex on #3634).
-                        let total_lines: u64 = match fresh_idx_lines(&filestore, &read_block, output_size, output_gen.as_deref()) {
+                        let total_lines: u64 = match view.fresh_lines {
                             Some(lines) => lines,
-                            None => rebuild_output_idx(&filestore, &read_block, output_size)?,
+                            None => rebuild_output_idx(&filestore, &read_block, output_size, view.output_gen)?,
                         };
 
                         // Empty result cases — answered from the index, no output read.

@@ -2844,24 +2844,23 @@ pub(super) fn global_zone_line_count(
     gfs: &Arc<crate::backend::storage::filestore::FileStore>,
     zone: &str,
 ) -> Option<u64> {
-    use crate::backend::blockcontroller::shell::{fresh_idx_lines, output_now};
+    use crate::backend::blockcontroller::shell::{extend_output_idx, output_index};
 
-    // Size and generation from the database: the cached `stat` size lags
-    // another srv instance's appends to this shared zone.
-    let (output_size, output_gen) = output_now(gfs, zone)?;
-    if output_size == 0 {
+    // `output` and its index from one database snapshot: sizes, header and
+    // generation label of the same moment, whatever another srv instance is
+    // writing to this shared zone (Codex on #3634).
+    let view = output_index(gfs, zone)?;
+    if view.output_size == 0 {
         return Some(0);
     }
-
-    // A fresh index answers directly — its size and header read from the
-    // database like the output's (Codex on #3634).
-    if let Some(lines) = fresh_idx_lines(gfs, zone, output_size, output_gen.as_deref()) {
+    if let Some(lines) = view.fresh_lines {
         return Some(lines);
     }
 
     // Stale or missing. `extend_output_idx` scans only the appended bytes when
     // it can anchor on the existing index, and falls back to a full rebuild
-    // when it can't (missing, unreadable, no entries, or `output` shrank).
+    // when it can't (missing, unreadable, no entries, another generation's, or
+    // `output` shrank).
     //
     // The count must stay EXACT. Returning a stale one instead was tried and
     // is wrong: this feeds `useHistoryPagination`'s tail window
@@ -2873,7 +2872,7 @@ pub(super) fn global_zone_line_count(
     // O(file-size) rescan every time — 37 rebuilds in 19 minutes on a 759 MB
     // transcript, mean 3168 ms, ~10% permanent duty cycle. See
     // docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5.
-    crate::backend::blockcontroller::shell::extend_output_idx(gfs, zone, output_size)
+    extend_output_idx(gfs, zone)
 }
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
@@ -3271,7 +3270,7 @@ mod cross_channel_tests {
 
         b.append_data(zone, OUTPUT_FILE, b"{\"b\":2}\n{\"c\":3}\n{\"d\":4}\n").unwrap();
         let b_size = b.line_state(zone, OUTPUT_FILE).unwrap().unwrap().size as u64;
-        assert_eq!(crate::backend::blockcontroller::shell::rebuild_output_idx(&b, zone, b_size), Some(4));
+        assert_eq!(crate::backend::blockcontroller::shell::rebuild_output_idx(&b, zone, b_size, crate::backend::blockcontroller::shell::output_now(&b, zone).and_then(|(_, g)| g)), Some(4));
 
         assert_eq!(global_zone_line_count(&a, zone), Some(4), "A must not count from its stale cached index size");
     }

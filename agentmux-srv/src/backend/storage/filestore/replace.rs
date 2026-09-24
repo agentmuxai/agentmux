@@ -17,6 +17,23 @@ use super::core::FileStore;
 use super::{FileMeta, FileOpts};
 use crate::backend::storage::error::StoreError;
 
+/// See [`FileStore::derived_snapshot`].
+#[derive(Debug, Clone)]
+pub struct DerivedSnapshot {
+    pub output_size: i64,
+    /// `output`'s valid generation; `None` when it is not counted.
+    pub output_gen: Option<String>,
+    pub derived: Option<DerivedView>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DerivedView {
+    pub size: i64,
+    /// The requested bytes; `None` if any of them isn't stored yet.
+    pub bytes: Option<Vec<u8>>,
+    pub meta: FileMeta,
+}
+
 impl FileStore {
     /// Replace `name`'s content with `data` (creating the file if missing)
     /// and delete the files in `drop`, in one transaction. The new content
@@ -138,6 +155,42 @@ impl FileStore {
         let conn = self.conn.lock().unwrap();
         super::counter::read_bytes_exact(&conn, zone_id, name, offset, len)?.ok_or_else(|| {
             StoreError::Other(format!("{zone_id}/{name}: bytes {offset}..{} not stored yet", offset + len))
+        })
+    }
+
+    /// A file (`output`) and a file derived from it (`output.idx`), read in
+    /// ONE snapshot (Codex on #3634): `output`'s size and valid generation,
+    /// and the derived file's size, its first `head` bytes (all of it when
+    /// `head` is `None`) and its metadata. `None` when `output` doesn't exist.
+    pub fn derived_snapshot(
+        &self,
+        zone_id: &str,
+        output: &str,
+        derived: &str,
+        head: Option<i64>,
+    ) -> Result<Option<DerivedSnapshot>, StoreError> {
+        self.read_txn(|tx| {
+            let Some(row) = super::counter::read_row(tx, zone_id, output)? else { return Ok(None) };
+            let output_gen = row.counter().map(|(gen, _)| gen);
+            let derived_row: Option<(i64, String)> = tx
+                .query_row(
+                    "SELECT size, meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, derived],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let derived = match derived_row {
+                None => None,
+                Some((size, meta)) => {
+                    let len = head.map_or(size, |h| h.min(size));
+                    Some(DerivedView {
+                        size,
+                        bytes: super::counter::read_bytes_exact(tx, zone_id, derived, 0, len)?,
+                        meta: serde_json::from_str(&meta).unwrap_or_default(),
+                    })
+                }
+            };
+            Ok(Some(DerivedSnapshot { output_size: row.size, output_gen, derived }))
         })
     }
 

@@ -170,6 +170,21 @@ impl FileStore {
         Ok(out)
     }
 
+    /// Run `f` as one read transaction: in WAL mode every read inside it sees
+    /// one consistent snapshot of the database, however other connections
+    /// write meanwhile. For a decision that combines several reads (a size, a
+    /// header, a label) that must describe the same moment.
+    pub(super) fn read_txn<T>(
+        &self,
+        f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let out = f(&tx)?;
+        tx.commit()?;
+        Ok(out)
+    }
+
     /// Evict the least-recently-used cache entries until `cache_total_bytes <= cache_max_bytes`.
     /// Must be called with *neither* `cache` nor `cache_total_bytes` lock held.
     pub(super) fn evict_to_cap(&self) {

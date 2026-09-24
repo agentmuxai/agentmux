@@ -115,13 +115,13 @@ fn bytes_a_file_claims_but_does_not_store_are_never_served() {
         .unwrap();
     assert!(fs.read_bytes_db(ZONE, "output", 0, 6).is_err());
     // The indexer can't build an index over the hole (callers fall back).
-    assert_eq!(rebuild_output_idx(&fs, ZONE, 6), None);
+    assert_eq!(rebuild_output_idx(&fs, ZONE, 6, crate::backend::blockcontroller::shell::output_now(&fs, ZONE).and_then(|(_, g)| g)), None);
     fs.conn()
         .lock()
         .unwrap()
         .execute("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, 'output', 0, ?2)", rusqlite::params![ZONE, b"a\nb\nc\n".to_vec()])
         .unwrap();
-    assert_eq!(rebuild_output_idx(&fs, ZONE, 6), Some(3));
+    assert_eq!(rebuild_output_idx(&fs, ZONE, 6, crate::backend::blockcontroller::shell::output_now(&fs, ZONE).and_then(|(_, g)| g)), Some(3));
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn the_indexer_labels_the_index_with_the_generation_it_read() {
     fs.make_file(ZONE, "output", FileMeta::new(), FileOpts::default()).unwrap();
     fs.append_lines(ZONE, "output", b"a\nb\nc\n").unwrap();
     let size = fs.line_state(ZONE, "output").unwrap().unwrap().size as u64;
-    assert_eq!(rebuild_output_idx(&fs, ZONE, size), Some(3));
+    assert_eq!(rebuild_output_idx(&fs, ZONE, size, crate::backend::blockcontroller::shell::output_now(&fs, ZONE).and_then(|(_, g)| g)), Some(3));
     let label = fs.meta_db(ZONE, "output.idx").unwrap().unwrap();
     assert_eq!(label.get("for_gen"), Some(&serde_json::json!(gen(&fs, "output"))));
 }
