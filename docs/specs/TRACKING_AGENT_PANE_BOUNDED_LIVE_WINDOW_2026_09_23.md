@@ -23,10 +23,10 @@
 | 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | merged |
 | 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | merged |
 | 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
-| 4 | O(batch + log n) stores | — | not started |
-| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6); 5a designed in §6.3.7 (PRs 5a-1…5a-4); Gemini-family user echo (5d) shipped | #3619 (plan), #3620 (echo), this PR (5a design) | 5a design in review |
-| 6 | Bounded live document | — | not started |
-| 7 | History tab follows | — | not started |
+| 4 | O(batch + log n) stores | — | **deferred** by the §6.9 revision (live feed keeps n small; stores ≤ 8 % at 200 turns, §3.8) |
+| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663 | **5a done**; 5b, 5c, 5e deferred by §6.9; 5d's journal is §6.9 PR 4 |
+| 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | — | next, after 7 |
+| 7 | History tab follows the transcript (spec §6.9) | — | in progress |
 | 8 | Off-main-thread markdown (decision) | — | not started |
 | 9 | Default on | — | not started |
 | 10 | `content-visibility` experiment | — | not started |
