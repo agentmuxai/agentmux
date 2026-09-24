@@ -1324,6 +1324,71 @@ in-process delivery. **Gate for switching a reader:** the corresponding
 write has shipped and the `m4.actor_*` counters for that site are
 understood (#3573's stub-slug noise is expected).
 
+#### 6.5.10 M4d design — signing keys by UID, signed `source_uid` (DRAFT)
+
+**Status: draft, not yet measured against the code** — this section records
+the plan §6.5.3 and §6.5.4 already fix, split into PRs; each step's
+measurements, file references and recorded costs are filled in before the
+design PR is opened, and an adversarial pass runs on it before anything is
+built. **Gated** (§6.5.6): no M4d step ships until M4b's agent-path
+`spawn.no_token.*` counters and the `live.tokenless_or_unknown` gauge read
+zero on every channel's srv, sustained over a release cycle (read at
+`GET /agentmux/identity/fallbacks`, first shipped in v0.56.14; the cycle
+starts with v0.57.0).
+
+**Rules carried from §6.5.3–§6.5.4, unchanged.** Names on the wire and in
+display are never replaced; every existing signature stays valid over its
+existing material. Name-keyed key rows stay until M5, so reverting any step
+loses nothing. Nothing is refused that works today: a tokenless caller
+keeps today's name-keyed path until M5, counted.
+
+**Steps (each its own PR, independently revertible):**
+
+1. **M4d-1 — purge revokes by UID.** `purge_agent_dependents` deletes the
+   deleted agent's LAN, **WAN** and jekt key rows and its
+   `db_conversation_trust_grants` by UID, beside M4a-3's name-keyed
+   deletion. Needs the UID columns step 2 adds, or lands with it.
+2. **M4d-2 — keys copied to the UID on ownership evidence.** At every
+   registration by block, under the store's connection lock: a LAN/WAN
+   keypair row is **copied** (never moved, never re-minted — peers pin the
+   public key by name forever) to the block's row UID only when its name is
+   the row's persisted slug **and** its `created_at` is no earlier than the
+   row's, and the name is not tombstoned after the row was created; anything
+   else gets a fresh keypair. Jekt HMAC keys are not copied. An ambiguous
+   `/reactive/agent?id=<name>` returns no key.
+3. **M4d-3 — publication carries the UID.** Registry entries and
+   `/reactive/agent` publish the UID beside the name, so peers can pin
+   `(peer, uid)`; the name pin stays as the legacy fallback.
+4. **M4d-4 — the MCP fetches its keys; injection stops for token rows.**
+   `GET /agentmux/agents/self/keys` (`Caller::Agent(uid)` only) returns the
+   caller's own keys by UID; the MCP fetches lazily, with retry.
+   `.mcp.json` key injection (`WriteAgentConfig` and `agent.open`) stops
+   only for rows that carry a token; tokenless rows keep it until M5.
+5. **M4d-5 — the host-tier HMAC goes for token callers.**
+   `verify_jekt_signature`'s host tier and `verified_block_id` (UI
+   automation, pane close, dev-server register) read `Caller`; a request
+   without a token keeps the name-keyed HMAC, counted. The cross-channel
+   "same-instance" guard (today: "an HMAC key exists for this name") becomes
+   a registration check in the same PR.
+6. **M4d-6 — signed `source_uid` (v2).** The MCP sets `source_uid` from its
+   own `AGENTMUX_AGENT_UID` and signs it in a **new** field; the v1
+   signature stays in its field over its material (no flag day). A
+   forwarding srv never sets or changes it — it compares it with its own
+   `Caller` and counts a disagreement (`m4.source_uid_mismatch`). A receiver
+   writes it as attribution only when a verified v2 covers it; an uncovered
+   one is recorded as claimed and counted. Over LAN a UID is attributed as
+   `(peer, uid)`, never matched to a local row; over WAN it is never
+   attribution until WAN verification exists.
+
+**To measure before the PR** (research in progress): the key tables'
+schema, key column folding and every ensure/read site; purge's current
+tables and lock scope; both `.mcp.json` injection sites and how
+`agentmux-mcp` reads and uses each key; every verification function and the
+same-instance guard; the signature wire fields; what the registry,
+`/reactive/agent` and LAN discovery publish and pin; where registration by
+block can hook the copy; and UI automation's `auth.agent_id` path (§6.5.9's
+table defers it to M4d).
+
 ## 7. Performance
 
 Revision 1 claimed hot paths *"lose a database read"*. §0.4: they have none to
