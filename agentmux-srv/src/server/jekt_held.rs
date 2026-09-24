@@ -132,7 +132,11 @@ pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
         ..Default::default()
     };
     req.sig_verified = row.sig_verified;
-    req.reagent_verified = row.reagent_verified;
+    // Not restored: only host-tier jekts are held (`hold_for_absent_target`)
+    // and reagent verification is WAN-only, so a held row never carries a
+    // real reagent verdict — and a replayed `Some(true)` without its key id
+    // would read as a failed verification.
+    req.reagent_verified = None;
     req.lan_verified = row.lan_verified;
     req.channel_verified = row.channel_verified;
     req.is_transcript_request = row.is_transcript_request;

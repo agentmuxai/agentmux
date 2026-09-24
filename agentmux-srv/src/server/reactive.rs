@@ -417,7 +417,7 @@ pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     };
     let within_freshness_window = ts_secs > 0 && (now - ts_secs).abs() <= REAGENT_SIG_MAX_AGE_SECS;
     let verified = within_freshness_window
-        && agentmux_common::jekt_sign::verify_reagent_jekt(
+        && agentmux_common::jekt_sign::verify_trusted_reagent_jekt(
             key_id,
             msg_id,
             req.source_agent.as_deref().unwrap_or(""),
@@ -2964,15 +2964,17 @@ mod verify_reagent_signature_tests {
     use super::*;
 
     // Reuses the exact fixture from agentmux-common/src/jekt_sign.rs's own
-    // `a_correctly_signed_reagent_message_verifies` test: a signature
-    // produced offline against the "reagent-v1-dev" pinned public key's
-    // matching private half, over signed_material("msg-1",
-    // "github-consumer", "agentx", 1000, "hello"). The private key isn't in
-    // this repo (agentmux-cloud's Secrets Manager only) so a fresh signature
-    // can't be minted at test time — `now` is passed explicitly instead of
-    // wall-clock so this fixed ts_secs=1000 can be held inside the
-    // freshness window on demand.
+    // `a_correctly_signed_reagent_message_verifies_under_the_production_key`
+    // test: a signature produced offline under the production `reagent-v1`
+    // key, over signed_material("msg-1", "github-consumer", "agentx", 1000,
+    // "hello"). The private key isn't in this repo (agentmux-cloud's Secrets
+    // Manager only) so a fresh signature can't be minted at test time —
+    // `now` is passed explicitly instead of wall-clock so this fixed
+    // ts_secs=1000 can be held inside the freshness window on demand.
     const FIXTURE_SIG_B64: &str =
+        "FCFjcvAzla329a39u8fFxOvRWaH1R2fUn8RsGtP9RaIbLbaS3aXgAQ7YB4ssWV5TDvAeGrwSkHfoeGi11iCPBg==";
+    // The same material signed under the `reagent-v1-dev` key.
+    const DEV_KEY_FIXTURE_SIG_B64: &str =
         "QehidZjJa2jYLPIPYSsVxUlm86W5Fdbr9PV3P4HJyZwJ68/HZR9EaAL0MpcVtTuZJW2+MMGebc0RH9HITNJGCw==";
     const FIXTURE_TS_SECS: i64 = 1_000;
 
@@ -2983,7 +2985,7 @@ mod verify_reagent_signature_tests {
             source_agent: Some("github-consumer".to_string()),
             delivery_tier: Some("wan".to_string()),
             reagent_sig: Some(FIXTURE_SIG_B64.to_string()),
-            reagent_key_id: Some("reagent-v1-dev".to_string()),
+            reagent_key_id: Some("reagent-v1".to_string()),
             reagent_msg_id: Some("msg-1".to_string()),
             reagent_ts_secs: Some(FIXTURE_TS_SECS),
             ..Default::default()
@@ -2995,6 +2997,15 @@ mod verify_reagent_signature_tests {
         let mut req = wan_req();
         verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
         assert_eq!(req.reagent_verified, Some(true));
+    }
+
+    #[test]
+    fn a_valid_signature_under_the_dev_key_is_not_verified() {
+        let mut req = wan_req();
+        req.reagent_key_id = Some("reagent-v1-dev".to_string());
+        req.reagent_sig = Some(DEV_KEY_FIXTURE_SIG_B64.to_string());
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, Some(false), "only the production key yields a verified sender");
     }
 
     #[test]

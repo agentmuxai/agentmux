@@ -901,11 +901,9 @@ async fn sync_agent_reactive(
         // present but which failed to cryptographically verify (see
         // InjectionRequest::reagent_verified,
         // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md); as of that
-        // narrowing, `agentmux_common::jekt_sign::is_reagent_trusted_signing_key`
-        // is NOT consulted by the tier-escalation gate at all — `Some(true)`
-        // under the trusted production key and `Some(true)` under the
-        // known-exposed `reagent-v1-dev` placeholder now get identical tier
-        // treatment. `req.reagent_key_id` below must still be carried
+        // narrowing. `verify_trusted_reagent_jekt` yields `Some(true)` only
+        // under the trusted production key; a signature under any other
+        // registered key is `Some(false)`. `req.reagent_key_id` below must still be carried
         // through from `inj` so the marker's `SIG=` label and the SIG=verified
         // rule-1b exception render correctly (reagentx P0 on PR #2576 — it
         // wasn't, so relaxation silently never activated for
@@ -927,7 +925,7 @@ async fn sync_agent_reactive(
             (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => {
                 Some(
                     reagent_sig_is_fresh(ts_secs, now_unix_secs())
-                        && agentmux_common::jekt_sign::verify_reagent_jekt(
+                        && agentmux_common::jekt_sign::verify_trusted_reagent_jekt(
                             key_id,
                             msg_id,
                             inj.source_agent.as_deref().unwrap_or(""),

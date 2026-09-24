@@ -966,21 +966,12 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_keyword_mat
     );
 }
 
-// reagentx P0 on PR #2576: `reagent-v1-dev`'s private key is documented as
-// exposed since generation (see jekt_sign.rs's `reagent_public_key` doc
-// comment), so a signature verifying under it proves nothing about sender
-// identity beyond "someone who read the source/docs." `is_reagent_trusted_
-// signing_key` (agentmux-common/src/jekt_sign.rs) still distinguishes it
-// from the real production key — that distinction still matters for
-// whether tier relaxation's rule 1b applies to THIS message specifically.
-// But as of SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md, failing to
-// qualify for rule 1b no longer means "forced sensitive" — it just means
-// "no special treatment," same as any other unverified/self-declared WAN
-// sender (rule 5's default). Only an ACTIVE verification failure
-// (SIG=invalid, reagent_verified == Some(false)) still forces sensitive —
-// see the SIG=invalid test below, unchanged, as the negative-control proof.
+// A signature under any key other than the trusted production key is not a
+// verified sender. The verifiers never produce `Some(true)` for one, and the
+// handler downgrades a directly-set `Some(true)` to `Some(false)` — an active
+// verification failure, rendered SIG=invalid and forced sensitive.
 #[tokio::test]
-async fn test_handler_inject_wan_reagent_verified_under_exposed_dev_key_falls_through_to_declared_tier() {
+async fn test_handler_inject_wan_reagent_verified_under_untrusted_key_is_a_failed_verification() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
     let sent_clone = sent.clone();
 
@@ -1000,26 +991,49 @@ async fn test_handler_inject_wan_reagent_verified_under_exposed_dev_key_falls_th
         jekt_tier: None,
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
-        // The signature genuinely verifies (reagent_verified: Some(true)) —
-        // the point of this test is that verifying alone isn't rule 1b's
-        // stronger claim; it's still not an active FAILURE either.
         reagent_verified: Some(true),
         reagent_key_id: Some("reagent-v1-dev".to_string()),
         ..Default::default()
     });
 
     assert!(resp.success);
-    assert_eq!(
-        resp.effective_tier.as_deref(),
-        Some("coord"),
-        "a signature verified under the known-exposed dev key doesn't qualify for the SIG=verified \
-         relaxation, but it's also not a FAILED verification — clean content falls through to the \
-         declared tier (default coord), same as any other unverified network-tier sender"
-    );
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
-    assert!(payload.contains("SIG=verified"), "the signature itself still renders as verified: {payload}");
-    assert!(payload.contains("TIER=coord"), "but no longer forced sensitive on trust alone: {payload}");
+    assert!(payload.contains("SIG=invalid"), "{payload}");
+    assert!(!payload.contains("SIG=verified"), "{payload}");
+    assert!(payload.contains("ESCALATE=required"), "{payload}");
+}
+
+// `Some(true)` with no key id at all is downgraded the same way.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_without_key_id_is_a_failed_verification() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1e".to_string()),
+        delivery_tier: Some("wan".to_string()),
+        reagent_verified: Some(true),
+        reagent_key_id: None,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("SIG=invalid"), "{payload}");
 }
 
 #[tokio::test]
@@ -3807,4 +3821,21 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
     assert!(text.contains(&format!("TS={}", sent_at_ms / 1000)), "original send time: {text}");
     let audit = handler.get_audit_log(1);
     assert_eq!(audit[0].outcome.as_deref(), Some("held_delivered"));
+
+    // Held rows are host-tier only, so a stored reagent verdict is never
+    // replayed — it can't turn into SIG=invalid for want of its key id.
+    delivered.lock().unwrap().clear();
+    let with_reagent = crate::backend::storage::jekt_held::HeldJekt {
+        request_id: "req-heldz-rg".into(),
+        sig_verified: Some(true),
+        reagent_verified: Some(true),
+        ..row.clone()
+    };
+    let req = crate::server::jekt_held::request_from_held(&with_reagent);
+    assert_eq!(req.reagent_verified, None);
+    let resp = handler.inject_held(req);
+    assert!(resp.success, "{:?}", resp.error);
+    let text = delivered.lock().unwrap().join("");
+    assert!(!text.contains("SIG="), "{text}");
+    assert!(text.contains("TRUST=host-verified"), "{text}");
 }
