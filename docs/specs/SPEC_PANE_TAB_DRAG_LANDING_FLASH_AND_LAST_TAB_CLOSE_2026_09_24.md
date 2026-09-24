@@ -1,10 +1,10 @@
 # SPEC: Pane Tab drag — Window-Tab-style landing flash on the destination, moving a pane's last tab closes that pane, and removing `pane:tabstrip = "multi-only"`
 
 **Date:** 2026-09-24
-**Status:** active — §8 (remove `pane:tabstrip = "multi-only"`) implemented
-in PR #3692 (PR C). §3 (flash + landing bounce, PR A) implemented in PR
-#3694. §4 (last-tab close, PR B) implemented in PR #3698. Design decisions in §6 are
-confirmed by the repo owner.
+**Status:** implemented — §8 (remove `pane:tabstrip = "multi-only"`) in PR
+#3692, §3 (flash + landing bounce) in PR #3694, §4 (last-tab close) in PR
+#3698. Design decisions in §6 are confirmed by the repo owner. Not yet
+verified in a running app (`task dev`); see §5's manual checks.
 **Author:** Camper
 **Trigger:** direct repo-owner request after live use of the shipped Pane Tab
 drag (PRs #3441, #3444, #3447, #3449): "it works well, but we want some
