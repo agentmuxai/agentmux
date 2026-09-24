@@ -23,7 +23,7 @@
 //! present in the schema (dropped in a later PR) — do not read either as a
 //! live source anywhere in this file; every read here is `db_agents`.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
@@ -1210,9 +1210,6 @@ impl Store {
             .as_millis() as i64;
         let rows = {
             let conn = self.conn.lock().unwrap();
-            // M4d-1: a renamed agent's earlier name may still key its signing
-            // material (its fallback id), so it is remembered for purge.
-            remember_former_name(&conn, &agent.id, "name", &agent.name)?;
             conn.execute(
                 "UPDATE db_agents SET name=?1, icon=?2, provider=?3, description=?4,
                  working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
@@ -1902,7 +1899,6 @@ impl Store {
             let conn = self.conn.lock().unwrap();
             let scope = Self::scope_for_row(&conn, id);
             let now_ms = Self::monotonic_updated_at(&conn, 0);
-            remember_former_name(&conn, id, "instance_name", instance_name)?;
             let rows = conn.execute(
                 "UPDATE db_agents SET instance_name = ?1, updated_at = ?2
                  WHERE id = ?3 AND is_template = 0 AND instance_name <> ''",
@@ -2835,63 +2831,12 @@ fn frontend_fallback_id(name: &str) -> String {
     id
 }
 
-/// `db_agent_content` type holding an agent's earlier display and instance
-/// names (JSON array) — M4d-1: a rename leaves keys minted under the old
-/// name's fallback id, and the purge must still find them (Codex P1 on
-/// #3633). Deleted with the agent row (`ON DELETE CASCADE`).
-const FORMER_NAMES: &str = "former_names";
-/// Former names kept per agent.
-const FORMER_NAMES_MAX: usize = 20;
-
-/// Before `column` of `id` changes to `new`, remember its current value.
-fn remember_former_name(
-    conn: &rusqlite::Connection,
-    id: &str,
-    column: &str,
-    new: &str,
-) -> Result<(), StoreError> {
-    let column = match column {
-        "name" => "name",
-        "instance_name" => "COALESCE(instance_name, '')",
-        _ => return Ok(()),
-    };
-    let old: Option<String> = conn
-        .query_row(
-            &format!("SELECT {column} FROM db_agents WHERE id = ?1 AND is_template = 0"),
-            params![id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let Some(old) = old.filter(|o| !o.trim().is_empty() && o.as_str() != new) else {
-        return Ok(());
-    };
-    let mut names = former_names(conn, id)?;
-    if names.contains(&old) {
-        return Ok(());
-    }
-    names.push(old);
-    if names.len() > FORMER_NAMES_MAX {
-        names.drain(..names.len() - FORMER_NAMES_MAX);
-    }
-    conn.execute(
-        "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(agent_id, content_type) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
-        params![id, FORMER_NAMES, serde_json::to_string(&names).unwrap_or_default(), agentmux_common::time::now_ms()],
-    )?;
-    Ok(())
-}
-
-/// An agent's remembered former names.
+/// Every display / instance name `id` has had before its current ones
+/// (`db_agent_former_names`, recorded by trigger on every rename path).
 fn former_names(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, StoreError> {
-    let content: Option<String> = conn
-        .query_row(
-            "SELECT content FROM db_agent_content WHERE agent_id = ?1 AND content_type = ?2",
-            params![id, FORMER_NAMES],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(content.and_then(|c| serde_json::from_str(&c).ok()).unwrap_or_default())
+    let mut stmt = conn.prepare("SELECT name FROM db_agent_former_names WHERE agent_id = ?1")?;
+    let rows = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 /// Whether another row may sign under `folded`: holds it as its slug, or its
@@ -2925,17 +2870,14 @@ fn key_name_used_by_another(
     }
     // A live agent's former names too: its running session may still sign
     // under an earlier name's fallback until it relaunches.
-    let mut stmt = conn.prepare(
-        "SELECT content FROM db_agent_content WHERE content_type = ?1 AND agent_id != ?2",
-    )?;
-    let formers = stmt.query_map(params![FORMER_NAMES, id], |r| r.get::<_, String>(0))?;
-    for content in formers {
-        let names: Vec<String> = serde_json::from_str(&content?).unwrap_or_default();
-        if names.iter().any(|n| {
-            n.trim().to_lowercase() == folded
-                || agent_open_fallback_id(n) == folded
-                || frontend_fallback_id(n) == folded
-        }) {
+    let mut stmt = conn.prepare("SELECT name FROM db_agent_former_names WHERE agent_id != ?1")?;
+    let formers = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+    for n in formers {
+        let n = n?;
+        if n.trim().to_lowercase() == folded
+            || agent_open_fallback_id(&n) == folded
+            || frontend_fallback_id(&n) == folded
+        {
             return Ok(true);
         }
     }
