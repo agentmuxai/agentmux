@@ -1,0 +1,90 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Shared drag-and-drop feedback: the "valid drop target" strobe + pulse and
+// the landing bounce. Moved verbatim out of tabbar.scss, where the Window Tab
+// bar introduced them (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1/A4), so the Pane
+// Tab strip can use the SAME look instead of a copy that drifts
+// (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3).
+//
+// Every file that `@use`s this emits its own copy of the @keyframes below.
+// The copies are identical, so whichever one the cascade picks is the same
+// animation. Change timing or colors HERE only.
+
+// --- Keyframes ---
+
+@keyframes tab-drop-pulse {
+    from {
+        outline-color: var(--accent-color);
+    }
+    to {
+        outline-color: rgba(34, 197, 94, 0.5);
+    }
+}
+
+// Spring bounce on tab landing — slight overshoot then settle
+@keyframes tab-bounce {
+    0%   { transform: scaleX(0.88); }
+    55%  { transform: scaleX(1.04); }
+    80%  { transform: scaleX(0.98); }
+    100% { transform: scaleX(1.0);  }
+}
+
+// One strobe cycle: the element's negative for the first half (200ms), normal
+// for the second (200ms) — 2 iterations = 2 distinct invert flashes over
+// 800ms (2.5 Hz — under the WCAG 2.3.1 3-flashes-per-second threshold).
+@keyframes tab-drop-invert-strobe {
+    0%   { filter: invert(1); }
+    50%  { filter: invert(0); }
+    100% { filter: invert(0); }
+}
+
+// --- Mixins ---
+
+// Something is being dragged over a valid drop target: the instant the hover
+// begins, the target flashes to its NEGATIVE (filter: invert) and back —
+// one-shot; re-applying the class per hover entry restarts it — then a slower
+// accent-outline pulse carries the "valid drop target" signal for the rest of
+// the hover.
+//
+// Flash rate (review finding on PR #2105, P1): the original design (10 flashes
+// / 500ms = 20 Hz) exceeded the WCAG 2.3.1 general flash threshold (max 3
+// flashes per any 1-second window) — a real photosensitive-seizure risk,
+// independent of any animation preference. Reduced to 2 flashes over 800ms
+// (2.5 Hz, safely under the threshold). Also keeps a targeted
+// `prefers-reduced-motion` opt-out for THIS flash specifically (dropping
+// straight to the steady pulse): seizure-trigger content warrants its own
+// escape hatch, a distinct and more serious category than the general "skip
+// cosmetic transitions" policy this app otherwise doesn't honor.
+@mixin drop-target-hover {
+    outline: 2px solid var(--accent-color);
+    outline-offset: -2px;
+    animation:
+        tab-drop-invert-strobe 400ms steps(1, end) 2,
+        tab-drop-pulse 0.8s ease-in-out infinite alternate;
+
+    @media (prefers-reduced-motion: reduce) {
+        animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+    }
+}
+
+// Exempt a descendant of a `drop-target-hover` element from its strobe by
+// running the same strobe on it. invert(1) is its own inverse (each channel
+// c → 1-c → c), so the parent's invert on top of this one gives back the
+// descendant's exact original pixels. Both start in the same style recalc
+// (one class toggle on the parent) and use steps(1, end), so they flip on the
+// same frame. Mirrors `drop-target-hover`'s reduced-motion opt-out: no parent
+// strobe there, so nothing to cancel.
+@mixin drop-target-strobe-exempt {
+    animation: tab-drop-invert-strobe 400ms steps(1, end) 2;
+
+    @media (prefers-reduced-motion: reduce) {
+        animation: none;
+    }
+}
+
+// Landing bounce on a tab that was just dropped into place.
+@mixin landing-bounce {
+    animation: tab-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    transform-origin: center bottom;
+}

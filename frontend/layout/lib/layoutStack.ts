@@ -230,6 +230,10 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
  * too, via the queued `stackmove` action `pane.moveTab` sends (this
  * client's own local edit already reflects it, so it doesn't need to wait
  * on or re-apply its own queued action).
+ *
+ * Returns whether the move was applied, so a drop handler can tell a real
+ * landing from a refused one (e.g. to play the landing bounce only when the
+ * tab actually moved).
  */
 export function moveBlockInStack(
     model: LayoutModel,
@@ -237,7 +241,7 @@ export function moveBlockInStack(
     targetBlockId: string,
     position: "before" | "after" | "end",
     activate = false
-): void {
+): boolean {
     const root = model.treeState.rootNode;
     // BOTH sides are resolved from their block ids, exactly as the backend's
     // `move_stack_member` does — deliberately NOT from a caller-supplied
@@ -253,7 +257,7 @@ export function moveBlockInStack(
     const targetNode = root && findNodeByBlockId(root, targetBlockId);
     if (!sourceNode?.data || !targetNode?.data) {
         console.error("moveBlockInStack: source or target block is in no pane", blockId, targetBlockId);
-        return;
+        return false;
     }
     const applied =
         sourceNode.id === targetNode.id
@@ -265,7 +269,7 @@ export function moveBlockInStack(
             blockId,
             targetBlockId
         );
-        return;
+        return false;
     }
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
@@ -276,4 +280,5 @@ export function moveBlockInStack(
         { block_id: blockId, target_block_id: targetBlockId, position, activate },
         {}
     ).catch((e) => console.error("moveBlockInStack: pane.moveTab RPC failed", e));
+    return true;
 }
