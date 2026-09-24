@@ -455,3 +455,117 @@ describe("scroll-follow Phase 0 regressions", () => {
         expect(s.viewState.stickToBottom()).toBe(true);
     });
 });
+
+// Spec invariant I4 (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md
+// §5.3): every stickToBottom change logs exactly one `[scroll-follow]` line
+// with its cause, and `data-follow-state` mirrors the state. Bug A was
+// invisible because its disengage path logged nothing (tracking: #3655).
+describe("follow-state transition log (I4)", () => {
+    let clock = 0;
+    let info: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+        roInstances = [];
+        rafQueue = [];
+        clock = 0;
+        vi.spyOn(performance, "now").mockImplementation(() => clock);
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+            rafQueue.push(cb);
+            return rafQueue.length;
+        });
+        vi.stubGlobal("cancelAnimationFrame", () => {});
+        info = vi.spyOn(console, "info").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    /** The `[scroll-follow]` lines logged so far, each joined into one string. */
+    const followLines = (): string[] =>
+        info.mock.calls.filter((c) => c[0] === "[scroll-follow]").map((c) => c.slice(1).join(" "));
+
+    function setupLogged(geo: Geo, hasOlder = false) {
+        const [nodes] = createSignal<DocumentNode[]>([md("a")]);
+        const viewState = createAgentViewState(nodes);
+        const [docState] = createSignal(emptyDocumentState());
+        let jump: ((reason?: string) => void) | undefined;
+        const utils = render(() => (
+            <AgentDocumentVirtualList
+                viewState={viewState}
+                documentState={docState}
+                onToggleCollapse={() => {}}
+                onTogglePin={() => {}}
+                blockId="abcdef1234567890"
+                onLoadOlder={() => Promise.resolve()}
+                hasOlderHistory={() => hasOlder}
+                scrollToBottomRef={(fn) => {
+                    jump = fn;
+                }}
+            />
+        ));
+        const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
+        const buffer = utils.container.querySelector(".agent-document-streaming-buffer") as HTMLElement;
+        const g = makeScrollable(scrollRef, geo);
+        triggerResize(buffer);
+        flushRaf();
+        return { viewState, scrollRef, g, jump: (r?: string) => jump!(r) };
+    }
+
+    function wheelTo(s: ReturnType<typeof setupLogged>, scrollTop: number) {
+        s.scrollRef.dispatchEvent(new Event("wheel"));
+        s.g.set({ scrollTop });
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        clock += 1_000;
+    }
+
+    it("logs the mount state and mirrors it in data-follow-state", () => {
+        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
+        expect(followLines()).toEqual(["pane=abcdef1 mount following"]);
+        expect(s.scrollRef.dataset.followState).toBe("following");
+    });
+
+    it("a user scroll away and back logs each transition once, with its cause", () => {
+        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
+        wheelTo(s, 200);
+        expect(s.scrollRef.dataset.followState).toBe("detached");
+        wheelTo(s, 700);
+        expect(s.scrollRef.dataset.followState).toBe("following");
+        expect(followLines().slice(1)).toEqual([
+            "pane=abcdef1 following→detached cause=user-scroll gap=500px",
+            "pane=abcdef1 detached→following cause=user-scroll-to-bottom gap=0px",
+        ]);
+    });
+
+    it("a jump to bottom logs its reason; an already-following jump logs nothing", () => {
+        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
+        s.jump("typing"); // already following: no transition, no line
+        expect(followLines()).toHaveLength(1);
+        wheelTo(s, 100);
+        s.jump("sent");
+        expect(followLines().slice(-1)).toEqual(["pane=abcdef1 detached→following cause=jump-to-bottom:sent"]);
+    });
+
+    it("the older-history anchor capture logs cause=load-older (no longer silent)", () => {
+        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 }, true);
+        wheelTo(s, 100); // a user scroll away that stops short of the top: no paging
+        expect(followLines().slice(1)).toEqual(["pane=abcdef1 following→detached cause=user-scroll gap=600px"]);
+        // Re-engage, then page from a state that is still following.
+        s.jump("typing");
+        s.scrollRef.dispatchEvent(new Event("wheel"));
+        s.g.set({ scrollTop: 15, scrollHeight: 320 }); // range 20: near bottom (gap 5) AND near top: stays following, then pages
+        s.scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(followLines().slice(-1)).toEqual(["pane=abcdef1 following→detached cause=load-older scrollTop=15"]);
+    });
+
+    it("a change that bypasses transitionFollow still logs, as cause=external, exactly once", () => {
+        const s = setupLogged({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
+        s.viewState.disengageStickToBottom();
+        expect(followLines().slice(1)).toEqual(["pane=abcdef1 following→detached cause=external"]);
+        expect(s.scrollRef.dataset.followState).toBe("detached");
+    });
+});
