@@ -2796,11 +2796,20 @@ fn agent_open_fallback_id(name: &str) -> String {
 /// The frontend's id for a launch with no slug — a template-created agent's
 /// first session (`agent-config-builder.ts`: `/[^a-z0-9-_]/g` → `-`, ASCII
 /// only, unlike `agent.open`'s).
+///
+/// JavaScript's non-`u` regex replaces each UTF-16 **code unit**, so a
+/// character outside the BMP becomes two dashes (`Agent 🚀` → `agent---`),
+/// not one (Codex P1 on #3633).
 fn frontend_fallback_id(name: &str) -> String {
-    name.to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' { c } else { '-' })
-        .collect()
+    let mut id = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' {
+            id.push(c);
+        } else {
+            id.extend(std::iter::repeat('-').take(c.len_utf16()));
+        }
+    }
+    id
 }
 
 /// Whether another row may sign under `folded`: holds it as its slug, or its
@@ -3701,5 +3710,20 @@ mod bundle_provisioning_store_separation_tests {
 
         assert_eq!(id_store.resolve_effective_provider_id(&agent), "codex", "must find it via the store it was actually provisioned into");
         assert_eq!(mstore.resolve_effective_provider_id(&agent), "claude", "an unrelated store must fall back to agent.provider, not silently succeed");
+    }
+}
+
+#[cfg(test)]
+mod fallback_id_tests {
+    use super::*;
+
+    /// Byte-for-byte with `agent-config-builder.ts`'s
+    /// `name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")` (UTF-16 units).
+    #[test]
+    fn the_frontend_fallback_matches_javascript_utf16_semantics() {
+        assert_eq!(frontend_fallback_id("Agent 🚀"), "agent---");
+        assert_eq!(frontend_fallback_id("Agent (v2)"), "agent--v2-");
+        assert_eq!(frontend_fallback_id("Café Bot"), "caf--bot");
+        assert_eq!(agent_open_fallback_id("Café Bot"), "café-bot");
     }
 }
