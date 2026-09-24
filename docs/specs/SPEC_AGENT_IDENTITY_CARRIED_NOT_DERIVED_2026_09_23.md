@@ -5,7 +5,7 @@
 carry the UID and token into the process) in #3548; M1b (UID columns on the
 work queue and cron, dual-written) in #3550. M2 implemented in #3560 from the §4.4 design (revision 4.1). M3 in #3563.
 M4 designed in §6.5 (revision 2.3, #3570); M4a-1 shipped in #3571; M4a-2
-(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) implemented. M5
+(actor counters) in #3572; M4a-3 (purge of name-keyed keys) in #3575. M4b designed in §6.5.8 (#3578); M4b-1 (`agent.send` through the builder) in #3581; M4b-2 (App Server and ACP carry) in #3582; M4b-3 (continuation create → stamp → resync) in #3583; M4b-4 (`agent.open` of a user agent records and stamps its launch) in #3584; the picker's launch-aborted notice fix in #3585; the deleted-agent spawn gate (§6.5.8) in #3591. M4c designed in §6.5.9. M4c-1 (dual-write) in #3597. `agent.open` refuses templates (§6.5.8) in #3600. M4c-2a (work holder checks by UID) in #3601. M4c-2b (the personal-memory owner is the Caller) implemented. M5
 not started.
 Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
@@ -1240,6 +1240,15 @@ from a legacy registry record whose `definition_id` is a template gets a
 name today, becomes a 409, and its personal-memory versions split by UID
 (the files, found by working directory, survive). The path is rare (only
 legacy records reach it) and is the one M4b-3 already flags.
+
+**The personal-memory owner (M4c-2b).** The six App API `memory.*` handlers
+take a `SelfOwner`: an attributed request's is its token's UID — versions
+and mirror rows keyed by it, the directory found by id
+(`memory_dir_for_agent_by_id`), and a UID with no row or no directory an
+error — **whatever `agent_id` names** (the MCP always sends its own slug; a
+name that is not the caller's is counted by M4a-2). An Unattributed request
+keeps the slug path, counted (`m4c.memory_owner_by_name`). The WS RPC
+(`memory.list/read/write`, S1-checked) keeps the slug and is not counted.
 
 **Cron (M4c-3, §6.5.5).** `created_by_uid` is captured at create (M4c-1).
 The fire path stops POSTing an unattributed `/agentmux/reactive/inject` and

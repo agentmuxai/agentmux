@@ -315,8 +315,8 @@ fn count_holder_match(matched: Option<HolderMatch>) {
     }
 }
 
-/// Shared shape for the three holder-only transitions. `false` from the store
-/// means the caller is not the current holder OR its fence is stale — both are
+/// Shared shape for the three holder-only transitions. No match from the
+/// store means the caller is not the current holder OR its fence is stale — both are
 /// CONFLICT, not NOT_FOUND: the row usually still exists, it just moved on
 /// without this caller.
 fn holder_result(ok: bool, state: &AppState) -> (StatusCode, Json<Value>) {

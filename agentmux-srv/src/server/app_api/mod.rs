@@ -1005,13 +1005,101 @@ pub(crate) async fn bundle_self_get_impl(
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_list_impl(
+/// The agent a self-scoped App API call is about — whose personal memory
+/// (`memory.*`) — identity M4c-2b (spec §6.5.9).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SelfOwner<'a> {
+    /// The calling agent's own row, by its token's UID. Versions are keyed by
+    /// it as they are; the files are found by id
+    /// (`memory_dir_for_agent_by_id`), and a UID with no row or no directory
+    /// is an error — never another agent's directory (the #2901 class). A
+    /// directory that resolves but does not exist still lists as empty, as
+    /// on the slug path.
+    Uid(&'a str),
+    /// A slug, resolved as before M4c-2b (`memory_dir_for_agent`,
+    /// `resolve_agent_uuid`): an Unattributed HTTP caller, and the WS RPC.
+    Slug(&'a str),
+}
+
+impl<'a> From<&'a str> for SelfOwner<'a> {
+    fn from(slug: &'a str) -> Self {
+        Self::Slug(slug)
+    }
+}
+
+impl<'a> From<&'a String> for SelfOwner<'a> {
+    fn from(slug: &'a String) -> Self {
+        Self::Slug(slug)
+    }
+}
+
+impl<'a> SelfOwner<'a> {
+    /// The owner of an HTTP request: the caller's own row when attributed,
+    /// whatever `agent_id` names — a name that is not the caller's is counted
+    /// by M4a-2 — so a name two agents share no longer selects the other's
+    /// memory. An Unattributed request keeps the slug, counted as
+    /// `by_name_counter`.
+    pub(crate) fn of(
+        caller: Option<&'a crate::server::caller::Caller>,
+        slug: &'a str,
+        by_name_counter: &'static str,
+    ) -> Self {
+        match caller.and_then(crate::server::caller::Caller::uid) {
+            Some(uid) => Self::Uid(uid),
+            None => {
+                crate::backend::agent_resolve::record_uid_fallback(by_name_counter);
+                Self::Slug(slug)
+            }
+        }
+    }
+
+    /// The UID or the slug, for messages and logs.
+    fn label(self) -> &'a str {
+        match self {
+            Self::Uid(v) | Self::Slug(v) => v,
+        }
+    }
+
+    /// The calling agent's row — a UID whose row is gone (a token that
+    /// outlived its agent) is an error on every path, never an empty history
+    /// or listing (ReAgent P1 on #3602).
+    fn caller_row(
+        uid: &str,
+        mstore: &crate::backend::storage::store::Store,
+    ) -> Result<crate::backend::storage::AgentDefinition, String> {
+        mstore
+            .agent_def_get(uid)
+            .map_err(|e| format!("memory: store: {e}"))?
+            .ok_or_else(|| format!("memory: calling agent {uid} not found"))
+    }
+
+    /// The owner's live memory directory.
+    fn dir(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
+        match self {
+            Self::Uid(uid) => {
+                let agent = Self::caller_row(uid, mstore)?;
+                crate::server::native_memory_handlers::memory_dir_for_agent_by_id(mstore, &agent)
+                    .ok_or_else(|| format!("memory: memory directory for agent {uid} not found"))
+            }
+            Self::Slug(slug) => crate::server::native_memory_handlers::memory_dir_for_agent(mstore, slug),
+        }
+    }
+
+    /// The id the owner's versions and mirror rows are keyed by.
+    fn version_key(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
+        match self {
+            Self::Uid(uid) => Self::caller_row(uid, mstore).map(|row| row.id),
+            Self::Slug(slug) => crate::server::native_memory_handlers::resolve_agent_uuid(mstore, slug),
+        }
+    }
+}
+
+pub(crate) fn memory_list_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
 ) -> Result<serde_json::Value, String> {
-    let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.list: {e}"))?;
+    let owner = owner.into();
+    let memory_dir = owner.dir(&state.mstore).map_err(|e| format!("memory.list: {e}"))?;
 
     let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
     let entries = match std::fs::read_dir(&memory_dir) {
@@ -1058,16 +1146,15 @@ pub(crate) fn memory_list_impl(
     serde_json::to_value(NativeMemoryListResult { files }).map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_read_impl(
+pub(crate) fn memory_read_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.read: {e}"))?;
-    let path = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.read: {e}"))?.join(filename);
+    let path = owner.dir(&state.mstore).map_err(|e| format!("memory.read: {e}"))?.join(filename);
 
     let file_type = std::fs::symlink_metadata(&path)
         .map_err(|e| format!("memory.read: {filename}: {e}"))?.file_type();
@@ -1094,22 +1181,22 @@ pub(crate) struct MemoryWriteProvenance<'a> {
     pub detail: &'a str,
 }
 
-pub(crate) fn memory_write_impl(
+pub(crate) fn memory_write_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
     content: &str,
     provenance: Option<MemoryWriteProvenance<'_>>,
 ) -> Result<(), String> {
+    let owner = owner.into();
+    let agent_id = owner.label();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.write: {e}"))?;
     const MAX: usize = 10 * 1024 * 1024;
     if content.len() > MAX {
         return Err(format!("memory.write: content too large ({} bytes, max {MAX})", content.len()));
     }
-    let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.write: {e}"))?;
+    let dir = owner.dir(&state.mstore).map_err(|e| format!("memory.write: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.write: mkdir: {e}"))?;
 
     // Version history recorded BEFORE the live-file write below — reagent
@@ -1131,15 +1218,15 @@ pub(crate) fn memory_write_impl(
     // Hard-fails on resolution failure — reagent P2 (re-review): this used
     // to silently fall back to the raw slug via `unwrap_or_else`, while
     // memory_history_impl/memory_diff_impl/memory_revert_impl all hard-fail
-    // on the identical call. `memory_dir_for_agent` above already succeeded
-    // (proving `agent_id` resolves via at least one lookup path), so a
+    // on the identical call. The owner's directory above already resolved
+    // (proving it resolves via at least one lookup path), so a
     // failure here is very likely transient (e.g. a registry-file I/O
     // hiccup) rather than "unknown agent" — but silently keying this
     // version by the raw slug on that failure would reintroduce the exact
     // disjoint-keyspace bug (a write invisible to history/diff/revert) this
     // PR exists to fix. A visible, retriable write failure is strictly
     // safer than a silent data-integrity split.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.version_key(&state.mstore)
         .map_err(|e| format!("memory.write: {e}"))?;
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
@@ -2024,16 +2111,17 @@ mod global_memory_version_impl_tests {
     }
 }
 
-pub(crate) fn memory_history_impl(
+pub(crate) fn memory_history_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.history: {e}"))?;
     // See memory_write_impl's own comment — must key by the same resolved
     // canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.version_key(&state.mstore)
         .map_err(|e| format!("memory.history: {e}"))?;
     let versions: Vec<crate::backend::rpc_types::NativeMemoryVersionMeta> = state
         .id_store
@@ -2054,15 +2142,17 @@ pub(crate) fn memory_history_impl(
         .map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_diff_impl(
+pub(crate) fn memory_diff_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     from_version_id: &str,
     to_version_id: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
+    let agent_id = owner.label();
     // See memory_write_impl's own comment — must compare against the same
     // resolved canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.version_key(&state.mstore)
         .map_err(|e| format!("memory.diff: {e}"))?;
     let from = state
         .id_store
@@ -2091,18 +2181,20 @@ pub(crate) fn memory_diff_impl(
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())
 }
 
-pub(crate) fn memory_revert_impl(
+pub(crate) fn memory_revert_impl<'o>(
     state: &AppState,
-    agent_id: &str,
+    owner: impl Into<SelfOwner<'o>>,
     filename: &str,
     target_version_id: &str,
 ) -> Result<serde_json::Value, String> {
+    let owner = owner.into();
+    let agent_id = owner.label();
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
     // See memory_write_impl's own comment — must key/compare against the
     // same resolved canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
+    let version_agent_id = owner.version_key(&state.mstore)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
     let target = state
@@ -2116,9 +2208,7 @@ pub(crate) fn memory_revert_impl(
         ));
     }
 
-    let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.mstore, agent_id,
-    ).map_err(|e| format!("memory.revert: {e}"))?;
+    let dir = owner.dir(&state.mstore).map_err(|e| format!("memory.revert: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.revert: mkdir: {e}"))?;
 
     // Version recorded BEFORE the live-file write below — same fs-watch-race
@@ -2575,6 +2665,82 @@ mod memory_version_impl_tests {
         let history = memory_history_impl(&state, "agent-friendly-slug", "MEMORY.md").unwrap();
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
         assert_eq!(versions.len(), 1);
+    }
+
+    fn add_agent(state: &AppState, id: &str, name: &str, slug: &str, dir: &std::path::Path) {
+        let mut def = agent_def(id, &dir.to_string_lossy());
+        def.name = name.to_string();
+        def.slug = slug.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: id.to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", dir.display()),
+                updated_at: 0,
+            })
+            .unwrap();
+    }
+
+    fn version_count(state: &AppState, owner: &str) -> usize {
+        state.id_store.agent_native_memory_version_list(owner, "MEMORY.md").unwrap().len()
+    }
+
+    /// Identity M4c-2b (spec §6.5.9), the colliding-names fixture: the second
+    /// agent ("AGENTY", `agenty-2`) sends the first one's slug `agenty`. When
+    /// attributed, its own row is the owner — its directory, its versions,
+    /// and it cannot read, diff or revert the first agent's; Unattributed,
+    /// the slug still resolves to the first agent, as before.
+    #[tokio::test]
+    async fn an_attributed_memory_owner_is_the_callers_row_not_the_slug() {
+        let (tmp_y, tmp_y2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let state = crate::server::tests::test_state();
+        add_agent(&state, "uid-mo-y", "AgentY", "agenty", tmp_y.path());
+        add_agent(&state, "uid-mo-y2", "AGENTY", "agenty-2", tmp_y2.path());
+        let as_y2 = SelfOwner::Uid("uid-mo-y2");
+
+        memory_write_impl(&state, "agenty", "MEMORY.md", "y's", None).unwrap();
+        memory_write_impl(&state, as_y2, "MEMORY.md", "y2's", None).unwrap();
+        assert_eq!(version_count(&state, "uid-mo-y"), 1);
+        assert_eq!(version_count(&state, "uid-mo-y2"), 1);
+
+        let read = |owner: SelfOwner<'_>| {
+            memory_read_impl(&state, owner, "MEMORY.md").unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(read(as_y2), "y2's");
+        assert_eq!(read("agenty".into()), "y's", "Unattributed: by slug");
+        let listed = memory_list_impl(&state, as_y2).unwrap();
+        assert_eq!(listed["files"].as_array().unwrap().len(), 1);
+
+        let y_version = state
+            .id_store
+            .agent_native_memory_version_list("uid-mo-y", "MEMORY.md")
+            .unwrap()[0]
+            .id
+            .clone();
+        let err = memory_revert_impl(&state, as_y2, "MEMORY.md", &y_version).unwrap_err();
+        assert!(err.contains("does not belong to"), "{err}");
+        let err = memory_diff_impl(&state, as_y2, &y_version, &y_version).unwrap_err();
+        assert!(err.contains("do not belong to"), "{err}");
+        let history = memory_history_impl(&state, as_y2, "MEMORY.md").unwrap();
+        assert_eq!(history["versions"].as_array().unwrap().len(), 1);
+
+        // A caller whose row is gone is an error, never another's directory
+        // and never an empty list.
+        let gone = SelfOwner::Uid("uid-mo-gone");
+        for err in [
+            memory_list_impl(&state, gone).unwrap_err(),
+            memory_history_impl(&state, gone, "MEMORY.md").unwrap_err(),
+            memory_diff_impl(&state, gone, &y_version, &y_version).unwrap_err(),
+            memory_revert_impl(&state, gone, "MEMORY.md", &y_version).unwrap_err(),
+            memory_write_impl(&state, gone, "MEMORY.md", "x", None).unwrap_err(),
+        ] {
+            assert!(err.contains("not found"), "{err}");
+        }
     }
 }
 
