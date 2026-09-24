@@ -1,6 +1,6 @@
 # Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound
 
-**Status:** implemented — branch `agent2/agent-activity-tab-flash`; see §8 for
+**Status:** implemented — PR #3625; see §8 for
 where the shipped code departs from §2–§4 as first written.
 **Date:** 2026-09-23.
 **Requested by:** repo owner (asafebgi).
