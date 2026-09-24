@@ -43,6 +43,34 @@ impl PersistentSubprocessController {
             }
         }
 
+        // First spawn with no id, onto a pane that renders prior history:
+        // continue that history's session instead of pairing it with a blank
+        // model (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §1.1, §5 P0a).
+        // A session live in another pane is left alone — adopting it would
+        // turn a plain open into the held-elsewhere refusal below.
+        let first_spawn_without_sid = {
+            let inner = self.inner.lock().unwrap();
+            inner.session_id.is_none() && inner.spawn_generation == 0
+        };
+        if first_spawn_without_sid {
+            if let Some(sid) = self.find_continuation_session_id(&config) {
+                if self.session_held_elsewhere(&sid).is_none() {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        session_id = %sid,
+                        "continuity: first spawn has no session id; continuing the session this pane's history belongs to"
+                    );
+                    self.inner.lock().unwrap().session_id = Some(sid);
+                } else {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        session_id = %sid,
+                        "continuity: prior session is live in another pane; starting fresh"
+                    );
+                }
+            }
+        }
+
         // Append `--resume <sid>` when we have a session id and the provider
         // supports simple-flag resume — same construction as
         // SubprocessController::spawn_turn. This is what makes a model/effort
