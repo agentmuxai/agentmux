@@ -50,7 +50,9 @@ copy it.
   and the CEF crash, hang and low-memory pages.
 - G4. Crash-class surfaces also offer **Copy diagnostics**: the error plus the
   environment and log locations a developer asks for first.
-- G5. Nothing secret reaches the clipboard (§4.5).
+- G5. Recognized credentials never reach the clipboard (§4.5). Redaction
+  is shape-based and best-effort, and the spec says so rather than promising
+  "nothing secret".
 
 **Non-goals**
 - Uploading reports, or a bug-report form. This is copy only.
@@ -162,15 +164,34 @@ Logs: <host log path>
 ### 4.5 Redaction
 
 Error text can carry credentials: auth failures echo request details, and
-stderr tails include whatever the CLI printed. `formatErrorReport` runs the
-same shape-based redaction as the continuation packet
-(`agentmux-srv/src/backend/continuity.rs`, `redact_secrets` /
-`redact_private_keys`: GitHub, OpenAI/Anthropic `sk-`, Slack, AWS key
-prefixes, and PEM private keys). It's ported to
-`frontend/app/errors/redact.ts` with the same test vectors, so both stay in
-step. Redaction runs on the whole report, before any truncation (the
-redact-then-cap rule from #3673). The on-screen text is not changed, only
-what's copied.
+stderr tails include whatever the CLI printed. `formatErrorReport` redacts
+the whole report before any truncation (the redact-then-cap rule from #3673).
+The on-screen text is not changed, only what's copied.
+
+The continuation packet's redaction (`agentmux-srv/src/backend/continuity.rs`,
+`redact_secrets` / `redact_private_keys`) only recognizes a narrow set:
+- token prefixes (GitHub, `sk-`, Slack, AWS access-key ids);
+- PEM private keys.
+
+That isn't enough here, because this copies raw stderr and request details
+(Codex P1 on #3689). `frontend/app/errors/redact.ts` covers that set plus
+structured forms. Each is replaced by its label and `[redacted]`:
+- `Authorization:` / `Proxy-Authorization:` header values, any scheme
+  (`Bearer`, `Basic`, `Token`, …);
+- `x-api-key`, `api-key`, `cookie` and `set-cookie` header values;
+- `key=value`, `key: value` and JSON `"key": "value"` pairs whose key contains
+  `password`, `passwd`, `pwd`, `secret`, `token`, `api_key` / `apikey`,
+  `access_key`, `private_key`, `client_secret` or `credential`, case-insensitive;
+- URL userinfo (`scheme://user:password@host` keeps `scheme://user:[redacted]@host`);
+- JWTs (three base64url segments, the first starting `eyJ`);
+- an AWS secret access key: a 40-character base64 value on the same line as
+  `aws_secret_access_key` or `AWS_SECRET_ACCESS_KEY`.
+
+Each form gets test vectors, including one straddling a truncation boundary
+and one that must *not* redact (an ordinary word like `tokenizer`). The same
+additions go back into `continuity.rs` in the same PR, so the two stay
+identical. This is still shape-based: a credential in an unrecognized form
+gets through. That's why G5 says "recognized".
 
 ### 4.6 Pages without the frontend
 
@@ -186,6 +207,12 @@ what's copied.
   - The payload is the same §4.1 text, built in Rust. A shared
     `error_report_text()` in `agentmux-cef` mirrors `formatErrorReport`'s
     format, and includes the log paths from `get_log_paths`'s Rust side.
+  - **No Reveal logs here.** These pages have no bridge to the host, so
+    they can't call `reveal_in_file_explorer` (Codex P2 on #3689). They
+    offer Copy details only; the log paths are in the copied text.
+    Surfaces 7 and 8 are kind "D-" in §5 for that reason. A real native
+    action would need an authenticated host IPC from a `data:` page, which is
+    out of scope.
   - The install page's existing "Copy path" button is re-checked in the
     running app. It's guarded by `if (navigator.clipboard)` (:220), which is
     likely always false on a `data:` page, so it probably does nothing today.
@@ -198,7 +225,8 @@ what's copied.
 ## 5. Surfaces and where the button goes
 
 **Kind:** E = error copy only; D = error copy plus Copy diagnostics and Reveal
-logs. **P** = phase (§7).
+logs; D- = Copy details including diagnostics and log paths, but no Reveal
+logs (CEF `data:` pages, §4.6). **P** = phase (§7).
 
 | # | Surface | Where (file:line) | Kind | Placement | P |
 |---|---|---|---|---|---|
@@ -208,8 +236,8 @@ logs. **P** = phase (§7).
 | 4 | Connection-lost / "Can't reconnect" card | `app/init/error-display.ts:266` (actions :308-326) | D | "Copy details" next to Restore, `transport="dom"`; plus the §6.1 fixes so there's something to copy | 1 |
 | 5 | Pre-launch "✗ Auth failed" | `components/PreLaunchAuthPanel.tsx:807-820` | E | Next to "Try again" | 1 |
 | 6 | "Launch aborted" (picker) | `components/AgentPicker.tsx:1074-1084` | E | Inline icon | 1 |
-| 7 | Host crash / hang page "AgentMux hit a problem" | `agentmux-cef/src/client/crash_recovery.rs:415-418` | D | In `.actions`, §4.6 | 2 |
-| 8 | Crash loop, low memory | `agentmux-cef/src/client/recovery_pages.rs:26,155` | D | Next to their actions, §4.6 | 2 |
+| 7 | Host crash / hang page "AgentMux hit a problem" | `agentmux-cef/src/client/crash_recovery.rs:415-418` | D- | In `.actions`, §4.6 | 2 |
+| 8 | Crash loop, low memory | `agentmux-cef/src/client/recovery_pages.rs:26,155` | D- | Next to their actions, §4.6 | 2 |
 | 9 | Pane crash panel "This pane crashed" | `block/BlockErrorBoundary.tsx:214-233` | D | "Copy details" in the footer: name, message, stack, block id, view type, render trail (already assembled at :57). Keep copy on highlight | 2 |
 | 10 | Generic `ErrorBoundary` fallback (workspace, tab, block, header) | `element/errorboundary.tsx:21-22` | D | Button overlaid on the `<pre>`, like `markdown-codeblock.tsx:65` | 2 |
 | 11 | Backend "Offline" popover | `statusbar/BackendStatus.tsx:~205-245` | D | "Copy diagnostics" next to Restart Backend | 2 |
@@ -243,13 +271,25 @@ These make sure there's something worth copying:
    - Fix: one `describeError(e)` → `{name, message, stack, cause}`, used for
      both the log line and `showStartupError`.
    - The connection-lost card then shows, and copies, the real stack.
-2. **The renderer can outrun srv at startup.** In the incident, srv started
-   at 19:59:06.6 and was still running migrations when the renderer's first
-   request failed at 19:59:08.086. `initHostMux` treated that as fatal and
-   went straight to the connection-lost card.
-   - Proposed: retry the initial srv request with a short backoff while srv
-     reports "starting", before declaring the connection lost.
-   - Separate PR. Root cause not confirmed beyond this timing.
+2. **Find which startup request actually failed.** In the incident, srv
+   logged "starting" at 19:59:06.6, and the renderer's `initHostMux` failed at
+   19:59:08.086 with `TypeError: Failed to fetch`.
+   - An earlier draft read that as the renderer outrunning srv. That doesn't
+     hold (Codex P2 on #3689). The launcher waits for srv's
+     `AGENTMUXSRV-ESTART`, which srv only emits after `run_pending_migrations`,
+     and `agentmux-cef/src/lib.rs` waits for backend readiness before it
+     creates the browser.
+   - So a request failed against a backend the host believed was ready, and
+     the log doesn't say which one.
+   - Before any retry is designed:
+     1. Log the failing URL and endpoint with the error (§6.1's
+        `describeError` plus the request target).
+     2. Check which endpoint the renderer used against what srv bound: the
+        web versus websocket port, and whether a pre-restart endpoint was
+        cached.
+     3. Define a real readiness signal if one is missing.
+   - Separate investigation. This build was a local portable opened directly
+     from the Desktop, so its launch path is the first thing to confirm.
 3. **"Update failed" shows no reason** (`MaintenanceSection.tsx:238`,
    `UpdateStatus.tsx:42`). It needs the updater's error text before a copy
    button is worth adding.
@@ -261,7 +301,7 @@ These make sure there's something worth copying:
 | **P1** Foundations and the most-hit surfaces | `formatErrorReport` + `redact.ts` (with srv's test vectors), `<CopyErrorButton>`, exported `CopyableErrorMessage`, `describeError` (§6.1) | 1–6 |
 | **P2** Crash class and diagnostics | `get_log_paths` IPC, Copy diagnostics, Reveal logs, the Rust `error_report_text()` for CEF pages | 7–12 |
 | **P3** Everything else | Toasts, modals, Armory, panes, config, updates | 13–24 |
-| **P4** Follow-ups | Startup retry (§6.2), update error detail (§6.3), native dialog hint (§4.6) | n/a |
+| **P4** Follow-ups | Startup failure investigation (§6.2), update error detail (§6.3), native dialog hint (§4.6) | n/a |
 
 P1 alone covers the errors users hit most, and it's one PR.
 
@@ -281,11 +321,23 @@ P1 alone covers the errors users hit most, and it's one PR.
 - **CEF pages**: Rust tests assert each page wires Copy with `addEventListener`
   (never an inline `onclick`) and embeds the report as a valid JS string
   literal, mirroring the install page's test (`creation.rs:1105-1118`).
-- **Placement**: a lint-style test lists every component rendering an
-  `*-error` class or an `ErrorBanner` / `ErrorBoundary` fallback, and fails if
-  one has no `<CopyErrorButton>` or `CopyableErrorMessage`. That keeps new
-  error surfaces from shipping without copy. The same check-script pattern is
-  already used for other UI invariants in `scripts/`.
+- **Placement.** A class-name lint alone would miss error surfaces that use
+  other primitives (Codex P2 on #3689), so the check has two parts:
+  1. **An audited registry,** `frontend/app/errors/error-surfaces.ts`: one
+     entry per §5 surface (id, component file, kind). Each component
+     references its entry's id where it renders `<CopyErrorButton>` or
+     `CopyableErrorMessage`. A test fails if an entry's file doesn't contain
+     that reference.
+  2. **A primitive scan,** `scripts/check-error-copy.mjs`. It fails on any
+     file that renders one of these without appearing in the registry:
+     - an `*-error` class, `ErrorBanner` or an `ErrorBoundary` fallback;
+     - a toast or flash with an error level (`pushNotification` /
+       `pushFlashError`);
+     - a failure accessory (`failure-accessory.ts` consumers);
+     - a Rust recovery-page builder in `agentmux-cef/src/client/`.
+
+  A new error surface either registers, and so gets copy, or is added to an
+  explicit, reviewed allowlist with a reason.
 
 ## 9. Open questions
 
