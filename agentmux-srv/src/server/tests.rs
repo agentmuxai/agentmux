@@ -5885,3 +5885,36 @@ async fn a_jekt_to_an_absent_known_agent_is_held_and_waits() {
     let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
     assert_eq!(rows[0].attempts, 0);
 }
+
+/// Durable jekt §2.1 condition 5 (review of #3632): a target running under
+/// another of its names — registered with its UID but not bound to the name
+/// addressed — is delivered by UID at once, never held as "not running".
+#[tokio::test]
+async fn a_target_running_under_another_name_is_delivered_by_uid_not_held() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("c5-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "C5", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    // Registered under a display binding other than the slug addressed.
+    state
+        .reactive_handler
+        .register_agent_full(&format!("{slug}-display"), &format!("{slug}-block"), None, 0, None, Some(&uid), "test")
+        .unwrap();
+
+    let body = serde_json::json!({"target_agent": slug, "message": "hi", "source_agent": "sender"});
+    let mut v = serde_json::Value::Null;
+    for _ in 0..25 {
+        v = m4c1_send(&state, None, "/agentmux/reactive/inject", body.clone()).await.1;
+        if v["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert!(v.get("held").is_none(), "running, so not held: {v}");
+    assert!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().is_empty());
+    let err = v["error"].as_str().unwrap_or("");
+    assert!(!err.starts_with("agent not found"), "delivered to the UID's block: {v}");
+}
