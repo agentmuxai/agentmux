@@ -109,7 +109,7 @@ describe("moveMemberAcrossStacks", () => {
     it("moves the block from source to target, appended and activated", () => {
         const source = stacked("a", ["a", "b"], "a");
         const target = stacked("x", ["x", "y"], "x");
-        expect(moveMemberAcrossStacks(source, target, "b", true)).toBe(true);
+        expect(moveMemberAcrossStacks(source, target, "b", true)).toBe("moved");
         expect(source.blockStack).toEqual(["a"]);
         expect(target.blockStack).toEqual(["x", "y", "b"]);
         expect(target.blockId).toBe("b");
@@ -119,7 +119,7 @@ describe("moveMemberAcrossStacks", () => {
     it("does not activate the moved block in the target unless requested", () => {
         const source = stacked("a", ["a", "b"], "a");
         const target = stacked("x", ["x", "y"], "x");
-        expect(moveMemberAcrossStacks(source, target, "b", false)).toBe(true);
+        expect(moveMemberAcrossStacks(source, target, "b", false)).toBe("moved");
         expect(target.blockStack).toEqual(["x", "y", "b"]);
         expect(target.blockId).toBe("x");
         expect(target.activeBlockId).toBe("x");
@@ -128,7 +128,7 @@ describe("moveMemberAcrossStacks", () => {
     it("moving the currently-visible source member activates its right-hand neighbour there", () => {
         const source = stacked("b", ["a", "b", "c"], "b");
         const target = stacked("x", ["x"], "x");
-        expect(moveMemberAcrossStacks(source, target, "b", false)).toBe(true);
+        expect(moveMemberAcrossStacks(source, target, "b", false)).toBe("moved");
         expect(source.blockStack).toEqual(["a", "c"]);
         expect(source.blockId).toBe("c");
         expect(source.activeBlockId).toBe("c");
@@ -137,18 +137,20 @@ describe("moveMemberAcrossStacks", () => {
     it("promotes a single-block target into a real stack", () => {
         const source = stacked("a", ["a", "b"], "a");
         const target = stacked("x", [], "x");
-        expect(moveMemberAcrossStacks(source, target, "b", true)).toBe(true);
+        expect(moveMemberAcrossStacks(source, target, "b", true)).toBe("moved");
         expect(target.blockStack).toEqual(["x", "b"]);
     });
 
-    it("refuses — changes nothing — when blockId is the source's only member", () => {
+    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2:
+    // moving a pane's only tab is allowed; the caller removes the emptied leaf.
+    it("moves the source's ONLY member and reports the source as emptied, leaving its data for the caller to delete", () => {
         const source = stacked("a", [], "a");
         const target = stacked("x", ["x", "y"], "x");
         const sourceBefore = { ...source };
-        const targetBefore = { ...target };
-        expect(moveMemberAcrossStacks(source, target, "a", true)).toBe(false);
+        expect(moveMemberAcrossStacks(source, target, "a", true)).toBe("emptied");
         expect(source).toEqual(sourceBefore);
-        expect(target).toEqual(targetBefore);
+        expect(target.blockStack).toEqual(["x", "y", "a"]);
+        expect(target.activeBlockId).toBe("a");
     });
 
     it("refuses when blockId is not a member of the source at all", () => {

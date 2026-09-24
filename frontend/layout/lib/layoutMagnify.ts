@@ -35,6 +35,31 @@ export function magnifyNodeToggle(model: LayoutModel, nodeId: string, setState =
 }
 
 /**
+ * Remove a pane whose only tab was just moved into another pane
+ * (`moveMemberAcrossStacks` returned "emptied"). This is a MOVE, not a
+ * close, so it deliberately does not go through `closeNode` below:
+ * `closeNode` asks `beforeNodeDelete` (the "something is still running"
+ * prompt — nothing is being stopped here) and then calls `onNodeDelete`,
+ * which deletes the block: the very block that was just moved, killing a
+ * live agent session. That exact bug happened once for a different move
+ * (incident R1 / #1681 — see layoutPersistence.ts's DeleteNode case).
+ *
+ * Only edits `model.treeState` (setState=false); the caller commits.
+ * SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
+ */
+export function removeLeafEmptiedByMove(model: LayoutModel, nodeId: string): void {
+    if (nodeId === model.magnifiedNodeId) {
+        magnifyNodeToggle(model, nodeId, false);
+    }
+    const deleteAction: LayoutTreeDeleteNodeAction = {
+        type: LayoutTreeActionType.DeleteNode,
+        nodeId,
+    };
+    model.treeReducer(deleteAction, false);
+    clearLeafRevealGate(nodeId);
+}
+
+/**
  * Close a given node and update the tree state.
  * @param model The LayoutModel instance.
  * @param nodeId The id of the node that is being closed.
