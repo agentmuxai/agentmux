@@ -1,7 +1,7 @@
 # Why window-tab switches feel glitchy and pane-tab switches don't, and what VS Code does instead
 
 **Date:** 2026-09-24
-**Status:** analysis — recommendations in §6, none implemented yet.
+**Status:** analysis. Recommendations are in §6. Items 1 and 2 are available behind `window:keepinactivetabslaidout` (default off) until they are measured. Item 6's measurement is `scripts/tab-switch-report.mjs`.
 **Author:** agentx
 **Trigger:** Repo owner, after the half-window pane offset
 (`docs/reports/REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md`): *"switching

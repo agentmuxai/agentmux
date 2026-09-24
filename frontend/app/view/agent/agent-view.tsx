@@ -21,6 +21,7 @@ import {
 } from "@/app/store/agentActivity";
 import { isBlockDormant } from "@/app/store/block-component-registry";
 import { AgentDormancyProvider } from "./agent-dormancy";
+import { useWindowTabHidden } from "@/app/workspace/window-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
@@ -533,6 +534,7 @@ const AgentPresentationView = ({
     // and useAgentFailure's auto-retry below so neither fires invisibly
     // while backgrounded.
     const dormant = isBlockDormant(model.blockId);
+    const windowTabHidden = useWindowTabHidden();
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -2195,7 +2197,10 @@ const AgentPresentationView = ({
         // tuned, and should not grow another prop it would only forward.
         // See `agent-dormancy.tsx` for why rendering (not data) is what gets
         // gated.
-        <AgentDormancyProvider dormant={dormant}>
+        // A hidden window tab kept laid out (`window:keepinactivetabslaidout`)
+        // pauses rendering the same way; only rendering, so this doesn't
+        // touch the question auto-timeout or auto-retry `dormant` also drives.
+        <AgentDormancyProvider dormant={() => dormant() || windowTabHidden()}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
