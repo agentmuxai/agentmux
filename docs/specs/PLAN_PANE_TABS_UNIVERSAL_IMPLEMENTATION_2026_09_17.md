@@ -40,6 +40,12 @@ control cluster buttons fire the same callbacks `BlockFrame_Header`'s did (so th
 is provably a drop-in replacement, not a new behavior).
 
 ### A2. `pane:tabstrip` setting
+
+> **Removed 2026-09-24.** The setting and its `multi-only` test are gone: a
+> Pane header always shows its tabs. See
+> `SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md` §8.
+> The text below records the original task.
+
 Add the setting (default `always`, per §7 resolution 1) to wherever AgentMux's
 settings schema/defaults live (find the existing pattern — likely alongside other
 `pane:*`/`widget:*` keys already used in `settings.json`, see `widget:pinned`/

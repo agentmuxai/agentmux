@@ -288,10 +288,9 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             setHighlightStrip(false);
             // `el` is blockframe.tsx's element, outside this component's own
             // JSX, so the class goes on imperatively. Removed on cleanup:
-            // the header outlives this strip whenever `pane:tabstrip` is
-            // "multi-only" and a pane drops back to one tab (pillStrip
-            // unmounts, the header row does not), and a stale accent
-            // outline left on that header would be permanent.
+            // the header's lifetime isn't tied to this strip's, and a stale
+            // accent outline left on a header that outlives it would be
+            // permanent.
             createEffect(() => el.classList.toggle("pane-header--foreign-hover", foreignHover()));
             onCleanup(() => el.classList.remove("pane-header--foreign-hover"));
         }

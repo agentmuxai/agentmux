@@ -170,10 +170,12 @@ describe("PaneTabStrip — cross-pane drop target (§3.4)", () => {
     });
 
     it("leaves no highlight on the header when the strip unmounts mid-hover", async () => {
-        // The header row outlives the strip: with `pane:tabstrip` set to
-        // "multi-only", a pane falling back to one tab unmounts the pill
-        // strip while its header stays. A class left behind there would be a
-        // permanent accent outline on a pane nobody is dragging onto.
+        // The header element belongs to blockframe.tsx, not to the strip, so
+        // nothing guarantees the two go away together. A class left behind
+        // on a header that outlives its strip would be a permanent accent
+        // outline on a pane nobody is dragging onto. (This used to happen for
+        // real under the removed `pane:tabstrip = "multi-only"` setting;
+        // kept as a guard for any future path that drops the strip alone.)
         const { config, header, unmount } = renderInHeader();
         config.onDragEnter();
         await Promise.resolve();
