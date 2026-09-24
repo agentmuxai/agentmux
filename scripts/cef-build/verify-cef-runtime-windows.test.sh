@@ -35,7 +35,11 @@ GUARD="$GUARD_DIR/verify-cef-runtime-windows.sh"
 runtime() {  # runtime <name> <libcef-content-file|-> [args.gn line]
   local d="$TMP/rt-$1"; mkdir -p "$d"
   [ "$2" = "-" ] || cp "$2" "$d/libcef.dll"
-  [ -z "${3:-}" ] || printf '%s\n' "$3" > "$d/args.gn"
+  # A finished local build: configured first, DLL built afterwards.
+  if [ -n "${3:-}" ]; then
+    printf '%s\n' "$3" > "$d/args.gn"
+    touch -d '2026-01-01 00:00' "$d/args.gn"
+  fi
   echo "$d"
 }
 expect() {  # expect <want-exit> <name> <dir> [env...]
@@ -60,6 +64,20 @@ expect 0 "local build tolerates spacing" "$(runtime lb-sp "$TMP/stale.dll" '  en
 expect 1 "local build with tracer=true fails" "$(runtime lb-on "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=true')"
 expect 1 "local build not mentioning the tracer fails (upstream default is on)" "$(runtime lb-none "$TMP/stale.dll" 'is_official_build=true')"
 expect 1 "a commented-out tracer=false doesn't count" "$(runtime lb-cmt "$TMP/stale.dll" '# enable_backup_ref_ptr_instance_tracer=false')"
+expect 0 "tracer=false with a trailing comment passes" "$(runtime lb-tc "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer = false  # 09-22 incident')"
+expect 1 "tracer=falsey_nonsense fails (reagentx P2 on #3615)" "$(runtime lb-fy "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=falsey_nonsense')"
+expect 1 "a second, conditional assignment fails (Codex on #3615)" "$(runtime lb-2 "$TMP/stale.dll" "$(printf 'enable_backup_ref_ptr_instance_tracer=false\nif (is_win) {\n  enable_backup_ref_ptr_instance_tracer=true\n}')")"
+expect 0 "CRLF args.gn (Windows gn output) passes" "$(runtime lb-crlf "$TMP/stale.dll" "$(printf 'enable_backup_ref_ptr_instance_tracer=false\r')")"
+# Codex on #3615: args fixed and regenerated, rebuild not finished -> the old DLL is still there.
+d="$(runtime lb-stale "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
+touch -d '2025-06-01 00:00' "$d/libcef.dll"
+expect 1 "libcef.dll older than args.gn fails (reconfigured, not rebuilt)" "$d"
+d="$(runtime lb-ninja "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
+touch -d '2026-02-01 00:00' "$d/libcef.dll"; : > "$d/build.ninja"
+expect 1 "libcef.dll older than build.ninja fails" "$d"
+d="$(runtime lb-done "$TMP/stale.dll" 'enable_backup_ref_ptr_instance_tracer=false')"
+touch -d '2026-01-01 00:00' "$d/build.ninja" 2>/dev/null || { : > "$d/build.ninja"; touch -d '2026-01-01 00:00' "$d/build.ninja"; }
+expect 0 "libcef.dll newer than args.gn and build.ninja passes" "$d"
 
 expect 0 "AGENTMUX_ALLOW_UNVERIFIED_CEF=1 overrides a failure" "$TMP/rt-stale" AGENTMUX_ALLOW_UNVERIFIED_CEF=1
 out="$(AGENTMUX_ALLOW_UNVERIFIED_CEF=1 bash "$GUARD" "$TMP/rt-stale" 2>&1)"
