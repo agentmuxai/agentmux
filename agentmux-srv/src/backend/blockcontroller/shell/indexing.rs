@@ -83,10 +83,12 @@ pub(crate) struct IndexedRead {
     pub raw: Vec<u8>,
     /// Byte offset in `output` of each returned line, in order.
     pub line_offsets: Vec<u64>,
-    /// `output.tsidx` (receive-time stamps keyed by `output` byte offset), from
-    /// the same snapshot, so stamps are joined to the lines they were written
-    /// for (Codex on #3634). `None`: no sidecar, or not fully stored.
-    pub tsidx: Option<Vec<u8>>,
+    /// Receive-time stamps for the returned lines (unix ms, `0` = unknown),
+    /// from the `output.tsidx` sidecar in the same snapshot, so they are joined
+    /// to the lines they were written for (Codex on #3634). Only a window of
+    /// the sidecar around the lines is read (`stamps.rs`). `None`: no sidecar,
+    /// no records near the lines, or bytes not fully stored.
+    pub stamps: Option<Vec<i64>>,
 }
 
 /// Read lines `[offset, offset + limit)` of `output` through a fresh
@@ -117,7 +119,7 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
             output_gen: out.gen.clone(),
             raw: Vec::new(),
             line_offsets: Vec::new(),
-            tsidx: None,
+            stamps: None,
         };
         if limit == 0 || offset >= total {
             return Ok(Some(read));
@@ -136,8 +138,12 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
         let Some(raw) = snap.bytes(zone, "output", start as i64, (end - start) as i64)? else { return Ok(None) };
         read.raw = raw;
         read.line_offsets = (0..count).map(at).collect();
-        read.tsidx = match snap.file(zone, crate::backend::agent_session::TSIDX_FILE)? {
-            Some(ts) if ts.size > 0 => snap.bytes(zone, crate::backend::agent_session::TSIDX_FILE, 0, ts.size)?,
+        const TS: &str = crate::backend::agent_session::TSIDX_FILE;
+        read.stamps = match snap.file(zone, TS)? {
+            Some(ts) if ts.size > 0 => {
+                let bytes = |off: i64, len: i64| snap.bytes(zone, TS, off, len);
+                super::stamps::stamps_for(&bytes, ts.size, &read.line_offsets)?
+            }
             _ => None,
         };
         Ok(Some(read))
@@ -443,12 +449,13 @@ mod tests {
         let r = read_via_index(&fs, zone, 1, 10).unwrap();
         assert_eq!((r.total, r.line_offsets.clone()), (3, vec![8, 16]));
         assert_eq!(r.raw, b"{\"b\":2}\n{\"c\":3}\n");
-        assert_eq!(r.tsidx, None, "no stamp sidecar yet");
-        // The stamp sidecar comes from the same snapshot as the lines.
-        let stamps: &[u8] = b"{\"off\":0,\"ms\":7}\n";
+        assert_eq!(r.stamps, None, "no stamp sidecar yet");
+        // Stamps come from the sidecar in the same snapshot as the lines: per
+        // line, the newest record at or before its offset.
+        let stamps: &[u8] = b"{\"off\":0,\"ms\":7}\n{\"off\":16,\"ms\":9}\n";
         fs.make_file(zone, crate::backend::agent_session::TSIDX_FILE, FileMeta::default(), FileOpts::default()).unwrap();
         fs.append_data(zone, crate::backend::agent_session::TSIDX_FILE, stamps).unwrap();
-        assert_eq!(read_via_index(&fs, zone, 1, 10).unwrap().tsidx.as_deref(), Some(stamps));
+        assert_eq!(read_via_index(&fs, zone, 1, 10).unwrap().stamps, Some(vec![7, 9]));
         let r = read_via_index(&fs, zone, 0, 1).unwrap();
         assert_eq!((r.line_offsets.clone(), r.raw), (vec![0], b"{\"a\":1}\n".to_vec()));
         assert!(read_via_index(&fs, zone, 5, 10).unwrap().line_offsets.is_empty());
