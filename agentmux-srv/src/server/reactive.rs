@@ -1032,27 +1032,7 @@ pub(crate) async fn deliver(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
     if resp.success {
-        echo_jekt_to_sender(
-            &state,
-            req.source_agent.as_deref(),
-            &req.target_agent,
-            &req.message,
-            &resp.request_id,
-            resp.effective_tier.as_deref(),
-            resp.requires_stop,
-            EchoTrust {
-                delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
-                // Same `req` this call's own `effective_tier`/`requires_stop`
-                // were computed from (via `inject_message` just above) — not
-                // hardcoded, so the echoed marker's TRUST/SIG stays consistent
-                // with its own ESCALATE= (reagentx P1 on PR #2623).
-                sig_verified: req.sig_verified,
-                reagent_verified: req.reagent_verified,
-                lan_verified: req.lan_verified,
-                channel_verified: req.channel_verified,
-            },
-            req.priority.as_deref().unwrap_or("normal"),
-        );
+        echo_local_delivery(state, &req, &resp);
         return serde_json::to_value(&resp).unwrap_or_default();
     }
 
@@ -1327,6 +1307,36 @@ pub(crate) async fn deliver(
     serde_json::to_value(&resp).unwrap_or_default()
 }
 
+/// Echo a locally delivered jekt into the sender's own pane, as every
+/// successful delivery path does.
+fn echo_local_delivery(
+    state: &AppState,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+) {
+    echo_jekt_to_sender(
+        state,
+        req.source_agent.as_deref(),
+        &req.target_agent,
+        &req.message,
+        &resp.request_id,
+        resp.effective_tier.as_deref(),
+        resp.requires_stop,
+        EchoTrust {
+            delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
+            // Same `req` this call's own `effective_tier`/`requires_stop`
+            // were computed from (via `inject_message`) — not hardcoded, so
+            // the echoed marker's TRUST/SIG stays consistent with its own
+            // ESCALATE= (reagentx P1 on PR #2623).
+            sig_verified: req.sig_verified,
+            reagent_verified: req.reagent_verified,
+            lan_verified: req.lan_verified,
+            channel_verified: req.channel_verified,
+        },
+        req.priority.as_deref().unwrap_or("normal"),
+    );
+}
+
 /// Hold a jekt no tier could take, when every condition of
 /// `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.1 holds: a full-key,
 /// host-tier request (a LAN caller never fills the hold); not a periodic
@@ -1397,6 +1407,11 @@ async fn hold_for_absent_target(
         let mut by_uid = req.clone();
         by_uid.target_agent = outcome.target_uid.clone();
         let resp = state.reactive_handler.inject_message(by_uid);
+        if resp.success {
+            // As addressed, so the sender's echo names whom it wrote to
+            // (ReAgent P1 on #3632: this path skipped the echo).
+            echo_local_delivery(state, req, &resp);
+        }
         return Some(serde_json::to_value(&resp).unwrap_or_default());
     }
     let mstore = state.mstore.clone();
