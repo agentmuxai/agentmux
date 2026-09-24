@@ -139,8 +139,10 @@ Logs: <host log path>
   paths. They're already known at `agentmux-cef/src/logging.rs:10-23`,
   `agentmux-srv/src/bootstrap.rs:312` and
   `agentmux-launcher/src/logging.rs:18`.
-- Crash-class surfaces also get **Reveal logs**, which opens the log folder
-  via `reveal_in_file_explorer`.
+- Crash-class surfaces rendered by the frontend (kind "D" in §5) also get
+  **Reveal logs**, which opens the log folder via `reveal_in_file_explorer`.
+  The CEF `data:` pages (kind "D-") can't: they have no bridge to the host
+  (§4.6). They offer Copy details, including the log paths as text, only.
 - Diagnostics never include log contents, only paths. A log can hold more
   than the user means to share, and the paths are what's needed to ask.
 
@@ -188,9 +190,18 @@ structured forms. Each is replaced by its label and `[redacted]`:
   `aws_secret_access_key` or `AWS_SECRET_ACCESS_KEY`.
 
 Each form gets test vectors, including one straddling a truncation boundary
-and one that must *not* redact (an ordinary word like `tokenizer`). The same
-additions go back into `continuity.rs` in the same PR, so the two stay
-identical. This is still shape-based: a credential in an unrecognized form
+and one that must *not* redact (an ordinary word like `tokenizer`).
+
+**One redactor per language, shared by every formatter** (Codex P1 on #3689).
+- **Rust:** the redactor moves out of `continuity.rs` into
+  `agentmux-common` (`redact::redact_secrets`) with the expanded rules. It's
+  used by srv's continuation packet and by `agentmux-cef`'s
+  `error_report_text()` (§4.6). The CEF pages copy failed URLs, where URL
+  userinfo is the likeliest leak.
+- **Frontend:** `redact.ts`, used by `formatErrorReport` and by every copy
+  action that puts error or log text on the clipboard (below).
+- **One set of test vectors,** `docs/specs/fixtures/redaction-vectors.json`,
+  run by both the Rust and TypeScript tests, so the two can't drift apart. This is still shape-based: a credential in an unrecognized form
 gets through. That's why G5 says "recognized".
 
 ### 4.6 Pages without the frontend
@@ -255,11 +266,20 @@ logs (CEF `data:` pages, §4.6). **P** = phase (§7).
 | 23 | Config errors | `view/settings/settings-view.tsx:25-45`, `window/system-status.tsx:30-50` | E | Next to "Fix in editor" | 3 |
 | 24 | Update / migration failed | `statusbar/MaintenanceSection.tsx:238,283-290`, `UpdateStatus.tsx:42` | D | "Update failed" first needs a detail to show (§6.3) | 3 |
 
-Already have copy and need no change: the connection-status overlay
-(`blockframe.tsx:943`), the install log's "Copy all" (`InstallProgress.tsx:86`),
-the LSP install banner (`editor-view.tsx:955`), and `CopyableErrorMessage`'s
-own two uses. These move to `<CopyErrorButton>` only if that makes their text
-match §4.1.
+Already have copy, but **move them to the redacted path** (Codex P1 on
+#3689). Their placement stays; what they copy changes:
+- the connection-status overlay (`blockframe.tsx:943`), which copies the raw
+  backend error;
+- the install log's "Copy all" (`InstallProgress.tsx:86`) and `LogView`'s
+  Copy / Copy All (`LogView.tsx:165-181`), which copy `logText()` or the
+  selection as-is;
+- the LSP install banner (`editor-view.tsx:955`);
+- `CopyableErrorMessage`'s own two uses.
+
+Each goes through `redact.ts` (or `<CopyErrorButton>`, where the §4.1 format
+fits). A copy of the user's own *selection* in an ordinary text view (the
+editor, the terminal, a chat code block) is not an error surface and isn't
+redacted: the user chose exactly that text.
 
 ## 6. Related fixes found while writing this
 
@@ -271,9 +291,23 @@ These make sure there's something worth copying:
    - Fix: one `describeError(e)` → `{name, message, stack, cause}`, used for
      both the log line and `showStartupError`.
    - The connection-lost card then shows, and copies, the real stack.
-2. **Find which startup request actually failed.** In the incident, srv
-   logged "starting" at 19:59:06.6, and the renderer's `initHostMux` failed at
-   19:59:08.086 with `TypeError: Failed to fetch`.
+2. **Retry startup requests on transient network errors.** In the incident,
+   srv logged "starting" at 19:59:06.6, and the renderer's `initHostMux`
+   failed at 19:59:08.086 with `TypeError: Failed to fetch`.
+   - **Root cause, found afterwards:** Chromium's `cef-debug.log` shows
+     `connect failed: 10055` at 19:59:07.650. That's WSAENOBUFS: Windows
+     couldn't allocate socket buffers. Kernel nonpaged pool was 3.66 GB when
+     measured shortly after, against a few hundred MB normally, which points
+     at a leaking kernel driver. There were no port-exhaustion events (Tcpip
+     4227/4231).
+   - It cleared on its own. Twenty minutes later, the same `GetClientData`
+     call from the same stuck window returned 200.
+   - AgentMux's part: one transient OS-level socket failure left the window
+     on the connection-lost card with no retry. The initial srv calls in
+     `initHostMux` should retry network-level failures (`TypeError` from
+     `fetch`) with a short backoff, for example 250 ms, 500 ms and 1 s,
+     before showing the card. HTTP errors (4xx/5xx) stay fatal.
+   - What follows is the investigation that led here:
    - An earlier draft read that as the renderer outrunning srv. That doesn't
      hold (Codex P2 on #3689). The launcher waits for srv's
      `AGENTMUXSRV-ESTART`, which srv only emits after `run_pending_migrations`,
@@ -288,8 +322,9 @@ These make sure there's something worth copying:
         web versus websocket port, and whether a pre-restart endpoint was
         cached.
      3. Define a real readiness signal if one is missing.
-   - Separate investigation. This build was a local portable opened directly
-     from the Desktop, so its launch path is the first thing to confirm.
+   - Those steps found the 10055 above. Step 1 (log the request target) is
+     still worth doing, so the next failure names its endpoint without
+     needing Chromium's log.
 3. **"Update failed" shows no reason** (`MaintenanceSection.tsx:238`,
    `UpdateStatus.tsx:42`). It needs the updater's error text before a copy
    button is worth adding.
@@ -298,10 +333,10 @@ These make sure there's something worth copying:
 
 | Phase | Scope | Surfaces |
 |---|---|---|
-| **P1** Foundations and the most-hit surfaces | `formatErrorReport` + `redact.ts` (with srv's test vectors), `<CopyErrorButton>`, exported `CopyableErrorMessage`, `describeError` (§6.1) | 1–6 |
+| **P1** Foundations and the most-hit surfaces | `formatErrorReport` + `redact.ts` + the shared Rust redactor in `agentmux-common` (one vector file), `<CopyErrorButton>`, exported `CopyableErrorMessage`, `describeError` (§6.1), the existing copy actions moved to the redacted path | 1–6 |
 | **P2** Crash class and diagnostics | `get_log_paths` IPC, Copy diagnostics, Reveal logs, the Rust `error_report_text()` for CEF pages | 7–12 |
 | **P3** Everything else | Toasts, modals, Armory, panes, config, updates | 13–24 |
-| **P4** Follow-ups | Startup failure investigation (§6.2), update error detail (§6.3), native dialog hint (§4.6) | n/a |
+| **P4** Follow-ups | Startup retry on transient network errors (§6.2), update error detail (§6.3), native dialog hint (§4.6) | n/a |
 
 P1 alone covers the errors users hit most, and it's one PR.
 
