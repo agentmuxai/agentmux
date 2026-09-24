@@ -375,4 +375,11 @@ describe("shown-tab tracking", () => {
         markTabShown("tab-x");
         expect(tabWasShown("tab-x")).toBe(true);
     });
+
+    test("forgets a closed tab", async () => {
+        const { forgetTabShown, markTabShown, tabWasShown } = await import("./tab-reveal");
+        markTabShown("tab-closed");
+        forgetTabShown("tab-closed");
+        expect(tabWasShown("tab-closed")).toBe(false);
+    });
 });

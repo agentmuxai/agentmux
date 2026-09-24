@@ -16,7 +16,7 @@ import {
     keepInactiveTabsLaidOut,
     tabContainerVisibility,
 } from "./window-tab-visibility";
-import { gateTargetTabId, markTabShown, scheduleRevealLift, tabSwitching, tabWasShown } from "@/store/tab-reveal";
+import { forgetTabShown, gateTargetTabId, markTabShown, scheduleRevealLift, tabSwitching, tabWasShown } from "@/store/tab-reveal";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -185,7 +185,10 @@ function WorkspaceElem(): JSX.Element {
                     <Show when={allTabIds().length > 0} fallback={<CenteredDiv>No Active Tab</CenteredDiv>}>
                         <For each={allTabIds()}>
                             {(tid) => {
-                                onCleanup(() => tabEls.delete(tid));
+                                onCleanup(() => {
+                                    tabEls.delete(tid);
+                                    forgetTabShown(tid);
+                                });
                                 const shown = createMemo(() =>
                                     tabContainerVisibility(tid === displayTabId(), keepLaidOut(), gateHides(tid)),
                                 );

@@ -81,6 +81,12 @@ export function tabWasShown(tabId: string): boolean {
     return shownTabIds.has(tabId);
 }
 
+/** A closed tab's entry, dropped so the set doesn't grow over a long session
+ *  (ReAgent P2 on #3687; same reasoning as `clearLeafRevealGate`). */
+export function forgetTabShown(tabId: string): void {
+    shownTabIds.delete(tabId);
+}
+
 /** A switch that skipped the gate; logged in the gate's own format so
  *  `scripts/tab-switch-report.mjs` measures both kinds the same way. */
 export function logUngatedReveal(tabId: string): void {
