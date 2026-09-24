@@ -1,7 +1,7 @@
 # Why window-tab switches feel glitchy and pane-tab switches don't, and what VS Code does instead
 
 **Date:** 2026-09-24
-**Status:** analysis. Recommendations are in §6. Items 1 and 2 are available behind `window:keepinactivetabslaidout` (default off) until they are measured. Item 6's measurement is `scripts/tab-switch-report.mjs`.
+**Status:** analysis. Recommendations are in §6, measurements in §7. Items 1, 2 and 4 shipped as `window:keepinactivetabslaidout` (#3686, #3687) and are **on by default** after the A/B in §7. Setting it to `false` restores the old behavior. Items 3 and 5 are not done. Item 6's measurement is `scripts/tab-switch-report.mjs`.
 **Author:** agentx
 **Trigger:** Repo owner, after the half-window pane offset
 (`docs/reports/REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md`): *"switching
@@ -227,3 +227,30 @@ tasks in the 3 s after reveal, on a busy tab.
 **Suggested order:** 1 + 2 together as one experiment behind a setting, with 6's
 measurements. If they hold, 3, then 4, then 5. Each is small on its own. 1 and
 4 are the ones users will feel.
+
+## 7. Measured (2026-09-24)
+
+**Setup.**
+- **Build and isolation:** portable builds of #3686 and #3687, fully isolated with `AGENTMUX_HOME_OVERRIDE`, so none of the user's agents or stores were involved.
+- **Load:** five Claude agent panes across three tabs (1 + 2 + 2). A stand-in CLI streamed realistic turns into them continuously: headings, tables, code blocks and tool calls, one delta every 40 ms.
+- **Protocol:** phases alternated default/keep/default/keep, so the transcripts' growth over time didn't favor either mode. Each phase was 20 s idle with Tab 1 visible, then 24 real tab-pill clicks (DevTools mouse events) 4 s apart.
+- **Sources:** long tasks and reveal times come from the host log (`[perf]` lines). Main-thread time comes from DevTools `Performance.getMetrics`.
+- **Mode check:** the inactive-tab styles were read back each phase to confirm the mode was really in effect.
+
+| 48 switches per column | default | keep laid out, gated (#3686) | keep laid out, no gate (#3687) |
+|---|---|---|---|
+| Switches with long tasks within 3 s after the reveal | 20 / 19 | **0** | **1** |
+| Reveal after the RPC, median | 114 / 116 ms, then a 120 ms fade | 156 ms, then the fade | **0 ms**, no fade |
+| Long tasks during the switching phases | 1,124 / 1,091 ms | 154 ms | 405 ms |
+| Idle background cost (main-thread s per s) | 0.357 / 0.355 | 0.347 | 0.368 |
+
+Default ran as a control in both A/Bs, so it has two values. Read the columns as:
+- **Keeping tabs laid out removes the catch-up after the reveal.** It doesn't raise background cost, because hidden agents pause rendering (§6.2).
+- **The gate then only adds delay.** Gated, the tab appeared about 40 ms later than today. That's plausibly the inherited `visibility` flip restyling the subtree: style time while switching was +8%. Unconfirmed.
+- **Without the gate and fade (#3687), the tab appears as soon as the RPC returns.** That's about 240 ms sooner per switch than default.
+- **The deferred markdown renders now commit in view.** That's Codex's point on #3687. They added 1 stuttering switch in 48 and 250 ms of long tasks across 48 switches. Most of the commit lands in chunks under 50 ms.
+
+**Limits.**
+- The stand-in agents produce lighter content than real sessions. In the user's own 0.57.0 log, the default mode's median after-reveal cost was 206 ms (§2), against 0 here. So the default-mode stutter measured here understates the real case.
+- Not measured: many tabs (10+), terminal-heavy tabs, and memory.
+- The setting stays available to turn this off if any of those regress.
