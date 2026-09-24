@@ -17,6 +17,7 @@
 
 import { KeyedAggregator, type QuantileSnapshot } from "@/perf/aggregates";
 import type { NodeKind } from "./renderers";
+import type { TranscriptCursorStats } from "../transcript-cursor";
 
 /**
  * Estimator-miss event — actual measured size diverged from estimate
@@ -82,6 +83,18 @@ class AgentPerfStore {
     /** Per-kind store `dispatch()` duration (ms) — layout vs document
      *  store. p50/p95/max surface in HUD, same shape as `rowMountAgg`. */
     private dispatchAgg = new KeyedAggregator(SAMPLE_RING_SIZE);
+    /** Live transcript cursors by block (Phase 5a-4): their counters are
+     *  read at snapshot time, not copied on every event. */
+    private transcriptCursors = new Map<string, TranscriptCursorStats>();
+
+    /** Show a pane's transcript-cursor counters; returns the unregister. */
+    registerTranscriptCursor(blockId: string, stats: TranscriptCursorStats): () => void {
+        if (!isProbingEnabled()) return () => {};
+        this.transcriptCursors.set(blockId, stats);
+        return () => {
+            if (this.transcriptCursors.get(blockId) === stats) this.transcriptCursors.delete(blockId);
+        };
+    }
 
     recordRowMount(kind: NodeKind, durationMs: number): void {
         if (!isProbingEnabled()) return;
@@ -136,6 +149,10 @@ class AgentPerfStore {
             recentEstimatorMisses: [...this.estimatorMisses],
             recentLayoutShifts: [...this.layoutShifts],
             dispatchByKind: this.dispatchAgg.snapshot() as Map<DispatchKind, QuantileSnapshot>,
+            transcriptCursors: [...this.transcriptCursors.entries()].map(([blockId, stats]) => ({
+                blockId,
+                stats: { ...stats },
+            })),
         };
     }
 
@@ -156,6 +173,8 @@ export interface AgentPerfSnapshot {
     recentLayoutShifts: readonly LayoutShiftSample[];
     /** Store `dispatch()` duration (ms), keyed by `layout`/`document`. */
     dispatchByKind: ReadonlyMap<DispatchKind, QuantileSnapshot>;
+    /** Per-pane transcript cursor counters (Phase 5a-4). */
+    transcriptCursors: ReadonlyArray<{ blockId: string; stats: TranscriptCursorStats }>;
 }
 
 const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
@@ -164,6 +183,7 @@ const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
     recentEstimatorMisses: [],
     recentLayoutShifts: [],
     dispatchByKind: new Map(),
+    transcriptCursors: [],
 };
 
 export const agentPerfStore = new AgentPerfStore();

@@ -50,6 +50,12 @@ export interface UsePendingMessageAcceptanceOptions {
      * scroll-follow-drift investigation, root cause #3.
      */
     onTurnStartFromQueue?: () => void;
+    /**
+     * The text of each message promoted to a `user_message` node — for
+     * `useAgentStream`'s echo ledger, which pairs it with the message's
+     * transcript record (Phase 5a-4, `transcript-cursor.ts`).
+     */
+    onAccepted?: (text: string) => void;
 }
 
 export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOptions): void {
@@ -124,6 +130,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
             };
             if (!opts.hasNodeId(node.id)) {
                 opts.addNodeId(node.id);
+                opts.onAccepted?.(pending.text);
                 opts.queue.pushNewNode(node);
                 opts.queue.scheduleFlush();
             }

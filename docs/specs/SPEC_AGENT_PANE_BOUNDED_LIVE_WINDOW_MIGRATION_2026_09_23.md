@@ -829,7 +829,9 @@ to §6.3.6; paths under `agentmux-srv/src/`):
      `session:archive` publishes `fileop: "delete"`.
      `agent:session:archive` is keyed by agent definition, not block, so its
      event waits for the consumer design in 5a-4. Until then a pane detects
-     the change by the generation mismatch on its next read.
+     the change by the generation mismatch on its next read. (5a-4: needs no
+     event. The cursor joins the recreated file at its first record; see
+     item 7.)
 7. **Consumer contract (frontend part of 5a).** Per pinned `(stream, gen)`
    the stream hook keeps `next`, the next line it expects:
    - `line < next`: duplicate, dropped.
@@ -846,6 +848,71 @@ to §6.3.6; paths under `agentmux-srv/src/`):
    The parser still assigns today's ids in 5a. Its input just becomes
    `{ stream, gen, line, text }`, ready for 5b.
 
+   As built in 5a-4 (`frontend/app/view/agent/transcript-cursor.ts`, wired in
+   `useAgentStream`):
+   - **Which stream.** The cursor pins the stream the history load was
+     served from (`read_range`'s `{ stream, gen }`), with `next` at the end of
+     the lines it showed. The v2 restore and the NDJSON load settle it through
+     a latch (`createTranscriptSettleLatch`), created by `agent-view.tsx` and
+     passed to both hooks. Before a pin, an event is placed in its `g:` entry
+     if it has one (reads are served from the global zone whenever it has
+     content), else its `b:` entry.
+   - **Held until history settles.** Live events queue until the load says
+     where it ended. Parsing them first would put live records above the
+     history they follow. The pane is covered by its loading overlay until
+     then. A load that never reports releases them after 15 s, placed from the
+     first event on.
+   - **Outcomes the load can report:**
+     - a pin;
+     - `"empty"`: nothing to show, so a first event past line 0 is a gap from
+       0;
+     - `null`: the load failed, a v1 snapshot, or an uncounted file. The
+       cursor starts at the first event it sees.
+   - **Gaps.**
+     - Read with `expectGen` in chunks of 1,000.
+     - Any mismatch (`genMismatch`, another stream or generation served)
+       skips the gap instead of mixing files.
+     - A gap over 5,000 lines is skipped too: those lines stay on disk for
+       the next load.
+     - Skipped lines are counted.
+   - **Echoes.** Echo events aren't parsed. An `EchoLedger` pairs them by text
+     with the user-message nodes this pane shows. A gap line that is the
+     record of such a node (its echo event was lost in a socket drop) is
+     dropped rather than becoming a second bubble. 5b replaces the text match
+     with positional ids.
+   - **Generation change without an event.** Two cases:
+     - A re-count after an older build's write keeps every line's index and
+       only grows the file.
+     - `agent:session:archive` deletes a shared zone and has no block to
+       announce it on. The next session's first record is line 0 of a new
+       file.
+
+     So the cursor keeps `next` only when the event starts at or past it and
+     no unpositioned record came in between. Otherwise it joins the new
+     generation at the event. This is also how the agent-level archive
+     reaches an open pane, so it needs no event of its own.
+   - **Resets.**
+     - `truncate` keeps today's reducer-gated `StreamTruncate`.
+     - `replace` (restore) and `delete` (archive) only move the cursor, and
+       the pane keeps what it shows. Neither published anything before 5a-3b.
+     - After a `replace` the restored content counts as history: the cursor
+       joins after it.
+   - **Unpositioned events** (no counter, a failed mirror, a pinned stream
+     missing from the event) are parsed as before and counted.
+   - **Migration.** A pane pinned to its block file follows the global zone
+     once events carry it, at a contiguous point. That happens when the
+     agent's first write to the zone comes after the pane loaded.
+   - **The poll is new, not existing.** No line-count poll existed.
+     - A pane pinned to a `g:` stream checks the count every 5 s while the
+       document is visible.
+     - It fills up to the count seen one tick earlier, so lines its own
+       events are still bringing arrive by event first.
+     - A `b:` stream has one writer (its block), so it needs no poll.
+   - **Dev HUD.** Each pane's counters appear under "Transcript cursors" in
+     the diag panel's agent-pane section: delivered, duplicates, echoes, gaps
+     filled, lines skipped, unpositioned, generation changes, own echoes
+     dropped.
+
 **Pull requests** (each shippable alone, in order):
 
 | PR | Scope | Proof |
@@ -856,7 +923,7 @@ to §6.3.6; paths under `agentmux-srv/src/`):
 | 5a-3a | Transcript appends written first (`append_lines`, block file and global zone) and published after under a striped per-block lock, with `pos` per stream and the exact offset; terminal data unchanged | Each event carries both streams' positions, numbered independently; the record is on disk when its event arrives; concurrent writers to one block publish in line order and each `line` addresses its record; a torn tail is closed and keeps its index. |
 | 5a-3b | Read responses name `{ stream, gen }`; `read_range` takes `expectGen`; the line count answers from the counter; a legacy row gets `init_line_counter` off the runtime; `replace` / `delete` events | Count from the counter equals the indexer's; a replace between count and read returns `genMismatch`. |
 | 5a-3c | The stdin user-line persist publishes as an `echo: "stdin"` transcript event with positions (the pane skips it); error frames (seven sites) and the app-server controller mirror to the global zone | The persisted user line fills its line (no gap) and is marked as an echo; the full suite; `tsc`. |
-| 5a-4 | Frontend consumer contract | Out-of-order, duplicate, gap, `gen` change mid-fetch, cross-process append via the poll; `full-conversation-bench` streaming cost unchanged. |
+| 5a-4 | Frontend consumer contract: `TranscriptCursor` pinned by the history load, gap reads with `expectGen`, echo ledger, the shared-zone poll, HUD counters | Out-of-order, duplicate, gap, `gen` change mid-fetch, recreated file, cross-process append via the poll (unit); `full-conversation-bench` streaming cost unchanged. |
 
 **Known, not changed here.** Two live sessions of the same agent (for
 example, one in each of two srv instances) interleave records in one global

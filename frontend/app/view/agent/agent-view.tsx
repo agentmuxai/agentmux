@@ -113,6 +113,7 @@ import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
 import { didTurnJustEnd, useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useHistoryPagination } from "./hooks/useHistoryPagination";
+import { createTranscriptSettleLatch } from "./transcript-cursor";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
 import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
@@ -876,8 +877,12 @@ const AgentPresentationView = ({
         if (settlePaintRaf1 !== undefined) cancelAnimationFrame(settlePaintRaf1);
         if (settlePaintRaf2 !== undefined) cancelAnimationFrame(settlePaintRaf2);
     });
+    // Where the history load ended, handed to the live stream so it places
+    // its records after that history (Phase 5a-4, transcript-cursor.ts).
+    const transcriptSettle = createTranscriptSettleLatch();
     const history = useHistoryPagination({
         blockId: model.blockId,
+        transcriptSettle,
         model: paneModel,
         outputFormat,
         // Jekt direction detection during replay: FROM == this agent →
@@ -1449,6 +1454,7 @@ const AgentPresentationView = ({
     // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
     const backgroundTasksAtom = useAgentStream({
         blockId: model.blockId,
+        transcriptSettle,
         // Pass the per-pane model so the hook's dispatch sites are
         // default-safe against post-unmount races — the disposed-flag
         // check is centralized in the model rather than per call site.
