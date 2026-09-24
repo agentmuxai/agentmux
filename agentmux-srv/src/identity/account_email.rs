@@ -15,9 +15,17 @@
 use crate::backend::storage::identities::{IdentityAccount, SecretRef};
 
 /// The email the provider CLI recorded in `dir`, if any. Only Claude writes
-/// one today; other providers return `None` and keep showing their name.
+/// one today (`claude`, or its `claude-code` alias); other providers return
+/// `None` and keep showing their name. The ambient `~/.claude` is skipped: a
+/// legacy account bound there shares credentials with a terminal `claude`,
+/// whose own config (`~/.claude.json`) is outside it, so the `.claude.json`
+/// inside may name a user no longer signed in.
 pub fn email_from_oauth_dir(provider: &str, dir: &str) -> Option<String> {
-    if provider != "claude" || dir.is_empty() {
+    if !matches!(provider, "claude" | "claude-code") || dir.is_empty() {
+        return None;
+    }
+    let claude = crate::backend::providers::get_provider("claude")?;
+    if crate::backend::providers::is_provider_ambient_home_dir(claude, dir) {
         return None;
     }
     let raw = std::fs::read_to_string(std::path::Path::new(dir).join(".claude.json")).ok()?;
@@ -27,28 +35,27 @@ pub fn email_from_oauth_dir(provider: &str, dir: &str) -> Option<String> {
 }
 
 /// Set `account.context.email` from its config dir when that differs from
-/// what is stored. Returns whether the account changed. A different email
-/// replaces the stored one — an account re-authenticated as another user
-/// must not keep showing the old address (§4). An account whose dir reports
-/// no email is left as it is.
-pub fn refresh_account_email(account: &mut IdentityAccount) -> bool {
+/// what is stored, and return the new email (the caller persists only that
+/// field, `Store::identity_set_context_email`). A different email replaces
+/// the stored one — an account re-authenticated as another user must not
+/// keep showing the old address (§4). An account whose dir reports no email
+/// is left as it is.
+pub fn refresh_account_email(account: &mut IdentityAccount) -> Option<String> {
     if account.kind != "oauth" {
-        return false;
+        return None;
     }
     let SecretRef::OAuthConfigDir { dir } = &account.secret_ref else {
-        return false;
+        return None;
     };
-    let Some(email) = email_from_oauth_dir(&account.provider, dir) else {
-        return false;
-    };
+    let email = email_from_oauth_dir(&account.provider, dir)?;
     if account.context.get("email").and_then(|v| v.as_str()) == Some(email.as_str()) {
-        return false;
+        return None;
     }
     if !account.context.is_object() {
         account.context = serde_json::json!({});
     }
-    account.context["email"] = serde_json::Value::String(email);
-    true
+    account.context["email"] = serde_json::Value::String(email.clone());
+    Some(email)
 }
 
 #[cfg(test)]
@@ -81,6 +88,7 @@ mod tests {
         let dir = dir_with(r#"{"oauthAccount":{"emailAddress":" me@example.com "}}"#);
         let d = dir.path().to_str().unwrap();
         assert_eq!(email_from_oauth_dir("claude", d).as_deref(), Some("me@example.com"));
+        assert_eq!(email_from_oauth_dir("claude-code", d).as_deref(), Some("me@example.com"));
         assert_eq!(email_from_oauth_dir("codex", d), None, "only Claude records one here");
         let empty = dir_with(r#"{"oauthAccount":{"emailAddress":""}}"#);
         assert_eq!(email_from_oauth_dir("claude", empty.path().to_str().unwrap()), None);
@@ -93,17 +101,39 @@ mod tests {
         let d = dir.path().to_str().unwrap();
 
         let mut blank = account(d, serde_json::json!({}));
-        assert!(refresh_account_email(&mut blank), "backfilled");
+        assert_eq!(refresh_account_email(&mut blank).as_deref(), Some("new@example.com"), "backfilled");
         assert_eq!(blank.context["email"], "new@example.com");
-        assert!(!refresh_account_email(&mut blank), "unchanged the second time");
+        assert_eq!(refresh_account_email(&mut blank), None, "unchanged the second time");
 
         let mut stale = account(d, serde_json::json!({"email": "old@example.com", "k": 1}));
-        assert!(refresh_account_email(&mut stale), "a re-login as someone else");
+        assert!(refresh_account_email(&mut stale).is_some(), "a re-login as someone else");
         assert_eq!(stale.context["email"], "new@example.com");
         assert_eq!(stale.context["k"], 1, "other context kept");
 
         let mut unknown = account("/no/such/dir", serde_json::json!({"email": "kept@example.com"}));
-        assert!(!refresh_account_email(&mut unknown), "no email on disk: left alone");
+        assert_eq!(refresh_account_email(&mut unknown), None, "no email on disk: left alone");
         assert_eq!(unknown.context["email"], "kept@example.com");
+    }
+
+    /// The backfill's write touches `context.email` only: other context keys,
+    /// `status` and `updated_at` stand, and an account that is gone is not
+    /// re-created.
+    #[test]
+    fn the_store_write_sets_the_email_and_nothing_else() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let mut acct = account("/dir", serde_json::json!({"k": 1}));
+        acct.status = "needs_reauth".into();
+        acct.updated_at = 42;
+        store.identity_upsert(&acct).unwrap();
+
+        assert!(store.identity_set_context_email("acc-1", "me@example.com").unwrap());
+        let got = store.identity_get("acc-1").unwrap().unwrap();
+        assert_eq!(got.context["email"], "me@example.com");
+        assert_eq!(got.context["k"], 1);
+        assert_eq!(got.status, "needs_reauth");
+        assert_eq!(got.updated_at, 42);
+
+        assert!(!store.identity_set_context_email("acc-gone", "x@example.com").unwrap());
+        assert!(store.identity_get("acc-gone").unwrap().is_none(), "never re-created");
     }
 }
