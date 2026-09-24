@@ -283,3 +283,104 @@ describe("Markdown streaming-render work invariants", () => {
         ).toBeLessThan(2);
     });
 });
+
+/**
+ * The open tail is updated in place while only its text grows
+ * (TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md §4: "the growing last
+ * message's DOM is replaced on every commit" — ~23 % of streaming work in
+ * `replaceChild`).
+ *
+ * The frozen prefix already survives commits; the tail — everything after the
+ * last provably-safe split, which is the WHOLE block while a code fence, list
+ * or table is still open — used to be re-rendered and swapped on every commit.
+ * When a commit changes nothing but the tail's last run of text (the common
+ * case: a code fence or paragraph growing), the tail's DOM must be kept and
+ * that one text node updated. Anything structural still rebuilds, and the
+ * result must always match a from-scratch render of the same text.
+ */
+describe("Markdown open-tail in-place updates", () => {
+    /**
+     * Rendered HTML for comparison across instances: per-instance slug prefixes
+     * removed, and whitespace-only text between tags collapsed — segmented
+     * rendering (frozen prefix + tail) drops the newline text node that a
+     * single parse keeps between the two blocks at the seam. Invisible, and
+     * pre-existing; not what these tests are about.
+     */
+    const html = (el: Element) => el.innerHTML.replace(/\sid="[^"]*"/g, "").replace(/>\s+</g, "><");
+
+    /** Streams cumulative `texts` into one instance; also renders the final text from scratch. */
+    function streamAndCompare(texts: string[]) {
+        const [view, setView] = createSignal({ text: "", streaming: true });
+        const live = render(() => <Markdown text={view().text} streaming={view().streaming} scrollable={false} />);
+        for (const t of texts) setView({ text: t, streaming: true });
+        const final = texts[texts.length - 1];
+        const fresh = render(() => <Markdown text={final} streaming={true} scrollable={false} />);
+        return { live, fresh };
+    }
+
+    it("keeps a growing code fence's DOM and updates its text in place", () => {
+        __resetMarkdownRenderStats();
+        const lines = Array.from({ length: 30 }, (_, i) => `const line${i} = ${i};`);
+        const doc = (n: number) => `${LONG_FILLER}\`\`\`ts\n${lines.slice(0, n).join("\n")}\n`;
+
+        const [view, setView] = createSignal({ text: doc(1), streaming: true });
+        const { container } = render(() => <Markdown text={view().text} streaming={view().streaming} scrollable={false} />);
+        const pre = container.querySelector("pre.codeblock");
+        expect(pre).not.toBeNull();
+
+        for (let n = 2; n <= 30; n++) setView({ text: doc(n), streaming: true });
+
+        expect(container.querySelector("pre.codeblock"), "the open code block must not be rebuilt per commit").toBe(pre);
+        expect(container.querySelector("pre.codeblock code")!.textContent).toContain("const line29 = 29;");
+        expect(__markdownRenderStats.tailInPlaceUpdates).toBeGreaterThanOrEqual(28);
+    });
+
+    it("keeps a growing paragraph's DOM", () => {
+        __resetMarkdownRenderStats();
+        const words = Array.from({ length: 40 }, (_, i) => `word${i}`);
+        const doc = (n: number) => `${LONG_FILLER}${words.slice(0, n).join(" ")}`;
+        const [view, setView] = createSignal({ text: doc(1), streaming: true });
+        const { container } = render(() => <Markdown text={view().text} streaming={view().streaming} scrollable={false} />);
+        const paras = () => container.querySelectorAll(".paragraph");
+        const last = paras()[paras().length - 1];
+
+        for (let n = 2; n <= 40; n++) setView({ text: doc(n), streaming: true });
+
+        expect(paras()[paras().length - 1]).toBe(last);
+        expect(last.textContent).toBe(words.join(" "));
+        expect(__markdownRenderStats.tailInPlaceUpdates).toBeGreaterThan(30);
+    });
+
+    it("matches a from-scratch render after in-place streaming (code fence, paragraph, list, table)", () => {
+        const code = Array.from({ length: 12 }, (_, i) => `x${i}()`);
+        const texts = code.map((_, i) => `${LONG_FILLER}\`\`\`py\n${code.slice(0, i + 1).join("\n")}\n`);
+        const add = (s: string) => texts.push(texts[texts.length - 1] + s);
+        add("```\n\nClosing paragraph that grows");
+        add(" a little more");
+        add("\n\n- item one\n- item two");
+        add(" grows\n- item three");
+        add("\n\n| a | b |\n|---|---|\n| 1 | 2 |");
+        add("3");
+        const { live, fresh } = streamAndCompare(texts);
+        expect(html(live.container)).toBe(html(fresh.container));
+    });
+
+    it("rebuilds when inline structure appears, and still matches a fresh render", () => {
+        __resetMarkdownRenderStats();
+        const base = `${LONG_FILLER}Some text with **bol`;
+        const { live, fresh } = streamAndCompare([base, `${base}d`, `${base}d** and more`]);
+        expect(live.container.querySelector("strong")?.textContent).toBe("bold");
+        expect(html(live.container)).toBe(html(fresh.container));
+        expect(__markdownRenderStats.tailRebuilds).toBeGreaterThan(0);
+    });
+
+    it("never patches heading text in place — its slug id and TOC entry follow the text", () => {
+        const texts = [`${LONG_FILLER}## Over`, `${LONG_FILLER}## Overvi`, `${LONG_FILLER}## Overview`];
+        const { live, fresh } = streamAndCompare(texts);
+        const headings = live.container.querySelectorAll(".heading");
+        const last = headings[headings.length - 1] as HTMLElement;
+        expect(last.textContent).toBe("Overview");
+        expect(last.id.endsWith("overview")).toBe(true);
+        expect(html(live.container)).toBe(html(fresh.container));
+    });
+});
