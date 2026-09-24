@@ -422,7 +422,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                                 type="text"
                                 value={secretSmPath()}
                                 onInput={(e) => setSecretSmPath(e.currentTarget.value)}
-                                placeholder="services/infra"
+                                placeholder="my-app/credentials"
                             />
                         </FormField>
                         <FormField label="JSON path (optional)">

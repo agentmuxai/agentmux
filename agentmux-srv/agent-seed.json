@@ -22,7 +22,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -46,7 +46,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -70,7 +70,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -94,7 +94,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -118,7 +118,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -142,7 +142,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -166,7 +166,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
@@ -190,7 +190,7 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     }
