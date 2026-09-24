@@ -400,6 +400,42 @@ mod tests {
         }
     }
 
+    /// Identity M4d-1 (spec §6.5.10): deleting an agent also deletes keys
+    /// filed under the other names it answered to — display name,
+    /// `instance_name`, and `agent.open`'s fallback id — except a name another
+    /// agent signs under (here: another row holds `zed-bot` as its slug).
+    #[test]
+    fn deleting_an_agent_deletes_the_keys_under_all_its_names() {
+        use crate::backend::storage::agents::test_agent_def;
+        let store = object_store();
+        let mut zed = test_agent_def("uid-zed", "Zed Bot", "claude", "agent", 1, "");
+        zed.slug = "zb".to_string();
+        store.agent_def_insert(&mut zed).unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("UPDATE db_agents SET instance_name = 'Zeddy' WHERE id = 'uid-zed'", [])
+            .unwrap();
+        let mut other = test_agent_def("uid-other", "Other", "claude", "agent", 1, "");
+        other.slug = "zed-bot".to_string();
+        store.agent_def_insert(&mut other).unwrap();
+        for name in ["zb", "zed bot", "zeddy", "zed-bot"] {
+            store.agent_lan_key_ensure(name).unwrap();
+            store.agent_jekt_key_ensure(name).unwrap();
+        }
+
+        assert!(store.agent_def_delete("uid-zed").unwrap());
+        for gone in ["zb", "zed bot", "zeddy"] {
+            assert!(store.agent_lan_key_load(gone).unwrap().is_none(), "{gone}");
+            assert!(store.agent_jekt_key_load(gone).unwrap().is_none(), "{gone}");
+        }
+        assert!(
+            store.agent_lan_key_load("zed-bot").unwrap().is_some(),
+            "the fallback id another agent holds as its slug stays"
+        );
+    }
+
     /// Slug ownership is folded as the key tables fold (`to_lowercase`), not
     /// with SQLite's ASCII-only `lower()`: agents with slugs `Ä` and `ä`
     /// share the key filed under `ä`, so deleting one must leave it for the
