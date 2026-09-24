@@ -266,6 +266,7 @@ logs (CEF `data:` pages, §4.6). **P** = phase (§7).
 | 23 | Config errors | `view/settings/settings-view.tsx:25-45`, `window/system-status.tsx:30-50` | E | Next to "Fix in editor" | 3 |
 | 24 | Update / migration failed | `statusbar/MaintenanceSection.tsx:238,283-290`, `UpdateStatus.tsx:42` | D | "Update failed" first needs a detail to show (§6.3) | 3 |
 | 25 | Swarm fleet action results: per-target failures | `view/swarm/swarm-fleet-toolbar.tsx:426-430` (`swarm-fleet-result-row--fail`, shows `f.id — f.error`) | E | Icon at the row's end, plus "Copy all failures" in the results header (Codex P2 on #3689, found after merge) | 3 |
+| 26 | Agent shell exited nonzero | `components/AgentShellInfoPanel.tsx:138-170` (`agent-shell-info-dot--failed`, "exited N") | E | Icon next to "exited N". It copies the exit code, the shell's command and cwd, and the output's last lines, the same as surface 15's tool output | 3 |
 
 Already have copy, but **move them to the redacted path** (Codex P1 on
 #3689). Their placement stays; what they copy changes:
@@ -345,7 +346,7 @@ These make sure there's something worth copying:
 |---|---|---|
 | **P1** Foundations and the most-hit surfaces | `formatErrorReport` + `redact.ts` + the shared Rust redactor in `agentmux-common` (one vector file), `<CopyErrorButton>`, exported `CopyableErrorMessage`, `describeError` (§6.1), the existing copy actions moved to the redacted path | 1–6 |
 | **P2** Crash class and diagnostics | `get_log_paths` IPC, Copy diagnostics, Reveal logs, the Rust `error_report_text()` for CEF pages | 7–12 |
-| **P3** Everything else | Toasts, modals, Armory, panes, config, updates | 13–24 |
+| **P3** Everything else | Toasts, modals, Armory, panes, config, updates, swarm fleet results, shell exit | 13–26 |
 | **P4** Follow-ups | Startup retry on transient network errors (§6.2), update error detail (§6.3), native dialog hint (§4.6) | n/a |
 
 P1 alone covers the errors users hit most, and it's one PR.
@@ -394,8 +395,10 @@ P1 alone covers the errors users hit most, and it's one PR.
        `swarm-fleet-result-row--fail` (surface 25).
 
      Status-only indicators with no text go on the reviewed allowlist, each
-     with its reason. The first entry is `agent-shell-info-dot--failed`
-     (`AgentShellInfoPanel.tsx:160`), a colored dot whose text is surface 16.
+     with its reason. The allowlist starts empty. `agent-shell-info-dot--failed`
+     was first listed there by mistake: it marks a shell that started and
+     later exited nonzero ("exited N"), a different failure from surface 16's
+     startup error. It's now surface 26 (Codex P2 on #3696).
 
   A new error surface either registers, and so gets copy, or is added to an
   explicit, reviewed allowlist with a reason.
