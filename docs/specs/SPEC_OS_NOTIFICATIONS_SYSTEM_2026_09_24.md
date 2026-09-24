@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Author:** Lark
-**Status:** Draft. Nothing here is implemented yet.
+**Status:** active — Windows and Linux implemented (#3645, #3650, #3653, #3654, #3662 and the Linux/quiet-hours PR); macOS toasts not started. See §11.5 for what shipped and where it deviates from this plan.
 **Verified against:** `main` @ `9cc79a624` (pulled 2026-09-24). I read the code directly and did external best-practices research. I did not build a prototype.
 **Builds on:**
 - [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md): the tray, background-service mode and autostart. Issue #2977.
@@ -442,6 +442,33 @@ Phase 5 is what fully delivers G4. Until it lands, `InputWaiting` requires the a
 - **Manual, human-with-screen, per OS (required; cannot be automated in CI):** toast appears with the correct app name and icon; click deep-links; answering in-app retracts; cold-start click via URI; DND on means the toast goes quietly to the notification center; Win11 overflow hint; macOS first-run permission prompt appears exactly once, and not at launch.
 
 ---
+
+## 11.5. Implementation status (2026-09-24)
+
+| Phase | State | PR |
+|---|---|---|
+| 0: tray reachable | Done. `--background` now sets the tray env on the launcher itself; `app:runinbackground` setting; separate "Start at login" toggle via host → launcher CLI verbs | #3645 |
+| 1A: Router + renderer bridge | Done | #3650 |
+| 1B: Windows toasts | Done. OS acceptance verified live (notifier `Enabled`, toast in the AUMID's notification-center history); the on-screen banner was not observed, because banners were suppressed for *every* app on the test machine (a PowerShell control toast also did not show) | #3653 |
+| 2: tray hub + srv sources | Done on Windows. `AgentCrashed`, `MessageNeedsReview`, pause, rate limits and summary, `notification:state` | #3654 |
+| 3: macOS | **Not started**, see below | — |
+| 3: Linux | Done: freedesktop notifications over zbus, `ksni` tray with the same hub menu. Compile- and unit-tested in CI only; not run on a Linux desktop | Linux/quiet-hours PR |
+| 3: quiet hours | Done (`notify:quiethours`) | Linux/quiet-hours PR |
+| 3: per-agent mute, in-app bell/history, ReviewArrived, sound via Router | Not started | — |
+| 4: taskbar attention (Windows) | Done: overlay badge plus flash on increase | #3662 |
+| 5: srv-side waiting detection | Done for persistent Claude (`can_use_tool` AskUserQuestion). Other providers have no waiting signal to hook (§1.3 research: they run with approvals bypassed) | #3662 |
+
+**Deviations from the plan above, and why:**
+
+- **The focus gate lives in srv, not the Presenter (§6.0).** The launcher only hears when a window *gains* foreground and has no per-pane focus information. Each frontend window instead reports `notify.focus`, and the Router gates on that, with a heartbeat so a reconnected WS re-registers.
+- **No `agentmux://` protocol handler in v1 (§6.1, §7).** Clicks use the in-process WinRT `Activated` callback, and the launcher clears the app's toasts at startup and exit, so a toast never outlives the instance that could act on it. This also avoids a URI that any local process or web page could invoke. A cold-start click is therefore not supported.
+- **Click → pane goes through srv and the frontend, not a host `focus_block` verb.** On a click, the launcher sends `notify.ack`, the Router publishes `notification:activate`, and the window that holds the block switches tab, focuses the pane and raises itself. If no window is open, the launcher opens one and it picks the block up via `notify.takeactivation`.
+- **One Router per broker, in a registry, not an `AppState` field.** Sources that are process-global (the reactive handler's needs-review hook) are filtered per Router by block ownership.
+- **History is in memory,** so there is no `notify_history` table yet. It is only needed for the in-app bell, which has not been built.
+- **Linux does not use `notify-rust`.** The backend speaks `org.freedesktop.Notifications` directly over async zbus, because notify-rust's blocking handle model can't retract a notification whose click is being awaited. ksni's blocking API runs its own Tokio runtime, so the tray lives on a dedicated std thread.
+- **Taskbar badges are per window,** driven by each frontend rather than by the launcher.
+
+**macOS — not started, deliberately.** It needs Objective-C FFI in the launcher (a `UNUserNotificationCenter` delegate, lazy authorization, and a Dock badge in the host). FFI mistakes there are runtime crashes of the whole app, not compile errors, and no Mac was available to run it. The §12 Q1 decision on the per-version bundle ID also affects it directly. `build-macos.yml` accepts `workflow_dispatch` with a branch ref, so a follow-up can at least be compile-checked on CI before a Mac run. Until then the macOS launcher uses the null presenter, and the menu bar keeps its original New Window / Quit menu.
 
 ## 12. Open questions (for the repo owner)
 
