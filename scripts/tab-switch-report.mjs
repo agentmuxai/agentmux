@@ -82,6 +82,8 @@ const withReveal = rows.filter((r) => r.reveal != null);
 if (withReveal.length) {
   const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
   console.log(
-    `\n${rows.length} switches · median reveal ${median(withReveal.map((r) => r.reveal))} ms · median after-reveal long tasks ${median(rows.map((r) => r.total))} ms · worst ${Math.max(...rows.map((r) => r.total))} ms`
+    // Only switches whose reveal was seen: the rest have no "after reveal"
+    // window, and their zeros would understate the cost (ReAgent P2 on #3686).
+    `\n${rows.length} switches, ${withReveal.length} with a reveal · median reveal ${median(withReveal.map((r) => r.reveal))} ms · median after-reveal long tasks ${median(withReveal.map((r) => r.total))} ms · worst ${Math.max(...withReveal.map((r) => r.total))} ms`
   );
 }
