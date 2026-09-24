@@ -367,3 +367,27 @@ describe("tab-reveal leaf-scoped gate", () => {
         });
     });
 });
+
+describe("shown-tab tracking", () => {
+    test("remembers tabs that have been shown", async () => {
+        const { markTabShown, tabWasShown } = await import("./tab-reveal");
+        expect(tabWasShown("never-shown")).toBe(false);
+        markTabShown("tab-x");
+        expect(tabWasShown("tab-x")).toBe(true);
+    });
+
+    test("forgets every tab when the hiding mode changes", async () => {
+        const { clearShownTabs, markTabShown, tabWasShown } = await import("./tab-reveal");
+        markTabShown("tab-a");
+        markTabShown("tab-b");
+        clearShownTabs();
+        expect(tabWasShown("tab-a") || tabWasShown("tab-b")).toBe(false);
+    });
+
+    test("forgets a closed tab", async () => {
+        const { forgetTabShown, markTabShown, tabWasShown } = await import("./tab-reveal");
+        markTabShown("tab-closed");
+        forgetTabShown("tab-closed");
+        expect(tabWasShown("tab-closed")).toBe(false);
+    });
+});

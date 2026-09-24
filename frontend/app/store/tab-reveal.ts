@@ -65,6 +65,41 @@ function logGateOutcome(
     );
 }
 
+// Tabs that have been revealed at least once in this window. With
+// `window:keepinactivetabslaidout`, a tab in this set is laid out and current
+// while hidden, so switching back to it has nothing for the gate or the view
+// transition to hide (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_
+// 2026_09_24.md §6.4). A tab's FIRST reveal is still gated: its content may
+// not have mounted yet.
+const shownTabIds = new Set<string>();
+
+export function markTabShown(tabId: string): void {
+    shownTabIds.add(tabId);
+}
+
+export function tabWasShown(tabId: string): boolean {
+    return shownTabIds.has(tabId);
+}
+
+/** A closed tab's entry, dropped so the set doesn't grow over a long session
+ *  (ReAgent P2 on #3687; same reasoning as `clearLeafRevealGate`). */
+export function forgetTabShown(tabId: string): void {
+    shownTabIds.delete(tabId);
+}
+
+/** Forget every tab: called when `window:keepinactivetabslaidout` changes,
+ *  since a tab shown under the other hiding mode wasn't kept laid out while
+ *  inactive (ReAgent P2 on #3687). Each tab's next switch is gated once. */
+export function clearShownTabs(): void {
+    shownTabIds.clear();
+}
+
+/** A switch that skipped the gate; logged in the gate's own format so
+ *  `scripts/tab-switch-report.mjs` measures both kinds the same way. */
+export function logUngatedReveal(tabId: string): void {
+    console.info(`[perf] tab-reveal whole-tab target=${tabId} source=ungated settled=true elapsed=0ms`);
+}
+
 /** Hard cap on how long a gate stays up. Past this, content reveals even
  *  if the long-task stream hasn't gone quiet — protects against perma-busy
  *  content (streaming agent, etc.) holding the gate open. */
