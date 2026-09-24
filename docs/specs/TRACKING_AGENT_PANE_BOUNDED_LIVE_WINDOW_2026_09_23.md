@@ -125,6 +125,12 @@ interleaved rounds each.
 | `main` (+ 2b, 2c) | **−18 to −141 px, every append, and it stays** |
 | + 3a | **0 px in all 16 appends** |
 
+The row that migrates itself (watching buffer row 0 instead of row 10):
+**−4 px on every migration** with the first version of 3a — `.agent-document`'s
+own flex gap made the head/buffer seam two gaps (Codex P2 on #3610) — and
+**0 px** once the virtualizer cancels it (`margin-bottom: -4px`, tied to
+`ROW_GAP_PX` by a test).
+
 On `main` the shift never corrects: the migrated node is far above the
 viewport, so it is never mounted in the head, never measured, and its
 estimate error (plus the 4 px gap the head did not have) stays in the layout.
