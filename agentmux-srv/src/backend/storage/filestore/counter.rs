@@ -567,20 +567,16 @@ impl FileStore {
     /// whole-file scan, but should see the generation an append by an older
     /// build didn't change.
     pub fn catch_up_line_counter(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
-        {
-            let conn = self.conn.lock().unwrap();
-            let Some(row) = read_row(&conn, zone_id, name)? else { return Ok(None) };
-            if row.counter().is_some() || row.behind().is_none() {
-                return Ok(Some(row.state()));
-            }
-        }
-        match self.init_scan(zone_id, name)? {
+        // The scan decides on the row it reads under its own lock: a separate
+        // check first could see an epoch behind, then a rewrite land before
+        // the scan reads the row again, and the scan would count from byte 0
+        // (ReAgent on #3663).
+        match self.init_scan_from(zone_id, name, ScanFrom::CatchUpOnly)? {
             InitScan::Done(state) => Ok(state),
-            // Dropped meanwhile: this would be a full count, which isn't ours
-            // to start here.
-            InitScan::Scanned(scan) if scan.base.is_none() => self.line_state(zone_id, name),
             InitScan::Scanned(scan) => match self.init_finish(zone_id, name, scan)? {
                 Some(state) => Ok(Some(state)),
+                // Moved or rewritten during the scan: as it is now, uncounted
+                // if it can't be caught up.
                 None => self.line_state(zone_id, name),
             },
         }
@@ -590,6 +586,13 @@ impl FileStore {
     /// or, for an epoch that is only behind, from the start of its last open
     /// line.
     pub(super) fn init_scan(&self, zone_id: &str, name: &str) -> Result<InitScan, StoreError> {
+        self.init_scan_from(zone_id, name, ScanFrom::Anywhere)
+    }
+
+    /// [`Self::init_scan`], or with [`ScanFrom::CatchUpOnly`] only an epoch
+    /// that is behind is scanned; anything else is returned as it is,
+    /// uncounted, without reading the file.
+    pub(super) fn init_scan_from(&self, zone_id: &str, name: &str, from: ScanFrom) -> Result<InitScan, StoreError> {
         let (row, base, open) = {
             let conn = self.conn.lock().unwrap();
             let Some(row) = read_row(&conn, zone_id, name)? else { return Ok(InitScan::Done(None)) };
@@ -597,6 +600,9 @@ impl FileStore {
                 return Ok(InitScan::Done(Some(row.state())));
             }
             let behind = row.behind();
+            if behind.is_none() && from == ScanFrom::CatchUpOnly {
+                return Ok(InitScan::Done(Some(row.state())));
+            }
             // The open line's bytes, which the appended ones continue.
             let open = match &behind {
                 Some(b) => {
@@ -696,6 +702,16 @@ impl FileStore {
             Ok(Some(LineState { size: row.size, counted: Some(Counted { gen, lines: count.lines }) }))
         })
     }
+}
+
+/// Where [`FileStore::init_scan_from`] may start counting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ScanFrom {
+    /// From byte 0 if need be ([`FileStore::init_line_counter`]).
+    Anywhere,
+    /// Only by catching up an epoch that is behind
+    /// ([`FileStore::catch_up_line_counter`]): never a whole-file scan.
+    CatchUpOnly,
 }
 
 /// Outcome of [`FileStore::init_scan`].

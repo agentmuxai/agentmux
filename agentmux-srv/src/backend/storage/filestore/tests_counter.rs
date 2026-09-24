@@ -683,3 +683,41 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn a_catch_up_never_scans_a_file_it_cannot_catch_up() {
+    use super::counter::{InitScan, ScanFrom};
+    // ReAgent on #3663: behind when first seen, rewritten before the scan
+    // reads the row. Catch-up must not fall back to a whole-file count; the
+    // decision is made on the row the scan itself reads.
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"aaaa\nbbbb\n").unwrap();
+    old_build_append(&fs, b"cccc\n");
+    fs.write_at(ZONE, NAME, 0, b"x").unwrap(); // a rewrite: `rev` moves
+    assert!(matches!(fs.init_scan_from(ZONE, NAME, ScanFrom::CatchUpOnly).unwrap(), InitScan::Done(_)), "must not scan");
+    let state = fs.catch_up_line_counter(ZONE, NAME).unwrap().unwrap();
+    assert_eq!(state.counted, None, "nothing to catch up, and no full count started");
+    assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap().counted, None);
+    // A reader that may pay for it (line_count) still counts it.
+    assert_eq!(counted(&fs.init_line_counter(ZONE, NAME).unwrap()).1, 3);
+
+    // Legacy: no epoch at all — the same.
+    let legacy = mem();
+    uncounted(&legacy, b"a\nb\n");
+    assert!(matches!(legacy.init_scan_from(ZONE, NAME, ScanFrom::CatchUpOnly).unwrap(), InitScan::Done(_)));
+    assert_eq!(legacy.catch_up_line_counter(ZONE, NAME).unwrap().unwrap().counted, None);
+}
+
+#[test]
+fn a_catch_up_on_a_read_path_keeps_the_generation() {
+    let fs = mem();
+    fs.make_file(ZONE, NAME, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, NAME, b"a\n").unwrap();
+    let (g0, _) = counted(&fs.line_state(ZONE, NAME).unwrap());
+    old_build_append(&fs, b"b\nc\n");
+    assert_eq!(counted(&fs.catch_up_line_counter(ZONE, NAME).unwrap()), (g0.clone(), 3));
+    // Already current: returned as is.
+    assert_eq!(counted(&fs.catch_up_line_counter(ZONE, NAME).unwrap()), (g0, 3));
+    assert_eq!(fs.catch_up_line_counter(ZONE, "missing").unwrap(), None);
+}
