@@ -107,6 +107,41 @@ describe("Markdown streaming-render work invariants", () => {
     });
 
     /**
+     * `streaming` is the prop MarkdownBlock drives per commit now. Across a
+     * stream that keeps flipping it (mid-stream pauses read as "settled"),
+     * only two processors may ever exist — the final one and the plain one
+     * for the open tail — and a flip must not re-parse the frozen prefix.
+     */
+    it("flipping `streaming` builds at most two processors and re-parses only the tail", () => {
+        const run = (flip: boolean): number => {
+            __resetMarkdownRenderStats();
+            const [view, setView] = createSignal({ text: "", streaming: true });
+            const r = render(() => <Markdown text={view().text} streaming={view().streaming} scrollable={false} />);
+            const step = Math.ceil(SAMPLE.length / 20);
+            for (let i = 1; i <= 20; i++) {
+                const text = SAMPLE.slice(0, Math.min(i * step, SAMPLE.length));
+                setView({ text, streaming: true });
+                if (flip) setView({ text, streaming: false }); // a pause: settled render of the same text
+            }
+            r.unmount();
+            return __markdownRenderStats.parsedChars;
+        };
+        const steady = run(false);
+        const flipping = run(true);
+
+        expect(__markdownRenderStats.processorBuilds).toBe(2);
+        // A flip may re-parse the open tail — once more per commit, at most
+        // doubling the work. Re-parsing the frozen prefix makes it scale with
+        // the message instead (MarkdownBlock.stream-pauses.test.tsx measured
+        // 11.4x the message before this was fixed).
+        expect(
+            flipping / steady,
+            `flipping \`streaming\` every commit parsed ${flipping} chars vs ${steady} without — ` +
+                `a flip re-parsed more than the open tail`,
+        ).toBeLessThanOrEqual(2);
+    });
+
+    /**
      * Codex P2 on #3559. A completed `@@@start … @@@end` block renders as a
      * `<waveblock>` placeholder whose markdown text is identical no matter
      * what the block body holds, and MuxBlock reads its `blockmap` once at
