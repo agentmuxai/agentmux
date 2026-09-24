@@ -828,6 +828,36 @@ pub struct PersistentSubprocessController {
     /// the spawn env carried no UID (no `db_agents` row yet). See
     /// `Controller::stable_agent_uid`.
     stable_agent_uid: Mutex<Option<String>>,
+    /// Reports whatever is still deferred when this controller is dropped.
+    /// See [`DeferredDropReport`].
+    deferred_drop_report: DeferredDropReport,
+}
+
+/// The last line of defence for §4.5: whatever is still deferred when the
+/// controller goes away is reported, not silently discarded with it.
+///
+/// `stop()` and `shutdown()` drain the queue, but a sender that fetched the
+/// controller before it was unregistered can still enqueue after that drain
+/// (codex P2 on #3562). The watchdog holds only a weak reference, so it dies
+/// with the controller and cannot catch it. `stop()` cannot refuse those late
+/// senders instead: the max-runtime watchdog stops controllers that stay
+/// registered and get used again.
+///
+/// A field rather than `Drop` on the controller itself, so struct-update
+/// construction (`..c`, used throughout the tests) keeps working. Holds the
+/// controller's own `inner`; `None` only transiently inside `new()`.
+struct DeferredDropReport(Option<(String, Arc<Mutex<PersistentInner>>)>);
+
+impl Drop for DeferredDropReport {
+    fn drop(&mut self) {
+        let Some((block_id, inner)) = self.0.take() else { return };
+        // Never panic in `drop`: a poisoned lock still holds the queue.
+        let stranded: Vec<String> = match inner.lock() {
+            Ok(mut g) => g.deferred_deliveries.drain(..).collect(),
+            Err(poisoned) => poisoned.into_inner().deferred_deliveries.drain(..).collect(),
+        };
+        PersistentSubprocessController::log_stranded_deferred(&block_id, "controller dropped", &stranded);
+    }
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -1059,7 +1089,7 @@ impl PersistentSubprocessController {
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
-        Self {
+        let mut this = Self {
             tab_id,
             block_id,
             inner: Arc::new(Mutex::new(PersistentInner {
@@ -1102,7 +1132,11 @@ impl PersistentSubprocessController {
             agent_id: Mutex::new(None),
             stable_agent_id: Mutex::new(None),
             stable_agent_uid: Mutex::new(None),
-        }
+            deferred_drop_report: DeferredDropReport(None),
+        };
+        this.deferred_drop_report =
+            DeferredDropReport(Some((this.block_id.clone(), Arc::clone(&this.inner))));
+        this
     }
 
     /// Supplies the dependencies `start()`'s eager-resume path needs
