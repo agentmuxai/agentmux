@@ -84,7 +84,7 @@ impl ClaudeHistoryAdapter {
     /// junction pointing at the exact same physical location as one of the
     /// global `<shared>/...` entries, and scanning both would surface every
     /// session twice.
-    fn base_dirs(&self) -> Vec<PathBuf> {
+    fn base_dirs(&self, problems: &mut Vec<String>) -> Vec<PathBuf> {
         let mut base_dirs = Vec::new();
         let mut seen_canonical: HashSet<PathBuf> = HashSet::new();
 
@@ -95,7 +95,7 @@ impl ClaudeHistoryAdapter {
             // Legacy multi-account convention: ~/.config/claude-*/projects/
             let config_dir = home.join(".config");
             if config_dir.is_dir() {
-                if let Ok(entries) = fs::read_dir(&config_dir) {
+                if let Some(entries) = read_dir_or_note(problems, &config_dir) {
                     for entry in entries.flatten() {
                         let name = entry.file_name();
                         let name_str = name.to_string_lossy();
@@ -115,7 +115,7 @@ impl ClaudeHistoryAdapter {
         //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles, global)
         if let Some(shared) = &self.shared_dir {
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
-            if let Ok(entries) = fs::read_dir(shared.join("identities")) {
+            if let Some(entries) = read_dir_or_note(problems, &shared.join("identities")) {
                 for entry in entries.flatten() {
                     Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, entry.path().join("claude").join("projects"));
                 }
@@ -133,6 +133,7 @@ impl ClaudeHistoryAdapter {
                     &mut base_dirs,
                     &mut seen_canonical,
                     2,
+                    problems,
                 );
             }
         }
@@ -153,8 +154,9 @@ impl ClaudeHistoryAdapter {
         base_dirs: &mut Vec<PathBuf>,
         seen: &mut HashSet<PathBuf>,
         max_depth: u8,
+        problems: &mut Vec<String>,
     ) {
-        let Ok(entries) = fs::read_dir(root) else {
+        let Some(entries) = read_dir_or_note(problems, root) else {
             return;
         };
         for entry in entries.flatten() {
@@ -164,14 +166,14 @@ impl ClaudeHistoryAdapter {
             }
             let identities = path.join("identities");
             if identities.is_dir() {
-                if let Ok(id_entries) = fs::read_dir(&identities) {
+                if let Some(id_entries) = read_dir_or_note(problems, &identities) {
                     for id_entry in id_entries.flatten() {
                         Self::push_deduped_dir(base_dirs, seen, id_entry.path().join("claude").join("projects"));
                     }
                 }
             }
             if max_depth > 1 {
-                Self::scan_isolated_identities_under(&path, base_dirs, seen, max_depth - 1);
+                Self::scan_isolated_identities_under(&path, base_dirs, seen, max_depth - 1, problems);
             }
         }
     }
@@ -236,26 +238,58 @@ impl ClaudeHistoryAdapter {
     }
 }
 
+/// Record a directory or file discovery couldn't read. A path that no longer
+/// exists isn't one: it was deleted (or never created), so nothing in it was
+/// missed.
+fn note_unreadable(problems: &mut Vec<String>, path: &Path, e: &std::io::Error) {
+    if e.kind() != std::io::ErrorKind::NotFound {
+        problems.push(format!("{}: {e}", path.display()));
+    }
+}
+
+fn read_dir_or_note(problems: &mut Vec<String>, dir: &Path) -> Option<fs::ReadDir> {
+    fs::read_dir(dir).map_err(|e| note_unreadable(problems, dir, &e)).ok()
+}
+
+fn metadata_or_note(problems: &mut Vec<String>, file: &Path) -> Option<fs::Metadata> {
+    file.metadata().map_err(|e| note_unreadable(problems, file, &e)).ok()
+}
+
 impl HistoryAdapter for ClaudeHistoryAdapter {
     fn provider(&self) -> &str {
         "claude"
     }
 
     fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
-        let mut files = Vec::new();
+        self.discover().map(|found| found.files)
+    }
 
-        for base_dir in &self.base_dirs() {
+    fn discover(&self) -> Result<Discovery, HistoryError> {
+        let mut files = Vec::new();
+        let mut problems = Vec::new();
+
+        for base_dir in &self.base_dirs(&mut problems) {
             let entries = match fs::read_dir(base_dir) {
                 Ok(e) => e,
-                Err(_) => continue,
+                Err(e) => {
+                    note_unreadable(&mut problems, base_dir, &e);
+                    continue;
+                }
             };
 
-            for project_entry in entries.flatten() {
+            for project_entry in entries {
+                let project_entry = match project_entry {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        note_unreadable(&mut problems, base_dir, &e);
+                        continue;
+                    }
+                };
                 let project_path = project_entry.path();
                 if !project_path.is_dir() {
                     // Top-level .jsonl files (session files at project root level)
                     if project_path.extension().map_or(false, |e| e == "jsonl") {
-                        if let Ok(meta) = project_path.metadata() {
+                        if let Some(meta) = metadata_or_note(&mut problems, &project_path) {
                             let mtime = meta
                                 .modified()
                                 .ok()
@@ -275,9 +309,19 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
                 // These are session directories that may also contain subagents/
                 let dir_entries = match fs::read_dir(&project_path) {
                     Ok(e) => e,
-                    Err(_) => continue,
+                    Err(e) => {
+                        note_unreadable(&mut problems, &project_path, &e);
+                        continue;
+                    }
                 };
-                for file_entry in dir_entries.flatten() {
+                for file_entry in dir_entries {
+                    let file_entry = match file_entry {
+                        Ok(entry) => entry,
+                        Err(e) => {
+                            note_unreadable(&mut problems, &project_path, &e);
+                            continue;
+                        }
+                    };
                     let file_path = file_entry.path();
                     if file_path.extension().map_or(false, |e| e == "jsonl") {
                         // Skip subagent files — those are children of sessions
@@ -288,7 +332,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
                         {
                             continue;
                         }
-                        if let Ok(meta) = file_path.metadata() {
+                        if let Some(meta) = metadata_or_note(&mut problems, &file_path) {
                             let mtime = meta
                                 .modified()
                                 .ok()
@@ -306,7 +350,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
         }
 
         files.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
-        Ok(files)
+        Ok(Discovery { files, problems })
     }
 
     fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
@@ -324,6 +368,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
         let mut total_tokens: u64 = 0;
         let mut first_timestamp: i64 = 0;
         let mut last_timestamp: i64 = 0;
+        let mut starts_undated = false;
         let mut session_id = String::new();
 
         // Extract session_id from filename (stem)
@@ -385,6 +430,12 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             }
 
             let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            // A conversation record before any dated one, itself undated:
+            // the session started no later than it, and nothing says when.
+            if first_timestamp == 0 && matches!(entry_type, "user" | "assistant") {
+                starts_undated = true;
+            }
 
             // Extract model from first assistant entry
             if model == "unknown" && entry_type == "assistant" {
@@ -494,6 +545,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             total_tokens,
             subagent_count,
             identity_id: Self::identity_id_from_path(path),
+            starts_undated,
         }))
     }
 
@@ -677,6 +729,43 @@ mod tests {
         assert_eq!(session.skipped_records, 0);
     }
 
+    /// A bundle with no Claude home yet, or a root that doesn't exist, is
+    /// nothing missed — only an unreadable directory is.
+    #[test]
+    fn a_missing_directory_is_not_a_discovery_problem() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        fs::create_dir_all(shared.join("identities").join("bundle-without-claude")).unwrap();
+        let adapter = ClaudeHistoryAdapter::with_roots(
+            Some(tmp.path().join("no-such-user-home")),
+            Some(shared),
+            Some(tmp.path().join("no-such-agentmux-home")),
+        );
+        let found = adapter.discover().unwrap();
+        assert!(found.problems.is_empty(), "{:?}", found.problems);
+    }
+
+    /// A directory that exists but can't be read may hold the session being
+    /// searched for, so it's reported rather than skipped (Codex P1 on
+    /// #3693).
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_project_directory_is_a_discovery_problem() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let project = shared.join("providers").join("claude").join("projects").join("-work-locked");
+        fs::create_dir_all(&project).unwrap();
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o000)).unwrap();
+        let readable_anyway = fs::read_dir(&project).is_ok(); // root ignores modes
+        let found = ClaudeHistoryAdapter::with_roots(None, Some(shared), None).discover().unwrap();
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o755)).unwrap();
+        if readable_anyway {
+            return;
+        }
+        assert!(found.problems.iter().any(|p| p.contains("-work-locked")), "{:?}", found.problems);
+    }
+
     /// An identity bundle or a channel created after the adapter is built —
     /// an account added or switched while srv runs — must still be found.
     /// The adapter used to list these directories once, when srv started, so
@@ -780,7 +869,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert_eq!(dirs, vec![projects]);
     }
 
@@ -799,7 +888,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert_eq!(dirs, vec![projects]);
     }
 
@@ -820,7 +909,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert!(dirs.is_empty(), "must not walk past the bounded depth");
     }
 
@@ -831,7 +920,7 @@ mod tests {
 
         let mut dirs = Vec::new();
         let mut seen = HashSet::new();
-        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2, &mut Vec::new());
         assert!(dirs.is_empty());
     }
 }

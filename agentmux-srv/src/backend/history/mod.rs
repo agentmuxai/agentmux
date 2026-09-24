@@ -231,10 +231,12 @@ impl HistoryService {
     /// An incremental refresh re-lists the transcript directories and
     /// re-parses only files whose mtime moved: 51,671 files stat'd in 2.7 s on
     /// one heavy host (2026-09-24), far less on most. A refresh already
-    /// running is waited for and then followed by this search's own, since it
-    /// may have started before this search's sessions were written. Only the
+    /// running is waited for and then followed by this search's own (unless
+    /// another search's refresh began after this one did), since it may have
+    /// started before this search's sessions were written. Only the
     /// very first build answers "still building" instead of waiting: it reads
     /// every transcript once and would outlast the MCP's 10 s timeout.
+    /// Concurrent searches share refreshes ([`SessionIndex::refresh_covering_now`]).
     fn refresh_for_search(&self) -> Result<(), HistorySearchError> {
         if self.index.refreshed_at_ms() == 0 {
             return match self.index.try_refresh() {
@@ -242,7 +244,7 @@ impl HistoryService {
                 None => Err(HistorySearchError::IndexBuilding),
             };
         }
-        self.index.refresh();
+        self.index.refresh_covering_now();
         Ok(())
     }
 
@@ -417,14 +419,20 @@ impl HistoryService {
 
         // A session last written before `since` holds nothing after it, and
         // one started after `until` holds nothing before it. An unknown start
-        // (0) can't rule a session out.
+        // — no timestamp at all, or an undated record before the first dated
+        // one — can't rule a session out.
         let in_window: Vec<SessionMeta> = all
             .into_iter()
             .filter(|s| opts.since_ms.is_none_or(|since| s.modified_at >= since))
-            .filter(|s| opts.until_ms.is_none_or(|until| s.created_at == 0 || s.created_at <= until))
+            .filter(|s| {
+                opts.until_ms
+                    .is_none_or(|until| s.created_at == 0 || s.starts_undated || s.created_at <= until)
+            })
             .collect();
 
-        Ok(self.index.search_sessions(&in_window, opts))
+        let mut outcome = self.index.search_sessions(&in_window, opts);
+        outcome.add_discovery_errors(self.index.discovery_problems());
+        Ok(outcome)
     }
 
     /// This agent's own sessions — the actual "fast Conversation History
@@ -534,6 +542,76 @@ mod search_freshness_tests {
         assert!(svc.index.refreshed_at_ms() > 0);
     }
 
+    fn real_service(shared: &std::path::Path) -> HistoryService {
+        HistoryService::from_index(SessionIndex::with_isolated_roots(
+            vec![Box::new(ClaudeHistoryAdapter::with_roots(None, Some(shared.to_path_buf()), None))],
+            vec![],
+        ))
+    }
+
+    fn owner_in(dir: &str) -> HistoryOwner {
+        HistoryOwner { definition_id: "agent-a".into(), working_directory: Some(dir.into()) }
+    }
+
+    /// A transcript whose first message carries no timestamp: its session
+    /// start (the first dated record) is after `until`, but the undated
+    /// message may not be, and the message-level window keeps undated
+    /// messages. Dropping the whole session on its start made the two
+    /// disagree and could answer "complete, no hits" (Codex P2 on #3693).
+    #[test]
+    fn a_session_starting_with_an_undated_message_stays_in_the_until_window() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let shared = tmp.path().join("shared");
+        let project = shared.join("providers").join("claude").join("projects").join("-work-a");
+        std::fs::create_dir_all(&project).unwrap();
+        let undated = r#"{"type":"user","message":{"role":"user","content":"undated question"},"cwd":"/work/a"}"#;
+        let dated = r#"{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"answered"}]},"timestamp":"2026-09-24T12:00:00Z","cwd":"/work/a"}"#;
+        std::fs::write(project.join("s.jsonl"), format!("{undated}\n{dated}\n")).unwrap();
+        let svc = real_service(&shared);
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let until = chrono::DateTime::parse_from_rfc3339("2026-09-24T11:00:00Z").unwrap().timestamp_millis();
+        let opts = index::HistorySearchOptions {
+            query: "undated question".into(),
+            limit: 50,
+            until_ms: Some(until),
+            ..Default::default()
+        };
+        let out = svc.search_for_agent(&store, &owner_in("/work/a"), &opts).unwrap();
+        assert_eq!(out.hits.len(), 1, "{out:?}");
+    }
+
+    /// Discovery that couldn't read somewhere may have missed the session
+    /// being searched for, so the answer isn't complete (Codex P1 on #3693).
+    #[test]
+    fn a_search_over_a_snapshot_with_discovery_problems_is_not_complete() {
+        struct Unreadable;
+        impl HistoryAdapter for Unreadable {
+            fn provider(&self) -> &str {
+                "mock"
+            }
+            fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+                Ok(Vec::new())
+            }
+            fn discover(&self) -> Result<Discovery, HistoryError> {
+                Ok(Discovery { files: Vec::new(), problems: vec!["/x/projects: Access is denied".into()] })
+            }
+            fn extract_meta(&self, _: &str) -> Result<Option<SessionMeta>, HistoryError> {
+                Ok(None)
+            }
+            fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+                Ok(None)
+            }
+        }
+        let svc = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![Box::new(Unreadable)], vec![]));
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let opts = index::HistorySearchOptions { query: "anything".into(), limit: 50, ..Default::default() };
+        let out = svc.search_for_agent(&store, &owner_in("/work/a"), &opts).unwrap();
+        assert!(out.hits.is_empty());
+        assert!(!out.complete, "{out:?}");
+        assert_eq!(out.incomplete_reasons, vec!["discovery_errors"]);
+        assert!(out.discovery_errors.iter().any(|p| p.contains("Access is denied")), "{out:?}");
+    }
+
     /// A session written moments after one search is found by the next. A
     /// snapshot reused because it was "fresh enough" (under 30 s old, or
     /// another refresh running) answered `complete: true` without it — the
@@ -630,6 +708,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1351,6 +1430,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {

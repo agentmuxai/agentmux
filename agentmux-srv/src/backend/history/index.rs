@@ -80,7 +80,7 @@ pub struct HistorySearchOutcome {
     /// says why.
     pub complete: bool,
     /// `"hit_limit"`, `"max_sessions"`, `"unreadable_sessions"`,
-    /// `"unreadable_records"`.
+    /// `"unreadable_records"`, `"discovery_errors"`.
     pub incomplete_reasons: Vec<&'static str>,
     /// Candidates `max_sessions` left unopened.
     pub sessions_skipped: u32,
@@ -88,6 +88,28 @@ pub struct HistorySearchOutcome {
     pub sessions_unreadable: Vec<UnreadableSession>,
     /// Candidates searched, but with records that could not be read.
     pub sessions_partly_read: Vec<UnreadableSession>,
+    /// What the index refresh behind this search couldn't read. A session
+    /// there may be missing from the candidates.
+    pub discovery_errors: Vec<String>,
+}
+
+/// At most this many discovery errors are listed in a search's answer.
+const DISCOVERY_ERRORS_LISTED: usize = 20;
+
+impl HistorySearchOutcome {
+    /// Record that the snapshot this search read couldn't see everything.
+    pub fn add_discovery_errors(&mut self, problems: Vec<String>) {
+        if problems.is_empty() {
+            return;
+        }
+        let total = problems.len();
+        self.discovery_errors = problems.into_iter().take(DISCOVERY_ERRORS_LISTED).collect();
+        if total > DISCOVERY_ERRORS_LISTED {
+            self.discovery_errors.push(format!("… and {} more", total - DISCOVERY_ERRORS_LISTED));
+        }
+        self.incomplete_reasons.push("discovery_errors");
+        self.complete = false;
+    }
 }
 
 /// A candidate session the search could not read.
@@ -340,6 +362,16 @@ pub struct SessionIndex {
     pub(super) refresh_lock: Mutex<()>,
     /// Unix ms when the last refresh finished; 0 = never.
     refreshed_at_ms: std::sync::atomic::AtomicI64,
+    /// Refreshes started so far; each takes the next number, under
+    /// `refresh_lock`, before it lists anything.
+    refreshes_started: std::sync::atomic::AtomicU64,
+    /// The number of the last refresh that finished. A request that finds it
+    /// higher than `refreshes_started` was when the request began knows a
+    /// refresh listed the disk after it began — see [`Self::refresh_covering_now`].
+    last_finished_refresh: std::sync::atomic::AtomicU64,
+    /// What the last refresh couldn't read (see [`Discovery::problems`]),
+    /// kept with the snapshot it produced.
+    discovery_problems: Mutex<Vec<String>>,
     /// Adapters for all registered providers
     adapters: Vec<Box<dyn HistoryAdapter>>,
     /// Roots under which destructive ops (delete/clear) are allowed.
@@ -363,6 +395,9 @@ impl SessionIndex {
             meta_cache: Mutex::new(HashMap::new()),
             refresh_lock: Mutex::new(()),
             refreshed_at_ms: std::sync::atomic::AtomicI64::new(0),
+            refreshes_started: std::sync::atomic::AtomicU64::new(0),
+            last_finished_refresh: std::sync::atomic::AtomicU64::new(0),
+            discovery_problems: Mutex::new(Vec::new()),
             adapters,
             isolated_roots,
         }
@@ -397,7 +432,33 @@ impl SessionIndex {
         self.refresh_holding(guard)
     }
 
+    /// Make the snapshot include every session on disk when this call began,
+    /// sharing the work with concurrent callers. A refresh that started after
+    /// this call began already listed everything this call needs, so once it
+    /// has finished there's nothing left to do; otherwise this runs its own.
+    /// However many searches arrive together, that's at most two walks —
+    /// every search running its own, one after another, put the fourth past
+    /// the MCP's 10 s timeout on a heavy host (Codex P1 on #3693).
+    pub fn refresh_covering_now(&self) {
+        use std::sync::atomic::Ordering;
+        let started_before_this_call = self.refreshes_started.load(Ordering::Acquire);
+        let guard = self.refresh_lock.lock().unwrap_or_else(|p| p.into_inner());
+        if self.last_finished_refresh.load(Ordering::Acquire) > started_before_this_call {
+            return;
+        }
+        self.refresh_holding(guard);
+    }
+
+    /// What the last refresh couldn't read — a session there may be missing
+    /// from the snapshot.
+    pub fn discovery_problems(&self) -> Vec<String> {
+        self.discovery_problems.lock().unwrap().clone()
+    }
+
     fn refresh_holding(&self, _refreshing: std::sync::MutexGuard<'_, ()>) -> (u32, u32, u32) {
+        use std::sync::atomic::Ordering;
+        let this_refresh = self.refreshes_started.fetch_add(1, Ordering::AcqRel) + 1;
+        let mut problems: Vec<String> = Vec::new();
         let mut discovered: u32 = 0;
         let mut updated: u32 = 0;
         let mut new_count: u32 = 0;
@@ -409,14 +470,18 @@ impl SessionIndex {
         let mut new_by_working_dir: HashMap<String, Vec<String>> = HashMap::new();
 
         for adapter in &self.adapters {
-            let files = match adapter.discover_files() {
-                Ok(f) => f,
+            let files = match adapter.discover() {
+                Ok(found) => {
+                    problems.extend(found.problems);
+                    found.files
+                }
                 Err(e) => {
                     tracing::warn!(
                         "history: failed to discover {} files: {}",
                         adapter.provider(),
                         e
                     );
+                    problems.push(format!("{} discovery failed: {e}", adapter.provider()));
                     continue;
                 }
             };
@@ -454,6 +519,9 @@ impl SessionIndex {
                             file.file_path,
                             e
                         );
+                        // A transcript that couldn't be indexed is missing
+                        // from the snapshot, whoever it belongs to.
+                        problems.push(format!("{}: {e}", file.file_path));
                     }
                 }
             }
@@ -474,10 +542,15 @@ impl SessionIndex {
         *self.by_working_dir.lock().unwrap() = new_by_working_dir;
         drop(sessions);
         *self.meta_cache.lock().unwrap() = new_cache;
+        if !problems.is_empty() {
+            tracing::warn!(count = problems.len(), first = %problems[0], "history: discovery couldn't read everything");
+        }
+        *self.discovery_problems.lock().unwrap() = problems;
         self.refreshed_at_ms.store(
             chrono::Utc::now().timestamp_millis().max(1),
-            std::sync::atomic::Ordering::Release,
+            Ordering::Release,
         );
+        self.last_finished_refresh.store(this_refresh, Ordering::Release);
 
         (discovered, updated, new_count)
     }
@@ -769,6 +842,7 @@ impl SessionIndex {
             sessions_skipped,
             sessions_unreadable,
             sessions_partly_read,
+            discovery_errors: Vec::new(),
         }
     }
 
@@ -887,6 +961,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1232,6 +1307,7 @@ mod tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: String::new(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, file_path: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1649,6 +1725,7 @@ mod refresh_tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: String::new(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -1714,5 +1791,108 @@ mod refresh_tests {
         let idx = index_over(&a);
         assert!(idx.try_refresh().is_some());
         assert!(idx.get_meta("a").is_some());
+    }
+
+    /// Discovery that walks slowly and counts its walks.
+    struct SlowAdapter {
+        walks: std::sync::atomic::AtomicUsize,
+    }
+
+    impl HistoryAdapter for Arc<SlowAdapter> {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            self.walks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Ok(Vec::new())
+        }
+        fn extract_meta(&self, _: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            Ok(None)
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    /// Searches arriving together share refreshes: a refresh that started
+    /// after a request began already lists everything that existed when it
+    /// began. Every search running its own full walk, one after another,
+    /// put the fourth past the MCP's 10 s timeout on a heavy host (Codex P1
+    /// on #3693).
+    #[test]
+    fn concurrent_searches_share_refreshes() {
+        let a = Arc::new(SlowAdapter { walks: Default::default() });
+        let idx = Arc::new(SessionIndex::with_isolated_roots(vec![Box::new(a.clone())], vec![]));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let (idx, barrier) = (idx.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    idx.refresh_covering_now();
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let walks = a.walks.load(std::sync::atomic::Ordering::SeqCst);
+        assert!((1..=2).contains(&walks), "8 simultaneous searches walked {walks} times");
+    }
+
+    /// …but a refresh that finished before the request began may have
+    /// missed a session written since, so it's never reused.
+    #[test]
+    fn a_refresh_finished_before_the_request_is_not_reused() {
+        let a = Arc::new(SlowAdapter { walks: Default::default() });
+        let idx = SessionIndex::with_isolated_roots(vec![Box::new(a.clone())], vec![]);
+        idx.refresh();
+        idx.refresh_covering_now();
+        assert_eq!(a.walks.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    /// Discovery that reports what it couldn't look at.
+    struct ProblemAdapter {
+        problems: Mutex<Vec<String>>,
+    }
+
+    impl HistoryAdapter for Arc<ProblemAdapter> {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            Ok(vec![DiscoveredFile { file_path: "/h/locked.jsonl".into(), mtime_ms: 1 }])
+        }
+        fn discover(&self) -> Result<Discovery, HistoryError> {
+            Ok(Discovery { files: self.discover_files()?, problems: self.problems.lock().unwrap().clone() })
+        }
+        fn extract_meta(&self, _: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            Err(HistoryError::Other("sharing violation".into()))
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    /// A directory the walk couldn't read, or a transcript it couldn't index,
+    /// may hold the very session being searched for. Both are kept with the
+    /// snapshot so a search over it can't claim to be complete (Codex P1 on
+    /// #3693).
+    #[test]
+    fn what_discovery_could_not_read_is_kept_with_the_snapshot() {
+        let a = Arc::new(ProblemAdapter { problems: Mutex::new(vec!["/h/private: Access is denied".into()]) });
+        let idx = SessionIndex::with_isolated_roots(vec![Box::new(a.clone())], vec![]);
+        idx.refresh();
+        let problems = idx.discovery_problems();
+        assert!(problems.iter().any(|p| p.contains("/h/private")), "{problems:?}");
+        assert!(
+            problems.iter().any(|p| p.contains("locked.jsonl") && p.contains("sharing violation")),
+            "a transcript that couldn't be indexed is a problem too: {problems:?}"
+        );
+
+        a.problems.lock().unwrap().clear();
+        idx.refresh();
+        assert_eq!(idx.discovery_problems().len(), 1, "each refresh replaces the last one's problems");
     }
 }
