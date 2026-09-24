@@ -3821,4 +3821,21 @@ async fn a_held_delivery_keeps_its_verdict_and_shows_it_was_held() {
     assert!(text.contains(&format!("TS={}", sent_at_ms / 1000)), "original send time: {text}");
     let audit = handler.get_audit_log(1);
     assert_eq!(audit[0].outcome.as_deref(), Some("held_delivered"));
+
+    // Held rows are host-tier only, so a stored reagent verdict is never
+    // replayed — it can't turn into SIG=invalid for want of its key id.
+    delivered.lock().unwrap().clear();
+    let with_reagent = crate::backend::storage::jekt_held::HeldJekt {
+        request_id: "req-heldz-rg".into(),
+        sig_verified: Some(true),
+        reagent_verified: Some(true),
+        ..row.clone()
+    };
+    let req = crate::server::jekt_held::request_from_held(&with_reagent);
+    assert_eq!(req.reagent_verified, None);
+    let resp = handler.inject_held(req);
+    assert!(resp.success, "{:?}", resp.error);
+    let text = delivered.lock().unwrap().join("");
+    assert!(!text.contains("SIG="), "{text}");
+    assert!(text.contains("TRUST=host-verified"), "{text}");
 }
