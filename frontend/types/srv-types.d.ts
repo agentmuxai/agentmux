@@ -1133,6 +1133,7 @@ declare global {
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;
         "agent:askquestiontimeoutms"?: number;
+        "agent:turnscopedtail"?: boolean;
     };
 
     // waveobj.StickerClickOptsType
