@@ -10,6 +10,7 @@
 //! - Background flusher via `tokio::spawn` + `tokio::time::interval`.
 
 mod cache;
+mod checkpointer;
 mod core;
 mod counter;
 mod ijson;

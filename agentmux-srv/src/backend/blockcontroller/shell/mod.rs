@@ -49,3 +49,5 @@ pub(crate) use indexing::{
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_transcript;
