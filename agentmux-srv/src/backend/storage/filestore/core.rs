@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use super::cache::CacheEntry;
 use super::types::{FileMeta, FileOpts, MuxFile};
@@ -121,6 +121,29 @@ impl FileStore {
         agentmux_common::time::now_ms()
     }
 
+    /// Run `f` as one `BEGIN IMMEDIATE` transaction: committed if it returns
+    /// `Ok`, rolled back otherwise. Every mutation goes through here.
+    ///
+    /// The in-process mutex only serializes this process. The global
+    /// transcript store is one database file opened by every srv instance on
+    /// the machine, so a multi-statement write (read the size, write the parts,
+    /// update the size) outside a transaction can interleave with another
+    /// process's and overwrite its bytes, and a failure part-way leaves a torn
+    /// file. `IMMEDIATE` takes the write lock up front, so reads inside `f` see
+    /// the state `f` writes on top of; `busy_timeout` makes another process
+    /// wait rather than fail. Callers update the in-process cache only after
+    /// this returns `Ok`.
+    pub(super) fn write_txn<T>(
+        &self,
+        f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let out = f(&tx)?;
+        tx.commit()?;
+        Ok(out)
+    }
+
     /// Evict the least-recently-used cache entries until `cache_total_bytes <= cache_max_bytes`.
     /// Must be called with *neither* `cache` nor `cache_total_bytes` lock held.
     pub(super) fn evict_to_cap(&self) {
@@ -194,25 +217,29 @@ impl FileStore {
             meta,
         };
 
-        let conn = self.conn.lock().unwrap();
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
-                params![zone_id, name],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
-
-        if exists {
-            return Err(StoreError::AlreadyExists);
-        }
-
         let opts_json = serde_json::to_string(&file.opts)?;
         let meta_json = serde_json::to_string(&file.meta)?;
-        conn.execute(
-            "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![file.zoneid, file.name, file.size, file.createdts, file.modts, opts_json, meta_json],
-        )?;
+        // Check and insert in one transaction: two processes creating the same
+        // file must see one success and one AlreadyExists, not a raw
+        // primary-key error (which callers treat as fatal and skip the write).
+        self.write_txn(|tx| {
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, name],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if exists {
+                return Err(StoreError::AlreadyExists);
+            }
+            tx.execute(
+                "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![file.zoneid, file.name, file.size, file.createdts, file.modts, opts_json, meta_json],
+            )?;
+            Ok(())
+        })?;
 
         // Add to cache
         let key = (zone_id.to_string(), name.to_string());
@@ -236,16 +263,17 @@ impl FileStore {
     /// Delete a file and all its data parts.
     #[allow(dead_code)]
     pub fn delete_file(&self, zone_id: &str, name: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
-            params![zone_id, name],
-        )?;
-        conn.execute(
-            "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
-            params![zone_id, name],
-        )?;
-        drop(conn);
+        self.write_txn(|tx| {
+            tx.execute(
+                "DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                params![zone_id, name],
+            )?;
+            tx.execute(
+                "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
+                params![zone_id, name],
+            )?;
+            Ok(())
+        })?;
 
         // Remove from cache
         let key = (zone_id.to_string(), name.to_string());
@@ -261,24 +289,25 @@ impl FileStore {
     /// Delete all files in a zone.
     #[allow(dead_code)]
     pub fn delete_zone(&self, zone_id: &str) -> Result<(), StoreError> {
-        // Get file names first for cache cleanup
-        let names: Vec<String> = {
-            let conn = self.conn.lock().unwrap();
-            let mut stmt = conn.prepare("SELECT name FROM db_wave_file WHERE zoneid = ?1")?;
-            let rows = stmt.query_map(params![zone_id], |row| row.get(0))?;
-            rows.filter_map(|r| r.ok()).collect()
-        };
-
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM db_wave_file WHERE zoneid = ?1",
-            params![zone_id],
-        )?;
-        conn.execute(
-            "DELETE FROM db_file_data WHERE zoneid = ?1",
-            params![zone_id],
-        )?;
-        drop(conn);
+        // The names (for cache cleanup) and both deletes in one transaction,
+        // so a file another process creates meanwhile is either deleted and
+        // listed, or neither.
+        let names: Vec<String> = self.write_txn(|tx| {
+            let names = {
+                let mut stmt = tx.prepare("SELECT name FROM db_wave_file WHERE zoneid = ?1")?;
+                let rows = stmt.query_map(params![zone_id], |row| row.get(0))?;
+                rows.collect::<Result<Vec<String>, _>>()?
+            };
+            tx.execute(
+                "DELETE FROM db_wave_file WHERE zoneid = ?1",
+                params![zone_id],
+            )?;
+            tx.execute(
+                "DELETE FROM db_file_data WHERE zoneid = ?1",
+                params![zone_id],
+            )?;
+            Ok(names)
+        })?;
 
         let mut cache = self.cache.lock().unwrap();
         let mut freed = 0usize;
@@ -347,39 +376,37 @@ impl FileStore {
         // Split data into parts
         let parts = Self::split_into_parts(data);
 
-        // Write directly to DB (write-through for full writes, matching Go's WriteFile)
-        let conn = self.conn.lock().unwrap();
-
-        // Verify file exists
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
-                params![zone_id, name],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
-        if !exists {
-            return Err(StoreError::NotFound);
-        }
-
-        // Update file size
-        conn.execute(
-            "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-            params![data.len() as i64, now, zone_id, name],
-        )?;
-
-        // Replace all data parts
-        conn.execute(
-            "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
-            params![zone_id, name],
-        )?;
-        for (idx, part_data) in parts.iter().enumerate() {
-            conn.execute(
-                "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, idx as i32, part_data],
+        // Write directly to DB (write-through for full writes, matching Go's
+        // WriteFile), in one transaction: a failure part-way keeps the old
+        // content instead of a new size over half-written parts.
+        self.write_txn(|tx| {
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, name],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !exists {
+                return Err(StoreError::NotFound);
+            }
+            tx.execute(
+                "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                params![data.len() as i64, now, zone_id, name],
             )?;
-        }
-        drop(conn);
+            tx.execute(
+                "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
+                params![zone_id, name],
+            )?;
+            for (idx, part_data) in parts.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                    params![zone_id, name, idx as i32, part_data],
+                )?;
+            }
+            Ok(())
+        })?;
 
         // Update cache (metadata only — data parts are already in DB, read_file loads from DB)
         {
@@ -490,71 +517,75 @@ impl FileStore {
         let key = (zone_id.to_string(), name.to_string());
         let now = Self::now_ms();
 
-        // Size read + writes under the same lock (self.stat would
-        // re-acquire this non-reentrant mutex, hence the direct query).
-        let conn = self.conn.lock().unwrap();
-        let file_size: i64 = match conn.query_row(
-            "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
-            params![zone_id, name],
-            |row| row.get(0),
-        ) {
-            Ok(s) => s,
-            Err(rusqlite::Error::QueryReturnedNoRows) => return Err(StoreError::NotFound),
-            Err(e) => return Err(e.into()),
-        };
-        if data.is_empty() {
-            return Ok(file_size);
-        }
-        let new_size = file_size + data.len() as i64;
-
-        // Figure out which part to start writing at
-        let start_offset = file_size;
-        let start_part = (start_offset / PART_DATA_SIZE as i64) as i32;
-        let offset_in_part = (start_offset % PART_DATA_SIZE as i64) as usize;
-        let mut data_offset = 0usize;
-        let mut current_part = start_part;
-
-        if offset_in_part > 0 {
-            // Load existing partial part
-            let existing: Option<Vec<u8>> = conn
+        // Size read + writes in one transaction (self.stat would re-acquire
+        // this non-reentrant mutex, and could answer from a cache another
+        // process has made stale — hence the direct query).
+        let (start_offset, new_size) = self.write_txn(|tx| {
+            let file_size: i64 = tx
                 .query_row(
-                    "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
-                    params![zone_id, name, start_part],
+                    "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, name],
                     |row| row.get(0),
                 )
-                .ok();
+                .optional()?
+                .ok_or(StoreError::NotFound)?;
+            if data.is_empty() {
+                return Ok((file_size, None));
+            }
+            let new_size = file_size + data.len() as i64;
 
-            let mut part_data = existing.unwrap_or_default();
-            let space = PART_DATA_SIZE - part_data.len();
-            let to_copy = space.min(data.len());
-            part_data.extend_from_slice(&data[..to_copy]);
-            data_offset = to_copy;
+            // Figure out which part to start writing at
+            let start_offset = file_size;
+            let start_part = (start_offset / PART_DATA_SIZE as i64) as i32;
+            let offset_in_part = (start_offset % PART_DATA_SIZE as i64) as usize;
+            let mut data_offset = 0usize;
+            let mut current_part = start_part;
 
-            conn.execute(
-                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, current_part, part_data],
+            if offset_in_part > 0 {
+                // Load the existing partial part. Keep only the bytes the size
+                // covers: anything past it is not file content.
+                let mut part_data: Vec<u8> = tx
+                    .query_row(
+                        "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                        params![zone_id, name, start_part],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or_default();
+                part_data.resize(offset_in_part, 0);
+                let space = PART_DATA_SIZE - part_data.len();
+                let to_copy = space.min(data.len());
+                part_data.extend_from_slice(&data[..to_copy]);
+                data_offset = to_copy;
+
+                tx.execute(
+                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                    params![zone_id, name, current_part, part_data],
+                )?;
+                current_part += 1;
+            }
+
+            // Write remaining full parts
+            while data_offset < data.len() {
+                let end = (data_offset + PART_DATA_SIZE).min(data.len());
+                let part_data = &data[data_offset..end];
+                tx.execute(
+                    "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                    params![zone_id, name, current_part, part_data],
+                )?;
+                data_offset = end;
+                current_part += 1;
+            }
+
+            tx.execute(
+                "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                params![new_size, now, zone_id, name],
             )?;
-            current_part += 1;
-        }
-
-        // Write remaining full parts
-        while data_offset < data.len() {
-            let end = (data_offset + PART_DATA_SIZE).min(data.len());
-            let part_data = &data[data_offset..end];
-            conn.execute(
-                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                params![zone_id, name, current_part, part_data],
-            )?;
-            data_offset = end;
-            current_part += 1;
-        }
-
-        // Update file size
-        conn.execute(
-            "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-            params![new_size, now, zone_id, name],
-        )?;
-        drop(conn);
+            Ok((start_offset, Some(new_size)))
+        })?;
+        let Some(new_size) = new_size else {
+            return Ok(start_offset);
+        };
 
         // Update cache
         {
@@ -594,29 +625,38 @@ impl FileStore {
         let key = (zone_id.to_string(), name.to_string());
         let now = Self::now_ms();
 
-        let file = self.stat(zone_id, name)?.ok_or(StoreError::NotFound)?;
-
-        let new_meta = if merge {
-            let mut merged = file.meta.clone();
-            for (k, v) in meta {
-                if v.is_null() {
-                    merged.remove(&k);
-                } else {
-                    merged.insert(k, v);
+        // Merge base read from the database in the same transaction as the
+        // update, not from `stat` — this process's cached row can predate
+        // another process's write, and merging onto it would drop that write.
+        let new_meta = self.write_txn(|tx| {
+            let current: String = tx
+                .query_row(
+                    "SELECT meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, name],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or(StoreError::NotFound)?;
+            let new_meta = if merge {
+                let mut merged: FileMeta = serde_json::from_str(&current).unwrap_or_default();
+                for (k, v) in meta {
+                    if v.is_null() {
+                        merged.remove(&k);
+                    } else {
+                        merged.insert(k, v);
+                    }
                 }
-            }
-            merged
-        } else {
-            meta
-        };
-
-        let meta_json = serde_json::to_string(&new_meta)?;
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE db_wave_file SET meta = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
-            params![meta_json, now, zone_id, name],
-        )?;
-        drop(conn);
+                merged
+            } else {
+                meta
+            };
+            let meta_json = serde_json::to_string(&new_meta)?;
+            tx.execute(
+                "UPDATE db_wave_file SET meta = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                params![meta_json, now, zone_id, name],
+            )?;
+            Ok(new_meta)
+        })?;
 
         // Update cache (metadata write doesn't change file.size, so cached_size_bytes unchanged)
         let mut cache = self.cache.lock().unwrap();
@@ -721,20 +761,21 @@ impl FileStore {
 
             if let Some(entry) = entry {
                 if let Some(ref file) = entry.file {
-                    let conn = self.conn.lock().unwrap();
                     let meta_json = serde_json::to_string(&file.meta)?;
-                    conn.execute(
-                        "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3 WHERE zoneid = ?4 AND name = ?5",
-                        params![file.size, file.modts, meta_json, file.zoneid, file.name],
-                    )?;
-
-                    for data_entry in entry.data_entries.values() {
-                        conn.execute(
-                            "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
-                            params![file.zoneid, file.name, data_entry.part_idx, data_entry.data],
+                    self.write_txn(|tx| {
+                        tx.execute(
+                            "UPDATE db_wave_file SET size = ?1, modts = ?2, meta = ?3 WHERE zoneid = ?4 AND name = ?5",
+                            params![file.size, file.modts, meta_json, file.zoneid, file.name],
                         )?;
-                        parts_flushed += 1;
-                    }
+                        for data_entry in entry.data_entries.values() {
+                            tx.execute(
+                                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                                params![file.zoneid, file.name, data_entry.part_idx, data_entry.data],
+                            )?;
+                        }
+                        Ok(())
+                    })?;
+                    parts_flushed += entry.data_entries.len();
                     files_flushed += 1;
                 }
             }
