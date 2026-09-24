@@ -369,11 +369,13 @@ impl PolicyState {
                     if existing.notification.kind.rank() > req.kind.rank() {
                         return out;
                     }
-                    // The same condition reported again — e.g. srv detected
-                    // the question and then the renderer mounts the pane and
-                    // reports it too. Idempotent: no retract, no re-debounce
-                    // (Codex P2 on #3662). Only fill a body we didn't have.
-                    if existing.notification.kind == req.kind {
+                    // The same question reported again — srv detected it, then
+                    // the renderer mounts the pane and reports it too (the one
+                    // kind with two reporters). Idempotent: no retract, no
+                    // re-debounce; only fill a body we didn't have. Other kinds
+                    // are distinct events (a second crash is news) and replace
+                    // as before (Codex P2s on #3662).
+                    if existing.notification.kind == req.kind && req.kind == NotifyKind::InputWaiting {
                         if existing.notification.body.is_none() && s.preview != Preview::None {
                             existing.notification.body = req.body;
                         }
@@ -881,6 +883,19 @@ mod tests {
         let n = shows(&p.step(Input::Tick, 36_000, &s)).into_iter().cloned().collect::<Vec<_>>();
         assert_eq!(n.len(), 1, "due at 36s from the FIRST report");
         assert_eq!(n[0].body.as_deref(), Some("Which branch?"));
+    }
+
+    #[test]
+    fn a_second_crash_is_news_not_a_duplicate() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req_b(NotifyKind::AgentCrashed, "b1")), 0, &s);
+        let first = shows(&p.step(Input::Tick, 10_000, &s))[0].clone();
+        let a = p.step(Input::Emit(req_b(NotifyKind::AgentCrashed, "b1")), 60_000, &s);
+        assert_eq!(retracts(&a), 1, "old toast pulled for the new crash");
+        let second = shows(&p.step(Input::Tick, 70_000, &s))[0].clone();
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.tag, second.tag);
     }
 
     #[test]
