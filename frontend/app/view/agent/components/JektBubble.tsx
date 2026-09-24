@@ -37,6 +37,16 @@ function formatTimestamp(ts: number): string {
     return new Date(ts).toLocaleString();
 }
 
+/** "45 s", "12 min", "3 h 5 min" — how long a held jekt waited. */
+function formatHeldFor(secs: number): string {
+    if (secs < 60) return `${secs} s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
+}
+
 export const JektBubble = (props: JektBubbleProps): JSX.Element => {
     // Don't destructure props — see AgentMessageBlock/MarkdownBlock
     // for why (codex P1 on PR #786 + family of virt-redesign issues).
@@ -103,6 +113,14 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                         <span class="agent-jekt-meta-item">Trust: {props.node.trust}</span>
                         <span class="agent-jekt-meta-item">Priority: {props.node.priority}</span>
                         <span class="agent-jekt-meta-item">{formatTimestamp(props.node.timestamp)}</span>
+                        <Show when={props.node.heldForSecs !== undefined}>
+                            <span
+                                class="agent-jekt-meta-item"
+                                title="The recipient was not running; this was held and delivered when it started"
+                            >
+                                Held for {formatHeldFor(props.node.heldForSecs ?? 0)}
+                            </span>
+                        </Show>
                     </div>
                     <details class="agent-jekt-raw">
                         <summary>Raw payload</summary>
