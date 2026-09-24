@@ -213,19 +213,30 @@ fn identifier(token: &str) -> Option<String> {
         let has_host = t.split_once("://").is_some_and(|(_, rest)| !rest.is_empty());
         return has_host.then(|| t.to_string());
     }
-    // `#3671` or `owner/repo#3671`.
+    // `#3671` or `owner/repo#3671`. Anything else with a `#` falls through,
+    // so `docs/spec.md#section` is still seen as a path.
     if let Some((repo, num)) = t.rsplit_once('#') {
         let repo_ok = repo.is_empty()
             || (repo.split('/').count() == 2 && repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)));
-        return (repo_ok && (2..=7).contains(&num.len()) && num.chars().all(|c| c.is_ascii_digit())).then(|| t.to_string());
+        if repo_ok && (2..=7).contains(&num.len()) && num.chars().all(|c| c.is_ascii_digit()) {
+            return Some(t.to_string());
+        }
     }
-    // A path: has a directory and a file extension. A trailing `:123` line
-    // number is dropped.
-    let path = t.split_once(':').map_or(t, |(p, rest)| if rest.chars().all(|c| c.is_ascii_digit() || c == '-') { p } else { t });
+    // A path: a directory, then a file name with a stem and an extension that
+    // has a letter (so `12/34.56` isn't one). A `#anchor` or a trailing `:123`
+    // line number is dropped.
+    let path = t.split_once('#').map_or(t, |(p, _)| p);
+    let path = path.split_once(':').map_or(path, |(p, rest)| if rest.chars().all(|c| c.is_ascii_digit() || c == '-') { p } else { path });
     if path.contains('/') && !path.starts_with('/') && !path.contains("//") {
-        let ext = path.rsplit('/').next().and_then(|name| name.rsplit_once('.')).map(|(_, e)| e);
+        let name = path.rsplit('/').next().and_then(|name| name.rsplit_once('.'));
         let chars_ok = path.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
-        if chars_ok && ext.is_some_and(|e| (1..=6).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric())) {
+        let name_ok = name.is_some_and(|(stem, ext)| {
+            !stem.is_empty()
+                && (1..=6).contains(&ext.len())
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+                && ext.chars().any(|c| c.is_ascii_alphabetic())
+        });
+        if chars_ok && name_ok {
             return Some(path.to_string());
         }
     }
@@ -693,6 +704,17 @@ mod tests {
     fn a_short_http_url_counts_and_a_bare_scheme_does_not() {
         assert_eq!(ids("http://x"), vec!["http://x".to_string()]);
         assert!(ids("http:// https://").is_empty());
+    }
+
+    /// ReAgent P2s on #3674.
+    #[test]
+    fn a_path_with_an_anchor_is_still_a_path() {
+        assert_eq!(ids("see docs/guide.md#install"), vec!["docs/guide.md".to_string()]);
+    }
+
+    #[test]
+    fn fractions_and_extensionless_names_are_not_paths() {
+        assert!(ids("ratio 12/34.56 and 1/2.5 and src/.gitignore").is_empty(), "{:?}", ids("12/34.56 1/2.5 src/.gitignore"));
     }
 
     #[test]
