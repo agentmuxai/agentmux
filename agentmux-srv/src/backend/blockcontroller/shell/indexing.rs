@@ -70,15 +70,63 @@ fn labelled_for(meta: &crate::backend::storage::filestore::FileMeta, output_gen:
     }
 }
 
-/// `[offset, offset + len)` of `output.idx`, from the database.
-pub(crate) fn idx_bytes(fs: &FileStore, zone: &str, offset: u64, len: u64) -> Option<Vec<u8>> {
-    fs.read_bytes_db(zone, IDX, offset as i64, len as i64).ok()
+/// Lines `[offset, offset + limit)` of `output`, read through `output.idx`.
+pub(crate) struct IndexedRead {
+    /// Total line count of `output` in the snapshot.
+    pub total: u64,
+    pub output_size: u64,
+    pub output_gen: Option<String>,
+    /// The bytes of the requested lines (from the first line's offset up to
+    /// the next line's, or the end of `output`).
+    pub raw: Vec<u8>,
+    /// Byte offset in `output` of each returned line, in order.
+    pub line_offsets: Vec<u64>,
 }
 
-/// Byte offset in `output` of line `k`, from `output.idx`.
-pub(crate) fn idx_entry(fs: &FileStore, zone: &str, k: u64) -> Option<u64> {
-    let b = idx_bytes(fs, zone, OUTPUT_IDX_HEADER_LEN as u64 + k * 8, 8)?;
-    Some(u64::from_le_bytes(b.try_into().ok()?))
+/// Read lines `[offset, offset + limit)` of `output` through a fresh
+/// `output.idx`, with the freshness check, the index entries and the output
+/// bytes all from ONE database snapshot (Codex on #3634): validating in one
+/// read and fetching entries and bytes in later ones would let another srv
+/// instance replace `output` and rebuild the index in between — the answer
+/// would mix the new file's lines with the old file's total.
+///
+/// `None` when the index doesn't describe `output` in that snapshot (missing,
+/// stale, another generation's) or a read hits bytes not stored yet: the
+/// caller rebuilds the index and retries once, or takes its slow path.
+pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
+    const H: i64 = OUTPUT_IDX_HEADER_LEN;
+    fs.read_snapshot(|snap| {
+        let Some(out) = snap.file(zone, "output")? else { return Ok(None) };
+        let Some(idx) = snap.file(zone, IDX)? else { return Ok(None) };
+        let Some(header) = snap.bytes(zone, IDX, 0, H)? else { return Ok(None) };
+        let covered = u64::from_le_bytes(header.as_slice().try_into().unwrap_or([0; 8]));
+        let output_size = out.size.max(0) as u64;
+        if idx.size < H || covered != output_size || !labelled_for(&idx.meta, out.gen.as_deref()) {
+            return Ok(None);
+        }
+        let total = ((idx.size - H) / 8) as u64;
+        let mut read = IndexedRead { total, output_size, output_gen: out.gen.clone(), raw: Vec::new(), line_offsets: Vec::new() };
+        if limit == 0 || offset >= total {
+            return Ok(Some(read));
+        }
+        let count = limit.min(total - offset);
+        // Entries for the returned lines, plus the next line's (the end of
+        // the last returned line) when there is one.
+        let want = count + u64::from(offset + count < total);
+        let Some(entries) = snap.bytes(zone, IDX, H + (offset * 8) as i64, (want * 8) as i64)? else { return Ok(None) };
+        let at = |k: u64| u64::from_le_bytes(entries[(k * 8) as usize..(k * 8 + 8) as usize].try_into().unwrap());
+        let start = at(0);
+        let end = if want > count { at(count) } else { output_size };
+        if start > end || end > output_size {
+            return Ok(None);
+        }
+        let Some(raw) = snap.bytes(zone, "output", start as i64, (end - start) as i64)? else { return Ok(None) };
+        read.raw = raw;
+        read.line_offsets = (0..count).map(at).collect();
+        Ok(Some(read))
+    })
+    .ok()
+    .flatten()
 }
 
 /// Rebuild `output.idx` from `output` in a single streaming scan and atomically
@@ -350,5 +398,38 @@ mod tests {
         // With the current generation it builds and publishes.
         assert_eq!(rebuild_output_idx(&fs, zone, 2, output_now(&fs, zone).and_then(|(_, g)| g)), Some(1));
         assert!(fs.line_state(zone, "output.idx").unwrap().is_some());
+
+    #[test]
+    fn a_read_through_the_index_comes_from_one_snapshot_or_not_at_all() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let zone = "blk-idx-read";
+        fs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, "output", b"{\"a\":1}
+{\"b\":2}
+{\"c\":3}
+").unwrap();
+        // No index yet: nothing to read through.
+        assert!(read_via_index(&fs, zone, 0, 10).is_none());
+        let view = output_index(&fs, zone).unwrap();
+        assert_eq!(rebuild_output_idx(&fs, zone, view.output_size, view.output_gen), Some(3));
+
+        let r = read_via_index(&fs, zone, 1, 10).unwrap();
+        assert_eq!((r.total, r.line_offsets.clone()), (3, vec![8, 16]));
+        assert_eq!(r.raw, b"{\"b\":2}
+{\"c\":3}
+");
+        let r = read_via_index(&fs, zone, 0, 1).unwrap();
+        assert_eq!((r.line_offsets.clone(), r.raw), (vec![0], b"{\"a\":1}
+".to_vec()));
+        assert!(read_via_index(&fs, zone, 5, 10).unwrap().line_offsets.is_empty());
+
+        // Replaced by content of the same size and a different layout: the
+        // index no longer describes it, so nothing is read through it.
+        fs.write_file(zone, "output", b"{\"x\":11111}
+{\"y\":222}
+").unwrap();
+        assert_eq!(fs.line_state(zone, "output").unwrap().unwrap().size, 24);
+        assert!(read_via_index(&fs, zone, 0, 10).is_none());
+    }
     }
 }

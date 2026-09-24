@@ -156,9 +156,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{
-                    idx_bytes, idx_entry, output_index, rebuild_output_idx, OUTPUT_IDX_HEADER_LEN,
-                };
+                use crate::backend::blockcontroller::shell::{output_index, read_via_index, rebuild_output_idx};
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
                     // streaming scan of `output`, which reaches hundreds of MB
@@ -174,42 +172,30 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
                         }
-                        // Size and generation from the database: the cached
-                        // `stat` size lags another srv instance's appends.
-                        // Its size, generation and index freshness in one snapshot.
-                        let view = output_index(&filestore, &read_block)?;
-                        let output_size = view.output_size;
-
-                        // Determine total_lines, rebuilding the index iff it is missing,
-                        // its covered-size header doesn't match the current output size,
-                        // or it was built for another generation of `output` (5a-2b).
-                        // The index's size and bytes come from the database like the
-                        // output's (Codex on #3634).
-                        let total_lines: u64 = match view.fresh_lines {
-                            Some(lines) => lines,
-                            None => rebuild_output_idx(&filestore, &read_block, output_size, view.output_gen)?,
+                        // Everything the answer rests on — the index judged fresh,
+                        // its entries, the output bytes they point at — comes from
+                        // ONE database snapshot (Codex on #3634), never the stale
+                        // per-process `stat` cache. A missing or stale index is
+                        // rebuilt once, for the output as a snapshot saw it, and read
+                        // again in a new snapshot; if that still doesn't match
+                        // (replaced again meanwhile), the slow path below answers.
+                        let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
+                            Some(read) => read,
+                            None => {
+                                let view = output_index(&filestore, &read_block)?;
+                                if view.fresh_lines.is_none() {
+                                    rebuild_output_idx(&filestore, &read_block, view.output_size, view.output_gen)?;
+                                }
+                                read_via_index(&filestore, &read_block, offset as u64, limit as u64)?
+                            }
                         };
+                        let total_lines = read.total;
 
                         // Empty result cases — answered from the index, no output read.
-                        if limit == 0 || total_lines == 0 || (offset as u64) >= total_lines {
+                        if read.line_offsets.is_empty() {
                             return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, stamps: None });
                         }
-
-                        // entry(k) = byte offset of non-blank line k (past the 8-byte header).
-                        let entry = |k: u64| -> Option<i64> { idx_entry(&filestore, &read_block, k).map(|o| o as i64) };
-
-                        let byte_start = entry(offset as u64)?;
-                        let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
-                            output_size as i64
-                        } else {
-                            entry((offset + limit) as u64)?
-                        };
-                        let read_len = (byte_end - byte_start).max(0);
-                        // Bounded by the database size above; `read_at` would
-                        // clamp to a possibly stale cached size.
-                        let raw = filestore
-                            .read_bytes_db(&read_block, "output", byte_start, read_len)
-                            .ok()?;
+                        let raw = read.raw;
                         let text = String::from_utf8_lossy(&raw);
                         let lines: Vec<String> = text
                             .lines()
@@ -246,22 +232,15 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             // zone).
                             entries.sort_by_key(|(off, _)| *off);
 
-                            // Byte offset of every returned line, read from
-                            // output.idx in one slice.
-                            let returned = lines.len() as u64;
-                            let idx_raw = idx_bytes(
-                                &filestore,
-                                &read_block,
-                                OUTPUT_IDX_HEADER_LEN as u64 + offset as u64 * 8,
-                                returned * 8,
-                            )?;
-                            if idx_raw.len() != (returned * 8) as usize {
+                            // Byte offset of every returned line: from the same
+                            // snapshot as the lines themselves.
+                            if read.line_offsets.len() != lines.len() {
                                 return None;
                             }
-                            let stamps = idx_raw
-                                .chunks_exact(8)
-                                .map(|b| {
-                                    let line_off = u64::from_le_bytes(b.try_into().unwrap());
+                            let stamps = read
+                                .line_offsets
+                                .iter()
+                                .map(|&line_off| {
                                     match entries.partition_point(|(off, _)| *off <= line_off) {
                                         0 => 0,
                                         p => entries[p - 1].1,

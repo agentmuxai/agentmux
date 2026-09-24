@@ -17,6 +17,42 @@ use super::core::FileStore;
 use super::{FileMeta, FileOpts};
 use crate::backend::storage::error::StoreError;
 
+/// Reads inside one [`FileStore::read_snapshot`]: every call sees the same
+/// moment of the database.
+pub struct SnapshotReader<'a> {
+    tx: &'a rusqlite::Transaction<'a>,
+}
+
+/// A file as a [`SnapshotReader`] sees it.
+#[derive(Debug, Clone)]
+pub struct SnapshotFile {
+    pub size: i64,
+    /// Valid generation; `None` when the file is not counted.
+    pub gen: Option<String>,
+    pub meta: FileMeta,
+}
+
+impl SnapshotReader<'_> {
+    pub fn file(&self, zone_id: &str, name: &str) -> Result<Option<SnapshotFile>, StoreError> {
+        let Some(row) = super::counter::read_row(self.tx, zone_id, name)? else { return Ok(None) };
+        let meta: String = self.tx.query_row(
+            "SELECT meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+            params![zone_id, name],
+            |r| r.get(0),
+        )?;
+        Ok(Some(SnapshotFile {
+            size: row.size,
+            gen: row.counter().map(|(gen, _)| gen),
+            meta: serde_json::from_str(&meta).unwrap_or_default(),
+        }))
+    }
+
+    /// `[offset, offset + len)`, or `None` if any of it isn't stored.
+    pub fn bytes(&self, zone_id: &str, name: &str, offset: i64, len: i64) -> Result<Option<Vec<u8>>, StoreError> {
+        super::counter::read_bytes_exact(self.tx, zone_id, name, offset, len)
+    }
+}
+
 /// See [`FileStore::derived_snapshot`].
 #[derive(Debug, Clone)]
 pub struct DerivedSnapshot {
@@ -156,6 +192,14 @@ impl FileStore {
         super::counter::read_bytes_exact(&conn, zone_id, name, offset, len)?.ok_or_else(|| {
             StoreError::Other(format!("{zone_id}/{name}: bytes {offset}..{} not stored yet", offset + len))
         })
+    }
+
+    /// Run `f` with a [`SnapshotReader`]: everything it reads comes from one
+    /// database snapshot — for a decision and the reads it licenses (an
+    /// index judged fresh, then its entries and the bytes they point at),
+    /// which must not straddle another instance's replace (Codex on #3634).
+    pub fn read_snapshot<T>(&self, f: impl FnOnce(&SnapshotReader<'_>) -> Result<T, StoreError>) -> Result<T, StoreError> {
+        self.read_txn(|tx| f(&SnapshotReader { tx }))
     }
 
     /// A file (`output`) and a file derived from it (`output.idx`), read in
