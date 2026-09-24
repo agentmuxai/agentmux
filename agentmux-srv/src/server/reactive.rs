@@ -985,7 +985,7 @@ pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Extension(auth_via): Extension<super::ReactiveAuthVia>,
     caller: Option<Extension<super::caller::Caller>>,
-    Json(mut req): Json<InjectionRequest>,
+    Json(req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
     super::actor::check_actor(
         &state,
@@ -999,11 +999,28 @@ pub(super) async fn handle_reactive_inject(
         msg_len = req.message.len(),
         "reactive inject request received"
     );
+    let caller_uid = super::caller::attributed_uid(caller.as_deref());
+    Json(deliver(&state, auth_via, &caller_uid, req).await)
+}
 
+/// Deliver an inject — verify, try this instance, then forward
+/// cross-instance, cross-channel, LAN and cloud relay — exactly as
+/// `POST /agentmux/reactive/inject` does. Shared with the cron scheduler's
+/// in-process fire (identity M4c-3, spec §6.5.9), which passes its tier
+/// explicitly (`auth_via`) in place of the route's `ReactiveAuthVia`
+/// extension. `caller_uid` is the sender's attributed UID, audited on this
+/// instance only (`InjectionRequest::audit_source_uid` never rides a hop);
+/// `""` when Unattributed.
+pub(crate) async fn deliver(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    caller_uid: &str,
+    mut req: InjectionRequest,
+) -> serde_json::Value {
     req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
     // Identity M4c-2d: the sender's UID, for the audit entry only — never
     // forwarded (`#[serde(skip)]`).
-    req.audit_source_uid = super::caller::attributed_uid(caller.as_deref());
+    req.audit_source_uid = caller_uid.to_string();
 
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
@@ -1035,7 +1052,7 @@ pub(super) async fn handle_reactive_inject(
             },
             req.priority.as_deref().unwrap_or("normal"),
         );
-        return Json(serde_json::to_value(&resp).unwrap_or_default());
+        return serde_json::to_value(&resp).unwrap_or_default();
     }
 
     // 2. On "agent not found", check cross-instance file registry and forward.
@@ -1051,7 +1068,7 @@ pub(super) async fn handle_reactive_inject(
             hops = req.forward_hops,
             "reactive inject: forward-hop limit reached, not forwarding further"
         );
-        return Json(serde_json::to_value(&resp).unwrap_or_default());
+        return serde_json::to_value(&resp).unwrap_or_default();
     }
 
     // Every forward below sends this hop-incremented request, not the
@@ -1106,7 +1123,7 @@ pub(super) async fn handle_reactive_inject(
                 )
                 .await
                 {
-                    ForwardOutcome::Delivered(body) => return Json(body),
+                    ForwardOutcome::Delivered(body) => return body,
                     // A non-delivery here is ambiguous: this entry may be
                     // stale (agent unregistered without a clean shutdown), OR
                     // the owning process may be alive and simply not have
@@ -1191,7 +1208,7 @@ pub(super) async fn handle_reactive_inject(
                 )
                 .await
                 {
-                    ForwardOutcome::Delivered(body) => return Json(body),
+                    ForwardOutcome::Delivered(body) => return body,
                     // Same ambiguity and same should_evict_on_forward_failure
                     // policy as Tier 2a — PID-liveness alone over-protects an
                     // old, genuinely-dead individual agent whose srv process
@@ -1254,7 +1271,7 @@ pub(super) async fn handle_reactive_inject(
             )
             .await
             {
-                ForwardOutcome::Delivered(body) => return Json(body),
+                ForwardOutcome::Delivered(body) => return body,
                 // The peer answered "not mine" (agent migrated away since we
                 // cached it) or was unreachable — either way the discovery
                 // cache entry is wrong. Unlike the registry tiers there is no
@@ -1279,12 +1296,12 @@ pub(super) async fn handle_reactive_inject(
         // inherits it. See `crate::muxbus::relay` and
         // REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §5.
         if let Some(body) = try_cloud_relay(&state, &req).await {
-            return Json(body);
+            return body;
         }
     }
 
     // 5. Every tier declined — return the original local error.
-    Json(serde_json::to_value(&resp).unwrap_or_default())
+    serde_json::to_value(&resp).unwrap_or_default()
 }
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
