@@ -113,6 +113,25 @@ impl HistoryOwner {
     }
 }
 
+/// Account ids linked to more than one agent (`db_agent_identity_links`).
+fn accounts_linked_to_several_agents(
+    store: &crate::backend::storage::store::Store,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut agents_by_account: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    for link in store
+        .agent_identity_list_all()
+        .map_err(|e| format!("failed to read identity links: {e}"))?
+    {
+        agents_by_account.entry(link.account_id).or_default().insert(link.agent_id);
+    }
+    Ok(agents_by_account
+        .into_iter()
+        .filter(|(_, agents)| agents.len() > 1)
+        .map(|(account, _)| account)
+        .collect())
+}
+
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
@@ -216,11 +235,37 @@ impl HistoryService {
             .agent_identity_list_for_agent(&owner.definition_id)
             .map_err(|e| format!("failed to resolve agent's linked identities: {e}"))?;
 
+        // An account linked to several agents holds all of their transcripts
+        // under one identity bundle, so its sessions are not all this
+        // owner's: `SearchHistory` would return another agent's conversation,
+        // the ungoverned disclosure `search_for_agent`'s doc rules out. From
+        // such an account keep only sessions in the owner's own working
+        // directory; with no known directory, keep none (counted) rather than
+        // guess. An account only this owner uses keeps every session, so an
+        // agent whose working directory moved keeps its older history.
+        let shared_accounts = accounts_linked_to_several_agents(store)?;
+        let own_dir = owner
+            .working_directory
+            .as_deref()
+            .map(index::normalize_working_dir);
         let mut merged: Vec<SessionMeta> = Vec::new();
         for link in &links {
             let (sessions, _total, _has_more) =
                 self.index.list_for_identity(&link.account_id, 0, usize::MAX, sort_by, sort_dir);
-            merged.extend(sessions);
+            if !shared_accounts.contains(&link.account_id) {
+                merged.extend(sessions);
+                continue;
+            }
+            match &own_dir {
+                Some(dir) => merged.extend(
+                    sessions
+                        .into_iter()
+                        .filter(|s| &index::normalize_working_dir(&s.working_directory) == dir),
+                ),
+                None => crate::backend::agent_resolve::record_uid_fallback(
+                    "history.shared_account_without_working_dir",
+                ),
+            }
         }
 
         // An agent on ambient credentials has no link row at all — its
@@ -621,6 +666,64 @@ mod tests {
             .unwrap();
         assert_eq!(total, 1, "the agent's own session must be found without any identity link");
         assert_eq!(sessions[0].session_id, "mine-wd");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// One account linked to two agents holds both agents' transcripts. Each
+    /// agent's history is its own working directory's sessions from it —
+    /// never the other agent's — while an account only one agent uses keeps
+    /// every session, including one from an earlier working directory.
+    #[test]
+    fn a_shared_account_contributes_only_the_owners_own_directory() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-shared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let y = write_session(&dir, "shared-y");
+        let z = write_session(&dir, "shared-z");
+        let y_old = write_session(&dir, "solo-y-old-dir");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter::in_dir(vec![DiscoveredFile { file_path: y, mtime_ms: 1 }], "acct-shared", "/agents/y")),
+                Box::new(MockAdapter::in_dir(vec![DiscoveredFile { file_path: z, mtime_ms: 1 }], "acct-shared", "/agents/z")),
+                Box::new(MockAdapter::in_dir(vec![DiscoveredFile { file_path: y_old, mtime_ms: 1 }], "acct-solo", "/agents/y-before-move")),
+            ],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+        let store = Store::open_in_memory().unwrap();
+        insert_agent(&store, "def-y", "AgentY", "agenty", "/agents/y");
+        insert_agent(&store, "def-z", "AgentZ", "agentz", "/agents/z");
+        for acct in ["acct-shared", "acct-solo"] {
+            store
+                .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                    id: acct.to_string(),
+                    name: format!("claude-{acct}"),
+                    provider: "claude".to_string(),
+                    kind: "oauth".to_string(),
+                    display_name: String::new(),
+                    secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                    context: serde_json::json!({}),
+                    status: "unknown".to_string(),
+                    created_at: 0,
+                    updated_at: 0,
+                })
+                .unwrap();
+        }
+        store.agent_identity_link("def-y", "acct-shared", "claude").unwrap();
+        store.agent_identity_link("def-z", "acct-shared", "claude").unwrap();
+        store.agent_identity_link("def-y", "acct-solo", "codex").unwrap();
+
+        let ids = |slug: &str| {
+            let (sessions, _, _) = service
+                .sessions_for_agent(&store, slug, 0, 10, "created_at", "desc", true)
+                .unwrap();
+            let mut ids: Vec<String> = sessions.into_iter().map(|s| s.session_id).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids("agenty"), ["shared-y", "solo-y-old-dir"], "never AgentZ's session");
+        assert_eq!(ids("agentz"), ["shared-z"], "never AgentY's sessions");
 
         std::fs::remove_dir_all(&dir).ok();
     }
