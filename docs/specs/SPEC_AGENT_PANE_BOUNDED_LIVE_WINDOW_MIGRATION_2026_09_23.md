@@ -1368,8 +1368,12 @@ opening History at a position. None is needed for a bounded live feed; each
 comes back if we want scroll-back in the feed or History anchored to a turn.
 
 **PRs.** (1) this revision; (2) History follows; (3) live feed roll-off,
-kill switch and the top row; (4) the journal for shells and AskUserQuestion
-answers (5d's second half), which lifts the blocked case. Each re-runs the
+kill switch and the top row; (4a) the per-turn subprocess controller writes
+the user's message to the transcript (#3701 — Codex, Kimi, muxcode/container
+Claude); (4b) the journal for in-pane shells (5d's second half), which lifts
+the blocked case. AskUserQuestion answers need no journal: the answer is
+already in the tool's result (PR 3 revision above); only rebuilding its
+styled rendering on replay remains, a parser follow-up. Each re-runs the
 full-conversation bench at N = 0 / 25 / 200 and records it in the tracker.
 **Exit criteria for (3):** DOM, JS heap and per-flush cost flat from N = 25 to
 N = 200 with the pane pinned, apart from blocked turns (counted in the HUD); nothing on screen moves when turns roll off
