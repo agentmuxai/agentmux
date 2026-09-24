@@ -367,3 +367,18 @@ describe("nodeBytes on non-string payloads (Codex P2, #3611)", () => {
         expect(visits).toBeLessThanOrEqual(100_000);
     });
 });
+
+describe("nodeBytes counts every rendered field, not a fixed list (Codex P2, #3611)", () => {
+    it("counts an answered question's answer and question text", () => {
+        const answered = {
+            type: "tool", id: "q", tool: "AskUserQuestion", params: {}, status: "success", collapsed: true, summary: "q",
+            questionText: "Which approach?", answerText: "x".repeat(600_000),
+        } as unknown as DocumentNode;
+        expect(nodeBytes(answered)).toBeGreaterThan(TURN_TAIL_MAX_BYTES);
+    });
+
+    it("counts a field this module has never heard of", () => {
+        const future = { type: "markdown", id: "m", content: "", timestamp: 0, someNewRenderedField: "y".repeat(600_000) } as unknown as DocumentNode;
+        expect(nodeBytes(future)).toBeGreaterThan(TURN_TAIL_MAX_BYTES);
+    });
+});

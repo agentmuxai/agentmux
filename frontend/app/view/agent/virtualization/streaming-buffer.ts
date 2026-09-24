@@ -208,15 +208,23 @@ function payloadBytes(value: unknown, budget: number): number {
     return value === undefined ? 0 : walk(value, budget, 0);
 }
 
-/** Rough rendered-content size, for the byte ceiling. Cached per node object. */
+/**
+ * Rough rendered-content size, for the byte ceiling. Cached per node object.
+ *
+ * Every field of the node is walked (payloadBytes: serialized size, bounded)
+ * rather than a list of known fields: node kinds keep gaining rendered fields
+ * — an answered question's `answerText`/`questionText`, tool params, nested
+ * results — and a field missed here would let a huge row sit in the
+ * always-mounted tail (Codex P2s on #3611, three of them). Only the streaming
+ * `log` is special-cased: it grows by a chunk per update and every update is
+ * a new object, so its scan is bounded separately.
+ */
 export function nodeBytes(node: DocumentNode): number {
     const cached = bytesCache.get(node);
     if (cached !== undefined) return cached;
     let n = 64;
-    const any = node as { content?: unknown; message?: unknown; log?: { chunks?: { content?: unknown }[] }; params?: unknown; result?: unknown };
-    if (typeof any.content === "string") n += any.content.length;
-    if (typeof any.message === "string") n += any.message.length;
-    const chunks = any.log?.chunks ?? [];
+    const { log, ...rendered } = node as unknown as { log?: { chunks?: { content?: unknown }[] } } & Record<string, unknown>;
+    const chunks = log?.chunks ?? [];
     if (chunks.length > MAX_LOG_CHUNKS_SCANNED) {
         n = NODE_BYTES_CAP;
     } else {
@@ -225,8 +233,7 @@ export function nodeBytes(node: DocumentNode): number {
             if (typeof c.content === "string") n += c.content.length;
         }
     }
-    if (n < NODE_BYTES_CAP) n += payloadBytes(any.params, NODE_BYTES_CAP - n);
-    if (n < NODE_BYTES_CAP) n += payloadBytes(any.result, NODE_BYTES_CAP - n);
+    if (n < NODE_BYTES_CAP) n += payloadBytes(rendered, NODE_BYTES_CAP - n);
     bytesCache.set(node, n);
     return n;
 }
