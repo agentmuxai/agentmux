@@ -418,6 +418,7 @@ partial list.
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
 | [`SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22`](SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22.md) | SPEC: WebFetch content view |
 | [`SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12`](SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) | SPEC: Widget bar parent widgets (grouped submenus) |
+| [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md) | SPEC — The Windows CEF runtime guard rejects the correct runtime whenever its path contains a backslash |
 | [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md) | SPEC — Windows builds refuse a CEF runtime that isn't the pinned tracer-off build |
 | [`SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04`](SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md) | SPEC: Window-close reliability — fix the `backend_window_id` race |
 | [`SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04`](SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md) | SPEC — Chrome-style window snap: drag-to-top maximize, border-drag vertical snap |
@@ -666,7 +667,6 @@ partial list.
 | [`SPEC_WEBSEARCH_RICH_VIEW_2026_06_19`](SPEC_WEBSEARCH_RICH_VIEW_2026_06_19.md) | SPEC: Web-search rich result view |
 | [`SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20`](SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md) | SPEC: Widget bar "More" / pinned-parent flyout closes on its first click when hover already opened it |
 | [`SPEC_WIDGET_PINBAR_DND_STATE_2026_06_15`](SPEC_WIDGET_PINBAR_DND_STATE_2026_06_15.md) | Spec: Widget Pin-Bar DnD State Machine — Robustness Rethink |
-| [`SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24`](SPEC_WINDOWS_CEF_RUNTIME_VERIFY_BACKSLASH_PATH_HASH_2026_09_24.md) | SPEC — The Windows CEF runtime guard rejects the correct runtime whenever its path contains a backslash |
 | [`SPEC_XTERM_PASTE_TRUNCATION_2026_06_12`](SPEC_XTERM_PASTE_TRUNCATION_2026_06_12.md) | SPEC: xterm Terminal Paste Truncation Fix |
 | [`SPIKE_OPENROUTER_ORI_HARNESS_2026_09_02`](SPIKE_OPENROUTER_ORI_HARNESS_2026_09_02.md) | Spike: OpenRouter's Ori harness — does it change our integration story? |
 | [`agent-input-auto-grow`](agent-input-auto-grow.md) | Agent Input Auto-Grow Textarea |
