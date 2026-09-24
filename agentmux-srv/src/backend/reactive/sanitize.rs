@@ -10,8 +10,17 @@ use super::{MAX_MESSAGE_LENGTH, TRUNCATION_SUFFIX};
 /// 2. Removes OSC sequences (terminal commands)
 /// 3. Removes CSI sequences
 /// 4. Removes control characters except \n, \t, \r
-/// 5. Truncates to MAX_MESSAGE_LENGTH with UTF-8 safety
+/// 5. Removes invisible characters (see [`is_invisible`]) and normalises
+///    carriage returns (`\r\n` → `\n`, a lone `\r` dropped) — before any
+///    content check runs, so the text scanned is the text delivered
+/// 6. Truncates to MAX_MESSAGE_LENGTH with UTF-8 safety
 pub fn sanitize_message(msg: &str) -> String {
+    let normalized: String = msg
+        .replace("\r\n", "\n")
+        .chars()
+        .filter(|&c| c != '\r' && !is_invisible(c))
+        .collect();
+    let msg = normalized.as_str();
     let mut result = String::with_capacity(msg.len());
 
     let bytes = msg.as_bytes();
@@ -354,7 +363,12 @@ pub fn wrap_jekt_message(
         _ => (now_secs, String::new()),
     };
 
-    let from = marker_field(source_agent.unwrap_or("unknown"));
+    // A sender that isn't a valid agent id is shown with a leading `?` —
+    // which no agent id contains — so its escaped form can't read as a real
+    // agent's name, and it gets no reply hint to follow.
+    let raw_from = source_agent.unwrap_or("unknown");
+    let from_is_agent = validate_agent_id(raw_from);
+    let from = if from_is_agent { raw_from.to_string() } else { format!("?{}", marker_field(raw_from)) };
     let target_agent = marker_field(target_agent);
     let msg_id = marker_field(msg_id);
     let priority = marker_field(priority);
@@ -401,7 +415,11 @@ pub fn wrap_jekt_message(
         ""
     };
 
-    let reply_hint = format!("Reply: bus:inject to {from}");
+    let reply_hint = if from_is_agent {
+        format!("Reply: bus:inject to {from}")
+    } else {
+        "Reply: not available — the sender is not an agent id".to_string()
+    };
 
     format!(
         "{structured_tag}\n────────────────────────────────────────────────────────────\nFrom: {from} | To: {target_agent} | ts={ts_secs}{sensitive_warning}\n{msg}\n────────────────────────────────────────────────────────────\n{reply_hint}\n[/JEKT]"
@@ -470,16 +488,13 @@ fn match_delimiter(chars: &[char], i: usize) -> Option<(usize, bool, char)> {
     Some((j + 1 - i, closing, end))
 }
 
-/// The message body as it goes inside the block: invisible characters
-/// dropped, carriage returns normalised (a lone `\r` can act as Enter in a
-/// terminal-based agent), and marker delimiters quoted, so the body can't
-/// close the real block or open one of its own.
+/// The message body as it goes inside the block: marker delimiters quoted,
+/// so the body can't close the real block or open one of its own. The body
+/// has already been through [`sanitize_message`], which dropped invisible
+/// characters and carriage returns; this only replaces delimiters, so it
+/// can't create text a content check didn't see.
 fn neutralize_markers(msg: &str) -> String {
-    let chars: Vec<char> = msg
-        .replace("\r\n", "\n")
-        .chars()
-        .filter(|&c| c != '\r' && !is_invisible(c))
-        .collect();
+    let chars: Vec<char> = msg.chars().collect();
     let mut out = String::with_capacity(msg.len());
     let mut i = 0;
     while i < chars.len() {
