@@ -206,20 +206,31 @@ export function nodeBytes(node: DocumentNode): number {
  * ceiling. Never past an in-progress node, and never past the last node.
  * With no user message the whole document is the turn. Pure: where and when
  * the frontier may actually move (viewport, pin) is the caller's decision.
+ *
+ * `from` is the current frontier: it never moves back, so nothing before it
+ * is examined and the result is never below it. That keeps a call — made on
+ * every stream flush — proportional to the tail and the turn in flight, not
+ * to the whole conversation (Codex P2, #3611). An in-progress node before
+ * `from` is already in the head and cannot pull the frontier back.
  */
 export function turnScopedFrontier(
     nodes: readonly DocumentNode[],
-    { maxNodes = TURN_TAIL_MAX_NODES, maxBytes = TURN_TAIL_MAX_BYTES }: { maxNodes?: number; maxBytes?: number } = {},
+    {
+        maxNodes = TURN_TAIL_MAX_NODES,
+        maxBytes = TURN_TAIL_MAX_BYTES,
+        from = 0,
+    }: { maxNodes?: number; maxBytes?: number; from?: number } = {},
 ): number {
     if (nodes.length === 0) return 0;
-    let start = 0;
-    for (let i = nodes.length - 1; i >= 0; i--) {
+    const floor = Math.min(Math.max(0, from), nodes.length - 1);
+    let start = floor;
+    for (let i = nodes.length - 1; i >= floor; i--) {
         if (nodes[i].type === "user_message") {
             start = i;
             break;
         }
     }
-    for (let i = 0; i < start; i++) {
+    for (let i = floor; i < start; i++) {
         if (isNodeInProgress(nodes[i])) {
             start = i;
             break;

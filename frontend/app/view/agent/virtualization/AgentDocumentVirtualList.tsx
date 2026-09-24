@@ -426,12 +426,24 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
      * straight to the target: restoring a long conversation mounts only its
      * last turn plus the visible head rows.
      */
+    // Where the frontier was last time: streaming only appends, so this is
+    // almost always still right and saves a full findIndex per flush.
+    let frontierIndexHint = -1;
+    const locateFrontier = (nodes: readonly DocumentNode[]): number => {
+        if (stickyFrontierId == null) return -1;
+        if (nodes[frontierIndexHint]?.id === stickyFrontierId) return frontierIndexHint;
+        return nodes.findIndex((n) => n.id === stickyFrontierId); // prepend (older history), truncation
+    };
     const turnPartition = (nodes: readonly DocumentNode[]) => {
-        let at = stickyFrontierId == null ? -1 : nodes.findIndex((n) => n.id === stickyFrontierId);
-        const target = turnScopedFrontier(nodes);
+        let at = locateFrontier(nodes);
+        // `from: at` — the frontier never moves back, so the target search
+        // never looks at the head: per-flush cost follows the tail and the
+        // turn in flight, not the conversation (Codex P2, #3611).
+        const target = turnScopedFrontier(nodes, { from: Math.max(0, at) });
         if (at < 0) at = target;
         else if (target > at) at = advanceFrontier(nodes, at, target);
         stickyFrontierId = nodes[at]?.id ?? null;
+        frontierIndexHint = at;
         const result = partitionAt(nodes, at);
         trail("agent:virt:partition", {
             virtCount: result.virtualizedNodes.length,

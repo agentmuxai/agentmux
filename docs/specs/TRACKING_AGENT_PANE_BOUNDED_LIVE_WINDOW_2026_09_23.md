@@ -303,10 +303,16 @@ is not part of 3b.
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
   numbers were taken with it.
-- **Mounting history is still ~2.9 s synchronous** for 25 turns × 3 panes
-  after 3b (§2.2c, down from ~8.8 s before 2c/3b). What remains is not
-  mounted rows; profile it next (reducer copies and layout-slice dispatches
-  are the suspects — Phase 4).
+- **Mounting history: ~1.2 s per load** for 25 turns × 3 panes with 3b's
+  review fixes (down from ~8.8 s before 2c/3b). Profiled: 82 % is parsing the
+  markdown of rows that are actually on screen (the visible 20 KB last message
+  and visible head rows) — no longer hidden rows. What lowers it further is
+  in-row windowing (below) or off-main-thread parsing (Phase 8).
+- **Per-flush work still proportional to the head** (Phase 4): the slice-
+  feeding effect re-maps every head id and `JSON.stringify`s each head row's
+  expansion on every partition change, and the reducer copies the node array.
+  3b made the frontier search itself independent of history (`from`, Codex P2
+  on #3611); these are the remaining O(history) costs per stream flush.
 - **Renderer memory grows across consecutive bench runs regardless of
   variant** (3.7 → 5.1 GB over one §2.2c session): process-lifetime growth,
   not per-window. Phase 6 (bounded live document) and the 8 h soak target it.

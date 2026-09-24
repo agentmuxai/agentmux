@@ -312,3 +312,31 @@ describe("nodeBytes on a long-running tool log (Codex P2, #3611)", () => {
         expect(nodeBytes(runningWith(10, reads))).toBe(64 + 10 * "line of output\n".length);
     });
 });
+
+describe("turnScopedFrontier from the current frontier (Codex P2, #3611)", () => {
+    it("does not examine nodes before `from` (the frontier never moves back)", () => {
+        let reads = 0;
+        const watched = (id: string): DocumentNode => {
+            const n = md(id) as unknown as Record<string, unknown>;
+            Object.defineProperty(n, "type", { get: () => (reads++, "markdown") });
+            return n as unknown as DocumentNode;
+        };
+        const history = Array.from({ length: 5_000 }, (_, i) => watched(`h${i}`));
+        const nodes = [...history, user("u1"), md("a1"), user("u2"), md("a2")];
+        reads = 0;
+        const at = turnScopedFrontier(nodes, { from: 5_000 });
+        expect(nodes[at].id).toBe("u2");
+        expect(reads, "history nodes examined").toBe(0);
+    });
+
+    it("ignores an in-progress node before `from` — it is already in the head", () => {
+        const nodes = [user("u0"), tool("t0", "running"), ...range(3), user("u1"), md("a1")];
+        expect(turnScopedFrontier(nodes)).toBe(1); // without `from`: pulled back to t0
+        expect(turnScopedFrontier(nodes, { from: 3 })).toBe(5); // from past t0: the turn start
+    });
+
+    it("never returns less than `from`", () => {
+        const nodes = [user("u0"), md("a0"), md("a1")];
+        expect(turnScopedFrontier(nodes, { from: 2 })).toBe(2);
+    });
+});
