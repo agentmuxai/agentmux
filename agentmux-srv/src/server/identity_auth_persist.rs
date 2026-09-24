@@ -71,7 +71,14 @@ fn persist_oauth_direct_account(
         // The key is OMITTED, not set empty, when the provider reported no
         // email — so "this provider does not surface one" stays
         // distinguishable from "logged in as a blank address" downstream.
-        context: match email.map(str::trim).filter(|e| !e.is_empty()) {
+        // Falls back to the email the CLI recorded in the account's own
+        // config dir (Claude's login transcript prints none) — §4.
+        context: match email
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .or_else(|| crate::identity::account_email::email_from_oauth_dir(provider_id, dir))
+        {
             Some(e) => serde_json::json!({ "email": e }),
             None => serde_json::json!({}),
         },

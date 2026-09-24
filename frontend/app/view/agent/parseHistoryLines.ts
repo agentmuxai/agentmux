@@ -70,7 +70,7 @@ export function parseHistoryLines(
         includeResumedOutcomes?: boolean;
     },
 ): ParsedHistory {
-    const translator = createTranslator(outputFormat);
+    const translator = createTranslator(outputFormat, { replay: true });
     // isReplay: true — thinking/tool_call events carry no wire timestamp of
     // their own, so stamping Date.now() here would show every replayed
     // clump/call as "just now" (reagent P2 on PR #2392). See

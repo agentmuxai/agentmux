@@ -1,11 +1,15 @@
 # SPEC: show the provider account's email in the Armory
 
 **Date:** 2026-09-23
-**Status:** active — the capture-and-render path shipped in #3541: the login
-email is recorded on the account and rendered on its Armory row.
-Not yet built: §4's backfill for accounts that authenticated before that PR,
-which keep an empty `context` until they re-authenticate. That is the majority
-of existing accounts, so it is the remaining work rather than a nicety.
+**Status:** active — the capture-and-render path shipped in #3541, but
+Claude's login transcript prints no email, so no Claude account ever had
+one recorded and the Accounts page kept showing `claude-oauth`. The
+follow-up reads the email the CLI records in the account's own config dir
+(`<dir>/.claude.json` → `oauthAccount.emailAddress`): at login when the
+transcript had none, and as §4's backfill each time accounts are listed
+(written only when it differs, so a re-login as another user replaces it).
+The row's label is now the email, falling back to the name
+(`accountLabel`).
 **Trigger:** Repo owner: *"for provider logins (like anthropic) we need the
 email address on the account to show on its entry in the armory."*
 **Scope:** OAuth provider accounts (`kind = "oauth"`). Static key/token
@@ -63,22 +67,21 @@ context: { "email": "user@example.com" }
 
 ## 3. What renders
 
-The row shows, in `.identity-row-meta`:
-
-1. `display_name` when the user has set one, else
-2. `context.email` when present, else
-3. nothing (current behaviour)
-
-When a user has set a display name **and** an email exists, the email is still
-worth having visible — that is the point of the request. It is shown after the
-display name, muted, rather than replaced by it:
+*(Revised after #3541: the email in the muted meta line was not what the
+repo owner wanted — the row still read `claude-oauth`.)* The row's **label**
+is `accountLabel(a)`: `context.email` when present, else the account name.
+The generic name moves to the label's tooltip; a user-set `display_name`
+still shows in `.identity-row-meta` beside it:
 
 ```
-claude-oauth    work · user@example.com    ●
+user@example.com    work    ●
 ```
 
-This is a small change to `AccountRow` in
-`frontend/app/view/identity/identity-accounts-tab.tsx`.
+The same label names the account in its detail modal title, its delete
+confirmation, the agent's bind-account picker and failure-row
+"Bind: <account>" action, and the Armory's Bind-to-Agent menu — every
+Claude account is named `claude-oauth`, so the name alone tells none of
+them apart.
 
 ## 4. Existing accounts must backfill
 
@@ -120,15 +123,17 @@ An email address is personal data and this makes it more visible than before.
 
 ## 7. Testing
 
-- `identity_auth_persist` writes `context.email` when the session captured one,
-  and omits the key entirely when it did not — **not** an empty string, so
-  "absent" and "blank" cannot be confused downstream.
-- Backfill updates a stale email and leaves a matching one untouched (no
-  spurious `updated_at` churn on every probe).
-- `AccountRow` renders email when present, display name when present, both when
-  both, nothing when neither.
-- A provider reporting no email leaves the row visually unchanged from today —
-  the regression that matters for users who do not have this.
+- `identity_auth_persist` writes `context.email` when the session captured one
+  and otherwise falls back to the config dir; it omits the key entirely when
+  neither has one — **not** an empty string, so "absent" and "blank" cannot be
+  confused downstream.
+- `account_email`: reads Claude's recorded email (and the `claude-code`
+  alias), skips the ambient `~/.claude`; the refresh backfills a blank
+  account, replaces a stale email, leaves a matching one and an unknown one
+  alone; the store write sets `context.email` only — no `updated_at` or
+  `status` change, and no row re-created for an account deleted meanwhile.
+- `accountLabel`: the email when present, else the name.
+- A provider reporting no email leaves the row showing its name, as before.
 
 ## 8. Confidence
 
