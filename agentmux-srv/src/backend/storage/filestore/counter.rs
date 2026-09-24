@@ -62,6 +62,11 @@ pub struct LineState {
 pub struct AppendPos {
     /// Byte offset of the first appended byte.
     pub offset: i64,
+    /// Byte offset where the appended records start: `offset`, or one past
+    /// it when [`FileStore::append_lines`] first wrote a `\n` to close a torn
+    /// last line. The records themselves are [`normalized_records`] of the
+    /// input, so a reader holding those bytes knows exactly where they sit.
+    pub records_offset: i64,
     /// `None` when the file is not counted (see the module doc).
     pub counted: Option<CountedAppend>,
 }
@@ -233,6 +238,14 @@ fn read_bytes_covered(
     Ok((out, covered))
 }
 
+/// The records [`FileStore::append_lines`] writes for `data`: its complete,
+/// non-blank lines, each ending in `\n` (the reader's rule). What a caller
+/// publishes alongside an append, so the bytes match what landed at
+/// [`AppendPos::records_offset`].
+pub fn normalized_records(data: &[u8]) -> Vec<u8> {
+    normalize_lines(data, false)
+}
+
 /// `data` as complete, non-blank lines, each ending in `\n`; prefixed with a
 /// `\n` when `close_tail`, so it can't continue a torn last line.
 fn normalize_lines(data: &[u8], close_tail: bool) -> Vec<u8> {
@@ -286,17 +299,19 @@ impl FileStore {
         let counter = row.counter();
 
         let normalized;
-        let data: &[u8] = match mode {
-            AppendMode::Raw => data,
+        let (data, records_offset): (&[u8], i64) = match mode {
+            AppendMode::Raw => (data, size),
             AppendMode::Lines => {
                 let torn = size > 0 && read_bytes(tx, zone_id, name, size - 1, 1)?[0] != b'\n';
                 normalized = normalize_lines(data, torn);
-                &normalized
+                // The closing `\n` (if any) precedes the records.
+                let skip = i64::from(torn && !normalized.is_empty());
+                (&normalized, size + skip)
             }
         };
         if data.is_empty() {
             let counted = counter.map(|(gen, c)| CountedAppend { gen, first_line: c.lines, lines: c.lines });
-            return Ok((AppendPos { offset: size, counted }, size));
+            return Ok((AppendPos { offset: size, records_offset: size, counted }, size));
         }
 
         // The counter needs the unterminated last line before the append
@@ -391,7 +406,7 @@ impl FileStore {
                 None
             }
         };
-        Ok((AppendPos { offset: size, counted }, new_size))
+        Ok((AppendPos { offset: size, records_offset, counted }, new_size))
     }
 
     /// [`Self::append_lines`], plus one receive-time record appended to

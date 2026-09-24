@@ -144,6 +144,33 @@ fn a_torn_last_line_is_closed_and_keeps_its_index() {
     assert_eq!((b.line, b.lines), (2, 3));
     let size = fs.line_state(block, "output").unwrap().unwrap().size;
     assert_eq!(fs.read_bytes_db(block, "output", 0, size).unwrap(), b"{\"a\":1}\n{\"par\n{\"b\":2}\n");
+    // The event's offset is where its own bytes start: past the `\n` that
+    // closed the torn line (review of #3635).
+    let ev = &seen[0].0;
+    let data = base64::engine::general_purpose::STANDARD.decode(&ev.data64).unwrap();
+    assert_eq!(ev.offset, Some(14));
+    assert_eq!(fs.read_bytes_db(block, "output", 14, data.len() as i64).unwrap(), data);
+}
+
+#[test]
+fn an_event_carries_exactly_the_bytes_written_at_its_offset() {
+    let block = "blk-exact";
+    let (broker, rec, fs, _gfs) = setup(block);
+    append_transcript(&broker, block, b"{\"a\":1}\n", Some(&fs), None, true);
+    // Blank lines, CRLF-only lines and an unterminated last line are
+    // normalized away before the write; the event carries what was written.
+    append_transcript(&broker, block, b"\n{\"b\":2}\n \r\n\n{\"c\":3}", Some(&fs), None, true);
+    // Nothing but blanks: nothing written, nothing announced.
+    append_transcript(&broker, block, b"\n  \r\n", Some(&fs), None, true);
+
+    let seen = rec.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    let ev = &seen[1].0;
+    let data = base64::engine::general_purpose::STANDARD.decode(&ev.data64).unwrap();
+    assert_eq!(data, b"{\"b\":2}\n{\"c\":3}\n");
+    let at = ev.offset.unwrap() as i64;
+    assert_eq!(fs.read_bytes_db(block, "output", at, data.len() as i64).unwrap(), data);
+    assert_eq!(at + data.len() as i64, fs.line_state(block, "output").unwrap().unwrap().size);
 }
 
 #[test]

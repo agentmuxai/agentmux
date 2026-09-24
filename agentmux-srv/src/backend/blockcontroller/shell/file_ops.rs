@@ -366,20 +366,30 @@ pub(super) fn append_transcript(
     stamp_tsidx: bool,
 ) {
     use crate::backend::agent_session::OUTPUT_FILE;
+    // The records exactly as they are written (`append_lines` normalizes to
+    // complete, non-blank lines): the event carries these bytes, and its
+    // `offset` is where they landed, so a consumer can match the event to a
+    // byte range read back from the file (review of #3635). Nothing to write,
+    // nothing to announce.
+    let records = crate::backend::storage::filestore::normalized_records(data);
+    if records.is_empty() {
+        return;
+    }
     let _order = transcript_order_lock(block_id);
 
     let mut offset = None;
     let mut pos = Vec::new();
     if let Some(fs) = filestore {
-        if let Some(p) = append_transcript_lines(fs, block_id, OUTPUT_FILE, data, stamp_tsidx, "filestore") {
-            offset = Some(p.offset.max(0) as u64);
+        if let Some(p) = append_transcript_lines(fs, block_id, OUTPUT_FILE, &records, stamp_tsidx, "filestore") {
+            // Past the `\n` that closed a torn last line, if one was written.
+            offset = Some(p.records_offset.max(0) as u64);
             if let Some(c) = p.counted {
                 pos.push(mps::StreamPos { stream: format!("b:{block_id}"), gen: c.gen, line: c.first_line, lines: c.lines });
             }
         }
     }
     if let Some((gfs, zone)) = global {
-        if let Some(c) = mirror_append_to_global(gfs, zone, data).and_then(|p| p.counted) {
+        if let Some(c) = mirror_append_to_global(gfs, zone, &records).and_then(|p| p.counted) {
             pos.push(mps::StreamPos { stream: format!("g:{zone}"), gen: c.gen, line: c.first_line, lines: c.lines });
         }
     }
@@ -388,7 +398,7 @@ pub(super) fn append_transcript(
         zoneid: block_id.to_string(),
         filename: OUTPUT_FILE.to_string(),
         fileop: mps::FILE_OP_APPEND.to_string(),
-        data64: base64::engine::general_purpose::STANDARD.encode(data),
+        data64: base64::engine::general_purpose::STANDARD.encode(&records),
         offset,
         pos,
     };
