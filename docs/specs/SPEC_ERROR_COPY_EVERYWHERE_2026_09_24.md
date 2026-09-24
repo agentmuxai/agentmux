@@ -265,6 +265,7 @@ logs (CEF `data:` pages, §4.6). **P** = phase (§7).
 | 22 | Media and Mermaid failures | `view/media/media.tsx:273,313`, `element/markdown-mermaid.tsx:88` | E | Icon | 3 |
 | 23 | Config errors | `view/settings/settings-view.tsx:25-45`, `window/system-status.tsx:30-50` | E | Next to "Fix in editor" | 3 |
 | 24 | Update / migration failed | `statusbar/MaintenanceSection.tsx:238,283-290`, `UpdateStatus.tsx:42` | D | "Update failed" first needs a detail to show (§6.3) | 3 |
+| 25 | Swarm fleet action results: per-target failures | `view/swarm/swarm-fleet-toolbar.tsx:426-430` (`swarm-fleet-result-row--fail`, shows `f.id — f.error`) | E | Icon at the row's end, plus "Copy all failures" in the results header (Codex P2 on #3689, found after merge) | 3 |
 
 Already have copy, but **move them to the redacted path** (Codex P1 on
 #3689). Their placement stays; what they copy changes:
@@ -386,7 +387,15 @@ P1 alone covers the errors users hit most, and it's one PR.
      - a toast or flash with an error level (`pushNotification` /
        `pushFlashError`);
      - a failure accessory (`failure-accessory.ts` consumers);
-     - a Rust recovery-page builder in `agentmux-cef/src/client/`.
+     - a Rust recovery-page builder in `agentmux-cef/src/client/`;
+     - a failure-state class: a BEM modifier or state class ending in
+       `--fail`, `--failed` or `--error`, or `is-failed` / `is-error`, on an
+       element that renders text. Class-name matching on its own missed
+       `swarm-fleet-result-row--fail` (surface 25).
+
+     Status-only indicators with no text go on the reviewed allowlist, each
+     with its reason. The first entry is `agent-shell-info-dot--failed`
+     (`AgentShellInfoPanel.tsx:160`), a colored dot whose text is surface 16.
 
   A new error surface either registers, and so gets copy, or is added to an
   explicit, reviewed allowlist with a reason.
