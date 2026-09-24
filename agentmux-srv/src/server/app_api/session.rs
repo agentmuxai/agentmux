@@ -1094,6 +1094,16 @@ fn read_recent_activity_digest(
     Some(extracted)
 }
 
+/// Where ambient side calls run: `<data dir>/ambient-calls`, created on
+/// demand; `None` (inherit srv's cwd, as before) only if it cannot be made.
+/// No agent works there, so no agent's history ever matches its transcripts
+/// (#3629).
+pub(crate) fn ambient_call_cwd() -> Option<std::path::PathBuf> {
+    let dir = crate::backend::base::get_mux_data_dir().join("ambient-calls");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
 /// Invoke the Claude CLI with Haiku model for a lightweight ambient call
 /// (activity summary, ghost-text next-prompt suggestion, or any future
 /// purpose routed through the Ambient Model Call gateway). Uses
@@ -1123,10 +1133,19 @@ pub(crate) async fn invoke_ambient_haiku_call(
         _ => std::collections::HashMap::new(),
     };
 
-    let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
-        .args(["-p", "--output-format", "stream-json", "--verbose",
-               "--model", "claude-haiku-4-5-20251001"])
-        .envs(&auth_env)
+    let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
+    cmd.args(["-p", "--output-format", "stream-json", "--verbose",
+              "--model", "claude-haiku-4-5-20251001"])
+        .envs(&auth_env);
+    // Run in a scratch dir of our own, never srv's cwd (the user's home):
+    // Claude files each call's transcript under its cwd's project folder,
+    // and an agent working in that same dir would find every side call —
+    // whose prompts quote other agents' conversations — in its own history
+    // (#3629).
+    if let Some(dir) = ambient_call_cwd() {
+        cmd.current_dir(dir);
+    }
+    let mut child = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -2246,5 +2265,19 @@ mod narration_tests {
         // text in a conversation row.
         assert!(p.contains("One sentence"));
         assert!(p.contains("no markdown"));
+    }
+}
+
+#[cfg(test)]
+mod ambient_call_cwd_tests {
+    /// #3629: side calls run in a dir of their own under the data dir —
+    /// never srv's cwd (the user's home), where an agent may work.
+    #[test]
+    fn side_calls_run_in_their_own_scratch_dir() {
+        let dir = super::ambient_call_cwd().expect("the scratch dir can be made");
+        assert!(dir.is_dir());
+        assert!(dir.ends_with("ambient-calls"));
+        assert!(dir.starts_with(crate::backend::base::get_mux_data_dir()));
+        assert_ne!(Some(dir.as_path()), dirs::home_dir().as_deref());
     }
 }
