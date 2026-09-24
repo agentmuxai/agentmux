@@ -668,6 +668,10 @@ enum SendAction {
     /// the drain claim — issue #2367) — this message has been enqueued
     /// for that claim-holder's own drain to deliver.
     Queued,
+    /// A kill is pending and the dying process still holds stdin: neither
+    /// written nor queued, reported to the sender as this error instead.
+    /// See `decide_send_action`.
+    Refused(String),
 }
 
 /// What `decide_retry_batch_action` determined a stale-resume retry

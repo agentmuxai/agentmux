@@ -258,6 +258,64 @@ fn a_message_arriving_during_the_quiesce_window_is_queued_not_lost() {
     );
 }
 
+/// Reagent P1 on #3562: a human send while a kill is pending must not be
+/// written into the dying process (reported delivered, then lost with it).
+/// It is refused with an explicit error rather than routed to a spawn: a
+/// pending stop may be a teardown (`delete_controller`, pane shutdown), and a
+/// spawn there would start a fresh process for a pane that is closing. Once
+/// the process has exited, the next send respawns as usual.
+#[test]
+fn a_human_send_while_a_stop_is_pending_is_refused_not_written() {
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.stop_pending = true;
+    }
+
+    let action = c.decide_send_action("m1", None);
+    assert!(matches!(action, SendAction::Refused(_)), "refused, not DeliverDirect or a spawn");
+    assert!(c.inner.lock().unwrap().pending_send_messages.is_empty(), "not queued behind nothing");
+    assert!(!c.health_monitor.is_active_turn(), "no turn reserved for a refused send");
+
+    let config = PersistentSpawnConfig {
+        cli_command: "unused-the-send-is-refused".to_string(),
+        cli_args: vec![],
+        working_dir: String::new(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: String::new(),
+        message_id: None,
+    };
+    let err = c.send_message("human".to_string(), config).unwrap_err();
+    assert!(err.contains("stopping"), "{err}");
+    assert!(rx.try_recv().is_err(), "nothing written into the dying process");
+
+    // The process exits: the next send respawns as usual.
+    c.inner.lock().unwrap().stdin_tx = None;
+    assert!(matches!(c.decide_send_action("m2", None), SendAction::BecomeSpawner { .. }));
+}
+
+/// A deferred config restart also sets `stop_pending` (it goes through
+/// `stop_process`). Its own rule wins: the message queues for the
+/// replacement process instead of being refused.
+#[test]
+fn a_committed_restart_still_queues_for_the_replacement_despite_its_stop() {
+    let c = controller();
+    let (tx, _rx) = mpsc::channel::<String>(4);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.restart_pending = true;
+        inner.stop_pending = true;
+    }
+    let action = c.decide_send_action("m1", None);
+    assert!(matches!(action, SendAction::BecomeSpawner { .. } | SendAction::Queued));
+    assert_eq!(c.inner.lock().unwrap().pending_send_messages.len(), 1);
+}
+
 /// The quiesce window ends when the replacement arrives — otherwise every
 /// later send would keep queueing behind a flag nothing clears.
 #[test]
@@ -1633,6 +1691,7 @@ fn decide_send_action_produces_exactly_one_spawner_under_real_concurrency() {
                     queued_count.fetch_add(1, AtomicOrdering::SeqCst);
                 }
                 SendAction::DeliverDirect { .. } => panic!("process was never running in this test"),
+                SendAction::Refused(e) => panic!("no stop is pending in this test: {e}"),
             })
         })
         .collect();

@@ -70,11 +70,13 @@ impl PersistentSubprocessController {
         // `!restart_pending`: a committed deferred restart leaves `stdin_tx`
         // live until the process actually exits, and writing into a process
         // about to be killed loses the message (codex P1 on PR #2858). Falling
-        // through queues it for the replacement instead.
+        // through queues it for the replacement instead. `!stop_pending`: the
+        // same loss for a requested kill; see the `Refused` branch below.
         if inner.stdin_tx.is_some()
             && !inner.spawning_in_progress
             && !inner.drain_claim
             && !inner.restart_pending
+            && !inner.stop_pending
         {
             // Reserve the turn before `inner` is released. Lock order is
             // `inner` → `health_monitor`, as everywhere else.
@@ -90,6 +92,18 @@ impl PersistentSubprocessController {
                     .push_back(QueuedMessage::fresh(seq, json_str.to_string()));
             }
             SendAction::Queued
+        } else if inner.stop_pending && !inner.restart_pending && inner.stdin_tx.is_some() {
+            // A kill is pending and the dying process still holds stdin
+            // (reagent P1 on #3562). Writing loses the message; spawning is
+            // wrong too, since the stop may be a teardown (`delete_controller`,
+            // pane shutdown) and would start a process for a closing pane.
+            // Refuse it explicitly: the window lasts until the exit, after
+            // which a send respawns as usual. A committed restart also sets
+            // `stop_pending`, and keeps its own rule: the message falls
+            // through and queues for the replacement.
+            SendAction::Refused(
+                "this agent is stopping — send the message again once it has stopped".to_string(),
+            )
         } else {
             inner.spawning_in_progress = true;
             let own_seq = skip_if_seq_queued.unwrap_or_else(|| inner.take_next_message_seq());
@@ -622,6 +636,9 @@ impl PersistentSubprocessController {
         let json_str = json_msg.to_string();
 
         match self.decide_send_action(&json_str, None) {
+            // Nothing was written, queued or persisted, so the caller's own
+            // error handling is the whole story.
+            SendAction::Refused(e) => Err(e),
             SendAction::Queued => {
                 // Persistence happens later, inside the drain, at the
                 // exact moment this message is actually delivered — see
