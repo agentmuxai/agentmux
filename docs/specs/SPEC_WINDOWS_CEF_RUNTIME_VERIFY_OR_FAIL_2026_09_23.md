@@ -1,6 +1,6 @@
 # SPEC — Windows builds refuse a CEF runtime that isn't the pinned tracer-off build
 
-**Status:** implemented — `scripts/cef-build/verify-cef-runtime-windows.sh`, wired into `bundle:windows` (Taskfile.yml), pin in `scripts/cef-build/windows-runtime-pin.sh`, tests in `scripts/cef-build/verify-cef-runtime-windows.test.sh` (run by ci-pr).
+**Status:** implemented (#3615) — `scripts/cef-build/verify-cef-runtime-windows.sh`, wired into `bundle:windows` (Taskfile.yml), pin in `scripts/cef-build/windows-runtime-pin.sh`, tests in `scripts/cef-build/verify-cef-runtime-windows.test.sh` (run by ci-pr).
 **Date:** 2026-09-23
 **Author:** agentx
 **Related:**
