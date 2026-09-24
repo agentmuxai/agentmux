@@ -11,6 +11,7 @@ import { APPEARANCE_SETTINGS } from "./sections/appearance-section";
 import { WINDOW_SETTINGS } from "./sections/window-panes-section";
 import { TERMINAL_SETTINGS } from "./sections/terminal-section";
 import { SOUNDS_SETTINGS } from "./sections/sounds-section";
+import { NOTIFICATIONS_SETTINGS } from "./sections/notifications-section";
 import { RECORDING_SETTINGS } from "./sections/recording-section";
 import { ADVANCED_SETTINGS } from "./sections/advanced-section";
 
@@ -19,6 +20,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(WINDOW_SETTINGS),
     ...Object.values(TERMINAL_SETTINGS),
     ...Object.values(SOUNDS_SETTINGS),
+    ...Object.values(NOTIFICATIONS_SETTINGS),
     ...Object.values(RECORDING_SETTINGS),
     ...Object.values(ADVANCED_SETTINGS),
 ];

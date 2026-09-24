@@ -226,6 +226,11 @@ async fn route_command(
         "quit_app" => commands::window::quit_app(state),
         // Issue #2977 WS3 — the tray panel: a small top-level window, pool-first.
         "open_panel" => commands::window::open_panel(state),
+        // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
+        // _2026_09_24 §4.1). Kept separate from background mode on purpose —
+        // tray spec §7.4.
+        "autostart_status" => commands::autostart::autostart_status().await,
+        "set_autostart" => commands::autostart::set_autostart(args).await,
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),
