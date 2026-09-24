@@ -1,8 +1,10 @@
 # SPEC: durable jekt delivery — a message to an absent agent is held, not dropped
 
 **Date:** 2026-09-24
-**Status:** draft — Phase 1 designed here and revised after an adversarial
-pass (§2); to be built in the same PR. Phase 2 recorded.
+**Status:** active — Phase 1 designed, revised after an adversarial pass
+(§2), and implemented in the same PR: `storage/jekt_held.rs` (objects v40),
+`reactive::hold_for_absent_target`, `server/jekt_held.rs` (replay), the
+`HELD_FOR` header field and the MCP's `HELD` report. Phase 2 recorded.
 **Trigger:** Repo owner: *"the durable jekt messaging was another thing we
 couldn't get working."*
 **Related:**
@@ -101,8 +103,8 @@ instance (channel) within 24 h.`
 Insert and cap check are one statement under the store lock (an
 `INSERT … SELECT … WHERE (SELECT count …) < cap`), run on the blocking pool.
 **Caps:** 64 held per target UID, 1000 per channel; past either, today's
-error plus `"hold full"` — never a false hold. The hold itself is audited
-(`outcome: "held"`).
+error plus `"hold full"` — never a false hold. The local attempt is audited
+as the "agent not found" it was; the hold is counted (`jekt.held`).
 
 ### 2.3 Replay
 
@@ -149,8 +151,9 @@ renders `TS=` as the **original** send time plus `DELIVERY=held` and
 - **At rest:** held message bodies live in `objects.db` for up to 24 h, and
   a pre-migration snapshot can keep them longer. Held rows cannot yet be
   listed or cancelled from the UI (Phase 2).
-- **Echo to the sender** is best effort and name-keyed, as for live
-  delivery; a stopped sender gets none.
+- **No echo to the sender** on a replayed delivery in Phase 1 (live
+  delivery's echo is name-keyed and would reach whoever holds the name by
+  then); the sender was told `HELD` at send time.
 
 ## 3. Phase 2 (recorded, not designed)
 
