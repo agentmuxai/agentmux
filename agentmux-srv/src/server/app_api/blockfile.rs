@@ -210,13 +210,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // byte offset. Best-effort — any failure yields no
                         // stamps, never a failed read.
                         let stamps: Option<Vec<i64>> = (|| {
-                            use crate::backend::agent_session::TSIDX_FILE;
-                            let ts_stat = filestore.stat(&read_block, TSIDX_FILE).ok().flatten()?;
-                            if ts_stat.size == 0 {
-                                return None;
-                            }
-                            let raw_ts = filestore.read_file(&read_block, TSIDX_FILE).ok().flatten()?;
-                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(&raw_ts)
+                            // Read in the same snapshot as the lines (Codex on #3634).
+                            let raw_ts = read.tsidx.as_deref()?;
+                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(raw_ts)
                                 .lines()
                                 .filter_map(|l| {
                                     let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;

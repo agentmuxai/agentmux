@@ -81,6 +81,10 @@ pub(crate) struct IndexedRead {
     pub raw: Vec<u8>,
     /// Byte offset in `output` of each returned line, in order.
     pub line_offsets: Vec<u64>,
+    /// `output.tsidx` (receive-time stamps keyed by `output` byte offset), from
+    /// the same snapshot, so stamps are joined to the lines they were written
+    /// for (Codex on #3634). `None`: no sidecar, or not fully stored.
+    pub tsidx: Option<Vec<u8>>,
 }
 
 /// Read lines `[offset, offset + limit)` of `output` through a fresh
@@ -105,7 +109,14 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
             return Ok(None);
         }
         let total = ((idx.size - H) / 8) as u64;
-        let mut read = IndexedRead { total, output_size, output_gen: out.gen.clone(), raw: Vec::new(), line_offsets: Vec::new() };
+        let mut read = IndexedRead {
+            total,
+            output_size,
+            output_gen: out.gen.clone(),
+            raw: Vec::new(),
+            line_offsets: Vec::new(),
+            tsidx: None,
+        };
         if limit == 0 || offset >= total {
             return Ok(Some(read));
         }
@@ -123,6 +134,10 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
         let Some(raw) = snap.bytes(zone, "output", start as i64, (end - start) as i64)? else { return Ok(None) };
         read.raw = raw;
         read.line_offsets = (0..count).map(at).collect();
+        read.tsidx = match snap.file(zone, crate::backend::agent_session::TSIDX_FILE)? {
+            Some(ts) if ts.size > 0 => snap.bytes(zone, crate::backend::agent_session::TSIDX_FILE, 0, ts.size)?,
+            _ => None,
+        };
         Ok(Some(read))
     })
     .ok()
@@ -415,6 +430,12 @@ mod tests {
         let r = read_via_index(&fs, zone, 1, 10).unwrap();
         assert_eq!((r.total, r.line_offsets.clone()), (3, vec![8, 16]));
         assert_eq!(r.raw, b"{\"b\":2}\n{\"c\":3}\n");
+        assert_eq!(r.tsidx, None, "no stamp sidecar yet");
+        // The stamp sidecar comes from the same snapshot as the lines.
+        let stamps: &[u8] = b"{\"off\":0,\"ms\":7}\n";
+        fs.make_file(zone, crate::backend::agent_session::TSIDX_FILE, FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_data(zone, crate::backend::agent_session::TSIDX_FILE, stamps).unwrap();
+        assert_eq!(read_via_index(&fs, zone, 1, 10).unwrap().tsidx.as_deref(), Some(stamps));
         let r = read_via_index(&fs, zone, 0, 1).unwrap();
         assert_eq!((r.line_offsets.clone(), r.raw), (vec![0], b"{\"a\":1}\n".to_vec()));
         assert!(read_via_index(&fs, zone, 5, 10).unwrap().line_offsets.is_empty());
