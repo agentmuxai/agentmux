@@ -24,6 +24,10 @@ open question #6 and fixes a key-overwrite defect that would have flipped
 legitimate multi-host traffic to permanent active-forgery escalation; it also
 changes the signed material (§3.1), which is free to do only while no verifier
 exists.
+**Amended 2026-09-24 by `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`:** the
+signing half (W3a) has shipped; that spec re-measures this one (its §1.4
+lists the statements here that are now stale), and adds phase W3-S —
+same-account verification, not gated on W2.
 **Builds on:**
 - `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` — the audit that made WAN
   signing conditional on tenant isolation. **§5.1's blocking finding is now
