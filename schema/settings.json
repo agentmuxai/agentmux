@@ -337,6 +337,11 @@
           "default": false,
           "description": "While paused, still notify when an agent needs your input or review."
         },
+        "notify:taskbar:attention": {
+          "type": "boolean",
+          "default": true,
+          "description": "Badge the AgentMux taskbar button (and flash it once) while an agent needs you. Windows only for now."
+        },
         "notify:os:preview": {
           "type": "string",
           "enum": ["redacted", "full", "none"],
