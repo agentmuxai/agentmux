@@ -1001,6 +1001,9 @@ pub(super) async fn handle_reactive_inject(
     );
 
     req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
+    // Identity M4c-2d: the sender's UID, for the audit entry only — never
+    // forwarded (`#[serde(skip)]`).
+    req.audit_source_uid = super::caller::attributed_uid(caller.as_deref());
 
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
@@ -2444,6 +2447,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
         &reason,
         &request_id,
         req.source_agent.as_deref(),
+        &super::caller::attributed_uid(caller.as_deref()),
     ) {
         Ok(resp) => Json(serde_json::to_value(&resp).unwrap_or_default()).into_response(),
         Err(e) => (
