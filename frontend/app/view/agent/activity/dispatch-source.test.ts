@@ -153,12 +153,11 @@ describe("dispatch-source — refresh coalescing", () => {
 });
 
 // docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md:
-// the debounce above coalesces request VOLUME, but each surviving call
-// during a burst is still a genuinely different, real, still-converging
-// snapshot — rows still visibly appear/vanish. backfill-tracker.ts closes
-// this by suppressing refresh entirely while ANY block's backfill is
-// reported in flight, firing exactly one once it's genuinely done.
-describe("dispatch-source — backfill-aware suppression", () => {
+// each refresh during a backfill burst is a still-converging snapshot, so a
+// backfilling pane's rows must not move until it settles. But only THAT
+// pane's: REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md §6
+// — the old app-wide suppression froze every other pane's dock too.
+describe("dispatch-source — per-pane backfill hold", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
@@ -167,36 +166,38 @@ describe("dispatch-source — backfill-aware suppression", () => {
         await Promise.resolve();
     }
 
-    it("suppresses refresh entirely for events arriving while a backfill is in flight, firing exactly one once it settles", async () => {
+    const d = (id: string, parent: string, members_done: number): AgentDispatch =>
+        ({
+            dispatch_id: id,
+            parent_block_id: parent,
+            status: "running",
+            member_count: 9,
+            members_done,
+            last_event_at: 0,
+        }) as unknown as AgentDispatch;
+
+    it("while pane A backfills, pane B's change still lands and A's rows hold; A lands when it settles", async () => {
         await flushMicrotasks();
-        callBackendServiceSpy.mockClear();
-        callBackendServiceSpy.mockResolvedValue([]);
+        callBackendServiceSpy.mockResolvedValue([d("a", "A", 0), d("b", "B", 0)]);
+        await refreshDispatchesNow();
 
         const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
-        expect(backfillStatus).toBeDefined();
-        backfillStatus({ scopes: ["block:b1"], data: { status: "started" } });
-
-        const spawned = hub.handlers.get("subagent:spawned")!;
-        for (let i = 0; i < 50; i++) spawned({ data: {} });
-        await vi.advanceTimersByTimeAsync(1200); // well past both debounce windows
-        expect(callBackendServiceSpy).not.toHaveBeenCalled(); // suppressed, not just debounced
-
-        backfillStatus({ scopes: ["block:b1"], data: { status: "done" } });
-        await flushMicrotasks();
-        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // exactly one, on settle
-    });
-
-    it("resumes ordinary debounced behavior for events after the backfill settles", async () => {
-        await flushMicrotasks();
-        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
-        backfillStatus({ scopes: ["block:b2"], data: { status: "started" } });
-        backfillStatus({ scopes: ["block:b2"], data: { status: "done" } });
-        await flushMicrotasks();
+        backfillStatus({ scopes: ["block:A"], data: { status: "started" } });
 
         callBackendServiceSpy.mockClear();
-        callBackendServiceSpy.mockResolvedValue([]);
+        callBackendServiceSpy.mockResolvedValue([d("a", "A", 5), d("b", "B", 1)]);
         hub.handlers.get("subagent:spawned")!({ data: {} });
         await vi.advanceTimersByTimeAsync(150);
-        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // not frozen app-wide
+
+        const byId = () => Object.fromEntries(allDispatchesAtom().map((x) => [x.dispatch_id, x.members_done]));
+        expect(byId()).toEqual({ a: 0, b: 1 }); // B updated, A held
+
+        callBackendServiceSpy.mockClear();
+        backfillStatus({ scopes: ["block:A"], data: { status: "done" } });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // one settle refresh
+        await flushMicrotasks();
+        expect(byId()).toEqual({ a: 5, b: 1 });
     });
 });

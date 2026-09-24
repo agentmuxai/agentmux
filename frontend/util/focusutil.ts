@@ -76,21 +76,32 @@ export function userCaretInBlock(blockId: string): boolean {
 }
 
 /**
- * For a document-level listener owned by something inside a pane (a popup,
- * an overlay, a prompt): does event `e` belong to the pane containing `el`?
- * True when `e` originated inside that pane, or — when its target is outside
- * every pane (e.g. `body`, nothing focused) — when that pane is the selected
- * one. Without this, the same popup open in two side-by-side panes both react
- * to one keystroke, or a popup in pane A reacts to typing in pane B.
- * An `el` that isn't inside any pane is app-global: always true.
+ * For a document/window-level listener acting on behalf of pane `blockId`:
+ * does event `e` belong to that pane? True when `e` originated inside it, or —
+ * when its target is outside every pane (e.g. `body`, nothing focused) — when
+ * it is the selected pane. Deliberately never consults the text selection
+ * (unlike `focusedBlockId()`): text left selected in pane A must not pull a
+ * Ctrl+F typed in pane B over to A.
+ */
+export function eventBelongsToBlock(e: Event, blockId: string): boolean {
+    const targetPane = e.target instanceof HTMLElement ? findBlockId(e.target) : null;
+    if (targetPane != null) return targetPane === blockId;
+    if (blockId.includes('"')) return false;
+    return document.querySelector(`.block-focused[data-blockid="${blockId}"]`) != null;
+}
+
+/**
+ * `eventBelongsToBlock` for a listener owned by an element inside a pane (a
+ * popup, an overlay, a prompt): the pane containing `el`. Without this, the
+ * same popup open in two side-by-side panes both react to one keystroke, or a
+ * popup in pane A reacts to typing in pane B. An `el` that isn't inside any
+ * pane is app-global: always true.
  */
 export function eventBelongsToPaneOf(e: Event, el: Element | null | undefined): boolean {
     if (!(el instanceof HTMLElement)) return true;
     const paneId = findBlockId(el);
     if (paneId == null) return true;
-    const targetPane = e.target instanceof HTMLElement ? findBlockId(e.target) : null;
-    if (targetPane != null) return targetPane === paneId;
-    return el.closest(".block-focused") != null;
+    return eventBelongsToBlock(e, paneId);
 }
 
 export function focusedBlockId(): string {

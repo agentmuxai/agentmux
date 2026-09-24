@@ -54,11 +54,11 @@ function installEventSinkOnce(): void {
         if (event.type === "pane-clicked") {
             // The pane HWND captured this click at Win32 level so React
             // never saw it — `document.activeElement` is whatever it was
-            // before (typically the address bar). Without blurring it,
-            // the subsequent `giveFocus()` flow sees `isMainInput=true`
-            // and tells the host to keep OS focus on the main window —
-            // bouncing focus back from the pane HWND we just gave it.
-            // See PR #760 for the full diagnosis.
+            // before (typically the address bar). Without blurring it, the
+            // shared pane-selection guard (userCaretInBlock) would see the
+            // caret still in this block's URL bar and never call
+            // `giveFocus()` — leaving OS focus on the main window instead of
+            // the pane HWND the user just clicked. See PR #760.
             const active = document.activeElement as HTMLElement | null;
             if (
                 active != null &&
@@ -738,22 +738,15 @@ export class BrowserViewModel implements ViewModel {
     giveFocus(): boolean {
         this.diag(`giveFocus closed=${this.closed}`);
         if (this.closed) return false;
-        // If a main-window input inside this block (e.g. the URL bar) is
-        // already focused, keep it — the user is interacting with the block's
-        // chrome, not the embedded page. Also tell the host to move OS-level
-        // keyboard focus back to the main window, in case a pane was holding
-        // it (otherwise keystrokes still get routed to the pane's HWND).
-        const active = document.activeElement as HTMLElement | null;
-        const isMainInput =
-            active != null &&
-            (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
-            !active.classList.contains("dummy-focus");
-        if (isMainInput) {
-            invokeCommand("main_window_focus", {}).catch(() => {});
-            return true;
-        }
-        // Otherwise the user wants to interact with the embedded page — tell
-        // the host to move Windows-level keyboard focus to the pane's HWND.
+        // "The caret is already in this pane's URL bar -- keep it" is decided
+        // before this is ever called, by the shared pane-selection guard
+        // (userCaretInBlock in focusManager.giveBlockFocus), scoped to THIS
+        // block. A view-local copy of that check used to live here and
+        // matched a focused input in ANY pane, so selecting a browser pane by
+        // keyboard left keystrokes in the other pane's text box. The URL bar's
+        // own main_window_focus IPC comes from block.tsx's handleChildFocus.
+        // Here: the user wants the embedded page -- tell the host to move
+        // Windows-level keyboard focus to the pane's HWND.
         invokeCommand("browser_pane_focus", { block_id: this.blockId }).catch(() => {});
         return true;
     }

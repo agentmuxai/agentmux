@@ -15,10 +15,15 @@ verification plan.
 > **Issue 1 (the scroll) is NOT in that spec** and is still open here. Fix B in §4
 > depends on that spec's `claimFocusOnMount()` guard.
 >
-> **Update:** both issues and all of §6 except the backfill tracker are now
-> implemented on branch `agent1/pane-click-through-input-focus`. The spec's §3
-> row P4 and §8 describe exactly what shipped. The §6 backfill-tracker item
-> is not included; it's an Activity Dock refresh-throttling issue, not focus.
+> **Update:** both issues and all of §6 except the backfill tracker shipped
+> in #3621. The spec's §3 row P4 and §8 describe exactly what shipped.
+>
+> **Update 2 (2026-09-24):** two more fixes shipped on branch
+> `agent1/two-pane-agent-quirks`:
+> - The §6 backfill tracker is now per pane. A backfilling pane's rows are
+>   held until it settles; every other pane's Activity Dock keeps updating.
+> - The Ctrl+F focus-source mismatch (see the codebase map) is fixed: the
+>   pane the key came from, else the selected pane, never the text selection.
 
 Scenario: two agent panes side by side, both showing the **AgentPicker**
 (pre-launch view: "Filter agents..." bar → My Agents list → "New Agent"
