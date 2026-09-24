@@ -667,14 +667,14 @@ mod tests {
     fn identifiers_of_each_kind_are_extracted_exactly() {
         let got = ids(
             "Merged #3671 (and agentmuxai/agentmux#3672), see https://github.com/a/b/pull/9. \
-             Edited `frontend/layout/lib/tilelayout.scss:8` and docs/specs/SPEC_X.md, commit 90c2209fd.",
+             Edited `frontend/layout/lib/tilelayout.scss:8` and src/example/widget.rs, commit 90c2209fd.",
         );
         for want in [
             "#3671",
             "agentmuxai/agentmux#3672",
             "https://github.com/a/b/pull/9",
             "frontend/layout/lib/tilelayout.scss",
-            "docs/specs/SPEC_X.md",
+            "src/example/widget.rs",
             "90c2209fd",
         ] {
             assert!(got.contains(&want.to_string()), "missing {want}: {got:?}");
