@@ -434,6 +434,22 @@ mod tests {
             store.agent_lan_key_load("zed-bot").unwrap().is_some(),
             "the fallback id another agent holds as its slug stays"
         );
+        assert!(store.agent_jekt_key_load("zed-bot").unwrap().is_some());
+
+        // Two template-created agents named "Agent (v2)" (slugs agent-v2,
+        // agent-v2-2) both sign their first session as the fallback id
+        // `agent--v2-`: deleting one leaves it for the other (review of #3633).
+        for (id, slug) in [("uid-v2a", "agent-v2"), ("uid-v2b", "agent-v2-2")] {
+            let mut def = test_agent_def(id, "Agent (v2)", "claude", "agent", 1, "");
+            def.slug = slug.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+        }
+        store.agent_lan_key_ensure("agent--v2-").unwrap();
+        assert!(store.agent_def_delete("uid-v2a").unwrap());
+        assert!(
+            store.agent_lan_key_load("agent--v2-").unwrap().is_some(),
+            "the same-named sibling still signs under it"
+        );
     }
 
     /// Slug ownership is folded as the key tables fold (`to_lowercase`), not

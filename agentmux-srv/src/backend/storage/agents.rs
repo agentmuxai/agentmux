@@ -2702,18 +2702,16 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
         return Ok(());
     };
     let now = agentmux_common::time::now_secs();
-    for n in [slug, name, instance_name] {
-        // Folded as the key tables fold their names (`to_lowercase`); M4d
-        // compares in Rust, never with SQLite's ASCII-only `lower()`.
-        let n = n.trim().to_lowercase();
-        if n.is_empty() {
-            continue;
-        }
-        // Signing keys are keyed by slug (`AGENTMUX_AGENT_ID`), so a name
-        // another agent holds as its slug is that agent's key, not this
-        // one's: deleting the second "AgentY" must not tombstone the first
-        // one's `agenty` (adversarial review of #3571).
-        if slug_held_by_another(conn, id, &n)? {
+    // The same names, and the same "another agent may sign under it" rule,
+    // as the key purge (M4d-1): a tombstone records a name whose keys were
+    // the dead agent's, so it must never be planted against a live agent's
+    // (ReAgent on #3633). Folded as the key tables fold (`to_lowercase`);
+    // compared in Rust, never with SQLite's ASCII-only `lower()`. Deleting
+    // the second "AgentY" must not tombstone the first one's `agenty`
+    // (adversarial review of #3571).
+    for n in key_names_of(&slug, &name, &instance_name) {
+        let n = n.trim().to_string();
+        if n.is_empty() || key_name_used_by_another(conn, id, &n)? {
             continue;
         }
         conn.execute(
@@ -2724,40 +2722,16 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
     Ok(())
 }
 
-/// Whether any row other than `id` holds `folded` as its slug, folded as the
-/// key tables fold their names (`to_lowercase`).
-///
-/// - **Templates count.** `agent.open` of a template, and template-based
-///   continuations, sign under the template's slug, and the old
-///   consolidation copied a template's slug verbatim onto ordinary rows —
-///   so deleting the last such row must not purge keys the template's live
-///   launches use (adversarial review of #3575).
-/// - **Folded in Rust**, not with SQLite's `lower()`, which folds ASCII only:
-///   slugs `Ä` and `ä` share the key filed under `ä` (Codex P2 on #3575).
-fn slug_held_by_another(
-    conn: &rusqlite::Connection,
-    id: &str,
-    folded: &str,
-) -> Result<bool, StoreError> {
-    let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE id != ?1")?;
-    let slugs = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
-    for slug in slugs {
-        if slug?.to_lowercase() == folded {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-/// Delete the signing keys filed under `id`'s slug — its jekt HMAC key and
-/// its LAN and WAN keypairs, which are keyed by name, not UID (identity
-/// M4a-3, spec §6.5.4). Without this a later agent that takes the name is
+/// Delete the signing keys filed under every name `id` may have signed as —
+/// its jekt HMAC key and its LAN and WAN keypairs, which are keyed by name,
+/// not UID. M4a-3 (spec §6.5.4) deleted them under the slug; M4d-1
+/// (§6.5.10) also under the display name, `instance_name` and the fallback
+/// ids ([`key_names_of`]). Without this a later agent that takes a name is
 /// handed the dead agent's keys by `ensure`'s `INSERT OR IGNORE`, and signs
-/// as it. Read before the row is deleted; a name another row holds as its
-/// slug is that agent's key and is left alone. The slug only: it is the
-/// name the MCP signs as (`AGENTMUX_AGENT_ID`). Folded as the key tables
-/// fold (`to_lowercase`). A template row is skipped, as in
-/// [`tombstone_key_names`]. Idempotent.
+/// as it. Read before the row is deleted; a name another row may sign under
+/// ([`key_name_used_by_another`]) is that agent's key and is left alone.
+/// Folded as the key tables fold (`to_lowercase`). A template row is
+/// skipped, as in [`tombstone_key_names`]. Idempotent.
 fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
     let names: Option<(String, String, String)> = conn
         .query_row(
@@ -2807,6 +2781,7 @@ fn key_names_of(slug: &str, name: &str, instance_name: &str) -> Vec<String> {
     push(name.trim().to_lowercase());
     push(instance_name.trim().to_lowercase());
     push(agent_open_fallback_id(name));
+    push(frontend_fallback_id(name));
     names
 }
 
@@ -2818,9 +2793,25 @@ fn agent_open_fallback_id(name: &str) -> String {
         .collect()
 }
 
-/// Whether another row signs under `folded`: holds it as its slug, or has no
-/// slug and `agent.open` would give it that id. Such a key is that agent's,
-/// not the deleted one's.
+/// The frontend's id for a launch with no slug — a template-created agent's
+/// first session (`agent-config-builder.ts`: `/[^a-z0-9-_]/g` → `-`, ASCII
+/// only, unlike `agent.open`'s).
+fn frontend_fallback_id(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' { c } else { '-' })
+        .collect()
+}
+
+/// Whether another row may sign under `folded`: holds it as its slug, or its
+/// display name gives that fallback id (`agent.open`'s or the frontend's).
+/// Any row, whatever its slug: a template-created agent's first session
+/// signs under the fallback id although its row has a derived slug (review
+/// of #3633), so two same-named agents share that key. Such a key is left.
+/// **Templates count**: `agent.open` of a template and template-based
+/// continuations sign under the template's slug. Folded as the key tables
+/// fold (`to_lowercase`), not SQLite's ASCII-only `lower()`: slugs `Ä` and
+/// `ä` share the key filed under `ä` (Codex P2 on #3575).
 fn key_name_used_by_another(
     conn: &rusqlite::Connection,
     id: &str,
@@ -2830,7 +2821,10 @@ fn key_name_used_by_another(
     let rows = stmt.query_map(params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     for row in rows {
         let (slug, name) = row?;
-        if slug.to_lowercase() == folded || (slug.is_empty() && agent_open_fallback_id(&name) == folded) {
+        if slug.to_lowercase() == folded
+            || agent_open_fallback_id(&name) == folded
+            || frontend_fallback_id(&name) == folded
+        {
             return Ok(true);
         }
     }
