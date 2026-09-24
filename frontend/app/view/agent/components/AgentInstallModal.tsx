@@ -71,6 +71,15 @@ const TONE_SGR: Record<LineTone, string> = {
     error: "\x1b[31m",
 };
 
+// Header subtitle per phase: what the install needs before it runs,
+// then where it stands.
+const DESCRIPTION = {
+    idle: "Needs an internet connection.",
+    installing: "Needs an internet connection.",
+    done: "Ready to launch.",
+    failed: "The install didn't finish.",
+} as const;
+
 // The user's open/closed choice for Details, remembered for the session
 // (spec §4.2). Collapsed by default.
 let detailsOpenPref = false;
@@ -516,11 +525,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         </span>
                     </Show>
                 </h2>
-                <p class="modal-panel-description">
-                    <Show when={phase() === "failed"} fallback="Needs an internet connection.">
-                        The install didn't finish.
-                    </Show>
-                </p>
+                <p class="modal-panel-description">{DESCRIPTION[phase()]}</p>
             </header>
             <div class="modal-panel-body agent-install-modal-body">
                 <InstallSteps steps={steps()} />

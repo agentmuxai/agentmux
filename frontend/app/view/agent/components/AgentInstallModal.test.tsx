@@ -227,6 +227,7 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
             <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
         ));
         await screen.findByText("Install now");
+        expect(container.querySelector(".modal-panel-description")?.textContent).toBe("Needs an internet connection.");
         expect(stepStatus(container)).toEqual([
             ["Check requirements", "pending"],
             ["Download packages", "pending"],
@@ -278,9 +279,13 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
         await waitFor(() => expect(stepStatus(container)[1]).toEqual(["Download packages", "active"]));
         expect(container.querySelector(".install-step-hint")?.textContent).toBe("1 fetched");
 
+        expect(container.querySelector(".modal-panel-description")?.textContent).toBe("Needs an internet connection.");
+
         send({ line: "added 1 package in 1s", stream: "stdout" });
         send({ op: "done", ok: true });
         await waitFor(() => expect(screen.getByText("Codex is installed")).toBeInTheDocument());
+        // The pre-install requirement no longer applies once it's done.
+        expect(container.querySelector(".modal-panel-description")?.textContent).toBe("Ready to launch.");
         expect(stepStatus(container).map(([, st]) => st)).toEqual(["done", "done", "done", "skipped", "done"]);
 
         const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
@@ -306,6 +311,7 @@ describe("AgentInstallModal — two layers (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_0
 
         await waitFor(() => expect(screen.getByText("Couldn't reach the package server.")).toBeInTheDocument());
         expect(stepStatus(container)[1]).toEqual(["Download packages", "failed"]);
+        expect(container.querySelector(".modal-panel-description")?.textContent).toBe("The install didn't finish.");
         expect(screen.getByText("Retry")).toBeInTheDocument();
 
         const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
