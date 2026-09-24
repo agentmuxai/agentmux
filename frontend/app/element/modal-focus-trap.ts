@@ -20,3 +20,13 @@ export function lastFocusable(root: HTMLElement): HTMLElement | null {
     const nodes = root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
     return nodes.length ? nodes[nodes.length - 1] : null;
 }
+
+/**
+ * Where focus lands when a modal opens or its content is replaced: the
+ * element the panel marked with `data-modal-initial-focus` (its primary
+ * action), else the first focusable. Without the marker, a panel whose
+ * first focusable is a log or terminal would open scrolled to it.
+ */
+export function initialFocusTarget(root: HTMLElement): HTMLElement | null {
+    return root.querySelector<HTMLElement>("[data-modal-initial-focus]:not([disabled])") ?? firstFocusable(root);
+}
