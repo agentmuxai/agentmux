@@ -102,6 +102,11 @@ async fn main() {
     // messages instead of having them dropped on a PTY fallback they reject.
     bootstrap::install_agent_turn_delivery(&state);
 
+    // Cron fires through the same in-process inject path (identity M4c-3);
+    // before `cron_scheduler.start()` below, so no fire takes the HTTP
+    // fallback.
+    bootstrap::install_cron_delivery(&state);
+
     // Now that AppState exists, wire up close-on-exit so a shell pane can
     // actually close itself when its process exits — see
     // `bootstrap::install_close_on_exit_handler`'s doc comment.
