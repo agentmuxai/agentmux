@@ -2,8 +2,9 @@
 
 **Date:** 2026-09-24
 **Status:** active — §8 (remove `pane:tabstrip = "multi-only"`) implemented
-in PR #3692 (PR C). §3 (flash, PR A) and §4 (last-tab close, PR B) not started yet. Design
-decisions in §6 are confirmed by the repo owner.
+in PR #3692 (PR C). §3 (flash + landing bounce, PR A) implemented in PR
+#3694. §4 (last-tab close, PR B) in progress. Design decisions in §6 are
+confirmed by the repo owner.
 **Author:** Camper
 **Trigger:** direct repo-owner request after live use of the shipped Pane Tab
 drag (PRs #3441, #3444, #3447, #3449): "it works well, but we want some
@@ -300,20 +301,23 @@ activity flash meaning only "a tool ran".)
   the flex sizing, so a `transform` on the inner pill doesn't disturb layout.
 - **Timing:** class on for 400ms, then off. That's the same clear-timeout
   the Window Tab bar uses (`tab-reorder.ts:240-241`).
-- **Mechanism:** a module-level `pendingLanding: { blockId, at } | null` in
-  `PaneTabStrip.tsx`, set by the destination header's `onDrop` just before it
-  (deferred-)calls `onReceiveForeignTab`. The moved block's pill *mounts* in
-  the destination strip (`<For>` creates a new item there). In
-  `PaneTabStripItem`'s `onMount`: if `pendingLanding?.blockId === id()` and
-  less than ~1s has passed, clear the variable and set a local
-  `landing` signal for 400ms. One-shot. A refused move mounts nothing, and
-  the stale value expires.
-- **Scope:** cross-pane drops only. Same-pane reorder keeps its current
-  feedback, and the Window Tab bar doesn't bounce a same-bar hover-drop
-  either. If a bounce on same-pane reorder is wanted as well (the Window
-  Tab bar *does* bounce a reordered tab), it's the same class set from the
-  reorder `onDrop`, so a one-line addition. Recommended for full parity;
-  listed in §6.
+- **Mechanism (as implemented):** a module-level Solid signal
+  `landedTab` (`{ id, paneKey }`) in `PaneTabStrip.tsx`, set by
+  `markLanded(blockId, destinationPaneKey)` and cleared after
+  `LANDING_BOUNCE_MS` (400). Every `PaneTabStripItem` binds
+  `.pane-tab--landing` to "same id AND same `paneKey`". The pane is part of
+  the identity because one block can have pills in several strips (agent
+  fork lineages show other panes' blocks as `extraTabs`), and only the pill
+  in the pane it landed in should bounce (Codex P2 on #3694). This works both for a
+  pill that mounts fresh in the destination strip (cross-pane) and for a
+  pill that `<For>` just moved in place (same-pane reorder). An earlier
+  draft used a one-shot `onMount` check, which can't see a reorder, since
+  the pill isn't remounted. `markLanded` runs only when the move was actually
+  applied: `moveBlockInStack` now returns a boolean, and `onReorder` /
+  `onReceiveForeignTab` pass it through (`false` = refused, no bounce).
+- **Scope:** cross-pane drops **and** same-pane reorders, for parity with the
+  Window Tab bar, which bounces a reordered tab (§6: resolved yes). The
+  bouncing pill is the one that moved, not the one it was dropped on.
 
 ---
 
@@ -598,10 +602,10 @@ the repo already uses). Otherwise this is a `task dev` check.
 - **`pane:tabstrip = "multi-only"`:** removed. A pane header always shows
   its tabs (§8).
 
-**Still open:**
-1. **Bounce on same-pane reorder too?** (§3.4) The Window Tab bar bounces a
-   reordered tab, so full parity says yes. It's a one-line addition.
-   Default: yes, in PR A.
+- **Bounce on same-pane reorder too?** (§3.4) Yes, for parity with the
+  Window Tab bar, which bounces a reordered tab. Shipped in PR A.
+
+**Still open:** nothing.
 
 ---
 

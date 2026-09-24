@@ -232,7 +232,7 @@
 
     & + & { border-top: 1px solid var(--border-color); }
 
-    // Landing/departure flash — reuses `tab-bounce` (tabbar.scss), the same
+    // Landing/departure flash — reuses `tab-bounce` (drop-feedback.scss), the same
     // spring-bounce played when a dragged tab lands, so a dock row appearing
     // or about to disappear reads the same way a tab drop does elsewhere in
     // the app. Both are transform-only (no layout shift) so they're safe to
