@@ -2146,7 +2146,7 @@ async fn handle_agent_memory_list(
         actor::ActorSite::MemoryList,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_list_impl(&state, &q.agent_id))
+    app_api_response(app_api::memory_list_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name")))
 }
 
 #[derive(serde::Deserialize)]
@@ -2168,7 +2168,7 @@ async fn handle_agent_memory_read(
         actor::ActorSite::MemoryRead,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_read_impl(&state, &q.agent_id, &q.filename))
+    app_api_response(app_api::memory_read_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.filename))
 }
 
 #[derive(serde::Deserialize)]
@@ -2222,7 +2222,7 @@ async fn handle_agent_memory_write(
     } else {
         None
     };
-    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, provenance) {
+    match app_api::memory_write_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.memory_owner_by_name"), &req.filename, &req.content, provenance) {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
@@ -2281,7 +2281,7 @@ async fn handle_agent_memory_history(
         actor::ActorSite::MemoryHistory,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_history_impl(&state, &q.agent_id, &q.filename))
+    app_api_response(app_api::memory_history_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.filename))
 }
 
 #[derive(serde::Deserialize)]
@@ -2306,7 +2306,7 @@ async fn handle_agent_memory_diff(
         actor::ActorSite::MemoryDiff,
         Some(&q.agent_id),
     );
-    app_api_response(app_api::memory_diff_impl(&state, &q.agent_id, &q.from_version_id, &q.to_version_id))
+    app_api_response(app_api::memory_diff_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &q.agent_id, "m4c.memory_owner_by_name"), &q.from_version_id, &q.to_version_id))
 }
 
 #[derive(serde::Deserialize)]
@@ -2331,7 +2331,7 @@ async fn handle_agent_memory_revert(
         actor::ActorSite::MemoryRevert,
         Some(&req.agent_id),
     );
-    app_api_response(app_api::memory_revert_impl(&state, &req.agent_id, &req.filename, &req.target_version_id))
+    app_api_response(app_api::memory_revert_impl(&state, app_api::SelfOwner::of(caller.as_deref(), &req.agent_id, "m4c.memory_owner_by_name"), &req.filename, &req.target_version_id))
 }
 
 #[derive(serde::Deserialize)]
