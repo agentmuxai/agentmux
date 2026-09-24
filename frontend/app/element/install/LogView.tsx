@@ -18,7 +18,7 @@
  * ToolOverlayLog.tsx and SystemToolInstallInline, codex P2 on PR #3165).
  */
 
-import { createEffect, createMemo, createSignal, For, on, onMount, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, type JSX } from "solid-js";
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -130,6 +130,15 @@ export const LogView = (props: LogViewProps): JSX.Element => {
 
     onMount(() => {
         measure();
+        // A resize with no scroll — the narrow-pane breakpoint changing the
+        // box from 200px to 140px, a window resize, Details opening — would
+        // otherwise leave the rendered window sized for the old height
+        // (ReAgent P2 on #3684). Absent in jsdom.
+        if (el && typeof ResizeObserver !== "undefined") {
+            const ro = new ResizeObserver(() => measure());
+            ro.observe(el);
+            onCleanup(() => ro.disconnect());
+        }
         props.apiRef?.({
             scrollToLine: (index) => {
                 if (!el) return;

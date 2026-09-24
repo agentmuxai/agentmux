@@ -79,6 +79,27 @@ describe("LogView", () => {
         ]);
     });
 
+    it("re-measures its viewport when resized without a scroll (ReAgent P2 on #3684)", () => {
+        let onResize: (() => void) | null = null;
+        const RO = vi.fn(function (this: unknown, cb: () => void) {
+            onResize = cb;
+            return { observe: vi.fn(), disconnect: vi.fn() };
+        });
+        vi.stubGlobal("ResizeObserver", RO);
+        const client = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(160);
+        try {
+            const { rows } = renderLog(makeLines(1_000));
+            const before = rows().length;
+            expect(onResize).not.toBeNull();
+            client.mockReturnValue(1_600); // the panel grew; no scroll happened
+            onResize!();
+            expect(rows().length).toBe(before + (1_600 - 160) / LOG_ROW_PX);
+        } finally {
+            client.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
     describe("sticks to the bottom (ported from SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §3-§4)", () => {
         // jsdom has no layout engine; stub the box sizes.
         const stub = (scrollHeight: number, clientHeight: number) => ({
