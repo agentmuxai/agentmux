@@ -365,8 +365,18 @@ impl PolicyState {
                     return out;
                 }
                 let group = req.kind.group_key(&req.block_id);
-                if let Some(existing) = self.live.get(&group) {
+                if let Some(existing) = self.live.get_mut(&group) {
                     if existing.notification.kind.rank() > req.kind.rank() {
+                        return out;
+                    }
+                    // The same condition reported again — e.g. srv detected
+                    // the question and then the renderer mounts the pane and
+                    // reports it too. Idempotent: no retract, no re-debounce
+                    // (Codex P2 on #3662). Only fill a body we didn't have.
+                    if existing.notification.kind == req.kind {
+                        if existing.notification.body.is_none() && s.preview != Preview::None {
+                            existing.notification.body = req.body;
+                        }
                         return out;
                     }
                 }
@@ -847,6 +857,30 @@ mod tests {
         assert_eq!(t.attention[0].kind, NotifyKind::InputWaiting);
         assert_eq!(t.paused_until_ms, 1_000_000);
         assert_eq!(p.tray_state(&s, 2_000_000).paused_until_ms, 0);
+    }
+
+    #[test]
+    fn repeated_same_kind_report_is_idempotent() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        // srv detects the question (no text), then the renderer reports it too.
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b1")), 0, &s);
+        let a = p.step(Input::Tick, 6_000, &s);
+        let first = shows(&a)[0].clone();
+        let a = p.step(Input::Emit(req(NotifyKind::InputWaiting, "b1")), 7_000, &s);
+        assert!(a.is_empty(), "no retract, no new toast: {a:?}");
+        assert!(p.step(Input::Tick, 20_000, &s).is_empty(), "not re-debounced/re-shown");
+        let t = p.tray_state(&s, 20_000);
+        assert_eq!(t.attention.len(), 1);
+        assert_eq!(t.attention[0].id, first.id, "same notification stays live");
+
+        // Pending (not yet shown) duplicate keeps its original due time and
+        // picks up the body it was missing.
+        p.step(Input::Emit(req_b(NotifyKind::InputWaiting, "b2")), 30_000, &s);
+        p.step(Input::Emit(req(NotifyKind::InputWaiting, "b2")), 35_000, &s);
+        let n = shows(&p.step(Input::Tick, 36_000, &s)).into_iter().cloned().collect::<Vec<_>>();
+        assert_eq!(n.len(), 1, "due at 36s from the FIRST report");
+        assert_eq!(n[0].body.as_deref(), Some("Which branch?"));
     }
 
     #[test]

@@ -43,6 +43,9 @@ enum Internal {
     Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
     /// Raw question text — redacted by `emit` like a renderer report.
     InputWaiting { block_id: String, question: Option<String> },
+    /// Resolve through the SAME ordered queue as the srv-side emits, so a
+    /// resolve can never overtake the emit it cancels (Codex P2 on #3662).
+    Resolve { block_id: String, family: Family },
 }
 
 const AGENT_NAME_MAX: usize = 32;
@@ -169,6 +172,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     })
                     .await;
                 }
+                Internal::Resolve { block_id, family } => r.resolve(&block_id, family),
             }
         }
     });
@@ -424,6 +428,12 @@ impl Router {
     /// renderer's own report for the same block (same `input:` group).
     pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>) {
         let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question });
+    }
+
+    /// Ordered counterpart of `resolve` for srv-side sources: queued behind any
+    /// `input_waiting_nonblocking` already sent for the same block.
+    pub fn resolve_nonblocking(&self, block_id: &str, family: Family) {
+        let _ = self.internal.send(Internal::Resolve { block_id: block_id.to_string(), family });
     }
 
     pub fn resolve(&self, block_id: &str, family: Family) {

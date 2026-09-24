@@ -826,7 +826,7 @@ impl PersistentSubprocessController {
                         // the reliable "resolved" signal.
                         if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
                             if let Some(r) = crate::backend::notify::router::get(broker) {
-                                r.resolve(&block_id_read, crate::backend::notify::policy::Family::Input);
+                                r.resolve_nonblocking(&block_id_read, crate::backend::notify::policy::Family::Input);
                             }
                         }
                         if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
@@ -1459,7 +1459,7 @@ impl PersistentSubprocessController {
                         // The process is gone — nothing is waiting on the user
                         // any more (Phase 5 notifications).
                         if let Some(r) = broker_wait.as_ref().and_then(crate::backend::notify::router::get) {
-                            r.resolve(&block_id_wait, crate::backend::notify::policy::Family::Input);
+                            r.resolve_nonblocking(&block_id_wait, crate::backend::notify::policy::Family::Input);
                         }
                         // Notify health monitor so Stalled/Dead watchdog stops.
                         health_wait.set_exited(exit_code);
