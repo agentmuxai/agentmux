@@ -16,7 +16,7 @@ import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { getProvider, resolveProviderAlias } from "@/app/view/agent/providers";
 import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { Logger } from "@/util/logger";
-import type { Account } from "./identity-model";
+import { accountLabel, type Account } from "./identity-model";
 import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 /** One agent's row-worth of binding context for the submenu. */
@@ -259,7 +259,7 @@ export async function buildAccountRowMenu(
             effectiveProviderById.set(a.id, await resolveEffectiveLaunchProvider(a));
         }),
     );
-    const accountNameById = new Map(accounts.map((a) => [a.id, a.name] as const));
+    const accountNameById = new Map(accounts.map((a) => [a.id, accountLabel(a)] as const));
     const candidates = computeBindCandidates(
         account,
         agents,
@@ -291,7 +291,7 @@ export async function buildAccountRowMenu(
                               .then(() => onBound?.())
                               .catch((e: any) => {
                                   onBindError?.(
-                                      `Couldn't bind "${account.name}" to ${c.agentName}: ${e?.message ?? e}`,
+                                      `Couldn't bind "${accountLabel(account)}" to ${c.agentName}: ${e?.message ?? e}`,
                                   );
                               });
                       },

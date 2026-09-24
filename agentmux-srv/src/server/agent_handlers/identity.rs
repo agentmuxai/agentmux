@@ -161,11 +161,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // OAuth account's login email from its own config dir, so
                 // accounts signed in before #3541 — and every Claude login,
                 // whose transcript prints no email — show it. Written only
-                // when it changed; a failed write still returns the email.
+                // when it changed, and only that one field, in this store and
+                // the global mirror (a full upsert here could re-create an
+                // account deleted since the list, undo a status written
+                // meanwhile, or repoint the mirror's `secret_ref`). A failed
+                // write still returns the email.
                 for account in &mut accounts {
-                    if crate::identity::account_email::refresh_account_email(account) {
-                        if let Err(e) = mstore.identity_upsert_with_mirror(&identity_store, account) {
-                            tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");
+                    if let Some(email) = crate::identity::account_email::refresh_account_email(account) {
+                        for store in [&mstore, &identity_store] {
+                            if let Err(e) = store.identity_set_context_email(&account.id, &email) {
+                                tracing::warn!(target: "identity", account_id = %account.id, error = %e, "listidentityaccounts: email backfill write failed");
+                            }
                         }
                     }
                 }
