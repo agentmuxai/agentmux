@@ -13,10 +13,15 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
+    COMMAND_GLOBAL_MEMORY_HISTORY, COMMAND_GLOBAL_MEMORY_DIFF, COMMAND_GLOBAL_MEMORY_REVERT,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
     CommandListBundlesData, CommandGetClaudeGlobalConfigData, ReorderGlobalBundlesResult,
+    CommandUpsertBundleData, CommandGlobalMemoryHistoryData, CommandGlobalMemoryDiffData,
+    CommandGlobalMemoryRevertData, GlobalMemoryDiffResult, GlobalMemoryHistoryResult,
+    GlobalMemoryRevertResult, GlobalMemoryVersionMeta,
 };
-use crate::backend::storage::store::Bundle;
+use crate::backend::storage::store::{Bundle, Store};
+use crate::backend::storage::{BundleVersion, BundleVersionSummary};
 
 use super::super::AppState;
 
@@ -58,10 +63,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_UPSERT_MEMORY,
-        move |mut memory: Bundle, _ctx| {
+        move |req: CommandUpsertBundleData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
+                let CommandUpsertBundleData { bundle: mut memory, base_sha256 } = req;
                 // Guard on BOTH client-supplied is_blank AND id == "blank".
                 // Without the id check a caller could send
                 // {id:"blank", is_blank:false, name:"evil"} and the
@@ -98,8 +104,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // own doc comment) — a human via the UI is the only thing
                 // this code path can honestly claim. No writer UID either
                 // (identity M4c-1): the WebSocket is always Unattributed.
+                // `base_sha256` (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
+                // §2.4): the Armory editor says which content its draft
+                // started from, so a concurrent write (an agent's
+                // GlobalMemoryWrite, another window) becomes a `conflict:`
+                // refusal instead of being silently overwritten. Absent =
+                // the unconditional save every other caller still gets.
                 mstore
-                    .bundle_upsert_with_version(&memory, "armory-ui", "", "human", "{}")
+                    .bundle_upsert_with_version_based(&memory, "armory-ui", "", "human", "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
@@ -182,10 +194,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_UPSERT_SYSTEM_MEMORY,
-        move |mut memory: Bundle, _ctx| {
+        move |req: CommandUpsertBundleData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
+                let CommandUpsertBundleData { bundle: mut memory, base_sha256 } = req;
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
                 }
@@ -212,8 +225,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // revision raced a concurrent writer (e.g. another AgentMux
                 // instance's own reseed) between the read and the write.
                 // Codex P1/P2, ReAgent P2, PR #3244.
+                // Same optional base check as `upsertmemory` above.
                 mstore
-                    .bundle_upsert_system_if_changed(&memory, "armory-ui", "human", "{}")
+                    .bundle_upsert_system_if_changed_based(&memory, "armory-ui", "human", "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
@@ -278,6 +292,153 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+    // ---- Global Memory version history for the Armory UI
+    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3). Same rows, same
+    // diff, same "revert records a new version" rule as the MCP tools in
+    // app_api/mod.rs (global_memory_{history,diff,revert}_impl) — the
+    // difference is the guard: the Armory can already edit and delete
+    // system-tier entries through upsertsystemmemory/deletesystemmemory, so
+    // their history is not hidden from it the way it is from agents.
+
+    let mstore = state.id_store.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_HISTORY,
+        move |cmd: CommandGlobalMemoryHistoryData, _ctx| {
+            let mstore = mstore.clone();
+            async move { global_memory_ui_history(&mstore, &cmd.id) }
+        },
+    );
+
+    let mstore = state.id_store.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_DIFF,
+        move |cmd: CommandGlobalMemoryDiffData, _ctx| {
+            let mstore = mstore.clone();
+            async move { global_memory_ui_diff(&mstore, &cmd) }
+        },
+    );
+
+    let mstore = state.id_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_REVERT,
+        move |cmd: CommandGlobalMemoryRevertData, _ctx| {
+            let mstore = mstore.clone();
+            let broker = broker.clone();
+            async move {
+                let result = global_memory_ui_revert(&mstore, &cmd)?;
+                broker.publish(crate::backend::mps::MuxEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(result)
+            }
+        },
+    );
+}
+
+/// Loads a Global Memory entry for the Armory's history commands: it must
+/// exist, be `is_global`, and not be the blank singleton. System-tier rows
+/// are allowed (see the comment above the registrations).
+fn load_global_bundle_for_ui(store: &Store, id: &str, verb: &str) -> Result<Bundle, String> {
+    let bundle = store
+        .bundle_get(id)
+        .map_err(|e| format!("globalmemory:{verb}: {e}"))?
+        .ok_or_else(|| format!("globalmemory:{verb}: not found id={id}"))?;
+    if bundle.is_blank || bundle.id == "blank" {
+        return Err(format!("globalmemory:{verb}: cannot {verb} the blank Bundle singleton"));
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory:{verb}: id={id} is not a Global Memory entry"));
+    }
+    Ok(bundle)
+}
+
+fn version_summary_meta(v: BundleVersionSummary) -> GlobalMemoryVersionMeta {
+    GlobalMemoryVersionMeta {
+        id: v.id,
+        content_hash: v.content_hash,
+        parent_version_id: v.parent_version_id,
+        source: v.source,
+        source_detail: v.source_detail,
+        written_by: v.written_by,
+        written_by_uid: v.written_by_uid,
+        created_at: v.created_at,
+    }
+}
+
+fn version_meta(v: BundleVersion) -> GlobalMemoryVersionMeta {
+    GlobalMemoryVersionMeta {
+        id: v.id,
+        content_hash: v.content_hash,
+        parent_version_id: v.parent_version_id,
+        source: v.source,
+        source_detail: v.source_detail,
+        written_by: v.written_by,
+        written_by_uid: v.written_by_uid,
+        created_at: v.created_at,
+    }
+}
+
+fn global_memory_ui_history(store: &Store, id: &str) -> Result<GlobalMemoryHistoryResult, String> {
+    load_global_bundle_for_ui(store, id, "history")?;
+    let versions = store
+        .bundle_version_list(id)
+        .map_err(|e| format!("globalmemory:history: store: {e}"))?
+        .into_iter()
+        .map(version_summary_meta)
+        .collect();
+    Ok(GlobalMemoryHistoryResult { versions })
+}
+
+fn global_memory_ui_diff(store: &Store, cmd: &CommandGlobalMemoryDiffData) -> Result<GlobalMemoryDiffResult, String> {
+    load_global_bundle_for_ui(store, &cmd.id, "diff")?;
+    let get = |vid: &str| {
+        store
+            .bundle_version_get(vid)
+            .map_err(|e| format!("globalmemory:diff: store: {e}"))?
+            .ok_or_else(|| format!("globalmemory:diff: version {vid} not found"))
+    };
+    let from = get(&cmd.from_version_id)?;
+    let to = get(&cmd.to_version_id)?;
+    // Both versions must belong to this entry — a version id alone does not
+    // prove which bundle it came from (same check as the MCP diff).
+    if from.bundle_id != cmd.id || to.bundle_id != cmd.id {
+        return Err(format!("globalmemory:diff: one or both versions do not belong to {}", cmd.id));
+    }
+    Ok(GlobalMemoryDiffResult { diff: crate::server::app_api::bundle_version_diff(&from, &to) })
+}
+
+/// Restores `name` + `instructions` from `target_version_id` as a NEW
+/// version (`source: "revert"`, `written_by: "armory-ui"`), through the same
+/// atomic upsert-plus-version primitive each tier's ordinary save uses.
+fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -> Result<GlobalMemoryRevertResult, String> {
+    let mut bundle = load_global_bundle_for_ui(store, &cmd.id, "revert")?;
+    let target = store
+        .bundle_version_get(&cmd.target_version_id)
+        .map_err(|e| format!("globalmemory:revert: store: {e}"))?
+        .ok_or_else(|| format!("globalmemory:revert: version {} not found", cmd.target_version_id))?;
+    if target.bundle_id != cmd.id {
+        return Err(format!(
+            "globalmemory:revert: version {} does not belong to {}",
+            cmd.target_version_id, cmd.id
+        ));
+    }
+    bundle.name = target.name;
+    bundle.instructions = target.instructions;
+    bundle.updated_at = agentmux_common::time::now_ms();
+    let detail = json!({ "reverted_to": cmd.target_version_id }).to_string();
+    let version = if bundle.is_system {
+        store.bundle_upsert_system_if_changed(&bundle, "armory-ui", "revert", &detail)
+    } else {
+        store.bundle_upsert_with_version(&bundle, "armory-ui", "", "revert", &detail)
+    }
+    .map_err(|e| format!("globalmemory:revert: {e}"))?;
+    tracing::info!(bundle_id = %cmd.id, version_id = %cmd.target_version_id, "globalmemory:revert");
+    Ok(GlobalMemoryRevertResult { version: version.map(version_meta) })
 }
 
 /// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
@@ -495,15 +656,18 @@ mod delete_memory_tests {
         // invariant -- so migrating them correctly made it fail. It now asserts
         // what each one actually records, which is the thing worth pinning.
         //
-        // `upsertmemory`/`upsertsystemmemory` take `Bundle` itself as the
-        // request because the upsert body IS the storage entity; only `id` and
-        // `name` are required on the wire (every other field has a serde
-        // default), which is what `BundleUpsertInput` expresses on the
-        // frontend side.
+        // `upsertmemory`/`upsertsystemmemory` take `CommandUpsertBundleData`:
+        // the storage `Bundle` itself, flattened (the upsert body IS the
+        // entity), plus an optional `base_sha256`. Only `id` and `name` are
+        // required on the wire (every other field has a serde default), which
+        // is what `BundleUpsertInput` expresses on the frontend side.
         for (cmd, req, resp) in [
             (COMMAND_GET_MEMORY, "CommandGetBundleData", "Bundle"),
-            (COMMAND_UPSERT_MEMORY, "Bundle", "Bundle"),
-            (COMMAND_UPSERT_SYSTEM_MEMORY, "Bundle", "Bundle"),
+            (COMMAND_UPSERT_MEMORY, "CommandUpsertBundleData", "Bundle"),
+            (COMMAND_UPSERT_SYSTEM_MEMORY, "CommandUpsertBundleData", "Bundle"),
+            (COMMAND_GLOBAL_MEMORY_HISTORY, "CommandGlobalMemoryHistoryData", "GlobalMemoryHistoryResult"),
+            (COMMAND_GLOBAL_MEMORY_DIFF, "CommandGlobalMemoryDiffData", "GlobalMemoryDiffResult"),
+            (COMMAND_GLOBAL_MEMORY_REVERT, "CommandGlobalMemoryRevertData", "GlobalMemoryRevertResult"),
             (
                 COMMAND_REORDER_GLOBAL_BRAIN,
                 "CommandReorderGlobalBundlesData",
@@ -537,5 +701,248 @@ mod delete_memory_tests {
             list_resp.starts_with("alloc::vec::Vec<") && list_resp.ends_with("::Bundle>"),
             "listmemories should answer with a Vec of Bundle, got {list_resp}"
         );
+    }
+}
+
+// Conditional saves (`base_sha256`) and the Armory's Global Memory history
+// commands — SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3/§2.4.
+#[cfg(test)]
+mod global_memory_ui_tests {
+    use super::*;
+    use crate::backend::rpc_types::RpcMessage;
+    use crate::server::tests::test_state;
+
+    async fn call(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        command: &str,
+        data: serde_json::Value,
+    ) -> RpcMessage {
+        let reqid = format!("req-{}", uuid::Uuid::new_v4());
+        engine.handle_message(RpcMessage {
+            command: command.to_string(),
+            reqid: reqid.clone(),
+            data: Some(data),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resp.resid, reqid);
+        resp
+    }
+
+    async fn ok<T: serde::de::DeserializeOwned>(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        command: &str,
+        data: serde_json::Value,
+    ) -> T {
+        let resp = call(engine, rx, command, data).await;
+        assert!(resp.error.is_empty(), "{command}: unexpected error: {}", resp.error);
+        serde_json::from_value(resp.data.unwrap_or(serde_json::Value::Null)).unwrap()
+    }
+
+    fn hash(name: &str, instructions: &str) -> String {
+        crate::backend::storage::bundle_versions::content_hash(name, instructions)
+    }
+
+    /// Creates an ordinary Global Memory entry through the real save path
+    /// and returns its id.
+    async fn create_entry(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        name: &str,
+        instructions: &str,
+    ) -> String {
+        let saved: Bundle = ok(engine, rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": "", "name": name, "is_global": true, "instructions": instructions,
+        }))
+        .await;
+        saved.id
+    }
+
+    #[tokio::test]
+    async fn upsertmemory_with_a_matching_base_saves() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Rules", "v1").await;
+
+        let resp = call(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": id, "name": "Rules", "is_global": true, "instructions": "v2",
+            "base_sha256": hash("Rules", "v1"),
+        }))
+        .await;
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        assert_eq!(state.id_store.bundle_get(&id).unwrap().unwrap().instructions, "v2");
+    }
+
+    #[tokio::test]
+    async fn upsertmemory_with_a_stale_base_is_a_conflict_and_changes_nothing() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Rules", "v1").await;
+        // Someone else saves while the human's draft is still based on v1.
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": id, "name": "Rules", "is_global": true, "instructions": "agent edit",
+        }))
+        .await;
+        let versions_before = state.id_store.bundle_version_list(&id).unwrap().len();
+
+        let resp = call(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": id, "name": "Rules", "is_global": true, "instructions": "human draft",
+            "base_sha256": hash("Rules", "v1"),
+        }))
+        .await;
+        assert!(resp.error.contains("conflict:"), "expected a conflict, got {:?}", resp.error);
+        assert_eq!(state.id_store.bundle_get(&id).unwrap().unwrap().instructions, "agent edit");
+        assert_eq!(state.id_store.bundle_version_list(&id).unwrap().len(), versions_before);
+    }
+
+    #[tokio::test]
+    async fn upsertmemory_without_a_base_behaves_as_before() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Rules", "v1").await;
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": id, "name": "Rules", "is_global": true, "instructions": "v2",
+        }))
+        .await;
+        assert_eq!(state.id_store.bundle_get(&id).unwrap().unwrap().instructions, "v2");
+    }
+
+    #[tokio::test]
+    async fn upsertsystemmemory_honours_the_base_too() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let saved: Bundle = ok(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+            "id": "sys-base", "name": "Policy", "instructions": "v1",
+        }))
+        .await;
+        let resp = call(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+            "id": saved.id, "name": "Policy", "instructions": "draft",
+            "base_sha256": hash("Policy", "something else"),
+        }))
+        .await;
+        assert!(resp.error.contains("conflict:"), "expected a conflict, got {:?}", resp.error);
+        assert_eq!(state.id_store.bundle_get("sys-base").unwrap().unwrap().instructions, "v1");
+
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+            "id": "sys-base", "name": "Policy", "instructions": "v2",
+            "base_sha256": hash("Policy", "v1"),
+        }))
+        .await;
+        assert_eq!(state.id_store.bundle_get("sys-base").unwrap().unwrap().instructions, "v2");
+    }
+
+    #[tokio::test]
+    async fn history_diff_and_revert_round_trip() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let id = create_entry(&engine, &mut rx, "Rules", "line one\n").await;
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": id, "name": "Rules", "is_global": true, "instructions": "line one\nline two\n",
+        }))
+        .await;
+
+        let history: GlobalMemoryHistoryResult =
+            ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_HISTORY, json!({ "id": id })).await;
+        assert_eq!(history.versions.len(), 2);
+        let (newest, oldest) = (history.versions[0].clone(), history.versions[1].clone());
+        assert_eq!(newest.written_by, "armory-ui");
+        // The latest version's hash is what the editor sends as its base.
+        assert_eq!(newest.content_hash, hash("Rules", "line one\nline two\n"));
+
+        let diff: GlobalMemoryDiffResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_DIFF, json!({
+            "id": id, "from_version_id": oldest.id, "to_version_id": newest.id,
+        }))
+        .await;
+        assert_eq!(diff.diff, "  line one\n+ line two\n");
+
+        let reverted: GlobalMemoryRevertResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REVERT, json!({
+            "id": id, "target_version_id": oldest.id,
+        }))
+        .await;
+        let v = reverted.version.expect("an ordinary revert always records a version");
+        assert_eq!(v.source, "revert");
+        assert_eq!(v.written_by, "armory-ui");
+        assert!(v.source_detail.contains(&oldest.id));
+        assert_eq!(state.id_store.bundle_get(&id).unwrap().unwrap().instructions, "line one\n");
+        assert_eq!(state.id_store.bundle_version_list(&id).unwrap().len(), 3, "revert appends, never rewrites");
+    }
+
+    #[tokio::test]
+    async fn diff_refuses_a_version_from_another_entry() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let a = create_entry(&engine, &mut rx, "A", "a").await;
+        let b = create_entry(&engine, &mut rx, "B", "b").await;
+        let va = state.id_store.bundle_version_list(&a).unwrap()[0].id.clone();
+        let vb = state.id_store.bundle_version_list(&b).unwrap()[0].id.clone();
+        let resp = call(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_DIFF, json!({
+            "id": a, "from_version_id": va, "to_version_id": vb,
+        }))
+        .await;
+        assert!(resp.error.contains("do not belong"), "got {:?}", resp.error);
+        let resp = call(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REVERT, json!({
+            "id": a, "target_version_id": vb,
+        }))
+        .await;
+        assert!(resp.error.contains("does not belong"), "got {:?}", resp.error);
+    }
+
+    #[tokio::test]
+    async fn history_refuses_a_non_global_bundle() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let saved: Bundle = ok(&engine, &mut rx, COMMAND_UPSERT_MEMORY, json!({
+            "id": "", "name": "Private preset", "is_global": false, "instructions": "x",
+        }))
+        .await;
+        let resp = call(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_HISTORY, json!({ "id": saved.id })).await;
+        assert!(resp.error.contains("not a Global Memory entry"), "got {:?}", resp.error);
+    }
+
+    // Unlike the MCP tools, the Armory sees system-tier history — it can
+    // already edit those entries. A no-op revert of one records nothing.
+    #[tokio::test]
+    async fn system_entries_have_history_and_a_no_op_revert_records_nothing() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        for body in ["v1", "v2"] {
+            ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+                "id": "sys-hist", "name": "Policy", "instructions": body,
+            }))
+            .await;
+        }
+        let history: GlobalMemoryHistoryResult =
+            ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_HISTORY, json!({ "id": "sys-hist" })).await;
+        assert_eq!(history.versions.len(), 2);
+
+        let latest = history.versions[0].id.clone();
+        let reverted: GlobalMemoryRevertResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REVERT, json!({
+            "id": "sys-hist", "target_version_id": latest,
+        }))
+        .await;
+        assert!(reverted.version.is_none());
+
+        let oldest = history.versions[1].id.clone();
+        let reverted: GlobalMemoryRevertResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REVERT, json!({
+            "id": "sys-hist", "target_version_id": oldest,
+        }))
+        .await;
+        assert_eq!(reverted.version.expect("a real revert records a version").source, "revert");
+        let row = state.id_store.bundle_get("sys-hist").unwrap().unwrap();
+        assert_eq!(row.instructions, "v1");
+        assert!(row.is_system, "reverting must not demote a system entry");
     }
 }

@@ -1673,12 +1673,24 @@ pub(crate) fn global_memory_diff_impl(
     if from.bundle_id != id || to.bundle_id != id {
         return Err(format!("globalmemory.diff: one or both versions do not belong to {id}"));
     }
+    Ok(json!({ "diff": bundle_version_diff(&from, &to) }))
+}
+
+/// The diff text `global_memory_diff_impl` returns — a `- name:`/`+ name:`
+/// pair when the name changed (see that function's doc comment for why),
+/// then `line_diff` over the instructions. Shared with the Armory UI's
+/// `globalmemory:diff` WebSocket command (`agent_handlers/bundle.rs`) so the
+/// MCP tool and the UI can never render the same pair of versions two ways.
+pub(crate) fn bundle_version_diff(
+    from: &crate::backend::storage::BundleVersion,
+    to: &crate::backend::storage::BundleVersion,
+) -> String {
     let mut diff = String::new();
     if from.name != to.name {
         diff.push_str(&format!("- name: {}\n+ name: {}\n", from.name, to.name));
     }
     diff.push_str(&crate::server::native_memory_handlers::line_diff(&from.instructions, &to.instructions));
-    Ok(json!({ "diff": diff }))
+    diff
 }
 
 /// Restores a Global Memory entry's live `name`/`instructions` to a prior

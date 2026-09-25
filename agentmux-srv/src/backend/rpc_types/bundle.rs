@@ -58,6 +58,95 @@ pub struct CommandListBundlesData {}
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandGetClaudeGlobalConfigData {}
 
+/// Request for `upsertmemory` / `upsertsystemmemory`: the `Bundle` row itself
+/// (flattened, so the wire shape every existing caller sends is unchanged)
+/// plus an optional `base_sha256`. When present, the save is refused with a
+/// `conflict:` error unless the stored row's `name` + `instructions` still
+/// hash to it — `bundle_versions::content_hash`, i.e. SHA-256 of
+/// `name + "\0" + instructions`, the same value as the latest version's
+/// `content_hash`. Absent = today's unconditional save. See
+/// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandUpsertBundleData {
+    #[serde(flatten)]
+    pub bundle: crate::backend::storage::store::Bundle,
+    #[serde(default)]
+    #[ts(optional)]
+    pub base_sha256: Option<String>,
+}
+
+// ---- Global Memory version history for the Armory UI —
+// globalmemory:history / diff / revert. The WebSocket counterparts of the
+// GlobalMemoryHistory/Diff/Revert MCP tools (#3448), over the same
+// db_bundle_versions rows. SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
+
+/// One `db_bundle_versions` row's metadata, no `name`/`instructions` —
+/// the same fields `bundle_version_meta_json` (app_api) puts on the MCP wire.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct GlobalMemoryVersionMeta {
+    pub id: String,
+    pub content_hash: String,
+    pub parent_version_id: Option<String>,
+    pub source: String,
+    pub source_detail: String,
+    /// The trusted writer: an agent's own id, or `"armory-ui"`.
+    pub written_by: String,
+    pub written_by_uid: String,
+    // ts-rs maps 64-bit integers to `bigint`; every consumer treats this as a
+    // plain JS number. See BrowserBookmark::created_at (PR #3293).
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryHistoryData {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct GlobalMemoryHistoryResult {
+    /// Newest first.
+    pub versions: Vec<GlobalMemoryVersionMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryDiffData {
+    /// Both versions must belong to this entry.
+    pub id: String,
+    pub from_version_id: String,
+    pub to_version_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct GlobalMemoryDiffResult {
+    /// Same format as `NativeMemoryDiffResult::diff`, preceded by a
+    /// `- name:` / `+ name:` pair when the entry was renamed.
+    pub diff: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryRevertData {
+    pub id: String,
+    pub target_version_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct GlobalMemoryRevertResult {
+    /// The new `source: "revert"` version. `null` only for a system-tier
+    /// entry whose revert target is byte-identical to what's stored — that
+    /// path deliberately records no version for a no-op (see
+    /// `Store::bundle_upsert_system_if_changed`).
+    pub version: Option<GlobalMemoryVersionMeta>,
+}
+
 /// Result of `reorderglobalbrain`. Was an inline `json!({"updated": n})`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
@@ -130,6 +219,48 @@ mod req_shape_tests {
             serde_json::from_value::<Bundle>(json!({"name": "n"})).is_err(),
             "a payload with no id must be rejected too"
         );
+    }
+
+    // The upsert request wraps `Bundle` with `#[serde(flatten)]` so the
+    // optional `base_sha256` can ride alongside without changing what any
+    // existing caller sends: a bare Bundle payload still parses, `name`/`id`
+    // are still required, and the base is picked out when present.
+    #[test]
+    fn upsert_request_flattens_the_bundle_and_takes_an_optional_base() {
+        let bare: CommandUpsertBundleData = serde_json::from_value(json!({"id": "b1", "name": "n"}))
+            .expect("a bare Bundle payload must still parse");
+        assert_eq!(bare.bundle.id, "b1");
+        assert_eq!(bare.bundle.context_files, "[]");
+        assert!(bare.base_sha256.is_none());
+
+        let based: CommandUpsertBundleData = serde_json::from_value(json!({
+            "id": "b1", "name": "n", "instructions": "body", "is_global": true, "sort_order": 3,
+            "base_sha256": "abc",
+        }))
+        .expect("base_sha256 rides alongside the Bundle fields");
+        assert_eq!(based.base_sha256.as_deref(), Some("abc"));
+        assert_eq!(based.bundle.instructions, "body");
+        assert!(based.bundle.is_global);
+        assert_eq!(based.bundle.sort_order, 3);
+
+        assert!(
+            serde_json::from_value::<CommandUpsertBundleData>(json!({"id": "b1"})).is_err(),
+            "name is still required through the flatten"
+        );
+    }
+
+    #[test]
+    fn the_global_memory_history_commands_accept_the_payloads_the_stub_sends() {
+        serde_json::from_value::<CommandGlobalMemoryHistoryData>(json!({"id": "b1"}))
+            .expect("globalmemory:history");
+        serde_json::from_value::<CommandGlobalMemoryDiffData>(
+            json!({"id": "b1", "from_version_id": "v1", "to_version_id": "v2"}),
+        )
+        .expect("globalmemory:diff");
+        serde_json::from_value::<CommandGlobalMemoryRevertData>(
+            json!({"id": "b1", "target_version_id": "v1"}),
+        )
+        .expect("globalmemory:revert");
     }
 
     // `Bundle` is the RESPONSE shape and is all-required in TypeScript because
