@@ -1,7 +1,7 @@
 # SPEC: Agent pane refinements — expanded tool-call hover text, close-last-tab returns to My Agents, composer autofocus on launch
 
 **Date:** 2026-09-23
-**Status:** implemented (branch `clamk/agent-pane-hover-close-focus`) —
+**Status:** implemented — all three refinements (§1–§3) shipped in PR #3780.
 §6 records where the implementation deliberately differs from the design
 below.
 **Repo state:** `agentmuxai/agentmux` main @ `cdee2e2` (design);
