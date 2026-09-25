@@ -154,6 +154,7 @@ impl HeldAgentLease {
 impl Drop for HeldAgentLease {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::SeqCst);
+        unregister_by_name(&self.agent, &self.lost);
         if let Err(e) = self.store.release(&self.lease) {
             tracing::warn!(
                 agent = %self.agent,
@@ -228,6 +229,7 @@ pub fn acquire(
         }
     };
     tracing::info!(agent, uid, block_id, epoch = lease.epoch(), "agent_admission.granted");
+    let on_lost: Arc<dyn Fn(String) + Send + Sync> = Arc::new(on_lost);
 
     let held = HeldAgentLease {
         store: Arc::clone(store),
@@ -244,8 +246,12 @@ pub fn acquire(
         Arc::clone(&held.lost),
         Arc::clone(&held.stopped),
         Arc::clone(&held.last_ok_ms),
-        on_lost,
+        {
+            let on_lost = Arc::clone(&on_lost);
+            move |why: String| on_lost(why)
+        },
     );
+    register_by_name(agent, &held.lost, on_lost);
     Ok(held)
 }
 
@@ -371,6 +377,10 @@ pub async fn check_before_spawn(
             Err(e) => tracing::warn!(agent, uid, error = %e, "agent_admission: early lease read panicked"),
         }
     }
+    if let Some(where_) = crate::muxbus::wan_lease::held_elsewhere(agent) {
+        tracing::warn!(agent, uid, holder = %where_, "agent_admission.denied: the muxbus relay says another instance holds this agent");
+        return Err(wan_denied_message(agent, &where_));
+    }
     if let Some(peer) = lan_holders(uid).await.into_iter().next() {
         tracing::warn!(agent, uid, peer_host = %peer.hostname, "agent_admission.denied: agent is live on a LAN peer");
         return Err(lan_denied_message(agent, &peer));
@@ -477,6 +487,79 @@ fn find_uid_block(regs: &[serde_json::Value], uid: &str) -> Option<String> {
             r.get("block_id").and_then(|v| v.as_str()).unwrap_or_default().to_string()
         })
     })
+}
+
+// ── Phase 5: WAN tier — the relay decides (spec §4.5) ──────────────────
+
+type LostCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// The held leases of this process by agent **name** (lower-cased) — the key
+/// the muxbus relay and its pending queue use — so the WAN side can fence the
+/// local holder when the relay says another instance holds the agent.
+static HELD_BY_NAME: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (Arc<LostReason>, LostCallback)>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn register_by_name(agent: &str, lost: &Arc<LostReason>, on_lost: LostCallback) {
+    if agent.trim().is_empty() {
+        return;
+    }
+    HELD_BY_NAME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(agent.trim().to_lowercase(), (Arc::clone(lost), on_lost));
+}
+
+fn unregister_by_name(agent: &str, lost: &Arc<LostReason>) {
+    let mut map = HELD_BY_NAME.lock().unwrap_or_else(|e| e.into_inner());
+    let key = agent.trim().to_lowercase();
+    // Only our own entry: a newer lease for the same name may have replaced it.
+    if map.get(&key).is_some_and(|(l, _)| Arc::ptr_eq(l, lost)) {
+        map.remove(&key);
+    }
+}
+
+/// The relay says another instance holds `agent_name` (WAN tier): fence this
+/// process's holder of that agent, if any — record the loss (the pre-turn
+/// fence refuses its next turn) and stop its CLI process. `true` when a
+/// local holder was fenced.
+pub fn fence_agent_named(agent_name: &str, where_: &str) -> bool {
+    let entry = HELD_BY_NAME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&agent_name.trim().to_lowercase())
+        .cloned();
+    let Some((lost, on_lost)) = entry else { return false };
+    if lost.get().is_some() {
+        return false;
+    }
+    let why = lost.set_first(wan_lost_message(agent_name, where_));
+    tracing::error!(agent = agent_name, holder = where_, "agent_admission.fenced: the muxbus relay says another instance holds this agent — stopping this one");
+    on_lost(why);
+    true
+}
+
+fn wan_place(where_: &str) -> String {
+    if where_.is_empty() { String::new() } else { format!(" ({where_})") }
+}
+
+/// The refusal when the relay says another instance runs the agent. Carries
+/// the host refusal's marker, so it classifies as `LiveElsewhere`.
+pub fn wan_denied_message(agent: &str, where_: &str) -> String {
+    let agent = if agent.is_empty() { "This agent" } else { agent };
+    format!(
+        "{agent} is already running in another AgentMux instance on another computer{}, according to AgentMux cloud. \
+         Close it there, then try again — an agent can only run in one place at a time.",
+        wan_place(where_)
+    )
+}
+
+fn wan_lost_message(agent: &str, where_: &str) -> String {
+    let agent = if agent.is_empty() { "This agent" } else { agent };
+    format!(
+        "{agent} was taken over by another AgentMux instance on another computer{}, according to AgentMux cloud, which \
+         had it first. It will not start another turn here.",
+        wan_place(where_)
+    )
 }
 
 // ── Phase 4: LAN tier — detect and yield (spec §4.4) ───────────────────
@@ -1066,6 +1149,38 @@ mod tests {
     async fn without_lan_discovery_the_lan_tier_is_skipped() {
         // LAN_DISCOVERY is never set in unit tests.
         assert!(lan_holders("uid-1").await.is_empty());
+    }
+
+    /// Phase 5: the WAN side fences the local holder by agent name, only its
+    /// own entry, and only once.
+    #[test]
+    fn the_relay_can_fence_the_local_holder_by_agent_name() {
+        let (_tmp, s) = store(60_000);
+        let name = format!("Agent-{}", uuid::Uuid::new_v4());
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let tx = std::sync::Mutex::new(tx);
+        let held = acquire(&s, "uid-w", &name, &boot("boot-a"), "block-a", None, move |m| {
+            let _ = tx.lock().unwrap().send(m);
+        })
+        .unwrap();
+        assert!(fence_agent_named(&name.to_lowercase(), "computer desk, channel stable"));
+        let why = rx.try_recv().expect("on_lost ran");
+        assert!(why.contains("taken over") && why.contains("computer desk"), "{why}");
+        assert!(is_admission_refusal(&why));
+        assert_eq!(held.verify().unwrap_err(), why, "the next turn is refused with the same reason");
+        assert!(!fence_agent_named(&name, "again"), "fenced once");
+        drop(held);
+        assert!(!fence_agent_named(&name, "after release"), "no holder left to fence");
+    }
+
+    #[test]
+    fn a_wan_refusal_is_recognised() {
+        let m = wan_denied_message("Agent3", "computer desk, channel stable, v0.58.0");
+        assert!(is_admission_refusal(&m), "{m}");
+        assert_eq!(
+            crate::agents::failure::classify(None, None, &m, None).code,
+            crate::agents::failure::FailureClass::LiveElsewhere
+        );
     }
 
     #[test]
