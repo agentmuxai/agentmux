@@ -168,6 +168,10 @@ impl Settings {
 pub struct FocusReport {
     pub window_focused: bool,
     pub block_id: Option<String>,
+    /// The reporting window's own `Window` oid (rich-content spec §3.3 A):
+    /// what makes "is that window open" answerable. `None` from an older
+    /// frontend.
+    pub window_id: Option<String>,
 }
 
 /// A request from a source. `agent_name` / `body` are already resolved and
@@ -279,6 +283,9 @@ pub struct PolicyState {
     /// group_key → the one live (pending or shown) notification for it.
     live: HashMap<String, Live>,
     focus: HashMap<String, FocusReport>,
+    /// The connection whose window most recently reported being focused —
+    /// where a click with no pane of its own raises (§3.3 F).
+    last_focused_conn: Option<String>,
     next_seq: u64,
     /// block_id → last time a toast for it was shown (per-block limit).
     last_shown: HashMap<String, i64>,
@@ -342,6 +349,25 @@ impl PolicyState {
     /// Whether any frontend window is connected (for click-with-no-window).
     pub fn has_window(&self) -> bool {
         !self.focus.is_empty()
+    }
+
+    /// Whether a connected frontend reports being window `window_id`.
+    pub fn window_open(&self, window_id: &str) -> bool {
+        self.focus.values().any(|f| f.window_id.as_deref() == Some(window_id))
+    }
+
+    /// The window a click should raise when it names none of its own: the
+    /// most recently focused one, else any connected window with an id.
+    pub fn raise_window(&self) -> Option<String> {
+        self.last_focused_conn
+            .as_ref()
+            .and_then(|c| self.focus.get(c))
+            .and_then(|f| f.window_id.clone())
+            .or_else(|| {
+                let mut ids: Vec<&String> = self.focus.values().filter_map(|f| f.window_id.as_ref()).collect();
+                ids.sort();
+                ids.first().map(|s| (*s).clone())
+            })
     }
 
     /// §6.0 gate, evaluated at the moment a notification becomes due.
@@ -433,6 +459,9 @@ impl PolicyState {
             Input::Focus { conn_id, report } => {
                 let looking = report.window_focused.then(|| report.block_id.clone()).flatten();
                 let app_focused = report.window_focused;
+                if app_focused {
+                    self.last_focused_conn = Some(conn_id.clone());
+                }
                 self.focus.insert(conn_id, report);
                 // Back in the app: the digest of what you missed is moot.
                 if app_focused {
@@ -446,6 +475,9 @@ impl PolicyState {
             }
             Input::Disconnect { conn_id } => {
                 self.focus.remove(&conn_id);
+                if self.last_focused_conn.as_deref() == Some(conn_id.as_str()) {
+                    self.last_focused_conn = None;
+                }
             }
             Input::Ack { id, clicked } => {
                 let group = self
@@ -593,7 +625,7 @@ mod tests {
         Request { kind, block_id: block.into(), agent_name: "lark".into(), body: Some("Which branch?".into()) }
     }
     fn focus(window: bool, block: Option<&str>) -> Input {
-        Input::Focus { conn_id: "c1".into(), report: FocusReport { window_focused: window, block_id: block.map(Into::into) } }
+        Input::Focus { conn_id: "c1".into(), report: FocusReport { window_focused: window, block_id: block.map(Into::into), window_id: None } }
     }
     fn shows(a: &[Action]) -> Vec<&Notification> {
         a.iter().filter_map(|x| if let Action::Show(n) = x { Some(n) } else { None }).collect()
@@ -910,6 +942,33 @@ mod tests {
         let second = shows(&p.step(Input::Tick, 70_000, &s))[0].clone();
         assert_ne!(first.id, second.id);
         assert_eq!(first.tag, second.tag);
+    }
+
+    fn focus_as(conn: &str, window_id: &str, focused: bool) -> Input {
+        Input::Focus {
+            conn_id: conn.into(),
+            report: FocusReport { window_focused: focused, block_id: None, window_id: Some(window_id.into()) },
+        }
+    }
+
+    #[test]
+    fn open_windows_and_the_raise_target_follow_focus_reports() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        assert!(!p.window_open("w1"));
+        assert_eq!(p.raise_window(), None);
+        p.step(focus_as("c1", "w1", false), 0, &s);
+        p.step(focus_as("c2", "w2", false), 0, &s);
+        assert!(p.window_open("w1") && p.window_open("w2"));
+        assert!(!p.window_open("w3"));
+        // Nobody focused yet: some open window, deterministically.
+        assert_eq!(p.raise_window().as_deref(), Some("w1"));
+        p.step(focus_as("c2", "w2", true), 1, &s);
+        p.step(focus_as("c2", "w2", false), 2, &s);
+        assert_eq!(p.raise_window().as_deref(), Some("w2"), "last focused, even after it blurred");
+        p.step(Input::Disconnect { conn_id: "c2".into() }, 3, &s);
+        assert!(!p.window_open("w2"));
+        assert_eq!(p.raise_window().as_deref(), Some("w1"));
     }
 
     #[test]

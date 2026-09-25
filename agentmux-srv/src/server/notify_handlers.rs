@@ -58,6 +58,9 @@ pub struct NotifyFocusParams {
     pub window_focused: bool,
     #[ts(optional)]
     pub block_id: Option<String>,
+    /// This window's own `Window` oid, so srv knows which windows are open.
+    #[ts(optional)]
+    pub window_id: Option<String>,
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
@@ -70,9 +73,30 @@ pub struct NotifyAckParams {
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NotifyAckResult {
-    /// False when no frontend window is connected — the caller (launcher)
-    /// should open one; it will pick the block up via `notify.takeactivation`.
+    /// False when the click's window isn't open — an older launcher opens a
+    /// window; the new one picks the pane up via `notify.takeactivation`.
     pub has_window: bool,
+    /// The acked id named a live notification.
+    #[serde(default)]
+    pub known: bool,
+    /// Raise this window (a connected frontend's `Window` oid).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub window_id: Option<String>,
+    /// No window shows the pane: open one on this workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace_id: Option<String>,
+}
+
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct NotifyTakeActivationParams {
+    /// The asking window's workspace; only a click for that workspace is
+    /// handed over.
+    #[serde(default)]
+    #[ts(optional)]
+    pub workspace_id: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
@@ -80,6 +104,8 @@ pub struct NotifyAckResult {
 pub struct NotifyTakeActivationResult {
     #[ts(optional)]
     pub block_id: Option<String>,
+    #[ts(optional)]
+    pub tab_id: Option<String>,
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
@@ -128,7 +154,14 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
         let r = rr.clone();
         let conn = conn.clone();
         async move {
-            r.focus(&conn, FocusReport { window_focused: p.window_focused, block_id: p.block_id.filter(|b| !b.is_empty()) });
+            r.focus(
+                &conn,
+                FocusReport {
+                    window_focused: p.window_focused,
+                    block_id: p.block_id.filter(|b| !b.is_empty()),
+                    window_id: p.window_id.filter(|w| !w.is_empty()),
+                },
+            );
             Ok(NotifyOk { ok: true })
         }
     });
@@ -136,7 +169,13 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     let rr = r.clone();
     engine.register_typed("notify.ack", move |p: NotifyAckParams, _ctx| {
         let r = rr.clone();
-        async move { Ok(NotifyAckResult { has_window: r.ack(&p.id, p.clicked) }) }
+        async move {
+            // Resolving the click's pane reads the store — off the async workers.
+            let o = tokio::task::spawn_blocking(move || r.ack(&p.id, p.clicked))
+                .await
+                .map_err(|e| format!("notify.ack: {e}"))?;
+            Ok(NotifyAckResult { has_window: o.has_window, known: o.known, window_id: o.window_id, workspace_id: o.workspace_id })
+        }
     });
 
     let rr = r.clone();
@@ -149,9 +188,15 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     });
 
     let rr = r;
-    engine.register_typed("notify.takeactivation", move |_p: NotifyNoArgs, _ctx| {
+    engine.register_typed("notify.takeactivation", move |p: NotifyTakeActivationParams, _ctx| {
         let r = rr.clone();
-        async move { Ok(NotifyTakeActivationResult { block_id: r.take_pending_activation() }) }
+        async move {
+            let taken = r.take_pending_activation(p.workspace_id.as_deref().filter(|w| !w.is_empty()));
+            Ok(NotifyTakeActivationResult {
+                block_id: taken.as_ref().map(|t| t.block_id.clone()),
+                tab_id: taken.map(|t| t.tab_id),
+            })
+        }
     });
 }
 
@@ -226,5 +271,79 @@ mod live_tests {
             .unwrap();
         let r = next_event(&mut rx, "notification:retract").await;
         assert_eq!(r["tag"], tag);
+    }
+
+    /// Rich-content spec §3.3 A/B: a click on a pane's toast resolves the
+    /// pane's tab and open window server-side, names that window in
+    /// `notification:activate`, and tells the launcher which window to raise.
+    #[tokio::test]
+    async fn clicking_a_pane_toast_names_its_open_window_and_tab() {
+        use crate::backend::obj::{Block, Window};
+        let state = crate::server::tests::test_state();
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        let (broker, store) = (state.broker.clone(), state.mstore.clone());
+        crate::backend::wcore::ensure_initial_data(&store).unwrap();
+        let block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let window = store.get_all::<Window>().unwrap().into_iter().next().expect("seeded window");
+        let auth = state.auth_key.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let (ws, _) = tokio_tungstenite::connect_async(ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        for (i, ev) in ["notification", "notification:activate"].iter().enumerate() {
+            tx.send(Message::Text(send("eventsub", &format!("s{i}"), serde_json::json!({"event":ev,"scopes":[],"allscopes":true})).into()))
+                .await
+                .unwrap();
+        }
+        // This connection is the seeded window, open but not focused.
+        tx.send(Message::Text(send("notify.focus", "f1", serde_json::json!({"window_focused": false, "window_id": window.oid})).into()))
+            .await
+            .unwrap();
+        let r = crate::backend::notify::router::get(&broker).expect("router created by the connection");
+        let b = block.oid.clone();
+        tokio::task::spawn_blocking(move || {
+            r.emit_fixed(crate::backend::notify::policy::NotifyKind::MessageNeedsReview, &b, Some("x".into()))
+        })
+        .await
+        .unwrap();
+        let n = next_event(&mut rx, "notification").await;
+        let id = n["id"].as_str().unwrap().to_string();
+
+        tx.send(Message::Text(send("notify.ack", "a1", serde_json::json!({"id": id, "clicked": true})).into()))
+            .await
+            .unwrap();
+        let (mut activate, mut response) = (None, None);
+        while activate.is_none() || response.is_none() {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("ack answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "a1" {
+                response = Some(v["data"]["data"].clone());
+            } else if v["data"]["command"] == "eventrecv" && v["data"]["data"]["event"] == "notification:activate" {
+                activate = Some(v["data"]["data"]["data"].clone());
+            }
+        }
+        let (a, resp) = (activate.unwrap(), response.unwrap());
+        let tab_id = block.parentoref.strip_prefix("tab:").unwrap();
+        assert_eq!(a["block_id"], block.oid.as_str());
+        assert_eq!(a["tab_id"], tab_id);
+        assert_eq!(a["window_id"], window.oid.as_str());
+        assert_eq!(a["workspace_id"], window.workspaceid.as_str());
+        assert_eq!(resp["window_id"], window.oid.as_str(), "the launcher raises that window: {resp}");
+        assert_eq!(resp["known"], true);
+        assert_eq!(resp["has_window"], true);
     }
 }

@@ -2018,6 +2018,9 @@ pub fn promote_pool_window_for_new_window(
     height: i32,
     initial_view: Option<String>,
     initial_meta: Option<String>,
+    // Show this existing workspace instead of creating a fresh one (a toast
+    // click whose pane's workspace is open in no window). `None` = fresh.
+    workspace_id: Option<&str>,
 ) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
@@ -2028,7 +2031,7 @@ pub fn promote_pool_window_for_new_window(
         let _ = (width, height); // used only on non-Windows path
         return promote_pool_window(
             state,
-            "",           // empty workspace_id → frontend creates fresh workspace
+            workspace_id.unwrap_or(""), // empty → frontend creates fresh workspace
             pos_x,
             pos_y,
             None,         // width: skip DPI conversion, use POOL_WIDTH default
@@ -2043,6 +2046,24 @@ pub fn promote_pool_window_for_new_window(
 
     #[cfg(not(target_os = "windows"))]
     {
+        // `pool:new-window` always makes a fresh workspace; an existing one
+        // goes through `pool:promote`, which carries `workspaceId` (the
+        // tear-off path).
+        if let Some(ws) = workspace_id {
+            return promote_pool_window(
+                state,
+                ws,
+                pos_x,
+                pos_y,
+                Some(width),
+                Some(height),
+                None,
+                None,
+                initial_view,
+                initial_meta,
+                false,
+            );
+        }
         let dispatch = state.host_dispatch(
             crate::reducer::HostCommand::PopAndPromoteFrontPoolWindow,
         );
