@@ -161,6 +161,36 @@ describe("loadWidgets", () => {
         expect((results[1] as { reason: string }).reason).toMatch(/ENOENT/);
     });
 
+    // ReAgent P1 on #3767: a failed widget used to be marked loaded, so fixing
+    // it and reloading widgets.json never retried it.
+    it("retries a widget that failed, on the next pass, once it's fixed", async () => {
+        const sample = (await import(SAMPLE)).default;
+        const path = "C:/Users/me/.agentmux/widgets/hello/index.js";
+        const exported: Record<string, unknown> = { [path]: { ...sample, apiVersion: 2 } };
+        const d = deps(exported);
+        const loaded = new Set<string>();
+        const widgets = { "ext@hello": entry("ext:hello", "hello/index.js") };
+
+        const [first] = await loadWidgets(widgets, d, loaded);
+        expect(first.ok).toBe(false);
+        expect(getPaneTab("ext:hello")).toBeUndefined();
+
+        exported[path] = sample; // the user fixes the widget
+        const [second] = await loadWidgets(widgets, d, loaded);
+        expect(second.ok).toBe(true);
+        expect(getPaneTab("ext:hello")).toBeDefined();
+    });
+
+    it("doesn't load the same widget twice when two passes overlap", async () => {
+        const sample = (await import(SAMPLE)).default;
+        const d = deps({ "C:/Users/me/.agentmux/widgets/hello/index.js": sample });
+        const loaded = new Set<string>();
+        const widgets = { "ext@hello": entry("ext:hello", "hello/index.js") };
+        const [a, b] = await Promise.all([loadWidgets(widgets, d, loaded), loadWidgets(widgets, d, loaded)]);
+        expect([...a, ...b].filter((r) => r.ok)).toHaveLength(1);
+        expect(d.readText).toHaveBeenCalledTimes(1);
+    });
+
     it("skips built-in widgets and ones already loaded", async () => {
         const sample = (await import(SAMPLE)).default;
         const d = deps({ "C:/Users/me/.agentmux/widgets/hello/index.js": sample });

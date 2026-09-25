@@ -74,7 +74,13 @@ function validate(exported: unknown, entry: WidgetConfigType, view: string): Pan
     };
 }
 
-/** Loads every `ext:` widget in `widgets` not already in `loaded` (keys). */
+/**
+ * Loads every `ext:` widget in `widgets` whose key isn't in `loaded`. A key is
+ * in `loaded` while its attempt is in flight (so an overlapping pass skips it)
+ * and after it succeeds; a failed attempt removes it, so the next pass — the
+ * next widgets.json change — retries a widget the user has since fixed
+ * (ReAgent P1 on #3767).
+ */
 export async function loadWidgets(
     widgets: Record<string, WidgetConfigType> | undefined,
     deps: WidgetLoaderDeps,
@@ -87,6 +93,7 @@ export async function loadWidgets(
         const view = entry.blockdef?.meta?.view as string | undefined;
         const path = resolveWidgetModulePath(entry.module, deps.widgetsDir);
         const fail = (reason: string): void => {
+            loaded.delete(key);
             results.push({ key, ok: false, reason });
             console.warn(`[widget-loader] ${key} (${path}) not loaded: ${reason}`);
         };

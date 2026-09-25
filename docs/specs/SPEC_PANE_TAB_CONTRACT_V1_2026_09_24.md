@@ -492,8 +492,9 @@ working throughout through a legacy adapter.
        `apiVersion: 1`, `view` equal to the entry's `ext:` view, and `create`
        (native only — a widget has no ViewModel class). Anything else is
        rejected with a logged reason and never registered; so is a module
-       that fails to read, parse or import. A later reload of the config
-       registers widgets that appeared and leaves loaded ones alone.
+       that fails to read, parse or import. The next reload of the config
+       (a `widgets.json` change) registers widgets that appeared and retries
+       ones that failed; a loaded widget is left alone.
      - **Crash containment.** A widget that throws while rendering is
        already contained by `Block`'s per-pane `BlockErrorBoundary`. What it
        didn't cover is `create(ctx)`, which runs in `makeViewModel` inside
