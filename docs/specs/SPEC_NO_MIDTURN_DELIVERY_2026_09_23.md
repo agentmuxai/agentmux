@@ -269,26 +269,36 @@ the same `inner` lock as the queue (§4.2):
 | State | Meaning | Messages |
 |---|---|---|
 | `Writing` (default) | the model is, or may be, producing text or thinking | wait |
-| `Open` | a tool call is complete and running; the model has stopped writing | one is written |
+| `Open` | the message is finished and its tool calls are running | one is written |
 | `Spent` | this tool wait already released its one message | wait |
+| `Blocked` | a tool call is parked for the operator's answer (AskUserQuestion) | wait |
 
 Transitions come from the stdout reader (`tool_wait_signal`), on the agent's own top-level lines only
 (a subagent's lines, `parent_tool_use_id` set, say nothing about the parent):
 
-- **Enter** (`Writing` → `Open`): an `assistant` line carrying a `tool_use` block, or a
-  `message_delta` with `stop_reason: "tool_use"`. The same call is reported by both, and parallel
-  calls report once each, so Enter acts only from `Writing`. When the wait opens, one queued message
-  is released at once, and the blockfile append follows the current line as at a turn boundary.
-- **Leave** (→ `Writing`): `message_start`, or an `assistant` line with text or thinking only.
+- **Enter** (`Writing` → `Open`): a `message_delta` with `stop_reason: "tool_use"`, i.e. the whole
+  message, every tool call in it, has been written. When the wait opens, one queued message is
+  released at once, and the blockfile append follows the current line as at a turn boundary. Only
+  the finished message opens a wait, not each `tool_use` as it streams in: a message can hold several
+  calls, and one of them can be a question.
+- **Blocked** (→ `Blocked`): an `assistant` line calling a tool that parks for the operator
+  (`tool_parks_for_operator`: AskUserQuestion, and anything `should_route_to_decision_panel` routes).
+  Enter does nothing from `Blocked`. This is set from the tool call's own line, which precedes both the
+  `message_delta` and the `control_request` that fills `pending_questions`, so the gate never depends
+  on the park having happened yet (ReAgent P1 on #3741: reading `pending_questions` alone leaves a
+  window in which the agent has asked and nothing is parked). `pending_questions` and
+  `pending_permissions` still close the gate as well.
+- **Leave** (→ `Writing`): `message_start`, or an `assistant` line with text or thinking only. This
+  is also how `Blocked` ends: once the operator answers, the model's next message starts.
 - A release inside an `Open` wait makes it `Spent`. A release anywhere else (turn boundary, idle
   fast path, watchdog) starts a new turn, which begins `Writing`.
 - A `result` frame and every spawn reset to `Writing`. Lines from a replaced process (stale
   generation) are ignored, as at §4.4.
-- The gate is closed while the agent is blocked on the operator (`pending_questions`,
-  `pending_permissions`): a message there would land between the question and its answer.
 
 **Unknown stream shapes hold messages, they never release them.** Anything `tool_wait_signal` does
-not recognise leaves the state unchanged, and the default is `Writing`.
+not recognise leaves the state unchanged, and the default is `Writing`. Because `Enter` needs the
+`message_delta`, a CLI run without `--include-partial-messages` never opens a tool wait and simply
+delivers at the turn boundary, as before; both persistent Claude launch paths pass that flag.
 
 **One per wait, not a burst.** Writing message #2 in the same wait as #1 is the burst §4.4 forbids.
 The next message goes out at the next tool wait or the turn boundary.

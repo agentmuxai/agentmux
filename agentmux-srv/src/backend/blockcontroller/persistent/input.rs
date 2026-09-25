@@ -314,11 +314,10 @@ impl PersistentSubprocessController {
     /// process's leftover lines say nothing about the new one, and the release
     /// writes to the CURRENT stdin (same reason as `turn_boundary_locked`).
     ///
-    /// `Enter` acts only from `Writing`. The same tool call is reported twice
-    /// (its `assistant` line, then the `message_delta`), and parallel tool calls
-    /// report once each; without this a second `Enter` would release a second
-    /// message inside the same wait, which is the burst the one-per-boundary
-    /// rule forbids.
+    /// `Enter` acts only from `Writing`, so it does nothing once the wait is
+    /// `Spent` (a second `message_delta` would otherwise release a second message
+    /// inside the same wait, the burst the one-per-boundary rule forbids) or
+    /// `Blocked` on the operator.
     pub(super) fn tool_wait_locked(
         inner: &mut PersistentInner,
         generation: u64,
@@ -331,6 +330,10 @@ impl PersistentSubprocessController {
         match signal {
             ToolWaitSignal::Leave => {
                 inner.tool_wait = ToolWait::Writing;
+                DeferredFlush::Empty
+            }
+            ToolWaitSignal::Blocked => {
+                inner.tool_wait = ToolWait::Blocked;
                 DeferredFlush::Empty
             }
             ToolWaitSignal::Enter if inner.tool_wait != ToolWait::Writing => DeferredFlush::Empty,

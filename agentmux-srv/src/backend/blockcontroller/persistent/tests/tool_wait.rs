@@ -34,14 +34,28 @@ fn queued(c: &PersistentSubprocessController) -> usize {
 
 // ── Reading the stream ───────────────────────────────────────────────
 
+/// Only the finished message opens a tool wait, not each tool call as it
+/// streams in: a message can hold several calls, and one of them can be a
+/// question for the operator.
 #[test]
-fn a_completed_tool_call_means_the_model_is_waiting_on_it() {
-    let assistant = json!({"type": "assistant", "parent_tool_use_id": null,
-        "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]}});
+fn a_finished_tool_use_message_means_the_model_is_waiting_on_its_tools() {
     let delta = json!({"type": "stream_event", "parent_tool_use_id": null,
         "event": {"type": "message_delta", "delta": {"stop_reason": "tool_use"}}});
-    assert_eq!(tool_wait_signal(&assistant), Some(ToolWaitSignal::Enter));
+    let bash = json!({"type": "assistant", "parent_tool_use_id": null,
+        "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]}});
     assert_eq!(tool_wait_signal(&delta), Some(ToolWaitSignal::Enter));
+    assert_eq!(tool_wait_signal(&bash), None, "a single call streaming in is not the whole message");
+}
+
+#[test]
+fn a_tool_that_waits_on_the_operator_blocks_the_wait() {
+    let ask = json!({"type": "assistant", "parent_tool_use_id": null,
+        "message": {"content": [{"type": "tool_use", "id": "t1", "name": "AskUserQuestion", "input": {}}]}});
+    let text_then_ask = json!({"type": "assistant",
+        "message": {"content": [{"type": "text", "text": "one question"},
+                                {"type": "tool_use", "id": "t2", "name": "AskUserQuestion", "input": {}}]}});
+    assert_eq!(tool_wait_signal(&ask), Some(ToolWaitSignal::Blocked));
+    assert_eq!(tool_wait_signal(&text_then_ask), Some(ToolWaitSignal::Blocked));
 }
 
 #[test]
@@ -166,8 +180,38 @@ async fn a_message_arriving_after_the_model_starts_writing_again_is_held() {
     assert_eq!(queued(&c), 1);
 }
 
-/// The agent is blocked on the operator, not on a tool: a message would land
-/// between the question and its answer.
+/// ReAgent P1 on #3741. The frames arrive as: the assistant line calling
+/// AskUserQuestion, the `message_delta` ending the message, and only then the
+/// `control_request` that fills `pending_questions`. The gate must already be
+/// closed when the `message_delta` arrives, with the map still empty.
+#[tokio::test]
+async fn a_question_for_the_operator_keeps_the_gate_closed_before_it_is_parked() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("jekt".to_string()).unwrap();
+
+    let ask = json!({"type": "assistant", "parent_tool_use_id": null,
+        "message": {"content": [{"type": "tool_use", "id": "toolu_q", "name": "AskUserQuestion", "input": {}}]}});
+    let delta = json!({"type": "stream_event", "parent_tool_use_id": null,
+        "event": {"type": "message_delta", "delta": {"stop_reason": "tool_use"}}});
+
+    assert_eq!(signal(&c, tool_wait_signal(&ask).unwrap()), DeferredFlush::Empty);
+    assert!(c.inner.lock().unwrap().pending_questions.is_empty(), "not parked yet, as in the real frame order");
+    assert_eq!(signal(&c, tool_wait_signal(&delta).unwrap()), DeferredFlush::Empty);
+    assert!(rx.try_recv().is_err(), "nothing may be written between the question and its park");
+    assert_eq!(queued(&c), 1);
+
+    // A message arriving now is held too, park or no park.
+    c.send_user_message("second".to_string()).unwrap();
+    assert!(rx.try_recv().is_err());
+
+    // The operator answers, the CLI moves on: the next message starts, and the
+    // gate is an ordinary closed one again.
+    signal(&c, ToolWaitSignal::Leave);
+    assert_eq!(c.inner.lock().unwrap().tool_wait, ToolWait::Writing);
+}
+
+/// Belt and braces: a parked question or permission closes the gate even if
+/// the state says otherwise.
 #[tokio::test]
 async fn a_pending_question_or_permission_keeps_the_gate_closed() {
     let (c, mut rx) = busy_controller();
@@ -264,6 +308,7 @@ async fn immediate_policy_is_unchanged() {
 /// stdout reader's own release can land inside it, so this fails if the
 /// watchdog is the only thing releasing.
 const STUB: &str = r#"
+const tool = process.argv[2] || "Bash";
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const rl = require("readline").createInterface({ input: process.stdin });
 out({ type: "system", subtype: "init", session_id: "stub-session" });
@@ -281,7 +326,7 @@ rl.on("line", (line) => {
   out({ type: "assistant", message: { content: [{ type: "text", text: "explaining" }] }, session_id: "stub-session" });
   setTimeout(() => {
     duringTool = true;
-    out({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] }, session_id: "stub-session" });
+    out({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: tool, input: {} }] }, session_id: "stub-session" });
     out({ type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "tool_use" } }, parent_tool_use_id: null });
     setTimeout(() => {
       duringTool = false;
@@ -303,19 +348,19 @@ async fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
     }
 }
 
-#[tokio::test]
-async fn a_jekt_sent_while_the_agent_writes_lands_during_its_tool_call() {
+/// Runs the stub's turn calling `tool`, sends a jekt while the agent is still
+/// writing, and returns the transcript as of the moment the agent received it.
+async fn run_scenario(tool: &str, block_id: &str) -> Option<String> {
     let has_node = std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|dir| dir.join("node").is_file() || dir.join("node.exe").is_file())
     });
     if !has_node {
         eprintln!("tool_wait tests: `node` not on PATH — skipping");
-        return;
+        return None;
     }
     let stub = std::env::temp_dir().join(format!("agentmux-tool-wait-stub-{}.js", uuid::Uuid::new_v4()));
     std::fs::write(&stub, STUB).unwrap();
 
-    let block_id = "blk-tool-wait";
     let broker = Arc::new(mps::Broker::new());
     let fs = Arc::new(FileStore::open_in_memory().unwrap());
     let c = Arc::new(PersistentSubprocessController::new(
@@ -329,7 +374,7 @@ async fn a_jekt_sent_while_the_agent_writes_lands_during_its_tool_call() {
     c.set_self_ref();
     let config = PersistentSpawnConfig {
         cli_command: "node".to_string(),
-        cli_args: vec![stub.to_string_lossy().to_string()],
+        cli_args: vec![stub.to_string_lossy().to_string(), tool.to_string()],
         working_dir: String::new(),
         env_vars: HashMap::new(),
         session_id_field: "session_id".to_string(),
@@ -354,8 +399,18 @@ async fn a_jekt_sent_while_the_agent_writes_lands_during_its_tool_call() {
             .unwrap_or_default()
     };
     wait_until("the agent to receive the jekt", || read().contains("jekt_received")).await;
-
     let transcript = read();
+    assert_eq!(queued(&c), 0);
+
+    wait_until("the turn to finish", || read().contains("turn ended")).await;
+    let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(5)).await;
+    let _ = std::fs::remove_file(stub);
+    Some(transcript)
+}
+
+#[tokio::test]
+async fn a_jekt_sent_while_the_agent_writes_lands_during_its_tool_call() {
+    let Some(transcript) = run_scenario("Bash", "blk-tool-wait").await else { return };
     assert!(
         transcript.contains("\"during_tool\":true"),
         "the agent must receive it while its tool runs, not at the end of the turn:\n{transcript}"
@@ -367,9 +422,17 @@ async fn a_jekt_sent_while_the_agent_writes_lands_during_its_tool_call() {
         position("\"tool_use\"") < position("TOOL-WAIT-JEKT"),
         "the jekt follows the tool call it was released by:\n{transcript}"
     );
-    assert_eq!(queued(&c), 0);
+}
 
-    wait_until("the turn to finish", || read().contains("turn ended")).await;
-    let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(5)).await;
-    let _ = std::fs::remove_file(stub);
+/// ReAgent P1 on #3741, against a real process: the stub calls AskUserQuestion
+/// and never sends the `control_request`, so nothing is parked. The gate must
+/// still hold the jekt, because the agent is waiting on a person.
+#[tokio::test]
+async fn a_jekt_is_held_while_the_agent_waits_on_a_question() {
+    let Some(transcript) = run_scenario("AskUserQuestion", "blk-tool-wait-ask").await else { return };
+    assert!(
+        transcript.contains("\"during_tool\":false"),
+        "the agent must not receive it while the question is open:\n{transcript}"
+    );
+    assert!(transcript.contains("turn ended"), "released at the turn boundary instead:\n{transcript}");
 }

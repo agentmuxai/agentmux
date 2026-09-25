@@ -980,6 +980,14 @@ pub(super) enum ToolWait {
     /// This tool wait already released its one message. The rest wait for the
     /// next one, or for the turn to end.
     Spent,
+    /// The model called a tool that parks for the operator's answer
+    /// ([`tool_parks_for_operator`]). Nothing is released: the agent is blocked
+    /// on a person, and a message would land between the question and its
+    /// answer. Set from the tool call's own `assistant` line, which precedes
+    /// both the `message_delta` that would open the wait and the
+    /// `control_request` that fills `pending_questions`, so the gate never
+    /// depends on the park having happened yet.
+    Blocked,
 }
 
 /// Whether a stdout line says the model is waiting on tools or is writing again.
@@ -989,18 +997,29 @@ pub(super) enum ToolWaitSignal {
     Enter,
     /// The model is producing output again (or the turn moved on).
     Leave,
+    /// The model called a tool that waits on the operator, not on a program.
+    Blocked,
+}
+
+/// Whether a tool call parks for the operator's answer rather than running.
+/// Must agree with `handle_control_frame`, which is what actually parks: an
+/// AskUserQuestion always, and any tool `should_route_to_decision_panel` routes.
+fn tool_parks_for_operator(tool_name: &str) -> bool {
+    tool_name == "AskUserQuestion" || should_route_to_decision_panel(tool_name)
 }
 
 /// Classify one stdout line. Only the agent's own top-level output counts: a
 /// subagent's lines (`parent_tool_use_id` set) say nothing about whether the
 /// parent is mid-sentence.
 ///
-/// `Enter` on a top-level `assistant` line carrying a `tool_use` block, or a
-/// `message_delta` whose `stop_reason` is `tool_use`. `Leave` on `message_start`
-/// or an `assistant` line with only text/thinking. Anything unrecognised is
-/// `None`, which keeps the previous state — and the previous state defaults to
-/// "not waiting", so an unknown stream shape holds messages, never releases
-/// them early.
+/// `Enter` only on a `message_delta` whose `stop_reason` is `tool_use`: the
+/// whole message, every tool call in it, has been written. `Blocked` on an
+/// `assistant` line calling a tool that parks for the operator (it precedes the
+/// `message_delta`, so `Blocked` is always seen first). `Leave` on
+/// `message_start` or an `assistant` line with text or thinking. Anything
+/// unrecognised is `None`, which keeps the previous state, and the default
+/// state is "writing", so an unknown stream shape holds messages and never
+/// releases them early.
 pub(super) fn tool_wait_signal(parsed: &serde_json::Value) -> Option<ToolWaitSignal> {
     if parsed.get("parent_tool_use_id").is_some_and(|v| !v.is_null()) {
         return None;
@@ -1021,12 +1040,19 @@ pub(super) fn tool_wait_signal(parsed: &serde_json::Value) -> Option<ToolWaitSig
         }
         "assistant" => {
             let blocks = parsed.pointer("/message/content")?.as_array()?;
-            let has = |kind: &str| {
-                blocks.iter().any(|b| b.get("type").and_then(|t| t.as_str()) == Some(kind))
-            };
-            if has("tool_use") {
-                Some(ToolWaitSignal::Enter)
-            } else if has("text") || has("thinking") || has("redacted_thinking") {
+            fn kind(b: &serde_json::Value) -> Option<&str> {
+                b.get("type").and_then(|t| t.as_str())
+            }
+            let parks = blocks.iter().any(|b| {
+                kind(b) == Some("tool_use")
+                    && b.get("name").and_then(|n| n.as_str()).is_some_and(tool_parks_for_operator)
+            });
+            if parks {
+                Some(ToolWaitSignal::Blocked)
+            } else if blocks
+                .iter()
+                .any(|b| matches!(kind(b), Some("text" | "thinking" | "redacted_thinking")))
+            {
                 Some(ToolWaitSignal::Leave)
             } else {
                 None
