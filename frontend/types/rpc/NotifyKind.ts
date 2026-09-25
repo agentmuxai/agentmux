@@ -4,4 +4,4 @@
  * Closed set of notification kinds. A source cannot invent a new visual
  * treatment — every kind has an app-controlled title template (§9.1).
  */
-export type NotifyKind = "input_waiting" | "turn_completed" | "turn_errored" | "agent_crashed" | "message_needs_review" | "summary" | "test";
+export type NotifyKind = "input_waiting" | "turn_completed" | "turn_errored" | "agent_crashed" | "message_needs_review" | "shutdown_pending" | "summary" | "test";

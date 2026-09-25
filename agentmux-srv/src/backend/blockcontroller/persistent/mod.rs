@@ -1695,6 +1695,10 @@ impl Controller for PersistentSubprocessController {
         self.agent_id.lock().unwrap().clone()
     }
 
+    fn turn_provenance(&self) -> Option<crate::backend::blockcontroller::health::TurnProvenance> {
+        self.health_monitor.provenance()
+    }
+
     fn set_agent_id(&self, id: Option<String>) {
         *self.agent_id.lock().unwrap() = id;
     }

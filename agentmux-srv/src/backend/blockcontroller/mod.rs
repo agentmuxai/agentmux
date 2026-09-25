@@ -311,6 +311,14 @@ pub trait Controller: Send + Sync {
         None
     }
 
+    /// What started this agent's current turn (SPEC_AGENT_SELF_QUIT §6.3), if
+    /// the controller tracks it. `None` = unknown, which never counts as the
+    /// user — the safe answer for controllers that can't tell (ACP, App
+    /// Server, subprocess: both origins reach them through one method).
+    fn turn_provenance(&self) -> Option<health::TurnProvenance> {
+        None
+    }
+
     /// Refresh this block's own captured jekt/muxbus identity (see
     /// [`agent_id`](Controller::agent_id)'s doc comment). Called whenever
     /// `ReactiveHandler::register_agent`/`register_agent_with_nonce`

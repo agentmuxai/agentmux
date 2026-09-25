@@ -66,6 +66,19 @@ impl PersistentSubprocessController {
     /// different, identical-text message as "already queued" and
     /// silently dropped it).
     pub(super) fn decide_send_action(&self, json_str: &str, skip_if_seq_queued: Option<u64>) -> SendAction {
+        self.decide_send_action_from(json_str, skip_if_seq_queued, None)
+    }
+
+    /// [`Self::decide_send_action`], saying who the input is from (turn
+    /// provenance, SPEC_AGENT_SELF_QUIT §6.3). A direct delivery reports it
+    /// with the turn mark; a queued one tells the tracker about the turn it
+    /// will start.
+    pub(super) fn decide_send_action_from(
+        &self,
+        json_str: &str,
+        skip_if_seq_queued: Option<u64>,
+        origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+    ) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
         // `!restart_pending`: a committed deferred restart leaves `stdin_tx`
         // live until the process actually exits, and writing into a process
@@ -80,7 +93,7 @@ impl PersistentSubprocessController {
         {
             // Reserve the turn before `inner` is released. Lock order is
             // `inner` → `health_monitor`, as everywhere else.
-            let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+            let was_active = self.health_monitor.mark_turn_active_from(origin);
             SendAction::DeliverDirect { was_active }
         } else if inner.spawning_in_progress || inner.drain_claim {
             let already_queued = skip_if_seq_queued
@@ -655,6 +668,18 @@ impl PersistentSubprocessController {
     }
 
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
+        self.send_message_from(message, config, None)
+    }
+
+    /// [`Self::send_message`], saying who the message is from, so the turn it
+    /// starts (or joins) carries that provenance (SPEC_AGENT_SELF_QUIT §6.3).
+    /// `None` = unknown, which never counts as the user.
+    pub fn send_message_from(
+        &self,
+        message: String,
+        config: PersistentSpawnConfig,
+        origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+    ) -> Result<(), String> {
         // Pre-turn fence (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.3):
         // a process that lost the agent to another instance starts no turn.
         self.fence_check()?;
@@ -668,7 +693,16 @@ impl PersistentSubprocessController {
         });
         let json_str = json_msg.to_string();
 
-        match self.decide_send_action(&json_str, None) {
+        let queued_origin = origin.clone();
+        let action = self.decide_send_action_from(&json_str, None, origin);
+        if matches!(action, SendAction::Queued | SendAction::BecomeSpawner { .. }) {
+            // Delivered when the process spawns: the turn it starts is this one's.
+            match queued_origin {
+                Some(o) => self.health_monitor.hint_next_turn(o),
+                None => self.health_monitor.hint_next_turn_unlabelled(),
+            }
+        }
+        match action {
             // Nothing was written, queued or persisted, so the caller's own
             // error handling is the whole story.
             SendAction::Refused(e) => Err(e),

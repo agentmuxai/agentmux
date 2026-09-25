@@ -123,7 +123,7 @@ impl PersistentSubprocessController {
     /// send already has one running, so re-spawning on every call would
     /// leak duplicate heartbeat tasks.
     pub(super) fn mark_turn_active_and_publish(&self) {
-        let was_active = self.health_monitor.mark_turn_active_returning_was_active();
+        let was_active = self.health_monitor.mark_turn_active_for_queued();
         if !was_active {
             self.spawn_status_heartbeat();
         }

@@ -442,6 +442,89 @@ pub(super) fn resolve_placement(
 /// ownership check on the TARGET (closing another agent's stuck pane without
 /// needing its cooperation is this spec's whole motivation), but the CALLER
 /// is never anonymous the way `FleetBulkStop`'s existing calls are today.
+/// `POST /api/v1/agent/self/quit` — the `QuitSelf` tool
+/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6). Always the caller's
+/// own block (from the signed `auth`); there is no target. Proceeds only
+/// when the user started the current turn, nothing else got in, and the
+/// quote is theirs (§6.3). The quit then waits for the turn to end (§4.2):
+/// 202 now, the tab closes after. Anything else is an external shutdown: 202
+/// `pending_user_override`, and the user has 15 s to keep the agent (§6.5).
+pub(crate) async fn handle_quit_self(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    axum::Json(req): axum::Json<agentmux_common::api_types::QuitSelfRequest>,
+) -> impl axum::response::IntoResponse {
+    use crate::sagas::self_quit;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
+    let agent = req.auth.agent_id.clone();
+    let detail = format!("{} | user said: {:?}", req.reason.trim(), req.user_instruction);
+    // Scheduled, closing, or a user-override window that already ran out.
+    let under_way = crate::sagas::pending_shutdown::active_for(&block_id).is_some_and(|v| v.status == "proceeding");
+    if self_quit::is_quitting(&block_id) || under_way {
+        return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
+    }
+    let provenance = crate::backend::blockcontroller::get_controller(&block_id).and_then(|c| c.turn_provenance());
+    if let Err(refusal) = self_quit::gate(provenance.as_ref(), &req.user_instruction) {
+        // Not the user's own ask: the user decides, within 15 s (§6.5). Audited
+        // with why the gate didn't pass (§4.4); the outcome is audited too.
+        let pending = crate::sagas::pending_shutdown::request(
+            &state,
+            &block_id,
+            &agent,
+            "QuitSelf",
+            req.reason.trim(),
+            crate::sagas::pending_shutdown::Action::SelfQuit { detail: detail.clone() },
+        );
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&agent),
+            &agent,
+            &block_id,
+            "agent.quit_self",
+            true,
+            Some(refusal.as_str()),
+            &pending.request_id,
+            Some(&format!("pending user override: {detail}")),
+        );
+        return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
+    }
+    if !self_quit::schedule_after_turn(&state, &block_id, detail) {
+        return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
+    }
+    (StatusCode::ACCEPTED, Json(json!({ "status": "scheduled" }))).into_response()
+}
+
+/// The 202 answer for a shutdown waiting on the user (§6.5).
+pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> serde_json::Value {
+    json!({
+        "status": "pending_user_override",
+        "request_id": p.request_id,
+        "deadline_ms": p.deadline_ms,
+        "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
+    })
+}
+
+/// `GET /api/v1/agent/shutdown/{request_id}` — where a shutdown waiting on the
+/// user's override stands (§6.5): `pending`, `kept_by_user`, `proceeding`,
+/// `shut_down`, `superseded` or `failed`.
+pub(crate) async fn handle_shutdown_status(
+    axum::extract::Path(request_id): axum::extract::Path<String>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+    match crate::sagas::pending_shutdown::status(&request_id) {
+        Some(v) => (StatusCode::OK, Json(serde_json::to_value(v).unwrap_or_default())).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!({ "error": "no such shutdown request" }))).into_response(),
+    }
+}
+
 pub(crate) async fn handle_close_pane(
     axum::extract::State(state): axum::extract::State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,

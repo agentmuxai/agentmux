@@ -35,6 +35,7 @@ import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable }
 import { paramsForTool } from "./tool-tones";
 import { TOOL_TONE_COALESCE_MS, ToolTonesPlayer } from "./tool-tones-player";
 import { WaitingTonePlayer } from "./waiting-tone-player";
+import { playShutdownTone } from "./shutdown-tone";
 import {
     DEFAULT_MASTER_VOLUME,
     DEFAULT_TOOLTONES_VOLUME,
@@ -306,6 +307,25 @@ function startWaiting(blockId: string): void {
     const vol =
         (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
     wp.start(vol);
+}
+
+/**
+ * The falling shutdown chime: someone other than the user asked to shut an
+ * agent down and the user has 15 s to keep it (SPEC_AGENT_SELF_QUIT §6.5).
+ * Under the master switch and its own `notify:sound:agent.shutdown.pending`;
+ * not suppressed for a focused pane — the countdown is running either way.
+ */
+export function playShutdownPendingTone(): boolean {
+    if (replayMode) return false;
+    if (getSettingsKeyAtom("notify:sounds:enabled")() === false) return false;
+    if (getSettingsKeyAtom("notify:sound:agent.shutdown.pending")() === false) return false;
+    const ctx = player.getAudioContext();
+    const master = player.getMasterGain();
+    if (!ctx || !master) return false;
+    const vol =
+        (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
+    playShutdownTone(ctx, master, vol);
+    return true;
 }
 
 function stopWaiting(blockId: string): void {

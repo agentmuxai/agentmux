@@ -118,6 +118,9 @@ pub const COMMAND_AGENT_ANSWER: &str = "agentanswer";
 /// `PersistentSubprocessController::deny_question` and
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
 pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
+/// The banner's "Keep running": cancel a pending external shutdown
+/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
+pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 /// Backend half of the `/btw` slash command — a fast, one-shot, tool-less
 /// side question answered against a fresh throwaway block, without

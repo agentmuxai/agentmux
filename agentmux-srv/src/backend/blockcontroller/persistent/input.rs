@@ -480,6 +480,13 @@ impl PersistentSubprocessController {
         };
         if !boundary.turn_still_active() {
             health.set_active_turn(false);
+        } else if matches!(boundary.flushed, DeferredFlush::Released(_)) {
+            // The released message starts the next turn while `turn_active`
+            // stays up: an automated turn (deferred deliveries always are).
+            health.begin_turn_from(crate::backend::blockcontroller::health::TurnInput {
+                origin: crate::backend::blockcontroller::health::TurnOrigin::Automated,
+                text: String::new(),
+            });
         }
         if boundary.apply_deferred_restart {
             inner.restart_pending = true;

@@ -324,6 +324,24 @@ pub struct CommandAgentCancelData {
     pub tool_use_id: String,
 }
 
+/// Data for AgentShutdownKeepCommand — the pending-shutdown banner's "Keep
+/// running" (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandAgentShutdownKeepData {
+    pub blockid: String,
+    /// From the `agent:shutdown-pending` event being answered.
+    pub request_id: String,
+}
+
+/// `kept_by_user`, or `too_late` when the shutdown had already begun.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct AgentShutdownKeepResult {
+    #[ts(type = "\"kept_by_user\" | \"too_late\"")]
+    pub outcome: String,
+}
+
 // ---- Subprocess agent command data types ----
 
 /// Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.
@@ -1067,6 +1085,10 @@ mod block_ws_req_shape_tests {
             json!({"blockid": "b1", "tool_use_id": "t1"}),
         )
         .expect("agentcancel");
+        serde_json::from_value::<CommandAgentShutdownKeepData>(
+            json!({"blockid": "b1", "request_id": "r1"}),
+        )
+        .expect("agentshutdownkeep");
     }
 
     // `outcome` and `scope` are Rust `String`s carrying closed sets. The
