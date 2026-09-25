@@ -14,6 +14,8 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     COMMAND_GLOBAL_MEMORY_HISTORY, COMMAND_GLOBAL_MEMORY_DIFF, COMMAND_GLOBAL_MEMORY_REVERT,
+    COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES, COMMAND_GLOBAL_MEMORY_IMPORT,
+    CommandGlobalMemoryImportSourcesData, CommandGlobalMemoryImportData,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
     CommandListBundlesData, CommandGetClaudeGlobalConfigData, ReorderGlobalBundlesResult,
     CommandUpsertBundleData, CommandGlobalMemoryHistoryData, CommandGlobalMemoryDiffData,
@@ -26,6 +28,7 @@ use crate::backend::storage::{BundleVersion, BundleVersionSummary};
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    register_global_memory_import(engine, state);
     // ---- Bundle CRUD ----
 
     let mstore = state.id_store.clone();
@@ -335,6 +338,54 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     data: None,
                 });
                 Ok(result)
+            }
+        },
+    );
+}
+
+/// The Armory's "Bring Global Memory from…" step for an isolated channel
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). Registered with the
+/// others below.
+pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppState) {
+    let id_store = state.id_store.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES,
+        move |_cmd: CommandGlobalMemoryImportSourcesData, _ctx| {
+            let store = id_store.clone();
+            async move {
+                let fs = crate::backend::agent_session::global_transcript_store()
+                    .ok_or_else(|| "globalmemory:import_sources: record store unavailable".to_string())?;
+                tokio::task::spawn_blocking(move || crate::backend::global_memory_record::import_sources(fs, &store))
+                    .await
+                    .map_err(|e| format!("globalmemory:import_sources: {e}"))?
+                    .map_err(|e| format!("globalmemory:import_sources: {e}"))
+            }
+        },
+    );
+    let id_store = state.id_store.clone();
+    let broker = state.broker.clone();
+    engine.register_typed(
+        COMMAND_GLOBAL_MEMORY_IMPORT,
+        move |cmd: CommandGlobalMemoryImportData, _ctx| {
+            let store = id_store.clone();
+            let broker = broker.clone();
+            async move {
+                let fs = crate::backend::agent_session::global_transcript_store()
+                    .ok_or_else(|| "globalmemory:import: record store unavailable".to_string())?;
+                let report = tokio::task::spawn_blocking(move || {
+                    crate::backend::global_memory_record::import(fs, &store, &cmd.list_id, cmd.index)
+                })
+                .await
+                .map_err(|e| format!("globalmemory:import: {e}"))?
+                .map_err(|e| format!("globalmemory:import: {e}"))?;
+                broker.publish(crate::backend::mps::MuxEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(report)
             }
         },
     );

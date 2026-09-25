@@ -119,3 +119,72 @@ fn writes_through_the_store_are_recorded_by_the_worker() {
     store.bundle_delete("g1").unwrap();
     wait_for(&|| heads(&fs, &scope).unwrap().entries.get("g1").is_some_and(|h| h.sha256.is_none()));
 }
+
+// ── Import into an isolated channel ─────────────────────────────────────
+
+/// The shared record, as a stable channel's Global Memory left it.
+fn shared_record(fs: &FileStore) {
+    let stable = Store::open_in_memory().unwrap();
+    stable.bundle_upsert(&bundle("g-rules", "Rules", "be kind", true)).unwrap();
+    stable.bundle_upsert(&bundle("g-style", "Style", "short sentences", true)).unwrap();
+    let mut system = bundle("operator-config-x", "System", "from AgentMux", true);
+    system.is_system = true;
+    stable.bundle_upsert_system(&system).unwrap();
+    stable.bundle_reorder(&["g-style".into(), "g-rules".into()]).unwrap();
+    sync_all(fs, &stable, "shared").unwrap();
+}
+
+#[test]
+fn an_isolated_channel_is_offered_the_entries_it_lacks_and_imports_them_in_order() {
+    let fs = FileStore::open_in_memory().unwrap();
+    shared_record(&fs);
+    let channel = Store::open_in_memory().unwrap();
+    let offer = import_sources_in(&fs, &channel, "channel:test").unwrap();
+    assert_eq!(offer.sources.len(), 1);
+    assert_eq!(offer.sources[0].scope, "shared");
+    let names: Vec<&str> = offer.sources[0].missing.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, vec!["Style", "Rules"], "in the source's order, without system entries");
+
+    let r = import(&fs, &channel, &offer.list_id, 0).unwrap();
+    assert_eq!(r, ImportReport { added: 2, renamed: 0 });
+    let here: Vec<(String, String)> =
+        channel.bundle_list_global().unwrap().into_iter().map(|b| (b.id, b.instructions)).collect();
+    assert_eq!(
+        here,
+        vec![("g-style".into(), "short sentences".into()), ("g-rules".into(), "be kind".into())],
+        "ids and order kept"
+    );
+    let v = channel.bundle_version_list("g-rules").unwrap();
+    assert_eq!((v[0].source.as_str(), v[0].source_detail.as_str()), ("import", "from shared"));
+    assert!(import_sources_in(&fs, &channel, "channel:test").unwrap().sources.is_empty(), "nothing left to offer");
+}
+
+/// An entry here is never overwritten; a clashing name is taken with the
+/// id's short form.
+#[test]
+fn import_never_overwrites_and_renames_on_a_name_clash() {
+    let fs = FileStore::open_in_memory().unwrap();
+    shared_record(&fs);
+    let channel = Store::open_in_memory().unwrap();
+    channel.bundle_upsert(&bundle("g-style", "Style", "this channel's own", true)).unwrap();
+    channel.bundle_upsert(&bundle("local-rules", "Rules", "a different entry, same name", true)).unwrap();
+    let offer = import_sources_in(&fs, &channel, "channel:test").unwrap();
+    assert_eq!(offer.sources[0].missing.len(), 1, "g-style is already here");
+    let r = import(&fs, &channel, &offer.list_id, 0).unwrap();
+    assert_eq!(r, ImportReport { added: 1, renamed: 1 });
+    assert_eq!(channel.bundle_get("g-style").unwrap().unwrap().instructions, "this channel's own");
+    assert_eq!(channel.bundle_get("g-rules").unwrap().unwrap().name, "Rules (g-rules)");
+    assert_eq!(channel.bundle_get("local-rules").unwrap().unwrap().instructions, "a different entry, same name");
+}
+
+#[test]
+fn a_shared_channel_is_offered_nothing() {
+    let fs = FileStore::open_in_memory().unwrap();
+    shared_record(&fs);
+    let other = Store::open_in_memory().unwrap();
+    other.bundle_upsert(&bundle("g-x", "X", "x", true)).unwrap();
+    sync_all(&fs, &other, "channel:other").unwrap();
+    let channel = Store::open_in_memory().unwrap();
+    assert!(import_sources_in(&fs, &channel, "shared").unwrap().sources.is_empty());
+    assert_eq!(import_sources_in(&fs, &channel, "channel:test").unwrap().sources.len(), 2, "shared first, then channel:other");
+}
