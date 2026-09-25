@@ -920,3 +920,42 @@ describe("computeStatsInline", () => {
         expect(computeStatsInline(1, 70, 26, 5, 100)).toBe(false);
     });
 });
+
+// The sign-in chip names the account: its email, shortened to 22 characters
+// (identity-model's shortenEmail), full address in the tooltip. The green dot
+// stays; without a recorded email it keeps saying "Logged in".
+describe("AgentComposerStrip — sign-in chip shows the account email", () => {
+    const chip = (container: HTMLElement) => container.querySelector(".agent-composer-strip-auth")!;
+
+    it("shows the shortened email, with the full address in the tooltip, when signed in", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="jonathan.ross@anthropic.com" />
+        ));
+        expect(chip(container)).toHaveTextContent("jonat…ss@anthropic.com");
+        expect(chip(container)).not.toHaveTextContent("Logged in");
+        expect(chip(container).getAttribute("title")).toBe("Signed in as jonathan.ross@anthropic.com");
+        expect(chip(container).querySelector(".agent-composer-strip-auth-dot")).not.toBeNull();
+        expect(chip(container).classList.contains("agent-composer-strip-auth--ok")).toBe(true);
+    });
+
+    it("an email that fits is shown whole", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="asafebgi@gmail.com" />
+        ));
+        expect(chip(container)).toHaveTextContent("asafebgi@gmail.com");
+    });
+
+    it("keeps 'Logged in' when no email is known", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} authStatus="authenticated" />);
+        expect(chip(container)).toHaveTextContent("Logged in");
+        expect(chip(container).getAttribute("title")).toBe("Signed in to this agent's provider");
+    });
+
+    it("never shows an email while signed out", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} authStatus="unauthenticated" authEmail="asafebgi@gmail.com" />
+        ));
+        expect(chip(container)).toHaveTextContent("Not logged in");
+        expect(chip(container)).not.toHaveTextContent("@");
+    });
+});
