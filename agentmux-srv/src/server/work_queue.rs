@@ -47,7 +47,7 @@ fn now_ms() -> i64 {
     agentmux_common::time::now_ms()
 }
 
-fn publish_changed(state: &AppState) {
+pub(crate) fn publish_changed(state: &AppState) {
     state.broker.publish(MuxEvent {
         event: EVENT_WORK_QUEUE_CHANGED.to_string(),
         scopes: vec![],

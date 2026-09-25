@@ -176,6 +176,19 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             }
             WebReturnType::success_empty()
         }
+        // `/quit` / `/exit` in an agent's composer: end that agent gracefully
+        // and close its own tab only (SPEC_AGENT_SELF_QUIT_2026_09_24.md §3).
+        // Returns the quit summary for the "<agent> quit" notice.
+        "QuitAgent" => {
+            let block_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            match crate::sagas::self_quit::run(state, &block_id, crate::sagas::self_quit::QuitOrigin::UserSlash).await {
+                Ok(summary) => WebReturnType::success(serde_json::to_value(&summary).unwrap_or_default()),
+                Err(reason) => WebReturnType::error(reason),
+            }
+        }
         // A pane's × — every block in the pane's stack, stopped before its
         // records are deleted (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md).
         // Closing one tab of a stack sends that one id; the saga keeps the

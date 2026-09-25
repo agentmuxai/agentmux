@@ -498,6 +498,26 @@ impl Store {
     }
 
     /// List items, newest-updated first. `state` empty = all states.
+    /// Every item currently claimed by this agent — by name, or by UID when
+    /// one is given — with no row cap. A superset of the store's holder rule
+    /// (`HOLDER_BY_UID`); callers narrow it with the exact rule. Used when an
+    /// agent quits, to release its claims at once (SPEC_AGENT_SELF_QUIT §4.3):
+    /// a capped fleet-wide list could miss them on a busy queue.
+    pub fn work_queue_claimed_by(&self, agent_id: &str, uid: &str) -> Result<Vec<WorkItem>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_work_queue
+              WHERE state = ?1
+                AND ((?2 != '' AND claimed_by = ?2) OR (?3 != '' AND claimed_by_uid = ?3))"
+        ))?;
+        let rows = stmt.query_map(params![work_state::CLAIMED, agent_id, uid], row_to_item)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn work_queue_list(&self, state: &str, limit: usize) -> Result<Vec<WorkItem>, StoreError> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(&format!(
@@ -557,6 +577,29 @@ mod tests {
             agent_uid: String::new(),
             groups: vec![],
         }
+    }
+
+    /// An agent that quits releases its claims at once (SPEC_AGENT_SELF_QUIT
+    /// §4.3). The lookup is scoped to it, with no cap: a fleet-wide list
+    /// capped at N could drop its claims on a busy queue (ReAgent P2, #3779).
+    #[test]
+    fn claimed_by_finds_all_of_one_agents_claims_and_nothing_else() {
+        let (s, _d) = store();
+        for i in 0..5 {
+            s.work_queue_enqueue(&item(&format!("w{i}"), "t")).unwrap();
+        }
+        let claim_as = |agent: &str, uid: &str| {
+            let f = ClaimFilter { kind: None, agent_id: agent.into(), agent_uid: uid.into(), groups: vec![] };
+            s.work_queue_claim(&f, 2000, 120_000).unwrap().expect("an open item");
+        };
+        claim_as("Lark", "uid-lark");
+        claim_as("Lark", "uid-lark");
+        claim_as("Korp", "uid-korp");
+        let lark = s.work_queue_claimed_by("Lark", "uid-lark").unwrap();
+        assert_eq!(lark.len(), 2);
+        assert!(lark.iter().all(|w| w.claimed_by == "Lark" && w.state == work_state::CLAIMED));
+        assert_eq!(s.work_queue_claimed_by("Nobody", "").unwrap().len(), 0);
+        assert_eq!(s.work_queue_claimed_by("", "").unwrap().len(), 0, "no identity: nothing");
     }
 
     // ---- identity M1b: the UID columns are written and round-trip --------
