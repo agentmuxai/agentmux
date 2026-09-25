@@ -331,6 +331,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     return (
         <div
             class="pane-stack"
+            // The whole-pane drop zone for a Pane Tab dragged from another
+            // pane (PaneTabStrip's `foreignDropRootFor`).
+            data-role="pane"
             classList={{
                 "pane-stack-focused": isFocused() && !isAlone(),
                 "pane-stack-focused-alone": isFocused() && isAlone(),

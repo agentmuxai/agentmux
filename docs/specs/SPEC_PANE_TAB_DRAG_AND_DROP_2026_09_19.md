@@ -2,29 +2,28 @@
 
 **Date:** 2026-09-19
 **Author:** Agent3
-**Status:** active — Phase 1 (§6, `LayoutStackMove` reducer command, backend
-only) implemented in PR #3441. Phase 2 (§3.6, reserved whole-pane drag space)
-implemented in PR #3442. Phase 3 (§3.1/§3.2, same-pane drag-reorder: the
-`pane.moveTab` RPC, `moveBlockInStack`, and the actual per-pill drag UI)
-implemented in PR #3444. Phase 4 (§3.4, cross-pane drop onto ANOTHER pane's
-header — the tab joins that pane's stack) implemented in PR #3447, with the
-drop zone widened from the tabstrip region to the whole header row (§3.4,
-repo-owner correction from live use) in a follow-up PR.
+**Status:** active — shipped: Phase 1 in PR #3441, Phase 2 in PR #3442,
+Phase 3 (same-pane reorder) in PR #3444, header drop (§3.4) in PR #3447 and
+PR #3449, plus the follow-ups in PR #3692, PR #3694 and PR #3698 (header
+always shows its tabs, Window-Tab drop flash + landing bounce, moving a
+pane's last tab closes it; see
+`SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md`). §3.3 was
+**revised** 2026-09-24 (a drop on a pane's body does the same as a drop on its
+header, no split) and shipped in PR #3706. §3.5
+(tear-off to a floating pane) is designed below (revision 2026-09-24) and
+ships in its own follow-up PR.
 
-**Deliberate re-ordering of the remaining work, decided with the repo owner
-2026-09-20:** §3.3 (cross-pane drop onto a pane's CONTENT area, with a
-ghost/split preview) was originally Phase 4's first half, but it is the only
-remaining piece that cannot be built additively — `OverlayNode`'s
-`dropTargetForElements` (`tilelayout-shared.tsx`) is keyed entirely to
-`tileItemType`, and pragmatic-dnd's drop-target registry is
-one-registration-per-DOM-element (verified in its source: `registry.set(element,
-args)`, with a dev-mode warning on a second registration), so a parallel,
-isolated handler on the same element is impossible — the existing callbacks
-would have to be edited in place. That file is the one implicated in the four
-rounds of dead-tab/dead-pane incidents `SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR_2026_07_11.md`
-catalogs, so the header-drop half (§3.4 — a brand-new drop target on an element
-with zero existing registrations) was built first instead. §3.3 and §3.5
-(tear-off-to-floating-pane) remain not started.
+**Revision 2026-09-24 (repo owner):**
+- **§3.3 split-on-content is dropped.** Dragging a Pane Tab over another
+  pane's body does exactly what dragging it over that pane's header does: the
+  tab joins that pane. There's no split preview and no ghost, so the concern
+  that §3.3 would have to edit `OverlayNode`'s fragile drop target
+  (`tilelayout-shared.tsx`) goes away entirely.
+- **§3.5 uses "the most robust, best-practice solution".** The design below
+  was re-grounded in the tear-off code as it stands on `main` (`eabfffd96`).
+  It resolves §7 Q1 in favor of `TearOffBlock` (relocate the same block,
+  never close-and-reopen).
+
 **Scope:** Dragging an individual **Pane Tab** pill (the pills rendered by
 `PaneHeaderTabStrip`/`PaneTabStrip`, one per `block_stack` member — see
 terminology below) to: reorder it within its own Pane, move it into a
@@ -295,25 +294,36 @@ being hovered and the same `tab_id`/leaf — same-leaf move, no cross-pane
 RPC branch needed at the frontend call-site (the reducer command shape is
 identical either way; see §5).
 
-### 3.3 Cross-pane drop on a Pane's CONTENT area → new split, with ghost (reuse existing mechanism almost verbatim)
+### 3.3 Cross-pane drop on a Pane's BODY → same as the header: join that pane (revised 2026-09-24)
 
-Hovering a **different** Pane's content (below its header) with a `kind:
-"pane-tab"` payload: reuse `OverlayNode`'s existing per-leaf
-`dropTargetForElements`/`ComputeMove`/ghost machinery
-(`tilelayout-shared.tsx:436-460`) unmodified for the *preview* — it already
-works for any drag payload shaped for direction resolution. The only new
-work is at the **commit** step: today's commit (`props.layoutModel.onDrop()`
-/ `redockDraggedPane`) moves a whole node; this spec's commit instead:
+**Original design (dropped):** a drop on another pane's content area would
+split that pane, with the `OverlayNode`/`ComputeMove` ghost preview. The
+repo owner dropped it: a Pane Tab dropped anywhere on another pane joins
+that pane, header or body alike.
 
-1. Splits the target leaf per the previewed direction (reuse
-   `queue_target_layout_split`, `agentmux-srv/src/server/service/layout_helpers.rs:123-159`,
-   unmodified — it already builds a fresh single-block leaf from a
-   `block_id`, which is exactly what a torn-out Pane Tab is).
-2. Removes `blockId` from the *source* leaf's stack via the new
-   `LayoutStackMove`/`LayoutStackRemove` reducer path (§5) — **not**
-   `queue_source_layout_delete`, which assumes whole-leaf deletion and is
-   the wrong tool once the source is a multi-member stack (leaving the
-   source leaf and its OTHER tabs untouched is the entire point).
+**Design as built:**
+- **Drop zone.** The cross-pane drop target (§3.4) registers on the whole
+  pane, PaneChrome's root (`.pane-stack`, marked `data-role="pane"`), instead
+  of just its header row. `foreignDropRootFor` (`PaneTabStrip.tsx`) resolves
+  it: header strip → enclosing pane root → else the header → else the strip.
+  A strip that lives inside a pane's *content* (editor file tabs, the agent
+  History strip) never widens to the pane around it.
+- **Feedback.** The Window-Tab-style flash still goes on the **header**
+  (`foreignDropHighlightFor`), wherever over the pane the pointer is. The
+  header is where the tab will appear, and the flash is sized for a strip,
+  not a pane body.
+- **Commit.** Unchanged from §3.4: `LayoutStackMove` append + activate, via
+  the same deferred `onReceiveForeignTab`.
+- **Why this is free.** Nothing inside a pane registers an element drop
+  target; the per-pill reorder targets reject foreign pills and let them
+  bubble. The tile overlay above pane bodies only takes pointer events during
+  a whole-**pane** drag (`layoutModel.activeDrag`, set by
+  `TileLayout.core.tsx`'s draggable), never during a pane-**tab** drag. So the
+  pointer reaches the real pane DOM, and whole-pane drags are unaffected.
+- **Known limitation, not addressed:** a browser pane's page is a native CEF
+  surface laid over the DOM, so a drag over that surface may not reach the
+  DOM drop target. The pane's header always works. Whole-pane drags have the
+  same property today.
 
 ### 3.4 Cross-pane drop on a Pane's HEADER → append as a new tab there (reuse the spring-loaded pattern, scoped one level in)
 
@@ -371,37 +381,117 @@ kind of target). Concretely:
   visible, matching every other "add a tab" path in this codebase —
   `addWidgetAsPaneTab`, quick-fork, etc., all activate on add).
 
-### 3.5 Drag out of the window entirely → floating pane
+### 3.5 Drag out of the window entirely → floating pane (revised 2026-09-24: robust design)
 
-On drop with no AgentMux window under the cursor (same cross-process
-hit-test `CrossWindowDragMonitor` already performs for every drag type),
-reuse `performTearOff`'s **`"tile"` branch** (§1.3 item 3) — `TearOffBlock`
-+ `open_floating_pane_window` — driven by the dragged pill's `blockId`
-directly (`TearOffBlock` already takes a bare block id, not a node). **Do
-not** use the `"tab"` branch (spawns a whole new top-level
-window/instance — wrong granularity for "one Pane Tab becomes a floating
-pane") and **do not** implement this as `closeBlockInStack` +
-re-`pane.open{floating:true}`, even though that is literally what
-`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md` §7 resolution 5
-describes for the analogous "tear one tab out of a stack" case. That
-resolution predates having read `TearOffBlock`'s actual behavior: closing
-the block and reopening a fresh one of the same widget type **destroys and
-recreates** it — for an agent Pane Tab, that means losing the live
-conversation/session, not relocating it. `TearOffBlock` already does the
-correct thing (moves the *same* block to a new workspace+tab, preserving
-its identity/state) for the existing whole-Pane and whole-Window-Tab
-cases; there is no reason a Pane Tab drag needs the lossy path when the
-non-lossy one already exists and needs zero new backend work. **Flagging
-this as a correction to the universal spec's resolved §7, to be confirmed
-by the repo owner (§7 open questions below), not silently overridden.**
+Grounded in the tear-off code on `main` (`eabfffd96`). Citations below are to
+that tree.
 
-Source-side cleanup: same as §3.3 — `LayoutStackMove`/`LayoutStackRemove`
-removes just the one member, not `queue_source_layout_delete`'s whole-leaf
-semantics. Per §1.3 item 3, confirm during implementation whether the
-Phase-0 `delete`-action fix already makes the existing `TearOffBlock` +
-`queue_source_layout_delete` pairing stack-safe as-is (in which case no new
-frontend wiring is even needed here beyond driving it from the new drag
-gesture) — do not assume either way without a test.
+**What exists and is reused unchanged:**
+- `WorkspaceService.TearOffBlock` (`service/tear_off.rs:29-146`, saga
+  `sagas/tear_off_block.rs:130-205`: `CreateWorkspace` → `CreateTab` →
+  `MoveBlock`, compensated with `DeleteWorkspace`). `MoveBlock`
+  (`reducer/block.rs:77-145`) only reparents the block, so the **same block**
+  moves, and a live agent session, terminal process or editor buffer
+  survives. §7 Q1 is resolved: relocate, never close-and-reopen.
+- `open_floating_pane_window` (`agentmux-cef/src/commands/floating_pane.rs`)
+  and `FloatingPaneWorkspace` (a floater is an ordinary workspace + tab +
+  block).
+- The per-platform `CrossWindowDragMonitor.{win32,darwin,linux}.tsx` and its
+  `performTearOff`, which today handles whole panes (`kind:"tile"`) and
+  window tabs (`kind:"tab"`).
+
+**What the research found unsafe or missing for a single tab** (and in part
+for whole panes today):
+1. Pills set no drag payload, so the monitors ignore pane-tab drags. A naive
+   new kind would fall into the monitors' `else` branch and be treated as a
+   window-tab drag with an undefined `tabId`.
+2. `performTearOff` removes the source locally with
+   `treeReducer(DeleteNode, getNodeByBlockId(blockId).id)`. `getNodeByBlockId`
+   also matches background stack members, so this deletes the **whole leaf,
+   siblings included**. It races the stack-safe queued `delete` action
+   (`layoutPersistence.ts` DeleteNode case, #3414) and can lose sibling tabs.
+   This already affects whole-pane tear-off of a pane with several tabs.
+3. The backend's own tree is only fixed when the source window echoes its
+   tree back: `TearOffBlock` queues a frontend `delete` but never dispatches
+   `LayoutDeleteNodeByBlock` (unlike the `delete_block` saga).
+4. On macOS/Linux the host window hit-test is a stub that returns "no window"
+   (`agentmux-cef/src/commands/drag.rs:219-222`). "Inside the window" is
+   inferred only from an in-window drop target clearing the payload. So a pill
+   dropped on its **own** pane (no target accepts it) would tear off.
+5. If `open_floating_pane_window` fails after `TearOffBlock` succeeded, the
+   block is left in a workspace with no window, and nothing moves it back
+   (`TODO(phase-5)`).
+6. Pill drags have no Escape-cancel hook and no macOS/Linux snapback
+   suppression (`preventUnhandled`), both of which tile drags have.
+7. Size: the floater size is measured by `[data-blockid]`, which for a
+   background member finds a hidden (or no) element. And `measureMotherResize`
+   would shrink the source window even though the source pane survives.
+
+**Design:**
+
+1. **Payload.** The pill's `draggable()` sets
+   `setCurrentDragPayload({ kind: "pane-tab", blockId, sourceNodeId,
+   sourceTabId, paneRect })` on drag start. `sourceTabId` comes from the pane's
+   own `layoutModel` (not the globally active tab). `paneRect` is the pane
+   root's (`[data-role="pane"]`) rect, captured at drag start. All three
+   monitors get an explicit `"pane-tab"` branch. It is never allowed to reach
+   the `"tab"` path.
+2. **In-window drops never tear off.**
+   - Both pill drop targets (same-pane reorder, cross-pane join) clear the
+     payload in `onDrop`, like the tile targets do.
+   - On macOS/Linux only, the `"pane-tab"` branch also tears off only if the
+     `dragend` screen point lies **outside this window's own screen rect**
+     (`window.screenX/Y`, `outerWidth/Height`, DIP). That closes gap 4
+     without touching the host.
+   - On Windows the real HWND hit-test already distinguishes "this window",
+     "another AgentMux window" and "no window".
+   - A pane-tab drop on **another AgentMux window** is treated as cancel for
+     now; landing it as a tab over there is a follow-up.
+3. **Stack-safe source removal: one shared helper.**
+   `removeBlockFromLayout(model, blockId)`: when the leaf has other members,
+   `removeMemberFromStack` (right-hand neighbour becomes visible); when it was
+   the only one, remove the leaf as a move (`removeLeafEmptiedByMove`,
+   #3698: un-magnify, `DeleteNode`, never `onNodeDelete`). Used by the
+   queued-action `DeleteNode` case **and** by every `performTearOff` local
+   removal (all three platforms, tile branch too). That fixes gap 2 for whole
+   panes as a side effect: a whole-pane tear-off of a multi-tab pane moves its
+   active tab and leaves the other tabs docked, instead of racing to delete
+   them. (Tearing off a whole *stack* as one floater is a separate,
+   pre-existing gap: `TearOffBlock` moves one block. Noted, not addressed.)
+4. **Backend truth.** `handle_tear_off_block` also dispatches
+   `LayoutDeleteNodeByBlock` for the source tab (stack-safe:
+   `remove_stack_member`, else delete the leaf), following the `delete_block`
+   saga, alongside the existing queued frontend `delete`. The frontend removal
+   stays idempotent: removing a block that's already gone is a no-op.
+5. **Size and mother window.** The floater size is `paneRect` (the pane the
+   tab came from), with `measureSourcePaneSize` as fallback. The mother-window
+   resize applies only when the tab was its pane's **only** tab (the pane
+   leaves the window); a pane that keeps other tabs doesn't shrink the window.
+6. **Rollback on failure** (fixes gap 5 for pane-tab tear-off). If
+   `open_floating_pane_window` fails after `TearOffBlock` succeeded, move the
+   block straight back with the existing, identity-preserving
+   `RedockFloatingPane`:
+   - If the source pane still has members, redock as a **tab** onto a
+     surviving member. That needs one new `dir` value, `"stack"`, which
+     queues a `stackpush` (`queue_target_stack_push`) instead of a split or
+     insert.
+   - If the source pane was removed, redock with `dir: "insert"`: the tab
+     comes back as its own pane. The position may differ, but nothing is lost.
+
+   Then delete the now-empty floater workspace. The tile branch keeps its
+   existing behavior; it can adopt the same rollback later.
+7. **Cancel and snapback parity with tile drags.** macOS/Linux call
+   `preventUnhandled.start()` on pill drag start and `.stop()` on drop. A
+   keydown Escape during a pill drag calls `setDragEscaped(true)`, and an
+   escaped drag never tears off.
+
+**Explicitly out of scope** (named so they're not mistaken for done):
+- Dragging pills *inside* a floater. Its capture-phase mousedown handler
+  prevents drag start on header content (`floating-pane-workspace.tsx:394-404`).
+- Redocking a floater *as a tab* onto a pane by user gesture. `dir: "stack"`
+  makes it possible; the gesture isn't built.
+- Pane-tab drops onto another AgentMux window.
+- Tearing off a whole multi-tab stack as one floater.
 
 ### 3.6 Reserved whole-Pane-drag space, only when the tab strip is actually overflowing
 
@@ -514,6 +604,13 @@ three.
 
 ## 5. Drag-session state: the one new piece, deliberately minimal
 
+> **As built (2026-09-24):** the dedicated `paneTabDragSession.ts` module was
+> never needed. Phases 3–4 and the follow-ups kept all pane-tab drag state
+> inside `PaneTabStrip.tsx` (per-pill `isDragging`/`dropSide`, the per-strip
+> `foreignHover`, the module-level landing flag), and §3.5 reuses the
+> monitors' existing `currentDragPayload` instead of adding a store. The
+> original recommendation is kept below for the record.
+
 Per §2's scope discipline, this spec does **not** refactor the existing
 whole-Pane/Window-Tab drag system. But it does need *some* place to hold
 "which Pane Tab is currently being dragged, which Pane/position is currently
@@ -583,12 +680,15 @@ drag a tab within a 3+-tab pane to every position; confirm whole-Pane drag
 (grabbing the reserved space from Phase 2, or the natural dead space when
 not overflowing) still works unaffected.
 
-### Phase 4 — Cross-pane drop on content (§3.3)
-Wires the new commit path into the *existing*, unmodified
-`OverlayNode`/`ComputeMove` ghost machinery. Test: dragging a Pane Tab onto
-another Pane's content in each of the 9 directions produces the same split
-`queue_target_layout_split` already produces for a whole-Pane drag; source
-leaf keeps its other members; I1/I2 hold after.
+### Phase 4 — Cross-pane drop on a pane's body (§3.3) — revised 2026-09-24, shipped in #3706
+**No split, no ghost.** The original plan here (route body drops through
+`OverlayNode`/`ComputeMove` and split the target in one of 9 directions) was
+dropped by the repo owner. As built: the cross-pane drop target (§3.4)
+registers on the whole pane (PaneChrome's root, `data-role="pane"`), so a body
+drop appends the tab to that pane exactly like a header drop, and the flash
+stays on the header. Tests: `foreignDropRootFor` widens a header strip to its
+pane and never widens a content strip; `foreignDropHighlightFor` stays on the
+header; the drop target registers on the pane root and flashes the header.
 
 ### Phase 5 — Cross-pane drop on header (§3.4)
 The new, Pane-header-scoped hover/commit target. Design-review pass on the
@@ -597,14 +697,19 @@ flash) — flagged as the one place in this plan where "verified via
 `task dev`, not just tests" matters most, matching how the universal
 redesign's own Task Group B4 flagged its own visual-verification limits.
 
-### Phase 6 — Drag out of window → floating pane (§3.5)
-Confirm (test, not assumption) whether `TearOffBlock` +
-`queue_source_layout_delete` is already stack-safe post-Phase-0 (§1.3 item
-3); wire the new payload kind into `performTearOff`'s existing `"tile"`
-branch. **Requires repo-owner sign-off on the §7 correction to the
-universal spec's §7 resolution 5 before this phase starts** (see Open
-Questions below) — everything else in this plan can proceed independently
-of that answer, but this phase's chosen mechanism depends on it.
+### Phase 6 — Drag out of window → floating pane (§3.5) — design revised 2026-09-24
+Build §3.5's design (points 1–7), not the original plan. The original plan
+(wire the payload into the `"tile"` branch; wait for sign-off on the
+close-and-reopen question) is superseded: the sign-off question is resolved in
+favor of `TearOffBlock` (§7 Q1), and the research behind §3.5 found that
+`TearOffBlock` + the local `performTearOff` removal is **not** stack-safe as-is
+(gap 2). Tests:
+- Rust: `TearOffBlock` of a background member and of the visible member of a
+  two-member pane keeps the sibling in the backend tree and the tab's
+  `blockids`; `RedockFloatingPane` with the "as a tab" option lands the block
+  in the target pane's stack.
+- vitest: `removeBlockFromLayout` (member vs. last tab), the pane-tab
+  monitor branch (in-window guard, escape, rollback on window-open failure).
 
 ### Cross-cutting, every phase
 - `npx tsc -p tsconfig.citypecheck.json --noEmit` clean.
@@ -623,6 +728,14 @@ of that answer, but this phase's chosen mechanism depends on it.
 ---
 
 ## 7. Open questions for the repo owner (do not resolve unilaterally)
+
+> **All resolved (2026-09-24):**
+> - Q1: `TearOffBlock` (relocate), per §3.5.
+> - Q2: no dwell, and the header flash shipped in #3694.
+> - Q3: always append, confirmed; body drops append too (§3.3).
+> - Q4: moot, the phases shipped incrementally.
+>
+> Kept below for the record.
 
 1. **§3.5's correction to the universal spec's §7 resolution 5.** That
    resolution explicitly recommended `closeBlockInStack` + reopen; this spec
