@@ -1,7 +1,11 @@
 # SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay
 
 **Date:** 2026-09-24
-**Status:** proposed — nothing here is built. Measured against `agentmux`
+**Status:** active — the pure primitives (identifiers, certificate,
+revocation, envelope and freshness checks; §2.7) ship in PR #3727; C1
+(agentmux-cloud#91) and D1a (`wan.db`, instance key, agent keys, purge; PR
+#3734) are in review; D1b (certify, publish, carry gate) and D2 (verifier,
+marker, tier rules) are not started. Verified 2026-09-24. Measured against `agentmux`
 `main` @ `d01833859` and `agentmux-cloud` `main` (server `1.8.3`, GitHub
 consumer `1.4.12`), both read on 2026-09-24.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
@@ -570,6 +574,40 @@ in W3-S: `conversation_trust_grant_check` returns false for tier `wan`.
   any stale, replay, unavailable or cert reason.
 - CLAUDE.md's jekt section gains the new marker fields and tier rules **in
   the PR that ships the verifier, not before**.
+
+### 2.7 Wire formats (as built, 2026-09-24)
+
+§2.2 names the certificate's fields but not their encodings. The pure half
+of W3-S (`agentmux-common/src/jekt_sign.rs`, "W3-S" section) fixes them, and
+the cloud's chain check must match byte for byte. Fixed vectors, computed by
+an independent Node implementation, are asserted in that file's tests
+(`w3s_identifiers_and_certificate_match_the_cross_language_vectors`); the
+cloud's tests assert the same values.
+- **Public keys** (`instance_pubkey`, `agent_pubkey`, `old_instance_pubkey`):
+  standard base64 of the raw 32 bytes, padded (44 chars). The certificate
+  material contains `agent_pubkey` in exactly this form.
+- **Signatures** (`cert_sig`, revocation `sig`, `wan_sig`): standard base64
+  of the raw 64-byte Ed25519 signature (88 chars).
+- **`key_fp`:** unpadded base64url of `SHA-256(raw agent public key)`
+  (43 chars).
+- **Instance id:** RFC 4648 base32 alphabet, lowercased, unpadded, over the
+  first 16 bytes of `SHA-256(raw instance public key)` (26 chars).
+- **`issued_at`, `revoked_at`:** Unix seconds, decimal, in the material.
+- **Record `agent_id`** must already be lowercase. The certificate signs the
+  lowercased id, so an uppercase record id would verify while naming a
+  different string; the chain check rejects it instead.
+- **Record shape** (`WanKeyRecord`): `instance_id`, `agent_id`, `channel`,
+  `key_fp`, `instance_pubkey`, `agent_pubkey`, `host_hint`, `issued_at`,
+  `cert_sig`. Revocation (`WanRevocation`): `old_instance_id`,
+  `old_instance_pubkey`, `new_instance_id`, `revoked_at`, `sig`.
+
+The §2.3 checks are split in two so the srv can run the cheap ones before
+any directory fetch: `check_wan_envelope` (envelope binding, then freshness)
+and `verify_wan_against_record` (chain, record matches the carried
+instance/channel/agent/fingerprint, then the message signature). The
+same-account check, directory lookup and replay table are stateful and stay
+in the srv (D2). `WanCheckFailure::verdict()` maps each failure to its §2.3
+`None` or `Some(false)`.
 
 ---
 
