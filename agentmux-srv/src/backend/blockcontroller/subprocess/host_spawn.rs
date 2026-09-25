@@ -136,8 +136,12 @@ impl SubprocessController {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
-        self.publish_status();
+        // Mark the turn active BEFORE publishing, so this "running" status
+        // carries turn_active=true: it is the start edge the notification
+        // Router pairs with the process_waiter's turn_active=false to detect
+        // "finished" (subprocess agents otherwise never showed a true→false).
         self.health_monitor.set_active_turn(true);
+        self.publish_status();
 
         // Build command — on Windows, .cmd batch wrappers can't be reliably spawned
         // via cmd.exe /C with piped stdio. Resolve to node <script> instead.
@@ -164,7 +168,15 @@ impl SubprocessController {
         cmd.stderr(std::process::Stdio::piped());
 
         // Spawn
-        let mut child = cmd.spawn().map_err(|e| {
+        let spawned = cmd.spawn();
+        if spawned.is_err() {
+            // The turn was marked active (and published) above; a spawn that
+            // never started must not leave it "active" forever — roll back and
+            // publish the terminal state (Codex P2 on #3705). Done before the
+            // map_err below takes the inner lock that publish_status needs.
+            self.health_monitor.set_active_turn(false);
+        }
+        let mut child = spawned.map_err(|e| {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_DONE);
             inner.proc_exit_code = -1;
@@ -179,7 +191,12 @@ impl SubprocessController {
             }
             self.unlock_run();
             format!("failed to spawn subprocess: {e}")
-        })?;
+        });
+        if child.is_err() {
+            // Inner lock released by now: publish DONE with turn_active=false.
+            self.publish_status();
+        }
+        let mut child = child?;
 
         let pid = child.id().unwrap_or(0);
         tracing::info!(

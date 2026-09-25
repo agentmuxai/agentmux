@@ -46,6 +46,49 @@ enum Internal {
     /// Resolve through the SAME ordered queue as the srv-side emits, so a
     /// resolve can never overtake the emit it cancels (Codex P2 on #3662).
     Resolve { block_id: String, family: Family },
+    /// A controller's authoritative `turn_active` (from `controllerstatus`).
+    TurnStatus { block_id: String, active: bool },
+    /// The user stopped/interrupted this block's turn in its pane.
+    TurnStopped { block_id: String },
+}
+
+/// How long after a user Stop the turn-ended transition it causes is treated
+/// as "the user's own action", not "finished".
+const STOP_GRACE_MS: i64 = 15_000;
+/// Cap on tracked blocks' turn state (see `Internal::TurnStatus` handling).
+const TURN_MAP_MAX: usize = 1024;
+
+/// What the Router does with a `controllerstatus` turn transition.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TurnTransition {
+    /// Turn (re)started: anything "finished" for this block is moot.
+    Started,
+    /// Turn really ended: notify "finished" (subject to policy).
+    Finished,
+    /// No transition, first sighting, or ended by the user's own Stop.
+    Nothing,
+}
+
+/// `(blockid, turn_active)` from a serialized `BlockControllerRuntimeStatus`.
+/// `turn_active` is `skip_serializing_if = "is_false"`, so a turn that ENDED
+/// arrives with the field absent — absent means false (Codex P1 on #3705;
+/// treating it as "unknown" dropped every end-of-turn and "finished" never
+/// fired).
+pub fn parse_turn_status(d: &serde_json::Value) -> Option<(String, bool)> {
+    let block_id = d.get("blockid")?.as_str()?.to_string();
+    let active = d.get("turn_active").and_then(|v| v.as_bool()).unwrap_or(false);
+    Some((block_id, active))
+}
+
+/// Pure: `prev` = last known `turn_active` for the block (None = never seen,
+/// e.g. right after srv start — a replayed/first status is not a transition).
+pub fn turn_transition(prev: Option<bool>, active: bool, stopped_recently: bool) -> TurnTransition {
+    match (prev, active) {
+        (Some(true), true) | (Some(false), false) => TurnTransition::Nothing,
+        (_, true) => TurnTransition::Started,
+        (Some(true), false) if !stopped_recently => TurnTransition::Finished,
+        _ => TurnTransition::Nothing,
+    }
 }
 
 const AGENT_NAME_MAX: usize = 32;
@@ -63,6 +106,10 @@ pub struct Router {
     names: Mutex<std::collections::HashMap<String, String>>,
     internal: tokio::sync::mpsc::UnboundedSender<Internal>,
     last_tray: Mutex<Option<TrayState>>,
+    /// block_id → last `turn_active` seen in `controllerstatus`.
+    turn_active: Mutex<std::collections::HashMap<String, bool>>,
+    /// block_id → when the user last stopped its turn (epoch ms).
+    stopped_at: Mutex<std::collections::HashMap<String, i64>>,
 }
 
 type Registry = Mutex<std::collections::HashMap<usize, Arc<Router>>>;
@@ -105,6 +152,8 @@ pub fn init(
                 names: Mutex::new(Default::default()),
                 internal: tx,
                 last_tray: Mutex::new(None),
+                turn_active: Mutex::new(Default::default()),
+                stopped_at: Mutex::new(Default::default()),
             });
             spawn_ticker(Arc::downgrade(&r));
             spawn_internal(Arc::downgrade(&r), rx);
@@ -120,6 +169,21 @@ pub fn init(
 fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crate::backend::reactive::ReactiveHandler) {
     let tx = r.internal.clone();
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {
+        // "Finished" comes from the controller's own turn state, not from the
+        // renderer's reducer — which can report turn-ended mid-turn (e.g. a
+        // queued message released straight into the next turn), producing
+        // "finished" toasts for an agent that is still working.
+        if ev.event == crate::backend::mps::EVENT_CONTROLLER_STATUS {
+            // No `is_agent_pane` filter: the subprocess controller (Codex,
+            // Gemini, …) publishes `is_agent_pane: false` for its agent panes
+            // (Codex P1 on #3705), and only real agent turns ever report
+            // turn_active=true (shell controllers hardcode false), so a
+            // true→false edge is agent-specific on its own.
+            if let Some((block_id, active)) = ev.data.as_ref().and_then(parse_turn_status) {
+                let _ = tx.send(Internal::TurnStatus { block_id, active });
+            }
+            return;
+        }
         if ev.event != crate::backend::mps::EVENT_AGENT_FAILURE {
             return;
         }
@@ -173,6 +237,46 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     .await;
                 }
                 Internal::Resolve { block_id, family } => r.resolve(&block_id, family),
+                Internal::TurnStopped { block_id } => {
+                    {
+                        let mut stopped = r.stopped_at.lock().unwrap_or_else(|e| e.into_inner());
+                        // Bounded: entries past the grace window can't matter.
+                        let now = now_ms();
+                        stopped.retain(|_, t| now - *t < STOP_GRACE_MS);
+                        stopped.insert(block_id.clone(), now);
+                    }
+                    r.resolve(&block_id, Family::Turn);
+                }
+                Internal::TurnStatus { block_id, active } => {
+                    let prev = {
+                        let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
+                        // Bounded like `names`: forgetting an IDLE block is
+                        // harmless — its next `true` still reads as Started.
+                        if turns.len() > TURN_MAP_MAX {
+                            turns.retain(|_, active| *active);
+                        }
+                        turns.insert(block_id.clone(), active)
+                    };
+                    let stopped_recently = r
+                        .stopped_at
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(&block_id)
+                        .is_some_and(|t| now_ms() - *t < STOP_GRACE_MS);
+                    match turn_transition(prev, active, stopped_recently) {
+                        TurnTransition::Started => {
+                            // A new turn: the earlier stop no longer applies
+                            // to it (Codex P2 on #3705).
+                            r.stopped_at.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+                            r.resolve(&block_id, Family::Turn)
+                        }
+                        TurnTransition::Finished => {
+                            let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None))
+                                .await;
+                        }
+                        TurnTransition::Nothing => {}
+                    }
+                }
             }
         }
     });
@@ -475,6 +579,12 @@ impl Router {
         });
     }
 
+    /// The user stopped this block's turn: cancel "finished" for it, and don't
+    /// turn the resulting turn-end into one (queued, ordered).
+    pub fn turn_stopped_nonblocking(&self, block_id: &str) {
+        let _ = self.internal.send(Internal::TurnStopped { block_id: block_id.to_string() });
+    }
+
     /// Ordered counterpart of `resolve`: queued behind any emit already sent
     /// for the same block.
     pub fn resolve_nonblocking(&self, block_id: &str, family: Family) {
@@ -530,6 +640,53 @@ mod tests {
         assert_eq!(sanitize_name("a\nb\tc"), "abc");
         assert_eq!(sanitize_name("   "), "An agent");
         assert_eq!(sanitize_name(&"x".repeat(100)).chars().count(), AGENT_NAME_MAX);
+    }
+
+    /// Against the REAL serialized status type, not a hand-written JSON — the
+    /// omitted-when-false field is exactly what a hand-written fixture hid.
+    #[test]
+    fn parses_real_serialized_controller_status_including_omitted_false() {
+        use crate::backend::blockcontroller::BlockControllerRuntimeStatus;
+        let mk = |turn_active: bool| BlockControllerRuntimeStatus {
+            blockid: "b1".into(),
+            version: 1,
+            shellprocstatus: "running".into(),
+            shellprocconnname: "local".into(),
+            shellprocexitcode: 0,
+            shellprocpid: None,
+            shellprocname: String::new(),
+            spawn_ts_ms: None,
+            is_agent_pane: false,
+            turn_active,
+        };
+        let started = serde_json::to_value(mk(true)).unwrap();
+        let ended = serde_json::to_value(mk(false)).unwrap();
+        assert!(ended.get("turn_active").is_none(), "precondition: false is omitted on the wire");
+        assert_eq!(parse_turn_status(&started), Some(("b1".to_string(), true)));
+        assert_eq!(parse_turn_status(&ended), Some(("b1".to_string(), false)));
+        assert_eq!(parse_turn_status(&serde_json::json!({"turn_active": true})), None);
+        // End to end with the transition rule: start then end = Finished.
+        let (_, a) = parse_turn_status(&started).unwrap();
+        let (_, b) = parse_turn_status(&ended).unwrap();
+        assert_eq!(turn_transition(None, a, false), TurnTransition::Started);
+        assert_eq!(turn_transition(Some(a), b, false), TurnTransition::Finished);
+    }
+
+    #[test]
+    fn turn_transitions_come_only_from_real_flips() {
+        use TurnTransition::*;
+        // First sighting (srv start / replay) is never a transition to "finished".
+        assert_eq!(turn_transition(None, false, false), Nothing);
+        assert_eq!(turn_transition(None, true, false), Started);
+        // Real end of a turn.
+        assert_eq!(turn_transition(Some(true), false, false), Finished);
+        // Ended by the user's own Stop.
+        assert_eq!(turn_transition(Some(true), false, true), Nothing);
+        // Repeated statuses are not transitions.
+        assert_eq!(turn_transition(Some(true), true, false), Nothing);
+        assert_eq!(turn_transition(Some(false), false, false), Nothing);
+        // Next turn starts.
+        assert_eq!(turn_transition(Some(false), true, false), Started);
     }
 
     #[test]
