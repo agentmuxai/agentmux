@@ -3,7 +3,6 @@
 
 import { Block } from "@/app/block/block";
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -355,22 +354,6 @@ class TermViewModel implements ViewModel {
     get viewComponent(): ViewComponent {
         return _terminalViewComponent;
     }
-
-    /** True exactly when `pane-leaf-chrome.tsx` hoisted chrome above this
-     *  Block — that chrome renders the replacement BlockFrame_Header, so
-     *  suppressing the inline one is what stops the two double-rendering.
-     *  Reads the tag on the NodeModel wrapper rather than being
-     *  unconditional, so a drag-preview thumbnail (`renderPreview`'s plain
-     *  `<Block preview>`, no chrome around it) keeps its own header — the
-     *  same bug Codex/ReAgent caught on the agent pane in #3151. */
-    get noHeader(): () => boolean {
-        return () => this.nodeModel.paneChromeHoisted?.() === true;
-    }
-
-    /** Terminal now renders through the ONE shared chrome like every other
-     *  widget type; what used to be `TermPaneChrome`'s bespoke component is
-     *  the capability model below (term.tsx's buildTermPaneChromeModel). */
-    renderPaneChrome = renderPaneChromeShell;
 
     /** Called once by the shared chrome at its own mount, in its own
      *  reactive scope — which is exactly the ownership the old

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
+import { getBlockViewClass } from "@/app/block/block-registry";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { MOS } from "@/app/store/global";
 import type { NodeModel } from "@/layout/index";
@@ -36,43 +38,29 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
  * `<Block>` alone already did.
  */
 /**
- * EFFECTIVE view types (post-`resolveEffectiveViewType`) whose `ViewModel`
- * implements `renderPaneChrome` — i.e. the ones that own an in-pane tab
- * strip and therefore need their chrome hoisted out of the per-block
- * remount boundary. Everything else takes the passthrough branch below,
- * unchanged from what a plain `<Block>` always did.
+ * Whether an EFFECTIVE view type (post-`resolveEffectiveViewType`) gets the
+ * shared pane chrome (header + tab strip + "+", hoisted out of the per-block
+ * remount boundary): every REGISTERED view type does.
  *
- * A view type listed here MUST also set `noHeader` off
- * `nodeModel.paneChromeHoisted` (see AgentViewModel/TermViewModel), or its
- * inline BlockFrame header and its hoisted one will both render.
+ * This used to be a hand-maintained `HOISTS_OWN_CHROME` list that each view
+ * also had to match with its own `renderPaneChrome` and `noHeader`. Views
+ * missing from it (toolchain, settings, launcher, identity, memory) got no
+ * tab strip when a pane started with them, and a DOUBLE header when added to
+ * a pane that already had chrome. Now the host decides for all of them:
+ * chrome is `vm.renderPaneChrome ?? renderPaneChromeShell` (below), and
+ * BlockFrame hides its inline header off `paneChromeHoisted` itself
+ * (blockframe.tsx). SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §4, Phase 1.
+ *
+ * An empty or unregistered type (block meta not loaded yet, or an unknown
+ * view) stays a plain `<Block>` until it resolves.
  */
-// Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-// §5, Task Group C): EVERY view type here registers the same shared
-// `renderPaneChromeShell` (PaneChrome.tsx) via a one-line
-// `this.renderPaneChrome =` field in its own ViewModel. There is no
-// per-type chrome component any more — agent and term used to have their
-// own (AgentPaneChrome/TermPaneChrome) and now express what was special
-// about them through the optional `paneChromeModel` capability hook
-// instead (custom.d.ts's `PaneChromeModel`).
-// "cpuplot" is sysinfo's own secondary registered view key
-// (block-registry.ts), same ViewModel class as "sysinfo".
-const HOISTS_OWN_CHROME = new Set([
-    "agent",
-    "term",
-    "browser",
-    "editor",
-    "sysinfo",
-    "cpuplot",
-    "swarm",
-    "armory",
-    "media",
-    "drone",
-    "help",
-    "warden",
-]);
+function hoistsOwnChrome(viewType: string): boolean {
+    return viewType !== "" && getBlockViewClass(viewType) != null;
+}
 
 /**
- * Subset of `HOISTS_OWN_CHROME` whose stack members stay mounted
+ * View types (all of which get the shared chrome, see `hoistsOwnChrome`)
+ * whose stack members stay mounted
  * SIMULTANEOUSLY instead of being swapped one-at-a-time behind the inner
  * `<Key>` — every member's own `<Block>` (xterm instance/PTY connection for
  * term; `AgentViewModel` + parsed document for agent) is created once and
@@ -149,7 +137,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // flash this file exists to prevent.
     let latchedHoisted = false;
     const hoisted = createMemo(() => {
-        if (!latchedHoisted && HOISTS_OWN_CHROME.has(effectiveViewType())) {
+        if (!latchedHoisted && hoistsOwnChrome(effectiveViewType())) {
             latchedHoisted = true;
         }
         return latchedHoisted;
@@ -269,9 +257,9 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // leaf-scoped, unaffected by which member is active.
     // `paneChromeHoisted` tags the wrapper so a ViewModel can tell whether
     // something is rendering a replacement header ABOVE it (codex P2 on
-    // this PR). AgentViewModel.noHeader reads it: an agent Block reached
+    // this PR). BlockFrame's `noHeader` reads it: a Block reached
     // through THIS file's hoisted branch suppresses BlockFrame's inline
-    // header (chrome supplies one), but the same ViewModel class rendering
+    // header (chrome supplies one), but the same view rendering
     // a drag-preview thumbnail — `tabcontent.tsx`'s `renderPreview`, a
     // plain `<Block preview>` with the raw leaf nodeModel and no chrome
     // around it — must keep its inline header or the thumbnail loses its
@@ -496,8 +484,11 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                 the outer chrome once mounted, since `chromeVm()` (above)
                 never returns to a falsy value after its first real
                 capture. */}
+            {/* The shared shell unless a view supplies its own. (Comment kept
+                OUTSIDE <Show>: a sibling of the callback child would turn it
+                into an array and break the callback form.) */}
             <Show when={chromeVm()}>
-                {(vm) => vm().renderPaneChrome!(chromeNodeModel(), content)}
+                {(vm) => (vm().renderPaneChrome ?? renderPaneChromeShell)(chromeNodeModel(), content)}
             </Show>
         </Show>
     );
