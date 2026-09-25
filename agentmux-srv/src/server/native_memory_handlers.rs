@@ -703,6 +703,13 @@ fn resolve_memory_dir_with(
     legacy_memory_dir_by_id(mstore, agent).map(|(path, provenance)| ResolvedMemoryDir { path, provenance })
 }
 
+/// The memory dir of `agent_uid`'s latest spawn, if one is on record — for a
+/// caller that knows the agent's id but has no local row for it.
+pub(crate) fn memory_dir_from_spawn(agent_uid: &str) -> Option<std::path::PathBuf> {
+    let gfs = crate::backend::agent_session::global_transcript_store().map(|a| a.as_ref());
+    memory_dir_from_latest_segment(gfs, agent_uid)
+}
+
 /// The memory dir an AgentMux write may go to: never an unverified guess.
 pub(crate) fn memory_dir_for_write_by_id(
     mstore: &crate::backend::storage::store::Store,
