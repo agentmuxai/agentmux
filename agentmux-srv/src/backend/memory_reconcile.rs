@@ -176,6 +176,9 @@ pub(crate) struct Report {
     pub adopted: usize,
     /// Versions imported from the per-channel history, the first time.
     pub imported: usize,
+    /// Files held for the adoption list at first sighting: another agent's
+    /// record already holds their content.
+    pub held: usize,
     pub written: usize,
     pub captured: usize,
     pub conflicts: usize,
@@ -402,8 +405,26 @@ fn adopt_baseline(
     budget: &mut Budget,
     report: &mut Report,
 ) -> Result<(), StoreError> {
+    // Content another agent's record already holds isn't this agent's to
+    // adopt: held for the adoption list (spec §2.1.2). All of it first, in
+    // one transaction, so a baseline cut short by the budget — whose rest
+    // the next pass captures as new files — never takes it either.
+    let shas: Vec<(String, String)> = disk
+        .iter()
+        .filter_map(|(name, d)| match d {
+            OnDisk::Body(b) => Some((name.clone(), record::sha256_hex(b))),
+            OnDisk::Unreadable => None,
+        })
+        .collect();
+    let foreign = record::held_by_other_records(fs, uid, &shas.iter().map(|(_, s)| s.clone()).collect::<Vec<_>>())?;
+    let held: Vec<(String, String)> = shas.into_iter().filter(|(_, sha)| foreign.contains(sha)).collect();
+    record::hold_for_adoption(fs, uid, dir_id, &held)?;
+    report.held = held.len();
     for (name, body) in disk {
         let OnDisk::Body(body) = body else { continue };
+        if held.iter().any(|(n, _)| n == name) {
+            continue;
+        }
         if budget.spent() {
             // The rest are captured, as new files, by the next pass.
             report.deferred = true;
@@ -433,6 +454,10 @@ fn adopt_baseline(
 /// The content `version` of `name` holds, from the log.
 fn sha_of(fs: &FileStore, uid: &str, name: &str, version: &str) -> Result<Option<String>, StoreError> {
     Ok(record::history(fs, uid, name)?.into_iter().find(|v| v.version == version).and_then(|v| v.sha256))
+}
+
+fn held_here<'h>(heads: &'h Heads, dir_id: &str, name: &str) -> Option<&'h str> {
+    heads.held.get(dir_id).and_then(|m| m.get(name)).map(String::as_str)
 }
 
 fn projected_version(heads: &Heads, dir_id: &str, name: &str) -> Option<String> {
@@ -468,6 +493,10 @@ fn reconcile_file(
     };
     let on_disk = on_disk.as_deref();
     let heads = record::heads(fs, uid)?;
+    // Held for the adoption list: left alone while it still holds that.
+    if on_disk.is_some_and(|b| held_here(&heads, dir_id, name) == Some(record::sha256_hex(b).as_str())) {
+        return Ok(());
+    }
     let head = heads.files.get(name).cloned();
     let head_sha = head.as_ref().and_then(|h| h.sha256.clone());
     let disk_sha = on_disk.map(record::sha256_hex);
@@ -746,6 +775,9 @@ fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str, settle:
             continue;
         }
         let sha = record::sha256_hex(&body);
+        if held_here(&heads, dir_id, &name) == Some(sha.as_str()) {
+            continue;
+        }
         let head = heads.files.get(&name);
         if head.is_some_and(|h| h.sha256.as_deref() == Some(sha.as_str())) {
             continue;
