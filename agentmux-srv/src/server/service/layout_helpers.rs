@@ -244,7 +244,14 @@ pub(crate) async fn queue_source_layout_delete(
     source_tab_id: &str,
     block_id: &str,
 ) -> Result<(), String> {
-    let action = LayoutActionData {
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, source_tab_id, vec![source_delete_action(block_id)])
+        .await
+}
+
+/// The frontend `delete` action for one block: its handler removes just that
+/// stack member (the leaf goes with the last one) and never runs `closeNode`.
+pub(crate) fn source_delete_action(block_id: &str) -> LayoutActionData {
+    LayoutActionData {
         actiontype: "delete".to_string(),
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
@@ -256,9 +263,7 @@ pub(crate) async fn queue_source_layout_delete(
         ephemeral: false,
         targetblockid: String::new(),
         position: String::new(),
-    };
-    super::reducer_helpers::queue_layout_actions_via_reducer(state, source_tab_id, vec![action])
-        .await
+    }
 }
 
 #[cfg(test)]

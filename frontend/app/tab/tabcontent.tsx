@@ -15,7 +15,14 @@ import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { busyMembers, describeBusyMember, type BusyMember, type PaneCloseProbe } from "@/app/tab/pane-close-guard";
+import {
+    busyMembers,
+    closesWithShutdownLog,
+    describeBusyMember,
+    type BusyMember,
+    type PaneCloseProbe,
+} from "@/app/tab/pane-close-guard";
+import { beginShutdownLog } from "@/app/view/agent/shutdown/shutdown-log";
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -45,6 +52,31 @@ const paneCloseProbe: PaneCloseProbe = {
         return (meta?.["agentName"] as string) || (meta?.["agentId"] as string) || "An agent";
     },
 };
+
+function isAgentBlock(blockId: string): boolean {
+    return MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["view"] === "agent";
+}
+
+/**
+ * Close agent panes in place (§5.5): the pane stays, covered by its shutdown
+ * log, and srv removes each tab from the layout once it is down — the
+ * `delete` actions it queues for a waiting frontend. A failure before srv
+ * could start (it reports later failures in the log itself) is flashed.
+ */
+function closeWithShutdownLog(blockIds: string[]): void {
+    for (const id of blockIds) {
+        if (isAgentBlock(id)) beginShutdownLog(id);
+    }
+    services.ObjectService.ClosePane(blockIds, true).catch((err) => {
+        pushFlashError({
+            id: "",
+            icon: "triangle-exclamation",
+            title: "Couldn't close the pane",
+            message: String(err),
+            expiration: Date.now() + 10_000,
+        });
+    });
+}
 
 function TabContent(props: { tabId: string }): JSX.Element {
     const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
@@ -118,12 +150,23 @@ function TabContent(props: { tabId: string }): JSX.Element {
         }
 
         // One confirmation for the whole pane when an agent in it is
-        // mid-turn or has tracked processes running (spec §4.6).
+        // mid-turn or has tracked processes running (spec §4.6). Then an agent
+        // pane is closed IN PLACE (§5.5): returning false stops the layout
+        // from removing it now; srv removes it once its agents are down.
         async function beforeNodeDelete(data: TabLayoutData): Promise<boolean> {
             const blockIds = effectiveStack(data).filter(Boolean);
             const busy = await busyMembers(blockIds, paneCloseProbe);
-            if (busy.length === 0) return true;
-            return new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
+            if (busy.length > 0) {
+                const confirmed = await new Promise<boolean>((resolve) =>
+                    setPendingCloses((q) => [...q, { busy, resolve }])
+                );
+                if (!confirmed) return false;
+            }
+            if (closesWithShutdownLog(blockIds, isAgentBlock)) {
+                closeWithShutdownLog(blockIds);
+                return false;
+            }
+            return true;
         }
 
         return {
@@ -184,7 +227,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
                         open={true}
                         title="Close this pane?"
                         description="Closing stops these agents. A turn in progress is interrupted, and processes they started are stopped."
-                        confirmLabel="Close"
+                        confirmLabel="Shut down"
                         destructive
                         onConfirm={() => answerPendingClose(true)}
                         onCancel={() => answerPendingClose(false)}
