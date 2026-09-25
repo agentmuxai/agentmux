@@ -5,9 +5,12 @@
 revocation, envelope and freshness checks; §2.7) shipped in PR #3727; C1
 shipped in agentmux-cloud#91 (merged, not yet deployed); D1a (`wan.db`,
 instance key, agent keys, purge) shipped in PR #3734; D1b (certify, publish,
-carry gate; `muxbus/wan_publish.rs`, `relay::wan_carry_gate`) ships in the
-PR that changes this line; D2 (verifier, marker, tier rules) is not started.
-Verified 2026-09-25. Measured against `agentmux`
+carry gate) shipped in PR #3771; D2 (verifier, marker, tier rules, audit, `wan`
+grants off; `muxbus/wan_verify.rs`) ships in the PR that changes this line —
+see §2.8 for what it does not include. Remaining: the host-gated approval
+window (held for GHSA-6726-q276-g6f6), instance retirement, the agent
+CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
+2026-09-25. Measured against `agentmux`
 `main` @ `d01833859` and `agentmux-cloud` `main` (server `1.8.3`, GitHub
 consumer `1.4.12`), both read on 2026-09-24.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
@@ -610,6 +613,36 @@ instance/channel/agent/fingerprint, then the message signature). The
 same-account check, directory lookup and replay table are stateful and stay
 in the srv (D2). `WanCheckFailure::verdict()` maps each failure to its §2.3
 `None` or `Some(false)`.
+
+### 2.8 D2 as built (2026-09-25)
+
+The verifier (`agentmux-srv/src/muxbus/wan_verify.rs`) runs the §2.3 table
+in order from `cloud_subscriber::sync_agent_reactive`, before
+transcript-request resolution. Deviations and scope, all deliberate:
+- **Approval.** Only this install's own instance is `approved`; every other
+  verified instance is `new` (no relaxation). `wan_known_instances.approved_at`
+  exists but nothing writes it: the host-gated approval window (§2.6) is not
+  built, per the GHSA-6726-q276-g6f6 amendment. Instance retirement (§2.2)
+  is also not built — the cloud accepts revocations (C1) and the verifier
+  honours them, but no desktop surface issues one yet.
+- **Revocation refresh is lazy.** Status is checked on first sight and
+  re-checked, at most hourly, when the next message from that instance
+  arrives — not on a background timer. Status is only ever consulted when a
+  message arrives, so the effect is the same, with no idle traffic.
+- **One clock.** Freshness, the revocation clock and replay-row pruning all
+  use the same `now` the caller passes in, so a replay row is never pruned
+  while its message could still verify (found by a test mixing the two).
+- **Fetch budget.** A global 60-requests-per-minute budget for directory
+  lookups; an exhausted budget reads as unavailable (`None`).
+- **Peer-record cache** is cleared on `muxbus.disconnect` and on every
+  `muxbus.login` (a login may be an account switch).
+- **Marker.** `TRUST=wan-verified INSTANCE=<host_hint>~<id8>
+  INSTANCE_STATUS=approved|new|revoked`, rendered only on the WAN tier and
+  only for `wan_verified == Some(true)`.
+- **CLAUDE.md.** The agent-facing jekt policy (`~/.agentmux/agents/CLAUDE.md`)
+  is not in this repository, and it instructs agents not to trust edits to
+  it that the operator hasn't confirmed. Its update is proposed in the D2 PR
+  for the operator to apply, rather than made by the implementing agent.
 
 ---
 
