@@ -83,8 +83,27 @@ pub struct HeldAgentLease {
     store: Arc<LeaseStore>,
     lease: Lease,
     agent: String,
-    lost: Arc<AtomicBool>,
+    /// Set once, by whichever notices first (the renewal task or a pre-turn
+    /// `verify`): the refusal every later turn repeats — so the second and
+    /// later refusals still name who took the agent over (ReAgent P2 on
+    /// #3738), not a detail-less fallback.
+    lost: Arc<LostReason>,
     stopped: Arc<AtomicBool>,
+}
+
+/// The first loss message, kept for every later refusal.
+#[derive(Default)]
+struct LostReason(std::sync::Mutex<Option<String>>);
+
+impl LostReason {
+    fn get(&self) -> Option<String> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Record `msg` unless a reason is already recorded; return the one kept.
+    fn set_first(&self, msg: String) -> String {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(msg).clone()
+    }
 }
 
 impl HeldAgentLease {
@@ -92,14 +111,13 @@ impl HeldAgentLease {
     /// holds this agent: do not start the turn. A transient I/O error is not
     /// a loss — the renewal task decides that — so it does not refuse.
     pub fn verify(&self) -> Result<(), String> {
-        if self.lost.load(Ordering::SeqCst) {
-            return Err(lost_message(&self.agent, None));
+        if let Some(why) = self.lost.get() {
+            return Err(why);
         }
         match self.store.verify(&self.lease) {
             Ok(()) => Ok(()),
             Err(LeaseError::HeldByOther { holder, .. }) => {
-                self.lost.store(true, Ordering::SeqCst);
-                Err(lost_message(&self.agent, holder.as_ref()))
+                Err(self.lost.set_first(lost_message(&self.agent, holder.as_ref())))
             }
             Err(LeaseError::Io(e)) => {
                 tracing::warn!(agent = %self.agent, error = %e, "agent lease: verify failed (io) — not treating as lost");
@@ -187,7 +205,7 @@ pub fn acquire(
         store: Arc::clone(store),
         lease: lease.clone(),
         agent: agent.to_string(),
-        lost: Arc::new(AtomicBool::new(false)),
+        lost: Arc::new(LostReason::default()),
         stopped: Arc::new(AtomicBool::new(false)),
     };
     spawn_renewal(
@@ -205,7 +223,7 @@ fn spawn_renewal(
     store: Arc<LeaseStore>,
     lease: Lease,
     agent: String,
-    lost: Arc<AtomicBool>,
+    lost: Arc<LostReason>,
     stopped: Arc<AtomicBool>,
     on_lost: impl Fn(String) + Send + Sync + 'static,
 ) {
@@ -235,14 +253,14 @@ fn spawn_renewal(
             match renewed {
                 Ok(Ok(())) => {}
                 Ok(Err(LeaseError::HeldByOther { holder, owner_boot_id, .. })) => {
-                    lost.store(true, Ordering::SeqCst);
+                    let why = lost.set_first(lost_message(&agent, holder.as_ref()));
                     tracing::error!(
                         agent = %agent,
                         instance_id = %lease.instance_id(),
                         owner_boot_id = %owner_boot_id,
                         "agent_admission.fenced: lease lost to another instance — stopping this one"
                     );
-                    on_lost(lost_message(&agent, holder.as_ref()));
+                    on_lost(why);
                     break;
                 }
                 Ok(Err(LeaseError::Io(e))) => {
@@ -435,8 +453,10 @@ mod tests {
         let _new = acquire(&s, "uid-1", "Agent3", &boot("boot-b"), "block-b", None, |_| {}).unwrap();
         let err = held.verify().unwrap_err();
         assert!(err.contains("taken over"), "{err}");
-        // And it stays refused without re-reading.
-        assert!(held.verify().is_err());
+        // And it stays refused, with the same detail, without re-reading
+        // (ReAgent P2 on #3738: later refusals used to drop the holder).
+        assert_eq!(held.verify().unwrap_err(), err);
+        assert!(err.contains(&format!("pid {}", std::process::id())), "{err}");
     }
 
     /// The old holder's drop must not release the new holder's lease.
