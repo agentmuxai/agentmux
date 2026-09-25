@@ -1,7 +1,7 @@
 # Activity flash matches its sound: same strikes, same timing, same relative intensity
 
-**Status:** Phase 1 (tool tones) implemented; see §8 for what shipped and where
-it departs from §3. Phases 2–3 not started.
+**Status:** active — Phase 1 (tool tones) shipped in PR #3717; Phases 2–3 not
+started. See §8 for what shipped and where it departs from §3.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi).
 **Author:** Clamk.
