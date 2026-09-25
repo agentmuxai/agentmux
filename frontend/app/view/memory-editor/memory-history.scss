@@ -1,10 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Styles for NativeMemoryHistoryPanel — shared version history/diff/revert
-// view, mounted from both AgentNativeMemoryModal (Stash) and Armory's
-// Native Memory tab. Follows the same variable/spacing conventions as
-// AgentNativeMemoryModal.scss (its usual host).
+// Styles for MemoryHistory — the shared version history/diff/revert list,
+// mounted from the Stash memory tab and the Armory's Personal and Global
+// Memory full views. Was NativeMemoryHistoryPanel.scss; the class names keep
+// their `native-memory-history-*` prefix so nothing that targets them moves.
+// The panel's "current content" rules went with it — content now renders in
+// MemoryContent (memory-editor.scss). SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
 
 .native-memory-history {
     display: flex;
@@ -205,48 +207,4 @@
         color: var(--error-color);
         background: color-mix(in srgb, var(--error-color) 8%, transparent);
     }
-}
-
-.native-memory-content-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-}
-
-.native-memory-content-label {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--main-text-color);
-}
-
-.native-memory-content-loading,
-.native-memory-content-empty {
-    margin: 0;
-    padding: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--secondary-text-color);
-    font-style: italic;
-}
-
-// Same pattern as .global-bundle-file-content — `resize: vertical`
-// needs an explicit starting `height`, not just `max-height`; `min-height`/
-// `max-height` bound the drag range. Markdown's own root sets `height: 100%;
-// overflow: hidden`, so the resize handle lives on this wrapper instead.
-.native-memory-content-preview {
-    height: 240px;
-    min-height: 120px;
-    max-height: 600px;
-    overflow: hidden;
-    resize: vertical;
-    padding: var(--space-2);
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    font-size: 11px;
-}
-
-// Compound selector needed to beat the base `.content { overflow: scroll }`
-// rule in markdown.scss — see .global-bundle-file-markdown-content
-// for the full rationale (same fix, PR #3199).
-.content.native-memory-content-markdown-content {
-    overflow: auto;
 }

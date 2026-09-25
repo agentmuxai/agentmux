@@ -2,36 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * NativeMemoryHistoryPanel — version history / diff / revert for one memory
- * file. Shared component, mounted from two places (props are the only
- * difference between them, never the underlying data):
- *   - AgentNativeMemoryModal (Stash "Memory" tab) — agentId fixed to the
- *     pane's own agent.
- *   - NativeMemoryManager (Armory "Native Memory" tab) — agentId comes from
- *     an agent picker.
- * Both read the identical agent:memory:history/diff/revert RPCs — one
- * source of truth, two entry points. See
- * docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3.
- *
- * Remounts per (agentId, filename) — this component does not itself react
- * to those props changing after mount; callers that let the user switch
- * agent/file (e.g. Armory's picker) must force a remount (e.g. a keyed
- * <Show>) rather than relying on this component to re-fetch internally.
+ * MemoryHistory — version list, two-version diff and revert for one memory,
+ * over a `MemoryHistoryModel` (whose data source decides whether that is a
+ * native memory file or a Global Memory entry). The history half of what was
+ * `NativeMemoryHistoryPanel`; the content half is `MemoryContent`.
+ * docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
  */
 
-import { For, Show, createSignal, onCleanup, type JSX } from "solid-js";
-import { Markdown } from "@/app/element/markdown";
-import { NativeMemoryHistoryModel, sourceLabel, sourceWarning } from "../native-memory-history-model";
-import "./NativeMemoryHistoryPanel.scss";
+import { createSignal, For, Show, type JSX } from "solid-js";
+import { diffLineClass, diffLines } from "./line-diff";
+import { sourceLabel, sourceWarning, type MemoryHistoryModel, type MemoryVersionMeta } from "./memory-history-model";
+import "./memory-history.scss";
 
-interface NativeMemoryHistoryPanelProps {
-    agentId: string;
-    filename: string;
-    /** Called with the restored content immediately after a successful
-     *  revert, so a caller showing "current content" elsewhere (e.g.
-     *  AgentNativeMemoryModal's own view pane) can refresh without a
-     *  separate read_file round trip of its own. */
-    onContentReverted?: (content: string) => void;
+interface MemoryHistoryProps<V extends MemoryVersionMeta> {
+    model: MemoryHistoryModel<V>;
+    /** Disables Revert (e.g. while the version is being saved). */
+    revertDisabled?: boolean;
 }
 
 function formatTimestamp(ms: number): string {
@@ -42,66 +28,26 @@ function formatTimestamp(ms: number): string {
     });
 }
 
-/** One line of `NativeMemoryDiffResult.diff`, tagged for styling. */
-function diffLineClass(line: string): string {
-    if (line.startsWith("+ ")) return "native-memory-diff-line is-added";
-    if (line.startsWith("- ")) return "native-memory-diff-line is-removed";
-    return "native-memory-diff-line";
+/** "by <writer>" for Global Memory versions — the trusted writer, which an
+ *  agent can't fake the way it can `source`. The Armory itself is implied by
+ *  a "Human" source, so it isn't repeated. */
+function writerLabel(v: MemoryVersionMeta): string | null {
+    if (!v.written_by || v.written_by === "armory-ui") return null;
+    return `by ${v.written_by}`;
 }
 
-export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): JSX.Element => {
-    const model = new NativeMemoryHistoryModel(props.agentId, props.filename);
-    onCleanup(() => model.dispose());
-    if (props.onContentReverted) {
-        model.onReverted = props.onContentReverted;
-    }
-
+export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryProps<V>): JSX.Element {
+    const model = props.model;
     const [confirmingRevert, setConfirmingRevert] = createSignal<string | null>(null);
 
     return (
-        <div class="native-memory-history">
-            <div class="native-memory-content-section">
-                <div class="native-memory-content-label">Current content</div>
-                <Show when={model.contentErrorAtom()}>
-                    <div class="native-memory-history-error">{model.contentErrorAtom()}</div>
-                </Show>
-                {/* codex P2 on PR #3218: contentLoadingAtom is tracked
-                    separately from `contentAtom() === null` — the latter is
-                    also true after a failed fetch, and gating the "Loading…"
-                    fallback on it alone made a completed failure look like a
-                    still-pending request forever. */}
-                <Show when={model.contentLoadingAtom()}>
-                    <div class="native-memory-content-loading">Loading…</div>
-                </Show>
-                <Show when={!model.contentLoadingAtom() && model.contentAtom() !== null}>
-                    <Show
-                        when={model.contentAtom() !== ""}
-                        fallback={<p class="native-memory-content-empty">Empty.</p>}
-                    >
-                        {/* The resize handle lives on this wrapper, not on
-                            <Markdown> itself — Markdown's own root sets
-                            `height: 100%; overflow: hidden`, which would
-                            fight a resize/height override applied directly
-                            to it. See global-bundle.scss's identical
-                            pattern (PR #3199). */}
-                        <div class="native-memory-content-preview">
-                            <Markdown
-                                text={model.contentAtom() ?? ""}
-                                scrollable={true}
-                                nativeScrollbar={true}
-                                contentClass="native-memory-content-markdown-content"
-                            />
-                        </div>
-                    </Show>
-                </Show>
-            </div>
-
+        <div class="native-memory-history memory-history" data-testid="memory-history">
             <Show when={model.errorAtom()}>
                 <div class="native-memory-history-error">{model.errorAtom()}</div>
             </Show>
 
             <Show
-                when={!model.loadingAtom()}
+                when={!model.loadingAtom() || model.versionsAtom().length > 0}
                 fallback={<div class="native-memory-history-loading">Loading history…</div>}
             >
                 <Show
@@ -115,6 +61,7 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
                         <For each={model.versionsAtom()}>
                             {(v, i) => {
                                 const warning = sourceWarning(v);
+                                const writer = writerLabel(v);
                                 const selected = () => model.diffSelectionAtom().includes(v.id);
                                 return (
                                     <li
@@ -136,6 +83,9 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
                                                 >
                                                     {sourceLabel(v.source)}
                                                 </span>
+                                                <Show when={writer}>
+                                                    <span class="native-memory-history-item-time">{writer}</span>
+                                                </Show>
                                                 <span class="native-memory-history-item-time">
                                                     {formatTimestamp(v.created_at)}
                                                 </span>
@@ -155,7 +105,7 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
                                                 fallback={
                                                     <button
                                                         class="native-memory-history-revert-btn"
-                                                        disabled={model.revertingAtom()}
+                                                        disabled={model.revertingAtom() || props.revertDisabled}
                                                         onClick={() => setConfirmingRevert(v.id)}
                                                     >
                                                         Revert to this
@@ -173,7 +123,7 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
                                                     </button>
                                                     <button
                                                         class="native-memory-history-btn native-memory-history-btn-primary"
-                                                        disabled={model.revertingAtom()}
+                                                        disabled={model.revertingAtom() || props.revertDisabled}
                                                         onClick={() => {
                                                             setConfirmingRevert(null);
                                                             void model.revertTo(v.id);
@@ -205,7 +155,7 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
                         fallback={<div class="native-memory-history-loading">Loading diff…</div>}
                     >
                         <pre class="native-memory-history-diff-body">
-                            <For each={(model.diffTextAtom() ?? "").split("\n").filter((_, idx, arr) => idx < arr.length - 1 || arr[idx] !== "")}>
+                            <For each={diffLines(model.diffTextAtom() ?? "")}>
                                 {(line) => <div class={diffLineClass(line)}>{line || " "}</div>}
                             </For>
                         </pre>
@@ -214,6 +164,4 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
             </Show>
         </div>
     );
-};
-
-NativeMemoryHistoryPanel.displayName = "NativeMemoryHistoryPanel";
+}

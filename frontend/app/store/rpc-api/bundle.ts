@@ -13,6 +13,9 @@ import { RpcClient } from "../rpc-client";
 // `BundleImportApi` at the bottom is NOT migrated yet — those three commands
 // need their private `Req` structs promoted out of the handler file first.
 export type { Bundle } from "@/types/rpc/Bundle";
+// Global Memory version history (globalmemory:history/diff/revert) — see
+// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
+export type { GlobalMemoryVersionMeta } from "@/types/rpc/GlobalMemoryVersionMeta";
 
 // The validation report shapes are GENERATED too. The validate HANDLER stays
 // on `register_handler` on purpose (it normalizes its payload before
@@ -46,6 +49,13 @@ import type { CommandDeleteBundleData } from "@/types/rpc/CommandDeleteBundleDat
 import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
 import type { CommandReorderGlobalBundlesData } from "@/types/rpc/CommandReorderGlobalBundlesData";
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
+import type { CommandUpsertBundleData } from "@/types/rpc/CommandUpsertBundleData";
+import type { CommandGlobalMemoryHistoryData } from "@/types/rpc/CommandGlobalMemoryHistoryData";
+import type { CommandGlobalMemoryDiffData } from "@/types/rpc/CommandGlobalMemoryDiffData";
+import type { CommandGlobalMemoryRevertData } from "@/types/rpc/CommandGlobalMemoryRevertData";
+import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
+import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult";
+import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
@@ -69,6 +79,15 @@ import type { BundleImportCommitResponse as BundleImportCommitResponseT } from "
 // field: they are `#[serde(default)]` but have no `skip_serializing_if`, so
 // none is ever omitted from a response.)
 export type BundleUpsertInput = Pick<BundleT, "id" | "name"> & Partial<Omit<BundleT, "id" | "name">>;
+
+// What `upsertmemory`/`upsertsystemmemory` actually accept: the above plus the
+// optional `base_sha256` from the generated `CommandUpsertBundleData` (which
+// flattens `Bundle`, so its own generated shape marks every Bundle field
+// required and can't serve as the input type directly). With a base, a save
+// whose entry has moved is refused with a `conflict:` error — SHA-256 of
+// `name + "\0" + instructions`. See
+// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4.
+export type BundleUpsertRequest = BundleUpsertInput & Pick<CommandUpsertBundleData, "base_sha256">;
 
 // `bundle.validate` takes the same payload EXCEPT that `id` is optional too,
 // so an unsaved draft can be checked before it has one. That is not a guess
@@ -108,7 +127,7 @@ export const BundleApi = {
 
     UpsertBundleCommand(
         client: RpcClient,
-        data: BundleUpsertInput,
+        data: BundleUpsertRequest,
         opts?: RpcOpts,
     ): Promise<BundleT> {
         return client.rpcCall("upsertmemory", data, opts);
@@ -137,7 +156,7 @@ export const BundleApi = {
     // UpsertBundleCommand/DeleteBundleCommand.
     UpsertSystemBundleCommand(
         client: RpcClient,
-        data: BundleUpsertInput,
+        data: BundleUpsertRequest,
         opts?: RpcOpts,
     ): Promise<BundleT> {
         return client.rpcCall("upsertsystemmemory", data, opts);
@@ -169,6 +188,33 @@ export const BundleApi = {
         return client.rpcCall("getclaudeglobalconfig", data, opts);
     },
 
+    // Global Memory version history for the Armory UI — the WebSocket
+    // counterparts of the GlobalMemory{History,Diff,Revert} MCP tools
+    // (#3448), system-tier entries included. Revert records a NEW version
+    // (source "revert"); `version` is null only for a no-op system revert.
+    GlobalMemoryHistoryCommand(
+        client: RpcClient,
+        data: CommandGlobalMemoryHistoryData,
+        opts?: RpcOpts,
+    ): Promise<GlobalMemoryHistoryResult> {
+        return client.rpcCall("globalmemory:history", data, opts);
+    },
+
+    GlobalMemoryDiffCommand(
+        client: RpcClient,
+        data: CommandGlobalMemoryDiffData,
+        opts?: RpcOpts,
+    ): Promise<GlobalMemoryDiffResult> {
+        return client.rpcCall("globalmemory:diff", data, opts);
+    },
+
+    GlobalMemoryRevertCommand(
+        client: RpcClient,
+        data: CommandGlobalMemoryRevertData,
+        opts?: RpcOpts,
+    ): Promise<GlobalMemoryRevertResult> {
+        return client.rpcCall("globalmemory:revert", data, opts);
+    },
 };
 
 

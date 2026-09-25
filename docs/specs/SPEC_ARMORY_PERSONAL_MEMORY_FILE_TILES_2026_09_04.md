@@ -1,7 +1,7 @@
 # Spec: Armory → Memory → Personal — file tiles, not a dropdown
 
 **Date:** 2026-09-04
-**Status:** Proposed
+**Status:** implemented — #3000 (file picker → tile grid). Since 2026-09-24 `MemoryFileCard` is a thin wrapper over the generic `MemoryTile` the Global Memory grid shares (`SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md` §2.3).
 **Motivated by:** direct request — *"we want the grid layout extended to more
 screens. The individual file view should be tiles, not a dropdown."*
 
