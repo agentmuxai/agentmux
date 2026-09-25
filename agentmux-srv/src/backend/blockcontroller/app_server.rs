@@ -1012,9 +1012,6 @@ impl AppServerProcess {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::sync::OnceLock;
-
     use serde_json::json;
     use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
