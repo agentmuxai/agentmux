@@ -7,6 +7,12 @@ const quitAgent = vi.fn();
 const pushNotification = vi.fn();
 vi.mock("@/store/services", () => ({ ObjectService: { QuitAgent: (...a: unknown[]) => quitAgent(...a) } }));
 vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: (n: unknown) => pushNotification(n) }));
+const beginShutdownLog = vi.fn();
+const endShutdownLog = vi.fn();
+vi.mock("@/app/view/agent/shutdown/shutdown-log", () => ({
+    beginShutdownLog: (id: string) => beginShutdownLog(id),
+    endShutdownLog: (id: string) => endShutdownLog(id),
+}));
 
 import type { SlashCommandContext } from "../types";
 import { quitCommand, quitNoticeMessage, type QuitSummary } from "./quit";
@@ -25,6 +31,8 @@ describe("/quit", () => {
     beforeEach(() => {
         quitAgent.mockReset();
         pushNotification.mockReset();
+        beginShutdownLog.mockReset();
+        endShutdownLog.mockReset();
     });
 
     it("is /quit with the /exit alias, never /q, and only on a launched agent", () => {
@@ -40,6 +48,7 @@ describe("/quit", () => {
         expect(quitAgent).toHaveBeenCalledTimes(1);
         expect(quitAgent).toHaveBeenCalledWith("block-1");
         expect(pushNotification).toHaveBeenCalledWith(expect.objectContaining({ title: "Camper quit", type: "info" }));
+        expect(beginShutdownLog).toHaveBeenCalledWith("block-1"); // the pane shows the shutdown log (§5.5)
     });
 
     it("a quit already under way is fine and shows no second notice", async () => {
@@ -52,6 +61,7 @@ describe("/quit", () => {
         quitAgent.mockRejectedValue(new Error("QuitAgent: block not found: block-1"));
         const r = await quitCommand.handler(ctx, "");
         expect(r).toEqual({ kind: "error", message: "Couldn't quit: QuitAgent: block not found: block-1" });
+        expect(endShutdownLog).toHaveBeenCalledWith("block-1"); // nothing to show: the pane stays as it was
         expect(pushNotification).not.toHaveBeenCalled();
     });
 });
