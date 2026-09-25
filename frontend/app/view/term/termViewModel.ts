@@ -32,7 +32,6 @@ import { boundNumber, createSignalAtom, sleep, stringToBase64 } from "@/util/uti
 import type { SignalAtom } from "@/util/util";
 import { createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
-import type { NodeModel } from "@/layout/index";
 
 // Ticks every 60 s so agentRuntimeLabel memos re-evaluate without waiting for a status event.
 // globalThis survives HMR module re-evaluation — prevents duplicate interval leak.
