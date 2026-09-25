@@ -634,6 +634,16 @@ pub enum DeliverPolicy {
     NextIdle,
 }
 
+/// What a [`DeliverPolicy`] send actually did with one message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// Written to the agent's input now.
+    Sent,
+    /// Queued behind the turn in flight (or older queued messages); released
+    /// at a later turn boundary.
+    Deferred,
+}
+
 /// How a controller-aware agent message was delivered.
 #[derive(Debug)]
 pub enum AgentDelivery {
@@ -644,8 +654,12 @@ pub enum AgentDelivery {
     /// "Accepted", not necessarily "already written": under
     /// [`DeliverPolicy::NextIdle`] a message arriving mid-turn is held and
     /// released at the next turn boundary. This variant means the controller
-    /// has taken responsibility for it, not that the agent has seen it yet.
+    /// has taken responsibility for it, not that the agent has seen it yet —
+    /// [`AgentDelivery::StructuredDeferred`] says when it is still waiting.
     Structured,
+    /// Accepted like [`AgentDelivery::Structured`], but held for the next
+    /// turn boundary because the agent is mid-turn (`DeliverPolicy::NextIdle`).
+    StructuredDeferred,
     /// The controller is PTY/terminal-based (shell/term) or otherwise has no
     /// structured input channel. The caller should fall back to keystroke
     /// injection.
@@ -684,8 +698,10 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        persistent_ctrl.send_user_message(message.to_string())?;
-        return Ok(AgentDelivery::Structured);
+        return Ok(match persistent_ctrl.send_user_message_outcome(message.to_string())? {
+            SendOutcome::Sent => AgentDelivery::Structured,
+            SendOutcome::Deferred => AgentDelivery::StructuredDeferred,
+        });
     }
 
     if ctrl.controller_type() == BLOCK_CONTROLLER_ACP {

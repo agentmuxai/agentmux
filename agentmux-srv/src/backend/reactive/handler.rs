@@ -927,6 +927,7 @@ impl Handler {
         // Rate limit check
         if !self.rate_limiter.check() {
             return InjectionResponse {
+                deferred: None,
                 success: false,
                 request_id,
                 block_id: None,
@@ -941,6 +942,7 @@ impl Handler {
         // Validate agent ID
         if !validate_agent_id(&req.target_agent) {
             return InjectionResponse {
+                deferred: None,
                 success: false,
                 request_id,
                 block_id: None,
@@ -984,6 +986,7 @@ impl Handler {
                     reason,
                 );
                 return InjectionResponse {
+                    deferred: None,
                     success: false,
                     request_id,
                     block_id: None,
@@ -1008,6 +1011,7 @@ impl Handler {
                     reason,
                 );
                 return InjectionResponse {
+                    deferred: None,
                     success: false,
                     request_id,
                     block_id: None,
@@ -1054,6 +1058,7 @@ impl Handler {
                         reason,
                     );
                     return InjectionResponse {
+                        deferred: None,
                         success: false,
                         request_id,
                         block_id: Some(block_id),
@@ -1140,6 +1145,7 @@ impl Handler {
                         reason,
                     );
                     return InjectionResponse {
+                        deferred: None,
                         success: false,
                         request_id,
                         block_id: Some(block_id),
@@ -1334,11 +1340,13 @@ impl Handler {
         // PTY-based shell/term agents report back so we fall through to keystrokes.
         if let Some(ref deliver) = self.message_sender {
             match deliver(&block_id, &final_msg) {
-                Ok(true) => {
+                Ok(outcome @ (SenderDelivery::Delivered | SenderDelivery::Deferred)) => {
+                    let deferred = outcome == SenderDelivery::Deferred;
                     tracing::info!(
                         target_agent = %req.target_agent,
                         block_id = %block_id,
-                        "inject: structured delivery to non-PTY controller (mid-turn steer)"
+                        deferred,
+                        "inject: structured delivery to non-PTY controller"
                     );
                     self.log_audit(
                         req.source_agent.as_deref(),
@@ -1360,9 +1368,10 @@ impl Handler {
                         effective_tier: Some(effective_tier.to_string()),
                         requires_stop: Some(requires_stop),
                         channel_verified: req.channel_verified,
+                        deferred: Some(deferred),
                     };
                 }
-                Ok(false) => {
+                Ok(SenderDelivery::Pty) => {
                     // PTY-based controller — fall through to keystroke injection.
                 }
                 Err(e) => {
@@ -1387,6 +1396,7 @@ impl Handler {
                         reason,
                     );
                     return InjectionResponse {
+                        deferred: None,
                         success: false,
                         request_id,
                         block_id: Some(block_id),
@@ -1417,6 +1427,7 @@ impl Handler {
                     reason,
                 );
                 return InjectionResponse {
+                    deferred: None,
                     success: false,
                     request_id,
                     block_id: Some(block_id),
@@ -1460,6 +1471,7 @@ impl Handler {
                 reason,
             );
             return InjectionResponse {
+                deferred: None,
                 success: false,
                 request_id,
                 block_id: Some(block_id),
@@ -1497,6 +1509,7 @@ impl Handler {
         );
 
         InjectionResponse {
+            deferred: None,
             success: true,
             request_id,
             block_id: Some(block_id),
@@ -1590,6 +1603,7 @@ impl Handler {
                     Some(reason),
                 );
                 Ok(InjectionResponse {
+                    deferred: None,
                     success: true,
                     request_id: request_id.to_string(),
                     block_id: if block_id.is_empty() { None } else { Some(block_id) },
@@ -2263,6 +2277,7 @@ mod needs_review_hook_tests {
 
     fn resp(success: bool, requires_stop: Option<bool>, block: Option<&str>) -> InjectionResponse {
         InjectionResponse {
+            deferred: None,
             success,
             request_id: "r".into(),
             block_id: block.map(Into::into),
