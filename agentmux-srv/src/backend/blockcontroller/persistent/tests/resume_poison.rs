@@ -30,6 +30,7 @@ fn inner_with_session_id(session_id: Option<&str>) -> PersistentInner {
         pending_send_messages: VecDeque::new(),
         deferred_deliveries: VecDeque::new(),
         deferred_watchdog_armed: false,
+        tool_wait: ToolWait::Writing,
         drain_claim: false,
         next_message_seq: 0,
         drain_send_in_flight: false,

@@ -595,8 +595,9 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// - `Ok(SenderDelivery::Delivered)` — delivered on the controller's structured
 ///   channel (persistent stream-json stdin / ACP `session/prompt`); no PTY
 ///   keystrokes needed.
-/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but held until
-///   the agent's current turn ends (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
+/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but held while
+///   the agent is writing; released at its next tool call or turn boundary
+///   (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
 ///   The message is safe; the agent just hasn't seen it yet.
 /// - `Ok(SenderDelivery::Pty)` — the controller is PTY-based; the caller should
 ///   fall back to keystroke injection.

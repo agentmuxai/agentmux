@@ -109,10 +109,11 @@ impl PersistentSubprocessController {
     /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
     /// and we have no `PersistentSpawnConfig` to hand.
     ///
-    /// Defaults to [`DeliverPolicy::NextIdle`]: if a turn is in flight the
-    /// message is queued and delivered at the next turn boundary, so an
-    /// automated sender never cuts the agent's explanation in half.
-    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`.
+    /// Defaults to [`DeliverPolicy::NextIdle`]: while the agent is writing the
+    /// message is queued, and it is delivered when the agent next waits on a
+    /// tool call or its turn ends, so an automated sender never cuts the
+    /// agent's explanation in half.
+    /// Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.7.
     pub fn send_user_message(&self, message: String) -> Result<(), String> {
         self.send_user_message_with_policy(message, DeliverPolicy::NextIdle)
     }
@@ -196,6 +197,7 @@ impl PersistentSubprocessController {
                     match Self::try_write_stdin_locked(&mut inner, &head) {
                         Ok(()) => {
                             inner.deferred_deliveries.pop_front();
+                            Self::note_release_locked(&mut inner);
                             // The flip MUST happen before this guard drops.
                             // Deferred to after the lock, a second caller
                             // arriving in the gap would still read "idle" and
@@ -236,7 +238,7 @@ impl PersistentSubprocessController {
         let Some((sent_line, was_active)) = delivered else {
             tracing::info!(
                 block_id = %self.block_id,
-                "delivery deferred — a turn is in flight; will flush at the next turn boundary"
+                "delivery deferred — the agent is writing; will release at its next tool call or turn boundary"
             );
             return Ok(outcome);
         };
@@ -288,10 +290,72 @@ impl PersistentSubprocessController {
     /// fails into the caller's respawn fallback, and the watchdog's grace
     /// window runs, so nothing parks unreported behind a stop.
     pub(super) fn deferred_must_wait_locked(&self, inner: &PersistentInner) -> bool {
-        self.health_monitor.is_active_turn()
+        (self.health_monitor.is_active_turn() && !Self::tool_wait_open_locked(inner))
             || inner.restart_pending
             || (inner.stop_pending && inner.stdin_tx.is_some())
             || Self::stdin_owned_by_another_writer(inner)
+    }
+
+    /// The agent is waiting on a tool call, so a message written now cuts
+    /// nothing: the model has stopped writing and reads it when the tool
+    /// returns. Not while the agent is blocked on the operator (a question or a
+    /// permission prompt): a message there would land between the prompt and
+    /// its answer.
+    fn tool_wait_open_locked(inner: &PersistentInner) -> bool {
+        inner.tool_wait == ToolWait::Open
+            && inner.pending_questions.is_empty()
+            && inner.pending_permissions.is_empty()
+    }
+
+    /// Apply one stdout line's [`ToolWaitSignal`] under `inner`, releasing at
+    /// most one deferred message when a tool wait opens.
+    ///
+    /// Ignored when `generation` is no longer the current one: a replaced
+    /// process's leftover lines say nothing about the new one, and the release
+    /// writes to the CURRENT stdin (same reason as `turn_boundary_locked`).
+    ///
+    /// `Enter` acts only from `Writing`, so it does nothing once the wait is
+    /// `Spent` (a second `message_delta` would otherwise release a second message
+    /// inside the same wait, the burst the one-per-boundary rule forbids) or
+    /// `Blocked` on the operator.
+    pub(super) fn tool_wait_locked(
+        inner: &mut PersistentInner,
+        generation: u64,
+        signal: ToolWaitSignal,
+        block_id: &str,
+    ) -> DeferredFlush {
+        if inner.spawn_generation != generation {
+            return DeferredFlush::Empty;
+        }
+        match signal {
+            ToolWaitSignal::Leave => {
+                inner.tool_wait = ToolWait::Writing;
+                DeferredFlush::Empty
+            }
+            ToolWaitSignal::Blocked => {
+                inner.tool_wait = ToolWait::Blocked;
+                DeferredFlush::Empty
+            }
+            ToolWaitSignal::Enter if inner.tool_wait != ToolWait::Writing => DeferredFlush::Empty,
+            ToolWaitSignal::Enter => {
+                inner.tool_wait = ToolWait::Open;
+                if !Self::tool_wait_open_locked(inner) {
+                    return DeferredFlush::Empty;
+                }
+                Self::flush_one_deferred_locked(inner, block_id)
+            }
+        }
+    }
+
+    /// A deferred message was just written. Inside a tool wait that spends the
+    /// wait's one message; anywhere else it starts a new turn, whose first tool
+    /// wait is still to come.
+    fn note_release_locked(inner: &mut PersistentInner) {
+        inner.tool_wait = if inner.tool_wait == ToolWait::Open {
+            ToolWait::Spent
+        } else {
+            ToolWait::Writing
+        };
     }
 
     /// Another writer is feeding stdin, and messages it carries were accepted
@@ -348,6 +412,7 @@ impl PersistentSubprocessController {
         match Self::try_write_stdin_locked(inner, &head) {
             Ok(()) => {
                 inner.deferred_deliveries.pop_front();
+                Self::note_release_locked(inner);
                 DeferredFlush::Released(head)
             }
             Err(e) => {
@@ -404,6 +469,9 @@ impl PersistentSubprocessController {
             );
             return None;
         }
+        // The turn is over, so whatever tool wait it was in is too; a released
+        // message starts a new turn that is writing until its own tool call.
+        inner.tool_wait = ToolWait::Writing;
         let flushed = Self::flush_one_deferred_locked(inner, block_id);
         let boundary = TurnBoundary {
             apply_deferred_restart: flushed == DeferredFlush::Empty
