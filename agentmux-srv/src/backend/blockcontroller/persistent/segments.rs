@@ -29,6 +29,46 @@ fn zone_size(zone: &str) -> Option<i64> {
 }
 
 impl PersistentSubprocessController {
+    /// Reconcile the agent's memory record with the folder this spawn is
+    /// about to use, before the provider starts, within
+    /// [`memory_reconcile::RECONCILE_BUDGET`](crate::backend::memory_reconcile::RECONCILE_BUDGET)
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3). Never fails the
+    /// spawn. Off for an agent with `agent:memoryrecord` = `off`.
+    pub(super) fn reconcile_memory_before_spawn(&self, config: &PersistentSpawnConfig) {
+        let (Some(gfs), Some(mstore)) = (crate::backend::agent_session::global_transcript_store(), self.mstore.as_deref()) else {
+            return;
+        };
+        let Some(uid) = config.env_vars.get("AGENTMUX_AGENT_UID").filter(|u| !u.is_empty()) else {
+            return;
+        };
+        let meta = mstore
+            .get::<crate::backend::obj::Block>(&self.block_id)
+            .ok()
+            .flatten()
+            .map(|b| b.meta)
+            .unwrap_or_default();
+        if crate::backend::obj::meta_get_string(&meta, "agent:memoryrecord", "") == "off" {
+            return;
+        }
+        let provider = crate::backend::obj::meta_get_string(&meta, "agentProvider", "");
+        let report = crate::backend::memory_reconcile::reconcile_before_spawn(
+            gfs,
+            mstore,
+            &crate::backend::memory_reconcile::SpawnMemory {
+                uid,
+                provider: &provider,
+                config_dir: config.env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+                cwd: &config.working_dir,
+            },
+            crate::backend::memory_reconcile::RECONCILE_BUDGET,
+        );
+        if report.deferred {
+            tracing::info!(block_id = %self.block_id, uid, "memory reconcile deferred: over budget");
+        } else if report != Default::default() {
+            tracing::info!(block_id = %self.block_id, uid, ?report, "memory reconciled before spawn");
+        }
+    }
+
     /// Records the start of the segment this spawn begins. `None` when the
     /// spawn carries no agent UID (quick-launch panes, a continuation that
     /// resumes before its row exists) or the write fails.

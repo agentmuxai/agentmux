@@ -22,7 +22,7 @@
 //!    that no longer exists (no local row, no active definition) is released.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -158,6 +158,7 @@ fn known_shared_or_vetoed(mstore: &Store, uid: &str, dir_id: &str, cwd: &str) ->
 mod tests {
     use super::*;
     use crate::backend::storage::AgentDefinition;
+    use std::path::PathBuf;
 
     fn agent(store: &Store, id: &str, wd: &str) -> AgentDefinition {
         let mut def = crate::backend::storage::agents::test_agent_def(id, id, "claude", "agent", 1, "");
