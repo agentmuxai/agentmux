@@ -24,8 +24,12 @@
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
+import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { setDragEscaped } from "@/app/tab/tabbar-dnd";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
 import { atoms } from "@/store/global";
+import { isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
 
@@ -288,6 +292,14 @@ export interface PaneTabStripProps<T> {
      *  Return `false` when the move was refused (same contract as
      *  `onReorder`). */
     onReceiveForeignTab?: (blockId: string) => boolean | void;
+
+    /** The window tab this pane lives in. When set (with `onReorder` and
+     *  `paneKey`), a pill dragged OUT of the window tears off into a floating
+     *  pane: its drag carries a `"pane-tab"` cross-window payload that the
+     *  `CrossWindowDragMonitor`s act on (pane-tab-tearoff.ts). Omitted → pills
+     *  only reorder / move between panes, as before.
+     *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5. */
+    sourceTabId?: string;
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
@@ -354,6 +366,9 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             onDragLeave: () => setForeignHover(false),
             onDrop: ({ source }) => {
                 setForeignHover(false);
+                // Handled in-window: the cross-window monitor must not also
+                // tear this tab off on dragend (pane-tab-tearoff.ts).
+                setCurrentDragPayload(null);
                 const blockId = source.data.blockId as string | undefined;
                 if (!blockId) return;
                 // Commit on the next task, after pragmatic-dnd has finished
@@ -524,6 +539,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             renderLabel={props.renderLabel}
                             onReorder={props.onReorder}
                             paneKey={props.paneKey}
+                            sourceTabId={props.sourceTabId}
                         />
                     )}
                 </For>
@@ -578,6 +594,7 @@ interface PaneTabStripItemProps<T> {
     renderLabel?: (tab: T) => JSX.Element;
     onReorder?: (blockId: string, targetId: string, position: "before" | "after") => boolean | void;
     paneKey?: string;
+    sourceTabId?: string;
 }
 
 function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
@@ -599,6 +616,45 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         onCleanup(unsubscribe);
     });
 
+    // Tear-off to a floating pane (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
+    // §3.5). On drag start, hand the cross-window monitors a "pane-tab"
+    // payload; they tear the tab off on dragend only if no drop target inside
+    // the window claimed it (both pill drop targets clear it) and it landed on
+    // no AgentMux window. The payload is deliberately NOT cleared in the
+    // draggable's own onDrop: dragend, which the monitors read it on, comes
+    // after — same as whole-pane (tile) drags.
+    const onEscape = (e: KeyboardEvent) => {
+        // keydown still reaches the page during an HTML5 drag; an escaped
+        // drag never tears off (the monitors check this flag).
+        if (e.key === "Escape") setDragEscaped(true);
+    };
+    let tracking = false;
+    const startTearOffTracking = () => {
+        if (!props.paneKey || !props.sourceTabId || !pillRef) return;
+        const paneRect = pillRef.closest<HTMLElement>('[data-role="pane"]')?.getBoundingClientRect();
+        setDragEscaped(false);
+        setCurrentDragPayload({
+            kind: "pane-tab",
+            blockId: id(),
+            sourceNodeId: props.paneKey,
+            sourceTabId: props.sourceTabId,
+            paneSize: paneRect ? { width: paneRect.width, height: paneRect.height } : undefined,
+        });
+        // macOS/Linux: without this, a drop outside every drop target (i.e. a
+        // tear-off) animates the drag image back into the window first, the
+        // same snapback whole-pane drags suppress (TileLayout.darwin.tsx).
+        if (!isWindows()) preventUnhandled.start();
+        window.addEventListener("keydown", onEscape, true);
+        tracking = true;
+    };
+    const stopTearOffTracking = () => {
+        if (!tracking) return;
+        tracking = false;
+        if (!isWindows()) preventUnhandled.stop();
+        window.removeEventListener("keydown", onEscape, true);
+    };
+    onCleanup(stopTearOffTracking);
+
     // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.1/§3.2). Gated entirely on `onReorder` being passed — every existing
     // consumer that doesn't (editor file tabs, agent History strip) gets no
@@ -619,8 +675,14 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 type: paneTabItemType,
                 sourceNodeId: props.paneKey,
             }),
-            onDragStart: () => setIsDragging(true),
-            onDrop: () => setIsDragging(false),
+            onDragStart: () => {
+                setIsDragging(true);
+                startTearOffTracking();
+            },
+            onDrop: () => {
+                setIsDragging(false);
+                stopTearOffTracking();
+            },
         });
         const cleanupDropTarget = dropTargetForElements({
             element: el,
@@ -638,6 +700,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
             onDragLeave: () => setDropSide(null),
             onDrop: ({ source, location }) => {
                 setDropSide(null);
+                // Handled in-window: never also a tear-off.
+                setCurrentDragPayload(null);
                 const blockId = source.data.blockId as string | undefined;
                 if (!blockId) return;
                 // Computed fresh here, not reused from the `onDrag`-updated

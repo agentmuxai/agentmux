@@ -11,7 +11,7 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use super::super::AppState;
 use super::layout_helpers::{
     queue_source_layout_delete, queue_target_layout_insert, queue_target_layout_split,
-    setup_torn_off_block_layout,
+    queue_target_stack_push, setup_torn_off_block_layout,
 };
 use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 
@@ -73,7 +73,30 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
     if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
         tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
     }
-    // Source tab: queue a layout-delete action so the source
+    // Source tab, backend side: prune the block from the reducer's own copy
+    // of the source tree (`db_layout`) now, the same two-step the
+    // `delete_block` saga does (its steps 2 and 2b). Stack-safe: when the
+    // block is one tab of a multi-tab pane, only that member is removed and
+    // the pane stays (`remove_stack_member`); the leaf goes only if it was
+    // the pane's last tab. Without this the backend tree was only fixed
+    // when the source window echoed its tree back, and a failed or missed
+    // echo left a dangling leaf behind.
+    // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 4).
+    let prune_events = dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutDeleteNodeByBlock {
+            tab_id: source_tab_id.clone(),
+            block_id: block_id.clone(),
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    for ev in &prune_events {
+        let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
+    }
+    publish_events(state, &prune_events);
+
+    // Source tab, frontend side: queue a layout-delete action so the source
     // window's frontend removes the node from its tree.
     if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
         tracing::warn!(source_tab = %source_tab_id, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
@@ -182,6 +205,11 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         .unwrap_or(None);
     let direction: Option<u8> = service::get_optional_arg(args, 6)
         .unwrap_or(None);
+    // Optional: land the block as a TAB of `target_block_id`'s pane (its
+    // stack, activated) instead of as a split/insert. Used to roll a failed
+    // pane-tab tear-off back into the pane it came from
+    // (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5, design 6).
+    let as_tab: bool = service::get_optional_arg(args, 7).unwrap_or(None).unwrap_or(false);
     tracing::info!(
         block_id = %block_id,
         source_tab = %source_tab_id,
@@ -215,6 +243,7 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // fails the block becomes invisible. Return error so the caller can
     // retry; no visible change has propagated to the renderers yet.
     let target_layout_result = match (target_block_id.as_deref(), direction) {
+        (Some(tbid), _) if as_tab => redock_as_tab(state, &target_tab_id, &block_id, tbid).await,
         (Some(tbid), Some(dir)) => {
             queue_target_layout_split(state, &target_tab_id, &block_id, tbid, dir).await
         }
@@ -304,6 +333,41 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     )
 }
 
+/// Place a just-redocked block as a TAB of the pane holding
+/// `target_block_id`, active: the reducer's own tree first
+/// (`LayoutStackPush`, which also checks the block now lives in this tab),
+/// then a queued `stackpush` so the window showing that tab adds the pill.
+/// Same backend-then-frontend shape as `pane.moveTab`.
+async fn redock_as_tab(
+    state: &AppState,
+    target_tab_id: &str,
+    block_id: &str,
+    target_block_id: &str,
+) -> Result<(), String> {
+    let events = dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutStackPush {
+            tab_id: target_tab_id.to_string(),
+            target_block_id: target_block_id.to_string(),
+            block_id: block_id.to_string(),
+            activate: true,
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    if let Some(msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(msg);
+    }
+    for ev in &events {
+        let _ = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore);
+    }
+    publish_events(state, &events);
+    queue_target_stack_push(state, target_tab_id, block_id, target_block_id).await
+}
+
 // Phase E.5.5 — TearOffTab migrated to saga. Closes the
 // smoke regression where wcore::tear_off_tab created the new
 // workspace bypassing the reducer, leaving the new window's
@@ -351,5 +415,181 @@ pub(crate) async fn handle_tear_off_tab(state: &AppState, call: &WebCallType) ->
             )
         }
         Err(reason) => WebReturnType::error(reason),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tearing ONE tab out of a multi-tab pane, and putting it back as a tab.
+    //! SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (designs 4 and 6).
+    use super::*;
+    use crate::server::tests::test_state;
+    use agentmux_common::ipc::{Command, Event};
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let events = dispatch_to_reducer(state, cmd).await;
+        for ev in &events {
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
+        }
+        events
+    }
+
+    fn call(method: &str, args: Vec<serde_json::Value>) -> WebCallType {
+        WebCallType { service: "workspace".into(), method: method.into(), uicontext: None, args }
+    }
+
+    /// A workspace with one tab laid out as `[pane-src: stack a,b (active
+    /// a)] | [pane-other: c]`. Returns (ws_id, tab_id, a, b, c).
+    async fn two_tab_pane_and_a_neighbour(state: &AppState) -> (String, String, String, String, String) {
+        let ws_id = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_id = dispatch_apply(state, Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() })
+            .await
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let id = dispatch_apply(state, Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null })
+                .await
+                .iter()
+                .find_map(|e| match e {
+                    Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        let (a, b, c) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
+        dispatch_apply(
+            state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(agentmux_common::LayoutNode {
+                    id: "root".into(),
+                    children: vec![
+                        agentmux_common::LayoutNode {
+                            id: "pane-src".into(),
+                            data: Some(agentmux_common::LayoutNodeData {
+                                block_id: a.clone(),
+                                block_stack: vec![a.clone(), b.clone()],
+                                active_block_id: a.clone(),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        agentmux_common::LayoutNode {
+                            id: "pane-other".into(),
+                            data: Some(agentmux_common::LayoutNodeData { block_id: c.clone(), ..Default::default() }),
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                }),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+        (ws_id, tab_id, a, b, c)
+    }
+
+    async fn tear_off(state: &AppState, block: &str, tab_id: &str, ws_id: &str) -> String {
+        let ret = handle_tear_off_block(
+            state,
+            &call("TearOffBlock", vec![block.into(), tab_id.into(), ws_id.into(), true.into()]),
+        )
+        .await;
+        assert!(ret.error.is_none(), "TearOffBlock failed: {:?}", ret.error);
+        ret.data.as_ref().and_then(|v| v.as_str()).expect("new workspace id").to_string()
+    }
+
+    async fn src_pane_members(state: &AppState, tab_id: &str) -> (Vec<String>, String, Vec<String>) {
+        let srv = state.srv_state.lock().await;
+        let tab = &srv.tabs[tab_id];
+        let root = tab.rootnode.as_ref().expect("source tree");
+        let src = crate::backend::layout::find_node_by_id(root, "pane-src").expect("source pane survives");
+        let data = src.data.as_ref().unwrap();
+        (crate::backend::layout::leaf_members(data), data.block_id.clone(), tab.block_ids.clone())
+    }
+
+    #[tokio::test]
+    async fn tearing_off_a_background_tab_keeps_its_pane_and_siblings_in_the_backend_tree() {
+        let state = test_state();
+        let (ws_id, tab_id, a, b, c) = two_tab_pane_and_a_neighbour(&state).await;
+
+        tear_off(&state, &b, &tab_id, &ws_id).await;
+
+        let (members, visible, blocks) = src_pane_members(&state, &tab_id).await;
+        assert_eq!(members, vec![a.clone()], "only the torn-off tab left the pane");
+        assert_eq!(visible, a);
+        assert!(blocks.contains(&a) && blocks.contains(&c) && !blocks.contains(&b));
+        // The source window is still told to prune its own copy.
+        let tab = state.mstore.must_get::<Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        assert!(
+            layout.pendingbackendactions.unwrap_or_default().iter().any(|x| x.actiontype == "delete" && x.blockid == b),
+            "queued frontend delete"
+        );
+    }
+
+    #[tokio::test]
+    async fn tearing_off_the_visible_tab_makes_its_neighbour_visible() {
+        let state = test_state();
+        let (ws_id, tab_id, a, b, _c) = two_tab_pane_and_a_neighbour(&state).await;
+
+        tear_off(&state, &a, &tab_id, &ws_id).await;
+
+        let (members, visible, _) = src_pane_members(&state, &tab_id).await;
+        assert_eq!(members, vec![b.clone()]);
+        assert_eq!(visible, b, "the right-hand neighbour becomes visible");
+    }
+
+    #[tokio::test]
+    async fn redock_as_tab_puts_a_torn_off_tab_back_into_its_pane() {
+        let state = test_state();
+        let (ws_id, tab_id, a, b, _c) = two_tab_pane_and_a_neighbour(&state).await;
+        let new_ws = tear_off(&state, &b, &tab_id, &ws_id).await;
+        let floater_tab = state.srv_state.lock().await.workspaces[&new_ws].tab_ids[0].clone();
+
+        // The rollback path: back as a TAB of the pane it came from.
+        let ret = handle_redock_floating_pane(
+            &state,
+            &call(
+                "RedockFloatingPane",
+                vec![
+                    b.clone().into(),
+                    floater_tab.into(),
+                    new_ws.into(),
+                    tab_id.clone().into(),
+                    ws_id.into(),
+                    a.clone().into(),
+                    serde_json::Value::Null,
+                    true.into(),
+                ],
+            ),
+        )
+        .await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        let (members, visible, blocks) = src_pane_members(&state, &tab_id).await;
+        assert_eq!(members, vec![a, b.clone()], "back in its pane's stack, not a split");
+        assert_eq!(visible, b, "and visible");
+        assert!(blocks.contains(&b), "and back in the tab");
+        let tab = state.mstore.must_get::<Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        assert!(
+            layout.pendingbackendactions.unwrap_or_default().iter().any(|x| x.actiontype == "stackpush" && x.blockid == b),
+            "the window showing the pane is told to add the pill"
+        );
     }
 }

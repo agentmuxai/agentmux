@@ -6,8 +6,8 @@ import { fireAndForget } from "@/util/util";
 import { isTileDragInFlight } from "./dragInFlight";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
-import { removeLeafEmptiedByMove } from "./layoutMagnify";
-import { addMemberToStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
+import { removeBlockFromLeaf, removeLeafEmptiedByMove } from "./layoutMagnify";
+import { addMemberToStack, moveMemberAcrossStacks, moveMemberInStack } from "./stackMembers";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -240,38 +240,23 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 leaf = findNodeByBlockId(model.treeState.rootNode, action.blockid);
             }
 
-            // The action names ONE block. `getNodeByBlockId` also matches a
-            // background tab of a stacked pane, so deleting the leaf here
-            // removed every other tab with it — each sibling's block (agents
-            // included) left running with no pane. A terminal tab whose shell
-            // exits (close-on-exit → delete_block → this action) did exactly
-            // that. Remove just this block from the stack; the leaf goes only
-            // when it was the last member.
-            // SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2, §3.4.
-            if (leaf?.data && removeMemberFromStack(leaf.data, action.blockid)) {
-                break; // committed by processPendingBackendActions' updateTree + persist
-            }
-
+            // The action names ONE block, and every backend emitter of it is a
+            // MOVE (TearOffBlock / RedockFloatingPane / PromoteBlockToTab via
+            // queue_source_layout_delete, or delete_block's layout prune): the
+            // block lives on elsewhere. So:
+            // - `getNodeByBlockId` also matches a background tab of a stacked
+            //   pane; deleting the whole leaf removed every other tab with it
+            //   (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.2, §3.4).
+            //   Only this member leaves; the leaf goes only when it was the last.
+            // - R1 (#1681): never closeNode() here. It ran onNodeDelete →
+            //   DeleteBlock and destroyed the just-moved block. A genuine pane
+            //   close deletes its block through the frontend closeNode path,
+            //   not this action.
+            // Both rules live in one shared helper, also used by the tear-off
+            // paths (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5). Committed
+            // by processPendingBackendActions' updateTree + persist.
             if (leaf) {
-                // R1 (#1681): a backend "delete" layout action means "remove this
-                // node from the layout tree" — NOT "delete the block". Every
-                // backend emitter of this action is a MOVE (tear_off_block,
-                // TearOffBlock / RedockFloatingPane / PromoteBlockToTab via
-                // queue_source_layout_delete); the block lives on in its new tab.
-                // Using closeNode() here ran onNodeDelete → DeleteBlock and
-                // destroyed the just-moved block (empty-slot redock, logo-only
-                // floater, "block not found"). Remove the node directly, like the
-                // orphaned-block branch above. Genuine pane CLOSE deletes the
-                // block through the frontend closeNode path, not this action — so
-                // it is unaffected. This makes the dedicated block-move guard
-                // obsolete (deleted).
-                model.treeReducer(
-                    {
-                        type: LayoutTreeActionType.DeleteNode,
-                        nodeId: leaf.id,
-                    } as LayoutTreeDeleteNodeAction,
-                    false
-                );
+                removeBlockFromLeaf(model, leaf, action.blockid);
             } else {
                 console.error(
                     "Cannot apply eventbus layout action DeleteNode, could not find leaf node with blockId",
