@@ -9,7 +9,13 @@ import {
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
 import { adaptPaneTabInstance, makePaneTabHostContext } from "@/app/block/pane-tab-host";
-import { getPaneTab, resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import {
+    getPaneTab,
+    resolvePaneTabView,
+    type PaneTabHostContext,
+    type PaneTabInstance,
+    type PaneTabManifest,
+} from "@/app/block/pane-tab-registry";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
@@ -81,7 +87,7 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
             // A native pane tab (Pane Tab contract Phase 2b): the instance
             // gets a host context, never the raw nodeModel.
             const ctx = makePaneTabHostContext(blockId, nodeModel);
-            return adaptPaneTabInstance(manifest, ctx, manifest.create(ctx));
+            return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
         }
         return ctor != null
             ? (new ctor(blockId, nodeModel as any) as ViewModel)
@@ -133,6 +139,28 @@ function makePreviewViewModel(blockId: string, blockView: string): ViewModel {
     });
     viewModelRoots.set(preview, disposeRoot);
     return preview;
+}
+
+/**
+ * `manifest.create(ctx)`, contained: it runs here, inside `Block`'s effect and
+ * outside the pane's `BlockErrorBoundary`, so a widget that throws while
+ * starting (Pane Tab contract Phase 6: third-party code) would otherwise take
+ * the whole tab down. It gets an instance that shows the error instead.
+ */
+function createPaneTabInstance(manifest: PaneTabManifest, ctx: PaneTabHostContext): PaneTabInstance {
+    try {
+        return manifest.create!(ctx);
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error(`[pane-tab] ${manifest.view} failed to start:`, e);
+        return {
+            component: () => (
+                <CenteredDiv>
+                    {manifest.label} failed to start: {message}
+                </CenteredDiv>
+            ),
+        };
+    }
 }
 
 function disposeViewModel(vm: ViewModel): void {

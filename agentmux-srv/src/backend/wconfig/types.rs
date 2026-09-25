@@ -532,6 +532,13 @@ pub struct WidgetConfigType {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
 
+    /// A third-party pane tab (Pane Tab contract v1, Phase 6): path to the
+    /// widget's ES module, relative to `~/.agentmux/widgets/` or absolute. The
+    /// frontend loads it (`widget-loader.ts`); `blockdef.meta.view` names its
+    /// `ext:` view. Empty for every built-in widget.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub module: String,
+
     #[serde(rename = "blockdef", default)]
     pub block_def: BlockDef,
 }
