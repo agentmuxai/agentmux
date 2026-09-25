@@ -1105,7 +1105,19 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // this a normal Solid reactive read, correctly re-deriving whenever
     // `paneChromeHoisted` (now a live accessor, not a snapshot — see
     // `BlockNodeModel.paneChromeHoisted`'s own doc comment) changes.
-    const noHeader = () => props.viewModel?.noHeader?.() ?? false;
+    //
+    // The HOST decides, not each view: when pane chrome is hoisted around
+    // this block (`nodeModel.paneChromeHoisted`), chrome draws the header,
+    // so this inline one must not. Every view type used to repeat that same
+    // one-line `noHeader` itself, and one that forgot got a double header
+    // (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §2.4, Phase 1). A view's own
+    // `noHeader` can still hide the header in other cases (Launcher). A
+    // drag-preview thumbnail (`tabcontent.tsx`'s plain `<Block preview>` with
+    // the raw leaf nodeModel, no chrome around it) is never tagged, so it
+    // keeps this header (codex P2 on #3151).
+    const noHeader = () =>
+        (props.nodeModel as { paneChromeHoisted?: () => boolean } | undefined)?.paneChromeHoisted?.() === true ||
+        (props.viewModel?.noHeader?.() ?? false);
     // Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
     // types keep the badge unconditionally, matching prior behavior — this
     // setting exists specifically for the terminal pane's CPU%/mem overlay.

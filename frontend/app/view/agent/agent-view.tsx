@@ -332,7 +332,8 @@ AgentBlockContent.displayName = "AgentBlockContent";
 
 /**
  * Chrome half of the agent pane — the header, tab strip and progress-bar
- * slot, rendered via `AgentViewModel.renderPaneChrome` for EVERY agent pane
+ * slot, rendered by the shared `renderPaneChromeShell` (pane-leaf-chrome.tsx's
+ * fallback when a view supplies no `renderPaneChrome`) for EVERY agent pane
  * (see `pane-leaf-chrome.tsx`'s `hoisted` memo for why gating this on stack
  * size was a catch-22), wrapping whichever `AgentBlockContent` instance is
  * currently the active stack member's own switch-scoped `<Block>`

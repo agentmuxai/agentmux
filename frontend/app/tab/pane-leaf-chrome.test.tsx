@@ -15,6 +15,7 @@
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createEffect, createSignal, onCleanup } from "solid-js";
+import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
 
@@ -42,9 +43,24 @@ let lastChromeNodeModel: NodeModel | null = null;
 // DEFERRED to the next effects flush) — the exact gap that let a
 // re-invocation bug ship undetected. Matching that timing here is what
 // makes the "does not re-invoke renderPaneChrome" test below meaningful.
+// The real registry imports every view module; the chrome decision only
+// needs "is this a registered view type" (pane-leaf-chrome's hoistsOwnChrome).
+vi.mock("@/app/block/block-registry", () => {
+    const registered = new Set(["agent", "term", "browser", "editor", "help", "sysinfo", "settings", "toolchain", "swarm"]);
+    return { getBlockViewClass: (v: string) => (registered.has(v) ? class {} : undefined) };
+});
+vi.mock("@/app/element/PaneChrome", () => ({
+    renderPaneChromeShell: (_nodeModel: NodeModel, content: JSX.Element) => (
+        <div data-testid="shell-chrome-root">{content}</div>
+    ),
+}));
+
 vi.mock("@/app/block/block", () => ({
     Block: (props: { nodeModel: NodeModel; preview: boolean }) => {
         const owner = {};
+        // Settings-like views supply no renderPaneChrome of their own and get
+        // the shared shell (mocked below as `shell-chrome-root`).
+        const suppliesOwnChrome = blockMetaSignals.get(props.nodeModel.blockId)?.[0]().meta?.view !== "settings";
         createEffect(() => {
             (props.nodeModel as any).setActiveViewModel?.(
                 {
@@ -53,7 +69,7 @@ vi.mock("@/app/block/block", () => ({
                     // Which member this vm belongs to, so a test can tell
                     // whose vm the chrome currently sees as active.
                     blockId: props.nodeModel.blockId,
-                    renderPaneChrome: (nodeModel: NodeModel, content: any) => {
+                    renderPaneChrome: !suppliesOwnChrome ? undefined : (nodeModel: NodeModel, content: any) => {
                         renderPaneChromeCallCount.count++;
                         lastChromeNodeModel = nodeModel;
                         return (
@@ -198,15 +214,11 @@ afterEach(() => {
 });
 
 describe("PaneLeafChrome — passthrough (not hoisted)", () => {
-    it("renders the block directly, with no chrome wrapper, for a view type that doesn't hoist its own chrome", async () => {
-        // "settings" — a system/utility view, not one of the widget-bar's
-        // Pane Tab-eligible types (CLAUDE.md's "Not widgets" table), so it
-        // correctly never hoists. Universal Pane Tabs (SPEC_PANE_TABS_
-        // UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) extended HOISTS_OWN_CHROME
-        // to every REAL widget-bar view type, so this test's original
-        // "editor" example no longer demonstrates the passthrough path —
-        // editor hoists now too.
-        setBlockView("b1", "settings");
+    it("renders the block directly, with no chrome wrapper, for a view type that isn't registered", async () => {
+        // Every REGISTERED view type gets the shared chrome now
+        // (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md Phase 1), settings and
+        // toolchain included, so only an unknown type passes through.
+        setBlockView("b1", "not-a-registered-view");
         const nodeModel = makeFakeNodeModel({
             activeViewModel: () => fakeChromeViewModel("chrome-root"),
         });
@@ -232,6 +244,22 @@ describe("PaneLeafChrome — passthrough (not hoisted)", () => {
     });
 });
 
+describe("PaneLeafChrome — every registered view gets the shared chrome (Phase 1)", () => {
+    // Settings/toolchain/launcher/identity/memory used to be missing from a
+    // hand-maintained HOISTS_OWN_CHROME list: no tab strip when a pane started
+    // with them, a double header when added to one that had chrome.
+    it("hoists settings too, using the shared shell when the ViewModel supplies no renderPaneChrome", async () => {
+        setBlockView("b1", "settings");
+        const nodeModel = makeFakeNodeModel();
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        expect(screen.getByTestId("shell-chrome-root")).toBeInTheDocument();
+        expect(screen.getByTestId("shell-chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
+    });
+});
+
 describe("PaneLeafChrome — hoisted", () => {
     // Hoists for EVERY agent pane, including a single-member one — gating
     // this on "has been multi-member" was a catch-22 (the "+" that creates
@@ -254,7 +282,7 @@ describe("PaneLeafChrome — hoisted", () => {
 
     // Terminal panes hoist too, as of the term-pane half of this work —
     // they have their own in-pane tab strip with the same flash problem.
-    // Guards HOISTS_OWN_CHROME (pane-leaf-chrome.tsx) against silently
+    // Guards pane-leaf-chrome.tsx's `hoistsOwnChrome` against silently
     // losing an entry.
     it("wraps the block in renderPaneChrome for a terminal pane too, not just agent", async () => {
         setBlockView("b1", "term");
@@ -610,7 +638,7 @@ describe("PaneLeafChrome — RCA verification (non-keep-alive hoist path)", () =
     // If this ever TIMES OUT, the deadlock is real on this path after all
     // and §3.1's original text is back in play.
     //
-    // **The view type must be in `HOISTS_OWN_CHROME` but NOT in
+    // **The view type must get the shared chrome but NOT be in
     // `KEEP_ALIVE_TYPES`**, or this test silently answers the wrong
     // question. This originally used `"agent"`, which is in BOTH
     // (`KEEP_ALIVE_TYPES = {"term", "agent"}`), so `keepAlive()` latched
@@ -620,10 +648,11 @@ describe("PaneLeafChrome — RCA verification (non-keep-alive hoist path)", () =
     // `<Key>`/`<Block>` fallback this PR exists to probe. A pass or a fail
     // would both have been uninformative (reagentx P1 on #3459).
     //
-    // `"editor"` is in `HOISTS_OWN_CHROME` and absent from
-    // `KEEP_ALIVE_TYPES`, so it lands on the non-keep-alive branch.
+    // `"help"` gets the shared chrome and is absent from `KEEP_ALIVE_TYPES`,
+    // so it lands on the non-keep-alive branch. (This used `"editor"` until
+    // editor became keep-alive in #3725.)
     it("resolves chrome-root even when the view type is already resolved (non-keep-alive) on the very first synchronous render", async () => {
-        setBlockView("b1", "editor"); // already resolved BEFORE render — the claimed trigger condition
+        setBlockView("b1", "help"); // already resolved BEFORE render — the claimed trigger condition
         const [activeBlockId] = createSignal("b1");
         const nodeModel = makeRealisticNodeModel({ activeBlockId }); // REAL signal-backed activeViewModel, not a static fake
         const PaneLeafChrome = await loadPaneLeafChrome();
