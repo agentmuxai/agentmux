@@ -163,10 +163,12 @@ fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crat
         // queued message released straight into the next turn), producing
         // "finished" toasts for an agent that is still working.
         if ev.event == crate::backend::mps::EVENT_CONTROLLER_STATUS {
+            // No `is_agent_pane` filter: the subprocess controller (Codex,
+            // Gemini, …) publishes `is_agent_pane: false` for its agent panes
+            // (Codex P1 on #3705), and only real agent turns ever report
+            // turn_active=true (shell controllers hardcode false), so a
+            // true→false edge is agent-specific on its own.
             let Some(d) = ev.data.as_ref() else { return };
-            if d.get("is_agent_pane").and_then(|v| v.as_bool()) != Some(true) {
-                return;
-            }
             let (Some(block_id), Some(active)) = (
                 d.get("blockid").and_then(|v| v.as_str()),
                 d.get("turn_active").and_then(|v| v.as_bool()),
@@ -256,7 +258,12 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                         .get(&block_id)
                         .is_some_and(|t| now_ms() - *t < STOP_GRACE_MS);
                     match turn_transition(prev, active, stopped_recently) {
-                        TurnTransition::Started => r.resolve(&block_id, Family::Turn),
+                        TurnTransition::Started => {
+                            // A new turn: the earlier stop no longer applies
+                            // to it (Codex P2 on #3705).
+                            r.stopped_at.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+                            r.resolve(&block_id, Family::Turn)
+                        }
                         TurnTransition::Finished => {
                             let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None))
                                 .await;

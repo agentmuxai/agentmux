@@ -270,14 +270,16 @@ impl SubprocessController {
                 inner.kill_tx = Some(kill_tx);
                 Self::set_status(&mut inner, STATUS_RUNNING);
             }
+            // turn_active=true on the start publish — the start edge the
+            // notification Router needs (same as host_spawn).
+            health_monitor.set_active_turn(true);
             if let Some(ref b) = broker {
                 let status = {
                     let inner = inner_arc.lock().unwrap();
-                    SubprocessController::build_status_snapshot(&inner, &block_id, false)
+                    SubprocessController::build_status_snapshot(&inner, &block_id, true)
                 };
                 publish_controller_status(b, &status);
             }
-            health_monitor.set_active_turn(true);
 
             // Start the exec via Docker socket — env vars travel through
             // CreateExecOptions.env (Docker API), never in process argv.
