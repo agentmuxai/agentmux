@@ -821,3 +821,71 @@ fn a_file_written_moments_ago_waits_until_it_settles() {
     assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
     assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 1);
 }
+
+// ── First sighting: content another agent's record already holds ───────
+
+fn put_in_other_record(f: &Fixture, body: &str) {
+    record::append_version(
+        &f.fs,
+        "agent-other",
+        NewVersion {
+            file: "their.md",
+            body: Some(body.as_bytes()),
+            expected_parent: None,
+            merged_parent: None,
+            conflicts_with: None,
+            source: "agent",
+            source_detail: "",
+            project_to: None,
+        },
+    )
+    .unwrap();
+}
+
+/// Spec §2.1.2: a file whose content another agent's record holds is not
+/// adopted — held for the adoption list, and left alone by later passes and
+/// by capture while running, until it changes.
+#[test]
+fn first_sighting_holds_content_another_agents_record_has() {
+    let f = fixture();
+    put_in_other_record(&f, "another agent's fact");
+    f.put("MEMORY.md", "idx");
+    f.put("copied.md", "another agent's fact");
+    let r = f.run();
+    assert_eq!((r.adopted, r.held), (1, 1), "{r:?}");
+    assert!(f.head_body("copied.md").is_none());
+    let again = f.run();
+    assert_eq!((again.captured, again.adopted), (0, 0), "{again:?}");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert!(f.head_body("copied.md").is_none());
+    assert_eq!(f.get("copied.md").as_deref(), Some("another agent's fact"), "left in place");
+    // Once this agent changes it, it is its own.
+    f.put("copied.md", "rewritten by this agent");
+    assert_eq!(f.run().captured, 1);
+    assert_eq!(f.head_body("copied.md").as_deref(), Some("rewritten by this agent"));
+}
+
+/// A baseline cut short by the budget: its rest is captured by the next
+/// pass as new files, never the held one.
+#[test]
+fn a_baseline_cut_short_never_takes_the_held_file_later() {
+    let f = fixture();
+    put_in_other_record(&f, "another agent's fact");
+    f.put("MEMORY.md", "idx");
+    f.put("a.md", "mine");
+    f.put("copied.md", "another agent's fact");
+    let r = f.run_files(1);
+    assert!(r.deferred, "{r:?}");
+    f.run();
+    assert!(f.head_body("a.md").is_some());
+    assert!(f.head_body("copied.md").is_none());
+}
+
+#[test]
+fn the_agents_own_record_is_not_another_agents() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.run();
+    let sha = record::sha256_hex(b"idx");
+    assert!(record::held_by_other_records(&f.fs, UID, &[sha]).unwrap().is_empty());
+}
