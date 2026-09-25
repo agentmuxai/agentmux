@@ -117,6 +117,23 @@ describe("AgentNativeMemoryModal", () => {
         expect(textarea()?.value).toBe("my draft");
     });
 
+    test("cancelling a dirty draft after a live change shows what's saved now", async () => {
+        const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+        await openFile();
+        fireEvent.click(screen.getByText("Edit"));
+        fireEvent.input(textarea()!, { target: { value: "my draft" } });
+
+        saved = "the agent wrote this";
+        mpsHub.handlers.get("agent:memory:changed:a1")?.();
+        await screen.findByTestId("memory-conflict-banner", {}, { timeout: 2000 });
+
+        fireEvent.click(screen.getByText("Cancel"));
+        await waitFor(() =>
+            expect(screen.getByTestId("memory-pinned-bottom").textContent).toContain("the agent wrote this")
+        );
+        confirmSpy.mockRestore();
+    });
+
     test("a live change with no open draft updates the content in place", async () => {
         await openFile();
         saved = "fresh";
