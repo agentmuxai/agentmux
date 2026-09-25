@@ -64,3 +64,53 @@ pub(crate) fn broker_recording(event_type: &str) -> (crate::backend::mps::Broker
     );
     (broker, client)
 }
+
+/// The fake App Server test binary (`tests/fixtures/fake_app_server.rs`),
+/// compiled once per source content and reused across test runs. It used to
+/// be built into a fresh temp dir that was deliberately leaked every run —
+/// 4.4 MB each, gigabytes of `/tmp` on a machine where many agents run the
+/// srv tests.
+#[cfg(test)]
+pub(crate) fn fake_app_server_binary() -> &'static std::path::PathBuf {
+    static BINARY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    BINARY.get_or_init(|| {
+        use sha2::{Digest, Sha256};
+        let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("fake_app_server.rs");
+        let code = std::fs::read(&source).expect("read fake App Server source");
+        let hash = hex::encode(Sha256::digest(&code));
+        let dir = std::env::temp_dir().join(format!("agentmux-test-fake-app-server-{}", &hash[..16]));
+        let mut binary = dir.join("fake-app-server");
+        if cfg!(windows) {
+            binary.set_extension("exe");
+        }
+        if binary.is_file() {
+            return binary;
+        }
+        std::fs::create_dir_all(&dir).expect("create fake server build dir");
+        // Build to a unique name and rename into place, so concurrent test
+        // processes never run a half-written binary.
+        let partial = dir.join(format!(".build-{}", uuid::Uuid::new_v4().simple()));
+        let output = std::process::Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(&source)
+            .arg("-o")
+            .arg(&partial)
+            .output()
+            .expect("run rustc for fake App Server");
+        assert!(
+            output.status.success(),
+            "fake App Server compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // A failed rename is fine only if another process put its build in
+        // place first (Windows won't rename over an existing file).
+        if let Err(e) = std::fs::rename(&partial, &binary) {
+            let _ = std::fs::remove_file(&partial);
+            assert!(binary.is_file(), "install fake App Server binary at {}: {e}", binary.display());
+        }
+        binary
+    })
+}
