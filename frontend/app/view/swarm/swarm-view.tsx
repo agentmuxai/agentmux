@@ -11,8 +11,7 @@ import { callBackendService } from "@/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS, atoms } from "@/app/store/global";
-import { ContextMenuModel } from "@/app/store/contextmenu";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { recordTurn } from "@/app/store/token-usage";
@@ -269,18 +268,16 @@ export function AgentRow({
     // so unlike a normal text pane there's no way to select-and-Copy — the
     // pane body's generic Copy-on-selection context menu (block/pane-
     // actions.ts) can never fire anything here. This is the only way to
-    // copy an agent's name or block id out of Swarm. See
-    // docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
+    // copy an agent's name or block id out of Swarm. The sub-rows below use the
+    // same helper. See docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
     const handleAgentRowContextMenu = (e: MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const menu: ContextMenuItem[] = [
-            { label: "Copy agent name", click: () => clipboardWriteText(node.agentName) },
-        ];
-        if (node.blockId) {
-            menu.push({ label: "Copy block ID", click: () => clipboardWriteText(node.blockId!) });
-        }
-        ContextMenuModel.showContextMenu(menu, e);
+        showCopyContextMenu(
+            [
+                { label: "Copy agent name", value: node.agentName },
+                { label: "Copy block ID", value: node.blockId },
+            ],
+            e
+        );
     };
 
     return (
@@ -445,7 +442,10 @@ const TODO_SIGIL: Record<string, string> = {
 function TodoRow({ todo }: { todo: TodoItem }): JSX.Element {
     const status = () => (todo.status in TODO_SIGIL ? todo.status : "pending");
     return (
-        <div classList={{ "swarm-todo-row": true, [`swarm-todo-row--${status()}`]: true }}>
+        <div
+            classList={{ "swarm-todo-row": true, [`swarm-todo-row--${status()}`]: true }}
+            onContextMenu={(e) => showCopyContextMenu([{ label: "Copy todo text", value: todo.text }], e)}
+        >
             <span class="swarm-todo-sigil">{TODO_SIGIL[status()]}</span>
             <span class="swarm-todo-text" title={todo.text}>
                 {todo.text}
@@ -529,7 +529,21 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
     };
 
     return (
-        <div class="swarm-shell-row" title={shell.cmd}>
+        <div
+            class="swarm-shell-row"
+            title={shell.cmd}
+            onContextMenu={(e) =>
+                showCopyContextMenu(
+                    [
+                        { label: "Copy command", value: shell.cmd },
+                        // `title` defaults to `cmd` server-side — only offer it when it's a distinct caller-supplied label.
+                        { label: "Copy title", value: shell.title !== shell.cmd ? shell.title : null },
+                        { label: "Copy shell ID", value: shell.shell_id },
+                    ],
+                    e
+                )
+            }
+        >
             <span class="swarm-shell-title">{shell.title}</span>
             <span class="swarm-shell-elapsed">{elapsed()}</span>
             <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
@@ -615,7 +629,11 @@ function LongRunningRow({ row }: { row: LongRunningToolRow }): JSX.Element {
         return `~${Math.ceil(Math.max(0, row.startedAt + row.sleepMs - Date.now()) / 1000)}s left`;
     });
     return (
-        <div class="swarm-longrunning-row" title={row.title}>
+        <div
+            class="swarm-longrunning-row"
+            title={row.title}
+            onContextMenu={(e) => showCopyContextMenu([{ label: "Copy command", value: row.title }], e)}
+        >
             <span class="swarm-longrunning-title">{row.title}</span>
             <span class="swarm-longrunning-elapsed">{elapsed()}</span>
             <Show when={remaining()}>
@@ -669,7 +687,21 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     );
 
     return (
-        <div class="swarm-cron-row" title={`${cron.expression} → ${cron.target}`}>
+        <div
+            class="swarm-cron-row"
+            title={`${cron.expression} → ${cron.target}`}
+            onContextMenu={(e) =>
+                showCopyContextMenu(
+                    [
+                        { label: "Copy name", value: cron.name },
+                        { label: "Copy schedule", value: cron.expression },
+                        { label: "Copy target agent", value: cron.target },
+                        { label: "Copy cron ID", value: cron.id },
+                    ],
+                    e
+                )
+            }
+        >
             <span class="swarm-cron-name">{cron.name}</span>
             <span class="swarm-cron-expression">{cron.expression}</span>
             <span class="swarm-cron-last-fired">{lastFired()}</span>
@@ -734,6 +766,15 @@ function WorkflowDispatchRow({
                 onClick={() => model.toggleDispatchExpanded(group.dispatchId)}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
+                onContextMenu={(e) =>
+                    showCopyContextMenu(
+                        [
+                            { label: "Copy name", value: group.name },
+                            { label: "Copy workflow ID", value: group.dispatchId },
+                        ],
+                        e
+                    )
+                }
                 title={group.name}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
@@ -993,6 +1034,17 @@ function SubagentRow({
                 onClick={handleToggle}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
+                onContextMenu={(e) =>
+                    showCopyContextMenu(
+                        [
+                            { label: "Copy name", value: displayLabel() },
+                            // Already inside the label when there's no display_name — only offer it as its own entry when distinct.
+                            { label: "Copy slug", value: sub.slug && sub.slug !== displayLabel() ? sub.slug : null },
+                            { label: "Copy agent ID", value: sub.agent_id },
+                        ],
+                        e
+                    )
+                }
                 title={displayLabel()}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-expand-icon`} />
