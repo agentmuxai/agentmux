@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi, openLink } from "./global";
-import { readText as clipboardReadText } from "@/util/clipboard";
+import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import * as util from "@/util/util";
 
 class ContextMenuModelType {
@@ -162,4 +162,36 @@ async function showTextInputContextMenu(e: MouseEvent, leadingItems?: ContextMen
     ContextMenuModel.showContextMenu(menu, e);
 }
 
-export { ContextMenuModel, showTextInputContextMenu };
+/** One "Copy <thing>" entry for {@link showCopyContextMenu}. */
+export interface CopyMenuEntry {
+    /** Menu label, e.g. "Copy command". */
+    label: string;
+    /** Text written to the clipboard. An empty/nullish value drops the entry. */
+    value: string | null | undefined;
+}
+
+/**
+ * Right-click menu of "Copy <thing>" entries for a row/node whose text cannot be
+ * selected (`user-select: none` — the Swarm rows and Drone nodes), so the pane
+ * body's generic Copy-on-selection menu can never fire for them.
+ *
+ * Empty values are dropped. If nothing is left the event is NOT consumed, so it
+ * still reaches the pane's own menu instead of swallowing the right-click for
+ * an empty menu. Otherwise the event is claimed (preventDefault +
+ * stopPropagation) so the pane menu does not also appear.
+ *
+ * Returns whether a menu was shown.
+ */
+function showCopyContextMenu(entries: CopyMenuEntry[], e: MouseEvent): boolean {
+    const menu: ContextMenuItem[] = [];
+    for (const { label, value } of entries) {
+        if (!value) continue;
+        menu.push({ label, click: () => void clipboardWriteText(value) });
+    }
+    if (menu.length === 0) return false;
+    e.preventDefault();
+    ContextMenuModel.showContextMenu(menu, e);
+    return true;
+}
+
+export { ContextMenuModel, showCopyContextMenu, showTextInputContextMenu };
