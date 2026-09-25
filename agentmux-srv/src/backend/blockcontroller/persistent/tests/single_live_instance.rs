@@ -11,8 +11,11 @@ use super::super::*;
 const MSG: &str = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
 
 fn config(uid: Option<&str>) -> PersistentSpawnConfig {
+    // No `AGENTMUX_AGENT_ID`: with one, a real spawn auto-registers that name
+    // in the HOST-GLOBAL shared reactive registry (`~/.agentmux/shared`),
+    // outside any temp dir — an earlier revision of this test left a stray
+    // `agent3/stable.json` there. The refusal text then says "This agent".
     let mut env_vars = HashMap::new();
-    env_vars.insert("AGENTMUX_AGENT_ID".to_string(), "Agent3".to_string());
     if let Some(uid) = uid {
         env_vars.insert("AGENTMUX_AGENT_UID".to_string(), uid.to_string());
     }
@@ -78,7 +81,7 @@ async fn a_second_instance_of_the_agent_is_refused_before_spawning() {
     let ctrl = f.controller("this-srv");
     let err = ctrl.send_message(MSG.to_string(), config(Some(&f.uid))).unwrap_err();
 
-    assert!(err.contains("Agent3 is already running in another AgentMux instance"), "got: {err}");
+    assert!(err.contains("This agent is already running in another AgentMux instance"), "got: {err}");
     let g = ctrl.inner.lock().unwrap();
     assert!(g.current_pid.is_none(), "no process may be spawned");
     assert!(g.agent_lease.is_none());

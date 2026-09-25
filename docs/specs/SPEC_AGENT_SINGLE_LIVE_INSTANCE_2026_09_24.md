@@ -412,8 +412,13 @@ irrelevant to the fix, which is I9.
 
 **Code.**
 - `agentmux-srv/src/registry/leases.rs`: `claim_as` with `ClaimantInfo`, the epoch counter, unreadable-is-held, the dead
-  and reused-pid reclaim, `verify`, `live_holder_other_than`, and a block-aware `release` (a superseded block of the same
-  process must not drop the lease a newer block holds).
+  and reused-pid reclaim, `verify`, and `live_holder_other_than`. Two rules added in review:
+  - **One driver inside a process too** (ReAgent P1 on #3738): a claim by another block of the same srv is refused while
+    the first block's lease is live. `verify`, `renew` and `release` all require the block to match.
+  - **A per-claim token** (`claim_id`, fresh on every claim, including a same-block re-claim): only the current handle may
+    renew, verify or release. Without it, a controller replaced for the same block (for example, a forced restart that
+    eager-resumes at once) re-claims before the old process's exit runs. That exit's release would delete the new
+    process's lease, and the new process would then be fenced — killed — at its next renew.
 - `agentmux-srv/src/backend/agent_admission.rs` (new):
   - `acquire` returns a `HeldAgentLease`, which has its own renewal task, `verify`, and release on drop. It fails closed on
     I/O after one retry (D2).
@@ -434,15 +439,28 @@ irrelevant to the fix, which is I9.
     jekts. This is a fourth I9 write that §1.1 had not listed.
 
 **Tests.**
-- `registry::leases`: 22 tests. Among them: fail-closed on an unreadable file, reclaim of a stale unreadable file, old
-  format honoured, epochs across release and across TTL reclaim, dead pid, reused pid, another host, `verify`, and the
-  superseded-block release.
+- `registry::leases`: 24 tests. Among them: fail-closed on an unreadable file, reclaim of a stale unreadable file, old
+  format honoured, epochs across release and across TTL reclaim, dead pid, reused pid, another host, and `verify`. Also:
+  a second block of the same process is refused; a block superseded after expiry is fenced and cannot release; and a
+  same-block re-claim supersedes the older handle.
 - `backend::agent_admission`: 9 tests. Among them: refusal naming the holder, a takeover reported by the renewal task
   through `on_lost`, and the probe matching by UID only.
 - `persistent::tests::single_live_instance`: 5 tests. Refused before spawn; lease held until the process exits; a pane that
   lost its lease starts no turn and is killed; no UID takes no lease; the early check.
 - `agent_open::single_live_instance_tests`: the I9 test (§7.9). It passes with the check and fails when the check is
   removed.
+
+**Live check (2026-09-25).**
+- **Done:** the compat probe's contract against a real, lease-unaware release (v0.57.2 on this host). I ran it exactly as
+  the probe does, by hand and read-only: take `local_url` and `auth_key` from its shared-registry entry, then
+  `GET /agentmux/reactive/agents`. The response was HTTP 200 with 9 registrations, each carrying `uid`. Matching Agent3's
+  UID found its live block `204dc49b…`, so a Phase 1 build opening Agent3 would be refused.
+- **Not done:** an end-to-end run on a `task dev` build with a fresh test agent (§7.6). Agents can be created only through
+  the WebSocket RPC, and exercising the check with any real agent risks resuming its live session if the check were wrong
+  — the 2026-07-29 incident.
+- **Found while testing:** a test that really spawns a process must not put `AGENTMUX_AGENT_ID` in its env. With it, the
+  spawn auto-registers that name in the host-global `~/.agentmux/shared` registry, outside any temp dir. An early
+  revision of this PR's tests left a stray `agent3/stable.json` there; the test is fixed and the file was removed.
 
 **Not in Phase 1.**
 - §4.2 step 6, the volume check for an overridden shared root.

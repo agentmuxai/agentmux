@@ -136,6 +136,14 @@ struct LeaseFile {
     channel: String,
     #[serde(default)]
     version: String,
+    /// Fresh for every successful `claim`, including a same-block re-claim.
+    /// Only the handle carrying the current value may renew, verify or
+    /// release: a controller replaced for the same block (a forced restart)
+    /// re-claims before the old process's exit runs, and that exit must not
+    /// delete — or be fenced by — the lease the new process now holds.
+    /// Empty on a lease written by an older build (matches any handle).
+    #[serde(default)]
+    claim_id: String,
 }
 
 impl LeaseFile {
@@ -162,6 +170,7 @@ pub struct Lease {
     instance_id: String,
     owner_boot_id: Arc<str>,
     block_id: String,
+    claim_id: String,
     epoch: u64,
     path: PathBuf,
 }
@@ -278,8 +287,11 @@ impl LeaseStore {
 
     /// Attempt to claim the lease for `instance_id`.
     ///
-    /// - Already held by `boot_id` (this process) → idempotent
-    ///   re-claim, timestamp refreshed, epoch kept.
+    /// - Already held by `boot_id` (this process) for the same block →
+    ///   idempotent re-claim, timestamp refreshed, epoch kept.
+    /// - Held, not yet expired, by **another block of this same process**
+    ///   → `Err(HeldByOther)`: one driver per agent holds inside a process
+    ///   too (ReAgent P1 on #3738), and the newcomer is the one refused.
     /// - Held by another owner, not yet expired, holder not provably
     ///   dead → `Err(HeldByOther)`.
     /// - Unreadable and rewritten within the TTL → `Err(HeldByOther)`
@@ -321,13 +333,24 @@ impl LeaseStore {
                 (None, 0)
             }
             OnDisk::Valid(existing) => {
-                if existing.owner_boot_id == boot_id.as_ref() {
+                let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
+                if existing.owner_boot_id == boot_id.as_ref() && same_block(&existing, block_id) {
                     // Same owner re-claiming (e.g. controller recreated
                     // on a resync with no process restart): ownership
                     // didn't change, so neither does the epoch.
                     (Some(existing.epoch), existing.epoch)
+                } else if existing.owner_boot_id == boot_id.as_ref() {
+                    // Another block of this process holds it.
+                    if age_ms <= self.ttl_ms {
+                        return Err(LeaseError::HeldByOther {
+                            instance_id: instance_id.to_string(),
+                            owner_boot_id: existing.owner_boot_id.clone(),
+                            age_ms,
+                            holder: Some(existing.holder()),
+                        });
+                    }
+                    (None, existing.epoch)
                 } else {
-                    let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
                     if age_ms <= self.ttl_ms && !holder_is_dead(&existing) {
                         return Err(LeaseError::HeldByOther {
                             instance_id: instance_id.to_string(),
@@ -346,12 +369,14 @@ impl LeaseStore {
             Some(e) if e > 0 => e,
             _ => self.next_epoch(instance_id, floor)?,
         };
-        let bytes = lease_bytes(instance_id, boot_id, block_id, session_id_hint, epoch, info)?;
+        let claim_id = uuid::Uuid::new_v4().to_string();
+        let bytes = lease_bytes(instance_id, boot_id, block_id, session_id_hint, epoch, &claim_id, info)?;
         write_atomic(&path, &bytes)?;
         Ok(Lease {
             instance_id: instance_id.to_string(),
             owner_boot_id: Arc::clone(boot_id),
             block_id: block_id.to_string(),
+            claim_id,
             epoch,
             path,
         })
@@ -400,7 +425,10 @@ impl LeaseStore {
                 });
             }
         };
-        if existing.owner_boot_id != lease.owner_boot_id.as_ref() {
+        // Owner, block AND claim: a lease another block of this process took
+        // over (after this one's expired), or this block re-claimed through a
+        // newer handle (a replaced controller), is not this handle's any more.
+        if !is_this_claim(&existing, lease) {
             let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
             return Err(LeaseError::HeldByOther {
                 instance_id: lease.instance_id.clone(),
@@ -424,10 +452,7 @@ impl LeaseStore {
             OnDisk::Valid(f) => f,
             OnDisk::Missing | OnDisk::Unreadable { .. } => return Ok(()),
         };
-        if existing.owner_boot_id != lease.owner_boot_id.as_ref() {
-            return Ok(());
-        }
-        if !existing.block_id.is_empty() && existing.block_id != lease.block_id {
+        if !is_this_claim(&existing, lease) {
             return Ok(());
         }
         match std::fs::remove_file(&lease.path) {
@@ -469,6 +494,20 @@ impl LeaseStore {
             }
         })
     }
+}
+
+/// Does `file` belong to `block_id`? A lease written before block ids were
+/// compared (empty) matches any block of its owner.
+fn same_block(file: &LeaseFile, block_id: &str) -> bool {
+    file.block_id.is_empty() || file.block_id == block_id
+}
+
+/// Is `file` the lease `lease` was granted — same owner, same block, same
+/// claim? An empty `claim_id` (older build) matches.
+fn is_this_claim(file: &LeaseFile, lease: &Lease) -> bool {
+    file.owner_boot_id == lease.owner_boot_id.as_ref()
+        && same_block(file, &lease.block_id)
+        && (file.claim_id.is_empty() || file.claim_id == lease.claim_id)
 }
 
 /// This host's name as recorded in a lease — lowercased and trimmed so two
@@ -514,6 +553,7 @@ fn lease_bytes(
     block_id: &str,
     session_id_hint: Option<&str>,
     epoch: u64,
+    claim_id: &str,
     info: &ClaimantInfo,
 ) -> Result<Vec<u8>, std::io::Error> {
     let now = now_ms();
@@ -531,6 +571,7 @@ fn lease_bytes(
         pid_start_s: process_start_s(pid).unwrap_or(0),
         channel: info.channel.clone(),
         version: info.version.clone(),
+        claim_id: claim_id.to_string(),
     };
     let mut bytes = serde_json::to_vec_pretty(&file).map_err(std::io::Error::from)?;
     bytes.push(b'\n');
@@ -850,16 +891,56 @@ mod tests {
         assert_eq!(on_disk(&tmp, "agent-1").owner_boot_id, "boot-b");
     }
 
-    /// One process, two blocks (a subprocess turn and a persistent pane for
-    /// the same agent): the earlier block's release must not drop the lease
-    /// the later block now holds.
+    /// ReAgent P1 on #3738: one process, two blocks of the same agent (two
+    /// panes, or a subprocess turn beside a persistent pane) — one driver
+    /// holds inside a process too, and the newcomer is the one refused.
     #[test]
-    fn release_by_a_superseded_block_of_the_same_process_is_a_noop() {
-        let (tmp, s) = store(60_000);
+    fn a_second_block_of_the_same_process_is_refused_while_the_first_holds_it() {
+        let (_tmp, s) = store(60_000);
         let first = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
-        s.claim("agent-1", &boot("boot-a"), "block-2", None).unwrap();
+        let err = s.claim("agent-1", &boot("boot-a"), "block-2", None).unwrap_err();
+        match err {
+            LeaseError::HeldByOther { holder, .. } => assert_eq!(holder.unwrap().block_id, "block-1"),
+            other => panic!("expected HeldByOther, got {other:?}"),
+        }
+        assert!(s.verify(&first).is_ok(), "the holder keeps the agent");
         s.release(&first).unwrap();
-        assert!(lease_path(&tmp, "agent-1").exists());
+        assert!(s.claim("agent-1", &boot("boot-a"), "block-2", None).is_ok());
+    }
+
+    /// A controller replaced for the same block (a forced restart) re-claims
+    /// before the old process's exit runs. That exit's release must not
+    /// delete the new claim, and the old handle is the one fenced — not the
+    /// new process.
+    #[test]
+    fn a_same_block_reclaim_supersedes_the_older_handle() {
+        let (tmp, s) = store(60_000);
+        let old = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        let new = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        assert_eq!(old.epoch(), new.epoch(), "same owner and block: not an ownership change");
+        s.release(&old).unwrap();
+        assert!(lease_path(&tmp, "agent-1").exists(), "the old handle's release must not free the new claim");
+        assert!(s.verify(&new).is_ok());
+        assert!(s.renew(&new).is_ok());
+        assert!(matches!(s.verify(&old), Err(LeaseError::HeldByOther { .. })));
+        assert!(matches!(s.renew(&old), Err(LeaseError::HeldByOther { .. })));
+        s.release(&new).unwrap();
+        assert!(!lease_path(&tmp, "agent-1").exists());
+    }
+
+    /// If a same-process block does take over — after the first block's
+    /// lease expired — the first block's `verify`/`renew` fail and its
+    /// release leaves the new holder alone.
+    #[test]
+    fn a_block_superseded_after_expiry_is_fenced_and_cannot_release() {
+        let (tmp, s) = store(50);
+        let first = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
+        let second = s.claim("agent-1", &boot("boot-a"), "block-2", None).unwrap();
+        assert!(second.epoch() > first.epoch(), "a block change is an ownership change");
+        assert!(matches!(s.verify(&first), Err(LeaseError::HeldByOther { .. })));
+        assert!(matches!(s.renew(&first), Err(LeaseError::HeldByOther { .. })));
+        s.release(&first).unwrap();
         assert_eq!(on_disk(&tmp, "agent-1").block_id, "block-2");
     }
 
