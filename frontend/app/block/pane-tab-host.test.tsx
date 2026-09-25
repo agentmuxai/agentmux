@@ -13,6 +13,9 @@ vi.mock("@/store/mos", () => ({
 const setMeta = vi.fn((..._args: unknown[]) => Promise.resolve());
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetMetaCommand: (...a: unknown[]) => setMeta(...a) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: "tab-rpc" }));
+const [dormantSig, setDormant] = createSignal(false);
+vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => dormantSig }));
+vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabDisplayed: () => () => true }));
 
 import { adaptPaneTabInstance, makePaneTabHostContext } from "./pane-tab-host";
 import type { PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
@@ -39,6 +42,17 @@ describe("PaneTabHostContext", () => {
             setBlockSig({ meta: { "x:y": 2 } });
             expect(ctx.meta()?.["x:y"]).toBe(2);
             expect(ctx.isFocused()).toBe(true);
+            dispose();
+        });
+    });
+
+    it("exposes the tab's one visibility signal", () => {
+        createRoot((dispose) => {
+            const ctx = makePaneTabHostContext("b1", {} as any);
+            expect(ctx.visibility()).toBe("active");
+            setDormant(true);
+            expect(ctx.visibility()).toBe("dormant");
+            setDormant(false);
             dispose();
         });
     });

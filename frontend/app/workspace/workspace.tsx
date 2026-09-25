@@ -11,8 +11,7 @@ import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms } from "@/store/global";
 import {
-    TAB_VISIBILITY_CHANGED_EVENT,
-    WindowTabHiddenProvider,
+    WindowTabDisplayedProvider,
     keepInactiveTabsLaidOut,
     tabContainerVisibility,
 } from "./window-tab-visibility";
@@ -136,8 +135,6 @@ function WorkspaceElem(): JSX.Element {
         const id = displayTabId();
         const el = tabEls.get(id);
         if (el) void el.getBoundingClientRect();
-        // Native browser panes re-sync now rather than on their next poll.
-        window.dispatchEvent(new Event(TAB_VISIBILITY_CHANGED_EVENT));
     });
 
     // Reveal gate, destination-aware (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
@@ -206,9 +203,6 @@ function WorkspaceElem(): JSX.Element {
                                 <div
                                     ref={(el) => tabEls.set(tid, el)}
                                     class="flex flex-row h-full w-full"
-                                    // Native browser panes read this to collapse while the
-                                    // tab is hidden but laid out (use-pane-rect-sync.ts).
-                                    data-tab-hidden-laid-out={shown().hiddenLaidOut ? "true" : undefined}
                                     style={{
                                         // Absolutely positioned, stacked on top of each other,
                                         // filling the relative-positioned parent above — NOT a
@@ -316,11 +310,11 @@ function WorkspaceElem(): JSX.Element {
                                         visibility: shown().visibility,
                                     }}
                                 >
-                                    <WindowTabHiddenProvider value={() => shown().hiddenLaidOut}>
+                                    <WindowTabDisplayedProvider value={() => tid === displayTabId()}>
                                         <ErrorBoundary>
                                             <TabContent tabId={tid} />
                                         </ErrorBoundary>
-                                    </WindowTabHiddenProvider>
+                                    </WindowTabDisplayedProvider>
                                 </div>
                                 );
                             }}
