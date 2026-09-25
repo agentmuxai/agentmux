@@ -1,7 +1,7 @@
 # SPEC: Agent shell drawer — right-click Paste, and a "context-menu region" mechanism to strip pane entries
 
 **Date:** 2026-09-25
-**Status:** implemented (single PR — Phase 1 and Phase 2 together; see §3.5 for the decisions made during implementation)
+**Status:** implemented — #3762 (Phase 1 and Phase 2 together; see §3.5 for the decisions made during implementation)
 **Related:**
 `docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md` (same root cause — a pane-body handler swallows right-click and never offers Paste; fixed there per-`<input>`, not for terminals nested in a non-terminal pane),
 `docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (the `getBodyContextMenuItems` extension point this builds on),
