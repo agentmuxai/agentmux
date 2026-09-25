@@ -607,7 +607,12 @@ declare global {
         noPadding?: Accessor<boolean>;
         searchAtoms?: SearchAtoms;
         viewComponent: ViewComponent<any>;
-        isBasicTerm?: () => boolean;
+        /** The tab's own selected text (a terminal keeps its selection apart
+         *  from the page's), for the pane menu's Copy. */
+        getSelection?: () => string;
+        /** Paste into the tab — the pane menu's Paste, shown for views with
+         *  the `acceptsInput` capability. */
+        paste?: (text: string) => void;
         getSettingsMenuItems?: () => ContextMenuItem[];
         /** `browserCtx` is populated only for a browser pane's synthetic
          *  context menu (its native overlay content has no real DOM

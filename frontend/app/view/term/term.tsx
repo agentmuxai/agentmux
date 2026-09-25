@@ -17,6 +17,7 @@ import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
 import { setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
+import { termModels } from "./term-models";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
@@ -502,10 +503,11 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
     // Re-derived per active member so switching tabs targets the right
     // block's modal state.
     // Both read the ACTIVE member, so they follow tab switches: the
-    // background is per-block meta, the runtime label is per-ViewModel
-    // state owned by whichever TermViewModel is currently mounted.
+    // background is per-block meta, the runtime label is the active
+    // terminal's own model, found by block id (term-models.ts) — the host's
+    // view model is only an adapter once the terminal is a native pane tab.
     const termBg = createMemo(() => computeBgStyleFromMeta(activeBlockData()?.meta, null));
-    const runtimeLabel = () => (nodeModel.activeViewModel?.() as TermViewModel | null)?.agentRuntimeLabel?.() ?? null;
+    const runtimeLabel = () => termModels.get(activeBlockId())?.agentRuntimeLabel() ?? null;
 
     const changeConnModalAtom = createMemo(
         () => useBlockAtom(activeBlockId(), "changeConn", () => createSignalAtom(false)) as SignalAtom<boolean>,

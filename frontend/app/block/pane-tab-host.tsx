@@ -56,8 +56,18 @@ export function adaptPaneTabInstance(
     if (instance.headerActions) vm.endIconButtons = instance.headerActions;
     if (instance.contextMenu) vm.getBodyContextMenuItems = (c) => instance.contextMenu!(c);
     if (instance.settingsMenu) vm.getSettingsMenuItems = () => instance.settingsMenu!();
-    if (manifest.capabilities?.connection) vm.manageConnection = () => true;
+    if (instance.background) vm.blockBg = instance.background;
+    if (manifest.capabilities?.connection) vm.manageConnection = instance.manageConnection ?? (() => true);
     if (manifest.capabilities?.noPadding) vm.noPadding = () => true;
+    if (instance.voice) vm.voiceHandle = () => instance.voice!();
+    // A getter, not a copy: the find bar is created when the tab's view
+    // mounts (`useSearch`), after this adapter runs.
+    if (instance.search) {
+        Object.defineProperty(vm, "searchAtoms", { get: () => instance.search!(), enumerable: true });
+    }
+    if (instance.selection) vm.getSelection = () => instance.selection!();
+    if (instance.paste) vm.paste = (text) => instance.paste!(text);
+    if (instance.progressMount) vm.setProgressBarMount = (el) => instance.progressMount!(el);
     if (instance.focus) vm.giveFocus = () => instance.focus!();
     if (instance.onKeyDown) vm.keyDownHandler = (e) => instance.onKeyDown!(e);
     if (instance.onActivate) vm.onActivate = () => instance.onActivate!();
