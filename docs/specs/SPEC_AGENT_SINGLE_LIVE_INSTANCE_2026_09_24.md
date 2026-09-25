@@ -1,7 +1,7 @@
 # SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN
 
 **Date:** 2026-09-24
-**Status:** active — Phase 1 (host tier: lease, admission, fencing) implemented; see §12 for what was built and what
+**Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; see §12 for what was built and what
 was left out. Phases 2–5 not started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
 proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
