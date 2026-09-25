@@ -136,6 +136,20 @@
     color: var(--accent-color);
 }
 
+// Secondary text after a JS-rendered context-menu row's label (sublabel) —
+// muted, smaller, right-aligned next to the label; ellipsized so a long reason
+// can't blow the menu wider than the viewport.
+.menu-item-sublabel {
+    @include mixins.ellipsis();
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 220px;
+    margin-left: var(--space-2);
+    font-size: 11px;
+    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.45));
+    pointer-events: none;
+}
+
 // VSCode-style keyboard shortcut hint — right-aligned, muted, mono.
 .menu-item-shortcut {
     flex-shrink: 0;
