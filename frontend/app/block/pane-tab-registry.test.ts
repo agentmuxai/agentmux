@@ -97,3 +97,22 @@ describe("pane tab registry", () => {
         expect(getPaneTab("fake")?.tab).toBe(tab);
     });
 });
+
+describe("native pane tabs", () => {
+    const create = () => ({ component: () => null as any });
+
+    it("registers a manifest with create instead of a ViewModel class", () => {
+        unregisters.push(registerPaneTab({ apiVersion: 1, view: "native", label: "Native", icon: "n", create }));
+        expect(getPaneTab("native")?.create).toBe(create);
+        expect(getPaneTab("native")?.viewModelClass).toBeUndefined();
+    });
+
+    it("refuses a manifest with both or neither instance factory", () => {
+        expect(() =>
+            registerPaneTab({ apiVersion: 1, view: "both", label: "B", icon: "b", create, viewModelClass: FakeViewModel as any })
+        ).toThrow();
+        expect(() => registerPaneTab({ apiVersion: 1, view: "neither", label: "N", icon: "n" })).toThrow();
+        expect(getPaneTab("both")).toBeUndefined();
+        expect(getPaneTab("neither")).toBeUndefined();
+    });
+});

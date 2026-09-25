@@ -21,6 +21,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
+import { registerPaneTab } from "./pane-tab-registry";
 
 const blockMetaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
 function setBlockView(blockId: string, view: string | undefined) {
@@ -99,6 +100,20 @@ class TestMemoViewModel {
         onCleanup(() => memoVmDisposals.push(blockId));
     }
 }
+// A native pane tab (Pane Tab contract Phase 2b): `create(ctx)`, no class.
+// Real registry, not mocked — block.tsx looks the manifest up there.
+const nativeCreates: { blockId: string; disposed: boolean }[] = [];
+registerPaneTab({
+    apiVersion: 1,
+    view: "native",
+    label: "Native",
+    icon: "n",
+    create: (ctx) => {
+        const rec = { blockId: ctx.blockId, disposed: false };
+        nativeCreates.push(rec);
+        return { component: () => null as any, liveTitle: () => ({ text: `native ${ctx.blockId}` }), dispose: () => (rec.disposed = true) };
+    },
+});
 vi.mock("@/app/block/block-registry", () => ({
     getBlockViewClass: (view: string) =>
         view === "agent" ? TestAgentViewModel : view === "memo" ? TestMemoViewModel : null,
@@ -169,6 +184,7 @@ afterEach(() => {
     constructedViewModels.length = 0;
     memoVmDisposals.length = 0;
     previewViewModels.clear();
+    nativeCreates.length = 0;
     setBackfillSettled(true);
 });
 
@@ -288,6 +304,29 @@ describe("Block — a preview never builds a live ViewModel", () => {
         render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={false} />);
         render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={true} />);
         expect(previewViewModels.get("p3").viewName()).toBe("live name of p3");
+    });
+});
+
+describe("Block — a native pane tab (create(ctx))", () => {
+    it("creates the instance once, registers it as the pane's ViewModel, and disposes it on unmount", async () => {
+        setBlockView("n1", "native");
+        const Block = await loadBlock();
+        const { unmount } = render(() => <Block nodeModel={makeNodeModel({ blockId: "n1" })} preview={false} />);
+
+        expect(nativeCreates).toEqual([{ blockId: "n1", disposed: false }]);
+        const vm = (registry.get("n1") as { viewModel: ViewModel }).viewModel;
+        expect(vm.viewType).toBe("native");
+        expect(vm.viewName?.()).toBe("native n1");
+
+        unmount();
+        expect(nativeCreates).toEqual([{ blockId: "n1", disposed: true }]);
+    });
+
+    it("a preview of a native tab never creates an instance", async () => {
+        setBlockView("n2", "native");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "n2" })} preview={true} />);
+        expect(nativeCreates).toHaveLength(0);
     });
 });
 

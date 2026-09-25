@@ -4,8 +4,8 @@
 **Status:** active — Phase 0 (§1.5, the Help ghost) implemented in PR #3723;
 per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
 PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
-split-browser fix (#3755); Phase 2a (the registry, §4) in the PR after #3755;
-Phases 2b–6 not started.
+split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
+Help as pilot) in the PR after it; Phases 2c–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -361,10 +361,19 @@ working throughout through a legacy adapter.
      `tab`. `block-registry.test.ts` pins parity with every table replaced.
      One deliberate difference: an alias now resolves for label and icon too
      (a still-live `forge` block reads "Agent", not "forge").
-   - **2b:** the host's native path — `create(ctx)` with a
-     `PaneTabHostContext`, adapted to what the host consumes today — and the
-     per-view migrations above, Help first as the pilot. `ctx.visibility`
-     arrives with Phase 3.
+   - **2b (implemented):** the host's native path. A manifest has exactly
+     one of `create(ctx)` and `viewModelClass`. `makeViewModel` calls
+     `create` in the instance's own root (rule 8) with a
+     `PaneTabHostContext` — `blockId`, reactive `meta`, `setMeta`,
+     `isFocused`; no raw nodeModel, MOS or RpcApi — and
+     `pane-tab-host.tsx`'s `adaptPaneTabInstance` presents the
+     `PaneTabInstance` as the ViewModel the rest of the host consumes today.
+     Help is the pilot: `helpPaneTab` in `helpview.tsx`, its zoom read and
+     written through `ctx.meta`/`ctx.setMeta`.
+   - **2c:** the remaining views move to `create` as Phases 3–5 give them
+     what they reach around the contract for today (`ctx.visibility`,
+     per-active-tab chrome, capabilities) — migrating them first would only
+     re-home their `nodeModel` reach-ins. Order as above.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
