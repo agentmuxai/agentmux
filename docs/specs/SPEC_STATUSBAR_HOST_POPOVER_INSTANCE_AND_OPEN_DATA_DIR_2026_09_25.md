@@ -2,7 +2,7 @@
 
 **Author:** Agent4
 **Date:** 2026-09-25
-**Status:** proposed — claims verified against `main` @ `3cd1bd188` (2026-09-25)
+**Status:** implemented — PR #3799
 
 ---
 
