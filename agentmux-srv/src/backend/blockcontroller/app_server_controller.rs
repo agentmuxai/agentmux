@@ -703,32 +703,7 @@ mod tests {
     }
 
     fn fake_server_binary() -> &'static std::path::PathBuf {
-        static BINARY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-        BINARY.get_or_init(|| {
-            let temp = tempfile::tempdir().expect("create fake server build dir");
-            let mut binary = temp.path().join("fake-app-server-ctrl");
-            if cfg!(windows) {
-                binary.set_extension("exe");
-            }
-            let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests")
-                .join("fixtures")
-                .join("fake_app_server.rs");
-            let output = std::process::Command::new("rustc")
-                .arg("--edition=2021")
-                .arg(source)
-                .arg("-o")
-                .arg(&binary)
-                .output()
-                .expect("run rustc for fake App Server");
-            assert!(
-                output.status.success(),
-                "fake App Server compilation failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            std::mem::forget(temp);
-            binary
-        })
+        crate::test_support::fake_app_server_binary()
     }
 
     fn app_server_meta(mode: &str) -> MetaMapType {
