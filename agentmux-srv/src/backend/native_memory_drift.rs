@@ -257,7 +257,7 @@ pub(crate) fn reconciliation_sweep_once(
 /// the folder isn't touched.
 fn capture_into_record(agent_id: &str, memory_dir: &Path) {
     let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return };
-    match crate::backend::memory_reconcile::capture_while_running(fs, agent_id, memory_dir) {
+    match crate::backend::memory_reconcile::capture_while_running(fs, agent_id, memory_dir, crate::backend::memory_reconcile::CAPTURE_SETTLE) {
         Ok(0) => {}
         Ok(n) => tracing::info!(agent_id, recorded = n, "native_memory_drift: recorded provider writes into the memory record"),
         Err(e) => tracing::warn!(agent_id, error = %e, "native_memory_drift: memory record capture failed; retried next sweep"),
