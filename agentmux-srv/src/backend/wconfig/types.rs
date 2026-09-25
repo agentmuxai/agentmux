@@ -308,11 +308,13 @@ pub struct SettingsType {
     #[serde(rename = "notify:tooltones:scope", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_scope: Option<String>,
 
-    // Visual twin of each tone: a brief flash on the source's pane-header
-    // pill (a brightened version of the pane's color) and a subtler one on
-    // its window tab. Fires exactly when a tone passes the gates above.
-    // Absence = on.
-    // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md.
+    // Visual twin of each sound from a pane — tool-call tones and the
+    // turn/message event sounds alike, despite the key's name: a flash on
+    // the source's pane-header pill (a brightened version of the pane's
+    // color) and a subtler one on its window tab, one pulse per strike.
+    // Fires exactly when a sound passes its own gates. Absence = on.
+    // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md,
+    // SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md.
     #[serde(rename = "notify:tooltones:flash", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_flash: Option<bool>,
 

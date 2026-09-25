@@ -1,7 +1,8 @@
 # Activity flash matches its sound: same strikes, same timing, same relative intensity
 
-**Status:** active — Phase 1 (tool tones) shipped in PR #3717; Phases 2–3 not
-started. See §8 for what shipped and where it departs from §3.
+**Status:** active — Phase 1 (tool tones) shipped in PR #3717; Phase 2 (event
+sounds) in PR #3740; Phase 3 (waiting loop) not started, pending Q3.
+See §8–§9 for what shipped and where it departs from §3.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi).
 **Author:** Clamk.
@@ -68,7 +69,7 @@ have 3. Curated tool strikes land within 1.4 dB of each other in level (−18.1 
 pitch. Hashed syllables span a little wider, from −17.0 dB (76 ms sine) to −21.3 dB
 (45 ms triangle).
 
-### 2.2 Event sounds (no flash today)
+### 2.2 Event sounds (no flash before Phase 2)
 
 Source: `synth-fallback.ts`. Attack is 10 ms, and each strike decays to 0.0001 at
 150 ms. The chain is × master 0.6 only; there is **no** 0.25 tool-tones stage, so
@@ -101,7 +102,7 @@ reading of the owner's description:
 - **Single hard knock:** an event sound, either **message accepted** (660 Hz sine) or
   **turn interrupted / message rejected** (440 Hz triangle). They are the only
   single-strike sounds, and they are about 18 dB harder than a tool strike.
-  **Neither flashes today**, so this knock currently has no visual at all.
+  **Neither flashed before Phase 2** (§9), so this knock had no visual at all.
 - **Three smaller knocks:** the **Edit** syllable (or Agent: same shape, lower
   notes, slightly slower). It is quiet (−24 dBFS peak), fast (62 ms apart) and
   strikes three times. A less likely alternative is the waiting arpeggio (3 notes,
@@ -449,3 +450,56 @@ Verification:
 - **Not yet done:** §6 items 1–3 in a dev build (CDP keyframe check in the app, the
   A/V capture, and calibrating `FLASH_VISUAL_LEAD_MS`), and the owner's muted
   side-by-side comparison. Those need the running app and someone listening.
+- **Owner check (2026-09-25):** the owner ran a `task dev` build of the rebased
+  branch and approved the result ("it is good"). The A/V capture and
+  `FLASH_VISUAL_LEAD_MS` calibration were not done.
+
+## 9. What shipped: Phase 2, event sounds (2026-09-25)
+
+The single hard knock gets its visual. Every event sound that has a source pane
+(turn complete, errored, interrupted; message accepted, rejected) now flashes that
+pane's pill and window tab with its own pattern:
+
+| Sound | Strikes | Intensity |
+|---|---|---|
+| info: message accepted | 1 at 0 ms | 0.94 |
+| warning: turn interrupted, message rejected | 1 at 0 ms | 0.94 |
+| success: turn complete | 0, 70 ms | 0.997 |
+| error: turn errored, submit timed out | 0, 90 ms | 1.00 |
+
+That is about 1.8× a tool knock (0.51–0.56), per §3.2. Q1 did not need answering
+first: whichever of these is the owner's hard knock, its flash is derived from its
+own synth parameters.
+
+Code:
+
+- `flash-patterns.ts`: `flashPatternForCategory(c)`, built from
+  `synthParamsFor(c)` (a strike at 0, plus one at `second.delayMs`), with
+  intensity from `categoryStrikeLevelDb`.
+- `synth-fallback.ts` / `sound-player.ts`: `playSynthFallback()` and
+  `SoundPlayer.play()` return the context time the sound was scheduled at (null
+  when not primed). The asset path returns it too.
+- `sound-service.ts`: the bus subscriber emits the flash right after
+  `player.play()`, so past every gate the sound passed (master switch, per-event
+  toggle, focus suppression, per-id coalesce, replay). It uses the same
+  audible-time delay as tool tones (§3.6) and fires unprimed with delay 0.
+  Sounds with no `sourceBlockId` play but can't flash anything.
+- **Setting (Q6, as proposed in §3.7):** the one `notify:tooltones:flash` key now
+  covers all sounds. It is relabeled "Flash the tab and pane when a sound plays"
+  and moved out of the tool-call-tones block, which hides it when tones are off,
+  to sit under the master sound switch. The settings row id and search keywords
+  are kept. The schema description, the Rust doc comment and the settings
+  template say it covers all sounds.
+
+No departures from §3.5. Note that the flash follows focus suppression, so the focused
+pane in a focused window doesn't flash for its own turn-complete, because the sound
+is suppressed too. That matches "flash exactly when the sound plays".
+
+Known limit: patterns come from the synth. No event sound ships an asset file
+today (`sounds.ts`). If one ever does, its pattern must come from the recording,
+and the comment on `flashPatternForCategory` says so.
+
+Tests: `flash-patterns.test.ts` (category strike timing and intensity, the hard
+knock about 1.8× a tool knock) and a new "event-sound flash" suite in
+`sound-service.test.ts` (per-sound pattern, every gate, focus suppression, the
+shared toggle, no-source events, and the audible delay when primed).

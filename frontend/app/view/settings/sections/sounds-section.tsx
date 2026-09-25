@@ -88,10 +88,10 @@ export const SOUNDS_SETTINGS = {
     },
     toolTonesFlash: {
         id: "sounds.tool_tones_flash",
-        label: "Flash source tab",
-        description: "Briefly flash the pane tab each tone came from, in that pane's color, and subtly its window tab",
+        label: "Flash the tab and pane when a sound plays",
+        description: "Pulse the pane tab each sound came from, in that pane's color, and subtly its window tab — one pulse per knock, in time with the sound",
         section: "sounds",
-        keywords: ["activity flash", "tab flash", "highlight tab", "which pane", "notify:tooltones:flash"],
+        keywords: ["activity flash", "tab flash", "flash with sounds", "highlight tab", "which pane", "notify:tooltones:flash"],
     },
     waitingToneEnabled: {
         id: "sounds.waiting_tone_enabled",
@@ -146,6 +146,22 @@ export function SoundsSection(): JSX.Element {
                         <ToggleControl
                             checked={s()["notify:sounds:suppresswhenfocused"] !== false}
                             onChange={(v) => set("notify:sounds:suppresswhenfocused", v)}
+                        />
+                    }
+                />
+                {/* One toggle for every sound's flash, tool tones and event
+                    sounds alike, so it lives here rather than under tool-call
+                    tones (where turning tones off would hide it).
+                    SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md §3.7. */}
+                <SettingRow
+                    id={SOUNDS_SETTINGS.toolTonesFlash.id}
+                    indent
+                    label={SOUNDS_SETTINGS.toolTonesFlash.label}
+                    description={SOUNDS_SETTINGS.toolTonesFlash.description}
+                    control={
+                        <ToggleControl
+                            checked={s()["notify:tooltones:flash"] !== false}
+                            onChange={(v) => set("notify:tooltones:flash", v)}
                         />
                     }
                 />
@@ -244,18 +260,6 @@ export function SoundsSection(): JSX.Element {
                             <option value="all">All panes</option>
                             <option value="focused">Focused pane only</option>
                         </select>
-                    }
-                />
-                <SettingRow
-                    id={SOUNDS_SETTINGS.toolTonesFlash.id}
-                    indent
-                    label={SOUNDS_SETTINGS.toolTonesFlash.label}
-                    description={SOUNDS_SETTINGS.toolTonesFlash.description}
-                    control={
-                        <ToggleControl
-                            checked={s()["notify:tooltones:flash"] !== false}
-                            onChange={(v) => set("notify:tooltones:flash", v)}
-                        />
                     }
                 />
             </Show>

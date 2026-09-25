@@ -31,7 +31,7 @@ import { createEffect, createRoot } from "solid-js";
 import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { SOUNDS, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
-import { audibleFlashDelayMs, flashPatternForSyllable } from "./flash-patterns";
+import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable } from "./flash-patterns";
 import { paramsForTool } from "./tool-tones";
 import { TOOL_TONE_COALESCE_MS, ToolTonesPlayer } from "./tool-tones-player";
 import { WaitingTonePlayer } from "./waiting-tone-player";
@@ -188,10 +188,23 @@ export function installSoundService(): () => void {
         const last = lastFiredAt.get(ev.id) ?? 0;
         if (now - last < (def.coalesceMs ?? 300)) return;
         lastFiredAt.set(ev.id, now);
+        let startAt: number | null = null;
         try {
-            player.play(def, ev.override?.gain ?? 1);
+            startAt = player.play(def, ev.override?.gain ?? 1);
         } catch (e) {
             console.warn(`[sound] play threw for ${ev.id}`, e);
+        }
+        // The visual twin, past every gate the sound itself passed (master,
+        // per-event, focus suppression, coalesce) and whether or not the
+        // player is primed. SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md
+        // §3.5 (Phase 2).
+        if (ev.sourceBlockId && getSettingsKeyAtom("notify:tooltones:flash")() !== false) {
+            const ctx = player.getAudioContext();
+            emitActivityFlash({
+                blockId: ev.sourceBlockId,
+                pattern: flashPatternForCategory(def.category),
+                delayMs: ctx && typeof startAt === "number" ? audibleFlashDelayMs(ctx, startAt, nowMs()) : 0,
+            });
         }
     });
 

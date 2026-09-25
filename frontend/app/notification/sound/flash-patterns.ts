@@ -115,7 +115,7 @@ export function syllableStrikeLevelDb(p: SyllableParams): number {
     return strikeEnergyDb(syllableStrike(p)) - loudestStrikeDb();
 }
 
-/** An event sound's strike level relative to the loudest sound, in dB. */
+/** An event sound's strike level relative to the loudest sound, in dB (≤ 0). */
 export function categoryStrikeLevelDb(c: SoundCategory): number {
     return strikeEnergyDb(categoryStrike(c)) - loudestStrikeDb();
 }
@@ -131,6 +131,24 @@ export function flashPatternForSyllable(p: SyllableParams): FlashPattern {
     const intensity = intensityForLevel(syllableStrikeLevelDb(p));
     const step = p.durationMs + p.gapMs;
     return { strikes: p.tones.map((_, i) => ({ atMs: i * step, intensity })) };
+}
+
+/**
+ * An event sound's strikes: one at its onset, plus one for its second tone
+ * if it has one (`synth-fallback.ts` plays it `second.delayMs` later with
+ * the same envelope). info (message accepted) and warning (turn
+ * interrupted, message rejected) are the single hard knocks.
+ *
+ * Built from the synth parameters. No event sound ships an asset file
+ * today (sounds.ts); a sound given one would need its pattern from that
+ * recording, which this cannot know.
+ */
+export function flashPatternForCategory(c: SoundCategory): FlashPattern {
+    const intensity = intensityForLevel(categoryStrikeLevelDb(c));
+    const second = synthParamsFor(c).second;
+    const strikes = [{ atMs: 0, intensity }];
+    if (second) strikes.push({ atMs: second.delayMs, intensity });
+    return { strikes };
 }
 
 // ── Timing ───────────────────────────────────────────────────────────────

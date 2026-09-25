@@ -15,6 +15,7 @@ import {
     categoryStrikeLevelDb,
     FLASH_MAX_AUDIO_DELAY_MS,
     FLASH_MIN_INTENSITY,
+    flashPatternForCategory,
     flashPatternForSyllable,
     intensityForLevel,
     syllableStrikeLevelDb,
@@ -60,6 +61,27 @@ describe("flashPatternForSyllable", () => {
                 expect(s.intensity).toBeLessThan(0.56);
             }
         }
+    });
+});
+
+describe("flashPatternForCategory (event sounds, spec §2.2)", () => {
+    const pattern = (c: "success" | "info" | "warning" | "error") => flashPatternForCategory(c).strikes;
+
+    it("gives the single-knock sounds one strike and the two-tone ones two, on the synth's own timing", () => {
+        expect(pattern("info").map((s) => s.atMs)).toEqual([0]);
+        expect(pattern("warning").map((s) => s.atMs)).toEqual([0]);
+        expect(pattern("success").map((s) => s.atMs)).toEqual([0, 70]);
+        expect(pattern("error").map((s) => s.atMs)).toEqual([0, 90]);
+    });
+
+    it("strikes near full strength: the hard knock reads about twice as bright as a tool knock", () => {
+        for (const c of ["info", "warning"] as const) {
+            expect(pattern(c)[0].intensity).toBeCloseTo(0.94, 2);
+        }
+        expect(pattern("success")[0].intensity).toBeCloseTo(0.997, 3); // −0.1 dB
+        expect(pattern("error")[0].intensity).toBe(1);
+        const toolKnock = flashPatternForSyllable(paramsForTool("Edit")).strikes[0].intensity;
+        expect(pattern("warning")[0].intensity / toolKnock).toBeGreaterThan(1.7);
     });
 });
 

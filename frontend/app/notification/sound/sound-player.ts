@@ -88,11 +88,14 @@ export class SoundPlayer {
      * Play the given sound definition through the master bus.
      * No-op if the player is not yet primed. Picks the buffer path
      * when the asset is loaded; otherwise routes to the synth fallback.
+     *
+     * Returns the context time the sound was scheduled at, or null when
+     * nothing played (not primed). The activity flash times itself from it.
      */
-    play(def: SoundDef, gain = 1): void {
+    play(def: SoundDef, gain = 1): number | null {
         const ctx = this.ctx;
         const out = this.masterGain;
-        if (!ctx || !out) return;
+        if (!ctx || !out) return null;
         if (ctx.state === "suspended") {
             // A best-effort resume — the autoplay-prime path should
             // have settled this already; if the context was suspended
@@ -108,10 +111,11 @@ export class SoundPlayer {
             const perPlay = ctx.createGain();
             perPlay.gain.value = Math.max(0, Math.min(1, gain));
             src.connect(perPlay).connect(out);
-            src.start();
-            return;
+            const startAt = ctx.currentTime;
+            src.start(startAt);
+            return startAt;
         }
-        playSynthFallback(ctx, out, def.category, gain);
+        return playSynthFallback(ctx, out, def.category, gain);
     }
 
     private async loadAsset(asset: string): Promise<void> {
