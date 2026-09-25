@@ -102,6 +102,7 @@ impl PersistentSubprocessController {
         config: &PersistentSpawnConfig,
         attempted_resume_sid: Option<&str>,
         carries_packet: bool,
+        lease_epoch: Option<u64>,
     ) -> SegmentRef {
         let gfs = crate::backend::agent_session::global_transcript_store()?;
         let meta = self
@@ -128,6 +129,7 @@ impl PersistentSubprocessController {
             started_at_ms: now_ms(),
             continuity_rung: segs::rung_for_spawn(attempted_resume_sid.is_some(), carries_packet),
             predecessor_segment_id: None,
+            lease_epoch,
         };
         let rung = start.continuity_rung;
         match segs::record_start(gfs, start) {

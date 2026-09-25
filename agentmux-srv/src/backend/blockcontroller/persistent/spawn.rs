@@ -465,7 +465,7 @@ impl PersistentSubprocessController {
             inner.stdin_tx = Some(msg_tx);
             // The same `Arc` when an earlier generation's lease was reused
             // (see `acquire_agent_lease`), so no release happens here.
-            inner.agent_lease = agent_lease;
+            inner.agent_lease = agent_lease.clone();
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
         // Now visible to `session_held_elsewhere` — a concurrent resume of
@@ -509,7 +509,13 @@ impl PersistentSubprocessController {
         // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.1, P1). The
         // stdout reader records its provider session id, the waiter its end.
         let segment: super::segments::SegmentRef = agent_uid_for_registry.as_deref().and_then(|uid| {
-            self.record_segment_start(uid, &config, attempted_resume_sid.as_deref(), continuation.is_some())
+            self.record_segment_start(
+                uid,
+                &config,
+                attempted_resume_sid.as_deref(),
+                continuation.is_some(),
+                agent_lease.as_ref().map(|l| l.epoch()),
+            )
         });
         *self.current_segment.lock().unwrap() = segment.as_ref().map(|(_, id)| id.clone());
         let segment_read = segment.clone();
@@ -692,6 +698,13 @@ impl PersistentSubprocessController {
         // task below — the process-waiter task (spawned further down) needs
         // its own copy to flush a held-back `pending_error_result_line`.
         let global_output_zone_wait = global_output_zone.clone();
+        // Writer-side fence on that shared record
+        // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 3): once this
+        // process has lost the agent's lease, its output still reaches this
+        // pane's own log but no longer the agent's record. `None` when no
+        // lease is held (no store, or no UID) — nothing to fence.
+        let record_fence = agent_lease.as_ref().map(|l| l.record_fence());
+        let record_fence_wait = record_fence.clone();
 
         // codex P1 on PR #2371: the JoinHandle is kept (not discarded) so the
         // process-waiter task can await this task's full completion before
@@ -1045,7 +1058,7 @@ impl PersistentSubprocessController {
                                                 PERSISTENT_OUTPUT_SUBJECT,
                                                 line.as_bytes(),
                                                 filestore_read.as_ref(),
-                                                global_output_zone.as_deref(),
+                                                crate::backend::agent_admission::fenced_zone(global_output_zone.as_deref(), &record_fence),
                                             );
                                         }
                                     }
@@ -1057,7 +1070,7 @@ impl PersistentSubprocessController {
                                                 PERSISTENT_OUTPUT_SUBJECT,
                                                 line.as_bytes(),
                                                 filestore_read.as_ref(),
-                                                global_output_zone.as_deref(),
+                                                crate::backend::agent_admission::fenced_zone(global_output_zone.as_deref(), &record_fence),
                                             );
                                         }
                                         // reagentx P2 on PR #2421: this flushes
@@ -1151,7 +1164,7 @@ impl PersistentSubprocessController {
                                                 PERSISTENT_OUTPUT_SUBJECT,
                                                 old_line.as_bytes(),
                                                 filestore_read.as_ref(),
-                                                global_output_zone.as_deref(),
+                                                crate::backend::agent_admission::fenced_zone(global_output_zone.as_deref(), &record_fence),
                                             );
                                         }
                                         // reagentx P1 on PR #2421 (round 2):
@@ -1272,7 +1285,7 @@ impl PersistentSubprocessController {
                         PERSISTENT_OUTPUT_SUBJECT,
                         line_with_newline.as_bytes(),
                         filestore_read.as_ref(),
-                        global_output_zone.as_deref(),
+                        crate::backend::agent_admission::fenced_zone(global_output_zone.as_deref(), &record_fence),
                     );
                 } else {
                     tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");
@@ -1333,7 +1346,7 @@ impl PersistentSubprocessController {
                     super::segments::record_segment_end(
                         &segment_wait,
                         crate::backend::continuity_segments::exit_reason(exit_code),
-                        global_output_zone_wait.as_deref(),
+                        crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                     );
                     tracing::info!(
                         block_id = %block_id_wait,
@@ -1617,7 +1630,7 @@ impl PersistentSubprocessController {
                                         PERSISTENT_OUTPUT_SUBJECT,
                                         line.as_bytes(),
                                         filestore_wait.as_ref(),
-                                        global_output_zone_wait.as_deref(),
+                                        crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                                     );
                                 }
                             }
@@ -1637,7 +1650,7 @@ impl PersistentSubprocessController {
                                         PERSISTENT_OUTPUT_SUBJECT,
                                         line.as_bytes(),
                                         filestore_wait.as_ref(),
-                                        global_output_zone_wait.as_deref(),
+                                        crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                                     );
                                 }
                                 // Classify + surface this exit's error to the
@@ -1709,7 +1722,7 @@ impl PersistentSubprocessController {
                                             PERSISTENT_OUTPUT_SUBJECT,
                                             line.as_bytes(),
                                             filestore_wait.as_ref(),
-                                            global_output_zone_wait.as_deref(),
+                                            crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                                         );
                                     }
                                     }
@@ -1801,7 +1814,7 @@ impl PersistentSubprocessController {
                     super::segments::record_segment_end(
                         &segment_wait,
                         segment_end_reason,
-                        global_output_zone_wait.as_deref(),
+                        crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                     );
 
                     // reagentx P1 on PR #2371: mirror the child.wait() arm's
@@ -1968,7 +1981,7 @@ impl PersistentSubprocessController {
                                 PERSISTENT_OUTPUT_SUBJECT,
                                 line.as_bytes(),
                                 filestore_wait.as_ref(),
-                                global_output_zone_wait.as_deref(),
+                                crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                             );
                         }
                         }
