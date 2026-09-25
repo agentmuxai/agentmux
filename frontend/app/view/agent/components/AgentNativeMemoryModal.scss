@@ -227,6 +227,12 @@
     // consistent whichever of the two PrimitiveListDetail shows.
     margin-top: var(--space-2);
     border: 1px solid var(--border-color);
+    // A definite height, not just flex: 1 — PrimitiveListDetail's detail body
+    // is a block (not flex) container, and the pinned layout's bottom region
+    // needs a definite column height for its min(240px, 50%) floor and to
+    // fill down to the pane's bottom edge.
+    box-sizing: border-box;
+    height: calc(100% - var(--space-2));
 }
 
 // The file view's bars, history and content live in a PinnedEditorLayout
