@@ -23,6 +23,9 @@ import type { NodeModel } from "@/layout/index";
 // mount, so it always sees whatever this currently points at) and by
 // tests, to count how many times renderPaneChrome actually fires.
 let renderPaneChromeCallCount = { count: 0 };
+// The NodeModel the most recent renderPaneChrome call was handed — what the
+// shared chrome reads `activeViewModel()` from for the pane's whole life.
+let lastChromeNodeModel: NodeModel | null = null;
 
 // Hoisted mocks — factories run before imports, so the real Block/
 // resolveEffectiveViewType and the real MOS store are replaced with
@@ -47,8 +50,12 @@ vi.mock("@/app/block/block", () => ({
                 {
                     viewType: "agent",
                     viewComponent: null,
-                    renderPaneChrome: (_nodeModel: NodeModel, content: any) => {
+                    // Which member this vm belongs to, so a test can tell
+                    // whose vm the chrome currently sees as active.
+                    blockId: props.nodeModel.blockId,
+                    renderPaneChrome: (nodeModel: NodeModel, content: any) => {
                         renderPaneChromeCallCount.count++;
+                        lastChromeNodeModel = nodeModel;
                         return (
                             <div data-testid="chrome-root">
                                 <div data-testid="chrome-header">chrome</div>
@@ -187,6 +194,7 @@ afterEach(() => {
     blockMetaSignals.clear();
     fakeNodesByNodeId.clear();
     renderPaneChromeCallCount = { count: 0 };
+    lastChromeNodeModel = null;
 });
 
 describe("PaneLeafChrome — passthrough (not hoisted)", () => {
@@ -391,6 +399,53 @@ describe("PaneLeafChrome — keep-alive (term)", () => {
 // KEEP_ALIVE_TYPES alongside "term" after auditing agent's own entangled
 // per-tab state (quick-fork, launch-in-place) for keep-alive safety — same
 // acceptance criteria as the term suite above, just for the other type.
+// RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md
+// (Part 2): a pane that starts as a non-keep-alive type (Swarm) hoists its
+// chrome once, then activating an agent tab latches keep-alive on mid-life.
+// The chrome must still see the active member's vm through the NodeModel it
+// was handed at first hoist, or anything it hands the active vm (the busy
+// ring's slot) never arrives. Before #3714 made `chromeNodeModel` read the
+// per-id slots unconditionally, it didn't; these guard that behavior.
+describe("PaneLeafChrome — chrome tracks the active vm after keep-alive latches mid-life", () => {
+    it("reports the agent tab's vm as active in a pane that started as Swarm", async () => {
+        setBlockView("s1", "swarm");
+        setBlockView("a1", "agent");
+        setBlockStack("node-1", ["s1", "a1"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("s1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        expect(lastChromeNodeModel).not.toBeNull();
+        const chromeNodeModel = lastChromeNodeModel!;
+
+        setActiveBlockId("a1");
+
+        // Keep-alive is on now: both members mounted at once.
+        expect(screen.getByTestId("block-s1")).toBeInTheDocument();
+        expect(screen.getByTestId("block-a1")).toBeInTheDocument();
+        expect((chromeNodeModel.activeViewModel?.() as any)?.blockId).toBe("a1");
+        // Chrome itself was not rebuilt to get there.
+        expect(renderPaneChromeCallCount.count).toBe(1);
+    });
+
+    it("follows later switches between members too", async () => {
+        setBlockView("s1", "swarm");
+        setBlockView("a1", "agent");
+        setBlockStack("node-1", ["s1", "a1"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("s1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        const chromeNodeModel = lastChromeNodeModel!;
+        setActiveBlockId("a1");
+        setActiveBlockId("s1");
+
+        expect((chromeNodeModel.activeViewModel?.() as any)?.blockId).toBe("s1");
+    });
+});
+
 describe("PaneLeafChrome — keep-alive (agent)", () => {
     it("keeps every stack member's Block mounted across a switch instead of remounting", async () => {
         setBlockView("b1", "agent");
@@ -438,6 +493,32 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
     // own dormancy-pause fixes depend on: a hidden stack member is marked
     // dormant (visibility:hidden, pointer-events:none), not merely "not the
     // active one" — see setKeepAliveBlockDormant's own call site below.
+    // Per-tab keep-alive (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5): only a
+    // member whose OWN view type keeps state stays mounted while inactive.
+    // It used to be per pane: one agent tab kept Help mounted too, which is
+    // what let Help's content ghost over the next tab.
+    it("keeps browser tabs mounted while inactive, but unmounts a Help tab you switch away from", async () => {
+        setBlockView("b1", "agent");
+        setBlockView("b2", "browser");
+        setBlockView("b3", "help");
+        setBlockStack("node-1", ["b1", "b2", "b3"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("b3");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        setActiveBlockId("b1"); // agent active: pane is keep-alive now
+        expect(screen.queryByTestId("block-b1")).not.toBeNull();
+        expect(screen.queryByTestId("block-b2")).not.toBeNull(); // browser: kept alive
+        expect(screen.queryByTestId("block-b3")).toBeNull(); // help: unmounted
+
+        setActiveBlockId("b3"); // back to Help: mounted again, fresh
+        expect(screen.queryByTestId("block-b3")).not.toBeNull();
+        setActiveBlockId("b2");
+        expect(screen.queryByTestId("block-b3")).toBeNull();
+        expect(screen.queryByTestId("block-b1")).not.toBeNull(); // agent: kept alive
+    });
+
     it("marks a hidden stack member's slot with visibility:hidden and pointer-events:none", async () => {
         setBlockView("b1", "agent");
         setBlockView("b2", "agent");

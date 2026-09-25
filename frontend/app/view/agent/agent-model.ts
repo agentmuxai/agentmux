@@ -53,9 +53,9 @@ export class AgentViewModel implements ViewModel {
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
      *  to know where to portal the marching-ants progress bar. Populated
-     *  externally by the shared pane chrome's `renderBelowHeader` slot
-     *  (this model's own `paneChromeModel`, via `setProgressBarMount`) —
-     *  `null` until chrome has mounted and called it at least once. */
+     *  externally by the shared pane chrome's own progress-bar slot
+     *  (PaneChrome.tsx, via `setProgressBarMount`) while this model is the
+     *  pane's active one — `null` otherwise. */
     progressBarMount: () => HTMLDivElement | null;
     /** NOT part of the shared `ViewModel` contract. ReAgent P2 on
      *  SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's PR: owned here
