@@ -18,6 +18,7 @@ import { onMount, Show, createMemo, type Accessor, type JSX } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
+import { AmbientNarrationBlock } from "../components/AmbientNarrationBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
@@ -224,6 +225,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
                 <MarkdownBlock node={props.node() as Extract<DocumentNode, { type: "markdown" }>} />
+            </Show>
+            <Show when={props.node() && props.node().type === "ambient_narration"}>
+                <AmbientNarrationBlock node={props.node() as Extract<DocumentNode, { type: "ambient_narration" }>} />
             </Show>
             <Show when={props.node() && props.node().type === "tool"}>
                 <ToolBlock
