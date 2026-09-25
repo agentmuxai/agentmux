@@ -113,13 +113,21 @@ describe("Notifications & Tray — desktop notifications", () => {
     it("hides the per-kind rows when the master switch is off", () => {
         settings = { "notify:os:enabled": false };
         render(() => <NotificationsSection />);
-        expect(screen.queryByText("Agent needs input")).toBeNull();
+        expect(screen.queryByText("Agent has a question")).toBeNull();
     });
 
     it("per-kind toggles write their own keys", () => {
         render(() => <NotificationsSection />);
         fireEvent.click(toggleFor("Agent finished"));
         expect(setConfig.mock.calls[0][1]).toEqual({ "notify:os:turncompleted": false });
+    });
+
+    it("the summary line defaults ON and writes notify:os:summary", () => {
+        render(() => <NotificationsSection />);
+        const t = toggleFor("Show what the agent is working on");
+        expect(t.getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(t);
+        expect(setConfig.mock.calls[0][1]).toEqual({ "notify:os:summary": false });
     });
 
     it("the test button calls notify.test", () => {

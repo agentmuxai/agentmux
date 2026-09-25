@@ -9,6 +9,11 @@ import type { NotifyPriority } from "./NotifyPriority";
  */
 export type OsNotification = { id: string, kind: NotifyKind, priority: NotifyPriority, block_id: string, agent_name: string, title: string, body: string | null, 
 /**
+ * What the agent is working on — a small third line under the body
+ * (rich-content spec §1). Absent when the agent has none.
+ */
+summary?: string, 
+/**
  * Stable per group: OS toast replace/remove key (≤16 chars, Win10-safe).
  */
 tag: string, created_at_ms: number, };
