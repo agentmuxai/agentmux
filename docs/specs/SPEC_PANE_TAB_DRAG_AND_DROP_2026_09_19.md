@@ -9,7 +9,7 @@ always shows its tabs, Window-Tab drop flash + landing bounce, moving a
 pane's last tab closes it; see
 `SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md`). §3.3 was
 **revised** 2026-09-24 (a drop on a pane's body does the same as a drop on its
-header, no split) and ships in the PR that commits this revision. §3.5
+header, no split) and shipped in PR #3706. §3.5
 (tear-off to a floating pane) is designed below (revision 2026-09-24) and
 ships in its own follow-up PR.
 
