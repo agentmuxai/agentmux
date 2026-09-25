@@ -399,13 +399,13 @@ describe("PaneLeafChrome — keep-alive (term)", () => {
 // KEEP_ALIVE_TYPES alongside "term" after auditing agent's own entangled
 // per-tab state (quick-fork, launch-in-place) for keep-alive safety — same
 // acceptance criteria as the term suite above, just for the other type.
-// RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md:
-// a pane that starts as a non-keep-alive type (Swarm) hoists its chrome with
-// the leaf's own NodeModel. Activating an agent tab later latches keep-alive
-// on, after which every member reports its vm to its OWN per-id slot — the
-// chrome must still see the active member's vm through the NodeModel it
+// RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md
+// (Part 2): a pane that starts as a non-keep-alive type (Swarm) hoists its
+// chrome once, then activating an agent tab latches keep-alive on mid-life.
+// The chrome must still see the active member's vm through the NodeModel it
 // was handed at first hoist, or anything it hands the active vm (the busy
-// ring's slot) never arrives.
+// ring's slot) never arrives. Before #3714 made `chromeNodeModel` read the
+// per-id slots unconditionally, it didn't; these guard that behavior.
 describe("PaneLeafChrome — chrome tracks the active vm after keep-alive latches mid-life", () => {
     it("reports the agent tab's vm as active in a pane that started as Swarm", async () => {
         setBlockView("s1", "swarm");

@@ -75,6 +75,14 @@ tab's bar still never reached it. The cause is a second latch in
 The same stale `activeViewModel()` also feeds the header's `viewModel` and
 the tab strip's `liveViewModel` in these panes.
 
+**Already fixed on main by #3714.** While this PR was in progress, #3714
+(pane tabs keep their own name, icon and content) rewrote `chromeNodeModel`
+to read the per-id slots unconditionally, whether or not keep-alive is on.
+That fixes Part 2 on its own. This PR's own Part 2 change (a
+delegating NodeModel handed to the chrome) became a no-op after rebasing onto
+it, which ReAgent caught on #3722, and was dropped. The Part 2 regression
+tests stay: they fail on pre-#3714 main and pass on current main.
+
 ## Fix
 
 1. `PaneChrome.tsx` renders `.pane-progress-bar-slot` on every pane and
@@ -82,9 +90,8 @@ the tab strip's `liveViewModel` in these panes.
    re-pointing on every switch. The agent's `PaneChromeModel` no longer
    supplies the slot. The slot's styles and `--progress-bar-color` move from
    `.agent-pane-stack` to `.pane-stack` (`PaneChrome.scss`).
-2. `pane-leaf-chrome.tsx` hands the chrome one stable NodeModel whose
-   `activeViewModel` delegates through the `chromeNodeModel()` memo, so it
-   follows the mid-life keep-alive switch.
+2. Part 2: already fixed on main by #3714 (see above). No change in this
+   PR beyond regression tests.
 
 ## Verification
 
@@ -92,8 +99,10 @@ the tab strip's `liveViewModel` in these panes.
   `PaneChromeModel`; it's handed to, taken back from, and moved between
   active vms) and `pane-leaf-chrome.test.tsx` (the chrome's
   `activeViewModel()` reports the agent tab in a Swarm-first pane after
-  keep-alive latches, and follows later switches). All six fail without
-  their half of the fix.
+  keep-alive latches, and follows later switches). The four `PaneChrome`
+  tests fail without Part 1's fix. The two `pane-leaf-chrome` tests failed
+  on the pre-#3714 base this was first written against, and pass on current
+  main.
 - Live, `task dev`, driven over CDP. In a pane with the Swarm tab active at
   load, switching to an agent tab (Mopeo) put the agent's
   `.agent-pane-progress-bar` into that pane's `.pane-progress-bar-slot`.
