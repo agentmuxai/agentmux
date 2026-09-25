@@ -91,6 +91,22 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
         },
     )
     .await;
+    // Best-effort, like the delete_block saga's identical dispatch: the block
+    // has already moved, so a failed prune must not fail the tear-off. But it
+    // must not be silent either — it's exactly the dangling-leaf case this
+    // step exists to prevent (reagent P1 on #3708). The queued frontend delete
+    // below still runs either way.
+    if let Some(msg) = prune_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        tracing::warn!(
+            source_tab = %source_tab_id,
+            block_id = %block_id,
+            "TearOffBlock: backend source-layout prune failed (best-effort; the source window's queued delete still applies): {}",
+            msg
+        );
+    }
     for ev in &prune_events {
         let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
     }
