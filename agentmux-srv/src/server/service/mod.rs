@@ -19,6 +19,7 @@ mod client;
 mod credential;
 mod host_ipc;
 mod introspect;
+mod memory_adopt;
 pub(crate) mod layout_helpers;
 mod misc;
 mod object;
@@ -116,6 +117,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         "object" => object::handle_object_service(state, call).await,
         "client" => client::handle_client_service(state, call).await,
         "credential" => credential::handle_credential_service(state, call).await,
+        "memoryadopt" => memory_adopt::handle_memory_adopt_service(state, call).await,
         "window" => window::handle_window_service(state, call).await,
         "workspace" => workspace::handle_workspace_service(state, call).await,
         "host_ipc" => host_ipc::handle_host_ipc_service(state, call).await,

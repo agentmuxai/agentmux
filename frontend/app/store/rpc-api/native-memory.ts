@@ -27,6 +27,10 @@ export type { NativeMemoryReadFileResult } from "@/types/rpc/NativeMemoryReadFil
 export type { NativeMemoryHistoryResult } from "@/types/rpc/NativeMemoryHistoryResult";
 export type { NativeMemoryDiffResult } from "@/types/rpc/NativeMemoryDiffResult";
 export type { NativeMemoryRevertResult } from "@/types/rpc/NativeMemoryRevertResult";
+export type { NativeMemoryAdoptionList } from "@/types/rpc/NativeMemoryAdoptionList";
+export type { NativeMemoryAdoptionCandidate } from "@/types/rpc/NativeMemoryAdoptionCandidate";
+export type { NativeMemoryAdoptionFile } from "@/types/rpc/NativeMemoryAdoptionFile";
+export type { NativeMemoryAdoptionListResult } from "@/types/rpc/NativeMemoryAdoptionListResult";
 
 import type { CommandNativeMemoryListData } from "@/types/rpc/CommandNativeMemoryListData";
 import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeMemoryReadFileData";
@@ -34,6 +38,8 @@ import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNative
 import type { CommandNativeMemoryHistoryData } from "@/types/rpc/CommandNativeMemoryHistoryData";
 import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
 import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
+import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
+import type { NativeMemoryAdoptionListResult as NativeMemoryAdoptionListResultT } from "@/types/rpc/NativeMemoryAdoptionListResult";
 import type { NativeMemoryListResult as NativeMemoryListResultT } from "@/types/rpc/NativeMemoryListResult";
 import type { NativeMemoryReadFileResult as NativeMemoryReadFileResultT } from "@/types/rpc/NativeMemoryReadFileResult";
 import type { NativeMemoryHistoryResult as NativeMemoryHistoryResultT } from "@/types/rpc/NativeMemoryHistoryResult";
@@ -55,6 +61,19 @@ export const NativeMemoryApi = {
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("agent:memory:write_file", data, opts);
+    },
+
+    /**
+     * The agent's memory folders under its earlier accounts (and files held
+     * at first sighting), offered for adoption — SPEC_MEMORY_FOLLOWS_THE_AGENT
+     * §2.1.4. Adopting goes through the host's confirmation window, not an RPC.
+     */
+    NativeMemoryAdoptionListCommand(
+        client: RpcClient,
+        data: CommandNativeMemoryAdoptionListData,
+        opts?: RpcOpts,
+    ): Promise<NativeMemoryAdoptionListResultT> {
+        return client.rpcCall("agent:memory:adoption_list", data, opts);
     },
 
     NativeMemoryHistoryCommand(
