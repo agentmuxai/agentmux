@@ -365,6 +365,28 @@ describe("GlobalBundleManager — full view: pinned editor, base-carrying save, 
     });
 });
 
+describe("GlobalBundleManager — overlapping refreshes", () => {
+    test("a stale list that resolves last never overwrites a fresher one", async () => {
+        listMemoriesMock.mockResolvedValueOnce([bundle("g-a", "Alpha", "v0")]);
+        render(() => <GlobalBundleManager />);
+        await waitFor(() => expect(tileTitles()).toContain("Alpha"));
+
+        let resolveStale: (v: Bundle[]) => void = () => {};
+        listMemoriesMock.mockImplementationOnce(() => new Promise<Bundle[]>((r) => (resolveStale = r)));
+        listMemoriesMock.mockResolvedValueOnce([bundle("g-a", "Fresh", "v2")]);
+        const onChanged = mpsHub.handlers.get("memories:changed");
+        expect(onChanged).toBeDefined();
+        onChanged!(); // the slow, older refresh
+        onChanged!(); // the newer refresh, which answers first
+        await waitFor(() => expect(tileTitles()).toContain("Fresh"));
+
+        resolveStale([bundle("g-a", "Stale", "v1")]);
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tileTitles()).toContain("Fresh");
+        expect(tileTitles()).not.toContain("Stale");
+    });
+});
+
 describe("GlobalBundleManager — read-only CLAUDE.md", () => {
     test("renders nothing for it before the fetch resolves", async () => {
         getClaudeGlobalConfigMock.mockReturnValue(new Promise(() => {}));
