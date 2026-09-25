@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-24
 **Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; Phase 2 (Take over) in PR
-#3742; see §12 and §13 for what was built and what was left out. Phases 3–5 not
-started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
+#3742; Phase 3 (record fencing) in PR #3744. See §12–§14 for what was built and what was left out. Phases 4 (LAN) and
+5 (WAN) not started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
 proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-09-24: *"by mistake I opened up an instance of you in a 57.2 version running on the same
