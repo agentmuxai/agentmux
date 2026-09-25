@@ -15,7 +15,7 @@ import { resolveTermScrollback } from "./termscrollback";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
-import { setTermPaneChromeModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
+import { setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -24,11 +24,7 @@ import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
-import {
-    setActiveBlockInStack,
-    type NodeModel,
-} from "@/layout/index";
-import { findNode } from "@/layout/lib/layoutNode";
+import type { NodeModel } from "@/layout/index";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -473,10 +469,8 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
  * (no progress-bar slot, no picker cross-fade, no pane-scope ModalLayer).
  *
  * `anchorBlockId` is whichever stack member's `TermViewModel` first called
- * `renderPaneChrome`; it is deliberately NOT used to resolve the owning
- * `LayoutNode` (that member's tab can be closed while chrome lives on) —
- * `getOwnNode` uses the leaf's own stable `nodeModel.nodeId` instead, the
- * same correction ReAgent caught on the agent pane in #3136.
+ * `renderPaneChrome`; it is only a fallback for the active block id (that
+ * member's tab can be closed while chrome lives on).
  */
 /**
  * Terminal's opt-in to the ONE shared pane chrome
@@ -484,19 +478,12 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
  * Everything the old `TermPaneChrome` component rendered around the
  * content (root box, focus ring, header row, tabs, ErrorBoundary) is the
  * shared chrome's job now; what stays here is only what is genuinely
- * terminal's: focus hand-off on a tab switch, its connection button, the
- * new-tab cwd, and the body wrapper its background image / runtime badge
- * need to span. Tab labels live in term-pane-tab.ts.
+ * terminal's: its connection button, the new-tab cwd, and the body wrapper
+ * its background image / runtime badge need to span. Tab labels live in
+ * term-pane-tab.ts. Focus hand-off on a tab switch is the host's, for every
+ * tab type (block.tsx, Pane Tab contract Phase 3b).
  */
 export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
-    // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — see that
-    // field's own doc comment (layout/lib/types.ts) and
-    // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md: this pane's
-    // own tab is not necessarily "whichever tab is globally active right
-    // now" at the moment chrome first constructs.
-    const layoutModel = nodeModel.layoutModel;
-
-    const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
     // Tracks the CURRENTLY ACTIVE member, not the anchor — getMuxObjectAtom
@@ -504,35 +491,6 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
     // established in #3134 for exactly this kind of switch-surviving reader.
     const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
 
-    // No leaf reveal gate on a switch any more. The gate existed
-    // because a switch used to force a WHOLE-LEAF remount
-    // (chrome included) — that no longer happens: pane-leaf-chrome.tsx's
-    // inner <Key> rebuilds only the active member's own <Block>, and this
-    // component stays mounted throughout. Keeping them would actively CAUSE
-    // a flash, since gatingNodeIds() hides the whole node. The content's own
-    // settle is already covered by Block's ready-gate cross-fade (block.tsx).
-    // Same removal, same reasoning, as the agent pane's handlers.
-    const handleTermTabSwitch = (targetBlockId: string) => {
-        if (targetBlockId === activeBlockId()) return;
-        const node = getOwnNode();
-        if (!node) return;
-        const wasFocused = nodeModel.isFocused();
-        setActiveBlockInStack(layoutModel, node.id, targetBlockId);
-        // Terminal panes keep every stack member's <Block> mounted
-        // (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES) instead of swapping
-        // which one exists — so the target tab's own onMount-driven
-        // `wasFocused && giveFocus()` (TerminalView, term.tsx) only ever
-        // fires on that tab's FIRST-ever activation, not on a repeat
-        // switch back to an already-mounted one. Replicate that hand-off
-        // explicitly here instead. `nodeModel` is `chromeNodeModel()` from
-        // pane-leaf-chrome.tsx — its `activeViewModel()` is a live lookup
-        // keyed by the CURRENT active blockId, so this already reads the
-        // TARGET tab's own ViewModel once `setActiveBlockInStack` above has
-        // taken effect.
-        if (wasFocused) {
-            (nodeModel.activeViewModel?.() as { giveFocus?: () => void } | null)?.giveFocus?.();
-        }
-    };
     // NOT stand-ins, unlike AgentPaneChrome's: TermViewModel sets
     // `manageConnection` to `!isCmd`, i.e. TRUE for every ordinary
     // terminal, so BlockFrame_Header really does render the connection
@@ -560,12 +518,10 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
             })(),
     );
     return {
-        // Returns true ("handled"): a terminal tab switch has to restore
-        // focus to the newly-active xterm.
-        onActivate: (id: string) => {
-            handleTermTabSwitch(id);
-            return true;
-        },
+        // No `onActivate`: a tab switch is the shared chrome's ordinary
+        // stack switch, and the HOST hands focus to the newly visible tab
+        // when the pane is focused, for every tab type (block.tsx, Pane Tab
+        // contract Phase 3b).
         // term's ConnectionButton (manageConnection, TermViewModel) is a
         // real live feature BlockFrame_Header renders — threaded through
         // unchanged.
@@ -591,18 +547,18 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
         // terminal, so they need a wrapper around the content region
         // rather than a slot beside it (term.scss's own
         // `> .term-pane-stack-body` positioning depends on this box).
-        wrapContent: (content: JSX.Element) => (
-            <div class="term-pane-stack-body">
-                <Show when={termBg()}>
-                    <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
-                </Show>
-                <Show when={runtimeLabel()}>
-                    <div class="agent-runtime-badge" title="Agent running time">
-                        {runtimeLabel()}
-                    </div>
-                </Show>
-                {content}
-            </div>
+        bodyClass: "term-pane-stack-body",
+        renderBehindContent: () => (
+            <>
+            <Show when={termBg()}>
+                <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
+            </Show>
+            <Show when={runtimeLabel()}>
+                <div class="agent-runtime-badge" title="Agent running time">
+                    {runtimeLabel()}
+                </div>
+            </Show>
+            </>
         ),
     };
 }
@@ -612,8 +568,5 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
 
 // Register TerminalView with the ViewModel to break the circular dependency
 setTerminalViewComponent(TerminalView);
-// Same late-binding registration, for the hoisted chrome half — see
-// setTermPaneChromeModel's own comment in termViewModel.ts.
-setTermPaneChromeModel(buildTermPaneChromeModel);
 
 export { TermViewModel };

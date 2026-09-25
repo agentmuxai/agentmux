@@ -4,10 +4,10 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { invokeCommand } from "@/app/platform/ipc";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
-import { TAB_VISIBILITY_CHANGED_EVENT } from "@/app/workspace/window-tab-visibility";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
-import { isBlockDormant } from "@/app/store/block-component-registry";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
 
 export interface PaneRect {
@@ -25,23 +25,23 @@ export interface PaneRectSync {
 }
 
 /**
- * True if `el` sits inside an inactive workspace tab (workspace.tsx): an
- * ancestor that is `content-visibility: hidden` (the default, PR #3239), or
- * one marked `data-tab-hidden-laid-out` (an inactive tab kept laid out with
- * `window:keepinactivetabslaidout`, hidden by `visibility` instead). Either
- * way the element's own `getBoundingClientRect()` keeps returning its real
- * size, so the native browser pane would stay drawn over the active tab; see
- * the call site. Keyed on the marker rather than computed `visibility`,
- * which the reveal gate also sets on the tab being shown (codex P1 on #3686).
+ * Which mount of a block's browser view owns its native page. The host keys
+ * the page by block id, and a view can mount again before an earlier mount's
+ * `browser_pane_create` returns (a split, a layout rebuild, a hot reload); the
+ * host then answers the newer create with `create-already-live` and the newer
+ * mount adopts the page. The LATEST mount to request it owns it: an older
+ * mount must not close it on unmount or as a "finished after unmount" orphan,
+ * or the newer mount is left with no page — a black pane
+ * (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §2.4).
  */
-export function isInsideHiddenTabContent(el: HTMLElement): boolean {
-    let node: HTMLElement | null = el;
-    while (node) {
-        if (node.dataset.tabHiddenLaidOut === "true") return true;
-        if (getComputedStyle(node).contentVisibility === "hidden") return true;
-        node = node.parentElement;
-    }
-    return false;
+const nativePaneOwners = new Map<string, symbol>();
+
+/** Releases `token`'s claim on `blockId`'s native page; true when it still
+ *  owned it, i.e. the caller should close the page. */
+function releaseNativePane(blockId: string, token: symbol | null): boolean {
+    if (token == null || nativePaneOwners.get(blockId) !== token) return false;
+    nativePaneOwners.delete(blockId);
+    return true;
 }
 
 /**
@@ -59,6 +59,9 @@ export function usePaneRectSync(params: {
     diag: (msg: string) => void;
 }): PaneRectSync {
     const { model, placeholderRef, windowLabel, diag } = params;
+    // The tab's one visibility signal (Pane Tab contract Phase 3): the native
+    // page is collapsed whenever the tab isn't "active".
+    const visibility = usePaneTabVisibility(model.blockId);
 
     let resizeObserver: ResizeObserver | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
@@ -112,6 +115,10 @@ export function usePaneRectSync(params: {
 
     const syncPosition = () => {
         if (!placeholderRef() || !paneCreated() || model.closed) return;
+        // Collapse whenever the tab isn't visible (`usePaneTabVisibility`):
+        // its window tab isn't displayed, or it's a kept-alive tab that isn't
+        // its pane's active one. The placeholder's rect can't tell:
+        //
         // Inside an inactive workspace tab (content-visibility:hidden since
         // PR #3239 — workspace.tsx), the placeholder's getBoundingClientRect()
         // keeps returning its last-known REAL size — unlike the display:none
@@ -125,14 +132,10 @@ export function usePaneRectSync(params: {
         // entirely, independent of it. codex P1 on PR #3239.
         //
         // Same for a browser that is a kept-alive but INACTIVE pane tab
-        // (pane-leaf-chrome keeps every tab of a keep-alive pane mounted and
-        // only hides the inactive ones with `visibility`, which changes
-        // neither this rect nor any window-tab marker). Without this its
+        // (pane-leaf-chrome keeps it mounted and only hides it with
+        // `visibility`, which doesn't change this rect). Without this its
         // native page stayed drawn over whichever tab was active in the pane.
-        const rect =
-            isInsideHiddenTabContent(placeholderRef()!) || isBlockDormant(model.blockId)()
-                ? { x: 0, y: 0, width: 0, height: 0 }
-                : paneRect();
+        const rect = visibility() !== "active" ? { x: 0, y: 0, width: 0, height: 0 } : paneRect();
         if (
             lastSentRect &&
             lastSentRect.x === rect.x &&
@@ -180,9 +183,14 @@ export function usePaneRectSync(params: {
     // native page would be created afterwards and never closed, left drawn
     // over whatever tab is active.
     let disposed = false;
+    // This mount's claim on the block's native page (`nativePaneOwners`).
+    let ownerToken: symbol | null = null;
 
     const createPane = async (url: string) => {
         if (!placeholderRef()) return;
+        const token = Symbol(model.blockId);
+        ownerToken = token;
+        nativePaneOwners.set(model.blockId, token);
         try {
             diag(`createPane url=${JSON.stringify(url)} window_label=${windowLabel}`);
             await invokeCommand("browser_pane_create", {
@@ -192,8 +200,12 @@ export function usePaneRectSync(params: {
                 ...paneRect(),
             });
             if (disposed) {
-                diag(`createPane finished after unmount — closing the orphan`);
-                invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+                if (releaseNativePane(model.blockId, token)) {
+                    diag(`createPane finished after unmount — closing the orphan`);
+                    invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+                } else {
+                    diag(`createPane finished after unmount — a newer mount owns the page, leaving it open`);
+                }
                 return;
             }
             setPaneCreated(true);
@@ -202,6 +214,13 @@ export function usePaneRectSync(params: {
             // layout changed while the async create was in-flight.
             notifyPaneReflow();
             registerPaneRect(model.blockId, paneRectCss());
+            // The page exists now, so it can take the keyboard: if this pane
+            // is the selected one (opened with focus, e.g. `muxsh web`), move
+            // the caret into it, as terminal/editor panes do on mount. A
+            // giveFocus() attempted earlier (at layout insert) found no page
+            // yet. claimFocusOnMount skips a background tab's pane and a
+            // caret the user already put in this pane's own URL bar.
+            focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
             // NOTE: does NOT call model.onLoad() here. Real load-finished
             // comes from the browser-pane-nav-state listener in
             // browser-model.ts. See
@@ -217,10 +236,6 @@ export function usePaneRectSync(params: {
             resizeObserver = new ResizeObserver(syncPosition);
             resizeObserver.observe(ph);
             positionInterval = setInterval(syncPosition, 200);
-            // Hiding or showing a window tab doesn't change this
-            // placeholder's geometry, so the observer above never sees it.
-            window.addEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition);
-            onCleanup(() => window.removeEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition));
         }
         // macOS/Linux: after a JS-driven drag moves the floating pane window,
         // paneRect() returns the same client coords (unchanged by window
@@ -241,11 +256,12 @@ export function usePaneRectSync(params: {
         if (url) createPane(url);
     });
 
-    // Re-sync when this tab goes dormant or wakes up (see syncPosition): the
-    // placeholder's geometry doesn't change, so the ResizeObserver can't see
-    // it, and waiting for the 200ms interval would show a stale frame.
+    // Re-sync when the tab's visibility changes (see syncPosition): hiding
+    // or showing doesn't change the placeholder's geometry, so the
+    // ResizeObserver can't see it, and waiting for the 200ms interval would
+    // show a stale frame.
     createEffect(() => {
-        isBlockDormant(model.blockId)();
+        visibility();
         if (placeholderRef()) syncPosition();
     });
 
@@ -259,8 +275,10 @@ export function usePaneRectSync(params: {
         // backend pane to Closing, so any in-flight resize/focus/nav calls
         // that haven't reached the backend yet get no-op'd there instead of
         // racing a mid-destruction HWND. See SPEC_BROWSER_PANE_LIFECYCLE.md §5.
-        if (paneCreated()) {
+        if (paneCreated() && releaseNativePane(model.blockId, ownerToken)) {
             invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
+        } else if (paneCreated()) {
+            diag(`view-unmount — a newer mount owns the page, leaving it open`);
         }
         resizeObserver?.disconnect();
         if (positionInterval) {

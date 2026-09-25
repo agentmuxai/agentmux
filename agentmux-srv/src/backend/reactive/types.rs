@@ -374,6 +374,13 @@ pub struct InjectionResponse {
     /// channel tier or when nothing could be checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_verified: Option<bool>,
+    /// `Some(true)`: the target was mid-turn, so the message is queued and
+    /// reaches it when that turn ends — accepted, not yet seen. `Some(false)`:
+    /// written to the agent now. `None` where nothing structured was attempted
+    /// (errors, PTY keystrokes, relay paths). Lets `SendMessage` tell its
+    /// caller which happened instead of claiming "injected" for both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred: Option<bool>,
 }
 
 /// Agent registration record.
@@ -585,14 +592,26 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// Function type for controller-aware delivery of a message to a (non-PTY) agent.
 ///
 /// Given `(block_id, message)`, returns:
-/// - `Ok(true)` — delivered on the controller's structured channel (persistent
-///   stream-json stdin / ACP `session/prompt`); no PTY keystrokes needed.
-/// - `Ok(false)` — the controller is PTY-based; the caller should fall back to
-///   keystroke injection.
+/// - `Ok(SenderDelivery::Delivered)` — delivered on the controller's structured
+///   channel (persistent stream-json stdin / ACP `session/prompt`); no PTY
+///   keystrokes needed.
+/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but held until
+///   the agent's current turn ends (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
+///   The message is safe; the agent just hasn't seen it yet.
+/// - `Ok(SenderDelivery::Pty)` — the controller is PTY-based; the caller should
+///   fall back to keystroke injection.
 /// - `Err(_)` — a structured controller failed to accept the message (e.g. the
 ///   persistent process is not running); the caller must NOT fall back to PTY,
 ///   since such controllers reject raw keystrokes.
-pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<bool, String> + Send + Sync>;
+pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<SenderDelivery, String> + Send + Sync>;
+
+/// See [`MessageSender`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SenderDelivery {
+    Delivered,
+    Deferred,
+    Pty,
+}
 
 /// Function type for querying a block's own live, spawn-time-captured jekt
 /// identity — an independent source of truth for `inject_message_inner`'s

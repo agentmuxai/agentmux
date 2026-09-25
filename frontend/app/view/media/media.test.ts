@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { basenameOf, dirnameOf, extOf } from "./media";
+import { basenameOf, dirnameOf, extOf, mediaPaneTab, mediaTitle } from "./media";
 
 describe("extOf", () => {
     it("returns the lowercase extension without a dot", () => {
@@ -45,5 +45,21 @@ describe("basenameOf", () => {
 
     it("returns the path unchanged when there's no separator", () => {
         expect(basenameOf("shot.webm")).toBe("shot.webm");
+    });
+});
+
+// Media as a native pane tab (Pane Tab contract Phase 2c).
+describe("mediaPaneTab", () => {
+    it("is native, with no ViewModel class", () => {
+        expect(mediaPaneTab.view).toBe("media");
+        expect(mediaPaneTab.create).toBeTypeOf("function");
+        expect(mediaPaneTab.viewModelClass).toBeUndefined();
+    });
+
+    it("titles the pane with the picked file's name, or Media before one is picked", () => {
+        expect(mediaTitle({ "media:path": "C:\\clips\\demo.mp4" } as any)).toBe("demo.mp4");
+        expect(mediaTitle({ "media:path": "/home/me/cat.png" } as any)).toBe("cat.png");
+        expect(mediaTitle({} as any)).toBe("Media");
+        expect(mediaTitle(undefined)).toBe("Media");
     });
 });

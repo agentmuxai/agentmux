@@ -18,9 +18,10 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
+import { registerPaneTab } from "./pane-tab-registry";
 
 const blockMetaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
 function setBlockView(blockId: string, view: string | undefined) {
@@ -71,22 +72,98 @@ class TestAgentViewModel {
     nodeModel: NodeModel;
     viewComponent = null;
     noHeader = () => (this.nodeModel as any)?.paneChromeHoisted?.() === true;
+    viewName = () => `live name of ${this.blockId}`;
+    disposed = false;
     constructor(blockId: string, nodeModel: NodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
         constructedViewModels.push({ blockId, nodeModel });
     }
+    dispose() {
+        this.disposed = true;
+    }
 }
+// Mirrors what SysinfoViewModel (and most view models) do in their
+// constructor: create a memo over the block's meta, and read the block
+// directly while building (sysinfo's loadInitialData -> numPoints()).
+const memoVmDisposals: string[] = [];
+class TestMemoViewModel {
+    viewType = "memo";
+    blockId: string;
+    viewComponent = null;
+    plotType: () => string | undefined;
+    constructor(blockId: string, _nodeModel: NodeModel) {
+        this.blockId = blockId;
+        const blockAtom = blockMetaSignals.get(blockId)![0] as () => { meta?: Record<string, unknown> };
+        void blockAtom()?.meta?.["plot"];
+        this.plotType = createMemo(() => blockAtom()?.meta?.["plot"] as string | undefined);
+        onCleanup(() => memoVmDisposals.push(blockId));
+    }
+}
+// The one visibility signal (Phase 3), per block, driven by the tests.
+const visibilitySignals = new Map<string, ReturnType<typeof createSignal<"active" | "dormant" | "windowHidden">>>();
+function visibilityOf(id: string) {
+    if (!visibilitySignals.has(id)) visibilitySignals.set(id, createSignal<"active" | "dormant" | "windowHidden">("active"));
+    return visibilitySignals.get(id)!;
+}
+vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: (id: string) => visibilityOf(id)[0] }));
+
+// Records a native tab's lifecycle hooks (Phase 3b).
+const lifecycle: string[] = [];
+registerPaneTab({
+    apiVersion: 1,
+    view: "lifecycle",
+    label: "Lifecycle",
+    icon: "l",
+    create: (ctx) => ({
+        component: () => null as any,
+        onActivate: () => lifecycle.push(`activate ${ctx.blockId}`),
+        onDeactivate: () => lifecycle.push(`deactivate ${ctx.blockId}`),
+        focus: () => (lifecycle.push(`focus ${ctx.blockId}`), true),
+    }),
+});
+
+// A widget whose create(ctx) throws (Pane Tab contract Phase 6).
+registerPaneTab({
+    apiVersion: 1,
+    view: "ext:broken",
+    label: "Broken",
+    icon: "b",
+    create: () => {
+        throw new Error("widget exploded");
+    },
+});
+
+// A native pane tab (Pane Tab contract Phase 2b): `create(ctx)`, no class.
+// Real registry, not mocked — block.tsx looks the manifest up there.
+const nativeCreates: { blockId: string; disposed: boolean }[] = [];
+registerPaneTab({
+    apiVersion: 1,
+    view: "native",
+    label: "Native",
+    icon: "n",
+    create: (ctx) => {
+        const rec = { blockId: ctx.blockId, disposed: false };
+        nativeCreates.push(rec);
+        return { component: () => null as any, liveTitle: () => ({ text: `native ${ctx.blockId}` }), dispose: () => (rec.disposed = true) };
+    },
+});
 vi.mock("@/app/block/block-registry", () => ({
-    getBlockViewClass: (view: string) => (view === "agent" ? TestAgentViewModel : null),
+    getBlockViewClass: (view: string) =>
+        view === "agent" ? TestAgentViewModel : view === "memo" ? TestMemoViewModel : null,
 }));
 
+// The ViewModel each preview mount handed its BlockFrame, by blockId.
+const previewViewModels = new Map<string, any>();
 vi.mock("./blockframe", () => ({
-    BlockFrame: (props: { nodeModel: NodeModel; viewModel: any; preview: boolean; children?: any }) => (
-        <div data-testid={`blockframe-${props.preview ? "preview" : "real"}-${props.nodeModel.blockId}`}>
-            {props.children}
-        </div>
-    ),
+    BlockFrame: (props: { nodeModel: NodeModel; viewModel: any; preview: boolean; children?: any }) => {
+        if (props.preview) previewViewModels.set(props.nodeModel.blockId, props.viewModel);
+        return (
+            <div data-testid={`blockframe-${props.preview ? "preview" : "real"}-${props.nodeModel.blockId}`}>
+                {props.children}
+            </div>
+        );
+    },
 }));
 
 // The real hook's `settled` is RE-ENTRANT — it calls setSettled(false) on every
@@ -139,7 +216,50 @@ afterEach(() => {
     blockMetaSignals.clear();
     registry.clear();
     constructedViewModels.length = 0;
+    memoVmDisposals.length = 0;
+    previewViewModels.clear();
+    nativeCreates.length = 0;
+    lifecycle.length = 0;
+    visibilitySignals.clear();
     setBackfillSettled(true);
+});
+
+/**
+ * block.tsx builds a ViewModel inside a reactive effect. A constructor's memos
+ * used to belong to that effect run, and its reads subscribed the effect to the
+ * block — so the first meta change re-ran the effect, disposed the run, and
+ * with it every memo of the (cached, reused) ViewModel. Sysinfo's plot type
+ * changed once, then froze (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §3).
+ */
+describe("Block — a ViewModel's own reactive state outlives meta changes", () => {
+    function setMeta(blockId: string, meta: Record<string, unknown>) {
+        const sig = blockMetaSignals.get(blockId);
+        if (sig) sig[1]({ meta } as any);
+        else blockMetaSignals.set(blockId, createSignal<{ meta?: any }>({ meta }));
+    }
+
+    it("a constructor memo keeps tracking the block across repeated meta changes", async () => {
+        setMeta("m1", { view: "memo", plot: "CPU" });
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "m1" })} preview={false} />);
+        const vm = (registry.get("m1") as { viewModel: TestMemoViewModel }).viewModel;
+        expect(vm.plotType()).toBe("CPU");
+
+        setMeta("m1", { view: "memo", plot: "CPU + Mem" });
+        expect(vm.plotType()).toBe("CPU + Mem");
+        setMeta("m1", { view: "memo", plot: "Mem" });
+        expect(vm.plotType()).toBe("Mem");
+        expect(memoVmDisposals).toEqual([]);
+    });
+
+    it("disposes the ViewModel's own reactive state when the mount that created it unmounts", async () => {
+        setMeta("m2", { view: "memo", plot: "CPU" });
+        const Block = await loadBlock();
+        const { unmount } = render(() => <Block nodeModel={makeNodeModel({ blockId: "m2" })} preview={false} />);
+        expect(memoVmDisposals).toEqual([]);
+        unmount();
+        expect(memoVmDisposals).toEqual(["m2"]);
+    });
 });
 
 describe("Block — preview/real ViewModel isolation", () => {
@@ -154,9 +274,9 @@ describe("Block — preview/real ViewModel isolation", () => {
         render(() => <Block nodeModel={previewNodeModel} preview={true} />);
         render(() => <Block nodeModel={realNodeModel} preview={false} />);
 
-        // Two SEPARATE ViewModels were constructed — preview never adopted
-        // into (or was adopted from) the shared registry.
-        expect(constructedViewModels).toHaveLength(2);
+        // Only the real mount constructed a ViewModel — a preview never builds
+        // a live instance (see "a preview never builds a live ViewModel").
+        expect(constructedViewModels).toHaveLength(1);
         const realVm = constructedViewModels.find((v) => v.nodeModel === realNodeModel);
         expect(realVm).toBeDefined();
         expect((realVm!.nodeModel as any).paneChromeHoisted?.()).toBe(true);
@@ -181,6 +301,123 @@ describe("Block — preview/real ViewModel isolation", () => {
         const registered = registry.get("b1") as { viewModel: TestAgentViewModel } | undefined;
         expect(registered?.viewModel.nodeModel).toBe(realNodeModel);
         expect(registered?.viewModel.noHeader()).toBe(true);
+    });
+});
+
+/**
+ * Every tile keeps a drag-preview `<Block preview>` mounted (TileLayout.core.tsx's
+ * `previewElement`). It used to construct its own ViewModel of the view's class,
+ * whose constructor can have global side effects: BrowserViewModel registers
+ * itself in the block-id-keyed browser-pane store (replacing the real pane's
+ * projections) and its dispose unregisters that slot — a split left the real
+ * browser pane black
+ * (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §2).
+ */
+describe("Block — a preview never builds a live ViewModel", () => {
+    it("constructs nothing for a preview mount on its own", async () => {
+        setBlockView("p1", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p1" })} preview={true} />);
+        expect(constructedViewModels).toHaveLength(0);
+        expect(previewViewModels.get("p1")).toBeDefined();
+    });
+
+    it("unmounting a preview leaves the real ViewModel alive and registered", async () => {
+        setBlockView("p2", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p2" })} preview={false} />);
+        const preview = render(() => <Block nodeModel={makeNodeModel({ blockId: "p2" })} preview={true} />);
+        preview.unmount();
+
+        expect(constructedViewModels).toHaveLength(1);
+        const registered = registry.get("p2") as { viewModel: TestAgentViewModel };
+        expect(registered.viewModel.disposed).toBe(false);
+    });
+
+    it("the preview's header shows the live ViewModel's name", async () => {
+        setBlockView("p3", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={false} />);
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={true} />);
+        expect(previewViewModels.get("p3").viewName()).toBe("live name of p3");
+    });
+});
+
+/**
+ * Pane Tab contract Phase 3b: the host fires onActivate/onDeactivate from the
+ * one visibility signal — on BOTH paths (a remount tab activates by mounting,
+ * a kept-alive one by leaving dormancy) — and a tab that becomes active in a
+ * focused pane gets focus, whatever tab type the pane started with.
+ */
+describe("Block — the host fires a tab's activation hooks", () => {
+    it("activates on mount, deactivates when it goes dormant, activates again when it comes back", async () => {
+        setBlockView("l1", "lifecycle");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "l1" })} preview={false} />);
+        expect(lifecycle).toEqual(["activate l1"]);
+
+        visibilityOf("l1")[1]("dormant");
+        visibilityOf("l1")[1]("windowHidden");
+        visibilityOf("l1")[1]("active");
+        expect(lifecycle).toEqual(["activate l1", "deactivate l1", "activate l1"]);
+    });
+
+    it("gives the newly active tab focus only when its pane is focused", async () => {
+        setBlockView("l2", "lifecycle");
+        const [paneFocused, setPaneFocused] = createSignal(false);
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "l2", isFocused: paneFocused })} preview={false} />);
+        visibilityOf("l2")[1]("dormant");
+        setPaneFocused(true);
+        visibilityOf("l2")[1]("active");
+        expect(lifecycle).toEqual(["activate l2", "deactivate l2", "activate l2", "focus l2"]);
+    });
+
+    it("deactivates an active tab when it unmounts, and never fires for a preview", async () => {
+        setBlockView("l3", "lifecycle");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "l3" })} preview={true} />);
+        const real = render(() => <Block nodeModel={makeNodeModel({ blockId: "l3" })} preview={false} />);
+        real.unmount();
+        expect(lifecycle).toEqual(["activate l3", "deactivate l3"]);
+    });
+});
+
+describe("Block — a widget whose create(ctx) throws", () => {
+    it("gets a ViewModel that shows the error, and nothing throws past its pane", async () => {
+        setBlockView("x1", "ext:broken");
+        const Block = await loadBlock();
+        expect(() => render(() => <Block nodeModel={makeNodeModel({ blockId: "x1" })} preview={false} />)).not.toThrow();
+        const vm = (registry.get("x1") as { viewModel: ViewModel }).viewModel;
+        expect(vm.viewType).toBe("ext:broken");
+        const VC = vm.viewComponent;
+        const { container } = render(() => (
+            <VC blockId="x1" blockRef={{ current: null }} contentRef={{ current: null }} model={vm} />
+        ));
+        expect(container.textContent).toContain("widget exploded");
+    });
+});
+
+describe("Block — a native pane tab (create(ctx))", () => {
+    it("creates the instance once, registers it as the pane's ViewModel, and disposes it on unmount", async () => {
+        setBlockView("n1", "native");
+        const Block = await loadBlock();
+        const { unmount } = render(() => <Block nodeModel={makeNodeModel({ blockId: "n1" })} preview={false} />);
+
+        expect(nativeCreates).toEqual([{ blockId: "n1", disposed: false }]);
+        const vm = (registry.get("n1") as { viewModel: ViewModel }).viewModel;
+        expect(vm.viewType).toBe("native");
+        expect(vm.viewName?.()).toBe("native n1");
+
+        unmount();
+        expect(nativeCreates).toEqual([{ blockId: "n1", disposed: true }]);
+    });
+
+    it("a preview of a native tab never creates an instance", async () => {
+        setBlockView("n2", "native");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "n2" })} preview={true} />);
+        expect(nativeCreates).toHaveLength(0);
     });
 });
 

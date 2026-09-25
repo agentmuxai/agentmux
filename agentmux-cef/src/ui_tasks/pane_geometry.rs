@@ -406,8 +406,15 @@ wrap_task! {
                     let make_key: extern "C" fn(Id, Sel, Id)   = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                     let order_fn: extern "C" fn(Id, Sel, Id)   = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
 
-                    // Restore main window as key so sidebar clicks work.
-                    if !task_main_win.is_null() && !task_sel_make_key_front.is_null() {
+                    // Restore main window as key so sidebar clicks work — unless
+                    // a pane overlay holds key because the user clicked into /
+                    // focused a page (make_pane_overlay_key). This task runs on
+                    // every bounds change (resize, split animation, tab switch),
+                    // so re-keying main here took the keyboard away from the
+                    // page mid-typing.
+                    if !task_main_win.is_null() && !task_sel_make_key_front.is_null()
+                        && !crate::ui_tasks::key_window_is_pane_overlay()
+                    {
                         make_key(task_main_win, task_sel_make_key_front, std::ptr::null_mut());
                     }
                     // Keep overlay frontmost.
@@ -475,6 +482,22 @@ wrap_task! {
                                     crate::ui_tasks::swizzled_is_key_window as *const std::ffi::c_void,
                                 );
                                 crate::ui_tasks::ORIG_IS_KEY_WINDOW.store(
+                                    old as usize,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                );
+                            }
+                            // can_activate=0 makes Chromium answer NO here, so
+                            // the page could never hold the keyboard. YES for
+                            // the tagged overlay only — see
+                            // swizzled_can_become_key_window.
+                            let sel_cbk = sel_registerName(b"canBecomeKeyWindow\0".as_ptr() as _);
+                            let m_cbk = class_getInstanceMethod(win_cls, sel_cbk);
+                            if !m_cbk.is_null() {
+                                let old = method_setImplementation(
+                                    m_cbk,
+                                    crate::ui_tasks::swizzled_can_become_key_window as *const std::ffi::c_void,
+                                );
+                                crate::ui_tasks::ORIG_CAN_BECOME_KEY_WINDOW.store(
                                     old as usize,
                                     std::sync::atomic::Ordering::SeqCst,
                                 );
@@ -688,6 +711,17 @@ wrap_task! {
 
             // Main browser host is now stored into PANE_WIN_TO_HOST inside the
             // rwhvc_cls block above, keyed by the NSWindow pointer for this pane.
+
+            // The overlay is now tagged and registered: apply a keyboard-focus
+            // request that arrived before it was (open-with-focus claims focus
+            // as soon as browser_pane_create returns, which beats this task).
+            #[cfg(target_os = "macos")]
+            if let Some(block_id) = self.label
+                .strip_prefix("browser-pane-")
+                .and_then(|rest| rest.rfind('-').map(|dash| &rest[..dash]))
+            {
+                crate::ui_tasks::apply_pending_pane_key(block_id);
+            }
 
             // Diagnostic: swizzle NSApp::sendEvent: once to log all leftMouseDown
             // events with their target window number. This lets us see where

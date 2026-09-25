@@ -19,10 +19,10 @@ import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
-import { isBlockDormant } from "@/app/store/block-component-registry";
 import { AgentDormancyProvider } from "./agent-dormancy";
-import { useWindowTabHidden } from "@/app/workspace/window-tab-visibility";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
+import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     atoms,
@@ -332,7 +332,8 @@ AgentBlockContent.displayName = "AgentBlockContent";
 
 /**
  * Chrome half of the agent pane — the header, tab strip and progress-bar
- * slot, rendered via `AgentViewModel.renderPaneChrome` for EVERY agent pane
+ * slot, rendered by the shared `renderPaneChromeShell` (pane-leaf-chrome.tsx's
+ * fallback when a view supplies no `renderPaneChrome`) for EVERY agent pane
  * (see `pane-leaf-chrome.tsx`'s `hoisted` memo for why gating this on stack
  * size was a catch-22), wrapping whichever `AgentBlockContent` instance is
  * currently the active stack member's own switch-scoped `<Block>`
@@ -525,13 +526,15 @@ const AgentPresentationView = ({
     progressBarMount: () => HTMLDivElement | undefined;
 }): JSX.Element => {
     const block = model.blockAtom;
-    // True while this tab is a hidden, kept-alive pane-tab-strip member
-    // (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md) rather than the one the
-    // user is looking at — threaded into AgentQuestionPanel's auto-timeout
-    // and useAgentFailure's auto-retry below so neither fires invisibly
-    // while backgrounded.
-    const dormant = isBlockDormant(model.blockId);
-    const windowTabHidden = useWindowTabHidden();
+    // True while the user can't see this tab: a hidden, kept-alive
+    // pane-tab-strip member (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md), or
+    // its window tab isn't displayed (`usePaneTabVisibility`, Pane Tab
+    // contract Phase 3). Render work pauses on it, and it's threaded into
+    // AgentQuestionPanel's auto-timeout and useAgentFailure's auto-retry below
+    // so neither fires invisibly while backgrounded — which, before Phase 3b,
+    // covered only the pane-stack case.
+    const visibility = usePaneTabVisibility(model.blockId);
+    const hidden = (): boolean => visibility() !== "active";
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -1069,7 +1072,7 @@ const AgentPresentationView = ({
     );
     createEffect(
         on(
-            () => dormant() || windowTabHidden(),
+            hidden,
             (hidden) => {
                 if (hidden) scheduleRollOff();
             },
@@ -2115,7 +2118,7 @@ const AgentPresentationView = ({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
-        isDormant: dormant,
+        isDormant: hidden,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         // live_elsewhere — take the agent over from the other AgentMux
@@ -2357,6 +2360,11 @@ const AgentPresentationView = ({
 
     // Context menu for copy
     const handleContextMenu = (e: MouseEvent) => {
+        // A registered context-menu region under the click (the Shell drawer)
+        // owns its own menu — this handler runs first (it is a descendant of
+        // blockframe's), so without yielding a transcript selection would win
+        // and show a Copy for the wrong text inside the terminal.
+        if (resolveContextMenuRegion(e.target, e.currentTarget as Element)) return;
         const sel = window.getSelection()?.toString();
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
@@ -2370,10 +2378,10 @@ const AgentPresentationView = ({
         // tuned, and should not grow another prop it would only forward.
         // See `agent-dormancy.tsx` for why rendering (not data) is what gets
         // gated.
-        // A hidden window tab kept laid out (`window:keepinactivetabslaidout`)
-        // pauses rendering the same way; only rendering, so this doesn't
-        // touch the question auto-timeout or auto-retry `dormant` also drives.
-        <AgentDormancyProvider dormant={() => dormant() || windowTabHidden()}>
+        // `hidden` covers a dormant pane-stack member and a hidden window tab
+        // alike; this provider gates only rendering (the timers read `hidden`
+        // directly).
+        <AgentDormancyProvider dormant={hidden}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
@@ -2683,7 +2691,7 @@ const AgentPresentationView = ({
                 pending={pendingQuestions}
                 onAnswer={handleAnswer}
                 onCancel={handleCancel}
-                isDormant={dormant}
+                isDormant={hidden}
             />
 
             {/* Queue sits directly below the feed so the user's newly-

@@ -30,6 +30,7 @@
 // a single branch on the runtime platform inside `applyChromeZoomCSS` — not
 // three copies of this file.
 
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { getAllBlockComponentModelEntries } from "@/app/store/block-component-registry";
 import { getBlockComponentModel, getFocusedBlockId, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -71,8 +72,7 @@ function getBaseFontSize(blockId: string): number {
         return metaFontSize;
     }
     const bcm = getBlockComponentModel(blockId);
-    if (bcm?.viewModel?.viewType === "editor") return 13;
-    return 15;
+    return paneTabCapability(bcm?.viewModel?.viewType, "paneZoom")?.baseFontSize ?? 15;
 }
 
 function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {
@@ -88,9 +88,10 @@ function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {
 function getBlockZoom(blockId: string): number | null {
     const bcm = getBlockComponentModel(blockId);
     if (!bcm?.viewModel) return null;
-    const vt = bcm.viewModel.viewType;
-    if (vt !== "term" && vt !== "agent" && vt !== "swarm" && vt !== "editor" && vt !== "armory" && vt !== "warden")
-        return null;
+    // Which views take part is their `paneZoom` capability (Pane Tab
+    // contract Phase 5) — formerly an allowlist here, which is how warden was
+    // once left out by accident.
+    if (!paneTabCapability(bcm.viewModel.viewType, "paneZoom")) return null;
 
     const blockOref = MOS.makeORef("block", blockId);
     const blockData = MOS.getObjectValue<Block>(blockOref);

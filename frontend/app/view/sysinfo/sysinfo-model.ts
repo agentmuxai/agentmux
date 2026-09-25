@@ -1,9 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, MOS } from "@/store/global";
-import { renderPaneChromeShell } from "@/app/element/PaneChrome";
-import { BlockNodeModel } from "@/app/block/blocktypes";
+import { atoms } from "@/store/global";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import * as util from "@/util/util";
 import { createMemo } from "solid-js";
 import type { SignalAtom } from "@/util/util";
@@ -192,9 +191,12 @@ export function sampleReducer(state: DataItem[], action: SampleAction): DataItem
 
 // ---------------------------------------------------------------------------
 
-class SysinfoViewModel implements ViewModel {
+/** Sysinfo's state behind its native pane tab (`sysinfoPaneTab`, sysinfo.tsx). */
+class SysinfoViewModel {
     viewType: string;
-    blockAtom: () => Block;
+    /** The block's meta — the host context's, reactive. */
+    meta: () => MetaType | undefined;
+    private ctx: PaneTabHostContext;
     blockId: string;
     viewIcon: () => string;
     viewText: () => string;
@@ -240,28 +242,15 @@ class SysinfoViewModel implements ViewModel {
         }
     }
 
-    // Universal Pane Tabs — real, pre-existing mismatch found while wiring
-    // this up, fixed as a necessary byproduct: `block.tsx`'s `makeViewModel`
-    // always calls `new ctor(blockId, nodeModel)` for EVERY registered
-    // ViewModel class (no per-view special-casing) — this constructor's 2nd
-    // param was actually receiving the real NodeModel object at runtime
-    // despite being named/typed `viewType: string`, so `this.viewType`
-    // (used nowhere critical — icon/name are this class's OWN viewIcon/
-    // viewName fields below, not the generic blockViewToName(meta.view)
-    // fallback — likely why this went unnoticed) was silently set to a
-    // NodeModel object instead of "sysinfo"/"cpuplot". Fixed by reading the
-    // real value from the block's own meta instead, and correctly typing
-    // the 2nd param as what it actually is.
-    nodeModel: BlockNodeModel;
-    renderPaneChrome = renderPaneChromeShell;
-    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
-
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.nodeModel = nodeModel;
-        const bd = MOS.getObjectValue(MOS.makeORef("block", blockId)) as Block | undefined;
-        this.viewType = (bd?.meta?.view as string) ?? "sysinfo";
-        this.blockId = blockId;
-        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
+    // (sysinfo.tsx), it reads and writes its block only through the host
+    // context. `viewType` is the manifest's view — "sysinfo", or its legacy
+    // twin "cpuplot".
+    constructor(ctx: PaneTabHostContext, viewType: string) {
+        this.ctx = ctx;
+        this.viewType = viewType;
+        this.blockId = ctx.blockId;
+        this.meta = ctx.meta;
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.loadingAtom = createSignalAtom(true);
@@ -274,14 +263,14 @@ class SysinfoViewModel implements ViewModel {
             if (settingsNumPoints != null && settingsNumPoints > 0) {
                 return Math.max(30, Math.min(1024, settingsNumPoints));
             }
-            const blockData = this.blockAtom();
+            const blockData = { meta: this.meta() };
             const metaNumPoints = blockData?.meta?.["graph:numpoints"];
             if (metaNumPoints == null || metaNumPoints <= 0) return DefaultNumPoints;
             return metaNumPoints;
         });
 
         this.plotTypeSelectedAtom = createMemo(() => {
-            const blockData = this.blockAtom();
+            const blockData = { meta: this.meta() };
             const plotType = blockData?.meta?.["sysinfo:type"];
             if (plotType == null || typeof plotType != "string") return "CPU";
             return plotType;
@@ -306,14 +295,14 @@ class SysinfoViewModel implements ViewModel {
         this.viewText = createMemo(() => "");
 
         this.connection = createMemo(() => {
-            const blockData = this.blockAtom();
+            const blockData = { meta: this.meta() };
             const connValue = blockData?.meta?.connection;
             if (util.isBlank(connValue)) return "local";
             return connValue;
         });
 
         this.connStatus = createMemo(() => {
-            const blockData = this.blockAtom();
+            const blockData = { meta: this.meta() };
             const connName = blockData?.meta?.connection;
             const connAtom = getConnStatusAtom(connName);
             return connAtom();
@@ -327,10 +316,6 @@ class SysinfoViewModel implements ViewModel {
         });
 
         this.loadInitialData();
-    }
-
-    get viewComponent(): ViewComponent {
-        return null; // set by the view module to avoid circular import
     }
 
     getConfiguredInterval(): number {
@@ -379,10 +364,7 @@ class SysinfoViewModel implements ViewModel {
                     type: "radio",
                     checked: currentlySelected == plotType,
                     click: async () => {
-                        await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: MOS.makeORef("block", this.blockId),
-                            meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
-                        });
+                        await this.ctx.setMeta({ "graph:metrics": dataTypes, "sysinfo:type": plotType });
                     },
                 };
                 return menuItem;
@@ -405,10 +387,7 @@ class SysinfoViewModel implements ViewModel {
             checked: currentlySelected === plotType,
             click: async () => {
                 const dataTypes = PlotTypes[plotType](plotData[plotData.length - 1]);
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: MOS.makeORef("block", this.blockId),
-                    meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
-                });
+                await this.ctx.setMeta({ "graph:metrics": dataTypes, "sysinfo:type": plotType });
             },
         }));
     }

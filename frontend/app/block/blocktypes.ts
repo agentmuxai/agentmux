@@ -96,10 +96,8 @@ export interface BlockFrameProps {
     // SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4 asks BlockFrame to
     // subscribe to pane readiness and suppress transient header affordances.
     // Wiring it through these props does not work, and does so SILENTLY: every
-    // view type in `pane-leaf-chrome.tsx`'s HOISTS_OWN_CHROME (agent, term,
-    // browser, editor, sysinfo, cpuplot, swarm, armory, media, drone, help,
-    // warden — i.e. essentially every real pane) sets `noHeader()`, so
-    // BlockFrame's own inline header never renders; the header those panes
+    // registered view type gets the shared chrome (`pane-leaf-chrome.tsx`'s
+    // `hoistsOwnChrome`), which suppresses BlockFrame's own inline header; the header those panes
     // actually show is built by `PaneHeaderTabStrip`, which lives OUTSIDE
     // `<Block>` and constructs its own explicit prop object. A prop threaded
     // from Block can never reach it. See spec §6.1 — phase 4 needs the same

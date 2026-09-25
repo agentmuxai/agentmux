@@ -1685,7 +1685,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
             .lock()
             .unwrap()
             .push((block_id.to_string(), message.to_string()));
-        Ok(true)
+        Ok(SenderDelivery::Delivered)
     }));
     handler.register_agent("agent1", "block1", None).unwrap();
 
@@ -1715,6 +1715,27 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         "structured channel got the JEKT-wrapped message (open + close markers + payload)"
     );
     assert!(pty_calls.lock().unwrap().is_empty());
+    assert_eq!(resp.deferred, Some(false), "written now, and the response says so");
+}
+
+/// A mid-turn target: the sender reports `Deferred`, and the response carries
+/// it so `SendMessage` can say "queued until their turn ends" instead of
+/// "injected into their conversation".
+#[test]
+fn test_handler_inject_reports_deferred_delivery() {
+    let mut handler = Handler::new();
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(SenderDelivery::Deferred)));
+    handler.register_agent("agent1", "block1", None).unwrap();
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        ..Default::default()
+    });
+    assert!(resp.success, "accepted: the message is safe in the queue");
+    assert_eq!(resp.block_id.as_deref(), Some("block1"));
+    assert_eq!(resp.deferred, Some(true));
+    let wire = serde_json::to_value(&resp).unwrap();
+    assert_eq!(wire["deferred"], true, "on the wire for the MCP");
 }
 
 // A PTY-based controller (message_sender returns Ok(false)) falls through to the
@@ -1732,7 +1753,7 @@ async fn test_handler_inject_pty_fallback() {
             .push((block_id.to_string(), data.to_vec()));
         Ok(())
     }));
-    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(false)));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(SenderDelivery::Pty)));
     handler.register_agent("agent1", "block1", None).unwrap();
 
     let resp = handler.inject_message(InjectionRequest {
@@ -2324,6 +2345,7 @@ fn test_injection_request_serde() {
 #[test]
 fn test_injection_response_serde() {
     let resp = InjectionResponse {
+        deferred: None,
         success: true,
         request_id: "req-123".to_string(),
         block_id: Some("block-abc".to_string()),
@@ -3063,7 +3085,7 @@ fn the_handler_lock_is_held_across_the_message_sender() {
         in_sender_tx.send(()).unwrap();
         // Hold here until the probe has had its chance.
         let _ = release_rx.lock().unwrap().recv_timeout(Duration::from_secs(60));
-        Ok(true)
+        Ok(SenderDelivery::Delivered)
     }));
 
     let injector_handler = handler.clone();
@@ -3164,7 +3186,7 @@ fn reentrant_registration_from_the_message_sender_fails_fast_not_hangs() {
             "agent1", "block1", None, 999, None,
         );
         reentrant_result_tx.send(result).unwrap();
-        Ok(true)
+        Ok(SenderDelivery::Delivered)
     }));
 
     let injector = handler.clone();
@@ -3242,7 +3264,7 @@ fn reentrant_try_get_agent_by_block_fails_fast_not_hangs() {
         // lock is held — exactly where the real regression lived.
         let result = handler_for_sender.try_get_agent_by_block("block1");
         reentrant_result_tx.send(result).unwrap();
-        Ok(true)
+        Ok(SenderDelivery::Delivered)
     }));
 
     let injector = handler.clone();

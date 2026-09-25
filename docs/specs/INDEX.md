@@ -71,6 +71,8 @@ See also:
 | [SPEC_BROWSER_PANE_LIFECYCLE](SPEC_BROWSER_PANE_LIFECYCLE.md) | Lifecycle: mount, navigate, unmount |
 | [SPEC_BROWSER_DOM_API](SPEC_BROWSER_DOM_API.md) | DOM injection / bridge API |
 | [SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Favicon + title propagation |
+| [SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | macOS: typing reaches the page — the pane overlay can become key; `muxsh web` selects and focuses the new pane |
+| [SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | macOS: the app's right-click menu draws behind the pane — register its rect for the hole punch (Windows parity) |
 
 ## Editor Pane
 
@@ -228,6 +230,7 @@ partial list.
 | [`SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07`](SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md) | SPEC: Explicit close button on the Runtime (Mode/Model/Effort) dropup |
 | [`SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02`](SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md) | SPEC: Agent Pane Session Cost/Token Totals |
 | [`SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08`](SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md) | SPEC: Open the agent-pane Shell drawer below the composer, not above it |
+| [`SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25`](SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25.md) | SPEC: Agent shell drawer — right-click Paste, and a "context-menu region" mechanism to strip pane entries |
 | [`SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20`](SPEC_AGENT_SHELL_DRAWER_ZOOM_COORDINATE_SPACE_2026_09_20.md) | SPEC — Shell drawer terminal renders in a fractionally-scaled coordinate space |
 | [`SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14`](SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md) | Agent shell drawer: PSReadLine thaw resize causes a visible ~9px width blip ~300-350ms after open |
 | [`SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10`](SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md) | Agent shell drawer: font-size seed race causes zoom jerk on open |
@@ -321,6 +324,8 @@ partial list.
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
+| [`SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24`](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | SPEC — macOS browser pane: show AgentMux's right-click menu above the page |
+| [`SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24`](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | SPEC — macOS browser pane: typing reaches the page |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
 | [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |

@@ -1,48 +1,101 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// View-type → ViewModel class registry.
-// To add a new block view: add its class to the map below — block.tsx never
-// needs to change. A runtime registration API (for user-installed pane-tab
-// widgets) is planned: SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3/§4.
+// The built-in pane tab types, registered through the ONE pane-tab registry
+// (`pane-tab-registry.ts`, Pane Tab contract v1 Phase 2 —
+// docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3/§4). To add a view:
+// register its manifest below — block.tsx, blockutil.tsx and
+// pane-leaf-chrome.tsx read everything from the registry. Labels and icons
+// reproduce the tables they replace exactly; a view with none there keeps
+// the defaults (its name, a square).
 
 import { AgentViewModel } from "@/app/view/agent";
-import { ArmoryViewModel } from "@/app/view/armory/armory";
+import { armoryPaneTab } from "@/app/view/armory/armory";
 import { BrowserViewModel } from "@/app/view/browser/browser";
-import { DroneViewModel } from "@/app/view/drone/drone";
+import { dronePaneTab } from "@/app/view/drone/drone";
 import { EditorViewModel } from "@/app/view/editor/editor";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
-import { MediaViewModel } from "@/app/view/media/media";
+import { mediaPaneTab } from "@/app/view/media/media";
 import { BundleViewModel } from "@/app/view/bundle/bundle";
 import { SettingsViewModel } from "@/app/view/settings/settings";
-import { SwarmViewModel } from "@/app/view/swarm/swarm";
-import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
+import { swarmPaneTab } from "@/app/view/swarm/swarm";
+import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
-import { WardenViewModel } from "@/app/view/warden/warden";
-import { HelpViewModel } from "@/view/helpview/helpview";
+import { wardenPaneTab } from "@/app/view/warden/warden";
+import { helpPaneTab } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
+import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "@/app/view/agent/agent-pane-tab";
+import { buildAgentPaneChromeModel } from "@/app/view/agent/agent-view";
+import { buildTermPaneChromeModel } from "@/view/term/term";
+import { termPaneTab } from "@/view/term/term-pane-tab";
+import { getPaneTab, legacyAdapter, registerPaneTab } from "./pane-tab-registry";
 
-const blockViewRegistry = new Map<string, ViewModelClass>();
-
-blockViewRegistry.set("term", TermViewModel as any);
-blockViewRegistry.set("cpuplot", SysinfoViewModel as any);
-blockViewRegistry.set("sysinfo", SysinfoViewModel as any);
-blockViewRegistry.set("help", HelpViewModel as any);
-blockViewRegistry.set("launcher", LauncherViewModel as any);
-blockViewRegistry.set("agent", AgentViewModel as any);
-blockViewRegistry.set("swarm", SwarmViewModel as any);
-blockViewRegistry.set("editor", EditorViewModel as any);
-blockViewRegistry.set("browser", BrowserViewModel as any);
-blockViewRegistry.set("memory", BundleViewModel as any);
-blockViewRegistry.set("media", MediaViewModel as any);
-blockViewRegistry.set("identity", IdentityPaneViewModel as any);
-blockViewRegistry.set("drone", DroneViewModel as any);
-blockViewRegistry.set("warden", WardenViewModel as any);
-blockViewRegistry.set("toolchain", ToolchainViewModel as any);
-blockViewRegistry.set("armory", ArmoryViewModel as any);
-blockViewRegistry.set("settings", SettingsViewModel as any);
+const builtins = [
+    // Keep-alive (term, agent, browser, editor): remounting would lose real
+    // state — the PTY/xterm instance, the parsed agent document, the page
+    // (scroll, form input), the editor's cursor and undo. Agent per
+    // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md; browser and editor per the
+    // repo owner's decision, SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
+    legacyAdapter("term", TermViewModel as any, {
+        label: "Terminal",
+        icon: "terminal",
+        lifecycle: "keepAlive",
+        capabilities: {
+            headerMic: { title: "Speak into this terminal (Ctrl+Shift+V)" },
+            statsBadgeSetting: "term:showstatsbadge",
+            hueBorder: true,
+            paneZoom: {},
+            acceptsInput: true,
+            shellKeys: true,
+            sharesCwd: true,
+        },
+        tab: termPaneTab,
+        chrome: buildTermPaneChromeModel,
+    }),
+    // "forge" was folded into the agent pane in v0.33.197.
+    legacyAdapter("agent", AgentViewModel as any, {
+        label: "Agent",
+        icon: "sparkles",
+        aliases: ["forge"],
+        lifecycle: "keepAlive",
+        capabilities: { header: "surface", paneZoom: {}, splitDropsMeta: AGENT_SPLIT_DROPPED_META },
+        tab: agentPaneTab,
+        chrome: buildAgentPaneChromeModel,
+    }),
+    legacyAdapter("browser", BrowserViewModel as any, {
+        label: "Browser",
+        icon: "globe",
+        lifecycle: "keepAlive",
+        capabilities: { nativeSurface: true },
+    }),
+    legacyAdapter("editor", EditorViewModel as any, {
+        label: "Editor",
+        icon: "file-lines",
+        lifecycle: "keepAlive",
+        capabilities: { paneZoom: { baseFontSize: 13 } },
+    }),
+    // Native (create(ctx)) — Phase 2c. "cpuplot" is the same view under an
+    // older name.
+    sysinfoPaneTab("sysinfo"),
+    sysinfoPaneTab("cpuplot"),
+    helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
+    legacyAdapter("launcher", LauncherViewModel as any),
+    swarmPaneTab, // native — Phase 2c
+    legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
+    mediaPaneTab, // native — Phase 2c
+    legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
+    dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
+    wardenPaneTab, // native — Phase 2c
+    legacyAdapter("toolchain", ToolchainViewModel as any),
+    armoryPaneTab, // native — Phase 2c (keeps the "trust" alias)
+    legacyAdapter("settings", SettingsViewModel as any),
+];
+const unregisterBuiltins = builtins.map(registerPaneTab);
+// A hot reload re-runs this module but not the registry; without this the
+// re-registration would throw "already registered".
+import.meta.hot?.dispose(() => unregisterBuiltins.forEach((unregister) => unregister()));
 
 export function getBlockViewClass(viewType: string): ViewModelClass | undefined {
-    return blockViewRegistry.get(viewType);
+    return getPaneTab(viewType)?.viewModelClass;
 }

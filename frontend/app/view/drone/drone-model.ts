@@ -13,8 +13,8 @@
 // What stays as view-model state (pure UI editing, no event-folded):
 //   - draft graph, selection, running button-flag, runs list, errors
 
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -52,27 +52,15 @@ const BLANK_DRONE = (): DroneDefinition => ({
     updated_at: 0,
 });
 
-export class DroneViewModel implements ViewModel {
+export class DroneViewModel {
     viewType = "drone";
-    renderPaneChrome = renderPaneChromeShell;
-    // Suppresses BlockFrame's own inline header once chrome is hoisted —
-    // required whenever a view type is added to pane-leaf-chrome.tsx's
-    // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors
-    // AgentViewModel's/TermViewModel's identical field exactly.
-    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
     blockId: string;
-    nodeModel: BlockNodeModel;
 
-    viewIcon: Accessor<string> = () => "diagram-project";
     viewName: Accessor<string>;
-    viewText: Accessor<string | HeaderElem[]> = () => "";
-    noPadding: Accessor<boolean> = () => true;
 
-    get viewComponent(): ViewComponent {
-        return null; // overridden by the barrel via Object.defineProperty
-    }
 
-    blockAtom: Accessor<Block | undefined>;
+    /** The block's meta — the host context's, reactive. */
+    meta: Accessor<MetaType | undefined>;
 
     // --- list of saved drones
     private _list = createSignal<DroneDefinition[]>([]);
@@ -185,14 +173,12 @@ export class DroneViewModel implements ViewModel {
     // teardown. Codex P2 on PR #844.
     private disposed = false;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.blockId = blockId;
-        this.nodeModel = nodeModel;
-        this.blockAtom = getMuxObjectAtom(makeORef("block", blockId));
-        this.viewName = createMemo(() => {
-            const block = this.blockAtom();
-            return (block?.meta?.["frame:title"] as string) ?? this.draftAtom().name;
-        });
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
+    // (drone.tsx); its own block's meta comes from the host context.
+    constructor(ctx: PaneTabHostContext) {
+        this.blockId = ctx.blockId;
+        this.meta = ctx.meta;
+        this.viewName = createMemo(() => (this.meta()?.["frame:title"] as string) ?? this.draftAtom().name);
 
         // Register the slot SYNCHRONOUSLY so the first dispatch (in
         // `run()`) never races against a missing pane.

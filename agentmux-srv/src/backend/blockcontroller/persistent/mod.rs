@@ -40,7 +40,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use super::{
-    BlockControllerRuntimeStatus, BlockInputUnion, Controller, DeliverPolicy, STATUS_DONE,
+    BlockControllerRuntimeStatus, BlockInputUnion, Controller, DeliverPolicy, SendOutcome, STATUS_DONE,
     STATUS_INIT, STATUS_RUNNING,
 };
 use super::core;

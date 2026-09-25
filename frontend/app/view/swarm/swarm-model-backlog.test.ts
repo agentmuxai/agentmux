@@ -67,7 +67,7 @@ describe("SwarmViewModel backfill-naming backlog trigger", () => {
     });
 
     it("fires subagent.ResolveUnnamedBacklog exactly once on construction", () => {
-        new SwarmViewModel("block-1", {} as any);
+        new SwarmViewModel("block-1");
 
         const backlogCalls = callBackendServiceSpy.mock.calls.filter(
             (call) => call[0] === "subagent" && call[1] === "ResolveUnnamedBacklog"
@@ -77,7 +77,7 @@ describe("SwarmViewModel backfill-naming backlog trigger", () => {
     });
 
     it("a synthetic subagent:named event still patches display_name in place (regression guard)", async () => {
-        const vm = new SwarmViewModel("block-1", {} as any);
+        const vm = new SwarmViewModel("block-1");
         await flush();
 
         expect(vm.subagentsAtom().find((s) => s.agent_id === "agent-1")?.display_name).toBeNull();
@@ -97,7 +97,7 @@ describe("SwarmViewModel backfill-naming backlog trigger", () => {
         // subagent:spawned but must re-fire the backlog resolver too —
         // otherwise those newly-discovered rows stay raw-slugged until the
         // whole view model is torn down and rebuilt.
-        new SwarmViewModel("block-1", {} as any);
+        new SwarmViewModel("block-1");
 
         const backlogCallCount = () =>
             callBackendServiceSpy.mock.calls.filter((call) => call[0] === "subagent" && call[1] === "ResolveUnnamedBacklog")
