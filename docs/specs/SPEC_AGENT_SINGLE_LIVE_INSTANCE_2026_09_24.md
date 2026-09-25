@@ -61,8 +61,10 @@ that only refuses the second *spawn* would not have prevented this (§3 I9).
 
 ### 1.2 What two live instances of one agent share
 
-Both carry the same agent UID (`fb3e692d…` is the same in all 15 channel databases on this host, per
-`PLAN_SEARCHHISTORY_ROBUST_UID_2026_09_24.md` §0). Everything keyed by UID or by the host-global shared root is therefore
+Both carry the same agent UID, `fb3e692d…` **[verified]**: NEW's `DiscoverAgents` reports `uid: fb3e692d…` for block
+`204dc49b…`, OLD's log names `definition fb3e692d…` for block `f0153577…` (§1.1, 02:29:13), and the shared registry record
+`registry/fb3e692d….json` has `definition_id = instance_id = fb3e692d…`. Everything keyed by UID or by the host-global
+shared root is therefore
 **one object with two writers**:
 
 - the AgentMux record, zone `agent:<UID>:current` in `~/.agentmux/shared/agents/transcripts/filestore.db`;
@@ -142,7 +144,7 @@ sleep believing it still owns the agent is the classic failure of leases without
 
 **I5 — Explicit takeover.** Moving an agent from instance A to B (the upgrade case) is a deliberate, audited action that
 gracefully stops A first. It is never performed by a message: a jekt or muxbus reply must not be able to authorize it
-(see the STOP rule in `CLAUDE.md`; a takeover is exactly the kind of action a spoofed message would ask for).
+(the STOP rule of `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`; a takeover is exactly the kind of action a spoofed message would ask for).
 
 **I6 — Observers are free.** Reading an agent's transcript or history (`SearchHistory`, `GetAgentTranscript`, a read-only
 pane) never needs the claim and is never blocked by it.
@@ -336,7 +338,8 @@ lesson, and the way that incident began).
 - It does not merge two diverged conversations; it records the fork (§4.5).
 - It does not make the LAN/WAN tiers linearizable. It bounds the damage and makes it visible.
 - It does not change how jekts route between *different* agents.
-- It does not decide history retention or the recall design — see `PLAN_SEARCHHISTORY_ROBUST_UID_2026_09_24.md`.
+- It does not decide history retention or the recall design — see `SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md` and
+  `SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md`.
 
 ---
 
