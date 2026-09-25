@@ -1,7 +1,6 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -856,18 +855,14 @@ function derivedRunningStatus(
 
 // ── ViewModel ────────────────────────────────────────────────────────────
 
-export class SwarmViewModel implements ViewModel {
+/** Swarm's state behind its native pane tab (`swarmPaneTab`, swarm.tsx). */
+export class SwarmViewModel {
     viewType = "swarm";
     blockId: string;
-    nodeModel: BlockNodeModel;
 
-    viewIcon: Accessor<string> = () => "diagram-project";
-    viewName: Accessor<string> = () => "Swarm";
-    noPadding: Accessor<boolean> = () => true;
 
-    get viewComponent(): ViewComponent {
-        return null; // set by barrel
-    }
+
+
 
     private _subagents = createSignal<ActiveSubagent[]>([]);
     subagentsAtom: Accessor<ActiveSubagent[]> = this._subagents[0];
@@ -1083,9 +1078,8 @@ export class SwarmViewModel implements ViewModel {
     private trackedBlocksPollTimer: ReturnType<typeof setInterval> | undefined;
     private static readonly TRACKED_BLOCKS_POLL_MS = 12_000;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
+    constructor(blockId: string) {
         this.blockId = blockId;
-        this.nodeModel = nodeModel;
 
         void this.loadAll();
 

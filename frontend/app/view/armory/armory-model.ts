@@ -1,9 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BlockNodeModel } from "@/app/block/blocktypes";
-import { useBlockAtom } from "@/app/store/global";
-import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, type Accessor } from "solid-js";
 
 // Section ids are internal and stay stable across renames (they're
@@ -53,11 +51,12 @@ function isMemorySubsection(v: unknown): v is MemorySubsection {
     return v === "global" || v === "personal";
 }
 
-export class ArmoryViewModel implements ViewModel {
+/** Armory's state behind its native pane tab (armory.tsx). */
+export class ArmoryViewModel {
     viewType = "armory";
     blockId: string;
-    nodeModel: BlockNodeModel;
-    blockAtom: Accessor<Block>;
+    /** Writes the block's meta — the host context's. */
+    setMeta: (patch: Record<string, unknown>) => void;
     // Per-pane zoom, same term:zoom metadata + clamp range as editor/term/
     // agent/swarm (editor-model.ts's zoomAtom is the direct precedent —
     // Armory reuses the key rather than introducing "armory:zoom", since
@@ -73,42 +72,34 @@ export class ArmoryViewModel implements ViewModel {
     // SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md.
     memorySubsectionAtom: Accessor<MemorySubsection>;
 
-    viewIcon = () => "vault";
-    // wired in armory.tsx to avoid circular import
-    declare viewComponent: ViewComponent<ArmoryViewModel>;
-    declare viewName: Accessor<string>;
+    viewName: Accessor<string>;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.blockId = blockId;
-        this.nodeModel = nodeModel;
-        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
-        this.zoomAtom = useBlockAtom(blockId, "armory-zoom", () =>
-            createMemo<number>(() => {
-                const z = this.blockAtom()?.meta?.["term:zoom"];
-                if (typeof z !== "number" || isNaN(z)) return 1.0;
-                return Math.max(0.5, Math.min(2.0, z));
-            }),
-        );
-        this.sectionAtom = useBlockAtom(blockId, "armory-section", () =>
-            createMemo<ArmorySection>(() => {
-                const s = this.blockAtom()?.meta?.["armory:section"] as LegacyArmorySection | undefined;
-                if (s === "native_memory") return "memory";
-                return isArmorySection(s) ? s : "accounts";
-            }),
-        );
-        this.memorySubsectionAtom = useBlockAtom(blockId, "armory-memory-subsection", () =>
-            createMemo<MemorySubsection>(() => {
-                const sub = this.blockAtom()?.meta?.["armory:memory:subsection"];
-                if (isMemorySubsection(sub)) return sub;
-                // Legacy: a pre-merge armory:section of "native_memory" meant
-                // the user had Personal Memory open — seed Personal instead
-                // of defaulting to Global. See sectionAtom above.
-                const legacySection = this.blockAtom()?.meta?.["armory:section"];
-                return legacySection === "native_memory" ? "personal" : "global";
-            }),
-        );
-        this.viewName = useBlockAtom(blockId, "armory-view-name", () =>
-            createMemo<string>(() => ARMORY_SECTION_LABELS[this.sectionAtom()]),
-        );
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`;
+    // its memos live in the instance's own root (host rule 8), so they no
+    // longer need the per-block atom cache to survive.
+    constructor(ctx: PaneTabHostContext) {
+        this.blockId = ctx.blockId;
+        this.setMeta = (patch) => void ctx.setMeta(patch);
+        const meta = ctx.meta;
+        this.zoomAtom = createMemo<number>(() => {
+            const z = meta()?.["term:zoom"];
+            if (typeof z !== "number" || isNaN(z)) return 1.0;
+            return Math.max(0.5, Math.min(2.0, z));
+        });
+        this.sectionAtom = createMemo<ArmorySection>(() => {
+            const s = meta()?.["armory:section"] as LegacyArmorySection | undefined;
+            if (s === "native_memory") return "memory";
+            return isArmorySection(s) ? s : "accounts";
+        });
+        this.memorySubsectionAtom = createMemo<MemorySubsection>(() => {
+            const sub = meta()?.["armory:memory:subsection"];
+            if (isMemorySubsection(sub)) return sub;
+            // Legacy: a pre-merge armory:section of "native_memory" meant
+            // the user had Personal Memory open — seed Personal instead
+            // of defaulting to Global. See sectionAtom above.
+            const legacySection = meta()?.["armory:section"];
+            return legacySection === "native_memory" ? "personal" : "global";
+        });
+        this.viewName = createMemo<string>(() => ARMORY_SECTION_LABELS[this.sectionAtom()]);
     }
 }

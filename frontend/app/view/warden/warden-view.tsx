@@ -4,8 +4,6 @@
 import { For, onCleanup, onMount, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { WardenHostManager } from "@/app/view/warden-host/warden-host-manager";
 import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
@@ -22,17 +20,14 @@ const RAIL: { id: WardenSection; label: string; icon: string }[] = [
     { id: "supervisor", label: WARDEN_SECTION_LABELS.supervisor, icon: "user-shield" },
 ];
 
-export function WardenView(props: ViewComponentProps<WardenViewModel>): JSX.Element {
+export function WardenView(props: { model: WardenViewModel }): JSX.Element {
     const model = props.model;
     // Meta-backed on the model (warden-model.ts's sectionAtom) rather than a
     // local createSignal — so WardenViewModel.viewName can react to it, and
     // the selected tab survives a block remount. Mirrors armory-view.tsx.
     const section = model.sectionAtom;
     const setSection = (id: WardenSection) =>
-        void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: `block:${model.blockId}`,
-            meta: { "warden:section": id },
-        });
+        model.setMeta({ "warden:section": id });
     let viewRef: HTMLDivElement | undefined;
 
     // Ctrl+Wheel zoom — identical pipeline to Armory's (armory-view.tsx is
@@ -50,10 +45,7 @@ export function WardenView(props: ViewComponentProps<WardenViewModel>): JSX.Elem
             const STEP = 0.1;
             const current = model.zoomAtom();
             const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
-            void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: `block:${model.blockId}`,
-                meta: { "term:zoom": next === 1.0 ? null : next },
-            });
+            model.setMeta({ "term:zoom": next === 1.0 ? null : next });
         };
         viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => viewRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));

@@ -31,27 +31,16 @@ vi.mock("@/app/view/warden-supervisor/warden-supervisor-manager", () => ({
 // sectionAtom/viewName are createMemo-derived from model.blockAtom(), so
 // reading a plain (non-reactive) stub only ever satisfies a memo's *first*
 // (eager, at-construction) computation. Backing the mock with a genuine
-// signal, and having the SetMetaCommand mock write into it, reproduces the
+// signal, and having the host context's setMeta write into it, reproduces the
 // real write -> MPS push -> blockAtom update round trip closely enough for
 // clicking a rail item to actually flip the visible/active section here,
 // the same way it does against the real backend. Mirrors armory-view.test.tsx.
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
-vi.mock("@/app/store/mos", () => ({
-    makeORef: (type: string, id: string) => `${type}:${id}`,
-    getMuxObjectAtom: () => () => ({ meta: blockMeta() }),
-    getObjectValue: () => ({}),
-}));
 
-const setMetaMock = vi.fn((..._args: unknown[]) => {
-    const opts = _args[1] as { oref: string; meta: Record<string, unknown> };
-    setBlockMeta((prev) => ({ ...prev, ...opts.meta }));
-    return Promise.resolve(undefined);
+const setMetaMock = vi.fn((patch: Record<string, unknown>) => {
+    setBlockMeta((prev) => ({ ...prev, ...patch }));
+    return Promise.resolve();
 });
-vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: {
-        SetMetaCommand: (...args: unknown[]) => setMetaMock(...args),
-    },
-}));
 
 import { WardenViewModel } from "./warden-model";
 import { WardenView } from "./warden-view";
@@ -63,13 +52,10 @@ describe("WardenView rail", () => {
     });
 
     function renderWarden() {
-        const model = new WardenViewModel("test-block", null as any);
+        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         return render(() => (
             <WardenView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
     }
@@ -126,13 +112,10 @@ describe("WardenView pane title", () => {
     });
 
     function renderWarden() {
-        const model = new WardenViewModel("test-block", null as any);
+        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         const result = render(() => (
             <WardenView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
         return { ...result, model };
@@ -143,33 +126,27 @@ describe("WardenView pane title", () => {
         expect(model.viewName()).toBe("Host");
     });
 
-    it("clicking a rail item writes warden:section via SetMetaCommand and updates viewName()", () => {
+    it("clicking a rail item writes warden:section through the host context and updates viewName()", () => {
         const { model } = renderWarden();
         const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
         const auditButton = Array.from(rail.querySelectorAll("button")).find((b) =>
             b.textContent?.includes("Audit")
         ) as HTMLButtonElement;
         auditButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
-            oref: "block:test-block",
-            meta: { "warden:section": "audit" },
-        });
+        expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "audit" });
         expect(model.viewName()).toBe("Audit");
         const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("clicking a tab-bar item writes warden:section via SetMetaCommand and updates viewName()", () => {
+    it("clicking a tab-bar item writes warden:section through the host context and updates viewName()", () => {
         const { model } = renderWarden();
         const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
         const supervisorButton = Array.from(tabBar.querySelectorAll("button")).find((b) =>
             b.textContent?.includes("Supervisor")
         ) as HTMLButtonElement;
         supervisorButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
-            oref: "block:test-block",
-            meta: { "warden:section": "supervisor" },
-        });
+        expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "supervisor" });
         expect(model.viewName()).toBe("Supervisor");
     });
 
@@ -183,13 +160,13 @@ describe("WardenView pane title", () => {
 
     it("viewName() reflects a pre-seeded warden:section meta value", () => {
         setBlockMeta({ "warden:section": "lan" });
-        const model = new WardenViewModel("test-block", null as any);
+        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         expect(model.viewName()).toBe("LAN");
     });
 
     it("falls back to 'Host' for an invalid warden:section meta value", () => {
         setBlockMeta({ "warden:section": "not-a-real-section" });
-        const model = new WardenViewModel("test-block", null as any);
+        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         expect(model.viewName()).toBe("Host");
     });
 });
@@ -202,13 +179,10 @@ describe("WardenView zoom", () => {
     });
 
     function renderWarden() {
-        const model = new WardenViewModel("test-block", null as any);
+        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         const result = render(() => (
             <WardenView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
         return { ...result, model };
@@ -220,18 +194,18 @@ describe("WardenView zoom", () => {
         expect(view.style.zoom).toBe("1");
     });
 
-    it("Ctrl+Wheel down writes a decreased term:zoom via SetMetaCommand", () => {
+    it("Ctrl+Wheel down writes a decreased term:zoom through the host context", () => {
         const { container } = renderWarden();
         const view = container.querySelector(".warden-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 0.9 } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 0.9 });
     });
 
-    it("Ctrl+Wheel up writes an increased term:zoom via SetMetaCommand", () => {
+    it("Ctrl+Wheel up writes an increased term:zoom through the host context", () => {
         const { container } = renderWarden();
         const view = container.querySelector(".warden-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 1.1 } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 1.1 });
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
@@ -256,18 +230,15 @@ describe("WardenView zoom", () => {
     });
 
     it("returning to 1.0 clears the metadata key (writes null)", () => {
-        const model = new WardenViewModel("test-block", null as any);
+        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         (model as any).zoomAtom = () => 0.9;
         const { container } = render(() => (
             <WardenView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
         const view = container.querySelector(".warden-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": null } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": null });
     });
 });
