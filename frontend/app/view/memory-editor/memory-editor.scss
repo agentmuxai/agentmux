@@ -1,0 +1,254 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Shared memory-editor chrome: the pinned two-region layout, the action bar,
+// the dirty-draft banner and the content/editor that fills the bottom.
+// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4.
+
+// ── Pinned layout ────────────────────────────────────────────────────────
+// Needs a definite height from its host (the pane) so `50%` below resolves.
+
+.memory-pinned-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
+.memory-pinned-top {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+}
+
+.memory-pinned-handle {
+    flex: 0 0 auto;
+    height: 5px;
+    border-top: 1px solid var(--border-color);
+    background: transparent;
+    cursor: row-resize;
+    touch-action: none;
+
+    &:hover,
+    &:focus-visible {
+        background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        outline: none;
+    }
+}
+
+.memory-pinned-bottom {
+    flex: 1 1 auto;
+    min-height: min(240px, 50%);
+    display: flex;
+    flex-direction: column;
+}
+
+// ── Action bar (Save / Cancel / Edit / History / Revert / Close) ────────
+
+.memory-editor-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+}
+
+.memory-editor-actions-spacer {
+    flex: 1;
+}
+
+.memory-editor-status {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.memory-editor-btn {
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: transparent;
+    color: var(--main-text-color);
+    cursor: default;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+    }
+
+    &.is-primary {
+        background: var(--accent-color);
+        color: var(--button-text-color);
+        border-color: var(--accent-color);
+
+        &:hover:not(:disabled) {
+            opacity: 0.85;
+        }
+    }
+
+    &.is-danger {
+        color: var(--error-color);
+        border-color: color-mix(in srgb, var(--error-color) 40%, var(--border-color));
+    }
+
+    &.is-active {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+}
+
+.memory-editor-error {
+    padding: var(--space-1-5) var(--space-2);
+    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color) 30%, transparent);
+    color: var(--error-color);
+    font-size: var(--text-sm);
+}
+
+.memory-editor-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.memory-editor-field-label {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.memory-editor-input {
+    padding: var(--space-1) var(--space-1-5);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color);
+    }
+}
+
+// ── Dirty-draft banner ───────────────────────────────────────────────────
+
+.memory-conflict-banner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid color-mix(in srgb, var(--warning-color) 50%, var(--border-color));
+    background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+    font-size: var(--text-sm);
+    color: var(--main-text-color);
+}
+
+.memory-conflict-banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+
+.memory-conflict-banner-diff {
+    margin: 0;
+    max-height: 240px;
+    overflow: auto;
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-color);
+    background: var(--main-bg-color);
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+// ── Content / editor (the bottom region) ─────────────────────────────────
+
+.memory-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.memory-content-status {
+    margin: 0;
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    font-style: italic;
+}
+
+.memory-content-error {
+    margin: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color) 30%, transparent);
+    color: var(--error-color);
+    font-size: var(--text-sm);
+}
+
+// Markdown's own root sets `height: 100%; overflow: hidden`, so the wrapper
+// is what fills the region.
+.memory-content-markdown {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: var(--space-2);
+    font-size: 11px;
+}
+
+// Compound selector needed to beat the base `.content { overflow: scroll }`
+// rule in markdown.scss — same fix as .native-memory-content-markdown-content.
+.content.memory-content-markdown-content {
+    overflow: auto;
+}
+
+.memory-content-pre {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: var(--space-2);
+    overflow: auto;
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-sm);
+    color: var(--main-text-color);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.memory-content-textarea {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: var(--space-1-5) var(--space-2);
+    border: none;
+    border-radius: 0;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-sm);
+    resize: none;
+    outline: none;
+
+    &:focus {
+        box-shadow: inset 0 0 0 1px var(--accent-color);
+    }
+}
+
+// MemoryHistory reuses NativeMemoryHistoryPanel.scss's item styles; inside the
+// pinned layout's top region it must not open a second scroll container.
+.native-memory-history.memory-history {
+    overflow: visible;
+    padding: 0;
+    min-height: auto;
+}

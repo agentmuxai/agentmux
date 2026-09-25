@@ -2,302 +2,62 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * NativeMemoryHistoryModel — view model for one memory file's version
- * history: list, diff any two versions, revert to a prior version. Backs
- * `NativeMemoryHistoryPanel`, which is mounted from two places — the
- * agent's own Stash "Memory" tab (`AgentNativeMemoryModal`) and Armory's
- * "Native Memory" tab (agent-picker + this same panel) — both reading the
- * identical `agent:memory:history/diff/revert` RPCs, so there is one
- * source of truth and two entry points, per
+ * NativeMemoryHistoryModel — view model for one native memory file's version
+ * history: list, diff any two versions, revert to a prior version, plus the
+ * file's current content. Mounted from two places — the agent's own Stash
+ * "Memory" tab (`AgentNativeMemoryModal`) and Armory's Personal Memory full
+ * view (`NativeMemoryFileView`) — both reading the identical
+ * `agent:memory:history/diff/revert` RPCs, so there is one source of truth
+ * and two entry points, per
  * docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3.
+ *
+ * The model itself now lives in memory-editor/memory-history-model.ts with a
+ * pluggable data source (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3);
+ * this is that model bound to the `agent:memory:*` RPCs.
  */
 
-import { createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NativeMemoryVersionMeta } from "@/app/store/rpc-api";
+import { MemoryHistoryModel, type MemoryHistorySource } from "@/app/view/memory-editor/memory-history-model";
 
-/** Order two version ids oldest-first, given `versions` in the model's own
- *  newest-first order (matches `agent:memory:history`'s response order —
- *  see `agent_native_memory_version_list`'s `ORDER BY created_at DESC` on
- *  the backend). Extracted as a standalone, unit-testable function after
- *  reagent P1 caught this exact ordering inverted in an earlier revision —
- *  a larger index in a newest-first list means an OLDER version, easy to
- *  get backwards inline. Returns `[idA, idB]` unchanged if either id isn't
- *  found in `versions` (defensive default; callers only invoke this with
- *  ids known to be present). */
-export function orderVersionsOldestFirst(
-    idA: string,
-    idB: string,
-    versions: NativeMemoryVersionMeta[],
-): [string, string] {
-    const indexOf = (id: string) => versions.findIndex((v) => v.id === id);
-    const idxA = indexOf(idA);
-    const idxB = indexOf(idB);
-    if (idxA < 0 || idxB < 0) return [idA, idB];
-    return idxA > idxB ? [idA, idB] : [idB, idA];
+export { orderVersionsOldestFirst, sourceLabel, sourceWarning } from "@/app/view/memory-editor/memory-history-model";
+
+/** The `agent:memory:*` data source for one (agent, file). */
+export function nativeMemoryHistorySource(
+    agentId: string,
+    filename: string,
+): MemoryHistorySource<NativeMemoryVersionMeta> {
+    // Plain `.then` chains rather than `async` wrappers: each extra `await`
+    // layer is one more microtask before a result lands, and nothing here
+    // needs one.
+    return {
+        listVersions: () =>
+            RpcApi.NativeMemoryHistoryCommand(TabRpcClient, { agent_id: agentId, filename }).then((r) => r.versions),
+        diff: (fromVersionId, toVersionId) =>
+            RpcApi.NativeMemoryDiffCommand(TabRpcClient, {
+                agent_id: agentId,
+                from_version_id: fromVersionId,
+                to_version_id: toVersionId,
+            }).then((r) => r.diff),
+        revert: (versionId) =>
+            RpcApi.NativeMemoryRevertCommand(TabRpcClient, {
+                agent_id: agentId,
+                filename,
+                target_version_id: versionId,
+            }).then(() => undefined),
+        readContent: () =>
+            RpcApi.NativeMemoryReadFileCommand(TabRpcClient, { agent_id: agentId, filename }).then((r) => r.content),
+    };
 }
 
-/** Human label for a version's `source` field. */
-export function sourceLabel(source: string): string {
-    switch (source) {
-        case "human": return "Human";
-        case "agent_inferred": return "Agent";
-        case "jekt": return "Jekt";
-        case "external_fs_write": return "Detected outside AgentMux";
-        case "revert": return "Revert";
-        default: return source;
-    }
-}
-
-/** Whether a version's source warrants a visible warning tag — a claim
- *  about *why* the write happened that the operator should specifically
- *  notice, per the spec's §4.4 (distinguishing "unverified sender" from
- *  "untracked write path" — two materially different weaker claims). */
-export function sourceWarning(v: NativeMemoryVersionMeta): string | null {
-    if (v.source === "jekt") {
-        let tier = "";
-        let trust = "";
-        try {
-            const detail = JSON.parse(v.source_detail || "{}") as Record<string, unknown>;
-            tier = typeof detail.TIER === "string" ? detail.TIER : "";
-            trust = typeof detail.TRUST === "string" ? detail.TRUST : "";
-        } catch {
-            // source_detail wasn't valid JSON — fall through with an empty tier/trust.
-        }
-        const parts = [tier && `TIER=${tier}`, trust && `TRUST=${trust}`].filter(Boolean);
-        return `written in response to a jekt${parts.length ? ` — ${parts.join(", ")}` : ""}`;
-    }
-    if (v.source === "external_fs_write") {
-        let detectedVia = "";
-        try {
-            const detail = JSON.parse(v.source_detail || "{}") as Record<string, unknown>;
-            detectedVia = typeof detail.detected_via === "string" ? detail.detected_via : "";
-        } catch {
-            // ignore
-        }
-        return `detected outside AgentMux's write path — provenance unknown${detectedVia ? ` (${detectedVia})` : ""}`;
-    }
-    return null;
-}
-
-export class NativeMemoryHistoryModel {
+export class NativeMemoryHistoryModel extends MemoryHistoryModel<NativeMemoryVersionMeta> {
     readonly agentId: string;
     readonly filename: string;
 
-    private _versions = createSignal<NativeMemoryVersionMeta[]>([]);
-    versionsAtom: Accessor<NativeMemoryVersionMeta[]> = this._versions[0];
-    private setVersions = this._versions[1];
-
-    private _loading = createSignal<boolean>(false);
-    loadingAtom: Accessor<boolean> = this._loading[0];
-    private setLoading = this._loading[1];
-
-    private _error = createSignal<string | null>(null);
-    errorAtom: Accessor<string | null> = this._error[0];
-    private setError = this._error[1];
-
-    /** The file's current (live) content — `null` means still loading, an
-     *  empty string means the file genuinely has no content. Mirrors
-     *  `AgentNativeMemoryModel.contentAtom`'s own convention so both
-     *  surfaces agree on what "no value yet" looks like. */
-    private _content = createSignal<string | null>(null);
-    contentAtom: Accessor<string | null> = this._content[0];
-    private setContent = this._content[1];
-
-    /** Separate from `errorAtom` so a caller can tell a content-fetch
-     *  failure apart from a history-fetch failure. */
-    private _contentError = createSignal<string | null>(null);
-    contentErrorAtom: Accessor<string | null> = this._contentError[0];
-    private setContentError = this._contentError[1];
-
-    /** True only while a content fetch is actually in flight — distinct
-     *  from `contentAtom() === null`, which also describes "fetch failed,
-     *  nothing to show" and must not keep rendering a loading state. */
-    private _contentLoading = createSignal<boolean>(true);
-    contentLoadingAtom: Accessor<boolean> = this._contentLoading[0];
-    private setContentLoading = this._contentLoading[1];
-
-    /* codex P2 on PR #3218: the constructor's initial loadContent() and a
-     * revert-triggered loadContent() can both be in flight at once; without
-     * a request-id guard (mirroring latestDiffRequestId above) the older
-     * response can resolve second and clobber the newer one. */
-    private latestContentRequestId = 0;
-
-    /** Up to two version ids selected for comparison, oldest-first once both are set. */
-    private _diffSelection = createSignal<string[]>([]);
-    diffSelectionAtom: Accessor<string[]> = this._diffSelection[0];
-    private setDiffSelection = this._diffSelection[1];
-
-    private _diffText = createSignal<string | null>(null);
-    diffTextAtom: Accessor<string | null> = this._diffText[0];
-    private setDiffText = this._diffText[1];
-
-    private _diffLoading = createSignal<boolean>(false);
-    diffLoadingAtom: Accessor<boolean> = this._diffLoading[0];
-    private setDiffLoading = this._diffLoading[1];
-
-    private _reverting = createSignal<boolean>(false);
-    revertingAtom: Accessor<boolean> = this._reverting[0];
-    private setReverting = this._reverting[1];
-
-    /** reagent P2 on PR #2678: guards computeDiff against a stale response —
-     *  selecting one version pair, then a different pair before the first
-     *  NativeMemoryDiffCommand resolves, could otherwise let the stale
-     *  response overwrite diffTextAtom after the newer selection's request
-     *  already completed. */
-    private latestDiffRequestId = 0;
-
-    /** Called after a successful revert so the caller (e.g.
-     *  AgentNativeMemoryModel) can refresh the live file content it shows
-     *  elsewhere — this model only owns history/diff/revert state, not the
-     *  "current content" view that already exists on the sibling model. */
-    onReverted?: (newContent: string) => void;
-
     constructor(agentId: string, filename: string) {
+        super(nativeMemoryHistorySource(agentId, filename));
         this.agentId = agentId;
         this.filename = filename;
-        void this.loadHistory();
-        void this.loadContent();
-    }
-
-    /** Fetch the file's current content. Mirrors
-     *  `AgentNativeMemoryModel.selectFile()`'s own read_file call — same
-     *  RPC, same agent_id/filename already available on this model.
-     *  Returns whether THIS call's result was the one actually applied —
-     *  `false` on a stale (superseded) or failed response, so a caller like
-     *  `revertTo` can tell "the content shown now truly reflects this
-     *  call" apart from "some load happened but this one didn't win". */
-    async loadContent(): Promise<boolean> {
-        const requestId = ++this.latestContentRequestId;
-        this.setContentLoading(true);
-        this.setContentError(null);
-        try {
-            const res = await RpcApi.NativeMemoryReadFileCommand(TabRpcClient, {
-                agent_id: this.agentId,
-                filename: this.filename,
-            });
-            if (requestId !== this.latestContentRequestId) return false;
-            this.setContent(res.content);
-            this.setContentLoading(false);
-            return true;
-        } catch (e) {
-            if (requestId !== this.latestContentRequestId) return false;
-            this.setContentError(`Failed to load content: ${(e as Error).message ?? e}`);
-            this.setContentLoading(false);
-            return false;
-        }
-    }
-
-    async loadHistory(): Promise<void> {
-        this.setLoading(true);
-        this.setError(null);
-        try {
-            const res = await RpcApi.NativeMemoryHistoryCommand(TabRpcClient, {
-                agent_id: this.agentId,
-                filename: this.filename,
-            });
-            this.setVersions(res.versions);
-        } catch (e) {
-            this.setError(`Failed to load history: ${(e as Error).message ?? e}`);
-        } finally {
-            this.setLoading(false);
-        }
-    }
-
-    /** Toggle a version in/out of the (at most 2) diff selection. Selecting
-     *  a third clears down to just the newly-clicked one — simpler than a
-     *  queue, and matches "pick two things to compare" as the only real
-     *  use case. */
-    toggleDiffSelection(versionId: string): void {
-        // Any change to the selection invalidates whatever diff request (if
-        // any) was previously in flight — otherwise a stale response could
-        // still land afterward and repopulate diffTextAtom for a selection
-        // the user has since abandoned, even on a path (like selecting a
-        // third id, below) that doesn't itself start a new diff request.
-        this.latestDiffRequestId++;
-        const current = this.diffSelectionAtom();
-        if (current.includes(versionId)) {
-            this.setDiffSelection(current.filter((id) => id !== versionId));
-            this.setDiffText(null);
-            return;
-        }
-        const next = current.length >= 2 ? [versionId] : [...current, versionId];
-        this.setDiffSelection(next);
-        this.setDiffText(null);
-        if (next.length === 2) void this.computeDiff(next[0], next[1]);
-    }
-
-    private async computeDiff(idA: string, idB: string): Promise<void> {
-        // Order oldest -> newest so the diff reads as "what changed since
-        // the earlier version", regardless of click order.
-        const [from, to] = orderVersionsOldestFirst(idA, idB, this.versionsAtom());
-
-        // toggleDiffSelection already bumped latestDiffRequestId for this
-        // call — capture it as-is rather than bumping again here.
-        const requestId = this.latestDiffRequestId;
-        this.setDiffLoading(true);
-        this.setError(null);
-        try {
-            const res = await RpcApi.NativeMemoryDiffCommand(TabRpcClient, {
-                agent_id: this.agentId,
-                from_version_id: from,
-                to_version_id: to,
-            });
-            if (requestId !== this.latestDiffRequestId) return;
-            this.setDiffText(res.diff);
-        } catch (e) {
-            if (requestId !== this.latestDiffRequestId) return;
-            this.setError(`Failed to load diff: ${(e as Error).message ?? e}`);
-        } finally {
-            if (requestId === this.latestDiffRequestId) this.setDiffLoading(false);
-        }
-    }
-
-    clearDiffSelection(): void {
-        this.latestDiffRequestId++;
-        this.setDiffSelection([]);
-        this.setDiffText(null);
-    }
-
-    /** Revert to `versionId` — recorded as a NEW version (source "revert"),
-     *  never a rewrite of history. Reloads history afterward so the new
-     *  version shows up immediately. */
-    async revertTo(versionId: string): Promise<void> {
-        this.setReverting(true);
-        this.setError(null);
-        try {
-            await RpcApi.NativeMemoryRevertCommand(TabRpcClient, {
-                agent_id: this.agentId,
-                filename: this.filename,
-                target_version_id: versionId,
-            });
-            this.clearDiffSelection();
-            await this.loadHistory();
-            // Refresh this model's own content view (now always present,
-            // not just when a caller supplies onReverted) and forward it to
-            // the caller for its own separate content view, if any (e.g.
-            // AgentNativeMemoryModal's contentAtom in the Stash "content"
-            // sub-view, which this history panel doesn't own). Only forward
-            // on a genuine, non-stale success — reagent P1 + codex P2 on PR
-            // #3218: forwarding contentAtom() unconditionally could hand the
-            // caller a stale pre-revert value (or null) if this refresh
-            // failed, silently presenting old content as if it were the
-            // freshly reverted content. The failure is still visible via
-            // this model's own contentErrorAtom, rendered right where the
-            // user is looking (the history panel they just reverted from).
-            const refreshed = await this.loadContent();
-            if (refreshed && this.onReverted) {
-                this.onReverted(this.contentAtom() ?? "");
-            }
-        } catch (e) {
-            this.setError(`Revert failed: ${(e as Error).message ?? e}`);
-        } finally {
-            this.setReverting(false);
-        }
-    }
-
-    dispose(): void {
-        // Solid signals are GC'd with the instance; nothing to unsubscribe.
     }
 }
