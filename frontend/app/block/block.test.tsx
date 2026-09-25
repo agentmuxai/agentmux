@@ -123,6 +123,17 @@ registerPaneTab({
     }),
 });
 
+// A widget whose create(ctx) throws (Pane Tab contract Phase 6).
+registerPaneTab({
+    apiVersion: 1,
+    view: "ext:broken",
+    label: "Broken",
+    icon: "b",
+    create: () => {
+        throw new Error("widget exploded");
+    },
+});
+
 // A native pane tab (Pane Tab contract Phase 2b): `create(ctx)`, no class.
 // Real registry, not mocked — block.tsx looks the manifest up there.
 const nativeCreates: { blockId: string; disposed: boolean }[] = [];
@@ -369,6 +380,21 @@ describe("Block — the host fires a tab's activation hooks", () => {
         const real = render(() => <Block nodeModel={makeNodeModel({ blockId: "l3" })} preview={false} />);
         real.unmount();
         expect(lifecycle).toEqual(["activate l3", "deactivate l3"]);
+    });
+});
+
+describe("Block — a widget whose create(ctx) throws", () => {
+    it("gets a ViewModel that shows the error, and nothing throws past its pane", async () => {
+        setBlockView("x1", "ext:broken");
+        const Block = await loadBlock();
+        expect(() => render(() => <Block nodeModel={makeNodeModel({ blockId: "x1" })} preview={false} />)).not.toThrow();
+        const vm = (registry.get("x1") as { viewModel: ViewModel }).viewModel;
+        expect(vm.viewType).toBe("ext:broken");
+        const VC = vm.viewComponent;
+        const { container } = render(() => (
+            <VC blockId="x1" blockRef={{ current: null }} contentRef={{ current: null }} model={vm} />
+        ));
+        expect(container.textContent).toContain("widget exploded");
     });
 });
 

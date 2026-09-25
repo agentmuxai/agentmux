@@ -7,8 +7,10 @@ PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
 activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
-Phases 5a–5b (capabilities replace view-name checks) in the PR after it;
-5c dropped (§4); Phases 2c and 6 not started.
+Phases 5a–5b (capabilities replace view-name checks) in #3765; 5c dropped
+(§4); Phase 6 (third-party widgets from the user's widgets.json) in the PR
+after it; Phase 2c (migrating the remaining built-in views to `create`) not
+started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -467,6 +469,47 @@ working throughout through a legacy adapter.
 6. **Third-party loading:** trusted, locally installed ES-module widgets
    listed in widgets.json, a shared Solid runtime, `apiVersion` checks and
    error boundaries. No sandbox in v1 (decided, §5).
+   - **Design (2026-09-25):**
+     - **Where a widget lives.** A `widgets.json` entry gains `"module"`: a
+       path to an ES module, relative to `~/.agentmux/widgets/` or absolute.
+       Its `blockdef.meta.view` must be `ext:<name>`. `WidgetConfigType`
+       (`wconfig/types.rs`) gets the field — serde otherwise drops it.
+     - **The user's widgets.json.** Widgets came only from the `widgets.json`
+       embedded at build time, so there was nowhere to add one. The user's
+       own `widgets.json` beside `settings.json` (same per-channel directory,
+       `resolve_settings_dir`) is merged over the built-ins — a new key adds a
+       widget, a built-in's key replaces it — loaded at startup and reloaded
+       on change like `settings.json` (`backend/user_widgets.rs`). A parse
+       error keeps the previous widgets.
+     - **Loading** (`frontend/app/block/widget-loader.ts`). For each such
+       entry the loader reads the module's text through the existing
+       `readeditorfile` RPC (a trusted local file, like any file the editor
+       opens), rewrites its bare `solid-js`, `solid-js/web` and
+       `solid-js/store` imports to small blob modules that re-export the
+       APP's own instances — one Solid runtime, as §5 requires — and imports
+       it from a blob URL. No new server endpoint.
+     - **Validation.** The default export must be a `PaneTabManifest` with
+       `apiVersion: 1`, `view` equal to the entry's `ext:` view, and `create`
+       (native only — a widget has no ViewModel class). Anything else is
+       rejected with a logged reason and never registered; so is a module
+       that fails to read, parse or import. A later reload of the config
+       registers widgets that appeared and leaves loaded ones alone.
+     - **Crash containment.** A widget that throws while rendering is
+       already contained by `Block`'s per-pane `BlockErrorBoundary`. What it
+       didn't cover is `create(ctx)`, which runs in `makeViewModel` inside
+       `Block`'s effect: the host now catches a throwing `create` and gives
+       the pane an instance that shows the error. Either way only that pane
+       is affected.
+     - **Startup order.** app-init waits (up to 2 s) for the loader's first
+       pass before the first render: a persisted `ext:` pane that mounted
+       before its widget registered would build the default view model and
+       never rebuild, since `Block` only does on a view change.
+     - **Sample** (`docs/examples/widgets/hello/`): a dependency-free widget
+       using only `solid-js` primitives and DOM nodes, exercising `ctx.meta`,
+       `ctx.setMeta`, `ctx.visibility`, `liveTitle` and `onActivate`. Tests
+       cover the import rewrite, a version-mismatch and a view-mismatch
+       rejection, and crash containment; the loader's import step is
+       injectable, since a test runner can't import a blob URL.
 
 ## 5. Risks and open questions
 
