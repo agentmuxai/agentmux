@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Browser module barrel — wires viewComponent onto BrowserViewModel.
+// Browser module barrel — its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { BrowserViewModel } from "./browser-model";
