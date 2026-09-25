@@ -193,7 +193,7 @@ pub fn spawn(data_dir: std::path::PathBuf, dir_hash: String) -> Result<mpsc::Rec
         .map_err(|e| e.to_string())?;
     // Bounded, like the Windows toast backend: a missing/wedged session bus
     // must not stall the supervisor.
-    match ready_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+    match ready_rx.recv_timeout(super::READY_TIMEOUT) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => return Err(e),
         Err(_) => return Err("tray did not start within 5s".into()),

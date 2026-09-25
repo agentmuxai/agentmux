@@ -50,6 +50,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
+/// How long a backend waits for its icon to actually exist before `spawn`
+/// reports success. Every backend builds the icon on another thread (Windows:
+/// its pump thread; macOS: the AppKit main thread; Linux: the ksni thread), and
+/// `start_if_enabled` must not report success for an icon that was only
+/// *requested*: `unavailable` depends on it (ReAgent P1s on #3785).
+pub(crate) const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Set when the tray was requested but could not start. Read by the host spawn.
 static TRAY_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 
