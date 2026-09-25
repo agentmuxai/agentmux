@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { busyMembers, closesWithShutdownLog, describeBusyMember, type PaneCloseProbe } from "./pane-close-guard";
+import { busyMembers, closesWithShutdownLog, describeBusyMember, isAllBlocksGoneError, type PaneCloseProbe } from "./pane-close-guard";
 
 function probe(state: Record<string, { turn?: boolean | null; procs?: number; fail?: boolean }>): PaneCloseProbe {
     return {
@@ -39,6 +39,16 @@ describe("pane close guard", () => {
         expect(describeBusyMember({ blockId: "m", name: "Manoz", turnActive: false, processCount: 1 })).toBe(
             "Manoz — 1 process running"
         );
+    });
+});
+
+describe("isAllBlocksGoneError", () => {
+    it("only the whole-request pre-check means every block is gone", () => {
+        expect(isAllBlocksGoneError(new Error("ClosePane: block not found: a, b"))).toBe(true);
+    });
+    it("a partial failure's per-member error is not it: other blocks may still exist", () => {
+        expect(isAllBlocksGoneError("ClosePane: id2: DeleteBlock: block not found: id2")).toBe(false);
+        expect(isAllBlocksGoneError("ClosePane: tab not found: t")).toBe(false);
     });
 });
 

@@ -132,11 +132,6 @@ pub async fn run_with(state: &AppState, block_ids: Vec<String>, opts: CloseOpts)
         run_inner(ctx, tab_id, present.clone(), leaf_to_delete, opts, gone_before(&ids, &present)),
     )
     .await;
-    if let Err(reason) = &result {
-        for id in &present {
-            publish_shutdown_error(state, id, reason);
-        }
-    }
     for id in &present {
         finish_close(state, id).await;
     }
@@ -190,7 +185,13 @@ async fn run_inner(
             closed.extend(gone.iter().cloned());
             queue_member_deletes(ctx.state, &tab_id, &closed).await;
         }
-        return Err(format!("ClosePane: {}", failures.join("; ")));
+        // Only the members that failed show the error; the ones that closed
+        // are on their way out (ReAgent P2 on #3784).
+        let reason = format!("ClosePane: {}", failures.join("; "));
+        for id in &failed_ids {
+            publish_shutdown_error(ctx.state, id, &reason);
+        }
+        return Err(reason);
     }
 
     let leaf_removed = leaf_to_delete.is_some();

@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Block } from "@/app/block/block";
+import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { PaneLeafChrome } from "@/app/tab/pane-leaf-chrome";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { ModalLayer } from "@/element/ModalLayer";
@@ -19,6 +19,7 @@ import {
     busyMembers,
     closesWithShutdownLog,
     describeBusyMember,
+    isAllBlocksGoneError,
     type BusyMember,
     type PaneCloseProbe,
 } from "@/app/tab/pane-close-guard";
@@ -55,8 +56,11 @@ const paneCloseProbe: PaneCloseProbe = {
     },
 };
 
+/** Through the view aliases (legacy "forge" is an agent pane too), as
+ *  block.tsx requires — not a raw `meta.view === "agent"` check. */
 function isAgentBlock(blockId: string): boolean {
-    return MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["view"] === "agent";
+    const view = MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["view"];
+    return resolveEffectiveViewType(typeof view === "string" ? view : "") === "agent";
 }
 
 /**
@@ -70,7 +74,7 @@ function closeWithShutdownLog(tabId: string, blockIds: string[]): void {
     const agentIds = blockIds.filter(isAgentBlock);
     for (const id of agentIds) beginShutdownLog(id);
     services.ObjectService.ClosePane(blockIds, true).catch((err) => {
-        if (/block not found/i.test(String(err))) {
+        if (isAllBlocksGoneError(err)) {
             // Every block was already gone, so srv can't name their tab to
             // queue the layout change: drop them here instead (a safe no-op
             // for any the layout no longer has).
