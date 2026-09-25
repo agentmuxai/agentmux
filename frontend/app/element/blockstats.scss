@@ -31,8 +31,8 @@
     }
 
     // When this pane's header is hoisted out of BlockFrame_Default (into the
-    // shared pane-leaf-chrome above it — see TermViewModel.noHeader/
-    // AgentViewModel.noHeader), `.block-frame-default-inner` no longer
+    // shared pane-leaf-chrome above it — see BlockFrame's
+    // `noHeader`), `.block-frame-default-inner` no longer
     // reserves --header-height of space at its own top: the badge's usual
     // header-height offset then lands inside the pane's actual content,
     // well below its real top-right corner. Sit flush against this
