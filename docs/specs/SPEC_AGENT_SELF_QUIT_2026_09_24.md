@@ -169,6 +169,19 @@ export const quitCommand: SlashCommand = {
 
 The tab disappears, so feedback that lives in the tab is lost. Show a toast in the window: **"<agent name> quit."** plus, when relevant, "3 cron jobs still target it — Manage" (links to the cron list). For a tool-initiated quit the toast also shows the reason: **"<agent name> quit itself: <reason>."**
 
+### 5.4 Point the pane-close confirmation at `/quit`
+
+Closing a busy pane shows `ConfirmModal` ("Close this pane?", `frontend/app/tab/tabcontent.tsx:181-189`), listing each busy agent via `describeBusyMember` (`frontend/app/tab/pane-close-guard.ts:52`), e.g. "Camper — 2 processes running". The repo owner hit exactly this on 2026-09-24 when trying to close an agent that still had background processes, and asked that the modal point at `/quit`.
+
+Add one line under the busy list:
+
+> Tip: type **/quit** in an agent's pane to have it wind down gracefully and close its own tab.
+
+- **Close stays available.** The modal keeps its destructive **Close** and **Cancel** buttons unchanged. The note is advice, not a gate.
+- **Only when it applies.** Show the line only when at least one busy member is an agent pane where `/quit` is available (`availability: "any-agent"`). A pane of only terminals or other views gets no tip.
+- **No auto-run.** The note is text, not a button that sends `/quit`. Sending it from the modal would quit every busy agent at once, which is a different action from the one the user chose. A per-agent "Quit gracefully" button is a possible follow-up (Q5).
+- **Test.** A vitest case in `pane-close-guard.test.ts` or `tabcontent` checks that the tip renders for an agent member and not for a terminal-only pane.
+
 ## 6. `QuitSelf` MCP tool
 
 ### 6.1 Name
@@ -250,7 +263,7 @@ Alternative: keep the no-argument form but add the gate and audit. This is weake
 
 | Phase | Scope | Ships |
 |---|---|---|
-| 1 | `self_quit::run` (tab-scoped, graceful), `mark_quitting`, work-claim release, `Shell()` ownership + stop, audit; `ObjectService.QuitAgent`; `/quit` + `/exit` slash command; toast | user-facing `/quit` |
+| 1 | `self_quit::run` (tab-scoped, graceful), `mark_quitting`, work-claim release, `Shell()` ownership + stop, audit; `ObjectService.QuitAgent`; `/quit` + `/exit` slash command; toast; the `/quit` tip in the pane-close modal (§5.4) | user-facing `/quit` |
 | 2 | turn provenance (`turn_origin`) on every input path; `POST /api/v1/agent/self/quit` with the gate; deferred-to-turn-end scheduling; `QuitSelf` tool | agent-facing tool — **only together with the gate, never before it** |
 | 3 | `ClosePane` no-argument form rerouted through self-quit (§7) | back door closed |
 | — | §8 defects | independent PRs |
@@ -290,3 +303,4 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - **Q2. Crons on quit.** Recommended: keep and report (§4.3). Alternative: pause them on quit and resume them on reopen.
 - **Q3. Human-confirm dialog for `QuitSelf`.** Recommended: not in v1 (§6.4).
 - **Q4. `ClosePane` no-argument form.** Recommended: reroute through self-quit (§7-1).
+- **Q5. Per-agent "Quit gracefully" button in the pane-close modal.** Recommended: not in v1; the text tip (§5.4) first.
