@@ -1,7 +1,7 @@
 # SPEC: Ambient narration — render inline, in the agent's voice, with a trailing tag
 
 **Date:** 2026-09-24
-**Status:** Proposed (not implemented)
+**Status:** Proposed; implementation in PR #3719 (Q1–Q3 resolved as recommended)
 **Builds on:** PR #3169 (`feat(agent-pane): narrate backgrounded tasks into the conversation`),
 `docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md` §8.3
 **Scope:** frontend rendering + where the narration lives. No backend change.
@@ -111,18 +111,17 @@ Replace the `AmbientNarrationRow` strip with document insertion:
    `WpsEvent.AmbientNarration` and its malformed-payload handling, but instead of
    holding a 5-item signal it hands each accepted narration to a callback that
    dispatches it into the pane's document as an `AmbientNarrationNode`.
-2. Insertion goes through the same `StreamFlushQueue` path other synthetic nodes
-   use (`pushNewNode`), so ordering relative to streamed content is decided by
-   one mechanism. Caveat: `pushNewNode` currently also calls
-   `pushDockNodeStatus`, which ignores non-tool/non-user_message nodes, so an
-   ambient node is a no-op there — but the implementation should verify this
-   rather than assume it.
-3. The dedupe key from the backend (`dedupe_key` = tool node id) should be carried
-   through the broadcast payload (today it carries `block_id`, `kind`, `text`
-   only) or, minimally, the node id should be derived from `kind` + arrival time.
-   Recommend adding `dedupe_key` to the broadcast so a re-delivered event maps to
-   the same node id and `HistoryRestored`'s id-dedup absorbs it. This is the one
-   optional backend touch (a single extra JSON field in `websocket.rs` ~L1385).
+2. Insertion is a direct `paneModel.dispatchDoc({ type: "StreamFlush", newNodes: [node], updatedNodes: [] })`,
+   the same way `postSystemNotification` posts its line — **not** through
+   `StreamFlushQueue`. (Revised from the first draft of this spec, which said
+   queue.) The queue's flush also dispatches `StreamFlushObserved` to the pane as
+   turn activity, and AgentMux narrating itself is not evidence the model is
+   doing anything (§6.3). The queue's `pushDockNodeStatus` side effect is
+   likewise avoided.
+3. Node ids are `ambient-<arrival ms>-<seq>` (unique per arrival). Carrying the
+   backend's `dedupe_key` through the broadcast so a re-delivered event maps to the
+   same id is a possible follow-up (a single extra JSON field in `websocket.rs`
+   ~L1385); the first implementation does not touch the backend.
 4. Delete `AmbientNarrationRow.tsx` / `.scss`, and the `<AmbientNarrationRow>`
    mount in `agent-view.tsx`. Remove the `MAX_RETAINED = 5` bound — the document
    store already owns retention and virtualisation, and an in-flow node must not
