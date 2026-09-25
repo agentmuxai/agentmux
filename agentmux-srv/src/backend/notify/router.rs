@@ -69,6 +69,17 @@ pub enum TurnTransition {
     Nothing,
 }
 
+/// `(blockid, turn_active)` from a serialized `BlockControllerRuntimeStatus`.
+/// `turn_active` is `skip_serializing_if = "is_false"`, so a turn that ENDED
+/// arrives with the field absent — absent means false (Codex P1 on #3705;
+/// treating it as "unknown" dropped every end-of-turn and "finished" never
+/// fired).
+pub fn parse_turn_status(d: &serde_json::Value) -> Option<(String, bool)> {
+    let block_id = d.get("blockid")?.as_str()?.to_string();
+    let active = d.get("turn_active").and_then(|v| v.as_bool()).unwrap_or(false);
+    Some((block_id, active))
+}
+
 /// Pure: `prev` = last known `turn_active` for the block (None = never seen,
 /// e.g. right after srv start — a replayed/first status is not a transition).
 pub fn turn_transition(prev: Option<bool>, active: bool, stopped_recently: bool) -> TurnTransition {
@@ -168,14 +179,9 @@ fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crat
             // (Codex P1 on #3705), and only real agent turns ever report
             // turn_active=true (shell controllers hardcode false), so a
             // true→false edge is agent-specific on its own.
-            let Some(d) = ev.data.as_ref() else { return };
-            let (Some(block_id), Some(active)) = (
-                d.get("blockid").and_then(|v| v.as_str()),
-                d.get("turn_active").and_then(|v| v.as_bool()),
-            ) else {
-                return;
-            };
-            let _ = tx.send(Internal::TurnStatus { block_id: block_id.to_string(), active });
+            if let Some((block_id, active)) = ev.data.as_ref().and_then(parse_turn_status) {
+                let _ = tx.send(Internal::TurnStatus { block_id, active });
+            }
             return;
         }
         if ev.event != crate::backend::mps::EVENT_AGENT_FAILURE {
@@ -634,6 +640,36 @@ mod tests {
         assert_eq!(sanitize_name("a\nb\tc"), "abc");
         assert_eq!(sanitize_name("   "), "An agent");
         assert_eq!(sanitize_name(&"x".repeat(100)).chars().count(), AGENT_NAME_MAX);
+    }
+
+    /// Against the REAL serialized status type, not a hand-written JSON — the
+    /// omitted-when-false field is exactly what a hand-written fixture hid.
+    #[test]
+    fn parses_real_serialized_controller_status_including_omitted_false() {
+        use crate::backend::blockcontroller::BlockControllerRuntimeStatus;
+        let mk = |turn_active: bool| BlockControllerRuntimeStatus {
+            blockid: "b1".into(),
+            version: 1,
+            shellprocstatus: "running".into(),
+            shellprocconnname: "local".into(),
+            shellprocexitcode: 0,
+            shellprocpid: None,
+            shellprocname: String::new(),
+            spawn_ts_ms: None,
+            is_agent_pane: false,
+            turn_active,
+        };
+        let started = serde_json::to_value(mk(true)).unwrap();
+        let ended = serde_json::to_value(mk(false)).unwrap();
+        assert!(ended.get("turn_active").is_none(), "precondition: false is omitted on the wire");
+        assert_eq!(parse_turn_status(&started), Some(("b1".to_string(), true)));
+        assert_eq!(parse_turn_status(&ended), Some(("b1".to_string(), false)));
+        assert_eq!(parse_turn_status(&serde_json::json!({"turn_active": true})), None);
+        // End to end with the transition rule: start then end = Finished.
+        let (_, a) = parse_turn_status(&started).unwrap();
+        let (_, b) = parse_turn_status(&ended).unwrap();
+        assert_eq!(turn_transition(None, a, false), TurnTransition::Started);
+        assert_eq!(turn_transition(Some(a), b, false), TurnTransition::Finished);
     }
 
     #[test]
