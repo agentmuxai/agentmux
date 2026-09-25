@@ -568,6 +568,12 @@ declare global {
          *  The consumer (blockframe) falls back to viewIcon if this is empty string. */
         viewFaviconUrl?: Accessor<string>;
         viewName?: Accessor<string>;
+        /** True while `viewName` is only a stand-in for the real name that
+         *  hasn't loaded yet (a browser pane's "Browser" / hostname before
+         *  the page reports its title). Pane-tab pills then keep showing the
+         *  name they last saw instead of flashing the stand-in
+         *  (pane-tab-model.tsx). Omit when the name is always real. */
+        viewNameIsPlaceholder?: Accessor<boolean>;
         /** When provided, the header name becomes an inline editable text field. */
         setViewName?: (name: string) => Promise<void>;
         viewText?: Accessor<string | HeaderElem[]>;

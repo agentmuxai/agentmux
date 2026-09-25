@@ -43,6 +43,13 @@ function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
+/** Whether `vm` is `blockId`'s own ViewModel. A ViewModel that doesn't
+ *  expose its blockId is trusted (it can't be checked). */
+function viewModelIsFor(vm: ViewModel | null, blockId: string): boolean {
+    const owner = (vm as { blockId?: unknown } | null)?.blockId;
+    return typeof owner !== "string" || owner === blockId;
+}
+
 export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
     // `nodeModel.layoutModel`, NOT `getLayoutModelForStaticTab()` — the tab
     // this pane's own leaf lives in is not necessarily "whichever tab is
@@ -110,7 +117,19 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             infos.set(
                 blockId,
                 describePaneTab(
-                    { blockId, view, meta, ordinal, liveViewModel: blockId === activeId ? liveVm : null },
+                    {
+                        blockId,
+                        view,
+                        meta,
+                        ordinal,
+                        // Only this block's OWN ViewModel may name it: a live
+                        // name/favicon read from another tab's ViewModel gets
+                        // remembered under this tab (pills showing another
+                        // tab's title, or a browser's favicon on every pill).
+                        // pane-leaf-chrome keys `activeViewModel` by the active
+                        // block now; this is the belt-and-braces check.
+                        liveViewModel: blockId === activeId && viewModelIsFor(liveVm, blockId) ? liveVm : null,
+                    },
                     extraLabels.get(blockId),
                     tabMemory
                 )
