@@ -1167,6 +1167,18 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     tlog("GetFullConfig", t);
     setFullConfigAtom(fullConfig);
 
+    // Third-party pane tabs from widgets.json (Pane Tab contract Phase 6),
+    // loaded before the first render so a persisted `ext:` pane finds its
+    // manifest. Local files, so this is quick; the timeout only guards a
+    // stuck read — a widget that misses it still loads, for panes opened
+    // later.
+    t = performance.now();
+    const { startWidgetLoader } = await import("@/app/block/widget-loader");
+    await withTimeout(startWidgetLoader(), 2000, "LoadWidgets").catch((e) =>
+        console.warn("[widget-loader] first pass still running at first render:", e)
+    );
+    tlog("LoadWidgets", t);
+
     t = performance.now();
     const elem = document.getElementById("main");
     render(App, elem);

@@ -1102,6 +1102,16 @@ pub fn spawn_background_subsystems(
         event_bus.clone(),
     );
 
+    // The user's own widgets.json beside settings.json, merged over the
+    // built-in widgets (Pane Tab contract Phase 6: where an `ext:` widget is
+    // added). Same load-then-watch shape, same pool.
+    backend::user_widgets::load_user_widgets_from_disk(&config_watcher);
+    backend::user_widgets::spawn_user_widgets_watcher(
+        fs_watch_pool.clone(),
+        config_watcher.clone(),
+        event_bus.clone(),
+    );
+
     // Browser pane start page — same load-then-watch shape as settings.json
     // above, on the SAME fs_watch_pool instance, so it rides the existing
     // GetFullConfig/live-broadcast pipeline instead of a parallel one. See

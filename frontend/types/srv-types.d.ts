@@ -1575,6 +1575,8 @@ declare global {
         description?: string;
         magnified?: boolean;
         children?: string[];
+        /** A third-party pane tab's ES module (Pane Tab contract Phase 6). */
+        module?: string;
         blockdef: BlockDef;
     };
 

@@ -66,6 +66,15 @@ impl ConfigState {
         *current = Arc::new(new_config);
     }
 
+    /// Replace the widget set (the built-ins merged with the user's own
+    /// `widgets.json` — `backend::user_widgets`).
+    pub fn update_widgets(&self, widgets: std::collections::HashMap<String, super::WidgetConfigType>) {
+        let mut current = self.config.write().unwrap();
+        let mut new_config = (**current).clone();
+        new_config.widgets = widgets;
+        *current = Arc::new(new_config);
+    }
+
     /// Update just the browser start page. Mirrors `update_settings` exactly
     /// — see `backend::browser_start_page` for the load/watch wiring that
     /// calls this.
