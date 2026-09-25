@@ -31,6 +31,53 @@ pub enum Action {
     /// The agent's own `QuitSelf` from a turn the user didn't start: the same
     /// self-quit, after its turn ends (§4.2).
     SelfQuit { detail: String },
+    /// Another agent's `ClosePane block_id=`: close the whole pane.
+    ClosePane { block_ids: Vec<String> },
+    /// An agent's `FleetBulkStop`: stop the controller, as `agent.stop` does.
+    Stop { signal: Option<String> },
+}
+
+impl Action {
+    /// Each does all the one below it does: closing the pane ends the agent
+    /// and its siblings, a self-quit stops it and closes its tab.
+    fn rank(&self) -> u8 {
+        match self {
+            Action::Stop { .. } => 0,
+            Action::SelfQuit { .. } => 1,
+            Action::ClosePane { .. } => 2,
+        }
+    }
+
+    /// Every block this shuts down: the whole pane for a close, else the one.
+    fn covers(&self, block_id: &str) -> Vec<String> {
+        let mut blocks = vec![block_id.to_string()];
+        if let Action::ClosePane { block_ids } = self {
+            blocks.extend(block_ids.iter().filter(|b| b.as_str() != block_id).cloned());
+        }
+        blocks
+    }
+
+    /// Folds in a joiner's action of the same kind, so what runs covers
+    /// both (ReAgent P2 on #3798): the more forceful stop, every pane asked
+    /// for. A self-quit is the same either way; its detail is audit text.
+    fn merge(&mut self, other: Action) {
+        match (self, other) {
+            (Action::Stop { signal }, Action::Stop { signal: theirs }) => {
+                let forceful = |s: &Option<String>| matches!(s.as_deref(), Some("SIGKILL") | Some("SIGTERM"));
+                if theirs.as_deref() == Some("SIGKILL") || (signal.is_none() && forceful(&theirs)) {
+                    *signal = theirs;
+                }
+            }
+            (Action::ClosePane { block_ids }, Action::ClosePane { block_ids: theirs }) => {
+                for b in theirs {
+                    if !block_ids.contains(&b) {
+                        block_ids.push(b);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A request as the caller and the frontend see it (§12.2).
@@ -40,6 +87,8 @@ pub struct PendingView {
     pub block_id: String,
     /// Who asked: an agent id, or `cron` etc.
     pub by: String,
+    /// The agent being shut down, resolved when asked (it may be gone after).
+    pub target: String,
     /// The tool: `QuitSelf`, `ClosePane`, `FleetBulkStop`.
     pub via: String,
     pub reason: String,
@@ -49,6 +98,10 @@ pub struct PendingView {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// This caller joined a request already open for the block rather than
+    /// opening one. Never stored; set on the view `request` returns.
+    #[serde(skip)]
+    pub joined: bool,
 }
 
 struct Entry {
@@ -57,6 +110,16 @@ struct Entry {
     finished_at_ms: Option<i64>,
     /// Taken when the window runs out and the shutdown begins.
     action: Option<Action>,
+    /// Everyone who asked, as (by, via): later requests for the same block
+    /// join this one rather than open a second window.
+    requesters: Vec<(String, String)>,
+    /// Every block it shuts down (`Action::covers`). A request naming any of
+    /// them joins this one, Keep running works from any of their banners,
+    /// and the banner shows on each — a pane's close covers all its tabs
+    /// (ReAgent P1 on #3798: keyed on the named block alone, two closes
+    /// naming two tabs of one pane got two windows, and keeping one didn't
+    /// stop the other closing the whole pane).
+    covers: Vec<String>,
 }
 
 static ENTRIES: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
@@ -80,7 +143,15 @@ fn is_active(status: &str) -> bool {
 /// The request for this block still waiting on the user or already under
 /// way, if any.
 pub fn active_for(block_id: &str) -> Option<PendingView> {
-    entries().values().find(|e| e.view.block_id == block_id && is_active(e.view.status)).map(|e| e.view.clone())
+    entries()
+        .values()
+        .find(|e| is_active(e.view.status) && e.covers.iter().any(|b| b == block_id))
+        .map(|e| e.view.clone())
+}
+
+/// Every block a request covers; empty once it's forgotten.
+fn covers_of(request_id: &str) -> Vec<String> {
+    entries().get(request_id).map(|e| e.covers.clone()).unwrap_or_default()
 }
 
 pub fn status(request_id: &str) -> Option<PendingView> {
@@ -128,9 +199,13 @@ fn notify_router(state: &AppState) -> Option<Arc<crate::backend::notify::router:
 }
 
 /// Ask to shut `block_id` down, subject to the user's override. A request
-/// already pending — or under way — for the block is returned as is: the
-/// clock never restarts, and no second window opens beside it (ReAgent P1 on
-/// #3789: a second banner's Keep running could not stop the first).
+/// already pending — or under way — for the block is joined instead: the clock
+/// never restarts, and no second window opens beside it (ReAgent P1 on #3789:
+/// a second banner's Keep running could not stop the first). A joiner whose
+/// action does more (see `Action::rank`) replaces the pending action and is
+/// named on the banner, so nobody is told the outcome of less than they asked
+/// for (ReAgent P1 on #3798). The returned view says whose request it is: a
+/// caller whose `by`/`via` differ has joined someone else's.
 pub fn request(state: &AppState, block_id: &str, by: &str, via: &str, reason: &str, action: Action) -> PendingView {
     request_within(state, block_id, by, via, reason, action, OVERRIDE_WINDOW)
 }
@@ -144,33 +219,91 @@ fn request_within(
     action: Action,
     window: std::time::Duration,
 ) -> PendingView {
+    let new_covers = action.covers(block_id);
     let view = {
         let mut map = entries();
         prune(&mut map, now_ms());
-        if let Some(existing) = map.values().find(|e| e.view.block_id == block_id && is_active(e.view.status)) {
-            return existing.view.clone();
+        if let Some(existing) = map
+            .values_mut()
+            .find(|e| is_active(e.view.status) && e.covers.iter().any(|b| new_covers.contains(b)))
+        {
+            let mut grew = false;
+            for b in &new_covers {
+                if !existing.covers.contains(b) {
+                    existing.covers.push(b.clone());
+                    grew = true;
+                }
+            }
+            if !existing.requesters.iter().any(|(b, v)| b == by && v == via) {
+                existing.requesters.push((by.to_string(), via.to_string()));
+            }
+            let pending = existing.view.status == "pending";
+            let stronger = pending && existing.action.as_ref().is_some_and(|cur| action.rank() > cur.rank());
+            if pending && !stronger {
+                if let Some(cur) = existing.action.as_mut().filter(|cur| cur.rank() == action.rank()) {
+                    cur.merge(action.clone());
+                }
+            }
+            if stronger {
+                existing.action = Some(action);
+                existing.view.by = by.to_string();
+                existing.view.via = via.to_string();
+                if !reason.trim().is_empty() {
+                    existing.view.reason = reason.trim().to_string();
+                }
+            }
+            let joined = PendingView { joined: true, ..existing.view.clone() };
+            let covers = existing.covers.clone();
+            drop(map);
+            // Only while the countdown runs: once under way there is no banner.
+            if pending && (stronger || grew) {
+                // Same request and deadline; the banner names the new asker,
+                // and shows on every tab it now covers.
+                let data = serde_json::to_value(PendingView { joined: false, ..joined.clone() }).unwrap_or_default();
+                for b in &covers {
+                    publish(state, EVENT_SHUTDOWN_PENDING, b, 1, data.clone());
+                }
+            }
+            return joined;
         }
         let view = PendingView {
             request_id: uuid::Uuid::new_v4().to_string(),
             block_id: block_id.to_string(),
             by: by.to_string(),
+            target: state
+                .reactive_handler
+                .get_agent_by_block(block_id)
+                .map(|a| a.agent_id)
+                .unwrap_or_else(|| block_id.to_string()),
             via: via.to_string(),
             reason: reason.trim().to_string(),
             deadline_ms: now_ms() + window.as_millis() as i64,
             status: "pending",
             error: None,
+            joined: false,
         };
         map.insert(
             view.request_id.clone(),
-            Entry { view: view.clone(), kept: Arc::new(tokio::sync::Notify::new()), finished_at_ms: None, action: Some(action) },
+            Entry {
+                view: view.clone(),
+                kept: Arc::new(tokio::sync::Notify::new()),
+                finished_at_ms: None,
+                action: Some(action),
+                requesters: vec![(by.to_string(), via.to_string())],
+                covers: new_covers.clone(),
+            },
         );
         view
     };
-    // The banner (persisted, so a window opened during the countdown shows it
-    // too) and the OS notification.
-    publish(state, EVENT_SHUTDOWN_PENDING, block_id, 1, serde_json::to_value(&view).unwrap_or_default());
+    // The banner on every tab it covers (persisted, so a window opened during
+    // the countdown shows it too) and the OS notification.
+    let data = serde_json::to_value(&view).unwrap_or_default();
+    for b in &new_covers {
+        publish(state, EVENT_SHUTDOWN_PENDING, b, 1, data.clone());
+    }
     if let Some(router) = notify_router(state) {
-        let body = format!("{} asked to shut it down: {}. Open it to keep it running.", view.by, view.reason);
+        let why = if view.reason.is_empty() { String::new() } else { format!(": {}", view.reason) };
+        let body = format!("{} asked to shut it down{why}. Open it to keep it running.", view.by);
         let block = block_id.to_string();
         // `emit_fixed` reads the block (blocking): off the async workers.
         tokio::task::spawn_blocking(move || {
@@ -195,42 +328,53 @@ fn request_within(
         let outcome = run_action(&state, &v.block_id, action).await;
         let (status, error) = match outcome {
             Ok(()) => ("shut_down", None),
-            Err(e) if e.contains("block not found") => ("superseded", None),
+            // Already gone: the user closed or stopped it meanwhile.
+            Err(e) if e.contains("block not found") || e.starts_with("NOT_RUNNING") => ("superseded", None),
             Err(e) => ("failed", Some(e)),
         };
-        audit(&state, &v, status, error.as_deref());
+        audit(&state, &v.request_id, status, error.as_deref());
         set_status(&v.request_id, status, error);
     });
     view
 }
 
-/// One entry per outcome, with the requester as its source (§6.5 step 8).
-fn audit(state: &AppState, v: &PendingView, outcome: &str, error: Option<&str>) {
-    let target = state
-        .reactive_handler
-        .get_agent_by_block(&v.block_id)
-        .map(|a| a.agent_id)
-        .unwrap_or_else(|| v.block_id.clone());
-    state.reactive_handler.log_fleet_action_audit(
-        Some(&v.by),
-        &target,
-        &v.block_id,
-        "agent.shutdown_override",
-        error.is_none(),
-        error,
-        &v.request_id,
-        Some(&format!("{outcome} | via {} | {}", v.via, v.reason)),
-    );
+/// The outcome, once per requester, each as its own source (§6.5 step 8).
+fn audit(state: &AppState, request_id: &str, outcome: &str, error: Option<&str>) {
+    let Some((v, requesters)) = entries().get(request_id).map(|e| (e.view.clone(), e.requesters.clone())) else {
+        return;
+    };
+    for (by, via) in requesters {
+        let ran = if via == v.via { String::new() } else { format!(" (ran as {} by {})", v.via, v.by) };
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&by),
+            &v.target,
+            &v.block_id,
+            "agent.shutdown_override",
+            error.is_none(),
+            error,
+            &v.request_id,
+            Some(&format!("{outcome} | via {via}{ran} | {}", v.reason)),
+        );
+    }
+}
+
+/// The request-time audit note: whether this caller opened the window or
+/// joined someone else's.
+pub fn audit_note(v: &PendingView, by: &str, via: &str) -> String {
+    if !v.joined {
+        "pending user override".to_string()
+    } else if v.by == by && v.via == via {
+        format!("joined its own pending request {}", v.request_id)
+    } else {
+        format!("joined {} by {}'s pending request", v.via, v.by)
+    }
 }
 
 fn cleared(state: &AppState, v: &PendingView, outcome: &str) {
-    publish(
-        state,
-        EVENT_SHUTDOWN_PENDING_CLEARED,
-        &v.block_id,
-        1,
-        serde_json::json!({ "block_id": v.block_id, "request_id": v.request_id, "outcome": outcome }),
-    );
+    let data = serde_json::json!({ "block_id": v.block_id, "request_id": v.request_id, "outcome": outcome });
+    for b in covers_of(&v.request_id) {
+        publish(state, EVENT_SHUTDOWN_PENDING_CLEARED, &b, 1, data.clone());
+    }
     if let Some(router) = notify_router(state) {
         router.resolve_nonblocking(&v.block_id, crate::backend::notify::policy::Family::Shutdown);
     }
@@ -251,7 +395,32 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 .await
                 .map(|_| ())
         }
+        Action::ClosePane { block_ids } => super::close_pane::run(state, block_ids).await.map(|_| ()),
+        Action::Stop { signal } => {
+            crate::server::app_api::agent_io::stop_one_agent_block(block_id, signal.as_deref()).map(|_| ())
+        }
     }
+}
+
+/// Tests: end the window now, as if it ran out.
+#[cfg(test)]
+pub fn expire_now(request_id: &str) {
+    if let Some(e) = entries().get(request_id) {
+        e.kept.notify_one();
+    }
+}
+
+/// Wait until a request settles; its final view. Tests only.
+#[cfg(test)]
+pub async fn settled(request_id: &str) -> PendingView {
+    for _ in 0..400 {
+        let v = status(request_id).expect("known request");
+        if !matches!(v.status, "pending" | "proceeding") {
+            return v;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("request {request_id} never settled");
 }
 
 /// "Keep running" (§12.3). `kept_by_user` if the request was still pending,
@@ -260,7 +429,7 @@ pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str 
     let view = {
         let mut map = entries();
         match map.get_mut(request_id) {
-            Some(e) if e.view.block_id == block_id && e.view.status == "pending" => {
+            Some(e) if e.covers.iter().any(|b| b == block_id) && e.view.status == "pending" => {
                 // Decided here, under the lock; the window task only wakes to
                 // find it no longer pending.
                 e.view.status = "kept_by_user";
@@ -272,7 +441,7 @@ pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str 
         }
     };
     cleared(state, &view, "kept_by_user");
-    audit(state, &view, "kept_by_user", None);
+    audit(state, request_id, "kept_by_user", None);
     tracing::info!(block_id, request_id, by = %view.by, "shutdown pending: kept by the user");
     "kept_by_user"
 }
@@ -302,6 +471,65 @@ mod tests {
         assert_eq!((b.request_id.as_str(), b.status), (a.request_id.as_str(), "proceeding"));
         assert_eq!(keep(&state, "blk-p3", &a.request_id), "too_late");
         assert!(begin(&a.request_id).is_none(), "the action runs once");
+    }
+
+    #[tokio::test]
+    async fn a_stronger_request_joins_and_takes_over_the_pending_action() {
+        let state = test_state();
+        let stop = request(&state, "blk-p4", "an agent", "FleetBulkStop", "", Action::Stop { signal: None });
+        let close = request(
+            &state,
+            "blk-p4",
+            "Korp",
+            "ClosePane",
+            "stuck",
+            Action::ClosePane { block_ids: vec!["blk-p4".into()] },
+        );
+        assert_eq!(close.request_id, stop.request_id, "one window per block");
+        assert_eq!((close.by.as_str(), close.via.as_str(), close.deadline_ms), ("Korp", "ClosePane", stop.deadline_ms));
+        assert!(matches!(begin(&stop.request_id), Some(Action::ClosePane { .. })), "the pane closes: it does all a stop does");
+
+        // A weaker joiner neither downgrades it nor takes the banner.
+        let quit = request(&state, "blk-p5", "Camper", "QuitSelf", "done", Action::SelfQuit { detail: String::new() });
+        let again = request(&state, "blk-p5", "an agent", "FleetBulkStop", "", Action::Stop { signal: None });
+        assert_eq!((again.request_id.as_str(), again.via.as_str()), (quit.request_id.as_str(), "QuitSelf"));
+        assert!(matches!(begin(&quit.request_id), Some(Action::SelfQuit { .. })));
+        let requesters = entries().get(&quit.request_id).unwrap().requesters.clone();
+        assert_eq!(requesters.len(), 2, "both are audited when it settles");
+    }
+
+    #[tokio::test]
+    async fn a_joiner_of_the_same_kind_is_folded_in_not_dropped() {
+        let state = test_state();
+        let a = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: None });
+        assert!(!a.joined);
+        let b = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: Some("SIGKILL".into()) });
+        assert!(b.joined && b.request_id == a.request_id);
+        assert_eq!(audit_note(&b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
+        assert!(matches!(begin(&a.request_id), Some(Action::Stop { signal: Some(s) }) if s == "SIGKILL"), "the forceful stop wins");
+
+        let c = request(&state, "blk-p7", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into()] });
+        request(&state, "blk-p7", "Posa", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into(), "y".into()] });
+        assert!(matches!(begin(&c.request_id), Some(Action::ClosePane { block_ids }) if block_ids == vec!["x".to_string(), "y".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn closes_naming_two_tabs_of_one_pane_share_one_window() {
+        let state = test_state();
+        let pane = || Action::ClosePane { block_ids: vec!["tab-a".into(), "tab-b".into()] };
+        let a = request(&state, "tab-a", "Korp", "ClosePane", "", pane());
+        let b = request(&state, "tab-b", "Posa", "ClosePane", "", pane());
+        assert!(b.joined && b.request_id == a.request_id, "one pane, one window");
+        assert_eq!(active_for("tab-b").map(|v| v.request_id), Some(a.request_id.clone()));
+        assert_eq!(keep(&state, "tab-b", &a.request_id), "kept_by_user", "kept from the other tab's banner");
+        assert!(begin(&a.request_id).is_none(), "nothing closes");
+
+        // A pending stop on one tab is joined — and taken over — by its pane's close.
+        let stop = request(&state, "tab-d", "an agent", "FleetBulkStop", "", Action::Stop { signal: None });
+        let close = request(&state, "tab-c", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["tab-c".into(), "tab-d".into()] });
+        assert_eq!(close.request_id, stop.request_id);
+        assert_eq!(active_for("tab-c").map(|v| v.via), Some("ClosePane".to_string()));
+        assert!(matches!(begin(&stop.request_id), Some(Action::ClosePane { .. })));
     }
 
     #[tokio::test]

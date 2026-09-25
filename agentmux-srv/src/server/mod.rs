@@ -2249,12 +2249,44 @@ async fn handle_agent_memory_write(
 /// `POST /api/v1/fleet/bulk-stop` — stop many agent panes (block ids) at
 /// once. Backs the `FleetBulkStop` MCP tool. Infallible per-target (never
 /// a single bool) — see `FleetActionResult`'s doc comment.
+///
+/// Agents' stops wait for each target's user override (§6.5 of
+/// SPEC_AGENT_SELF_QUIT_2026_09_24.md): 202 with a request per target, or 200
+/// as before when nothing had to wait. `auth` (optional, signed by
+/// agentmux-mcp) names the caller on the banner and in the audit log.
 async fn handle_fleet_bulk_stop(
     State(state): State<AppState>,
-    Json(req): Json<crate::backend::rpc_types::CommandFleetBulkStopData>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let result = app_api::fleet::fleet_bulk_stop_impl(&state, req.targets, req.signal.as_deref(), req.staged).await;
-    (StatusCode::OK, Json(result)).into_response()
+    let req: crate::backend::rpc_types::CommandFleetBulkStopData = match serde_json::from_value(body.clone()) {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e.to_string() }))).into_response(),
+    };
+    let by = body
+        .get("auth")
+        .and_then(|a| serde_json::from_value::<agentmux_common::api_types::UiAutomationAuth>(a.clone()).ok())
+        .filter(|a| ui_handlers::verified_block_id(&state, caller.as_deref(), a).is_ok())
+        .map(|a| a.agent_id)
+        .unwrap_or_else(|| "an agent".to_string());
+    let (result, pending) =
+        app_api::fleet::fleet_bulk_stop_with_override(&state, &by, req.targets, req.signal.as_deref(), req.staged).await;
+    if pending.is_empty() {
+        return (StatusCode::OK, Json(result)).into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "status": "pending_user_override",
+            "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
+            "deadline_ms": pending.iter().map(|p| p.deadline_ms).max(),
+            "pending": pending.iter().map(|p| json!({ "block_id": p.block_id, "request_id": p.request_id })).collect::<Vec<_>>(),
+            "succeeded": result.succeeded,
+            "failed": result.failed,
+            "aborted_early": result.aborted_early,
+        })),
+    )
+        .into_response()
 }
 
 #[derive(serde::Deserialize)]

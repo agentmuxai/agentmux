@@ -1,7 +1,7 @@
 # SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only)
 
 **Date:** 2026-09-24
-**Status:** active — Phase 1 (`/quit` + `/exit`, `sagas/self_quit.rs`) shipped in PR #3779; Phase 1b (visible shutdown log) shipped in PR #3784; Phase 2 (`QuitSelf` + gate) and Phase 2b's `QuitSelf` half (`sagas/pending_shutdown.rs`, banner, tone) in PR #3789; 2b's `ClosePane block_id=` / `FleetBulkStop` half and Phase 3 not started.
+**Status:** active — Phase 1 (`/quit` + `/exit`, `sagas/self_quit.rs`) shipped in PR #3779; Phase 1b (visible shutdown log) shipped in PR #3784; Phase 2 (`QuitSelf` + gate) and Phase 2b's `QuitSelf` half (`sagas/pending_shutdown.rs`, banner, tone) shipped in PR #3789; 2b's `ClosePane block_id=` / `FleetBulkStop` half in PR #3798; Phase 3 not started.
 **Author:** Camper. Revised 2026-09-25 by Lark with the repo owner's decisions (§0.1).
 **Trigger:** repo owner, 2026-09-24: "we want a command where an agent can kill itself, like /quit for short, where it gracefully shutdown, and it is also a tool an agent can use, with a MAJOR WARNING, but ok to use on direct instruction from user."
 **Grounded in:** `main` at `01100e9c9`. Read from code; file:line references are as of that commit.
@@ -328,7 +328,10 @@ A human-confirm dialog ("Camper wants to quit — Allow?") would close the resid
 - srv answers an external request at once with **202** `{ status: "pending_user_override", request_id, deadline_ms, wait_at_least_ms: 15000 }`, and serves the outcome at `GET /api/v1/agent/shutdown/{request_id}`. A synchronous 15 s+ HTTP call would exceed the MCP client's 10 s srv timeout (`agentmux-mcp/src/main.rs:109`).
 - The MCP tools (`QuitSelf` from a non-user turn, `ClosePane block_id=`, `FleetBulkStop`) poll that endpoint and return only the final result: `shut_down` or `kept_by_user`.
 - Their descriptions say plainly: *"Shutting down an agent you don't own (or yourself, without the user asking this turn) waits for a 15-second user override window. Expect this call to take at least 15 seconds; the result says whether the user kept the agent running."*
-- `FleetBulkStop` runs all its targets' windows in parallel, one countdown each, and returns per-target outcomes.
+- `FleetBulkStop` runs all its targets' windows in parallel, one countdown each, and returns per-target outcomes: its usual `{ succeeded, failed, aborted_early }`, plus `kept_by_user` (those are in `failed` too). srv answers 202 `{ status: "pending_user_override", wait_at_least_ms, deadline_ms, pending: [{ block_id, request_id }], succeeded, failed }`, or 200 as before when no target had to wait.
+  - The window covers targets running on this AgentMux. A target on another instance on this machine (cross-channel) is still stopped by that instance at once, and `staged` applies only to those; holding them needs the other instance's banner, a follow-up.
+  - The Swarm UI's own bulk stop is the user's, and stops at once.
+  - A `ClosePane block_id=` whose pane holds the caller's own block is the caller's own business, and closes at once.
 
 ## 7. Close the existing back door: `ClosePane` with no arguments
 

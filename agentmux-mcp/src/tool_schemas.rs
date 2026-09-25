@@ -406,7 +406,7 @@ pub(crate) const QUIT_SELF_TOOL: &str = r#"{
 
 pub(crate) const CLOSE_PANE_TOOL: &str = r#"{
   "name": "ClosePane",
-  "description": "Close a pane. With no arguments, closes YOUR OWN pane (identity verified server-side, same mechanism as UIClick — there is no way to spoof this as a different pane). Pass block_id to close ANY pane instead — including one that is unresponsive/unclickable (e.g. a pane stuck in a broken render state) — with no ownership check on the target: this is a fleet-level action, logged to the audit trail with your own verified identity as the source, same posture as FleetBulkStop. Get a target block_id from Layout. Closing a pane only removes it from the layout; the underlying agent's conversation history is not deleted.",
+  "description": "Close a pane. With no arguments, closes YOUR OWN pane (identity verified server-side, same mechanism as UIClick — there is no way to spoof this as a different pane). Pass block_id to close ANY pane instead — including one that is unresponsive/unclickable (e.g. a pane stuck in a broken render state) — with no ownership check on the target: this is a fleet-level action, logged to the audit trail with your own verified identity as the source, same posture as FleetBulkStop. Get a target block_id from Layout. Closing a pane only removes it from the layout; the underlying agent's conversation history is not deleted. Shutting down an agent you don't own (or yourself, without the user asking this turn) waits for a 15-second user override window. Expect this call to take at least 15 seconds; the result says whether the user kept the agent running.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -538,7 +538,7 @@ pub(crate) const OPEN_AGENT_TOOL: &str = r#"{
 
 pub(crate) const FLEET_BULK_STOP_TOOL: &str = r#"{
   "name": "FleetBulkStop",
-  "description": "Stop many agent panes at once by block_id (get these from FleetList). Destructive — double-check your target list first. Returns JSON {succeeded, failed: [{id, error}...], aborted_early}. Optionally pass `staged` to cap blast radius on a bad selection: stops `batch_size` targets at a time, and if a batch's failure rate exceeds `max_fail_percentage`, the remaining targets are recorded as failed (untried) instead of being attempted — `aborted_early` will be true. Without `staged`, every target is attempted as one batch.",
+  "description": "Stop many agent panes at once by block_id (get these from FleetList). Destructive — double-check your target list first. Returns JSON {succeeded, failed: [{id, error}...], aborted_early}. Optionally pass `staged` to cap blast radius on a bad selection: stops `batch_size` targets at a time, and if a batch's failure rate exceeds `max_fail_percentage`, the remaining targets are recorded as failed (untried) instead of being attempted — `aborted_early` will be true. Without `staged`, every target is attempted as one batch. Shutting down an agent you don't own (or yourself, without the user asking this turn) waits for a 15-second user override window. Expect this call to take at least 15 seconds; the result says whether the user kept the agent running. Every running target on this AgentMux gets its own window, all in parallel; a target the user kept is listed in `kept_by_user` and in `failed`.",
   "inputSchema": {
     "type": "object",
     "properties": {
