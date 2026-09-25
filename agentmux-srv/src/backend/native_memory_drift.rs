@@ -83,6 +83,59 @@ pub(crate) fn check_and_record_drift(
         .map(|v| v.is_some())
 }
 
+/// Give every verified agent's memory file with no recorded version its
+/// first one, labelled `agent_inferred` ("Agent" in the Armory), before the
+/// drift detector starts. Otherwise the detector finds these ordinary files
+/// on its first sweep and records them as `external_fs_write`, "Detected
+/// outside AgentMux", as it did for every file after a new local-build
+/// channel (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §1.3, phase M1).
+///
+/// Runs at startup after the identity stores are attached, so an agent's
+/// account-linked directory resolves; this used to be migration m0024,
+/// which ran before that and fell back to a registry guess. Only verified
+/// directories are used (`list_all_memory_targets`). Returns the number of
+/// versions recorded.
+pub(crate) fn backfill_first_sight_versions(mstore: &Store, id_store: &Store) -> usize {
+    backfill_first_sight_versions_for(id_store, &list_all_memory_targets(mstore))
+}
+
+fn backfill_first_sight_versions_for(id_store: &Store, targets: &[(String, PathBuf)]) -> usize {
+    let mut recorded = 0;
+    for (agent_id, dir) in targets {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for entry in entries.flatten() {
+            let filename = entry.file_name().to_string_lossy().into_owned();
+            if !filename.ends_with(".md") || !entry.path().is_file() {
+                continue;
+            }
+            match id_store.agent_native_memory_version_latest(agent_id, &filename) {
+                Ok(None) => {}
+                Ok(Some(_)) => continue,
+                Err(e) => {
+                    tracing::warn!(agent_id, filename, error = %e, "native_memory: first-sight backfill: lookup failed");
+                    continue;
+                }
+            }
+            let content = match read_memory_file_lossy(&entry.path()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(agent_id, filename, error = %e, "native_memory: first-sight backfill: skipping unreadable file");
+                    continue;
+                }
+            };
+            match id_store.agent_native_memory_version_insert_if_changed(agent_id, &filename, &content, "agent_inferred", "{}", "") {
+                Ok(Some(_)) => recorded += 1,
+                Ok(None) => {}
+                Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory: first-sight backfill: insert failed"),
+            }
+        }
+    }
+    if recorded > 0 {
+        tracing::info!(recorded, "native_memory: first-sight backfill recorded versions");
+    }
+    recorded
+}
+
 /// Read one `.md` file's content the same way the rest of the native-memory
 /// code does: lossy UTF-8. Unlike `native_memory_handlers.rs`'s own
 /// mirror-refresh path — which truncates an oversized file and separately
@@ -385,6 +438,27 @@ mod tests {
     fn shared_store() -> Store {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         Store::open_shared(tmp.path()).unwrap()
+    }
+
+    /// A pre-existing file gets one `agent_inferred` version at startup, so
+    /// the first sweep sees no drift and never labels it "Detected outside
+    /// AgentMux" (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §1.3, M1).
+    #[test]
+    fn first_sight_backfill_records_once_and_the_sweep_then_sees_no_drift() {
+        let store = shared_store();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("MEMORY.md"), "pre-existing").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "not memory").unwrap();
+        let targets = vec![("agent-1".to_string(), dir.path().to_path_buf())];
+
+        assert_eq!(backfill_first_sight_versions_for(&store, &targets), 1);
+        assert_eq!(backfill_first_sight_versions_for(&store, &targets), 0, "idempotent");
+        let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].source, "agent_inferred");
+
+        let drifted = check_and_record_drift(&store, "agent-1", "MEMORY.md", "pre-existing", "reconciliation_sweep").unwrap();
+        assert!(!drifted, "unchanged content is not an outside write");
     }
 
     #[test]

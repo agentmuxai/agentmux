@@ -119,6 +119,16 @@ pub(super) async fn bundle_import_for_agent_impl(
             req.agent_id
         ));
     }
+    // Importing memory writes files, so the directory must be verified, not
+    // a blank-working-dir guess (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
+    let memory_dir = if manifest_memory_paths.is_empty() {
+        memory_dir
+    } else {
+        Some(
+            crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
+                .map_err(|e| format!("bundle.import_for_agent: {e}"))?,
+        )
+    };
 
     // Normal bundle components, exactly as bundle.import creates them —
     // a memory-bearing import still creates a reusable bundle row
