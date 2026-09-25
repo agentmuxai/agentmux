@@ -3841,6 +3841,9 @@ fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<String> {
         let by = now["by"].as_str().unwrap_or("another agent");
         return match now["status"].as_str().unwrap_or("") {
             "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
+            // Found gone (closed, or its agent already stopped): retrying
+            // would only find it gone again.
+            "superseded" => Ok(format!("Pane {block:?} was already closed, or its agent already stopped: nothing more to do.")),
             "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
             "" | "pending" => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
             state => Ok(format!(
@@ -3942,6 +3945,9 @@ mod tests {
         let joined = serde_json::json!({ "status": "shut_down", "via": "FleetBulkStop", "by": "Korp" });
         let text = close_pane_outcome("b", &joined).unwrap();
         assert!(text.contains("Korp's FleetBulkStop") && text.contains("may still be open"), "{text}");
+        let gone = serde_json::json!({ "status": "superseded", "via": "FleetBulkStop", "by": "Korp" });
+        let text = close_pane_outcome("b", &gone).unwrap();
+        assert!(text.contains("already closed") && !text.contains("call ClosePane again"), "{text}");
     }
 
     #[test]

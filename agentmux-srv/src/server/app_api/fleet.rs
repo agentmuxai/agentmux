@@ -311,7 +311,7 @@ pub(crate) async fn fleet_bulk_stop_with_override(
     let pending = local
         .iter()
         .map(|block_id| {
-            let v = crate::sagas::pending_shutdown::request(
+            let mut v = crate::sagas::pending_shutdown::request(
                 state,
                 block_id,
                 by,
@@ -319,10 +319,21 @@ pub(crate) async fn fleet_bulk_stop_with_override(
                 "",
                 crate::sagas::pending_shutdown::Action::Stop { signal: signal.map(str::to_string) },
             );
+            // A target can join a request opened for another block (its
+            // pane's close, via a sibling tab): audit and report it under the
+            // block this caller named (ReAgent P1 on #3798), with that
+            // request's id.
+            let target = state
+                .reactive_handler
+                .get_agent_by_block(block_id)
+                .map(|a| a.agent_id)
+                .unwrap_or_else(|| block_id.clone());
             state.reactive_handler.log_fleet_action_audit(
-                Some(by), &v.target, block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                Some(by), &target, block_id, FLEET_BULK_STOP_AUDIT_ACTION,
                 true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
             );
+            v.block_id = block_id.clone();
+            v.target = target;
             v
         })
         .collect();
@@ -545,5 +556,28 @@ mod override_tests {
         assert!(!b_stopped.load(Ordering::SeqCst), "the user kept it");
         crate::backend::blockcontroller::delete_controller(&a);
         crate::backend::blockcontroller::delete_controller(&b);
+    }
+
+    #[tokio::test]
+    async fn a_target_that_joins_its_pane_s_pending_close_is_reported_under_its_own_block() {
+        let state = crate::server::tests::test_state();
+        let (tab, _) = running("bulk-join-tab");
+        let sibling = format!("bulk-join-sibling-{}", uuid::Uuid::new_v4());
+        let close = crate::sagas::pending_shutdown::request(
+            &state,
+            &sibling,
+            "Korp",
+            "ClosePane",
+            "",
+            crate::sagas::pending_shutdown::Action::ClosePane { block_ids: vec![sibling.clone(), tab.clone()] },
+        );
+
+        let (_, pending) = fleet_bulk_stop_with_override(&state, "Posa", vec![tab.clone()], None, None).await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].block_id, tab, "the block the caller named, not the sibling");
+        assert_eq!(pending[0].request_id, close.request_id, "the pane's one window");
+        assert!(pending[0].joined);
+        crate::sagas::pending_shutdown::keep(&state, &sibling, &close.request_id);
+        crate::backend::blockcontroller::delete_controller(&tab);
     }
 }

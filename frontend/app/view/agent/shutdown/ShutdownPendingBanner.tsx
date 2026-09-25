@@ -38,6 +38,10 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
     const [now, setNow] = createSignal(Date.now());
     const [keeping, setKeeping] = createSignal(false);
     let lastCallFor: string | null = null;
+    // Set by any live event: from then on it, not the history replay, is the
+    // truth (a replay resolving after a live -cleared must not bring the
+    // banner back).
+    let sawLive = false;
 
     const show = (p: PendingShutdown | null, chime: boolean) => {
         setPending(p);
@@ -51,12 +55,16 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
         {
             eventType: EVENT_SHUTDOWN_PENDING,
             scope,
-            handler: (event: MuxEvent) => show(parsePending(event?.data), true),
+            handler: (event: MuxEvent) => {
+                sawLive = true;
+                show(parsePending(event?.data), true);
+            },
         },
         {
             eventType: EVENT_SHUTDOWN_PENDING_CLEARED,
             scope,
             handler: (event: MuxEvent) => {
+                sawLive = true;
                 if (clearedRequestId(event?.data) === pending()?.request_id) setPending(null);
             },
         },
@@ -70,8 +78,9 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
             .catch(() => null);
     void Promise.all([history(EVENT_SHUTDOWN_PENDING), history(EVENT_SHUTDOWN_PENDING_CLEARED)]).then(
         ([p, cleared]) => {
+            if (sawLive) return;
             const replayed = replayPending(p, cleared, Date.now());
-            if (replayed && !pending()) show(replayed, false);
+            if (replayed) show(replayed, false);
         },
     );
 

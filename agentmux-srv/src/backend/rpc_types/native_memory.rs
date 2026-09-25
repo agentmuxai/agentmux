@@ -42,6 +42,12 @@ pub struct CommandNativeMemoryListData {
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryListResult {
     pub files: Vec<NativeMemoryFileMeta>,
+    /// The folder was found by a guess (a blank working directory and no
+    /// spawn on record), not from the agent's own launch: shown read-only
+    /// until the agent launches (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
+    /// §2.1.2).
+    #[serde(default)]
+    pub unverified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -152,6 +158,24 @@ pub struct NativeMemoryVersionMeta {
     // plain JS number. See BrowserBookmark::created_at (PR #3293).
     #[ts(type = "number")]
     pub created_at: i64,
+}
+
+/// `agent:memory:adoption_list` — the agent's memory folders under its
+/// earlier accounts, offered for adoption
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one goes
+/// through the host's confirmation window, not an RPC.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandNativeMemoryAdoptionListData {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct NativeMemoryAdoptionListResult {
+    /// `None` until the agent has a verified memory folder (its first spawn,
+    /// or a working directory).
+    pub list: Option<crate::backend::memory_adopt::AdoptionList>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
