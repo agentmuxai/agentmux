@@ -1174,6 +1174,13 @@ pub(super) fn write_agent_config_files(
             .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
             continue;
         }
+        // `.mcp.json` merges into a user's own file instead of replacing it,
+        // and is written owner-only (#3680) — see the function's doc comment.
+        if file.filename == ".mcp.json" {
+            crate::backend::agent_config::write_mcp_json_respecting_user_servers(base_path, &file.content)
+                .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
+            continue;
+        }
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {
                 let _ = std::fs::create_dir_all(parent);
