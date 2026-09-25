@@ -31,11 +31,13 @@
 //! block's own isolated page (arbitrary third-party content with no
 //! `data-blockid` concept — scoping would break it). See `ResolvedTarget`.
 //!
-//! Cache: `(block_id → ResolvedTarget)`. Known limit (Path 1, unchanged
-//! from the original design): two browser panes navigated to the same URL
-//! can't be distinguished. Phase-1 consumers use distinct URLs to avoid
-//! the collision. A later phase can swap in a snapshot-at-create strategy
-//! for bulletproof one-to-one mapping (see `SPEC_BROWSER_DOM_API.md` §5.5).
+//! Cache: `(block_id → ResolvedTarget)`. Two browser panes on the same URL
+//! used to be indistinguishable here, so a block could be handed ANOTHER
+//! pane's page: screenshots came back sized for the wrong pane, and `eval`/
+//! `navigate` could act on the wrong one. When more than one unclaimed
+//! target matches, Path 1 now asks the block's own `Browser` to stamp its
+//! page with a one-off value and picks the target whose page carries it
+//! (`pick_by_stamp`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -99,8 +101,34 @@ impl TargetCache {
         // handed the same dedicated target.
         let resolved = if let Some(pane_url) = state.browser_panes.pane_url(state, block_id) {
             let already_cached = self.already_cached();
-            let target_id =
-                Self::resolve_by_url(debug_port, &pane_url, block_id, &already_cached).await?;
+            let candidates = Self::url_candidates(debug_port, &pane_url, &already_cached).await?;
+            let target_id = match candidates.as_slice() {
+                [] => {
+                    return Err(format!(
+                        "UNKNOWN_BLOCK_ID: no unclaimed CDP target matches url={pane_url} \
+                         for block_id={block_id}"
+                    ))
+                }
+                [only] => only.clone(),
+                _ => {
+                    let stamp = uuid::Uuid::new_v4().simple().to_string();
+                    if !state
+                        .browser_panes
+                        .run_js_in_pane(state, block_id, &stamp_js(&stamp))
+                    {
+                        return Err(format!("block_id={block_id}: pane closed while resolving"));
+                    }
+                    Self::pick_by_stamp(debug_port, &candidates, &stamp, STAMP_POLLS, STAMP_POLL_INTERVAL)
+                        .await
+                        .ok_or_else(|| {
+                            format!(
+                                "UNKNOWN_BLOCK_ID: {} CDP targets match url={pane_url} and none \
+                                 carried block_id={block_id}'s stamp",
+                                candidates.len()
+                            )
+                        })?
+                }
+            };
             ResolvedTarget {
                 target_id,
                 scope_to_block: false,
@@ -143,12 +171,14 @@ impl TargetCache {
             .map_err(|e| format!("parse /json: {e}"))
     }
 
-    async fn resolve_by_url(
+    /// Every unclaimed page target whose URL matches the pane's, in `/json`
+    /// order. More than one means several panes are on the same URL, which
+    /// only `pick_by_stamp` can tell apart.
+    async fn url_candidates(
         debug_port: u16,
         pane_url: &str,
-        block_id: &str,
         already_cached: &[String],
-    ) -> Result<String, ResolveError> {
+    ) -> Result<Vec<String>, ResolveError> {
         let targets = Self::fetch_page_targets(debug_port).await?;
 
         // Filter:
@@ -156,20 +186,61 @@ impl TargetCache {
         // - url matches the pane's url (exact or trailing-slash-tolerant)
         // - id not already in our cache (avoids claiming another block's target)
         let pane_url_norm = normalize_url(pane_url);
-        let candidate = targets
+        Ok(targets
             .iter()
             .filter(|t| t.kind == "page" || t.kind.is_empty())
             .filter(|t| !already_cached.contains(&t.id))
-            .find(|t| normalize_url(&t.url) == pane_url_norm);
+            .filter(|t| normalize_url(&t.url) == pane_url_norm)
+            .map(|t| t.id.clone())
+            .collect())
+    }
 
-        match candidate {
-            Some(t) => Ok(t.id.clone()),
-            None => Err(format!(
-                "UNKNOWN_BLOCK_ID: no unclaimed CDP target matches url={pane_url} \
-                 for block_id={block_id} (found {} targets)",
-                targets.len()
-            )),
+    /// Which of `candidates` is the page stamped with `stamp` (`stamp_js`,
+    /// run in the block's own `Browser`). Polled, because the stamp is
+    /// posted to the renderer and lands a little later; the matching page's
+    /// stamp is removed once found. None if no page shows it in time.
+    async fn pick_by_stamp(
+        debug_port: u16,
+        candidates: &[String],
+        stamp: &str,
+        polls: u32,
+        interval: std::time::Duration,
+    ) -> Option<String> {
+        let mut sessions = Vec::new();
+        for id in candidates {
+            let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{id}");
+            if let Ok(cdp) = CdpSession::connect(&ws_url).await {
+                sessions.push((id.clone(), cdp));
+            }
         }
+        let probe = stamp_probe_js(stamp);
+        let mut found = None;
+        'poll: for attempt in 0..polls {
+            if attempt > 0 {
+                tokio::time::sleep(interval).await;
+            }
+            for (id, cdp) in sessions.iter_mut() {
+                let reply = cdp
+                    .call(
+                        "Runtime.evaluate",
+                        serde_json::json!({ "expression": probe, "returnByValue": true }),
+                    )
+                    .await;
+                let hit = reply
+                    .ok()
+                    .and_then(|v| v.get("result").and_then(|r| r.get("value")).cloned())
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if hit {
+                    found = Some(id.clone());
+                    break 'poll;
+                }
+            }
+        }
+        for (_, cdp) in sessions {
+            cdp.close().await;
+        }
+        found
     }
 
     /// Probe every "page" CDP target and ask each one (via a cheap
@@ -179,7 +250,7 @@ impl TargetCache {
     /// (host↔srv round trip) is needed.
     ///
     /// Deliberately does NOT exclude already-cached/claimed targets the way
-    /// `resolve_by_url` does — that exclusivity is a Path-1 (dedicated
+    /// `url_candidates` does — that exclusivity is a Path-1 (dedicated
     /// browser-pane) concept, where one CDP target really can only belong
     /// to one block. Path 2's whole premise is the opposite: MANY blocks
     /// (every pane in a window) legitimately share ONE target. Applying
@@ -247,6 +318,28 @@ impl TargetCache {
     }
 }
 
+/// Window property the stamp lives in while a same-URL resolve is in flight.
+const STAMP_KEY: &str = "__agentmuxResolveStamp";
+/// ~600ms in all: the stamp normally lands within a frame or two.
+const STAMP_POLLS: u32 = 20;
+const STAMP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(30);
+
+/// JS that stamps the page it runs in. Non-enumerable, so the page's own
+/// scripts don't trip over it walking `window`; removed by `stamp_probe_js`.
+fn stamp_js(stamp: &str) -> String {
+    format!(
+        "Object.defineProperty(window, '{STAMP_KEY}', {{ value: '{stamp}', configurable: true }});"
+    )
+}
+
+/// JS that answers whether this page carries `stamp`, removing it if so.
+fn stamp_probe_js(stamp: &str) -> String {
+    format!(
+        "(() => {{ const hit = window['{STAMP_KEY}'] === '{stamp}'; \
+         if (hit) delete window['{STAMP_KEY}']; return hit; }})()"
+    )
+}
+
 fn normalize_url(u: &str) -> String {
     // `https://www.google.com` vs `https://www.google.com/` are the
     // same target; CEF /json includes the trailing slash, the pane's
@@ -257,7 +350,7 @@ fn normalize_url(u: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_url, TargetCache};
+    use super::{normalize_url, stamp_js, stamp_probe_js, TargetCache};
 
     #[test]
     fn normalize_strips_trailing_slash_and_lowercases() {
@@ -268,7 +361,7 @@ mod tests {
     }
 
     /// Minimal fake CDP `/json` endpoint — serves `body` verbatim for every
-    /// GET. Enough to exercise resolve_by_url / resolve_by_dom_probe's
+    /// GET. Enough to exercise url_candidates / resolve_by_dom_probe's
     /// target-matching logic without a real CEF process.
     async fn spawn_fake_json_endpoint(body: &'static str) -> u16 {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -296,7 +389,7 @@ mod tests {
     // — critically for the multi-pane case — must not re-claim a target
     // another cached block already owns even when the URL still matches.
     #[tokio::test]
-    async fn resolve_by_url_matches_and_skips_already_claimed_targets() {
+    async fn url_candidates_match_and_skip_already_claimed_targets() {
         let port = spawn_fake_json_endpoint(
             r#"[
                 {"id": "target-a", "type": "page", "url": "https://example.com/pane-a/"},
@@ -305,21 +398,77 @@ mod tests {
         )
         .await;
 
-        let found =
-            TargetCache::resolve_by_url(port, "https://example.com/pane-a", "block-a", &[])
-                .await
-                .expect("should resolve target-a");
-        assert_eq!(found, "target-a");
+        let found = TargetCache::url_candidates(port, "https://example.com/pane-a", &[])
+            .await
+            .expect("/json is reachable");
+        assert_eq!(found, vec!["target-a".to_string()]);
 
-        let err = TargetCache::resolve_by_url(
+        let claimed = TargetCache::url_candidates(
             port,
             "https://example.com/pane-a",
-            "block-a2",
             &["target-a".to_string()],
         )
         .await
-        .expect_err("target-a is already claimed, must not be handed out twice");
-        assert!(err.contains("UNKNOWN_BLOCK_ID"), "got: {err}");
+        .expect("/json is reachable");
+        assert!(claimed.is_empty(), "target-a is already claimed, must not be handed out twice");
+    }
+
+    // Several panes on one URL: every one of them is a candidate, which is
+    // what sends resolve() to pick_by_stamp instead of taking the first.
+    #[tokio::test]
+    async fn url_candidates_returns_every_same_url_target() {
+        let port = spawn_fake_json_endpoint(
+            r#"[
+                {"id": "target-a", "type": "page", "url": "https://agentmux.ai/"},
+                {"id": "target-b", "type": "page", "url": "https://agentmux.ai/"},
+                {"id": "target-c", "type": "page", "url": "https://example.com/"}
+            ]"#,
+        )
+        .await;
+
+        let found = TargetCache::url_candidates(port, "https://agentmux.ai", &[])
+            .await
+            .expect("/json is reachable");
+        assert_eq!(found, vec!["target-a".to_string(), "target-b".to_string()]);
+    }
+
+    // The stamped page is found even when it isn't the first candidate —
+    // the old first-URL-match rule handed block B target-a here.
+    #[tokio::test]
+    async fn pick_by_stamp_finds_the_stamped_page_among_same_url_targets() {
+        let port = spawn_fake_cdp_endpoint(r#"[]"#, Some("target-b")).await;
+        let found = TargetCache::pick_by_stamp(
+            port,
+            &["target-a".to_string(), "target-b".to_string()],
+            "stamp",
+            3,
+            std::time::Duration::from_millis(1),
+        )
+        .await;
+        assert_eq!(found.as_deref(), Some("target-b"));
+    }
+
+    #[tokio::test]
+    async fn pick_by_stamp_gives_up_when_no_page_carries_the_stamp() {
+        let port = spawn_fake_cdp_endpoint(r#"[]"#, Some("target-z")).await;
+        let found = TargetCache::pick_by_stamp(
+            port,
+            &["target-a".to_string(), "target-b".to_string()],
+            "stamp",
+            2,
+            std::time::Duration::from_millis(1),
+        )
+        .await;
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn stamp_js_and_probe_agree_on_the_key_and_value() {
+        let set = stamp_js("abc123");
+        let probe = stamp_probe_js("abc123");
+        assert!(set.contains("'__agentmuxResolveStamp'") && set.contains("'abc123'"), "{set}");
+        assert!(probe.contains("'__agentmuxResolveStamp'") && probe.contains("'abc123'"), "{probe}");
+        assert!(probe.contains("delete window"), "the probe removes the stamp once found: {probe}");
     }
 
     // Path 2 (fallback — any other block): no real CDP server sits behind
@@ -346,7 +495,9 @@ mod tests {
     /// this target's DOM contains whatever [data-blockid] selector was
     /// asked about." Good enough to exercise the DOM-probe *success* path,
     /// which the connect-always-fails tests above can't reach.
-    async fn spawn_fake_cdp_endpoint(json_body: &'static str) -> u16 {
+    /// `true_only_on`: answer true only on that target's socket, false on
+    /// every other — "only this page carries the stamp."
+    async fn spawn_fake_cdp_endpoint(json_body: &'static str, true_only_on: Option<&'static str>) -> u16 {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
@@ -362,8 +513,18 @@ mod tests {
                     // and hanging `accept_async`'s handshake read forever —
                     // that was a real bug in an earlier version of this
                     // test helper (2026-08-19), not in production code.
-                    let mut peek_buf = [0u8; 16];
+                    let mut peek_buf = [0u8; 128];
                     let Ok(n) = stream.peek(&mut peek_buf).await else { return };
+                    // The request line's path, e.g. `/devtools/page/target-b`.
+                    let path = std::str::from_utf8(&peek_buf[..n])
+                        .ok()
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .unwrap_or("")
+                        .to_string();
+                    let answer = match true_only_on {
+                        Some(id) => path.ends_with(&format!("/{id}")),
+                        None => true,
+                    };
                     if peek_buf[..n].starts_with(b"GET /json") {
                         use tokio::io::{AsyncReadExt, AsyncWriteExt};
                         let mut stream = stream;
@@ -392,7 +553,7 @@ mod tests {
                             continue;
                         };
                         let id = req.get("id").cloned().unwrap_or(serde_json::json!(0));
-                        let reply = serde_json::json!({ "id": id, "result": { "result": { "value": true } } });
+                        let reply = serde_json::json!({ "id": id, "result": { "result": { "value": answer } } });
                         if ws
                             .send(tokio_tungstenite::tungstenite::Message::Text(
                                 reply.to_string().into(),
@@ -424,6 +585,7 @@ mod tests {
     async fn resolve_by_dom_probe_lets_multiple_blocks_share_one_window_target() {
         let port = spawn_fake_cdp_endpoint(
             r#"[{"id": "main-window-target", "type": "page", "url": "http://127.0.0.1:5307/"}]"#,
+            None,
         )
         .await;
 

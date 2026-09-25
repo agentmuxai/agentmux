@@ -545,8 +545,12 @@
 // §3.6) — the true last child of .pane-tab-strip-inner, after the "+". Zero
 // width until PaneTabStrip.tsx's ResizeObserver finds the strip actually
 // overflowing; only then does it claim space, so it costs nothing in the
-// common (non-overflowing) case. 2× .pane-tab-strip-add's 28px — enough to
-// comfortably grab, not so much it reads as a stray empty tab. Deliberately
+// common (non-overflowing) case. Sized so the VISIBLE gap — from the "+"
+// glyph to the header's first end icon — is 2.5× .pane-tab-strip-add's 28px
+// (70px), per the repo owner: the gap reads from the glyph, and the header
+// already adds the "+"'s own right half (~9px) plus two 8px flex gaps
+// (mixins.scss) around the empty text-elems wrapper, so 45 + 9 + 16 = 70.
+// A bare 2× (56px) measured ~81px on screen. Deliberately
 // carries no draggable/drop-target wiring of its own (PaneTabStrip.tsx) — it
 // stays part of whichever "drag the whole pane" region already covers the
 // header it lives in.
@@ -556,8 +560,8 @@
     transition: width 120ms ease, flex-basis 120ms ease;
 
     &--active {
-        flex: 0 0 56px;
-        width: 56px;
+        flex: 0 0 45px;
+        width: 45px;
     }
 }
 

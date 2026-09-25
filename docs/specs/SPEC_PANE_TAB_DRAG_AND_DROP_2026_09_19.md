@@ -501,7 +501,11 @@ reachable by scrolling to the strip's end, matching the user's own framing
 end").
 
 - Width: ~2× `.pane-tab-strip-add`'s 28px (~56-60px) — a `PaneTabStrip.scss`
-  constant, e.g. `--pane-tab-strip-drag-handle-width: 56px`.
+  constant, e.g. `--pane-tab-strip-drag-handle-width: 56px`. **Revised
+  2026-09-25 (repo owner, from live use):** the visible gap — "+" glyph to
+  the header's first end icon — is 2.5× the "+" button's 28px, i.e. 70px.
+  The header's own flex gaps and the "+"'s right half already supply 25px
+  of that, so the spacer itself is 45px (a bare 56px read as ~81px).
 - Rendered unconditionally in the DOM (simplest, matches how `.pane-tab-strip-add`
   is already always the last flex child) but given `width: 0` / `flex: 0 0
   0` unless the strip is overflowing; reuse the exact overflow check the
