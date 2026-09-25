@@ -64,14 +64,14 @@ import {
     installSoundService,
     setReplayMode,
 } from "../sound-service";
-import { __resetSoundListeners } from "../sound-events";
+import { __resetSoundListeners, notify } from "../sound-events";
 import {
     __resetActivityFlash,
     FLASH_VISUAL_LEAD_MS,
     onActivityFlash,
     type FlashTarget,
 } from "../../activity-flash";
-import { flashPatternForSyllable } from "../flash-patterns";
+import { flashPatternForCategory, flashPatternForSyllable } from "../flash-patterns";
 import { paramsForTool } from "../tool-tones";
 import { TOOL_TONE_COALESCE_MS } from "../tool-tones-player";
 
@@ -86,7 +86,7 @@ describe("sound-service policy", () => {
         __resetSoundService();
         __resetSoundListeners();
         captured = null;
-        playSpy = vi.spyOn(__getSoundPlayer(), "play").mockImplementation(() => {});
+        playSpy = vi.spyOn(__getSoundPlayer(), "play").mockImplementation(() => null);
         cleanup = installSoundService();
     });
 
@@ -466,5 +466,108 @@ describe("sound-service activity flash", () => {
         setReplayMode(true);
         fireToolStarted("blk-1");
         expect(flashes).toEqual([]);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Event-sound flash (Phase 2): turn complete / error / interrupted and
+// message accepted / rejected flash their source pane with their own
+// strike pattern, after exactly the gates that let the sound play.
+// SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md §3.5, §4 Phase 2.
+// ──────────────────────────────────────────────────────────────────────
+describe("sound-service event-sound flash", () => {
+    let flashes: FlashTarget[];
+    let unsubscribe: () => void;
+    let playSpy: ReturnType<typeof vi.spyOn>;
+    let cleanup: () => void;
+
+    beforeEach(() => {
+        resetSettings();
+        focusState.focusedBlockId = null;
+        focusState.windowFocused = true;
+        __resetSoundService();
+        __resetSoundListeners();
+        __resetActivityFlash();
+        captured = null;
+        flashes = [];
+        unsubscribe = onActivityFlash((t) => flashes.push(t));
+        playSpy = vi.spyOn(__getSoundPlayer(), "play").mockImplementation(() => null);
+        cleanup = installSoundService();
+    });
+
+    afterEach(() => {
+        cleanup();
+        unsubscribe();
+        playSpy.mockRestore();
+        setReplayMode(false);
+    });
+
+    function fire(blockId: string, event: { type: string; [k: string]: unknown }): void {
+        if (!captured) throw new Error("multicast listener was never installed");
+        captured(blockId, event);
+    }
+    const turnEnded = (outcome: string) => ({ type: "turn-ended", outcome, statsMerged: false, stoppingCleared: false });
+
+    it("flashes the source pane with the sound's own pattern: one strike for a single knock, two for a ding", () => {
+        fire("blk-1", turnEnded("stopped")); // warning: the single hard knock
+        fire("blk-2", { type: "pending-accepted", id: "m1", wasPresent: true }); // info: single knock
+        fire("blk-3", turnEnded("completed")); // success: two tones
+        expect(flashes.map((f) => f.blockId)).toEqual(["blk-1", "blk-2", "blk-3"]);
+        expect(flashes[0].pattern).toEqual(flashPatternForCategory("warning"));
+        expect(flashes[1].pattern).toEqual(flashPatternForCategory("info"));
+        expect(flashes[2].pattern.strikes.map((s) => s.atMs)).toEqual([0, 70]);
+        // Unprimed: nothing audible to wait for.
+        expect(flashes.map((f) => f.delayMs)).toEqual([0, 0, 0]);
+    });
+
+    it("skips the flash whenever the sound is skipped: master off, event off, coalesced, replay", () => {
+        setSetting("notify:sounds:enabled", false);
+        fire("blk-1", turnEnded("completed"));
+        resetSettings();
+        setSetting("notify:sound:agent.turn.complete", false);
+        fire("blk-1", turnEnded("completed"));
+        resetSettings();
+        setReplayMode(true);
+        fire("blk-1", turnEnded("errored"));
+        setReplayMode(false);
+        expect(flashes).toEqual([]);
+
+        fire("blk-1", turnEnded("errored"));
+        fire("blk-1", turnEnded("errored")); // within the 300 ms coalesce
+        expect(flashes).toHaveLength(1);
+    });
+
+    it("follows focus suppression: no sound for the focused pane in a focused window, so no flash", () => {
+        focusState.focusedBlockId = "blk-1";
+        fire("blk-1", turnEnded("completed"));
+        expect(flashes).toEqual([]);
+        focusState.windowFocused = false;
+        fire("blk-1", turnEnded("errored"));
+        expect(flashes.map((f) => f.blockId)).toEqual(["blk-1"]);
+    });
+
+    it("notify:tooltones:flash=false turns event-sound flashes off too (one toggle for all sounds)", () => {
+        setSetting("notify:tooltones:flash", false);
+        fire("blk-1", turnEnded("completed"));
+        expect(flashes).toEqual([]);
+        expect(playSpy).toHaveBeenCalledTimes(1); // the sound itself still plays
+    });
+
+    it("a sound with no source pane plays but cannot flash anything", () => {
+        notify("agent.turn.complete");
+        expect(playSpy).toHaveBeenCalledTimes(1);
+        expect(flashes).toEqual([]);
+    });
+
+    it("holds the flash until the sound is audible once the player is primed", () => {
+        const ctx = { currentTime: 1, baseLatency: 0.01, outputLatency: 0.03 } as unknown as AudioContext;
+        const ctxSpy = vi.spyOn(__getSoundPlayer(), "getAudioContext").mockReturnValue(ctx);
+        try {
+            playSpy.mockReturnValueOnce(1.01);
+            fire("blk-1", turnEnded("completed"));
+            expect(flashes[0].delayMs).toBeCloseTo(50 - FLASH_VISUAL_LEAD_MS, 3);
+        } finally {
+            ctxSpy.mockRestore();
+        }
     });
 });
