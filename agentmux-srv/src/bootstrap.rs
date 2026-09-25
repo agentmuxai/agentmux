@@ -1274,6 +1274,10 @@ pub fn spawn_background_subsystems(
     } else {
         crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
     }
+    // W3-S D1b: publish each agent's instance-certified WAN key to the
+    // account's cloud directory. Not gated on the subscriber: a logged-out
+    // or isolated channel simply finds no token and publishes nothing.
+    crate::muxbus::wan_publish::spawn(mstore.clone(), id_store.clone());
 
     // Discord messaging bridge — connects to Discord Gateway if configured.
     // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.
