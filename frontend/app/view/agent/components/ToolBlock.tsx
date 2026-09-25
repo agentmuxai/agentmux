@@ -16,16 +16,16 @@
  *     off the top. This replaced the old fixed post-completion timer; see
  *     docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
  *   - Click summary: pins the expanded state. Clicking again unpins.
- *   - Hover (collapsed only): no panel expand, no time popup — the
- *     hover-to-peek model from the prior `tool-collapse.md` spec is still
- *     gone (that removed three overlapping visuals: browser title tooltip,
- *     larger log panel, fast expand/collapse — collapsed into the single
- *     auto-expand panel above). What DOES still show on hover is a small,
- *     separate tooltip over just the command/summary text — the full
- *     word-wrapped string, nothing else (no output, no expand trigger).
- *     Suppressed once the panel is already expanded, since the command is
- *     visible in context there. This is intentionally narrower than what
- *     was removed: static text only, no state change.
+ *   - Hover: no panel expand — the hover-to-peek model from the prior
+ *     `tool-collapse.md` spec is still gone (that removed three overlapping
+ *     visuals: browser title tooltip, larger log panel, fast
+ *     expand/collapse — collapsed into the single auto-expand panel above).
+ *     What DOES show on hover is the peek overlay: time, token estimate,
+ *     and the full word-wrapped command/detail string (no output, no
+ *     expand trigger). It shows in every state, collapsed or expanded —
+ *     the header summary is ellipsis-truncated either way, and the
+ *     expanded panel doesn't reliably show the full call
+ *     (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
  *
  * SolidJS reactivity note:
  *   Props are accessed via `props.X` (never destructured in the function
@@ -309,9 +309,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
 
     // Bare command/detail text for the hover tooltip — same per-tool-kind
     // extraction generateToolSummary() uses for the decorated `summary`
-    // string, so the two never drift out of sync. Suppressed once the
-    // panel is already expanded (command visible in context there) or
-    // when there's nothing tool-kind-specific to show.
+    // string, so the two never drift out of sync. Empty (and so not shown)
+    // when there's nothing tool-kind-specific to show; shown regardless of
+    // expand state (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
     const cmdText = createMemo(() =>
         extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {})
     );
@@ -480,14 +480,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 </div>
                 {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
                 styled to match UserMessageBlock.tsx's "Session context"
-                hover-to-peek (see PeekOverlay.tsx). Time/estimate show
-                regardless of expand state — MarkdownBlock/UserMessageBlock
-                never suppressed these either, and unlike the command text
-                below, they're not shown anywhere in the expanded panel body
-                (REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md).
-                Only the bare command line stays gated on !expanded() — that
-                one genuinely is redundant once the panel shows it in
-                context. */}
+                hover-to-peek (see PeekOverlay.tsx). Every line shows
+                regardless of expand state: time/estimate since
+                REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md,
+                and the command line since
+                SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1
+                — the expanded panel doesn't reliably show the full call
+                (Bash's only appears once the result lands; most tools never
+                show all their params), and the header stays truncated. */}
                 <PeekOverlay show={isPeeking() && hasAnyPeekContent()} rowEl={peekRowEl}>
                     <Show when={peekTimeText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
@@ -495,7 +495,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     <Show when={peekEstimateText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
                     </Show>
-                    <Show when={cmdText() && !expanded()}>
+                    <Show when={cmdText()}>
                         <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
                     </Show>
                 </PeekOverlay>

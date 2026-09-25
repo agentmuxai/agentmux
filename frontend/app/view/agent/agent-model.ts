@@ -27,6 +27,7 @@ import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
+import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 
@@ -819,6 +820,10 @@ export class AgentViewModel implements ViewModel {
                 "frame:activebordercolor": agentColor,
                 "frame:bordercolor": dimAgentColor(agentColor),
             };
+            // The composer mounts as soon as the meta write below lands; ask
+            // it to take focus so the user can type right away instead of
+            // clicking into it (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3).
+            requestComposerFocus(blockId);
             // Identity M4b-3 (spec §6.5.8): record the launch row, THEN one
             // SetMeta carrying the block meta and its stamp, THEN resync —
             // see `commitLaunch`. Resync creates the controller (a no-op
@@ -838,6 +843,9 @@ export class AgentViewModel implements ViewModel {
                 warn: (msg) => Logger.warn("agent", msg),
             });
             if (committed.ok === false) {
+                // Same as the catch below: a launch that didn't happen must
+                // not leave a focus request for a later, unrelated mount.
+                cancelComposerFocusRequest(blockId);
                 this.launchError = committed.error;
                 return false;
             }
@@ -890,6 +898,7 @@ export class AgentViewModel implements ViewModel {
             }
             return true;
         } catch (e: any) {
+            cancelComposerFocusRequest(blockId);
             Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
             return false;
         }
@@ -932,14 +941,12 @@ export class AgentViewModel implements ViewModel {
         ];
     }
 
+    // Returns false (caller falls back to the block's dummy input) while no
+    // composer is mounted — the picker screen, a history tab.
     giveFocus(): boolean {
         const ta = this.focusTargetRef.current;
         if (ta == null) return false;
-        // The composer's own scroller handles its content; letting the browser
-        // scroll ancestors to reveal it shifted whole tabs
-        // (REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md).
-        ta.focus({ preventScroll: true });
-        return true;
+        return focusComposer(ta);
     }
 
     dispose(): void {}
