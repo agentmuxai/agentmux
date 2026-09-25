@@ -23,7 +23,7 @@ pub(crate) mod layout_helpers;
 mod misc;
 mod object;
 pub(crate) mod object_helpers;
-mod reducer_helpers;
+pub(crate) mod reducer_helpers;
 pub(crate) mod session_restore;
 mod tab_lifecycle;
 mod tab_move;

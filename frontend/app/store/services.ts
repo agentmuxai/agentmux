@@ -66,7 +66,9 @@ class ObjectServiceType {
     // close a pane: stop and delete every block in its stack, each process
     // stopped before its records go. One id = one tab of a stack; the pane
     // itself is removed only when no member survives.
-    ClosePane(blockIds: string[]): Promise<void> {
+    // frontendWaits: the pane stayed on screen showing the shutdown log, so
+    // srv removes each closed tab from the layout itself (§5.5).
+    ClosePane(blockIds: string[], frontendWaits?: boolean): Promise<void> {
         return MOS.callBackendService("object", "ClosePane", Array.from(arguments))
     }
 

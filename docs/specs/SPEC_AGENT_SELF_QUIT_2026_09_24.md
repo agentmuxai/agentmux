@@ -1,7 +1,7 @@
 # SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only)
 
 **Date:** 2026-09-24
-**Status:** active — Phase 1 (`/quit` + `/exit`, `sagas/self_quit.rs`) in PR #3779; Phases 1b, 2, 2b and 3 not started.
+**Status:** active — Phase 1 (`/quit` + `/exit`, `sagas/self_quit.rs`) shipped in PR #3779; Phase 1b (visible shutdown log) in PR #3784; Phases 2, 2b and 3 not started.
 **Author:** Camper. Revised 2026-09-25 by Lark with the repo owner's decisions (§0.1).
 **Trigger:** repo owner, 2026-09-24: "we want a command where an agent can kill itself, like /quit for short, where it gracefully shutdown, and it is also a tool an agent can use, with a MAJOR WARNING, but ok to use on direct instruction from user."
 **Grounded in:** `main` at `01100e9c9`. Read from code; file:line references are as of that commit.
@@ -414,7 +414,7 @@ MPS event, scope `block:<block_id>`, published by `shutdown_one` (`sagas/close_p
 ```jsonc
 {
   "block_id": "…",
-  "seq": 3,                    // per block, from 1, strictly increasing: order by it, not arrival
+  "seq": 3,                    // strictly increasing (one process-wide counter, so per block too): order by it, not arrival
   "step": "interrupt" | "exit" | "kill" | "process" | "saved" | "done" | "error",
   "text": "claude — exited",   // one display line, ≤ 80 chars, already concise
   "process": { "pid": 4312, "name": "node dev-server.js", "outcome": "stopped" | "killed" },  // step == "process" only
