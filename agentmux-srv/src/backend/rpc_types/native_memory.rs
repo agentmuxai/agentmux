@@ -160,6 +160,15 @@ pub struct NativeMemoryVersionMeta {
     pub created_at: i64,
 }
 
+/// `agent:memory:claims` — the memory folders an agent has claimed, for
+/// the human "release this folder" action. Releasing goes through the
+/// host's confirmation window, not an RPC.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandNativeMemoryClaimsData {
+    pub agent_id: String,
+}
+
 /// `agent:memory:adoption_list` — the agent's memory folders under its
 /// earlier accounts, offered for adoption
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). Adopting one goes
