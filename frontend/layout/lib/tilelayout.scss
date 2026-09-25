@@ -5,7 +5,13 @@
     position: relative;
     height: 100%;
     width: 100%;
-    overflow: hidden;
+    // `clip`, not `hidden`: `hidden` is still a scroll container, and the
+    // parked previews below give it ~10,000 px of range. A focus() landing on
+    // an input at the bottom edge scrolled it by half its height and left
+    // every pane of the tab shifted up
+    // (REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md). `clip` clips the
+    // same but can't be scrolled at all.
+    overflow: clip;
 
     --gap-size-px: 5px;
 

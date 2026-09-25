@@ -36,7 +36,7 @@ vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
     },
 }));
 
-import { paneTabItemType, PaneTabStrip } from "./PaneTabStrip";
+import { LANDING_BOUNCE_MS, paneTabItemType, PaneTabStrip } from "./PaneTabStrip";
 
 afterEach(() => cleanup());
 beforeEach(() => {
@@ -134,16 +134,31 @@ describe("PaneTabStrip — cross-pane drop target (§3.4)", () => {
         expect(config.canDrop(drag("pane-other", "TILE_ITEM"))).toBe(false);
     });
 
-    it("reports the dragged blockId on drop", () => {
-        const { config, onReceiveForeignTab } = renderInHeader();
-        config.onDrop({ source: { data: { type: paneTabItemType, sourceNodeId: "pane-other", blockId: "blk-7" } } });
-        expect(onReceiveForeignTab).toHaveBeenCalledWith("blk-7");
+    it("reports the dragged blockId on drop — one task later, not inside the drop dispatch", () => {
+        vi.useFakeTimers();
+        try {
+            const { config, onReceiveForeignTab } = renderInHeader();
+            config.onDrop({ source: { data: { type: paneTabItemType, sourceNodeId: "pane-other", blockId: "blk-7" } } });
+            // Deferred so the move (which unmounts the dragged pill, the live
+            // drag source) runs after pragmatic-dnd finishes dispatching.
+            expect(onReceiveForeignTab).not.toHaveBeenCalled();
+            vi.runOnlyPendingTimers();
+            expect(onReceiveForeignTab).toHaveBeenCalledWith("blk-7");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("does not fire on a drop carrying no blockId", () => {
-        const { config, onReceiveForeignTab } = renderInHeader();
-        config.onDrop({ source: { data: { type: paneTabItemType, sourceNodeId: "pane-other" } } });
-        expect(onReceiveForeignTab).not.toHaveBeenCalled();
+        vi.useFakeTimers();
+        try {
+            const { config, onReceiveForeignTab } = renderInHeader();
+            config.onDrop({ source: { data: { type: paneTabItemType, sourceNodeId: "pane-other" } } });
+            vi.runOnlyPendingTimers();
+            expect(onReceiveForeignTab).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("highlights the whole header while hovering, and clears it on leave", async () => {
@@ -170,10 +185,12 @@ describe("PaneTabStrip — cross-pane drop target (§3.4)", () => {
     });
 
     it("leaves no highlight on the header when the strip unmounts mid-hover", async () => {
-        // The header row outlives the strip: with `pane:tabstrip` set to
-        // "multi-only", a pane falling back to one tab unmounts the pill
-        // strip while its header stays. A class left behind there would be a
-        // permanent accent outline on a pane nobody is dragging onto.
+        // The header element belongs to blockframe.tsx, not to the strip, so
+        // nothing guarantees the two go away together. A class left behind
+        // on a header that outlives its strip would be a permanent accent
+        // outline on a pane nobody is dragging onto. (This used to happen for
+        // real under the removed `pane:tabstrip = "multi-only"` setting;
+        // kept as a guard for any future path that drops the strip alone.)
         const { config, header, unmount } = renderInHeader();
         config.onDragEnter();
         await Promise.resolve();
@@ -222,5 +239,110 @@ describe("PaneTabStrip — cross-pane drop target (§3.4)", () => {
         dropTargetCalls[0].onDragEnter();
         await Promise.resolve();
         expect(strip.classList.contains("pane-tab-strip--foreign-hover")).toBe(true);
+    });
+});
+
+// The Window Tab landing bounce, replayed on a Pane Tab pill that was just
+// dropped into place.
+// SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4.
+describe("PaneTabStrip — landing bounce", () => {
+    afterEach(() => {
+        // Let the module-level landing flag expire so it can't leak into the
+        // next test, then hand real timers back.
+        vi.runOnlyPendingTimers();
+        vi.useRealTimers();
+    });
+
+    const pill = (container: HTMLElement, label: string) =>
+        [...container.querySelectorAll<HTMLElement>(".pane-tab")].find((el) => el.textContent?.includes(label))!;
+    const foreignDrop = (blockId: string) => ({
+        source: { data: { type: paneTabItemType, sourceNodeId: "pane-other", blockId } },
+    });
+
+    it("bounces the pill that landed from another pane, and only for LANDING_BOUNCE_MS", () => {
+        vi.useFakeTimers();
+        const { config, container } = renderInHeader(vi.fn(() => true));
+        config.onDrop(foreignDrop("b"));
+        // Nothing yet: the move itself hasn't run.
+        expect(pill(container, "beta").classList.contains("pane-tab--landing")).toBe(false);
+        vi.advanceTimersByTime(0);
+        expect(pill(container, "beta").classList.contains("pane-tab--landing")).toBe(true);
+        expect(pill(container, "alpha").classList.contains("pane-tab--landing")).toBe(false);
+        vi.advanceTimersByTime(LANDING_BOUNCE_MS);
+        expect(pill(container, "beta").classList.contains("pane-tab--landing")).toBe(false);
+    });
+
+    // Codex P2 on #3694: one block can have pills in several strips (agent
+    // fork lineages show other panes' blocks as extra tabs). Only the pill in
+    // the pane it landed in may bounce.
+    it("bounces only the pill in the destination pane, not the same block's pill in another pane", () => {
+        vi.useFakeTimers();
+        const { container } = render(() => (
+            <>
+                <div data-role="block-header" data-testid="dest">
+                    <PaneTabStrip
+                        tabs={TABS}
+                        activeId="a"
+                        getId={(t: T) => t.id}
+                        getLabel={(t: T) => t.label}
+                        onActivate={vi.fn()}
+                        paneKey="pane-dest"
+                        onReceiveForeignTab={vi.fn(() => true)}
+                    />
+                </div>
+                <div data-role="block-header" data-testid="elsewhere">
+                    <PaneTabStrip
+                        tabs={TABS}
+                        activeId="a"
+                        getId={(t: T) => t.id}
+                        getLabel={(t: T) => t.label}
+                        onActivate={vi.fn()}
+                        paneKey="pane-elsewhere"
+                        onReceiveForeignTab={vi.fn(() => true)}
+                    />
+                </div>
+            </>
+        ));
+        const dest = container.querySelector<HTMLElement>('[data-testid="dest"]')!;
+        const elsewhere = container.querySelector<HTMLElement>('[data-testid="elsewhere"]')!;
+        dropTargetCalls.find((c) => c.element === dest)!.onDrop(foreignDrop("b"));
+        vi.advanceTimersByTime(0);
+        expect(pill(dest, "beta").classList.contains("pane-tab--landing")).toBe(true);
+        expect(pill(elsewhere, "beta").classList.contains("pane-tab--landing")).toBe(false);
+    });
+
+    it("does not bounce anything when the move was refused", () => {
+        vi.useFakeTimers();
+        const { config, container } = renderInHeader(vi.fn(() => false));
+        config.onDrop(foreignDrop("b"));
+        vi.advanceTimersByTime(0);
+        expect(container.querySelectorAll(".pane-tab--landing")).toHaveLength(0);
+    });
+
+    it("bounces the MOVED pill after a same-pane reorder, not the one it was dropped on", () => {
+        vi.useFakeTimers();
+        const onReorder = vi.fn(() => true);
+        const { container } = render(() => (
+            <div data-role="block-header">
+                <PaneTabStrip
+                    tabs={TABS}
+                    activeId="a"
+                    getId={(t: T) => t.id}
+                    getLabel={(t: T) => t.label}
+                    onActivate={vi.fn()}
+                    paneKey="pane-self"
+                    onReorder={onReorder}
+                />
+            </div>
+        ));
+        const alphaTarget = dropTargetCalls.find((c) => c.element === pill(container, "alpha"))!;
+        alphaTarget.onDrop({
+            source: { data: { type: paneTabItemType, sourceNodeId: "pane-self", blockId: "b" } },
+            location: { current: { input: { clientX: 0 } } },
+        });
+        // Which side is irrelevant here (jsdom rects are all zero).
+        expect(onReorder).toHaveBeenCalledWith("b", "a", expect.any(String));
+        expect(pill(container, "beta").classList.contains("pane-tab--landing")).toBe(true);
+        expect(pill(container, "alpha").classList.contains("pane-tab--landing")).toBe(false);
     });
 });

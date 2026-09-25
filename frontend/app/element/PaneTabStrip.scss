@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../drop-feedback.scss" as drop;
+
 // Shared tab-strip chrome, promoted from the editor's original
 // .editor-tab-strip/.editor-tab (editor-view.scss) so agent-pane forks and
 // terminal-pane shell tabs can reuse the identical box model, active-state
@@ -135,17 +137,14 @@
     }
 
     // Cross-pane drop-to-append hover (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.4, Phase 4) — a pill dragged from a DIFFERENT pane is hovering this
-    // strip's row, about to be appended as a new tab here on drop. Same
-    // "minimal, exact polish deferred" posture as the same-pane reorder
-    // feedback above (`--dragging`/`--drop-before`/`--drop-after` on
-    // `.pane-tab`).
-    // Only applied when this strip IS the drop zone — a strip not hosted in
-    // a Pane header row. Header-hosted strips (every pane, via
-    // PaneHeaderTabStrip) highlight the whole header instead; see
-    // `.pane-header--foreign-hover` below.
+    // §3.4) — a pill dragged from a DIFFERENT pane is hovering this strip,
+    // about to be appended as a new tab here on drop. Only applied when this
+    // strip IS the drop zone — a strip not hosted in a Pane header row.
+    // Header-hosted strips (every pane, via PaneHeaderTabStrip) highlight the
+    // whole header instead; see `.pane-header--foreign-hover` below. Same
+    // Window Tab treatment either way (drop-feedback.scss).
     &--foreign-hover {
-        box-shadow: inset 0 0 0 1px var(--accent-color);
+        @include drop.drop-target-hover;
     }
 }
 
@@ -153,15 +152,28 @@
 // actual drop zone (`foreignDropRootFor`, PaneTabStrip.tsx). Applied
 // imperatively to blockframe.tsx's `[data-role="block-header"]` element,
 // which is why this rule is a bare class rather than nested under
-// `.pane-tab-strip`. `outline` rather than the `box-shadow` used above:
-// the header row already carries its own box-shadow in the has-summary
-// case (block.scss), and outline is a separate property, so the highlight
-// composes instead of replacing it. Negative offset keeps the 1px inside
-// the row's own bounds, so it can't be clipped by the pane's rounded
-// corners or overlap the neighbouring pane.
+// `.pane-tab-strip`.
+//
+// The exact treatment a Window Tab gets when a pane is dragged over it
+// (drop-feedback.scss): two invert flashes, then a pulsing 2px outline.
+// `outline` composes with the header's own box-shadow (has-summary case,
+// block.scss) instead of replacing it, and the negative offset keeps it
+// inside the row, so the pane's rounded corners can't clip it and it can't
+// overlap the neighbouring pane.
+//
+// The tabs themselves don't flash: the header's invert covers its
+// background and non-tab chrome (ConnectionButton, header text, end icons),
+// and the pill-strip wrapper runs the same invert, cancelling it out.
+// Inverting the chrome along with the background (rather than the
+// background alone) keeps the header text/icons readable mid-flash — their
+// color was picked for contrast against the un-inverted background.
+// SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.2.
 .pane-header--foreign-hover {
-    outline: 1px solid var(--accent-color);
-    outline-offset: -1px;
+    @include drop.drop-target-hover;
+
+    .block-frame-default-header-tabstrip {
+        @include drop.drop-target-strobe-exempt;
+    }
 }
 
 // The zoomed layer — carries the flex layout the outer box used to own
@@ -347,6 +359,16 @@
 
     &--drop-after {
         box-shadow: inset -2px 0 0 0 var(--accent-color);
+    }
+
+    // A tab that was just dropped into place — from another pane, or
+    // reordered within this one — plays the Window Tab landing bounce
+    // (drop-feedback.scss). Toggled by PaneTabStrip.tsx's `landedTab` (id + destination pane).
+    // Sits on the pill, not its `.pane-tab-tip` wrapper: the wrapper owns
+    // the flex sizing, so a transform here never moves its neighbours.
+    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4.
+    &--landing {
+        @include drop.landing-bounce;
     }
 }
 

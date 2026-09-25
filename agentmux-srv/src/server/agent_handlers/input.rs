@@ -1258,10 +1258,18 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     &cmd.blockid,
                     cmd.hidden.unwrap_or(false),
                 );
+                // A post-compaction memory reinjection also carries the
+                // agent's running summary (SPEC_DURABLE_CONVERSATION_MEMORY
+                // §4.4, "Compaction reuse").
+                let message = if cmd.hidden.unwrap_or(false) {
+                    crate::backend::continuity_state::with_state_after_compaction(&deps.mstore, &cmd.blockid, cmd.message)
+                } else {
+                    cmd.message
+                };
                 run_agent_turn(
                     &deps,
                     cmd.blockid,
-                    cmd.message,
+                    message,
                     cmd.message_id,
                     TurnRegistration::Register,
                 )

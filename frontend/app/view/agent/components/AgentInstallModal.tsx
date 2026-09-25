@@ -2,43 +2,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentInstallModalPanel — modal that runs an agent's install recipe
- * and shows live output in an xterm.js terminal. Opens when the user
- * picks an agent whose CLI isn't already in the per-version cache.
- * Sibling to `AgentLaunchModalPanel`.
+ * AgentInstallModalPanel — modal that runs an agent's install recipe.
+ * Opens when the user picks an agent whose CLI isn't already in the
+ * per-version cache. Sibling to `AgentLaunchModalPanel`.
  *
  * Phase α (SPEC_AGENT_INSTALL_STAGE_2026_05_17.md §11): single-step
  * recipe (just `npm install <package>`) streamed line-by-line via the
  * `install.start` RPC. Cancel kills the install + removes the partial
  * dir.
  *
- * UX: modal opens in `idle` state with a "Click to install" CTA at the
- * bottom-right. Clicking starts the install; the CTA goes away and the
- * xterm renders npm's output (ANSI colors preserved).
+ * Rendered with the shared `<InstallDialog>` (SPEC_UNIVERSAL_INSTALL_
+ * DIALOG_2026_09_23.md §5): plain-language npm steps by default, the raw
+ * console under a collapsed "Details". This file only owns what is
+ * specific to provider CLIs — which provider to install, and what the
+ * footer buttons do.
  */
 
-import { Show, createEffect, createResource, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
+import { Match, Switch, createResource, onCleanup, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
-import { ErrorBanner } from "@/app/errors/ErrorBanner";
-import { atoms, getSettingsKeyAtom } from "@/app/store/global";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { InstallDialog } from "@/element/install/InstallDialog";
+import { createInstallSession } from "@/element/install/install-session";
+import { NpmStepTracker } from "@/element/install/npm-steps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/mps";
-import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
-import { writeText as clipboardWriteText } from "@/util/clipboard";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
-// Use the project's customized xterm.css copy (same one term.tsx
-// imports) rather than the raw package stylesheet. The package CSS
-// loads later in the bundle and would override our project-wide
-// terminal theme tweaks.
-import "../../term/xterm.css";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 interface AgentInstallModalPanelProps {
@@ -54,478 +45,131 @@ interface AgentInstallModalPanelProps {
     onInstalled: (continueToLaunch: boolean) => void;
 }
 
+// Header subtitle per state: what the install needs before it runs,
+// then where it stands.
+const DESCRIPTION = {
+    idle: "Needs an internet connection.",
+    running: "Needs an internet connection.",
+    done: "Ready to launch.",
+    failed: "The install didn't finish.",
+} as const;
+
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
     // Resolve through the agent's bound bundle rather than the possibly-
     // drifted `agent.provider` column directly — #2594, same "gate vs.
     // actual launch can disagree" risk class #2592/#2596/#2607/#2609
     // fixed. This modal determines which CLI package literally gets
-    // installed (`startInstall` below); disagreeing with what
-    // AgentPicker's checkInstalled (already fixed) decided needed
-    // installing would install the wrong provider's CLI.
+    // installed; disagreeing with what AgentPicker's checkInstalled
+    // (already fixed) decided needed installing would install the wrong
+    // provider's CLI.
     //
     // Used only for the cosmetic header (icon/displayName/version) —
-    // `startInstall` re-resolves directly rather than reading this
-    // resource, so a click that races the resource's own in-flight
-    // fetch still installs the correct provider (see its own comment).
-    // Falls back to `props.agent.provider` while loading/on failure,
-    // same as `resolveEffectiveLaunchProvider` itself.
+    // `start` re-resolves directly rather than reading this resource, so a
+    // click that races the resource's own in-flight fetch still installs
+    // the correct provider. Falls back to `props.agent.provider` while
+    // loading/on failure, same as `resolveEffectiveLaunchProvider` itself.
     const [resolvedProviderId] = createResource(() => props.agent, resolveEffectiveLaunchProvider);
     const displayProviderId = () => resolvedProviderId() ?? props.agent.provider;
     const catalog = () => getCliCatalogEntry(displayProviderId());
     const provider = () => getProvider(displayProviderId());
     const displayName = () => catalog()?.displayName ?? props.agent.name;
-    const version = () => provider()?.pinnedVersion;
+    const version = () => {
+        const v = provider()?.pinnedVersion;
+        if (!v) return undefined;
+        return v === "latest" ? "latest" : `v${v}`;
+    };
 
-    const [phase, setPhase] = createSignal<"idle" | "installing" | "done" | "failed">("idle");
-    // `unknown` — accepts plain strings (legacy) AND the wire-format
-    // `AgentMuxError` object the backend now emits for typed errors.
-    // `<ErrorBanner>` + `translateError()` handle both shapes.
-    const [error, setError] = createSignal<unknown>(null);
-    const [sessionId, setSessionId] = createSignal<string | null>(null);
-    const [elapsedMs, setElapsedMs] = createSignal(0);
+    // The provider this run installs, resolved fresh on each click.
+    let runProviderId: string | null = null;
 
-    let unsub: (() => void) | null = null;
-    let termRef: HTMLDivElement | undefined;
-    let terminal: Terminal | null = null;
-    let fitAddon: FitAddon | null = null;
-    let resizeObserver: ResizeObserver | null = null;
-    // Details wrapper around the terminal (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_
-    // AUTOSCROLL_2026_09_10.md §5) — defaults open (see the JSX below for
-    // why this differs from SystemToolInstallInline's default-closed
-    // panel), but still individually collapsible.
-    let detailsRef: HTMLDetailsElement | undefined;
-    let startedAt = 0;
-    let tickHandle: ReturnType<typeof setInterval> | null = null;
-    // Hoisted so onCleanup can cancel the pending copy-on-select
-    // timer when the modal unmounts (reagent P2 on PR #899 v2).
-    let selectionDebounce: ReturnType<typeof setTimeout> | null = null;
-    // Flipped in onCleanup so a startInstall awaiting the RPC response
-    // can cancel the resolved session id even if it landed after unmount.
-    let disposed = false;
+    const session = createInstallSession({
+        tracker: () =>
+            new NpmStepTracker(
+                (runProviderId && getCliCatalogEntry(runProviderId)?.displayName) || displayName(),
+            ),
+        begin: async () => {
+            const prov = runProviderId ? getProvider(runProviderId) : undefined;
+            if (!prov) throw new Error(`unknown provider ${runProviderId}`);
+            return RpcApi.InstallStartCommand(TabRpcClient, {
+                providerId: prov.id,
+                cliCommand: prov.cliCommand,
+                npmPackage: prov.npmPackage,
+                pinnedVersion: prov.pinnedVersion,
+            });
+        },
+        cancel: (sessionId) => RpcApi.InstallCancelCommand(TabRpcClient, { sessionId }),
+        // npm into an isolated per-version directory is safe to stop; the
+        // backend rolls back the partial directory.
+        cancelOnDispose: true,
+    });
+
+    const start = async () => {
+        // Re-resolve directly rather than reading the `provider()` memo
+        // above — that memo backs the resource's current (possibly still-
+        // loading, or subsequently-stale if the component has been open a
+        // while) snapshot, whereas a fresh resolve here guarantees whatever
+        // actually gets installed matches the agent's bundle at the moment
+        // the user clicked, not whatever the header happened to be showing.
+        runProviderId = await resolveEffectiveLaunchProvider(props.agent);
+        await session.start();
+    };
+
     // Set when either footer button fires onInstalled, so the unmount
     // path in onCleanup doesn't double-fire. Also lets us detect "user
     // dismissed the success screen via ESC / backdrop" (notifiedDone
     // stays false in those paths) and flip state once on the way out.
     // Codex P2 on PR #895.
     let notifiedDone = false;
-
-    const writeTerm = (line: string, stream: "stdout" | "stderr") => {
-        if (!terminal) return;
-        if (stream === "stderr") {
-            terminal.write(`\x1b[31m${line}\x1b[0m\r\n`);
-        } else {
-            terminal.write(`${line}\r\n`);
-        }
-    };
-
-    const startInstall = async () => {
-        // Re-resolve directly rather than reading the `provider()`
-        // memo above — that memo backs the resource's current
-        // (possibly still-loading, or subsequently-stale if the
-        // component has been open a while) snapshot, whereas a fresh
-        // resolve here guarantees whatever actually gets installed
-        // matches the agent's bundle at the moment the user clicked,
-        // not whatever the header happened to be showing.
-        // resolveEffectiveLaunchProvider is a cheap, idempotent single
-        // RPC round-trip — no reason to trust a possibly-stale cache
-        // for the one call that determines what gets installed.
-        const resolvedId = await resolveEffectiveLaunchProvider(props.agent);
-        const prov = getProvider(resolvedId);
-        if (!prov) {
-            setError(`unknown provider ${resolvedId}`);
-            setPhase("failed");
-            return;
-        }
-        // Tear down any prior run (Retry path).
-        if (unsub) {
-            unsub();
-            unsub = null;
-        }
-        if (tickHandle != null) {
-            clearInterval(tickHandle);
-            tickHandle = null;
-        }
-        if (terminal) {
-            terminal.clear();
-        }
-        setPhase("installing");
-        setError(null);
-        startedAt = Date.now();
-        tickHandle = setInterval(() => setElapsedMs(Date.now() - startedAt), 250);
-        try {
-            const r = await RpcApi.InstallStartCommand(TabRpcClient, {
-                providerId: prov.id,
-                cliCommand: prov.cliCommand,
-                npmPackage: prov.npmPackage,
-                pinnedVersion: prov.pinnedVersion,
-            });
-            // If the modal unmounted while the RPC was in flight, cancel
-            // the resolved session id rather than subscribing.
-            if (disposed) {
-                void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: r.sessionId }).catch(() => {
-                    /* best-effort */
-                });
-                return;
-            }
-            setSessionId(r.sessionId);
-            unsub = muxEventSubscribe({
-                eventType: "install_chunk",
-                scope: `install:${r.sessionId}`,
-                handler: (event: any) => {
-                    const data = event?.data;
-                    if (!data || typeof data !== "object") return;
-                    if (typeof data.line === "string") {
-                        writeTerm(data.line, data.stream === "stderr" ? "stderr" : "stdout");
-                    } else if (data.op === "done") {
-                        if (data.ok) {
-                            // Don't auto-chain — the user clicks
-                            // "Continue to Launch" in the footer so
-                            // they have a moment to read the install
-                            // log and confirm the operation
-                            // succeeded.
-                            setPhase("done");
-                        } else {
-                            setError(data.error ?? "install failed");
-                            setPhase("failed");
-                        }
-                    }
-                },
-            });
-        } catch (e) {
-            setError((e as Error)?.message ?? String(e));
-            setPhase("failed");
-        }
-    };
-
-    const cancel = async () => {
-        const sid = sessionId();
-        if (sid) {
-            try {
-                await RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: sid });
-            } catch {
-                /* ignore — best-effort */
-            }
-        }
-        props.onCancel();
-    };
-
-    onMount(() => {
-        // Lazy-create the terminal so it doesn't render before the
-        // container has a layout size (FitAddon needs a real rect).
-        if (!termRef) return;
-        // Resolve the project's monospace font at runtime — xterm.js
-        // doesn't parse CSS variables, so passing a literal `var(...)`
-        // string would silently fall back to xterm's default (Courier),
-        // which renders wider than the rest of the app's terminals.
-        const cs = getComputedStyle(termRef);
-        // Reads --font-mono, the canonical family token (PR #3252). This
-        // previously read --termfontfamily, which was never defined anywhere
-        // in the codebase — so this lookup always returned "" and silently
-        // used the hardcoded fallback instead of the app's actual font.
-        // The fallback is kept as a belt, but it should now be unreachable.
-        const termFont = cs.getPropertyValue("--font-mono").trim()
-            || `"Hack", Consolas, Menlo, monospace`;
-        // Bind to the same theme source the regular term pane uses
-        // (single source of truth — see SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md).
-        const [initialTheme] = computeTermThemeFromSettings(atoms.fullConfigAtom());
-        // Layer D1 of MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26 §7:
-        // construct at the smallest viable size (2×2) instead of the
-        // xterm.js default of 80×24. In a narrow agent pane, default
-        // cols=80 paints a ~600px-wide canvas BEFORE FitAddon's first
-        // ResizeObserver tick can fire — the modal-panel locks in to
-        // that width, `.modal-panel { overflow: auto }` reserves a
-        // horizontal scrollbar, and the user sees an unshrunk modal
-        // even though the parent CSS has `min-width: 0`. Starting at
-        // 2×2 means the initial paint is tiny; the synchronous
-        // `fitAddon.fit()` after `terminal.open(termRef)` then sizes
-        // to the actual container width on the same frame.
-        terminal = new Terminal({
-            cursorBlink: false,
-            scrollback: 5000,
-            fontSize: 12,
-            fontFamily: termFont,
-            theme: initialTheme,
-            convertEol: false,
-            scrollOnUserInput: false,
-            cols: 2,
-            rows: 2,
-        });
-        // Live theme swap — mirrors TermThemeUpdater so settings changes
-        // while the modal is open take effect without remount.
-        createEffect(() => {
-            const [t] = computeTermThemeFromSettings(atoms.fullConfigAtom());
-            if (terminal) terminal.options.theme = t;
-        });
-        // Clipboard wiring — phase α of SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
-        // Mirrors the regular term pane's three paths (copy-on-select,
-        // Ctrl+Shift+C, context menu Copy) so users can pull npm output
-        // out of the install log.
-        const copyOnSelect = getSettingsKeyAtom("term:copyonselect");
-        // Debounce matches termwrap.ts:205 — fires once per drag burst
-        // instead of once per tick. `selectionDebounce` is hoisted to
-        // component scope so onCleanup can cancel it.
-        terminal.onSelectionChange(() => {
-            if (!copyOnSelect()) return;
-            if (selectionDebounce != null) clearTimeout(selectionDebounce);
-            selectionDebounce = setTimeout(() => {
-                const sel = terminal?.getSelection() ?? "";
-                if (sel.length > 0) {
-                    clipboardWriteText(sel).catch((e) =>
-                        console.log("clipboard write failed", e),
-                    );
-                }
-            }, 50);
-        });
-        terminal.attachCustomKeyEventHandler((ev) => {
-            // Ctrl+Shift+C → manual copy. Return false stops xterm from
-            // also routing the keystroke as input.
-            if (ev.type === "keydown" && ev.ctrlKey && ev.shiftKey && ev.key === "C") {
-                const sel = terminal?.getSelection() ?? "";
-                if (sel.length > 0) {
-                    clipboardWriteText(sel).catch((e) =>
-                        console.log("clipboard write failed", e),
-                    );
-                }
-                return false;
-            }
-            return true;
-        });
-
-        fitAddon = new FitAddon();
-        terminal.loadAddon(fitAddon);
-        terminal.open(termRef);
-        const tryFit = () => {
-            try {
-                fitAddon?.fit();
-            } catch {
-                /* container still 0×0 — wait for next resize */
-            }
-        };
-        // Force-load the term font BEFORE the first fit so cell-width
-        // measurement uses real glyph metrics, not fallback (Courier).
-        // Same race as termwrap.ts — see
-        // docs/archive/terminal-jumbled-startup-investigation.md "Follow-up".
-        // fonts.load() actively requests the face and resolves when ready;
-        // fonts.ready alone is vacuous because the WOFF/WOFF2 isn't
-        // requested until something measures a glyph.
-        const FIT_FONT_TIMEOUT_MS = 1000;
-        const fontSpec = (variant: string) => `${variant}12px ${termFont}`;
-        const fontsReady = (async () => {
-            try {
-                await Promise.race([
-                    Promise.all([
-                        document.fonts?.load(fontSpec("")) ?? Promise.resolve(),
-                        document.fonts?.load(fontSpec("bold ")) ?? Promise.resolve(),
-                        document.fonts?.load(fontSpec("italic ")) ?? Promise.resolve(),
-                    ]),
-                    new Promise<void>((resolve) =>
-                        setTimeout(resolve, FIT_FONT_TIMEOUT_MS),
-                    ),
-                ]);
-            } catch (_) { /* font API unavailable — fall through */ }
-        })();
-        void fontsReady.then(() => {
-            if (disposed) return;
-            tryFit();
-        });
-        tryFit(); // best-effort initial fit (often fallback metrics on cold cache)
-        // Refit on container resize. The modal may animate in from
-        // 0×0; without an observer the terminal stays at the default
-        // 80×24 indefinitely.
-        resizeObserver = new ResizeObserver(() => tryFit());
-        resizeObserver.observe(termRef);
-        terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
-
-        // Re-fit when the Details panel around the terminal opens. A closed
-        // <details> doesn't lay out its children, so FitAddon can't size
-        // correctly until the container has real dimensions — the same
-        // "no layout while hidden" problem SystemToolInstallInline.tsx's
-        // scroll-sync solves for scrollTop, hitting xterm's sizing here
-        // instead. The existing ResizeObserver above may or may not fire
-        // reliably on a <details> open transition depending on how the
-        // browser handles that layout change, so don't rely on it alone.
-        const detailsEl = detailsRef;
-        if (detailsEl) {
-            const onToggle = () => { if (detailsEl.open) tryFit(); };
-            detailsEl.addEventListener("toggle", onToggle);
-            onCleanup(() => detailsEl.removeEventListener("toggle", onToggle));
-        }
-    });
-
     onCleanup(() => {
-        disposed = true;
-        if (unsub) {
-            unsub();
-            unsub = null;
-        }
-        if (tickHandle != null) {
-            clearInterval(tickHandle);
-            tickHandle = null;
-        }
-        if (selectionDebounce != null) {
-            clearTimeout(selectionDebounce);
-            selectionDebounce = null;
-        }
-        if (resizeObserver) {
-            resizeObserver.disconnect();
-            resizeObserver = null;
-        }
-        if (terminal) {
-            terminal.dispose();
-            terminal = null;
-        }
-        const sid = sessionId();
-        if (sid && phase() === "installing") {
-            void RpcApi.InstallCancelCommand(TabRpcClient, { sessionId: sid }).catch(() => {
-                /* best-effort */
-            });
-        }
-        // ESC, backdrop click, or any other unmount path that bypassed
-        // the footer buttons. If the install succeeded, we still owe
-        // the picker the state flip so the card's ribbon clears.
-        // Codex P2 on PR #895.
-        if (phase() === "done" && !notifiedDone) {
-            props.onInstalled(false);
-        }
+        if (session.state() === "done" && !notifiedDone) props.onInstalled(false);
     });
-
-    const elapsedLabel = () => {
-        const s = Math.floor(elapsedMs() / 1000);
-        const mm = Math.floor(s / 60).toString();
-        const ss = (s % 60).toString().padStart(2, "0");
-        return `${mm}:${ss}`;
+    const installed = (continueToLaunch: boolean) => {
+        notifiedDone = true;
+        props.onInstalled(continueToLaunch);
     };
 
     return (
-        <>
-            <header class="modal-panel-header">
-                <h2 class="modal-panel-title">
-                    <span class="agent-install-modal-icon" aria-hidden="true">
-                        {catalog()?.icon ?? "📦"}
-                    </span>
-                    Install {displayName()}
-                    <Show when={version()}>
-                        <span class="agent-install-modal-version">
-                            {version() === "latest" ? "latest" : `v${version()}`}
-                        </span>
-                    </Show>
-                </h2>
-                <p class="modal-panel-description">
-                    <Show when={phase() === "idle"}>not installed — click below to install</Show>
-                    <Show when={phase() === "installing"}>
-                        <span class="agent-install-modal-spinner">⏳</span> Installing… {elapsedLabel()}
-                    </Show>
-                    <Show when={phase() === "done"}>
-                        <span class="agent-install-modal-ok">✓</span> Installed
-                    </Show>
-                    <Show when={phase() === "failed"}>
-                        <span class="agent-install-modal-fail">✗</span> Failed
-                    </Show>
-                </p>
-                <Show when={phase() === "installing"}>
-                    <div class="install-progress" aria-hidden="true">
-                        <div class="install-progress-bar" />
-                    </div>
-                </Show>
-            </header>
-            <div class="modal-panel-body agent-install-modal-body">
-                {/* Defaults OPEN, unlike SystemToolInstallInline's Details
-                    panel — this modal's entire visible body is the
-                    terminal, so collapsing it by default would leave a
-                    user who opened "Install X" staring at a bare progress
-                    bar with nothing else visible. Still individually
-                    collapsible if a user wants the compact view.
-                    SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5. */}
-                <details class="agent-install-modal-details" open ref={detailsRef}>
-                <summary>Details</summary>
-                <div
-                    class="agent-install-modal-term"
-                    ref={termRef}
-                    onContextMenu={(e) => {
-                        // Right-click → Copy (selection) / Copy All. Mirrors
-                        // the regular term pane's menu. Phase α of
-                        // SPEC_UNIFIED_CLIPBOARD_2026_05_18.md.
-                        // preventDefault stops Chromium's native right-click
-                        // menu from firing alongside our custom one
-                        // (reagent P1 + codex P2 on PR #899).
-                        e.preventDefault();
-                        const sel = terminal?.getSelection() ?? "";
-                        // Lazy-walk the scrollback inside the click
-                        // handler so we don't pay for it on every
-                        // right-click + dismiss (reagent P2). For
-                        // long install logs this is non-trivial work.
-                        const collectAll = (): string => {
-                            // Reassemble logical lines from xterm's visual
-                            // rows. `isWrapped` on row N+1 means row N's
-                            // logical line continues onto N+1, so emit a
-                            // newline only when the next row starts a fresh
-                            // logical line. Codex P2 on PR #899 v3 — naive
-                            // join inserted artificial breaks into long
-                            // URLs / stack traces / npm command echoes.
-                            const buf = terminal?.buffer?.active;
-                            if (!buf) return "";
-                            let out = "";
-                            for (let i = 0; i < buf.length; i++) {
-                                const line = buf.getLine(i);
-                                if (!line) continue;
-                                out += line.translateToString(true);
-                                const next = buf.getLine(i + 1);
-                                if (!next?.isWrapped) out += "\n";
-                            }
-                            return out;
-                        };
-                        ContextMenuModel.showContextMenu(
-                            [
-                                {
-                                    label: "Copy",
-                                    enabled: sel.length > 0,
-                                    click: () => void clipboardWriteText(sel).catch((err) =>
-                                        console.log("clipboard write failed", err)),
-                                },
-                                {
-                                    label: "Copy All",
-                                    enabled: !!terminal?.buffer?.active?.length,
-                                    click: () => {
-                                        const all = collectAll();
-                                        if (all.length === 0) return;
-                                        void clipboardWriteText(all).catch((err) =>
-                                            console.log("clipboard write failed", err));
-                                    },
-                                },
-                            ],
-                            e,
-                        );
-                    }}
-                />
-                </details>
-                <Show when={error()}>
-                    <ErrorBanner error={error()} />
-                </Show>
-            </div>
-            <footer class="modal-panel-footer">
-                <Show when={phase() === "idle"}>
-                    <Button onClick={() => props.onCancel()} data-modal-dismiss>Cancel</Button>
-                    <Button onClick={() => void startInstall()} className="green solid">
-                        Install now
-                    </Button>
-                </Show>
-                <Show when={phase() === "installing"}>
-                    <Button onClick={() => void cancel()} data-modal-dismiss>Cancel</Button>
-                </Show>
-                <Show when={phase() === "failed"}>
-                    <Button onClick={() => props.onCancel()} data-modal-dismiss>Close</Button>
-                    <Button onClick={() => void startInstall()} className="green solid">
-                        Retry
-                    </Button>
-                </Show>
-                <Show when={phase() === "done"}>
-                    <Button onClick={() => { notifiedDone = true; props.onInstalled(false); }} data-modal-dismiss>Close</Button>
-                    <Button onClick={() => { notifiedDone = true; props.onInstalled(true); }} className="green solid">
-                        Continue to Launch
-                    </Button>
-                </Show>
-            </footer>
-        </>
+        <InstallDialog
+            session={session}
+            kind="provider-cli"
+            icon={catalog()?.icon ?? "📦"}
+            title={session.state() === "done" ? `${displayName()} is installed` : `Install ${displayName()}`}
+            version={version()}
+            description={DESCRIPTION[session.state()]}
+            actions={
+                <Switch>
+                    <Match when={session.state() === "idle"}>
+                        <Button onClick={() => props.onCancel()} data-modal-dismiss>Cancel</Button>
+                        <Button onClick={() => void start()} className="green solid" data-modal-initial-focus>
+                            Install now
+                        </Button>
+                    </Match>
+                    <Match when={session.state() === "running"}>
+                        <Button
+                            onClick={async () => {
+                                await session.cancel();
+                                props.onCancel();
+                            }}
+                            data-modal-dismiss
+                        >
+                            Cancel
+                        </Button>
+                    </Match>
+                    <Match when={session.state() === "failed"}>
+                        <Button onClick={() => props.onCancel()} data-modal-dismiss>Close</Button>
+                        <Button onClick={() => void start()} className="green solid">
+                            Retry
+                        </Button>
+                    </Match>
+                    <Match when={session.state() === "done"}>
+                        <Button onClick={() => installed(false)} data-modal-dismiss>Close</Button>
+                        <Button onClick={() => installed(true)} className="green solid">
+                            Continue to Launch
+                        </Button>
+                    </Match>
+                </Switch>
+            }
+        />
     );
 };
 

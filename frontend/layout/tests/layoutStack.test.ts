@@ -403,17 +403,86 @@ describe("layoutStack", () => {
             );
         });
 
-        it("refuses to move a pane's ONLY tab into another pane — that's a close, not a move", () => {
+        // Moving a pane's ONLY tab into another pane empties the source pane,
+        // which is removed — as a MOVE: the block must survive.
+        // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.
+        describe("moving a pane's only tab", () => {
+            function twoPanes() {
+                const model = createLayoutModel();
+                const paneA = insertRootBlock(model, "a1"); // pane A: [a1] only
+                insertSecondPane(model, "b1"); // pane B: [b1]
+                model.updateTree();
+                rpcCall.mockResolvedValue(undefined);
+                return { model, paneA };
+            }
+
+            it("moves it, active, and removes the emptied pane", () => {
+                const { model, paneA } = twoPanes();
+
+                expect(moveBlockInStack(model, "a1", "b1", "end", true)).toBe(true);
+
+                const b = getNodeByBlockId(model, "b1")!;
+                expect(effectiveStack(b.data!)).toEqual(["b1", "a1"]);
+                expect(b.data!.activeBlockId).toBe("a1");
+                // Only pane B is left; pane A's node is gone.
+                expect(getNodeByBlockId(model, "a1")!.id).toBe(b.id);
+                expect(model.leafs().map((l) => l.id)).not.toContain(paneA);
+                expect(model.leafs()).toHaveLength(1);
+            });
+
+            // The regression guard: going through closeNode here would ask the
+            // "still running" prompt and then delete the moved block — killing
+            // a live agent (incident R1 / #1681 was this bug on another move).
+            it("never asks beforeNodeDelete and never calls onNodeDelete — the block is moved, not deleted", () => {
+                const { model } = twoPanes();
+                const beforeNodeDelete = vi.fn().mockResolvedValue(true);
+                const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+                model.beforeNodeDelete = beforeNodeDelete;
+                model.onNodeDelete = onNodeDelete;
+
+                moveBlockInStack(model, "a1", "b1", "end", true);
+
+                expect(beforeNodeDelete).not.toHaveBeenCalled();
+                expect(onNodeDelete).not.toHaveBeenCalled();
+                expect(deleteBlock).not.toHaveBeenCalled();
+            });
+
+            it("fires pane.moveTab exactly once and nothing else", () => {
+                const { model } = twoPanes();
+
+                moveBlockInStack(model, "a1", "b1", "end", true);
+
+                expect(rpcCall).toHaveBeenCalledTimes(1);
+                expect(rpcCall).toHaveBeenCalledWith(
+                    "pane.moveTab",
+                    { block_id: "a1", target_block_id: "b1", position: "end", activate: true },
+                    {}
+                );
+            });
+
+            it("un-magnifies the emptied pane first, and focuses the pane the tab landed in", () => {
+                const { model, paneA } = twoPanes();
+                model.magnifyNodeToggle(paneA);
+                expect(model.magnifiedNodeId).toBe(paneA);
+
+                moveBlockInStack(model, "a1", "b1", "end", true);
+
+                expect(model.magnifiedNodeId).toBeFalsy();
+                expect(model.focusedNodeId).toBe(getNodeByBlockId(model, "b1")!.id);
+            });
+        });
+
+        it("focuses the destination pane after an ordinary cross-pane move too", () => {
             const model = createLayoutModel();
-            insertRootBlock(model, "a1"); // pane A: [a1] only
+            const paneA = insertRootBlock(model, "a1");
+            pushBlockOntoStack(model, paneA, "a2");
             insertSecondPane(model, "b1");
             model.updateTree();
+            rpcCall.mockResolvedValue(undefined);
 
-            moveBlockInStack(model, "a1", "b1", "end", true);
+            moveBlockInStack(model, "a2", "b1", "end", true);
 
-            expect(effectiveStack(getNodeByBlockId(model, "a1")!.data!)).toEqual(["a1"]);
-            expect(effectiveStack(getNodeByBlockId(model, "b1")!.data!)).toEqual(["b1"]);
-            expect(rpcCall).not.toHaveBeenCalled();
+            expect(model.focusedNodeId).toBe(getNodeByBlockId(model, "b1")!.id);
         });
 
         it("resolves a DORMANT (background) pill's own pane, not just a visible one", () => {

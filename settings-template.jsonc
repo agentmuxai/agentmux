@@ -35,6 +35,7 @@
     // "window:nativetitlebar":    false,
     // "window:confirmclose":      false,
     // "window:savelastwindow":    true,
+    // "window:keepinactivetabslaidout": true,
     // "window:dimensions":        "",
     // "window:reducedmotion":     false,
     // "window:magnifiedblockopacity": 0.6,

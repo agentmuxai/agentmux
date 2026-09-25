@@ -133,8 +133,8 @@
 // Specificity inside an `@container` rule is computed from the
 // inner selector alone (the at-rule itself adds none), so
 // `.modal-panel-body > *` carries its natural (0,1,0). The bundle
-// import order issue from Phase 1 is unchanged: per-modal body
-// `.agent-install-modal-body { min-width: 560px }` is also (0,1,0).
+// import order issue from Phase 1 is unchanged: a per-modal body
+// `min-width` (e.g. `.agent-launch-modal-body`) is also (0,1,0).
 // In compact mode we still need to win — make the selector
 // `.modal-panel-body[class]` to bump specificity to (0,2,0) without
 // requiring a wrapper class. Reagent + codex P1 on PR #1060 round 1.

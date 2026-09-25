@@ -6,6 +6,7 @@ import { fireAndForget } from "@/util/util";
 import { isTileDragInFlight } from "./dragInFlight";
 import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
+import { removeLeafEmptiedByMove } from "./layoutMagnify";
 import { addMemberToStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 import {
     LayoutTreeActionType,
@@ -341,7 +342,13 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 // §3.4) — `position` is irrelevant here (a cross-pane
                 // header-drop always appends), same as `moveBlockInStack`'s
                 // own cross-leaf branch.
-                moveMemberAcrossStacks(leaf.data, targetLeaf.data, action.blockid, action.focused);
+                const result = moveMemberAcrossStacks(leaf.data, targetLeaf.data, action.blockid, action.focused);
+                // The moved tab was its pane's only one: mirror the removal
+                // of that emptied pane. A move, not a close — never
+                // closeNode/onNodeDelete here, same reason as the DeleteNode
+                // case above (R1 / #1681).
+                // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
+                if (result === "emptied") removeLeafEmptiedByMove(model, leaf.id);
             }
             break;
         }

@@ -41,7 +41,8 @@ import { ObjectService } from "@/app/store/services";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findNode, findNodeByBlockId } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
-import { closeNode } from "./layoutMagnify";
+import { focusNode } from "./layoutFocus";
+import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { effectiveStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
 
 export { effectiveStack };
@@ -230,6 +231,10 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
  * too, via the queued `stackmove` action `pane.moveTab` sends (this
  * client's own local edit already reflects it, so it doesn't need to wait
  * on or re-apply its own queued action).
+ *
+ * Returns whether the move was applied, so a drop handler can tell a real
+ * landing from a refused one (e.g. to play the landing bounce only when the
+ * tab actually moved).
  */
 export function moveBlockInStack(
     model: LayoutModel,
@@ -237,7 +242,7 @@ export function moveBlockInStack(
     targetBlockId: string,
     position: "before" | "after" | "end",
     activate = false
-): void {
+): boolean {
     const root = model.treeState.rootNode;
     // BOTH sides are resolved from their block ids, exactly as the backend's
     // `move_stack_member` does — deliberately NOT from a caller-supplied
@@ -253,27 +258,44 @@ export function moveBlockInStack(
     const targetNode = root && findNodeByBlockId(root, targetBlockId);
     if (!sourceNode?.data || !targetNode?.data) {
         console.error("moveBlockInStack: source or target block is in no pane", blockId, targetBlockId);
-        return;
+        return false;
     }
-    const applied =
-        sourceNode.id === targetNode.id
-            ? moveMemberInStack(sourceNode.data, blockId, targetBlockId, position, activate)
-            : moveMemberAcrossStacks(sourceNode.data, targetNode.data, blockId, activate);
-    if (!applied) {
+    const crossPane = sourceNode.id !== targetNode.id;
+    const result = crossPane
+        ? moveMemberAcrossStacks(sourceNode.data, targetNode.data, blockId, activate)
+        : moveMemberInStack(sourceNode.data, blockId, targetBlockId, position, activate);
+    if (!result) {
         console.error(
-            "moveBlockInStack: could not apply — blockId is not a member of its resolved pane, or is that pane's only member",
+            "moveBlockInStack: could not apply — blockId is not a member of its resolved pane",
             blockId,
             targetBlockId
         );
-        return;
+        return false;
+    }
+    // Moving a pane's only tab out empties that pane, so the pane goes —
+    // as a move, never a close (removeLeafEmptiedByMove's own comment).
+    // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.
+    if (result === "emptied") {
+        removeLeafEmptiedByMove(model, sourceNode.id);
     }
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
+
+    // A tab dragged into another pane is where the user's attention now is:
+    // focus that pane. Re-resolved by block id AFTER the edit, not the
+    // `targetNode` reference from before it — removing the source leaf can
+    // collapse a single-child parent and re-home the destination's id/data
+    // (the same hazard closeBlockInStack's comment cites, reagent P1 on #3422).
+    if (crossPane) {
+        const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, blockId);
+        if (landedIn) focusNode(model, landedIn.id);
+    }
 
     TabRpcClient.rpcCall(
         "pane.moveTab",
         { block_id: blockId, target_block_id: targetBlockId, position, activate },
         {}
     ).catch((e) => console.error("moveBlockInStack: pane.moveTab RPC failed", e));
+    return true;
 }

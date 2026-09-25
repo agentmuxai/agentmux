@@ -22,9 +22,30 @@
  * so the live pane's layout slot is untouched.
  *
  * Spec: SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.
+ *
+ * Follows the transcript (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md
+ * §6.9): records written after the initial load are placed by a
+ * `TranscriptCursor` on the source block's output file subject — the same
+ * line-addressed contract the live pane uses — and fed to one resumable
+ * `HistoryParser`, so an append costs O(new lines). What the view shows is
+ * republished at most once a second, and not at all while the tab is hidden;
+ * revealing it publishes what arrived meanwhile.
  */
 
-import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import {
+    batch,
+    createEffect,
+    createMemo,
+    createSignal,
+    on,
+    onCleanup,
+    onMount,
+    Show,
+    untrack,
+    type Accessor,
+} from "solid-js";
+import { isBlockDormant } from "@/app/store/block-component-registry";
+import { getFileSubject } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -32,8 +53,16 @@ import {
     unregisterPane as unregisterLayoutPane,
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
+import { useWindowTabHidden } from "@/app/workspace/window-tab-visibility";
 import { AgentDocumentView } from "../components/AgentDocumentView";
-import { parseHistoryLines } from "../parseHistoryLines";
+import { HistoryParser } from "../parseHistoryLines";
+import {
+    GAP_FILL_MAX_LINES,
+    historyPin,
+    splitRecords,
+    TranscriptCursor,
+    type TranscriptFileEvent,
+} from "../transcript-cursor";
 import { injectDayDividers } from "./day-dividers";
 import type { DocumentNode, DocumentState, FilterState } from "../types";
 
@@ -41,6 +70,13 @@ import type { DocumentNode, DocumentState, FilterState } from "../types";
  *  wants fewer load-older stops; still bounded well under the backend's
  *  10k per-request cap. */
 const HISTORY_PAGE = 600;
+
+/** Appended records are shown at most this often (spec §6.9). */
+export const HISTORY_PUBLISH_MIN_INTERVAL_MS = 1_000;
+
+/** Line-count poll for lines no event brings (another block or srv instance
+ *  appending to the agent's shared zone) — same cadence as the live pane. */
+const SHARED_ZONE_POLL_MS = 5_000;
 
 const HISTORY_FILTER: FilterState = {
     // The reader shows the honest full record — thinking included is a
@@ -95,19 +131,22 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     // key only.
     const readBlockId = props.sourceBlockId ?? props.blockId;
 
-    // The accumulated RAW LINES (+ parallel stamps), reparsed wholesale
-    // into nodes on every page load. Wholesale — not per-page with an id
-    // dedup — because ClaudeCodeStreamParser generates counter-based ids
-    // (node_0, user_0, …) that restart for every parser instance: two
-    // independently-parsed pages collide on ids for UNRELATED messages,
-    // and any per-page dedup silently drops real history (codex P1 on
-    // PR #2509). One parse over the full accumulated range keeps ids
-    // unique and accumulator state (text/thinking runs spanning a page
-    // boundary) correct. Cost: O(loaded lines) per page-up, bounded by
-    // the reader's own pagination — fine for a reading posture.
+    // The accumulated RAW LINES (+ parallel stamps) of everything this
+    // reader shows, and ONE resumable parser that has consumed exactly them.
+    // One parser — not one per page with an id dedup — because
+    // ClaudeCodeStreamParser generates counter-based ids (node_0, user_0, …)
+    // that restart for every parser instance: two independently-parsed
+    // pages collide on ids for UNRELATED messages, and any per-page dedup
+    // silently drops real history (codex P1 on PR #2509). Appended records
+    // go through the same parser (O(new lines), open text runs continue);
+    // an older page rebuilds it over the whole accumulated range — O(loaded
+    // lines) per page-up, bounded by the reader's own pagination.
     const [rawNodes, setRawNodes] = createSignal<DocumentNode[]>([]);
     let accLines: string[] = [];
     let accStamps: (number | undefined)[] = [];
+    const newParser = (): HistoryParser =>
+        new HistoryParser(props.outputFormat(), props.agentName?.(), { includeResumedOutcomes: true });
+    let parser = newParser();
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [totalLines, setTotalLines] = createSignal(0);
     const [loading, setLoading] = createSignal(true);
@@ -140,81 +179,346 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     registerLayoutPane(layoutKey, { layout: setLayoutView, zoom: () => {} });
     onCleanup(() => unregisterLayoutPane(layoutKey));
 
-    /** Reparse the full accumulated line range into nodes (see the
-     *  wholesale-reparse rationale on `rawNodes`). */
-    const reparseAccumulated = (): DocumentNode[] =>
-        parseHistoryLines(
-            accLines,
-            props.outputFormat(),
-            props.agentName?.(),
-            accStamps as number[],
-            { includeResumedOutcomes: true },
-        ).nodes;
-
     const stampsOf = (resp: { lines?: string[]; stamps?: number[] }): (number | undefined)[] =>
         resp.stamps ?? new Array((resp.lines ?? []).length).fill(undefined);
 
-    onMount(() => {
-        let mounted = true;
-        onCleanup(() => {
-            mounted = false;
-        });
-        (async () => {
-            try {
-                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                    block_id: readBlockId,
-                    filename: "output",
-                }, { timeout: 5000 });
-                if (!mounted) return;
-                const total = countResp?.count ?? 0;
-                setTotalLines(total);
-                if (total === 0) {
-                    setLoading(false);
-                    return;
-                }
+    // ---- Publishing (spec §6.9: at most once a second, never while hidden) ----
+    const dormant = isBlockDormant(props.blockId);
+    const windowTabHidden = useWindowTabHidden();
+    const hidden = (): boolean => dormant() || (windowTabHidden?.() ?? false);
+    let dirty = false;
+    let lastPublishAt = 0;
+    let publishTimer: ReturnType<typeof setTimeout> | undefined;
+    const publishNow = (): void => {
+        clearTimeout(publishTimer);
+        publishTimer = undefined;
+        // Hidden since the timer was armed: keep it for the reveal.
+        if (untrack(hidden)) {
+            dirty = true;
+            return;
+        }
+        dirty = false;
+        lastPublishAt = Date.now();
+        setRawNodes(parser.nodes.slice());
+    };
+    const publishSoon = (): void => {
+        dirty = true;
+        if (publishTimer !== undefined || hidden()) return;
+        const wait = Math.max(0, lastPublishAt + HISTORY_PUBLISH_MIN_INTERVAL_MS - Date.now());
+        publishTimer = setTimeout(publishNow, wait);
+    };
+    onCleanup(() => clearTimeout(publishTimer));
 
-                const offset = Math.max(0, total - HISTORY_PAGE);
-                const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                    block_id: readBlockId,
-                    filename: "output",
-                    offset,
-                    limit: total - offset,
-                }, { timeout: 30_000 });
-                if (!mounted) return;
-                accLines = resp.lines ?? [];
-                accStamps = stampsOf(resp);
-                const nodes = reparseAccumulated();
+    // ---- Recovering from a hole without yanking the reader (spec §6.9) ----
+    // After a gap History can't fill, appends would land after a hole, so
+    // they stop being shown. A reader following the bottom gets the newest
+    // page at once; one reading older turns keeps their pages and position,
+    // and the reload waits until they ask for it or scroll back down.
+    const [followingSource, setFollowingSource] = createSignal<Accessor<boolean>>(() => true);
+    const followingSignal = (): boolean => followingSource()();
+    const following: Accessor<boolean> = followingSignal;
+    let scrollToBottom: ((reason?: string) => void) | undefined;
+    const [stale, setStale] = createSignal(false);
+    const recover = (): void => {
+        if (untrack(following)) return void load();
+        setStale(true);
+    };
+    const jumpToLatest = async (): Promise<void> => {
+        await load();
+        scrollToBottom?.("history-jump-to-latest");
+    };
+
+    // ---- Following the transcript ----
+    // Records land here in order, exactly once, after the initial load
+    // (TranscriptCursor). Echoes are the user's own messages — the live pane
+    // pairs them with its optimistic copy; this reader has none, so they are
+    // parsed like any other record.
+    const appendRecords = (text: string): void => {
+        if (untrack(stale)) return;
+        // The cursor joined a new generation (an archive or restore that
+        // recreated the stream without a replace event for this block): these
+        // records start another transcript, which must not be parsed onto
+        // this one's nodes.
+        if ((cursor?.stats.genChanges ?? 0) > genChangesSeen) {
+            genChangesSeen = cursor?.stats.genChanges ?? 0;
+            recover();
+            return;
+        }
+        const lines = splitRecords(text);
+        if (lines.length === 0) return;
+        const now = Date.now();
+        const stamps = lines.map(() => now);
+        try {
+            parser.feed(lines, stamps);
+        } catch (err) {
+            // The cursor has already moved past these records and would only
+            // log the throw: without this, they would be missing from what
+            // History shows. Treat it like a skipped gap (spec §6.9).
+            console.warn("[AgentHistoryView] parse failed; reloading", err);
+            recover();
+            return;
+        }
+        accLines = accLines.concat(lines);
+        accStamps = accStamps.concat(stamps);
+        setTotalLines((t) => t + lines.length);
+        publishSoon();
+    };
+
+    let disposed = false;
+    let cursor: TranscriptCursor | null = null;
+    let loadSeq = 0;
+    /**
+     * The cursor skips a gap it won't fill (over GAP_FILL_MAX_LINES, a failed
+     * read, a vanished generation) by moving past it. Here that would leave
+     * lines missing BELOW the loaded range, where loadOlder can't reach them,
+     * so any skip reloads the newest page instead (spec §6.9).
+     */
+    let skippedSeen = 0;
+    let genChangesSeen = 0;
+    const reloadIfSkipped = (): void => {
+        const skipped = cursor?.stats.linesSkipped ?? 0;
+        if (skipped <= skippedSeen) return;
+        skippedSeen = skipped;
+        recover();
+    };
+    const newCursor = (): TranscriptCursor => {
+        cursor?.dispose();
+        skippedSeen = 0;
+        genChangesSeen = 0;
+        const c = new TranscriptCursor({
+            deliver: appendRecords,
+            echo: appendRecords,
+            isOwnEcho: () => false,
+            // The stream was truncated, replaced or deleted: what this
+            // reader holds no longer describes it. Start over.
+            reset: () => void load(),
+            readRange: async (offset, limit, expectGen) => {
+                const resp = await RpcApi.BlockfileReadRangeCommand(
+                    TabRpcClient,
+                    { block_id: readBlockId, filename: "output", offset, limit, expect_gen: expectGen },
+                    { timeout: 15_000 }
+                );
+                return {
+                    lines: resp?.lines ?? [],
+                    stream: resp?.stream,
+                    gen: resp?.gen,
+                    genMismatch: resp?.gen_mismatch,
+                };
+            },
+            log: (message, level) => {
+                if (level === "warn") {
+                    console.warn(`[AgentHistoryView] ${message}`);
+                    // Skips are logged as warnings; check once the log
+                    // call's own bookkeeping has run.
+                    queueMicrotask(reloadIfSkipped);
+                } else {
+                    console.debug(`[AgentHistoryView] ${message}`);
+                }
+            },
+        });
+        cursor = c;
+        return c;
+    };
+
+    /** (Re)load the newest page and start following from where it ends. */
+    const load = async (): Promise<void> => {
+        const seq = ++loadSeq;
+        // A new cursor holds every event from now until it is settled below,
+        // so nothing written during the read is lost or doubled.
+        const c = newCursor();
+        const current = (): boolean => seq === loadSeq && !disposed;
+        clearTimeout(publishTimer);
+        publishTimer = undefined;
+        dirty = false;
+        accLines = [];
+        accStamps = [];
+        parser = newParser();
+        batch(() => {
+            setStale(false);
+            setLoading(true);
+            setLoadError(null);
+        });
+        try {
+            const countResp = await RpcApi.BlockfileLineCountCommand(
+                TabRpcClient,
+                { block_id: readBlockId, filename: "output" },
+                { timeout: 5000 }
+            );
+            if (!current()) return;
+            const total = countResp?.count ?? 0;
+            if (total === 0) {
+                c.settle("empty");
                 batch(() => {
-                    setRawNodes(nodes);
-                    setHistoryOffset(Math.min(offset, typeof resp.total === "number" ? resp.total : offset));
-                    if (typeof resp.total === "number") setTotalLines(resp.total);
+                    setTotalLines(0);
+                    setHistoryOffset(0);
+                    publishNow();
                     setLoading(false);
                 });
-            } catch (err) {
-                if (!mounted) return;
+                return;
+            }
+
+            const offset = Math.max(0, total - HISTORY_PAGE);
+            const resp = await RpcApi.BlockfileReadRangeCommand(
+                TabRpcClient,
+                { block_id: readBlockId, filename: "output", offset, limit: total - offset },
+                { timeout: 30_000 }
+            );
+            if (!current()) return;
+            accLines = resp.lines ?? [];
+            accStamps = stampsOf(resp);
+            parser.feed(accLines, accStamps);
+            batch(() => {
+                publishNow();
+                setHistoryOffset(Math.min(offset, typeof resp.total === "number" ? resp.total : offset));
+                setTotalLines(typeof resp.total === "number" ? resp.total : total);
+                setLoading(false);
+            });
+            c.settle(historyPin(offset, resp));
+        } catch (err) {
+            if (!current()) return;
+            // Follow from the next record rather than not at all.
+            c.settle(null);
+            batch(() => {
                 setLoadError((err as Error | undefined)?.message ?? String(err));
                 setLoading(false);
+            });
+        }
+    };
+
+    // ---- Dormancy: a hidden tab does no work (spec §6.9) ----
+    // Events are not handed to the cursor while hidden — nothing is decoded
+    // or parsed; the tab only notes one arrived. On reveal, one line-count
+    // read catches up: the cursor fills a gap it can fill by range reads,
+    // and a larger one (or a different stream/generation) reloads.
+    let missedWhileHidden = false;
+    /** A truncate/replace/delete arrived while hidden: only a reload can
+     *  recover it (a count read of the new generation is ignored by the
+     *  cursor, which is pinned to the old one). */
+    let resetWhileHidden = false;
+    const catchUp = async (): Promise<void> => {
+        const c = cursor;
+        const pin = c?.position();
+        if (!c || !pin) return recover();
+        try {
+            const resp = await RpcApi.BlockfileLineCountCommand(
+                TabRpcClient,
+                { block_id: readBlockId, filename: "output" },
+                { timeout: 5_000 }
+            );
+            if (disposed || c !== cursor) return;
+            if (!resp?.stream || !resp.gen || resp.stream !== pin.stream || resp.gen !== pin.gen) return recover();
+            if (resp.count - pin.next > GAP_FILL_MAX_LINES) return recover();
+            c.observeCount(resp.count, resp.stream, resp.gen);
+        } catch {
+            if (!disposed) recover();
+        }
+    };
+    createEffect(
+        on(hidden, (isHidden) => {
+            if (isHidden) {
+                // An armed publish would render a hidden tab: hold it.
+                if (publishTimer !== undefined) {
+                    clearTimeout(publishTimer);
+                    publishTimer = undefined;
+                    dirty = true;
+                }
+                return;
             }
-        })();
+            if (dirty) publishSoon();
+            if (resetWhileHidden) {
+                resetWhileHidden = false;
+                missedWhileHidden = false;
+                recover();
+            } else if (missedWhileHidden) {
+                missedWhileHidden = false;
+                void catchUp();
+            }
+        })
+    );
+
+    // A stale reader who scrolls back to the bottom gets the newest page.
+    createEffect(() => {
+        if (stale() && followingSignal()) void load();
+    });
+
+    onMount(() => {
+        const fileSubject = getFileSubject(readBlockId, "output");
+        const subscription = fileSubject.subscribe((ev: TranscriptFileEvent) => {
+            if (hidden() && cursor?.isSettled()) {
+                missedWhileHidden = true;
+                if (ev.fileop !== "append") resetWhileHidden = true;
+                return;
+            }
+            cursor?.push(ev);
+        });
+
+        // Lines no event brings: another block or srv instance appending to
+        // the agent's shared zone (same poll as the live pane's). Only while
+        // shown; a hidden reader catches up from the first poll after reveal.
+        let lastCount: { count: number; stream: string; gen: string } | null = null;
+        let polling = false;
+        const pollTimer = setInterval(async () => {
+            reloadIfSkipped();
+            const pin = cursor?.position();
+            if (!pin || !pin.stream.startsWith("g:") || polling || hidden() || document.hidden) return;
+            polling = true;
+            try {
+                const resp = await RpcApi.BlockfileLineCountCommand(
+                    TabRpcClient,
+                    { block_id: readBlockId, filename: "output" },
+                    { timeout: 5_000 }
+                );
+                if (!resp?.stream || !resp.gen) return;
+                if (resp.stream !== pin.stream || resp.gen !== pin.gen) {
+                    // Recreated under us (see appendRecords): start over.
+                    lastCount = null;
+                    recover();
+                    return;
+                }
+                if (lastCount && lastCount.stream === resp.stream && lastCount.gen === resp.gen) {
+                    cursor?.observeCount(lastCount.count, resp.stream, resp.gen);
+                }
+                lastCount = { count: resp.count, stream: resp.stream, gen: resp.gen };
+            } catch {
+                // Soft: the next tick or event catches up.
+            } finally {
+                polling = false;
+            }
+        }, SHARED_ZONE_POLL_MS);
+
+        onCleanup(() => {
+            disposed = true;
+            clearInterval(pollTimer);
+            subscription.unsubscribe();
+            fileSubject.release();
+            cursor?.dispose();
+            cursor = null;
+        });
+        void load();
     });
 
     const loadOlder = async (): Promise<void> => {
         const currentOffset = historyOffset();
         if (currentOffset === 0 || loadingOlder()) return;
+        const seq = loadSeq;
         setLoadingOlder(true);
         try {
             const newOffset = Math.max(0, currentOffset - HISTORY_PAGE);
-            const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                block_id: readBlockId,
-                filename: "output",
-                offset: newOffset,
-                limit: currentOffset - newOffset,
-            }, { timeout: 15_000 });
+            const resp = await RpcApi.BlockfileReadRangeCommand(
+                TabRpcClient,
+                { block_id: readBlockId, filename: "output", offset: newOffset, limit: currentOffset - newOffset },
+                { timeout: 15_000 }
+            );
+            // A reload started meanwhile: this page belongs to the old view.
+            if (seq !== loadSeq || disposed) return;
             accLines = [...(resp.lines ?? []), ...accLines];
             accStamps = [...stampsOf(resp), ...accStamps];
-            const nodes = reparseAccumulated();
+            // Rebuild the parser over the whole range; records appended from
+            // now on continue from this one.
+            parser = newParser();
+            parser.feed(accLines, accStamps);
             batch(() => {
-                setRawNodes(nodes);
+                publishNow();
                 setHistoryOffset(newOffset);
             });
         } catch {
@@ -229,6 +533,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         <div class="agent-history-view">
             <div class="agent-history-header">
                 <div class="agent-history-title">Agent History</div>
+                <Show when={stale()}>
+                    <button type="button" class="agent-history-jump-latest" onClick={() => void jumpToLatest()}>
+                        Newer turns — jump to latest
+                    </button>
+                </Show>
                 <div class="agent-history-meta">
                     {/* Explicit loading state first — without it the initial
                         async window renders "no recorded history", which is
@@ -247,6 +556,8 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             </div>
             <div class="agent-history-body">
                 <AgentDocumentView
+                    followingRef={(f) => setFollowingSource(() => f)}
+                    scrollToBottomRef={(fn) => (scrollToBottom = fn)}
                     documentNodes={docNodes}
                     documentStateAtom={[docState, setDocState]}
                     onLoadOlder={loadOlder}

@@ -3,7 +3,7 @@
 
 import type { SessionStats, StreamEvent } from "../types";
 import { ToolCorrelator, wrapOutput } from "./tool-correlation";
-import type { OutputTranslator } from "./translator";
+import { replayedUserMessage, type OutputTranslator } from "./translator";
 
 interface ItemState {
     opened: boolean;
@@ -26,8 +26,12 @@ export class CodexTranslator implements OutputTranslator {
     private unknownItemTypes = new Map<string, number>();
     private terminal = false;
 
+    constructor(private readonly opts: { replay?: boolean } = {}) {}
+
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
+        const user = replayedUserMessage(rawEvent, this.opts.replay);
+        if (user) return user;
 
         switch (rawEvent.type) {
             case "thread.started":

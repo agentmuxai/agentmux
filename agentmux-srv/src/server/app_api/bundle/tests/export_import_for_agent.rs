@@ -1400,6 +1400,7 @@ mod with_history_tests {
                 total_tokens: 0,
                 subagent_count: 0,
                 identity_id: self.identity_id.clone(),
+                starts_undated: false,
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {

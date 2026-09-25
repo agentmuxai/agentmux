@@ -23,12 +23,12 @@
 | 3a | Migration into the head keeps the node's exact position: row gap + height handoff (§2.2b) | #3610 | merged |
 | 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | merged |
 | 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
-| 4 | O(batch + log n) stores | — | not started |
-| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6); 5a designed in §6.3.7 (PRs 5a-1…5a-4); Gemini-family user echo (5d) shipped | #3619 (plan), #3620 (echo), this PR (5a design) | 5a design in review |
-| 6 | Bounded live document | — | not started |
-| 7 | History tab follows | — | not started |
+| 4 | O(batch + log n) stores | — | **deferred** by the §6.9 revision (live feed keeps n small; stores ≤ 8 % at 200 turns, §3.8) |
+| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663, #3701 | **5a done**; 5b, 5c, 5e deferred by §6.9. 5d: user messages reach the transcript for persistent Claude (stdin line, 5a-3c) and the Gemini family (CLI echo, #3620), and — **added by #3701** — for panes on the per-turn subprocess controller: Kimi, muxcode/container Claude, and Codex *not* run by the app-server controller. **Not covered:** app-server Codex, ACP (spec §6.9 PR 4c); also open: the shell journal (PR 4b) |
+| 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | #3700, #3701 | **merged**, on by default; kill switch `agent:livefeed`, K = `agent:livefeedturns` (§2.2d). Every pane but ACP and app-server Codex; turns holding an in-pane shell stay until the journal |
+| 7 | History tab follows the transcript (spec §6.9) | #3695 | merged |
 | 8 | Off-main-thread markdown (decision) | — | not started |
-| 9 | Default on | — | not started |
+| 9 | Remove the kill switches once each phase has soaked (the flags themselves are already on by default) | — | not started |
 | 10 | `content-visibility` experiment | — | not started |
 
 ## 2. Measurements
@@ -170,6 +170,30 @@ first version of 3b): synchronous mount 5.5–7.1 s → **2.75–3.14 s**
 last turn (3 nodes) and no head rows; a pane scrolled to the top mounts the
 last turn plus ~10 head rows in view — 5.5k elements, where the count policy
 mounted 33k and the first version of 3b 44k (§3.7).
+
+### 2.2d The live feed: finished turns roll off (spec §6.9, PR 3)
+
+Same dev build, `agent:livefeed` off (every turn stays, paging on) vs on
+(K = 3), 3 panes, bench history injected at N turns (20 KB each).
+
+**After the load, forced GC (`HeapProfiler.collectGarbage` ×3), N = 200, two
+runs each:**
+
+| | off | on |
+|---|---|---|
+| document nodes per pane | 602 | **14–20** (4–6 turns: K finished + the one in flight + any on screen) |
+| JS heap | 68.1 / 67.3 MB | **56.1 / 55.9 MB** (−17 %) |
+| live DOM nodes | 26.8k | 26.7k — unchanged: Phase 3b already mounts only what is on screen |
+
+The heap saving is the rolled-off turns' content (~200 × 20 KB per pane
+here); it grows with what real turns carry (tool output, long replies).
+
+**Streaming + typing, interleaved ×3, medians** (N = 0 / 25 / 200): fps
+59.2–59.8 and key → paint p95 64 ms in every cell, on and off — this machine
+was quiet (§3.9); script time per run 2,137 / 2,013 / 2,088 ms off vs
+2,095 / 1,862 / 1,917 ms on. Heap and live-DOM readings inside those windows
+are GC-timing noise (e.g. off read 127 MB at N = 25 and 87 MB at N = 200), so
+the table above is the memory result.
 
 ### 2.3 `main` baseline, direct mode (Phase 0)
 
@@ -327,6 +351,41 @@ Measured on `main` + 3b (Windows dev build, 3 panes streaming, typing):
   heap 180 → ~65 MB, DOM 223k → ~35k nodes for 200 turns) and Phase 6
   bounds.
 
+### 3.9 Rejected: updating the open block's text in place
+
+§3.8 attributed ~23 % of streaming work to `replaceChild` of the growing last
+block. Tried: when a commit only lengthens the open block's last text run
+(same element shape, same other text), set that DOM text node's `data`
+instead of rebuilding the block. Built behind a setting and A/B-tested on one
+dev build (`main` 8b69b29 + the change), interleaved ×3, 3 panes, N = 0 / 25:
+
+| N = 0 / 25 turns, medians of 3 | rebuild (as `main`) | in place |
+|---|---|---|
+| fps | 59.6 / 59.5 | 59.7 / 59.6 |
+| key → paint p95 | 64 / 64 ms | 64 / 64 ms |
+| script time per run | 1,968 / 1,817 ms | 1,907 / 1,692 ms |
+
+Three CPU-profile pairs (9 s each, 3 panes streaming, typing): `replaceChild`
+0–4 ms per window either way, markdown (inclusive) 483 / 252 / 255 ms in
+place vs 656 / 245 / 270 ms rebuilding — noise. Two reasons: the cost §3.8
+named is not there on current `main` at these sizes (not re-measured at
+N = 200), and the bench's reply (~185 characters per commit, dense inline
+markup, short blocks) changes the open block's shape on most commits, so
+only 41 of 284 commits could be patched at all. Not shipped: a setting and a
+text-node patch path for no measured gain. The machine was quiet (every run
+60 fps), so this bounds the gain rather than proving it zero on a loaded one.
+
+**Found on the way — a real bug.** Frozen segments (#3559) are rendered under
+their own `createRoot` so their components outlive later commits, but
+`solid-js/h` returns elements as lazy thunks that Solid only calls from its
+insert effect — so the components were created under that effect instead and
+disposed on the next commit, while their DOM stayed. Visible effect: a table
+in a long streamed reply never showed "✓ copied" (and never would, since
+frozen segments are kept after the stream ends); an image there would never
+have resolved had a caller passed `resolveOpts` (none does today). Fixed by
+resolving the thunks inside the segment's root; regression tests in
+`markdown-frozen-owner.test.tsx` fail on `main` and pass with the fix.
+
 ## 4. Open follow-ups
 
 - **Bench pipeline mode** (`--stream-mode pipeline`, default) — #3598; §2.1's
@@ -341,20 +400,44 @@ Measured on `main` + 3b (Windows dev build, 3 panes streaming, typing):
   expansion on every partition change, and the reducer copies the node array.
   3b made the frontier search itself independent of history (`from`, Codex P2
   on #3611); these are the remaining O(history) costs per stream flush — under
-  ~8 % of streaming work at 200 turns (§3.8), so Phase 4 waits.
+  ~8 % of streaming work at 200 turns (§3.8), so Phase 4 waits. The reducer's
+  copy alone, benched in isolation: 0.056 / 1.14 / 19.3 ms per append at
+  1k / 10k / 100k nodes (200 turns ≈ 600 nodes) — it matters only far beyond
+  the sizes Phase 6 will allow.
 - **Renderer memory after large loads** (§3.8): a resident high-water mark
   from peak loads, not an agent-pane leak. Phase 6 (bounded live document)
   bounds the peak; the 8 h soak verifies it.
-- **Next phase: 5 (stable node identity and durability)**, the prerequisite
-  for Phase 6 eviction — what moves old messages out of the live pane and
-  into the History tab, bounding memory.
-- **The growing last message's DOM is replaced on every commit** (§3.8:
-  ~23 % of streaming work in `replaceChild`): a per-commit cost independent
-  of history, worth its own look.
+- **Phases 5b, 5c, 5e are deferred** (spec §6.9): the live feed shipped
+  (#3700, #3701) on 5a alone. They come back only if scroll-back in the feed
+  or History anchored to a turn is wanted. What remains is listed under
+  "Live feed follow-ups" below.
+- ~~**The growing last message's DOM is replaced on every commit**~~ —
+  looked at (§3.9): an in-place update was built and measured, no gain on
+  current `main`; not shipped. The look found a real bug instead, fixed
+  alongside (§3.9).
 - **Pane-header chrome retained by block-frame closures** (§3.8): ~13 copies
   of header buttons/icons survive a clear. Small; outside the agent pane.
 - **In-row windowing for one huge node** (spec §6.2) — not in 3b.
 - **macOS and Linux baselines** (spec §7 Phase 0).
 - **Fault-suite runner** (spec §8) — a later Phase 0 PR.
+- **Live feed follow-ups (§6.9):** the shell journal (`out-of-band.jsonl`)
+  so turns holding an in-pane shell can roll off and History shows shells;
+  rebuilding AskUserQuestion's styled answer on replay (the answer is already
+  in the tool result); ACP and the Codex app-server controller writing the
+  user's message; opening History at the first kept turn (needs 5b). Not yet
+  verified with a real signed-in agent on a dev build — the dev instance's
+  agents had no credentials; the load-time roll-off was checked on real
+  transcripts (a long pane opened at 4 turns).
+- **Send-and-record ordering across stdin writers** (found in review of
+  #3703): every persistent-controller path writes a stdin line and then
+  records it in the transcript as two steps — `send_message`'s
+  `DeliverDirect` (`deliver_direct`, then `persist_message_to_blockfile`),
+  the queue drain (`tx.send(..).await`, then persist), the muxbus path
+  (`append_delivered_message`) and the dead-air fallbacks. Two writers
+  racing within that window can be recorded in the opposite order to the one
+  the CLI received. Rare (it needs two sends within milliseconds), but History
+  and conversation recovery would replay it that way. Fix: one per-controller
+  send-and-record ordering lock taken by every path, the async drain
+  included — its own PR, since it touches the hottest send path.
 - **Residual nodes after a clear:** a cleared pane can refill with a few
   transcript nodes; the bench records them (`residualNodes`).

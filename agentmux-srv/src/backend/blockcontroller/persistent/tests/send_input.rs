@@ -869,7 +869,7 @@ fn find_recovery_session_id_recovers_the_largest_on_disk_session() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -921,7 +921,7 @@ fn find_recovery_session_id_refuses_an_already_poisoned_candidate() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = "/agents/agentx".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("dead-sid.jsonl"), vec![b'x'; 1_000]).unwrap();
@@ -961,7 +961,7 @@ fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_sessi
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -1011,7 +1011,7 @@ fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_witho
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -1096,7 +1096,7 @@ fn retry_after_resume_failure_with_no_entries_hands_a_queued_prompt_and_its_cand
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -2355,7 +2355,7 @@ fn retry_after_resume_failure_does_not_emit_an_outcome_yet_when_recovery_is_foun
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -2458,7 +2458,7 @@ fn retry_after_resume_failure_only_publishes_retrying_when_recovery_is_found() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
     let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
-    let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+    let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -3859,4 +3859,116 @@ async fn an_immediate_send_is_refused_while_a_restart_is_committed() {
 
     assert!(err.contains("restarting"), "{err}");
     assert!(rx.try_recv().is_err());
+}
+
+// ── Dead-air re-deliveries reach the transcript (spec §6.9; #3703) ──────────
+//
+// When the CLI abandons a pending AskUserQuestion / tool-permission call, the
+// controller re-sends the user's choice as a follow-up stdin line. The CLI then
+// writes no tool result, so the line itself must be recorded — or the choice is
+// gone on reload, absent from History, and lost when the live feed rolls the
+// turn off.
+
+fn controller_with_transcript(block_id: &str) -> (PersistentSubprocessController, Arc<FileStore>) {
+    let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        block_id.to_string(),
+        Some(Arc::new(crate::backend::mps::Broker::new())),
+        None,
+        None,
+        Some(filestore.clone()),
+    );
+    (c, filestore)
+}
+
+fn transcript(fs: &FileStore, block_id: &str) -> String {
+    fs.read_file(block_id, crate::backend::agent_session::OUTPUT_FILE)
+        .unwrap()
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default()
+}
+
+#[test]
+fn redelivery_persister_records_the_line_in_the_blocks_transcript() {
+    let (c, fs) = controller_with_transcript("block-redeliver-unit");
+    let line = PersistentSubprocessController::encode_user_message("the user's answer");
+    c.redelivery_persister().write(&line);
+    let t = transcript(&fs, "block-redeliver-unit");
+    assert_eq!(
+        t.trim_end(),
+        line,
+        "exactly the re-delivered line, as one record"
+    );
+}
+
+#[tokio::test]
+async fn a_dead_air_answer_is_resent_and_recorded() {
+    let (c, fs) = controller_with_transcript("block-redeliver-answer");
+    let (tx, mut rx) = mpsc::channel::<String>(8);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.pending_questions.insert(
+            "tu-q".to_string(),
+            (
+                "req-q".to_string(),
+                serde_json::json!([{ "question": "Pick one?", "header": "Pick" }]),
+            ),
+        );
+    }
+    c.answer_question("tu-q".to_string(), serde_json::json!({ "Pick one?": "B" }))
+        .unwrap();
+    let control = rx.try_recv().expect("the control_response goes out first");
+    assert!(control.contains("control_response"));
+
+    // No stdout activity: the fallback fires after ANSWER_RESUME_FALLBACK_MS.
+    tokio::time::sleep(std::time::Duration::from_millis(
+        ANSWER_RESUME_FALLBACK_MS + 500,
+    ))
+    .await;
+    let resent = rx
+        .try_recv()
+        .expect("the answer is re-delivered as a follow-up line");
+    assert!(resent.contains("\"type\":\"user\""));
+    let t = transcript(&fs, "block-redeliver-answer");
+    assert!(
+        t.lines().any(|l| l == resent),
+        "the re-delivered line must be in the transcript; got {t:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_dead_air_answer_during_a_committed_restart_is_not_recorded() {
+    let (c, fs) = controller_with_transcript("block-redeliver-restart");
+    let (tx, mut rx) = mpsc::channel::<String>(8);
+    {
+        let mut inner = c.inner.lock().unwrap();
+        inner.stdin_tx = Some(tx);
+        inner.pending_questions.insert(
+            "tu-r".to_string(),
+            (
+                "req-r".to_string(),
+                serde_json::json!([{ "question": "Go?", "header": "Go" }]),
+            ),
+        );
+    }
+    c.answer_question("tu-r".to_string(), serde_json::json!({ "Go?": "yes" }))
+        .unwrap();
+    let _control = rx.try_recv().unwrap();
+    // A config change commits a restart while the fallback waits: the process
+    // is going down and may never read the line. Delivery is as it always was
+    // (unchanged by #3703), but History must not claim a decision the agent
+    // may never have received, so nothing is recorded.
+    c.inner.lock().unwrap().restart_pending = true;
+
+    tokio::time::sleep(std::time::Duration::from_millis(
+        ANSWER_RESUME_FALLBACK_MS + 500,
+    ))
+    .await;
+    assert_eq!(
+        transcript(&fs, "block-redeliver-restart"),
+        "",
+        "nothing is recorded while a restart is committed"
+    );
 }

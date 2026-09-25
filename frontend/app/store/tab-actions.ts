@@ -11,11 +11,12 @@
 // global.ts. Both files instead import the shared window-identity base
 // module.
 
+import { keepInactiveTabsLaidOut } from "@/app/workspace/window-tab-visibility";
 import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
 import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
-import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
+import { holdRevealGate, logUngatedReveal, scheduleRevealLift, tabWasShown } from "./tab-reveal";
 import { activeTabId, workspace } from "./window-identity";
 
 export function createTab() {
@@ -124,14 +125,20 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // §9): the source tab keeps painting during the RPC instead of
     // blanking the content region the moment the switch starts; only the
     // destination is FOUC-gated, from the activetabid flip until settle.
-    holdRevealGate(tabId);
+    //
+    // Not for a tab already shown while inactive tabs are kept laid out: it
+    // has no catch-up for the gate to hide (ANALYSIS_WINDOW_TAB_SWITCH_
+    // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
+    const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
+    if (gated) holdRevealGate(tabId);
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } finally {
         // Pair with holdRevealGate above. Also lifts the gate on
         // the RPC-throws path so the user isn't stuck on a hidden
         // source tab.
-        scheduleRevealLift();
+        if (gated) scheduleRevealLift();
+        else logUngatedReveal(tabId);
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
                 if (mySeq === tabSwitchSeq) {

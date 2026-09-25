@@ -38,3 +38,19 @@ fn a_later_generation_respawn_is_not_re_disclosed() {
 fn generation_zero_is_not_treated_as_a_first_spawn() {
     assert!(!fresh_start_needs_disclosure(None, 0));
 }
+
+/// A fresh session given AgentMux's record says so in its outcome frame
+/// (`continued`), while the outcome itself stays `fresh`: every consumer
+/// that scopes scrollback on `fresh` keeps working unchanged.
+#[test]
+fn a_continued_fresh_outcome_keeps_its_outcome_and_adds_the_flag() {
+    use super::super::{persistent_resume::SessionOutcome, session_outcome_line, session_outcome_line_with};
+    let v: serde_json::Value =
+        serde_json::from_str(session_outcome_line_with(SessionOutcome::Fresh, String::new(), None, true).trim()).unwrap();
+    assert_eq!(v["subtype"], "agentmux_session_outcome");
+    assert_eq!(v["outcome"], "fresh");
+    assert_eq!(v["continued"], true);
+    let plain: serde_json::Value =
+        serde_json::from_str(session_outcome_line(SessionOutcome::Resumed, "a".into(), Some("a".into())).trim()).unwrap();
+    assert_eq!(plain["continued"], false);
+}

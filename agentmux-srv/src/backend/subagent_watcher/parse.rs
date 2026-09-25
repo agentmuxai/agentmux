@@ -544,17 +544,6 @@ pub(super) fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-// ── Utility: encode workspace path like Claude Code does ──────────────────
-
-/// Encode a workspace path the same way Claude Code does for its projects dir.
-#[allow(dead_code)]
-pub fn encode_workspace_path(workspace_path: &str) -> String {
-    workspace_path
-        .replace('\\', "-")
-        .replace('/', "-")
-        .replace(':', "")
-}
-
 /// Derive the Claude Code config directory for a host agent. Only matches
 /// reality for an agent with an explicit per-identity bundle override —
 /// prefer `resolve_claude_config_dir` when the block's meta is available.

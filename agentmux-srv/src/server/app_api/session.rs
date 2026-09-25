@@ -1125,6 +1125,19 @@ pub(crate) async fn invoke_ambient_haiku_call(
     meta: &obj::MetaMapType,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
+    invoke_ambient_haiku_call_with_timeout(cli_path, prompt, meta, cancel, std::time::Duration::from_secs(15)).await
+}
+
+/// [`invoke_ambient_haiku_call`] with its own timeout, for calls off any
+/// user-facing path that need longer than a pane-header summary (the rolling
+/// continuity state, `backend::continuity_state`).
+pub(crate) async fn invoke_ambient_haiku_call_with_timeout(
+    cli_path: &str,
+    prompt: &str,
+    meta: &obj::MetaMapType,
+    cancel: tokio_util::sync::CancellationToken,
+    timeout: std::time::Duration,
+) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
     let auth_env: std::collections::HashMap<String, String> = match meta.get("cmd:env") {
         Some(serde_json::Value::Object(obj_map)) => obj_map
             .iter()
@@ -1182,8 +1195,8 @@ pub(crate) async fn invoke_ambient_haiku_call(
             let _ = child.kill().await;
             return Err("cancelled: superseded by a newer activity-summary request".to_string());
         }
-        result = tokio::time::timeout(std::time::Duration::from_secs(15), child.wait()) => {
-            result.map_err(|_| "activity CLI timed out after 15s".to_string())?
+        result = tokio::time::timeout(timeout, child.wait()) => {
+            result.map_err(|_| format!("activity CLI timed out after {}s", timeout.as_secs()))?
                 .map_err(|e| format!("activity CLI wait: {e}"))?
         }
     };

@@ -75,7 +75,7 @@ import { Portal } from "solid-js/web";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
-import { firstFocusable, lastFocusable } from "./modal-focus-trap";
+import { firstFocusable, initialFocusTarget, lastFocusable } from "./modal-focus-trap";
 import { ModalTitleIdContext } from "./modal-parts";
 import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
 import { push, remove, isReachable, type StackEntry } from "./modal-stack";
@@ -178,7 +178,8 @@ export interface ModalProps {
     ariaLabel?: string;
     ariaLabelledBy?: string;
     ariaDescribedBy?: string;
-    /** Element (or accessor) to focus on open. Defaults to the first focusable. */
+    /** Element (or accessor) to focus on open. Defaults to the panel's
+     *  `[data-modal-initial-focus]` element, then the first focusable. */
     initialFocus?: HTMLElement | (() => HTMLElement | null);
     /** Called with the mounted `.modal-root` element (and `null` on unmount).
      *  For a caller that needs to observe/query the modal's own rendered
@@ -297,7 +298,7 @@ export const Modal: Component<ModalProps> = (props) => {
             } else if (props.initialFocus) {
                 target = props.initialFocus;
             }
-            if (!target) target = firstFocusable(panelRef);
+            if (!target) target = initialFocusTarget(panelRef);
             (target ?? panelRef).focus();
         });
     };

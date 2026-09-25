@@ -67,6 +67,12 @@ interface AgentDocumentViewProps {
      * Re-engages stick-to-bottom as a side effect.
      */
     scrollToBottomRef?: (fn: (reason?: string) => void) => void;
+    /**
+     * Hands the parent whether the reader is following the bottom (the
+     * list's stick-to-bottom state) — History uses it to recover from a
+     * gap without yanking someone reading older turns.
+     */
+    followingRef?: (following: Accessor<boolean>) => void;
     /** The node id of the currently highlighted search match (if any). */
     highlightNodeId?: Accessor<string | null>;
     /**
@@ -114,6 +120,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // the initial history load is done. Called synchronously — before
     // any async history work starts. See PR #1212.
     props.registerHistoryReadyCallback?.(viewState.markHistoryReady);
+    props.followingRef?.(viewState.stickToBottom);
 
     // Auto-collapse-on-size for user messages was retired in PR #1020
     // — `UserMessageBlock` keys collapse off `node.isStartup` and

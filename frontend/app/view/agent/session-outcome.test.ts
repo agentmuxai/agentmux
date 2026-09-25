@@ -20,11 +20,18 @@ function frame(overrides: Record<string, unknown> = {}) {
 }
 
 describe("parseSessionOutcomeFrame", () => {
+    it("reads the continued flag on a fresh outcome, and only a literal true", () => {
+        expect(parseSessionOutcomeFrame(frame({ outcome: "fresh", continued: true }))?.continued).toBe(true);
+        expect(parseSessionOutcomeFrame(frame({ outcome: "fresh", continued: "yes" }))?.continued).toBe(false);
+        expect(parseSessionOutcomeFrame(frame({ outcome: "fresh" }))?.continued).toBe(false);
+    });
+
     it("extracts a resumed outcome", () => {
         expect(parseSessionOutcomeFrame(frame())).toEqual({
             outcome: "resumed",
             attemptedSid: "abc-123",
             actualSid: null,
+            continued: false,
             frameTimestamp: "2026-08-05T08:00:00.000Z",
         });
     });
@@ -35,6 +42,7 @@ describe("parseSessionOutcomeFrame", () => {
             outcome: "fresh",
             attemptedSid: "abc-123",
             actualSid: "xyz-789",
+            continued: false,
             frameTimestamp: "2026-08-05T08:00:00.000Z",
         });
     });
@@ -81,6 +89,7 @@ describe("sessionOutcomeNodeId", () => {
                 outcome: "resumed",
                 attemptedSid: "abc-123",
                 actualSid: null,
+                continued: false,
                 frameTimestamp: "2026-08-05T08:00:00.000Z",
             }),
         ).toBe("session-outcome-2026-08-05T08:00:00.000Z");

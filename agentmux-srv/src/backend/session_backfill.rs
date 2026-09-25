@@ -15,18 +15,9 @@
 //! Once populated, `--resume` keeps the same session id across turns, so a single
 //! idempotent startup pass keeps continuity solid without per-turn wiring.
 
+use crate::backend::claude_layout::project_dir_name;
 use crate::registry::Registry;
 use std::path::{Path, PathBuf};
-
-/// Encode an absolute workspace path to a Claude project-dir slug. Claude Code
-/// replaces each of `/ \ : .` with `-` (lossy — a literal `-` inside a segment is
-/// indistinguishable from a separator; this matches the CLI's own scheme and the
-/// `decode_project_path` direction in `history::claude_adapter`).
-pub fn encode_project_slug(path: &str) -> String {
-    path.chars()
-        .map(|c| if matches!(c, '/' | '\\' | ':' | '.') { '-' } else { c })
-        .collect()
-}
 
 /// The largest `(size, session-id)` directly under `projects_dir/<slug>`, or
 /// `None` if the dir doesn't exist / has no session files.
@@ -90,7 +81,7 @@ pub fn largest_session_id(projects_dirs: &[PathBuf], slug: &str) -> Option<Strin
 /// than the config-dir case: `agent_open.rs`'s default cwd for any agent
 /// without an explicit `working_directory` is the literal string
 /// `~/.agentmux/agents/<slug>` — the single most common case, not an
-/// edge case — so without this, `encode_project_slug` would hash the
+/// edge case — so without this, `project_dir_name` would name the
 /// wrong (literal-tilde) path and recovery would silently fail for
 /// nearly every default-configured agent (Codex P1 on PR #2693, found
 /// after #2693 had already merged — the config-dir half of this same
@@ -102,7 +93,7 @@ pub fn find_largest_session_for_working_dir(config_dir: &str, working_dir: &str)
     let expanded = crate::backend::base::expand_home_dir_safe(config_dir);
     let projects_dir = expanded.join("projects");
     let expanded_working_dir = crate::backend::blockcontroller::core::expand_home_dir(working_dir);
-    let slug = encode_project_slug(&expanded_working_dir);
+    let slug = project_dir_name(&expanded_working_dir);
     largest_session_id(&[projects_dir], &slug)
 }
 
@@ -121,7 +112,7 @@ pub fn session_file_path(config_dir: &str, working_dir: &str, sid: &str) -> Opti
     }
     let expanded = crate::backend::base::expand_home_dir_safe(config_dir);
     let expanded_working_dir = crate::backend::blockcontroller::core::expand_home_dir(working_dir);
-    let slug = encode_project_slug(&expanded_working_dir);
+    let slug = project_dir_name(&expanded_working_dir);
     Some(
         expanded
             .join("projects")
@@ -163,7 +154,7 @@ pub fn backfill_session_ids(reg: &Registry, shared_dir: &Path) -> usize {
         };
         let base = base.trim_end_matches(['/', '\\']);
         let workspace = format!("{base}/{}", rec.data.working_dir);
-        let slug = encode_project_slug(&workspace);
+        let slug = project_dir_name(&workspace);
         // Candidate project roots: the account-wide default, plus the agent's
         // identity bundle when bound to a non-default identity — identity-bound
         // agents write sessions under `identities/<id>/claude/projects` (per
@@ -202,18 +193,23 @@ mod tests {
     use crate::registry::{NamedAgentRecord, NamedAgentRecordV1};
     use std::fs;
 
+    /// The folder name below is what the Claude Code CLI itself computes for
+    /// this cwd (its `RC()`, run under Node against the CLI bundled with
+    /// AgentMux 0.57.0), not what any AgentMux function computes. A resume
+    /// check that derives a different name reports a present transcript as
+    /// unreachable, and the agent loses its native resume.
     #[test]
-    fn encode_slug_matches_claude_convention() {
-        // Verified against a real on-disk slug (Naki).
-        assert_eq!(
-            encode_project_slug(r"C:\Users\asafe\.agentmux\agents\naki-0612a"),
-            "C--Users-asafe--agentmux-agents-naki-0612a"
-        );
-        // POSIX path; a literal '-' inside a segment is preserved.
-        assert_eq!(
-            encode_project_slug("/home/u/.agentmux/agents/foo-bar"),
-            "-home-u--agentmux-agents-foo-bar"
-        );
+    fn session_is_reachable_in_the_folder_the_cli_names_for_an_underscore_and_a_space() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("projects").join("-home-u-my-project-dir");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("sid-1.jsonl"), b"{}").unwrap();
+
+        assert!(session_is_reachable(
+            &tmp.path().to_string_lossy(),
+            "/home/u/my_project dir",
+            "sid-1",
+        ));
     }
 
     #[test]
@@ -241,7 +237,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let config_dir = tmp.path();
         let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n";
-        let slug = encode_project_slug(working_dir);
+        let slug = project_dir_name(working_dir);
         let dir = config_dir.join("projects").join(&slug);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
@@ -287,7 +283,7 @@ mod tests {
         let rel = format!(".agentmux-test-tilde-expansion-{}", std::process::id());
         let config_dir_abs = home.join(&rel);
         let working_dir = r"C:\Users\test\.agentmux\agents\tilde-test";
-        let slug = encode_project_slug(working_dir);
+        let slug = project_dir_name(working_dir);
         let dir = config_dir_abs.join("projects").join(&slug);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("abc123-session.jsonl"), b"{}").unwrap();
@@ -323,7 +319,7 @@ mod tests {
         let working_dir_tilde = format!("~/{working_dir_rel}");
         let expanded_working_dir = home.join(&working_dir_rel);
 
-        let slug = encode_project_slug(&expanded_working_dir.to_string_lossy());
+        let slug = project_dir_name(&expanded_working_dir.to_string_lossy());
         let dir = config_dir_abs.join("projects").join(&slug);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("def456-session.jsonl"), b"{}").unwrap();
@@ -367,7 +363,7 @@ mod tests {
         let projects = shared.join("providers").join("claude").join("projects");
         let base = r"C:\agents";
         // Provider sessions for agent "naki" (working_dir naki-0612a).
-        let slug = encode_project_slug(&format!("{base}/naki-0612a"));
+        let slug = project_dir_name(&format!("{base}/naki-0612a"));
         let dir = projects.join(&slug);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("LONG.jsonl"), vec![b'x'; 1_000_000]).unwrap();
@@ -405,7 +401,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let shared = tmp.path();
         let base = r"C:\agents";
-        let slug = encode_project_slug(&format!("{base}/bound-0612a"));
+        let slug = project_dir_name(&format!("{base}/bound-0612a"));
         let idir = shared
             .join("identities")
             .join("bundle1")

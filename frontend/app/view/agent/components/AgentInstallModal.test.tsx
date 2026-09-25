@@ -24,41 +24,8 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
-vi.mock("@/app/store/global", () => ({
-    atoms: { fullConfigAtom: () => ({}) },
-    getSettingsKeyAtom: () => () => false,
-}));
 vi.mock("@/app/store/contextmenu", () => ({ ContextMenuModel: { showContextMenu: vi.fn() } }));
-vi.mock("@/app/view/term/termutil", () => ({
-    computeTermThemeFromSettings: () => [{}],
-}));
-vi.mock("@/util/clipboard", () => ({ writeText: vi.fn() }));
-
-// Stub xterm.js entirely — this test exercises provider resolution, not
-// terminal rendering, and jsdom has no canvas/ResizeObserver support xterm
-// needs for real construction.
-vi.mock("@xterm/xterm", () => ({
-    Terminal: class {
-        options: Record<string, unknown> = {};
-        onSelectionChange(): void {}
-        attachCustomKeyEventHandler(): void {}
-        loadAddon(): void {}
-        open(): void {}
-        writeln(): void {}
-        write(): void {}
-        clear(): void {}
-        dispose(): void {}
-        buffer = { active: { length: 0, getLine: () => null } };
-        getSelection(): string {
-            return "";
-        }
-    },
-}));
-vi.mock("@xterm/addon-fit", () => ({
-    FitAddon: class {
-        fit(): void {}
-    },
-}));
+vi.mock("@/util/clipboard", () => ({ writeText: vi.fn().mockResolvedValue(undefined) }));
 
 vi.mock("../defaults/cli-catalog", () => ({
     getCliCatalogEntry: (id: string) =>
@@ -79,21 +46,17 @@ vi.mock("../providers", () => ({
     },
 }));
 
-// jsdom has no ResizeObserver — AgentInstallModalPanel's onMount
-// constructs one unconditionally.
-class FakeResizeObserver {
-    observe(): void {}
-    disconnect(): void {}
-}
-(globalThis as any).ResizeObserver = FakeResizeObserver;
-
 import { AgentInstallModalPanel } from "./AgentInstallModal";
 import { RpcApi } from "@/app/store/rpc-api";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { resetInstallDetailsPrefs } from "@/element/install/InstallProgress";
+import { LOG_ROW_PX } from "@/element/install/LogView";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    resetInstallDetailsPrefs();
 });
 
 const ts = () => 1_700_000_000_000;
@@ -177,55 +140,151 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
     });
 });
 
-describe("AgentInstallModal — progress bar + Details chrome (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5)", () => {
-    it("shows the progress bar only while phase is 'installing', matching the existing spinner's gating", async () => {
-        const agent = baseAgent({ provider: "codex", memory_id: "" });
-        const { container } = render(() => (
-            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
-        ));
+/** Clicks "Install now" and returns a function that delivers install_chunk events. */
+async function startAndSubscribe(): Promise<(data: Record<string, unknown>) => void> {
+    fireEvent.click(await screen.findByText("Install now"));
+    await waitFor(() => expect(muxEventSubscribe).toHaveBeenCalled());
+    const { handler } = vi.mocked(muxEventSubscribe).mock.calls[0][0] as { handler: (e: unknown) => void };
+    return (data) => handler({ data: { sessionId: "sess-1", ...data } });
+}
 
+const stepStatus = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(".install-step")).map((li) => [
+        li.querySelector(".install-step-label")?.textContent,
+        li.dataset.status,
+    ]);
+
+const logRows = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>(".install-log-line")).map((el) => [el.textContent, el.dataset.tone]);
+
+const description = (container: HTMLElement) => container.querySelector(".modal-panel-description")?.textContent;
+
+const renderCodex = () =>
+    render(() => (
+        <AgentInstallModalPanel
+            agent={baseAgent({ provider: "codex", memory_id: "" })}
+            onCancel={vi.fn()}
+            onInstalled={vi.fn()}
+        />
+    ));
+
+describe("AgentInstallModal — shared install dialog (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md)", () => {
+    it("shows the plan with every step pending before the install starts", async () => {
+        const { container } = renderCodex();
         await screen.findByText("Install now");
-        expect(container.querySelector(".install-progress")).toBeNull();
-
-        fireEvent.click(screen.getByText("Install now"));
-        // `setPhase("installing")` runs synchronously in startInstall,
-        // before the InstallStartCommand RPC is even awaited — the same
-        // point the existing "⏳ Installing…" spinner already appears at.
-        await waitFor(() => expect(container.querySelector(".install-progress")).not.toBeNull());
-        expect(container.querySelector(".install-progress-bar")).not.toBeNull();
+        expect(description(container)).toBe("Needs an internet connection.");
+        expect(stepStatus(container)).toEqual([
+            ["Check requirements", "pending"],
+            ["Download packages", "pending"],
+            ["Set up files", "pending"],
+            ["Run setup scripts", "pending"],
+            ["Check Codex is installed", "pending"],
+        ]);
     });
 
-    it("the Details panel wrapping the terminal defaults to open, unlike SystemToolInstallInline's default-closed panel", async () => {
-        const agent = baseAgent({ provider: "codex", memory_id: "" });
-        const { container } = render(() => (
-            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
-        ));
-
-        await screen.findByText("Install now");
-        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
-        expect(details).not.toBeNull();
-        expect(details.open).toBe(true);
+    it("marks the primary button as the modal's initial focus, so the console never gets it", async () => {
+        renderCodex();
+        const btn = await screen.findByText("Install now");
+        expect(btn.closest("button")?.hasAttribute("data-modal-initial-focus")).toBe(true);
     });
 
-    it("re-fits the terminal when the Details panel is (re)opened", async () => {
-        const { FitAddon } = await import("@xterm/addon-fit");
-        const fitSpy = vi.spyOn(FitAddon.prototype, "fit");
-        const agent = baseAgent({ provider: "codex", memory_id: "" });
-        const { container } = render(() => (
-            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
-        ));
-        await screen.findByText("Install now");
+    it("keeps Details collapsed by default while the log still fills", async () => {
+        const { container } = renderCodex();
+        const send = await startAndSubscribe();
+        send({ line: "npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms", stream: "stderr" });
+        const details = container.querySelector(".install-details") as HTMLDetailsElement;
+        expect(details.open).toBe(false);
+        await waitFor(() => expect(logRows(container).some(([t]) => t?.includes("chalk-4.1.2.tgz"))).toBe(true));
+    });
 
-        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
-        const callsBeforeToggle = fitSpy.mock.calls.length;
+    it("advances the steps from npm output and does not paint healthy stderr red", async () => {
+        const { container } = renderCodex();
+        const send = await startAndSubscribe();
+        await waitFor(() => expect(stepStatus(container)[0]).toEqual(["Check requirements", "active"]));
 
-        // Real click on <summary> flips `.open` before dispatching
-        // "toggle" — set it explicitly, same as a real collapse/reopen.
-        details.open = false;
-        fireEvent(details, new Event("toggle"));
+        send({ line: "npm http fetch GET 200 https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz 12ms", stream: "stderr" });
+        await waitFor(() => expect(stepStatus(container)[1]).toEqual(["Download packages", "active"]));
+        expect(container.querySelector(".install-step-hint")?.textContent).toBe("1 fetched");
+        expect(description(container)).toBe("Needs an internet connection.");
+
+        send({ line: "added 1 package in 1s", stream: "stdout" });
+        send({ op: "done", ok: true });
+        await waitFor(() => expect(screen.getByText("Codex is installed")).toBeInTheDocument());
+        // The pre-install requirement no longer applies once it's done.
+        expect(description(container)).toBe("Ready to launch.");
+        expect(stepStatus(container).map(([, st]) => st)).toEqual(["done", "done", "done", "skipped", "done"]);
+        expect(logRows(container).find(([t]) => t?.includes("chalk-4.1.2.tgz"))?.[1]).toBe("normal");
+    });
+
+    it("on failure explains it in the step list and opens Details at the first error", async () => {
+        const { container } = renderCodex();
+        const send = await startAndSubscribe();
+        send({ line: "npm http fetch GET https://registry.npmjs.org/npm attempt 1 failed with ENOTFOUND", stream: "stderr" });
+        for (let i = 0; i < 30; i++) send({ line: `npm verbose stack frame ${i}`, stream: "stderr" });
+        send({ line: "npm error code ENOTFOUND", stream: "stderr" });
+        send({ line: "npm error network This is a problem related to network connectivity.", stream: "stderr" });
+        send({ op: "done", ok: false, error: "npm exited Some(1)" });
+
+        await waitFor(() => expect(screen.getByText("Couldn't reach the package server.")).toBeInTheDocument());
+        expect(stepStatus(container)[1]).toEqual(["Download packages", "failed"]);
+        expect(description(container)).toBe("The install didn't finish.");
+        expect(screen.getByText("Retry")).toBeInTheDocument();
+
+        const details = container.querySelector(".install-details") as HTMLDetailsElement;
+        await waitFor(() => expect(details.open).toBe(true));
+        // The first error is line 31; scrolled so it sits two rows from the top.
+        const log = container.querySelector(".install-log") as HTMLElement;
+        await waitFor(() => expect(log.scrollTop).toBe((31 - 2) * LOG_ROW_PX));
+        expect(logRows(container).find(([t]) => t === "npm error code ENOTFOUND")?.[1]).toBe("error");
+        // The backend's own reason ends the log.
+        expect(logRows(container).at(-1)).toEqual(["Install failed: npm exited Some(1)", "error"]);
+    });
+
+    it("scrolls to the first error even when Details was already open during the install", async () => {
+        const { container } = renderCodex();
+        const send = await startAndSubscribe();
+        const details = container.querySelector(".install-details") as HTMLDetailsElement;
         details.open = true;
         fireEvent(details, new Event("toggle"));
 
-        expect(fitSpy.mock.calls.length).toBeGreaterThan(callsBeforeToggle);
+        for (let i = 0; i < 30; i++) send({ line: `npm verbose line ${i}`, stream: "stderr" });
+        send({ line: "npm error code ENOTFOUND", stream: "stderr" });
+        send({ op: "done", ok: false, error: "npm exited Some(1)" });
+        const log = container.querySelector(".install-log") as HTMLElement;
+        await waitFor(() => expect(log.scrollTop).toBe((30 - 2) * LOG_ROW_PX));
+    });
+
+    it("shows why the install couldn't start when the start RPC itself fails", async () => {
+        vi.mocked(RpcApi.InstallStartCommand).mockRejectedValueOnce(new Error("provider codex install already in progress"));
+        const { container } = renderCodex();
+        fireEvent.click(await screen.findByText("Install now"));
+
+        await waitFor(() => expect(screen.getByText("Retry")).toBeInTheDocument());
+        const details = container.querySelector(".install-details") as HTMLDetailsElement;
+        await waitFor(() => expect(details.open).toBe(true));
+        expect(logRows(container)).toEqual([["Install failed: provider codex install already in progress", "error"]]);
+    });
+
+    it("cancels the running install when the dialog unmounts", async () => {
+        const { unmount } = renderCodex();
+        await startAndSubscribe();
+        unmount();
+        expect(RpcApi.InstallCancelCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "sess-1" });
+    });
+
+    it("still tells the picker the CLI is installed when the success screen is dismissed without a button", async () => {
+        const onInstalled = vi.fn();
+        const { unmount } = render(() => (
+            <AgentInstallModalPanel
+                agent={baseAgent({ provider: "codex", memory_id: "" })}
+                onCancel={vi.fn()}
+                onInstalled={onInstalled}
+            />
+        ));
+        const send = await startAndSubscribe();
+        send({ op: "done", ok: true });
+        await screen.findByText("Continue to Launch");
+        unmount();
+        expect(onInstalled).toHaveBeenCalledWith(false);
     });
 });

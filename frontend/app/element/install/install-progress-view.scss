@@ -1,0 +1,60 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// <InstallProgress> — Layer 1 plus the collapsed Layer 2 disclosure
+// (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4).
+
+.install-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.install-details {
+    min-width: 0;
+
+    summary {
+        cursor: pointer;
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+        user-select: none;
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+
+    &[open] > summary {
+        margin-bottom: var(--space-1);
+    }
+}
+
+.install-details-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--space-1);
+}
+
+.install-details-copy {
+    padding: 0 var(--space-1-5);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: default;
+
+    &:hover:not(:disabled) {
+        color: var(--main-text-color);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+}

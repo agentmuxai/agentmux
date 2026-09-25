@@ -449,13 +449,13 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
         render(() => <PaneLeafChrome nodeModel={nodeModel} />);
 
         const slotFor = (blockId: string) => screen.getByTestId(`block-${blockId}`).parentElement as HTMLElement;
-        expect(slotFor("b1").style.visibility).toBe("visible");
+        expect(slotFor("b1").style.visibility).toBe("inherit"); // not "visible": it would show through a hidden window tab
         expect(slotFor("b2").style.visibility).toBe("hidden");
         expect(slotFor("b2").style.pointerEvents).toBe("none");
 
         setActiveBlockId("b2");
         expect(slotFor("b1").style.visibility).toBe("hidden");
-        expect(slotFor("b2").style.visibility).toBe("visible");
+        expect(slotFor("b2").style.visibility).toBe("inherit");
     });
 
     // Reproduced live: a pane went permanently blank — no header, no

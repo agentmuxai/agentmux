@@ -82,7 +82,7 @@ fn fixture(transcript_on_disk: bool) -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let working_dir = "/agents/agenty".to_string();
     if transcript_on_disk {
-        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
         let dir = tmp.path().join("projects").join(slug);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("{LIVE_SID}.jsonl")), b"{}\n").unwrap();

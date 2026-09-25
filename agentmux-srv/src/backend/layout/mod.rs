@@ -280,8 +280,15 @@ pub fn remove_stack_member(tree: &mut LayoutNode, block_id: &str) -> bool {
 /// cross-leaf move (removed from its source leaf via [`remove_stack_member`],
 /// placed into `target_block_id`'s leaf via a position-aware push). Returns
 /// `false`, leaving the tree untouched, when either block doesn't exist in
-/// the tree, or when `block_id` is its source leaf's only member (that's
-/// closing the pane, a different command).
+/// the tree.
+///
+/// When `block_id` is its source leaf's ONLY member, the cross-leaf move
+/// empties that pane, so the source leaf is deleted from the tree (with the
+/// usual single-child-parent collapse, see [`delete_node`]). This is a move:
+/// the block itself lives on in the destination.
+/// [`source_leaf_emptied_by_move`] tells a caller in advance whether this
+/// will happen, so it can reconcile focus/magnify that pointed at that leaf.
+/// SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.3.
 ///
 /// Deliberately NOT a same-leaf-and-cross-leaf-both composition of
 /// `remove_stack_member` + a push: `remove_stack_member`'s neighbour
@@ -314,6 +321,7 @@ pub fn move_stack_member(
     let Some(source_leaf) = find_leaf_containing_block(tree, block_id) else {
         return false;
     };
+    let source_node_id = source_leaf.id.clone();
     let source_members = leaf_members(source_leaf.data.as_ref().expect("leaf has data"));
     if source_members.iter().any(|m| m == target_block_id) {
         return reorder_within_leaf(tree, block_id, target_block_id, position, activate);
@@ -325,12 +333,42 @@ pub fn move_stack_member(
         return false;
     }
     if source_members.len() <= 1 {
-        return false; // the leaf's only member — removing it is "close the pane"
+        // The pane's only tab: the move empties it, so the pane goes. Place
+        // the block first (located by block id, which survives the collapse
+        // below), then delete the source leaf by node id — both inside this
+        // one `&mut` edit, so no caller ever sees the block in two leaves or
+        // in none. The source can't be the root: the destination is a
+        // different leaf in the same tree, so the root has ≥2 leaves under it.
+        if tree.id == source_node_id {
+            return false;
+        }
+        if !push_stack_member_at(tree, target_block_id, block_id, position, activate) {
+            return false;
+        }
+        return delete_node(tree, &source_node_id).is_ok();
     }
     if !remove_stack_member(tree, block_id) {
         return false;
     }
     push_stack_member_at(tree, target_block_id, block_id, position, activate)
+}
+
+/// The node id of `block_id`'s leaf, when `move_stack_member(tree, block_id,
+/// target_block_id, ..)` would delete that leaf: `block_id` is its only
+/// member and `target_block_id` lives in a different leaf. `None` for every
+/// other move (reorder, multi-member source, missing blocks, self-target).
+pub fn source_leaf_emptied_by_move(tree: &LayoutNode, block_id: &str, target_block_id: &str) -> Option<String> {
+    if block_id == target_block_id {
+        return None;
+    }
+    let source = find_leaf_containing_block(tree, block_id)?;
+    let members = leaf_members(source.data.as_ref()?);
+    if members.len() != 1 || source.id == tree.id {
+        return None;
+    }
+    find_leaf_containing_block(tree, target_block_id)
+        .filter(|target| target.id != source.id)
+        .map(|_| source.id.clone())
 }
 
 /// Splice `block_id` to `position` relative to `target_block_id` within the

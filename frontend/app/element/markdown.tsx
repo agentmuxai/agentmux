@@ -56,6 +56,32 @@ import { MarkdownImg, MarkdownSource, MuxBlock } from "./markdown-media";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 import "./markdown.scss";
 
+/**
+ * `solid-js/h` returns each element as a thunk that builds it on first call
+ * and returns the same element on every later call (it is marked with a
+ * `hyper-element` symbol). Left unresolved, Solid calls it from its insert
+ * effect — so the element's components are created under that effect instead
+ * of the root the caller rendered them in, and are disposed the next time the
+ * effect re-runs while their DOM lives on. Resolving inside the root puts them
+ * where they belong and yields real DOM nodes. Any other function (a reactive
+ * accessor, e.g. ErrorBoundary's around a Mermaid diagram) is left as is, so
+ * it stays reactive.
+ */
+function isHyperElement(v: unknown): v is () => unknown {
+    return typeof v === "function" && Object.getOwnPropertySymbols(v).some((s) => s.description === "hyper-element");
+}
+function resolveHyperElements(nodes: JSX.Element[]): JSX.Element[] {
+    const out: JSX.Element[] = [];
+    const visit = (n: unknown): void => {
+        while (isHyperElement(n)) n = n();
+        // A resolved Fragment is an array of further children.
+        if (Array.isArray(n)) for (const c of n) visit(c);
+        else out.push(n as JSX.Element);
+    };
+    for (const n of nodes) visit(n);
+    return out;
+}
+
 const Link = ({
     setFocusedHeading,
     props,
@@ -342,7 +368,9 @@ const Markdown = (props: MarkdownProps) => {
         createRoot((dispose) => {
             stats.domSegmentRenders++;
             try {
-                return { element: hastToElement(children), dispose };
+                // Resolved here so the segment's components are owned by THIS
+                // root (see resolveHyperElements), not by the insert effect.
+                return { element: resolveHyperElements(flatNodes(hastToElement(children))), dispose };
             } catch (e) {
                 // The root exists the moment createRoot runs its callback; if
                 // the render throws, nothing above ever receives `dispose`, so

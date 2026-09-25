@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StreamEvent } from "../types";
-import type { OutputTranslator } from "./translator";
+import { replayedUserMessage, type OutputTranslator } from "./translator";
 import { ToolCorrelator } from "./tool-correlation";
 
 /**
@@ -23,8 +23,12 @@ import { ToolCorrelator } from "./tool-correlation";
 export class KimiTranslator implements OutputTranslator {
     private tools = new ToolCorrelator();
 
+    constructor(private readonly opts: { replay?: boolean } = {}) {}
+
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
+        const user = replayedUserMessage(rawEvent, this.opts.replay);
+        if (user) return user;
 
         const role: string = rawEvent.role ?? "";
 

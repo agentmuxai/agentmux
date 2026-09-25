@@ -95,8 +95,31 @@ impl PersistentSubprocessController {
         attempted_sid: String,
         actual_sid: Option<String>,
     ) {
+        self.emit_session_outcome_now_with(outcome, attempted_sid, actual_sid, false);
+    }
+
+    /// A `Fresh` outcome whose new session will carry AgentMux's record of
+    /// the conversation, so the pane says "continued" rather than "new".
+    pub(super) fn emit_fresh_outcome_now(&self, attempted_sid: String, continued: bool) {
+        self.emit_session_outcome_now_with(persistent_resume::SessionOutcome::Fresh, attempted_sid, None, continued);
+    }
+
+    /// Whether a fresh spawn right now would carry a continuation packet
+    /// (what `spawn` gives any no-`--resume` spawn onto prior history).
+    /// Reads the transcript tail: call it on rare paths, never under `inner`.
+    pub(super) fn fresh_spawn_would_continue(&self) -> bool {
+        self.has_prior_transcript() && self.continuation_packet().is_some()
+    }
+
+    fn emit_session_outcome_now_with(
+        &self,
+        outcome: persistent_resume::SessionOutcome,
+        attempted_sid: String,
+        actual_sid: Option<String>,
+        continued: bool,
+    ) {
         let Some(ref broker) = self.broker else { return };
-        let line = session_outcome_line(outcome, attempted_sid, actual_sid);
+        let line = session_outcome_line_with(outcome, attempted_sid, actual_sid, continued);
         let global_output_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         super::super::shell::handle_append_block_file(
             broker,
@@ -173,7 +196,21 @@ impl PersistentSubprocessController {
             &self.block_id,
             crate::backend::continuity::PACKET_TAIL_BYTES,
         )?;
-        crate::backend::continuity::build_continuation_packet(&tail, starts_mid_line)
+        // The agent's running summary, kept beside its global transcript
+        // (`continuity_state.rs`). Missing for panes that aren't anchored to
+        // an agent, or until the first update has run.
+        let state = global_prior_zone(self.mstore.as_deref(), &self.block_id).and_then(|zone| {
+            let gfs = crate::backend::agent_session::global_transcript_store()?;
+            crate::backend::continuity_state::latest_state(gfs, &zone)
+        });
+        crate::backend::continuity::build_continuation_packet(
+            &tail,
+            starts_mid_line,
+            state.as_ref().map(|s| crate::backend::continuity::RunningState {
+                text: &s.text,
+                created_at_ms: s.created_at_ms,
+            }),
+        )
     }
 
     /// After a confirmed-stale `--resume` failure, try to recover a REAL
@@ -200,6 +237,26 @@ impl PersistentSubprocessController {
         let already_poisoned = self.inner.lock().unwrap().resume_poisoned.as_deref() == Some(candidate.as_str());
         if already_poisoned {
             return None;
+        }
+        // The largest session under this config dir and cwd is only this
+        // conversation if it's the head of the agent's segment chain
+        // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.2). Otherwise
+        // (after an account switch, typically) it's older history. Returning
+        // `None` makes the retry a fresh session, which now carries the
+        // continuation packet.
+        if let (Some(uid), Some(gfs)) = (self.stable_agent_uid(), crate::backend::agent_session::global_transcript_store()) {
+            let chain = crate::backend::continuity_segments::segments(gfs, &uid);
+            let current = self.current_segment.lock().unwrap().clone();
+            let head = crate::backend::continuity_segments::head_session(&chain, current.as_deref());
+            if !crate::backend::continuity_segments::recovery_allowed(&candidate, head.as_deref()) {
+                tracing::info!(
+                    block_id = %self.block_id,
+                    candidate = %candidate,
+                    head = ?head,
+                    "continuity: not recovering a session that isn't the head of the agent's chain"
+                );
+                return None;
+            }
         }
         Some(candidate)
     }
@@ -265,11 +322,10 @@ impl PersistentSubprocessController {
             // with the outcome itself.
             None => {
                 publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
-                self.emit_session_outcome_now(
-                    persistent_resume::SessionOutcome::Fresh,
-                    attempted_sid,
-                    None,
-                )
+                // The respawn below carries the continuation packet whenever
+                // there's history (§4.2.1), so say so.
+                let continued = self.fresh_spawn_would_continue();
+                self.emit_fresh_outcome_now(attempted_sid, continued)
             }
         }
         // Non-empty by the guard at the top.
@@ -604,6 +660,8 @@ impl PersistentSubprocessController {
             return;
         }
         let recovered = self.find_recovery_session_id(&config);
+        // Decided before the lock below: it reads the transcript tail.
+        let continued = recovered.is_none() && self.fresh_spawn_would_continue();
         // Second check, mutation, and every side effect under ONE lock
         // acquisition — see the doc comment for why nothing may sit
         // between them.
@@ -631,7 +689,7 @@ impl PersistentSubprocessController {
             Self::set_status(&mut inner, STATUS_DONE);
         }
         if recovered.is_none() {
-            self.emit_session_outcome_now(persistent_resume::SessionOutcome::Fresh, attempted_sid, None);
+            self.emit_fresh_outcome_now(attempted_sid, continued);
         }
         if queued_behind_claim {
             drop(inner);

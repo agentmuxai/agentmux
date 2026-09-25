@@ -297,21 +297,16 @@ impl PersistentSubprocessController {
         // whole point. The frontend renders that as "—" rather than a blank
         // (`DocumentRow.tsx`'s session-outcome body).
         let mut continuation: Option<String> = None;
-        if fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)
-            && self.has_prior_transcript()
-        {
-            tracing::info!(
-                block_id = %self.block_id,
-                "spawned with no --resume while prior history exists — disclosing a fresh start"
-            );
-            self.emit_session_outcome_now(
-                persistent_resume::SessionOutcome::Fresh,
-                String::new(),
-                None,
-            );
+        let fresh_onto_history = attempted_resume_sid.is_none() && self.has_prior_transcript();
+        if fresh_onto_history {
             // The provider can't give this process the conversation the pane
             // shows, so AgentMux's own record rides on its first message
-            // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+            // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4). On any
+            // generation, not just the first: a resume the CLI rejected falls
+            // through to here within the same launch (§4.2, "fall through,
+            // don't fail"), and its retry needs the record as much as a
+            // first spawn does. The disclosure above stays first-spawn-only;
+            // the retry path emits its own.
             continuation = self.continuation_packet();
             if let Some(ref packet) = continuation {
                 tracing::info!(
@@ -320,6 +315,16 @@ impl PersistentSubprocessController {
                     "continuity: carrying AgentMux's record of the conversation into the fresh session"
                 );
             }
+        }
+        // After the packet is built, so the disclosure can say whether this
+        // fresh session was given the record ("continued") or not.
+        if fresh_onto_history && fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation) {
+            tracing::info!(
+                block_id = %self.block_id,
+                continued = continuation.is_some(),
+                "spawned with no --resume while prior history exists — disclosing a fresh start"
+            );
+            self.emit_fresh_outcome_now(String::new(), continuation.is_some());
         }
 
         let pid = child.id().unwrap_or(0);
@@ -479,6 +484,15 @@ impl PersistentSubprocessController {
             .map(|u| u.trim().to_string())
             .filter(|u| !u.is_empty());
         *self.stable_agent_uid.lock().unwrap() = agent_uid_for_registry.clone();
+        // This process is one segment of the agent's conversation
+        // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.1, P1). The
+        // stdout reader records its provider session id, the waiter its end.
+        let segment: super::segments::SegmentRef = agent_uid_for_registry.as_deref().and_then(|uid| {
+            self.record_segment_start(uid, &config, attempted_resume_sid.as_deref(), continuation.is_some())
+        });
+        *self.current_segment.lock().unwrap() = segment.as_ref().map(|(_, id)| id.clone());
+        let segment_read = segment.clone();
+        let segment_wait = segment;
         // Defaults to this spawn's own nonce; overridden below if
         // registration is skipped (reagent P1 on PR #3084 — see the `Err`
         // arm just below for why `my_registration_nonce` alone is wrong
@@ -958,6 +972,7 @@ impl PersistentSubprocessController {
                                     "persistent session ID captured"
                                 );
                                 core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
+                                super::segments::record_segment_session(&segment_read, &sid_string);
                             }
                             // reagentx P0 on PR #2373: resolving tracking
                             // here can legitimately flush a held-back
@@ -1192,6 +1207,14 @@ impl PersistentSubprocessController {
                         // same tick — that state must survive, not be
                         // immediately wiped by this frame's own success.
                         core::persist_last_failure(&block_id_read, None, &mstore_read, &event_bus_read);
+                        // A completed turn is when the agent's running
+                        // summary may be due for an update. Background, and
+                        // a no-op unless enough happened since the last one
+                        // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
+                        crate::backend::continuity_state::after_successful_turn(
+                            mstore_read.clone(),
+                            block_id_read.clone(),
+                        );
                     }
                 }
 
@@ -1286,6 +1309,11 @@ impl PersistentSubprocessController {
             tokio::select! {
                 status = child.wait() => {
                     let exit_code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+                    super::segments::record_segment_end(
+                        &segment_wait,
+                        crate::backend::continuity_segments::exit_reason(exit_code),
+                        global_output_zone_wait.as_deref(),
+                    );
                     tracing::info!(
                         block_id = %block_id_wait,
                         exit_code = exit_code,
@@ -1688,6 +1716,16 @@ impl PersistentSubprocessController {
                         KillRequest::Force => None,
                         KillRequest::Graceful(deadline) => Some(deadline),
                     };
+                    // Why it's going away, read before the kill changes
+                    // anything: `shutdown` marks a pane close for this
+                    // generation; `restart_pending` a runtime-config restart.
+                    let segment_end_reason = {
+                        let inner = inner_wait.lock().unwrap();
+                        crate::backend::continuity_segments::kill_reason(
+                            inner.shutdown_generation == Some(my_generation_wait),
+                            inner.restart_pending,
+                        )
+                    };
                     tracing::info!(
                         block_id = %block_id_wait,
                         force = graceful_deadline.is_none(),
@@ -1736,6 +1774,11 @@ impl PersistentSubprocessController {
                         let _ = child.kill().await;
                         inner_wait.lock().unwrap().stop_exit = Some((my_generation_wait, true));
                     }
+                    super::segments::record_segment_end(
+                        &segment_wait,
+                        segment_end_reason,
+                        global_output_zone_wait.as_deref(),
+                    );
 
                     // reagentx P1 on PR #2371: mirror the child.wait() arm's
                     // bounded await+abort of both reader tasks (above,

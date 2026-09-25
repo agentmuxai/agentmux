@@ -9,16 +9,17 @@
  * — a full `BlockFrame_Header` on top, `PaneTabStrip` below it.
  *
  * Deliberately a THIN wrapper around the real `BlockFrame_Header`, not a
- * reimplementation of any part of it. `BlockFrame_Header` gained two props
- * (`blocktypes.ts`) for this:
- *   - `leadingTabStrip` — when set, renders in place of the iconview
- *     (icon+title+blockid). Set whenever the pane has tabs, which is always
- *     (PaneChrome includes a lone tab), unless `pane:tabstrip` is
- *     "multi-only" and there's just one.
- *   - `trailingAddButton` — the "+" beside the iconview in that
- *     "multi-only" lone-tab case.
- * Every other row element (ConnectionButton, header text elems, error
- * boundary, drag handle, context menu, EndIcons) is untouched either way.
+ * reimplementation of any part of it: the tab strip goes in through
+ * `BlockFrame_Header`'s `leadingTabStrip` prop (`blocktypes.ts`), which
+ * renders in place of the iconview (icon+title+blockid). Every other row
+ * element (ConnectionButton, header text elems, error boundary, drag handle,
+ * context menu, EndIcons) is untouched.
+ *
+ * The strip is ALWAYS passed, lone tab included: a Pane header always shows
+ * its tabs. There used to be a `pane:tabstrip = "multi-only"` setting that
+ * swapped a lone tab back to the plain iconview; it was removed because a
+ * pane without a pill silently lost every per-tab feature (drag, drop,
+ * activity flash). SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §8.
  *
  * Spec: docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md §4.1.
  * Plan: docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md
@@ -27,7 +28,6 @@
 
 import type { Accessor, JSX } from "solid-js";
 import { BlockFrame_Header } from "@/app/block/blockframe";
-import { getSettingsKeyAtom } from "@/app/store/global";
 import { NodeModel } from "@/layout/index";
 import { PaneTabStrip, type PaneTabStripProps } from "./PaneTabStrip";
 
@@ -56,30 +56,6 @@ export interface PaneHeaderTabStripProps<T> extends PaneTabStripProps<T> {
 }
 
 export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.Element {
-    // "always" (default): every tab is a pill, including a lone one, so the
-    // header looks the same at one tab as at many. "multi-only" opts a lone
-    // tab back into the plain icon+title header.
-    const tabStripSetting = getSettingsKeyAtom("pane:tabstrip");
-    const usePillStrip = () =>
-        props.tabs.length >= 2 || (props.tabs.length === 1 && (tabStripSetting() ?? "always") !== "multi-only");
-
-    // The "+"-only-or-nothing element for the real-iconview branch. Reuses
-    // PaneTabStrip itself with an empty tabs array — already exactly the
-    // "just the +" rendering agent/term relied on pre-redesign, so this is
-    // not new behavior, just relocated.
-    const addButtonOnly = (
-        <PaneTabStrip
-            tabs={[]}
-            activeId={null}
-            getId={props.getId}
-            getLabel={props.getLabel}
-            onActivate={props.onActivate}
-            onAdd={props.onAdd}
-            addTitle={props.addTitle}
-            addLabel={props.addLabel}
-        />
-    );
-
     const pillStrip = (
         <PaneTabStrip
             tabs={props.tabs}
@@ -125,8 +101,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             connBtnRef={props.connBtnRef}
             changeConnModalAtom={props.changeConnModalAtom}
             error={props.error}
-            leadingTabStrip={usePillStrip() ? pillStrip : undefined}
-            trailingAddButton={addButtonOnly}
+            leadingTabStrip={pillStrip}
             headerBgOverride={props.headerBgOverride}
         />
     );

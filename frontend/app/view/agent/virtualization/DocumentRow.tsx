@@ -24,7 +24,8 @@ import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
 import { useNodePeek } from "../hooks/useNodePeek";
-import type { DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../types";
+import { historyLinkLabel } from "../live-feed";
+import type { DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
@@ -534,7 +535,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 })()}
             </Show>
             {/* history_link intentionally has no peek — a render-time synthetic
-                CTA row (fixed id "history-link") with no timestamp/content field
+                CTA row (id "history-link" at the top of the feed, or
+                "history-gap:<next id>" between kept turns — spec §6.9) with no
+                timestamp/content field
                 at all, and its full text is already fully visible without
                 hovering. SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25
                 treats this as the one deliberate exception to "always fires":
@@ -553,7 +556,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     }}
                 >
                     <span class="agent-history-link-sigil">⌛</span>
-                    <span class="agent-history-link-label">Earlier conversations preserved —</span>
+                    <span class="agent-history-link-label">{historyLinkLabel(props.node() as HistoryLinkNode)}</span>
                     <span class="agent-history-link-cta">Open Agent History →</span>
                 </div>
             </Show>
@@ -646,12 +649,18 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         >
                             <div class="agent-session-outcome-rule">
                                 <span class="agent-session-outcome-label">
-                                    {resumed ? "Session continued" : "New session started"}
+                                    {resumed
+                                        ? "Session continued"
+                                        : n.continued
+                                          ? "Session continued · reconstructed context"
+                                          : "New session started"}
                                 </span>
                             </div>
                             <Show when={!resumed}>
                                 <div class="agent-session-outcome-detail">
-                                    Prior conversation isn't available to this agent — it's preserved in the agent's history
+                                    {n.continued
+                                        ? "The provider couldn't resume the previous session, so this new one was given AgentMux's record of the conversation: a running summary and the recent exchange"
+                                        : "Prior conversation isn't available to this agent — it's preserved in the agent's history"}
                                 </div>
                             </Show>
                             <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>

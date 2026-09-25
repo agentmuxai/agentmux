@@ -594,6 +594,7 @@ export function useAgentStream({
                             outcome: sessionOutcome.outcome,
                             attemptedSid: sessionOutcome.attemptedSid,
                             actualSid: sessionOutcome.actualSid,
+                            continued: sessionOutcome.continued,
                             timestamp: sessionOutcomeLiveTimestamp(sessionOutcome.frameTimestamp),
                         };
                         if (!hasNodeId(node.id)) {

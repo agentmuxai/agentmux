@@ -242,6 +242,7 @@ impl SubprocessController {
         // time out with "no stdin data received in 3s".
         let message = config.message;
         let block_id_stdin = self.block_id.clone();
+        let user_record = self.user_record_sink();
         {
             // Convert Tokio's async ChildStdin to a raw OS handle, then
             // wrap in a std::fs::File for synchronous write. The pipe
@@ -276,8 +277,12 @@ impl SubprocessController {
                 }
                 if let Err(e) = pipe.flush() {
                     tracing::warn!(block_id = %block_id_stdin, "subprocess stdin flush error: {}", e);
+                    std::mem::forget(pipe);
+                    return;
                 }
                 std::mem::forget(pipe); // don't double-close — _keep_alive owns the handle
+                // Delivered: now the transcript may say so (Codex review).
+                user_record.write(&message);
                 // _keep_alive (Tokio ChildStdin) drops here → EOF to the subprocess
             });
         }

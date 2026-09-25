@@ -964,7 +964,10 @@ export class AgentViewModel implements ViewModel {
     giveFocus(): boolean {
         const ta = this.focusTargetRef.current;
         if (ta == null) return false;
-        ta.focus();
+        // The composer's own scroller handles its content; letting the browser
+        // scroll ancestors to reveal it shifted whole tabs
+        // (REPORT_TAB_PANES_OFFSET_HALF_WINDOW_2026_09_24.md).
+        ta.focus({ preventScroll: true });
         return true;
     }
 

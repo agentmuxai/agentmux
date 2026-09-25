@@ -9,6 +9,7 @@ const KeyTypeCode = "code";
 
 let PLATFORM: NodeJS.Platform = "darwin";
 const PlatformMacOS = "darwin";
+const PlatformWindows = "win32";
 
 function setKeyUtilPlatform(platform: NodeJS.Platform) {
     PLATFORM = platform;
@@ -38,12 +39,16 @@ function parseKey(key: string): { key: string; type: string } {
     return { key: key, type: KeyTypeKey };
 }
 
-function parseKeyDescription(keyDescription: string): KeyPressDecl {
+// `platform` defaults to the module's own PLATFORM (set once at startup by
+// setKeyUtilPlatform). Passing it explicitly exists for formatKeyDescription
+// below, so a label can be rendered for a given platform through exactly this
+// parse, without mutating module state.
+function parseKeyDescription(keyDescription: string, platform: NodeJS.Platform = PLATFORM): KeyPressDecl {
     let rtn = { key: "", mods: {} } as KeyPressDecl;
     let keys = keyDescription.replace(/[()]/g, "").split(":");
     for (let key of keys) {
         if (key == "Cmd") {
-            if (PLATFORM == PlatformMacOS) {
+            if (platform == PlatformMacOS) {
                 rtn.mods.Meta = true;
             } else {
                 rtn.mods.Alt = true;
@@ -54,21 +59,21 @@ function parseKeyDescription(keyDescription: string): KeyPressDecl {
         } else if (key == "Ctrl") {
             rtn.mods.Ctrl = true;
         } else if (key == "Option") {
-            if (PLATFORM == PlatformMacOS) {
+            if (platform == PlatformMacOS) {
                 rtn.mods.Alt = true;
             } else {
                 rtn.mods.Meta = true;
             }
             rtn.mods.Option = true;
         } else if (key == "Alt") {
-            if (PLATFORM == PlatformMacOS) {
+            if (platform == PlatformMacOS) {
                 rtn.mods.Option = true;
             } else {
                 rtn.mods.Cmd = true;
             }
             rtn.mods.Alt = true;
         } else if (key == "Meta") {
-            if (PLATFORM == PlatformMacOS) {
+            if (platform == PlatformMacOS) {
                 rtn.mods.Cmd = true;
             } else {
                 rtn.mods.Option = true;
@@ -92,6 +97,79 @@ function parseKeyDescription(keyDescription: string): KeyPressDecl {
         }
     }
     return rtn;
+}
+
+// How a named key (a KeyboardEvent.key or .code value) is shown in a shortcut
+// label: [macOS, Windows/Linux]. Anything not listed renders as its own name,
+// with a single character upper-cased ("t" -> "T", "]" stays "]").
+const KeyLabels = new Map<string, [string, string]>([
+    ["ArrowUp", ["↑", "↑"]],
+    ["ArrowDown", ["↓", "↓"]],
+    ["ArrowLeft", ["←", "←"]],
+    ["ArrowRight", ["→", "→"]],
+    ["Escape", ["⎋", "Esc"]],
+    ["Enter", ["↩", "Enter"]],
+    ["Backspace", ["⌫", "Backspace"]],
+    ["Delete", ["⌦", "Delete"]],
+    ["Tab", ["⇥", "Tab"]],
+    ["Home", ["↖", "Home"]],
+    ["End", ["↘", "End"]],
+    ["PageUp", ["⇞", "PgUp"]],
+    ["PageDown", ["⇟", "PgDn"]],
+    ["Space", ["Space", "Space"]],
+]);
+
+// A physical-key code ("c{Digit1}" in a key description) as the character or
+// name printed on that key.
+function keyCodeLabel(code: string): string {
+    let match = code.match(/^(?:Key|Digit)(.)$/);
+    if (match != null) {
+        return match[1];
+    }
+    match = code.match(/^Numpad(\d)$/);
+    if (match != null) {
+        return `Num ${match[1]}`;
+    }
+    return code;
+}
+
+/**
+ * Renders a key description (the same "Cmd:t" / "Ctrl:Shift:n" / "Shift:Cmd:]"
+ * strings keymodel.ts registers) as a shortcut label for display, e.g. in a
+ * menu. It parses through parseKeyDescription, so the label names exactly the
+ * physical keys checkKeyPressed matches on that platform: "Cmd" is ⌘ on macOS
+ * but Alt on Windows/Linux, "Ctrl" is Control everywhere, and an upper-case
+ * letter implies Shift.
+ *
+ *   macOS:          modifier glyphs in the conventional order ⌃⌥⇧⌘, then the key ("⌃⇧N")
+ *   Windows/Linux:  Ctrl+Alt+Shift+Win+Key, "Super" instead of "Win" on Linux ("Alt+T")
+ *
+ * `platform` defaults to the one set by setKeyUtilPlatform, i.e. the platform
+ * the bindings themselves are matched against.
+ */
+function formatKeyDescription(keyDescription: string, platform: NodeJS.Platform = PLATFORM): string {
+    const keyPress = parseKeyDescription(keyDescription, platform);
+    const isMac = platform == PlatformMacOS;
+    let keyLabel = keyPress.keyType == KeyTypeCode ? keyCodeLabel(keyPress.key) : keyPress.key;
+    const named = KeyLabels.get(keyLabel);
+    if (named != null) {
+        keyLabel = isMac ? named[0] : named[1];
+    } else if (keyLabel.length == 1) {
+        keyLabel = keyLabel.toUpperCase();
+    }
+    const mods = keyPress.mods;
+    if (isMac) {
+        const glyphs =
+            (mods.Ctrl ? "⌃" : "") + (mods.Alt ? "⌥" : "") + (mods.Shift ? "⇧" : "") + (mods.Meta ? "⌘" : "");
+        return glyphs + keyLabel;
+    }
+    const parts: string[] = [];
+    if (mods.Ctrl) parts.push("Ctrl");
+    if (mods.Alt) parts.push("Alt");
+    if (mods.Shift) parts.push("Shift");
+    if (mods.Meta) parts.push(platform == PlatformWindows ? "Win" : "Super");
+    if (keyLabel != "") parts.push(keyLabel);
+    return parts.join("+");
 }
 
 function notMod(keyPressMod: boolean, eventMod: boolean) {
@@ -233,4 +311,11 @@ const keyMap = {
     PageDown: "\x1b[6~",
 };
 
-export { adaptFromReactOrNativeKeyEvent, checkKeyPressed, isInputEvent, keydownWrapper, setKeyUtilPlatform };
+export {
+    adaptFromReactOrNativeKeyEvent,
+    checkKeyPressed,
+    formatKeyDescription,
+    isInputEvent,
+    keydownWrapper,
+    setKeyUtilPlatform,
+};

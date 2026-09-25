@@ -1,0 +1,92 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Layer 1 step list — SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4.1.
+
+.install-steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.install-step {
+    display: grid;
+    grid-template-columns: 1.25em minmax(0, 1fr) auto;
+    column-gap: var(--space-2);
+    align-items: baseline;
+    font-size: var(--text-md);
+    color: var(--main-text-color);
+
+    &[data-status="pending"] {
+        color: var(--secondary-text-color);
+    }
+}
+
+.install-step-icon {
+    text-align: center;
+    color: var(--secondary-text-color);
+
+    [data-status="active"] > & {
+        color: var(--accent-color);
+        animation: install-step-pulse 1.4s ease-in-out infinite;
+    }
+
+    [data-status="done"] > & {
+        color: var(--success-color);
+        font-weight: 700;
+    }
+
+    [data-status="failed"] > & {
+        color: var(--error-color);
+        font-weight: 700;
+    }
+}
+
+.install-step-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.install-step-hint {
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+// Single line, never grows (§4.1 "Active step subline").
+.install-step-subline {
+    grid-column: 2 / -1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+
+    [data-status="failed"] > & {
+        color: var(--error-color);
+        white-space: normal;
+    }
+}
+
+// §4.3 rule 3: below 400px wide, hints drop under their label.
+@container modal-mount (max-width: 400px) {
+    .install-step-hint {
+        grid-column: 2 / -1;
+    }
+}
+
+@keyframes install-step-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-status="active"] > .install-step-icon {
+        animation: none;
+    }
+}

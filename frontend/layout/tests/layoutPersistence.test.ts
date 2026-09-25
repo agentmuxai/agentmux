@@ -599,3 +599,50 @@ describe("pruneDanglingLeaves", () => {
         expect(findBlock(model, "was-fresh-now-stale")).toBeFalsy();
     });
 });
+
+// Another window watching this layout applies the queued `stackmove` that
+// `pane.moveTab` sends. When the moved tab was its pane's only one, that
+// pane has to go here too — as a move, never through onNodeDelete.
+// SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
+describe("processPendingBackendActions — StackMove of a pane's only tab", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("moves the tab and removes the emptied pane without deleting the block", async () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        insertBlock(model, "moved-block");
+        model.updateTree();
+        const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+        const beforeNodeDelete = vi.fn().mockResolvedValue(true);
+        model.onNodeDelete = onNodeDelete;
+        model.beforeNodeDelete = beforeNodeDelete;
+
+        setPendingActions(model, [{
+            actiontype: LayoutTreeActionType.StackMove,
+            actionid: "action-stackmove-last",
+            blockid: "moved-block",
+            targetblockid: "existing",
+            position: "end",
+            focused: true,
+            magnified: false,
+            ephemeral: false,
+        }]);
+
+        await processPendingBackendActions(model);
+
+        const leaf = findBlock(model, "existing")!;
+        expect(leaf.data!.blockStack).toEqual(["existing", "moved-block"]);
+        expect(leaf.data!.activeBlockId).toBe("moved-block");
+        expect(findBlock(model, "moved-block")!.id).toBe(leaf.id);
+        expect(model.leafs()).toHaveLength(1);
+        expect(onNodeDelete).not.toHaveBeenCalled();
+        expect(beforeNodeDelete).not.toHaveBeenCalled();
+    });
+});

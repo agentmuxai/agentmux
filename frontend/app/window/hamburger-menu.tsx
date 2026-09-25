@@ -20,7 +20,8 @@ import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
-import { isMacOS } from "@/util/platformutil";
+import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "@/app/store/keymodel-bindings";
+import { formatKeyDescription } from "@/util/keyutil";
 import { createMemo, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
@@ -35,9 +36,6 @@ interface HamburgerMenuProps {
 
 export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
     const menuItems = createMemo((): MenuItem[] => {
-        const mac = isMacOS();
-        const kbd = (m: string, w: string) => (mac ? m : w);
-
         const settings = settingsAtom() ?? ({} as any);
 
         const currentTheme = (settings["window:theme"] as string) || "default";
@@ -81,14 +79,16 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             {
                 label: "New Tab",
                 icon: "plus",
-                shortcut: kbd("⌘T", "Ctrl+T"),
+                // Shortcut labels render the binding keymodel.ts registers,
+                // never a hand-written string: "Cmd" is Alt on Windows/Linux.
+                shortcut: formatKeyDescription(NEW_TAB_KEY),
                 onClick: () => createTab(),
             },
             { label: "", divider: true },
             {
                 label: "New Window",
                 icon: "window-restore",
-                shortcut: kbd("⌘⇧N", "Ctrl+Shift+N"),
+                shortcut: formatKeyDescription(NEW_WINDOW_KEY),
                 onClick: () => getApi().openNewWindow().catch(console.error),
             },
             { label: "", divider: true },
@@ -111,7 +111,7 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             {
                 label: "Command Palette",
                 icon: "magnifying-glass",
-                shortcut: kbd("⌘P", "Ctrl+P"),
+                shortcut: formatKeyDescription(COMMAND_PALETTE_KEY),
                 onClick: () => openModal(CommandPaletteModal),
             },
             {

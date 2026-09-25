@@ -370,7 +370,10 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                             style={{
                                 position: "absolute",
                                 inset: "0",
-                                visibility: id === activeBlockId() ? "visible" : "hidden",
+                                // `inherit`, not `visible`: an explicit `visible`
+                                // would show through a hidden window tab kept laid out
+                                // with `visibility: hidden` (workspace.tsx).
+                                visibility: id === activeBlockId() ? "inherit" : "hidden",
                                 "pointer-events": id === activeBlockId() ? "auto" : "none",
                             }}
                         >

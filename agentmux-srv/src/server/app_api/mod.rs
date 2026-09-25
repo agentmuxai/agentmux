@@ -3704,8 +3704,8 @@ mod pane_open_reducer_tests {
             ids.push(id);
         }
         // Pane A is a real 2-member stack (so the source leaf survives the
-        // move — a solo-member source is covered by the dedicated
-        // zero-members-guard test above, unaffected by this change).
+        // move — a solo-member source, whose pane is removed, is covered by
+        // the dedicated only-tab test below).
         let (a1, a2, b) = (ids[0].clone(), ids[1].clone(), ids[2].clone());
         dispatch_apply(
             &state,
@@ -3767,10 +3767,12 @@ mod pane_open_reducer_tests {
     }
 
     #[tokio::test]
-    async fn move_tab_rejects_stripping_a_pane_to_zero_members() {
+    async fn move_tab_of_a_panes_only_tab_moves_it_and_removes_the_emptied_pane() {
         // Both panes live in the SAME tab (LayoutStackMove operates within
         // one tab's tree) — a solo-block leaf and a two-member stacked leaf
-        // as siblings under one root.
+        // as siblings under one root. Moving the solo pane's only tab empties
+        // it, so the pane goes and the block lives on in the destination.
+        // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.
         let state = test_state();
         let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
             .await
@@ -3832,17 +3834,38 @@ mod pane_open_reducer_tests {
         )
         .await;
 
-        let res = move_tab(
+        move_tab(
             &state,
             CommandPaneMoveTabData {
-                block_id: solo,
-                target_block_id: x,
-                position: "after".into(),
-                activate: false,
+                block_id: solo.clone(),
+                target_block_id: y.clone(),
+                position: "end".into(),
+                activate: true,
             },
         )
-        .await;
-        assert!(res.is_err(), "moving a pane's only tab is a close, not a move");
+        .await
+        .expect("moving a pane's only tab into another pane succeeds");
+
+        let (tree, block_survives) = {
+            let srv = state.srv_state.lock().await;
+            (srv.tabs[&tab_id].rootnode.clone().unwrap(), srv.blocks.contains_key(&solo))
+        };
+        // The emptied pane is gone and the root collapsed onto the only
+        // remaining leaf (delete_node's single-child collapse).
+        assert!(tree.children.is_empty(), "one pane left: {tree:?}");
+        let dst = tree.data.as_ref().expect("root is now the destination leaf");
+        assert_eq!(dst.block_stack, vec![x.clone(), y.clone(), solo.clone()]);
+        assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), (solo.as_str(), solo.as_str()));
+        assert!(block_survives, "a move, not a close: the block itself must not be deleted");
+
+        let tab = state.mstore.must_get::<crate::backend::obj::Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate).unwrap();
+        assert_eq!(layout.rootnode.as_ref(), Some(&tree), "db_layout persisted the post-move tree");
+        let actions = layout.pendingbackendactions.unwrap_or_default();
+        assert!(
+            actions.iter().any(|a| a.actiontype == "stackmove" && a.blockid == solo && a.targetblockid == y),
+            "other windows told via a queued stackmove: {actions:?}"
+        );
     }
 
     #[tokio::test]
