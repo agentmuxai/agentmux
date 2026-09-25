@@ -262,6 +262,81 @@ function rectFromElement(el: HTMLElement): OverlayRect {
  * Safe to nest — each call registers its own rect, the union is applied.
  * No-op on platforms without native pane HWNDs (backend IPC is a no-op).
  */
+export interface PaneOverlayHandle {
+    /** Re-measure now (the style/size observers already cover most moves). */
+    update(): void;
+    /** Drop this overlay's hole. Idempotent. Must run on every close path —
+     *  a leaked registration leaves a see-through, click-through hole in the
+     *  pane (on macOS the whole pane ignores the mouse while any hole is open). */
+    release(): void;
+}
+
+/**
+ * Imperative sibling of `usePaneOverlay` for overlays that aren't Solid
+ * components — `showJsContextMenu` (cef-api.ts) builds its menu with plain DOM
+ * and so can't call a hook. Same map, same `sendClip()`, same observers.
+ *
+ * Registering early is fine: an element that is `display:none` (zero box) or
+ * `visibility:hidden` contributes no hole, and the style observer re-measures
+ * once it is placed and revealed.
+ *
+ * Needed because the auto-discovery service (pane-overlay-auto.ts) only runs on
+ * Windows, so on macOS/Linux a `data-pane-overlay` attribute alone registers
+ * nothing — see SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md.
+ */
+export function registerPaneOverlay(el: HTMLElement): PaneOverlayHandle {
+    const id = nextOverlayId++;
+    let released = false;
+    registeredOverlayEls.add(el);
+    const update = (): void => {
+        if (released) return;
+        const rect = rectFromElement(el);
+        const hidden = !el.isConnected || getComputedStyle(el).visibility === "hidden";
+        if (!hidden && rect.w > 0 && rect.h > 0) {
+            overlayRects.set(id, rect);
+        } else if (!overlayRects.delete(id)) {
+            return;
+        }
+        sendClip();
+    };
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => update()) : undefined;
+    resizeObserver?.observe(el);
+    const styleObserver = typeof MutationObserver !== "undefined" ? new MutationObserver(() => update()) : undefined;
+    styleObserver?.observe(el, { attributes: true, attributeFilter: ["style"] });
+    window.addEventListener("resize", update);
+    update();
+    return {
+        update,
+        release: () => {
+            if (released) return;
+            released = true;
+            registeredOverlayEls.delete(el);
+            window.removeEventListener("resize", update);
+            resizeObserver?.disconnect();
+            styleObserver?.disconnect();
+            if (overlayRects.delete(id)) sendClip();
+        },
+    };
+}
+
+// Elements currently registered through registerPaneOverlay.
+const registeredOverlayEls = new WeakSet<Element>();
+
+/**
+ * Whether `el` is registered to punch a hole through the browser panes it
+ * overlaps: explicitly (registerPaneOverlay) or by the Windows auto-discovery
+ * service. The dev-build menu guard (menu-position.ts) uses this so a menu
+ * that is meant to sit over a pane isn't reported as "behind native pane".
+ */
+export function isRegisteredPaneOverlay(el: Element): boolean {
+    return registeredOverlayEls.has(el) || autoOverlayRects.has(el);
+}
+
+/** Test-only: number of live imperative/hook overlay registrations with a rect. */
+export function __overlayRectCount(): number {
+    return overlayRects.size;
+}
+
 export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>): void {
     const id = nextOverlayId++;
     const update = (): void => {

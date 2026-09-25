@@ -71,6 +71,7 @@ See also:
 | [SPEC_BROWSER_PANE_LIFECYCLE](SPEC_BROWSER_PANE_LIFECYCLE.md) | Lifecycle: mount, navigate, unmount |
 | [SPEC_BROWSER_DOM_API](SPEC_BROWSER_DOM_API.md) | DOM injection / bridge API |
 | [SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Favicon + title propagation |
+| [SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | macOS: the app's right-click menu draws behind the pane — register its rect for the hole punch (Windows parity) |
 
 ## Editor Pane
 
