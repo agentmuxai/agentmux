@@ -610,8 +610,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     // color is passed here.
     onMount(() => {
         if (!props.flashOnActivity) return;
-        const unsubscribe = onActivityFlash(({ blockId }) => {
-            if (blockId === id() && pillRef) flashElement(pillRef);
+        const unsubscribe = onActivityFlash((target) => {
+            if (target.blockId === id() && pillRef) flashElement(pillRef, target);
         });
         onCleanup(unsubscribe);
     });

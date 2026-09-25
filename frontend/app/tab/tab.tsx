@@ -231,8 +231,8 @@ function Tab(props: TabProps): JSX.Element {
     // not — docs/specs/SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md. A subtle
     // lift of the tab's own color (tab.scss); the pane's color is its pill's.
     onMount(() => {
-        const unsubscribe = onActivityFlash(({ blockId }) => {
-            if (tabData()?.blockids?.includes(blockId)) flashElement(tabInnerRef);
+        const unsubscribe = onActivityFlash((target) => {
+            if (tabData()?.blockids?.includes(target.blockId)) flashElement(tabInnerRef, target);
         });
         onCleanup(unsubscribe);
     });
