@@ -38,7 +38,7 @@ use agentmux_common::api_types::{
     UiBrowserDispatchKeyRequest, UiBrowserEvalRequest, UiBrowserFocusElementRequest,
     UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest, UiClickRequest,
     UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse, WindowFocusRequest,
-    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest,
+    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };
 use anyhow::Result;
@@ -203,6 +203,7 @@ async fn main() {
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
                 let close_pane: Value =
                     serde_json::from_str(CLOSE_PANE_TOOL).expect("static json");
+                let quit_self: Value = serde_json::from_str(QUIT_SELF_TOOL).expect("static json");
                 let register_dev_server: Value =
                     serde_json::from_str(REGISTER_DEV_SERVER_TOOL).expect("static json");
                 let browser_navigate: Value =
@@ -268,7 +269,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -2588,6 +2589,31 @@ async fn call_tool(
                 None => Ok("Closed your own pane".to_string()),
             }
         }
+        "QuitSelf" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let field = |k: &str| {
+                arguments
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow::anyhow!("missing required parameter: {k}"))
+            };
+            let (reason, user_instruction) = (field("reason")?, field("user_instruction")?);
+            let auth = sign_ui_automation_auth()?;
+            let url = format!("{}/api/v1/agent/self/quit", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&QuitSelfRequest { auth, reason, user_instruction })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            quit_self_result(status.as_u16(), &body)
+        }
         "RegisterDevServer" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
@@ -3712,6 +3738,19 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+/// What `QuitSelf` tells the agent, from srv's answer (§4.2, §6.3).
+fn quit_self_result(status: u16, body: &Value) -> anyhow::Result<String> {
+    match status {
+        202 => Ok("Quit scheduled. Your session ends when this turn finishes: give the user a one-line goodbye and start no new work.".to_string()),
+        200 => Ok("Already quitting — nothing more to do.".to_string()),
+        403 => anyhow::bail!(
+            "QuitSelf refused ({}): only the user's own message that started this turn can ask you to quit, and nothing else may have been delivered since. Do NOT retry. Tell the user they can type /quit in your pane.",
+            body.get("refused").and_then(|v| v.as_str()).unwrap_or("not allowed")
+        ),
+        _ => anyhow::bail!("QuitSelf failed: HTTP {status} — {}", body),
+    }
+}
+
 /// `SendMessage`'s answer when srv accepted the message but holds it until the
 /// target's next tool call or turn boundary (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
 fn deferred_delivery_text(to: &str) -> String {
@@ -3725,6 +3764,24 @@ fn deferred_delivery_text(to: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quit_self_result_tells_the_agent_what_happened() {
+        assert!(quit_self_result(202, &Value::Null).unwrap().starts_with("Quit scheduled"));
+        assert!(quit_self_result(200, &Value::Null).unwrap().starts_with("Already quitting"));
+        let refused = quit_self_result(403, &serde_json::json!({ "refused": "not_user_turn" })).unwrap_err().to_string();
+        assert!(refused.contains("not_user_turn") && refused.contains("/quit"), "{refused}");
+        assert!(quit_self_result(401, &Value::Null).is_err());
+    }
+
+    #[test]
+    fn quit_self_takes_no_target_and_requires_the_users_quote() {
+        let v: Value = serde_json::from_str(QUIT_SELF_TOOL).unwrap();
+        let props = v["inputSchema"]["properties"].as_object().unwrap();
+        assert!(!props.contains_key("block_id") && !props.contains_key("agent"), "no way to aim it at another agent");
+        assert_eq!(v["inputSchema"]["required"], serde_json::json!(["reason", "user_instruction"]));
+        assert!(v["description"].as_str().unwrap().starts_with("⚠️ MAJOR WARNING"));
+    }
 
     /// The text an agent reads back. Pinned because a lost `\` continuation
     /// once turned the indentation into runs of spaces (ReAgent P1 on #3763).
@@ -4300,6 +4357,7 @@ mod tests {
             DISCOVER_WINDOWS_TOOL,
             LIST_CONVERSATIONS_TOOL,
             CLOSE_PANE_TOOL,
+            QUIT_SELF_TOOL,
             REGISTER_DEV_SERVER_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
@@ -4342,7 +4400,7 @@ mod tests {
         // but had no MCP tool wrapper until now) — same reasoning, not fixing
         // the pre-existing drift between this running total and the prose
         // breakdown.
-        assert_eq!(defs.len(), 52, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
+        assert_eq!(defs.len(), 53, "+ 1 QuitSelf; tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

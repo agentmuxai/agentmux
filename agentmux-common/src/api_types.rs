@@ -623,6 +623,21 @@ pub struct UiBrowserFocusInfoRequest {
 /// — it is what resolves the caller's OWN pane when `block_id` is omitted,
 /// and what supplies a verified `source_agent` for the audit log when
 /// `block_id` targets another agent's pane (§5.2 of that spec).
+/// `QuitSelf` — an agent ends its own session on the user's direct
+/// instruction (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6). There is
+/// no target field: the caller's own block, from `auth`, is the only one it
+/// can name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuitSelfRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// One line: why. Shown to the user and audited.
+    pub reason: String,
+    /// The user's own words telling the agent to quit, verbatim. Checked
+    /// against the message that started the current turn (§6.3).
+    pub user_instruction: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosePaneRequest {
     #[serde(flatten)]
