@@ -322,8 +322,8 @@ fn match_message(
                 role: msg.role.clone(),
                 snippet: snippet_around(&tu.argument_summary, at),
                 tool_name: Some(tu.name.clone()),
-                    source: candidate.source_label(),
-                    attribution: candidate.attribution_label(),
+                source: candidate.source_label(),
+                attribution: candidate.attribution_label(),
             });
         }
     }
