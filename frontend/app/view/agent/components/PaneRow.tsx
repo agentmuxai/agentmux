@@ -82,6 +82,9 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
         <div
             class={clsx("pane-row", `pane-row--${props.accent ?? "neutral"}`, {
                 "pane-row--expanded": props.expanded,
+                // Text-button rows (the failure-recovery row) wrap/stack on
+                // narrow panes; icon-only pin rows keep their single line.
+                "pane-row--labeled-actions": props.actions?.some((a) => a.label),
             })}
         >
             <div
