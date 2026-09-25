@@ -323,6 +323,15 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 /// nothing special here — same as `lan_verified`, the red flag (once Phase
 /// C enables it) lives in `TIER`.
 ///
+/// `wan_instance` (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.6) is the WAN
+/// analog, passed only when a same-account agent's WAN signature verified
+/// (`wan_verified == Some(true)`). On the WAN tier it renders
+/// `TRUST=wan-verified INSTANCE=<host_hint>~<id8> INSTANCE_STATUS=<status>`:
+/// the label's suffix comes from the id the certificate chain proved, never
+/// from the sender, and the status tells the reader whether a human approved
+/// that install (`approved`), nobody has (`new`: verified but no relaxation),
+/// or its owner retired it (`revoked`: forced sensitive by the caller).
+///
 /// `requires_stop` (SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md)
 /// is the caller's already-computed answer to "does `TIER=sensitive` mean
 /// STOP, or just tag-for-visibility" — see `Handler::inject_message_inner`'s
@@ -343,6 +352,7 @@ pub fn wrap_jekt_message(
     reagent_verified: Option<bool>,
     lan_verified: Option<bool>,
     channel_verified: Option<bool>,
+    wan_instance: Option<&super::types::WanInstanceInfo>,
     requires_stop: bool,
     msg_id: &str,
     priority: &str,
@@ -375,10 +385,13 @@ pub fn wrap_jekt_message(
     let delivery_tier = marker_field(delivery_tier);
     let delivery_tier = delivery_tier.as_str();
     let msg = neutralize_markers(msg);
+    let wan_instance = wan_instance.filter(|_| delivery_tier == "wan");
     let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
         "lan-verified"
     } else if delivery_tier == "channel" && channel_verified == Some(true) {
         "channel-verified"
+    } else if wan_instance.is_some() {
+        "wan-verified"
     } else if delivery_tier != "host" && delivery_tier != "channel" {
         "network-claimed"
     } else {
@@ -395,6 +408,15 @@ pub fn wrap_jekt_message(
         None => "",
     };
 
+    let instance_field = match wan_instance {
+        Some(instance) => format!(
+            " INSTANCE={} INSTANCE_STATUS={}",
+            marker_field(&instance.label),
+            instance.status.as_str()
+        ),
+        None => String::new(),
+    };
+
     let escalate_field = if effective_tier == "sensitive" {
         if requires_stop { " ESCALATE=required" } else { " ESCALATE=none" }
     } else {
@@ -402,7 +424,7 @@ pub fn wrap_jekt_message(
     };
 
     let structured_tag = format!(
-        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{sig_field}{escalate_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
+        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier}{held_field} TRUST={trust}{instance_field}{sig_field}{escalate_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
     );
 
     let sensitive_warning = if effective_tier == "sensitive" {

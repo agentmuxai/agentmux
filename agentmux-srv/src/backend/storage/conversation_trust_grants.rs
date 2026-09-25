@@ -37,6 +37,16 @@ impl Store {
         requester_agent_id: &str,
         tier: &str,
     ) -> Result<bool, StoreError> {
+        // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.6): a `wan` grant
+        // is never honoured yet. The grant is keyed by bare peer name, and on
+        // WAN one name can be several instances; honouring it needs a key
+        // that includes the instance (a table-rebuild migration — the current
+        // primary key plus `INSERT OR REPLACE` would silently rebind to
+        // whichever instance was granted last) and a way to create grants.
+        // Nothing is lost: no production path creates grants today.
+        if tier.eq_ignore_ascii_case("wan") {
+            return Ok(false);
+        }
         let agent_key = agent_id.to_lowercase();
         let requester_key = requester_agent_id.to_lowercase();
         let conn = self.conn.lock().unwrap();
@@ -135,6 +145,16 @@ mod tests {
         let store = object_store();
         store.conversation_trust_grant_add("korp", "loap", "lan").unwrap();
         assert!(store.conversation_trust_grant_check("korp", "loap", "lan").unwrap());
+    }
+
+    /// W3-S §2.6: a `wan` grant is stored but never honoured until grants
+    /// are keyed by instance.
+    #[test]
+    fn a_wan_grant_is_never_honoured() {
+        let store = object_store();
+        store.conversation_trust_grant_add("korp", "loap", "wan").unwrap();
+        assert!(!store.conversation_trust_grant_check("korp", "loap", "wan").unwrap());
+        assert!(!store.conversation_trust_grant_check("korp", "loap", "WAN").unwrap());
     }
 
     #[test]

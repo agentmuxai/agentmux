@@ -158,6 +158,11 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 );
                             }
                         }
+                        // W3-S: a login may be an account switch — forget
+                        // peer records fetched under the old account (§2.3),
+                        // and publish any keys that were waiting on a login.
+                        clear_wan_peer_cache();
+                        crate::muxbus::wan_publish::nudge();
                         let resp = MuxBusLoginResp {
                             success: true,
                             email,
@@ -273,10 +278,23 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .await
                     .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
+                clear_wan_peer_cache();
                 Ok(MuxBusDisconnectResp {})
             }
         },
     );
+}
+
+/// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.3): cached peer
+/// records belong to the account they were fetched under. Best-effort — the
+/// records are self-certifying, so a stale one can't verify a forgery; this
+/// only keeps one account's directory from answering for another's.
+fn clear_wan_peer_cache() {
+    if let Some(wan) = crate::backend::storage::wan_identity::global() {
+        if let Err(e) = wan.peer_cache_clear() {
+            tracing::warn!(error = %e, "wan identity: could not clear the peer-record cache");
+        }
+    }
 }
 
 /// Inject MUXBUS_TOKEN into spawn env if credentials are stored and valid.

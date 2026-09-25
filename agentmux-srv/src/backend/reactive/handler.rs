@@ -154,6 +154,10 @@ pub struct Handler {
     /// `record_supervisor_decision` call, under this handler's mutex, so no
     /// other delivery can see it.
     delivery_source_uid: String,
+    /// The WAN verdict of the delivery in flight (W3-S audit), copied onto
+    /// its audit entries. Same set-and-restore discipline as
+    /// `delivery_source_uid`.
+    delivery_wan: Option<super::types::WanAudit>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
     /// Warden Supervisor consecutive-nudge ceiling state, keyed on the
@@ -258,6 +262,7 @@ impl Handler {
             block_liveness: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
+            delivery_wan: None,
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
             nudge_counters: HashMap::new(),
@@ -888,10 +893,12 @@ impl Handler {
     ) -> InjectionResponse {
         let uid = std::mem::take(&mut req.audit_source_uid);
         let outer = std::mem::replace(&mut self.delivery_source_uid, uid);
+        let outer_wan = std::mem::replace(&mut self.delivery_wan, super::types::WanAudit::from_request(&req));
         let resp = self.deliver_audited(req, outcome_on_success, outcome_on_failure, reason);
         // Restore, not clear: a Supervisor nudge runs this inside its own
         // decision, whose UID stays set for the rest of it.
         self.delivery_source_uid = outer;
+        self.delivery_wan = outer_wan;
         resp
     }
 
@@ -1222,6 +1229,16 @@ impl Handler {
         // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4/§2.5.
         let is_lan_sig_invalid = delivery_tier == "lan" && req.lan_verified == Some(false);
         let is_unverified_sender = req.sig_verified == Some(false);
+        // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.6): a same-account
+        // agent's WAN signature that actively failed (envelope, certificate
+        // chain, record match, signature or replay), or one from an instance
+        // its owner has revoked — the key is known to be out of its owner's
+        // control — is forced sensitive, like `SIG=invalid`.
+        let wan_instance_status = req.wan_instance.as_ref().map(|i| i.status);
+        let is_wan_sig_invalid = delivery_tier == "wan"
+            && (req.wan_verified == Some(false)
+                || (req.wan_verified == Some(true)
+                    && wan_instance_status == Some(super::types::WanInstanceStatus::Revoked)));
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 1: a
         // transcript_request (muxspect Phase B/C's LAN/WAN conversation-
         // visibility protocol) is forced sensitive unconditionally, on any
@@ -1233,6 +1250,7 @@ impl Handler {
         // comment), so this can't be spoofed by a client claiming/denying it.
         let is_sensitive = is_network_tier_sig_invalid
             || is_lan_sig_invalid
+            || is_wan_sig_invalid
             || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
             || is_sensitive_message(&sanitized)
@@ -1276,10 +1294,19 @@ impl Handler {
         // among the forcing rules above — Phase C, deliberately held back
         // until published keys have propagated (spec §6/§10) — so today
         // this field can only ever relax, never escalate.
+        //
+        // `wan_verified` (W3-S §2.6) joins only for an **approved** instance.
+        // A verified signature from a `new` instance proves which install
+        // sent it, but anyone holding the account token can mint an install,
+        // so without a human's approval it relaxes nothing — exactly today's
+        // WAN behavior, just labelled. `revoked` is forcing, above.
         let is_cryptographically_verified = req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
             || req.lan_verified == Some(true)
-            || req.channel_verified == Some(true);
+            || req.channel_verified == Some(true)
+            || (delivery_tier == "wan"
+                && req.wan_verified == Some(true)
+                && wan_instance_status == Some(super::types::WanInstanceStatus::Approved));
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 2: the
         // ONE named exception to the verified-sender relaxation above. A
         // transcript_request's ESCALATE=required is not relaxed by a
@@ -1317,6 +1344,7 @@ impl Handler {
             req.reagent_verified,
             req.lan_verified,
             req.channel_verified,
+            req.wan_instance.as_ref().filter(|_| req.wan_verified == Some(true)),
             requires_stop,
             &request_id,
             priority,
@@ -1765,6 +1793,7 @@ impl Handler {
             evicted_block: None,
             evicted_agent: None,
             audit_source_uid: self.delivery_source_uid.clone(),
+            wan: self.delivery_wan.clone(),
         };
 
         if self.audit_log.len() >= AUDIT_LOG_MAX {
@@ -1803,6 +1832,7 @@ impl Handler {
             evicted_block: evicted_block.map(|s| s.to_string()),
             evicted_agent: evicted_agent.map(|s| s.to_string()),
             audit_source_uid: String::new(),
+            wan: None,
         };
 
         if self.audit_log.len() >= AUDIT_LOG_MAX {

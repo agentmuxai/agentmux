@@ -135,6 +135,9 @@ pub(super) fn echo_jekt_to_sender(
         reagent_verified,
         lan_verified,
         channel_verified,
+        // The sender-side echo never has a WAN verdict: WAN verification
+        // happens only at the receiving install (W3-S §2.3), after the echo.
+        None,
         // Defaults to `true` (STOP) when the caller couldn't tell us —
         // matches `effective_tier` defaulting to the more-cautious "coord"
         // rather than assuming "info" above; never silently downgrades a
@@ -904,8 +907,14 @@ mod transcript_request_tier_resolution_tests {
         assert!(req.is_transcript_request, "rule 1 must fire on WAN exactly like every other tier");
     }
 
+    /// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.6) reverses what
+    /// this test used to pin: a `wan` grant no longer relaxes escalation. It
+    /// is keyed by bare peer name, and on WAN one name can be several
+    /// instances (anyone holding the account token can mint one), so honouring
+    /// it waits for an instance-keyed grant. No production path creates
+    /// grants yet, so nothing that worked stops working.
     #[tokio::test]
-    async fn wan_tier_trusted_peers_grant_on_the_matching_tier_relaxes_escalation() {
+    async fn wan_tier_trusted_peers_grant_is_not_honoured_yet() {
         let state = test_state();
         insert_agent_def(&state, "agent1", "trusted_peers");
         state.mstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
@@ -918,8 +927,8 @@ mod transcript_request_tier_resolution_tests {
         };
         resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(
-            !req.transcript_request_escalate_forced,
-            "a WAN grant checked against an actual WAN request must relax escalation, same as LAN's matching-tier case"
+            req.transcript_request_escalate_forced,
+            "a WAN grant is keyed by name only, and one name can be several instances on WAN"
         );
     }
 
