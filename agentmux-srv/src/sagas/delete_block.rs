@@ -12,12 +12,18 @@
 // `docs/retro/reducer-architecture-gaps-2026-05-01.md`).
 //
 // **Steps:**
+// 0. `close_pane::shutdown_agents` for the block — the same graceful
+//    shutdown the pane's × uses (interrupt a running turn, EOF, force-kill
+//    only at the deadline, release its processes, save final state),
+//    BEFORE the records go (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md
+//    §4.2).
 // 1. `DeleteBlock { tab_id, block_id }` — reducer removes the block
 //    from canonical state and emits `Event::BlockDeleted`. The
 //    persist subscriber writes SQLite via `wcore::delete_block`.
 // 2. `LayoutDeleteNodeByBlock` (SPEC_864 site #6) — reducer prunes the
-//    block's layout node from `db_layout`, the single writer's own
-//    copy of the tree.
+//    block from `db_layout`, the single writer's own copy of the tree.
+//    For one tab of a stacked pane it removes just that member and keeps
+//    the pane and its other tabs; the last member takes the leaf.
 // 2b. `queue_source_layout_delete` — tells any frontend that already
 //    has this tab's tree loaded (via `LayoutState.pendingbackendactions`)
 //    to prune the node too. Added after
@@ -27,15 +33,19 @@
 //    edit in the tab silently resurrects the just-pruned node as a
 //    dangling reference.
 //
-// **Block controller side-effect:** the legacy RPC handler killed
-// the block's PTY/controller via `blockcontroller::delete_controller`
-// BEFORE the wcore SQLite delete. The saga preserves that ordering
-// — controller-kill happens in this function before the reducer
-// dispatch, since the persist subscriber's `wcore::delete_block`
-// only handles SQLite and layout pruning, not process teardown. We
-// still drop the controller even if the saga later short-circuits
-// (block-not-found): the controller registry is a process-local
-// map, idempotent on missing keys.
+// **Block controller side-effect:** the process is stopped gracefully by
+// step 0. `blockcontroller::delete_controller` then runs AFTER the saga,
+// whenever the reducer has removed the block (see the round-3 note in
+// `run`); by then it is idempotent cleanup of an already-stopped
+// controller, not a kill. (This header used to say the controller was
+// killed before the reducer dispatch — the legacy RPC handler's order,
+// long since replaced; that stale line misled a reader into thinking this
+// saga hard-kills.)
+//
+// This saga is therefore the right primitive for a close srv starts
+// itself on one tab: unlike `close_pane::run` with one id, which queues a
+// frontend action only when the whole leaf goes, step 2b updates an
+// already-loaded frontend.
 //
 // **Compensation:** delete sagas are awkward to compensate — once
 // the block row + controller are gone, "un-delete" requires
