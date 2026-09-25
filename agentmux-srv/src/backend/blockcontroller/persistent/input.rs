@@ -649,17 +649,23 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            // One `inner` acquisition around the send AND its record: every
-            // other stdin write goes through `inner` too, so no other line can
-            // be sent — and so persisted — between this one's send and its
-            // record, and the transcript keeps delivery order (Codex review
-            // of #3703). `persist.write` never takes `inner`.
-            let guard = inner.lock().unwrap();
-            let stdin_tx = guard.stdin_tx.clone();
-            match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
-                    persist.write(&line);
-                    drop(guard);
+            // Through the same gated write as every other stdin line
+            // (`try_write_stdin_locked`: refused while spawning, restarting or
+            // stopping, and tracked into the resume retry batch), and recorded
+            // in the transcript only if it was written — under the same `inner`
+            // acquisition, so the dead-air fallbacks can't interleave with each
+            // other. Ordering against a concurrent ordinary send is the same as
+            // between two ordinary sends (each records after its own send) —
+            // a known gap tracked in the live-feed tracker's follow-ups.
+            // `persist.write` never takes `inner`.
+            let mut guard = inner.lock().unwrap();
+            let sent = Self::try_write_stdin_locked(&mut guard, &line);
+            if sent.is_ok() {
+                persist.write(&line);
+            }
+            drop(guard);
+            match sent {
+                Ok(()) => {
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -667,11 +673,11 @@ impl PersistentSubprocessController {
                         "AskUserQuestion answer did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
                     );
                 }
-                Some(_) => tracing::warn!(
+                Err(ref e) if !e.contains("not running") => tracing::warn!(
                     block_id = %block_id,
                     "AskUserQuestion dead-air fallback: stdin send failed"
                 ),
-                None => tracing::warn!(
+                Err(_) => tracing::warn!(
                     block_id = %block_id,
                     "AskUserQuestion dead-air fallback skipped: process not running"
                 ),
@@ -754,17 +760,23 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            // One `inner` acquisition around the send AND its record: every
-            // other stdin write goes through `inner` too, so no other line can
-            // be sent — and so persisted — between this one's send and its
-            // record, and the transcript keeps delivery order (Codex review
-            // of #3703). `persist.write` never takes `inner`.
-            let guard = inner.lock().unwrap();
-            let stdin_tx = guard.stdin_tx.clone();
-            match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
-                    persist.write(&line);
-                    drop(guard);
+            // Through the same gated write as every other stdin line
+            // (`try_write_stdin_locked`: refused while spawning, restarting or
+            // stopping, and tracked into the resume retry batch), and recorded
+            // in the transcript only if it was written — under the same `inner`
+            // acquisition, so the dead-air fallbacks can't interleave with each
+            // other. Ordering against a concurrent ordinary send is the same as
+            // between two ordinary sends (each records after its own send) —
+            // a known gap tracked in the live-feed tracker's follow-ups.
+            // `persist.write` never takes `inner`.
+            let mut guard = inner.lock().unwrap();
+            let sent = Self::try_write_stdin_locked(&mut guard, &line);
+            if sent.is_ok() {
+                persist.write(&line);
+            }
+            drop(guard);
+            match sent {
+                Ok(()) => {
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -772,11 +784,11 @@ impl PersistentSubprocessController {
                         "AskUserQuestion decline did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
                     );
                 }
-                Some(_) => tracing::warn!(
+                Err(ref e) if !e.contains("not running") => tracing::warn!(
                     block_id = %block_id,
                     "AskUserQuestion deny dead-air fallback: stdin send failed"
                 ),
-                None => tracing::warn!(
+                Err(_) => tracing::warn!(
                     block_id = %block_id,
                     "AskUserQuestion deny dead-air fallback skipped: process not running"
                 ),
@@ -886,17 +898,23 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            // One `inner` acquisition around the send AND its record: every
-            // other stdin write goes through `inner` too, so no other line can
-            // be sent — and so persisted — between this one's send and its
-            // record, and the transcript keeps delivery order (Codex review
-            // of #3703). `persist.write` never takes `inner`.
-            let guard = inner.lock().unwrap();
-            let stdin_tx = guard.stdin_tx.clone();
-            match stdin_tx {
-                Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
-                    persist.write(&line);
-                    drop(guard);
+            // Through the same gated write as every other stdin line
+            // (`try_write_stdin_locked`: refused while spawning, restarting or
+            // stopping, and tracked into the resume retry batch), and recorded
+            // in the transcript only if it was written — under the same `inner`
+            // acquisition, so the dead-air fallbacks can't interleave with each
+            // other. Ordering against a concurrent ordinary send is the same as
+            // between two ordinary sends (each records after its own send) —
+            // a known gap tracked in the live-feed tracker's follow-ups.
+            // `persist.write` never takes `inner`.
+            let mut guard = inner.lock().unwrap();
+            let sent = Self::try_write_stdin_locked(&mut guard, &line);
+            if sent.is_ok() {
+                persist.write(&line);
+            }
+            drop(guard);
+            match sent {
+                Ok(()) => {
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -904,11 +922,11 @@ impl PersistentSubprocessController {
                         "tool-permission decision did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
                     );
                 }
-                Some(_) => tracing::warn!(
+                Err(ref e) if !e.contains("not running") => tracing::warn!(
                     block_id = %block_id,
                     "tool-permission dead-air fallback: stdin send failed"
                 ),
-                None => tracing::warn!(
+                Err(_) => tracing::warn!(
                     block_id = %block_id,
                     "tool-permission dead-air fallback skipped: process not running"
                 ),

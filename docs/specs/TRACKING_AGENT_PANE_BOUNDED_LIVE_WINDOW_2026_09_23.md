@@ -428,5 +428,16 @@ resolving the thunks inside the segment's root; regression tests in
   verified with a real signed-in agent on a dev build — the dev instance's
   agents had no credentials; the load-time roll-off was checked on real
   transcripts (a long pane opened at 4 turns).
+- **Send-and-record ordering across stdin writers** (found in review of
+  #3703): every persistent-controller path writes a stdin line and then
+  records it in the transcript as two steps — `send_message`'s
+  `DeliverDirect` (`deliver_direct`, then `persist_message_to_blockfile`),
+  the queue drain (`tx.send(..).await`, then persist), the muxbus path
+  (`append_delivered_message`) and the dead-air fallbacks. Two writers
+  racing within that window can be recorded in the opposite order to the one
+  the CLI received. Rare (it needs two sends within milliseconds), but History
+  and conversation recovery would replay it that way. Fix: one per-controller
+  send-and-record ordering lock taken by every path, the async drain
+  included — its own PR, since it touches the hottest send path.
 - **Residual nodes after a clear:** a cleared pane can refill with a few
   transcript nodes; the bench records them (`residualNodes`).
