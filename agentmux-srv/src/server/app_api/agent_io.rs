@@ -752,6 +752,35 @@ mod tests {
         );
     }
 
+    /// Plain-`gh` guard: a spawn built through `build_persistent_spawn_env` —
+    /// the path `agentinput`, eager resume and `agent.send` all share — points
+    /// `GH_CONFIG_DIR` at the agent's login-free dir, overriding a value the
+    /// block's `cmd:env` carries (e.g. a human's real gh config).
+    #[tokio::test]
+    async fn an_agent_send_spawn_overrides_gh_config_dir_with_the_guard_dir() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store.apply_identity_schema_for_tests().unwrap();
+        let mut def = test_agent_def("uid-gh-y", "AgentY", "test-no-credentials", "agent", 1, "");
+        def.slug = "agenty".to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        let mut block = block_with(&store, "block-gh-y", "uid-gh-y");
+        block.meta.insert(
+            "cmd:env".to_string(),
+            serde_json::json!({"GH_CONFIG_DIR": "/home/human/.config/gh"}),
+        );
+        store.update(&mut block).unwrap();
+
+        let env = env_for(&store, &block).await;
+        let dir = std::path::PathBuf::from(env.get("GH_CONFIG_DIR").expect("always set"));
+        assert_eq!(dir.parent(), Some(crate::backend::gh_guard::guard_config_home().as_path()));
+        assert!(
+            dir.file_name().unwrap().to_string_lossy().starts_with("gh-"),
+            "{}",
+            dir.display()
+        );
+        assert_ne!(dir, std::path::PathBuf::from("/home/human/.config/gh"));
+    }
+
     /// A block with no row (a provider-key pane) gets neither.
     #[tokio::test]
     async fn an_agent_send_spawn_without_a_row_carries_no_uid_or_token() {

@@ -74,7 +74,7 @@ export async function checkNodejsForProvider(provider: Pick<ProviderDefinition, 
 /**
  * Return the AgentMux user-home base directory as an absolute path.
  *
- * Routed by the CEF host so per-agent paths (working dir, `GH_CONFIG_DIR`, …)
+ * Routed by the CEF host so per-agent paths (e.g. the working dir)
  * land in the right place for the instance type:
  *   - Portable: `<portable>/data`
  *   - Installed: `~/.agentmux`

@@ -528,10 +528,6 @@ pub(crate) async fn open_agent_impl(
                 for key in provider.unset_env {
                     env_vars.insert(key.to_string(), json!(""));
                 }
-                // Use AGENTMUX_CONFIG_HOME so portable installs stay self-contained.
-                // Falls back to ~/.agentmux/config for non-portable installs.
-                let config_home = std::env::var("AGENTMUX_CONFIG_HOME")
-                    .unwrap_or_else(|_| format!("{}/.agentmux/config", home));
                 // Auth dir — the DEFAULT provider auth lives in the shared,
                 // instance/channel/version-independent providers area so a single
                 // login is shared everywhere (the structural fix for the per-channel
@@ -587,8 +583,9 @@ pub(crate) async fn open_agent_impl(
                         }
                     }
                 }
-                // Agent identity
-                env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("{}/gh-{}", config_home, agent_slug)));
+                // Agent identity. `GH_CONFIG_DIR` is not persisted here: it is
+                // a reserved variable set on every spawn by `backend::gh_guard`,
+                // which this env reaches through `build_persistent_spawn_env`.
                 // Use stored slug (stable across renames) for muxbus routing;
                 // fall back to the computed slug derived from the display name.
                 let routing_id = if !agent.slug.is_empty() { &agent.slug } else { &agent_slug };

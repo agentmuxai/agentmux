@@ -61,7 +61,7 @@ pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String
 /// Get the AgentMux account-wide root (`~/.agentmux/`) — `user_home_dir`, set
 /// from `paths.home_dir` (sidecar.rs; the same root in portable / installed /
 /// override modes, not a per-channel or `<portable>/data` subdir). Used by the
-/// frontend for per-agent paths (working dir, `GH_CONFIG_DIR`) and as the root
+/// frontend for per-agent paths (e.g. the working dir) and as the root
 /// of the shared provider auth dir (`ensure_auth_dir`).
 pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let dir = state.user_home_dir.lock();

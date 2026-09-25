@@ -1046,6 +1046,9 @@ async fn handle_shell_create(
     if let Some(req_env) = req.env {
         effective_env.extend(req_env);
     }
+    // After the caller's overrides: a command run on an agent's behalf gets the
+    // same plain-`gh` guard as the agent itself, and `req.env` can't lift it.
+    crate::backend::gh_guard::apply_gh_guard(&mut effective_env);
 
     tracing::info!(
         block_id = %req.agent_block_id,

@@ -278,7 +278,8 @@ git add -p
 git commit -m "feat: description"
 git push -u origin agenta/feature-name
 
-# 8. Create PR
+# 8. Create PR. Agents: `gh-agent pr create ...` -- plain `gh` is logged out
+#    inside AgentMux agent processes and fails with "not logged in".
 gh pr create --title "Feature" --body "Description"
 ```
 

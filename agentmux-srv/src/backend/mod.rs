@@ -64,6 +64,7 @@ pub mod memory_reconcile;
 pub mod continuity_state;
 pub mod shellexec;
 pub mod transcript_backfill;
+pub mod gh_guard;
 pub mod pane_env;
 pub mod shellintegration;
 pub mod sysinfo;
