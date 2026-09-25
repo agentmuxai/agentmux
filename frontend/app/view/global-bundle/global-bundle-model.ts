@@ -279,9 +279,16 @@ export class GlobalBundleViewModel {
     }
 
 
+    /** Id of the newest `refresh()`; an older one that resolves later is
+     *  dropped, so overlapping `memories:changed` refreshes can't put stale
+     *  data (or stale content for the draft's conflict check) over fresh. */
+    private latestRefreshId = 0;
+
     async refresh(): Promise<void> {
+        const requestId = ++this.latestRefreshId;
         try {
             const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
+            if (requestId !== this.latestRefreshId) return;
             this.setAll(list);
             this.setError(null);
             this.setRefreshNonce((n) => n + 1);
@@ -293,6 +300,7 @@ export class GlobalBundleViewModel {
                 void this.draft.observeExternal(this.currentOpenDraft());
             }
         } catch (e) {
+            if (requestId !== this.latestRefreshId) return;
             this.setError(`Failed to load global bundles: ${(e as Error).message ?? e}`);
         }
     }
