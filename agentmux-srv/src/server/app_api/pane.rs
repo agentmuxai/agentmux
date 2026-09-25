@@ -465,7 +465,9 @@ pub(crate) async fn handle_quit_self(
     };
     let agent = req.auth.agent_id.clone();
     let detail = format!("{} | user said: {:?}", req.reason.trim(), req.user_instruction);
-    if self_quit::is_quitting(&block_id) {
+    // Scheduled, closing, or a user-override window that already ran out.
+    let under_way = crate::sagas::pending_shutdown::active_for(&block_id).is_some_and(|v| v.status == "proceeding");
+    if self_quit::is_quitting(&block_id) || under_way {
         return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
     }
     let provenance = crate::backend::blockcontroller::get_controller(&block_id).and_then(|c| c.turn_provenance());

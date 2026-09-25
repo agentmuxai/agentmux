@@ -55,6 +55,8 @@ struct Entry {
     view: PendingView,
     kept: Arc<tokio::sync::Notify>,
     finished_at_ms: Option<i64>,
+    /// Taken when the window runs out and the shutdown begins.
+    action: Option<Action>,
 }
 
 static ENTRIES: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
@@ -71,29 +73,32 @@ fn prune(map: &mut HashMap<String, Entry>, now: i64) {
     map.retain(|_, e| e.finished_at_ms.is_none_or(|t| now - t < KEEP_FINISHED_MS));
 }
 
-/// The request still pending for this block, if any.
-pub fn pending_for(block_id: &str) -> Option<PendingView> {
-    entries().values().find(|e| e.view.block_id == block_id && e.view.status == "pending").map(|e| e.view.clone())
+fn is_active(status: &str) -> bool {
+    matches!(status, "pending" | "proceeding")
+}
+
+/// The request for this block still waiting on the user or already under
+/// way, if any.
+pub fn active_for(block_id: &str) -> Option<PendingView> {
+    entries().values().find(|e| e.view.block_id == block_id && is_active(e.view.status)).map(|e| e.view.clone())
 }
 
 pub fn status(request_id: &str) -> Option<PendingView> {
     entries().get(request_id).map(|e| e.view.clone())
 }
 
-/// `pending` → `to`, atomically: exactly one of the window running out and
-/// the user's Keep running wins (ReAgent P1 on #3789 — checking and setting
-/// under separate locks let a late check see `pending` after a keep).
-fn transition(request_id: &str, to: &'static str) -> bool {
+/// `pending` → `proceeding`, atomically, handing over the action to run:
+/// exactly one of the window running out and the user's Keep running wins
+/// (ReAgent P1 on #3789 — checking and setting under separate locks let a
+/// late check see `pending` after a keep).
+fn begin(request_id: &str) -> Option<Action> {
     let mut map = entries();
     match map.get_mut(request_id) {
         Some(e) if e.view.status == "pending" => {
-            e.view.status = to;
-            if to != "proceeding" {
-                e.finished_at_ms = Some(now_ms());
-            }
-            true
+            e.view.status = "proceeding";
+            e.action.take()
         }
-        _ => false,
+        _ => None,
     }
 }
 
@@ -123,7 +128,9 @@ fn notify_router(state: &AppState) -> Option<Arc<crate::backend::notify::router:
 }
 
 /// Ask to shut `block_id` down, subject to the user's override. A request
-/// already pending for the block is returned as is: the clock never restarts.
+/// already pending — or under way — for the block is returned as is: the
+/// clock never restarts, and no second window opens beside it (ReAgent P1 on
+/// #3789: a second banner's Keep running could not stop the first).
 pub fn request(state: &AppState, block_id: &str, by: &str, via: &str, reason: &str, action: Action) -> PendingView {
     request_within(state, block_id, by, via, reason, action, OVERRIDE_WINDOW)
 }
@@ -140,7 +147,7 @@ fn request_within(
     let view = {
         let mut map = entries();
         prune(&mut map, now_ms());
-        if let Some(existing) = map.values().find(|e| e.view.block_id == block_id && e.view.status == "pending") {
+        if let Some(existing) = map.values().find(|e| e.view.block_id == block_id && is_active(e.view.status)) {
             return existing.view.clone();
         }
         let view = PendingView {
@@ -153,7 +160,10 @@ fn request_within(
             status: "pending",
             error: None,
         };
-        map.insert(view.request_id.clone(), Entry { view: view.clone(), kept: Arc::new(tokio::sync::Notify::new()), finished_at_ms: None });
+        map.insert(
+            view.request_id.clone(),
+            Entry { view: view.clone(), kept: Arc::new(tokio::sync::Notify::new()), finished_at_ms: None, action: Some(action) },
+        );
         view
     };
     // The banner (persisted, so a window opened during the countdown shows it
@@ -170,7 +180,7 @@ fn request_within(
     tracing::info!(block_id, by, via, request_id = %view.request_id, "shutdown pending: user has 15 s to keep it");
 
     let kept = entries().get(&view.request_id).map(|e| e.kept.clone());
-    let (state, v, action) = (state.clone(), view.clone(), action);
+    let (state, v) = (state.clone(), view.clone());
     tokio::spawn(async move {
         if let Some(kept) = kept {
             tokio::select! {
@@ -178,9 +188,9 @@ fn request_within(
                 _ = kept.notified() => {}
             }
         }
-        if !transition(&v.request_id, "proceeding") {
+        let Some(action) = begin(&v.request_id) else {
             return; // kept by the user
-        }
+        };
         cleared(&state, &v, "proceeding");
         let outcome = run_action(&state, &v.block_id, action).await;
         let (status, error) = match outcome {
@@ -279,8 +289,19 @@ mod tests {
         assert_eq!(a.status, "pending");
         let b = request(&state, "blk-p1", "cron", "QuitSelf", "again", Action::SelfQuit { detail: String::new() });
         assert_eq!((b.request_id.as_str(), b.deadline_ms), (a.request_id.as_str(), a.deadline_ms), "never restarts the clock");
-        assert_eq!(pending_for("blk-p1").map(|v| v.request_id), Some(a.request_id.clone()));
+        assert_eq!(active_for("blk-p1").map(|v| v.request_id), Some(a.request_id.clone()));
         assert_eq!(keep(&state, "blk-p1", &a.request_id), "kept_by_user");
+    }
+
+    #[tokio::test]
+    async fn a_request_under_way_is_returned_too_so_no_second_window_opens() {
+        let state = test_state();
+        let a = request(&state, "blk-p3", "Korp", "QuitSelf", "done", Action::SelfQuit { detail: String::new() });
+        assert!(begin(&a.request_id).is_some(), "the window ran out");
+        let b = request(&state, "blk-p3", "Korp", "QuitSelf", "again", Action::SelfQuit { detail: String::new() });
+        assert_eq!((b.request_id.as_str(), b.status), (a.request_id.as_str(), "proceeding"));
+        assert_eq!(keep(&state, "blk-p3", &a.request_id), "too_late");
+        assert!(begin(&a.request_id).is_none(), "the action runs once");
     }
 
     #[tokio::test]
@@ -289,7 +310,7 @@ mod tests {
         let v = request(&state, "blk-p2", "Korp", "QuitSelf", "done", Action::SelfQuit { detail: String::new() });
         assert_eq!(keep(&state, "blk-p2", &v.request_id), "kept_by_user");
         assert_eq!(status(&v.request_id).unwrap().status, "kept_by_user");
-        assert_eq!(pending_for("blk-p2"), None);
+        assert_eq!(active_for("blk-p2"), None);
         assert_eq!(keep(&state, "blk-p2", &v.request_id), "too_late");
         assert_eq!(keep(&state, "some-other-block", &v.request_id), "too_late", "only the block it was for");
     }
