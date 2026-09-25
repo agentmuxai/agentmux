@@ -226,6 +226,76 @@ async fn a_pending_question_or_permission_keeps_the_gate_closed() {
     assert_eq!(queued(&c), 1);
 }
 
+/// The frame sequences recorded from Claude Code 2.1.280
+/// (`docs/specs/evidence/tool-wait-frame-order-claude-2.1.280.txt`), replayed
+/// through the reader's own parser and gate. `park` runs where the recorded
+/// `control_request` arrived.
+fn replay(c: &PersistentSubprocessController, frames: &[serde_json::Value], park: impl Fn(&PersistentSubprocessController, &serde_json::Value)) -> usize {
+    let mut released = 0;
+    for f in frames {
+        if f["type"] == "control_request" {
+            park(c, f);
+            continue;
+        }
+        if let Some(sig) = tool_wait_signal(f) {
+            if matches!(signal(c, sig), DeferredFlush::Released(_)) {
+                released += 1;
+            }
+        }
+    }
+    released
+}
+
+fn msg_start() -> serde_json::Value {
+    json!({"type": "stream_event", "event": {"type": "message_start"}})
+}
+fn text(t: &str) -> serde_json::Value {
+    json!({"type": "assistant", "message": {"content": [{"type": "text", "text": t}]}})
+}
+fn tool(name: &str) -> serde_json::Value {
+    json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t", "name": name, "input": {}}]}})
+}
+fn stop_tool_use() -> serde_json::Value {
+    json!({"type": "stream_event", "event": {"type": "message_delta", "delta": {"stop_reason": "tool_use"}}})
+}
+
+/// Real order for a question: the tool call, then its `control_request`, then
+/// the `message_delta`. Nothing is written.
+#[tokio::test]
+async fn the_recorded_question_sequence_releases_nothing() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("jekt".to_string()).unwrap();
+    let frames = [
+        msg_start(), text("one short sentence"), tool("AskUserQuestion"),
+        json!({"type": "control_request", "request_id": "r1"}),
+        stop_tool_use(),
+    ];
+    let released = replay(&c, &frames, |c, _| {
+        c.inner.lock().unwrap().pending_questions.insert("t".to_string(), ("r1".to_string(), json!({})));
+    });
+    assert_eq!(released, 0);
+    assert!(rx.try_recv().is_err());
+    assert_eq!(queued(&c), 1);
+}
+
+/// Real order for two parallel calls: both tool lines, then one `message_delta`.
+/// Exactly one message is written, then the next message starts a new wait.
+#[tokio::test]
+async fn the_recorded_parallel_tools_sequence_releases_exactly_one() {
+    let (c, mut rx) = busy_controller();
+    c.send_user_message("first".to_string()).unwrap();
+    c.send_user_message("second".to_string()).unwrap();
+    let frames = [msg_start(), text("both at once"), tool("Bash"), tool("Bash"), stop_tool_use()];
+
+    assert_eq!(replay(&c, &frames, |_, _| {}), 1);
+    assert!(rx.try_recv().unwrap().contains("first"));
+    assert!(rx.try_recv().is_err(), "the second waits for the next wait");
+
+    let next = [msg_start(), text("Done."), tool("Bash"), stop_tool_use()];
+    assert_eq!(replay(&c, &next, |_, _| {}), 1);
+    assert!(rx.try_recv().unwrap().contains("second"));
+}
+
 /// A leftover line from a replaced process must not open the gate on the new
 /// one, or write into its stdin.
 #[tokio::test]

@@ -300,6 +300,14 @@ not recognise leaves the state unchanged, and the default is `Writing`. Because 
 `message_delta`, a CLI run without `--include-partial-messages` never opens a tool wait and simply
 delivers at the turn boundary, as before; both persistent Claude launch paths pass that flag.
 
+**Observed order (Claude Code 2.1.280).** In a probe with the persistent launch args
+(`docs/specs/evidence/tool-wait-frame-order-claude-2.1.280.txt`), every `tool_use` line, and for
+AskUserQuestion the `control_request`, arrived before the `message_delta` that opens the wait; one
+`message_delta` closed a message holding two parallel calls. A message written at that
+`message_delta` was followed: both tools finished and the reply ended with the requested word.
+One run per case, not a documented guarantee, so the design does not depend on the order: `Blocked`
+comes from the tool call's own line and `pending_questions` is checked too.
+
 **One per wait, not a burst.** Writing message #2 in the same wait as #1 is the burst §4.4 forbids.
 The next message goes out at the next tool wait or the turn boundary.
 
