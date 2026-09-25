@@ -589,7 +589,7 @@ should be treated as a schema reset.
 | 5a | Fix the transcript address at the source: one authoritative stream per pane, a **generation** that changes whenever it is replaced, deleted or re-sourced, and the **absolute line index** (of that stream) on every live event, including records written today without an event. Line-count and range-read responses carry the generation. | Backend (+ event type) |
 | 5b | Positional ids `G<gen>L<line>[.k]` for counter-minted kinds only; `src` / `endLine` / `turn`; replay flushes like live; `skipIds` removed; persisted collapse/pin reset; snapshot v1 treated as a schema reset. | Frontend parser |
 | 5c | Parser and translator `checkpoint()` / `restore()` with the completeness test; checkpoints persisted per block (needs an append RPC, added in 5a or here). | Frontend (+ RPC) |
-| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. *Revised by §6.9:* user messages go into the transcript itself (#3701 for the subprocess controller; ACP and the Codex app-server controller still to do), AskUserQuestion answers need nothing (already in the tool result) — the journal is for in-pane shells only. | Frontend + backend |
+| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. *Revised by §6.9:* user messages go into the transcript itself (#3701 for the subprocess controller; ACP and the Codex app-server controller still to do), AskUserQuestion answers need no journal (already in the tool result; the dead-air re-delivery is written to the transcript since #3703) — the journal is for in-pane shells only. | Frontend + backend |
 | 5e | Accepted ranges and the replay filter (§6.3.3). | Frontend |
 
 Order: 5d's Gemini echo fix can land any time (shipped in #3620); 5a before
@@ -1252,6 +1252,11 @@ last turn can't leave overdue turns resident waiting for a next trigger
   and the client-side auto-fill note are optimistic — and those fields are
   never cleared, so blocking on them would keep every such turn forever.
   Rebuilding the styled rendering on replay is a parser follow-up.
+  The one path where the CLI writes no tool result — the dead-air fallback
+  that re-sends the answer (or a decline, or a tool-permission decision) as a
+  follow-up stdin line when the CLI abandoned the pending call — now writes
+  that line to the transcript too, like every other stdin line (#3703, Codex
+  review), so every answer path is durable.
 - **A blocked turn is never rolled off — and does not stop the others.** It
   stays where it is; durable finished turns before and after it still roll
   off. Removing from the middle is as safe as removing a prefix here: the
