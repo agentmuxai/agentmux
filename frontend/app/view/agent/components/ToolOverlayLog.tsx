@@ -50,6 +50,20 @@ interface ToolOverlayLogProps {
     dispatchMatch?: AgentDispatch;
 }
 
+/** Same window as the pane's own (`AgentDocumentVirtualList.tsx`'s
+ *  USER_INPUT_WINDOW_MS): how long after the last user scroll input a scroll
+ *  event still counts as the user's. Not imported, to keep this component
+ *  free of the virtual list's module graph. */
+const USER_INPUT_WINDOW_MS = 250;
+/** Re-attach when a user scroll ends this close to the bottom — the pane's
+ *  REATTACH_PX (pane spec §5.5); not 1 px, for fractional positions at
+ *  non-100% zoom. */
+const REATTACH_PX = 24;
+/** Coarse tool kinds whose finished preview is a document (file / diff),
+ *  read from the top rather than followed at the bottom. */
+const DOCUMENT_KINDS = new Set<string>(["Read", "Write", "Edit"]);
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+
 const KIND_CLASS: Record<string, string> = {
     stdout: "agent-tool-log-line--stdout",
     stderr: "agent-tool-log-line--stderr",
@@ -133,16 +147,6 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         return "empty";
     };
 
-    // Auto-stick to bottom while the user hasn't scrolled away. The
-    // threshold is forgiving — within 40px of the bottom counts as
-    // "still at bottom" so a single mousewheel tick doesn't unstick.
-    let stickToBottom = true;
-    const onScroll = () => {
-        if (!scrollRef) return;
-        const dist = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
-        stickToBottom = dist < 40;
-    };
-
     // Scroll-chaining handoff to the outer pane (SPEC_TOOL_PREVIEW_SCROLL_
     // CHAINING_2026_07_03.md Phase 2). This box carries `overscroll-behavior:
     // contain` (_tool-overlay-portal.scss) so the browser's native chaining —
@@ -207,27 +211,155 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         onCleanup(() => mo.disconnect());
     });
 
-    createEffect(() => {
-        // Re-read chunks and panelHidden to register both as reactive deps.
-        // panelHidden must be read here (not inside the RAF callback) so the
-        // effect re-fires when the panel expands even after streaming has ended
-        // and chunks() is no longer changing.
-        chunks();
-        const hidden = panelHidden();
-        if (stickToBottom && scrollRef) {
-            // Wait one frame for the DOM to flush before measuring.
-            // Re-check scrollRef + isConnected because a Show-branch
-            // flip during the same RAF window can detach the element
-            // out from under us. Mutating scrollTop on a detached node
-            // raised the `replaceChild` reconciliation race that
-            // crashed v0.33.799. Guard panelHidden to avoid forcing
-            // layout on a content-visibility:hidden subtree.
-            requestAnimationFrame(() => {
-                if (scrollRef && scrollRef.isConnected && !hidden) {
-                    scrollRef.scrollTop = scrollRef.scrollHeight;
-                }
-            });
+    // Follow the latest output: the agent pane's FOLLOWING / DETACHED model
+    // (SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md §5), local to
+    // this scroller until that spec's shared follow controller exists.
+    // SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §3.
+    //
+    // - FOLLOWING pins to the bottom on every content or box resize (the
+    //   ResizeObserver below). The old code pinned once, one frame after each
+    //   node update, and never again: a result that kept growing after that
+    //   frame (async syntax highlighting, late renderers, the height FLIP)
+    //   was left with its bottom out of view once updates stopped — the
+    //   "wanders to the middle" report.
+    // - Only the user can detach. A scroll with no wheel / touch / scrollbar /
+    //   scroll-key input in the last USER_INPUT_WINDOW_MS never does, whatever
+    //   its geometry — a browser clamp, scroll anchoring, the output cap
+    //   trimming head lines. The old rule (any scroll > 40px from the bottom)
+    //   detached on all of those.
+    // - A user scroll that ends within REATTACH_PX of the bottom re-attaches.
+    // - Document-like previews (Read / Write / Edit) that haven't streamed
+    //   start DETACHED at the top: the start of a file or diff is where
+    //   reading begins. If one does start streaming, it follows.
+    const initialFollow = (): boolean =>
+        !(DOCUMENT_KINDS.has(props.node.tool) && dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length === 0);
+    let following = initialFollow();
+    // Detached only because of the document-preview default, not by the user.
+    let detachedByDefault = !following;
+    let lastScrollTop = 0;
+    let lastUserScrollInputAt = Number.NEGATIVE_INFINITY;
+    let scrollbarPointerHeld = false;
+    const hasRecentUserScrollInput = (): boolean =>
+        scrollbarPointerHeld || performance.now() - lastUserScrollInputAt <= USER_INPUT_WINDOW_MS;
+
+    // One line per state change — `muxlog fe grep scroll-follow`, same prefix
+    // as the pane's own follow log (I4 of the pane spec).
+    const setFollowing = (next: boolean, cause: string, detail?: string): void => {
+        detachedByDefault = false;
+        if (next === following) return;
+        following = next;
+        console.info(
+            "[scroll-follow]",
+            `tool=${props.node.id.slice(-7)}`,
+            `${next ? "detached→following" : "following→detached"} cause=${cause}${detail ? ` ${detail}` : ""}`,
+        );
+    };
+
+    // The only writer of scrollTop-to-bottom. Called from ResizeObserver
+    // callbacks (layout is already clean there) or, without RO, from a rAF.
+    // Re-checks isConnected: a Switch-branch flip can detach the element, and
+    // writing scrollTop on a detached node raised the `replaceChild`
+    // reconciliation race that crashed v0.33.799. Never touches a
+    // content-visibility:hidden subtree.
+    const pinToBottom = (): void => {
+        const el = scrollRef;
+        if (!el || !following || !el.isConnected || panelHidden()) return;
+        el.scrollTop = el.scrollHeight;
+        lastScrollTop = el.scrollTop;
+    };
+
+    const onScroll = (): void => {
+        const el = scrollRef;
+        if (!el || panelHidden()) return;
+        const top = el.scrollTop;
+        const gap = el.scrollHeight - el.clientHeight - top;
+        const movedUp = top < lastScrollTop;
+        lastScrollTop = top;
+        if (!hasRecentUserScrollInput()) return; // not the user: never changes follow
+        if (following && movedUp && gap > REATTACH_PX) {
+            setFollowing(false, scrollbarPointerHeld ? "user-scroll:scrollbar" : "user-scroll", `gap=${Math.round(gap)}px`);
+        } else if (!following && gap <= REATTACH_PX) {
+            setFollowing(true, "user-scroll-to-bottom");
         }
+    };
+
+    // Record user scroll input. Wheel and touch on the scroller; a pointer
+    // only when pressed on the scroller element itself (its scrollbar —
+    // content clicks target a child), held open until release; scroll keys
+    // while focus is inside. Target identity, not a hit-test: no layout read
+    // in an input handler.
+    onMount(() => {
+        const el = scrollRef;
+        if (!el) return;
+        const mark = (): void => {
+            lastUserScrollInputAt = performance.now();
+        };
+        const onPointerDown = (e: PointerEvent): void => {
+            if (e.target !== el) return;
+            scrollbarPointerHeld = true;
+            mark();
+        };
+        const onPointerUp = (): void => {
+            if (!scrollbarPointerHeld) return;
+            scrollbarPointerHeld = false;
+            mark(); // the drag's trailing scroll events are still the user's
+        };
+        const onKey = (e: KeyboardEvent): void => {
+            if (SCROLL_KEYS.has(e.key)) mark();
+        };
+        const opts: AddEventListenerOptions = { passive: true, capture: true };
+        const types = ["wheel", "touchstart", "touchmove"] as const;
+        for (const type of types) el.addEventListener(type, mark, opts);
+        el.addEventListener("pointerdown", onPointerDown, opts);
+        el.addEventListener("keydown", onKey, opts);
+        window.addEventListener("pointerup", onPointerUp, opts);
+        window.addEventListener("pointercancel", onPointerUp, opts);
+        onCleanup(() => {
+            for (const type of types) el.removeEventListener(type, mark, opts);
+            el.removeEventListener("pointerdown", onPointerDown, opts);
+            el.removeEventListener("keydown", onKey, opts);
+            window.removeEventListener("pointerup", onPointerUp, opts);
+            window.removeEventListener("pointercancel", onPointerUp, opts);
+        });
+    });
+
+    // Pin on every resize of the box (FLIP, max-height transition, pane or
+    // window resize, un-hiding) and of the content (new chunks, the result
+    // swap, late renders such as syntax highlighting).
+    let contentRef: HTMLDivElement | undefined;
+    const hasResizeObserver = typeof ResizeObserver !== "undefined";
+    onMount(() => {
+        const el = scrollRef;
+        if (!el || !hasResizeObserver) return;
+        const ro = new ResizeObserver(() => pinToBottom());
+        ro.observe(el);
+        if (contentRef) ro.observe(contentRef);
+        onCleanup(() => ro.disconnect());
+    });
+
+    createEffect(() => {
+        // Tracked: chunks, the rendered branch, and panelHidden — so this
+        // re-runs when the panel expands after streaming has ended.
+        chunks();
+        const b = branch();
+        panelHidden();
+        // A document preview that starts streaming follows like any other.
+        if (b === "streaming" && detachedByDefault) setFollowing(true, "streaming-started");
+        // Without ResizeObserver (jsdom), pin one frame after the DOM flush.
+        if (!hasResizeObserver && following) requestAnimationFrame(pinToBottom);
+    });
+
+    // A different tool node reusing this slot (streaming-buffer cap advance,
+    // see `lastNodeId` below) starts from its own initial state.
+    let followNodeId = props.node.id;
+    createEffect(() => {
+        const id = props.node.id;
+        if (id === followNodeId) return;
+        followNodeId = id;
+        following = initialFollow();
+        detachedByDefault = !following;
+        lastScrollTop = 0;
+        if (!following && scrollRef) scrollRef.scrollTop = 0;
     });
 
     // FLIP-style height transition when the rendered `<Switch>` branch below
@@ -358,6 +490,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
             ref={scrollRef}
             onScroll={onScroll}
         >
+            <div class="agent-tool-overlay-log-content" ref={contentRef}>
             <Switch>
                 <Match when={isStreaming() && hasChunks()}>
                     <ChunkList chunks={chunks()} />
@@ -372,6 +505,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
                     <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
                 </Match>
             </Switch>
+            </div>
         </div>
     );
 };

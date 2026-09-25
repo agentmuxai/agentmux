@@ -2,7 +2,7 @@
 
 **Author:** Agent4
 **Date:** 2026-09-25
-**Status:** proposed
+**Status:** implemented — Part A in PR #3800, Part B in PR #3801 (see B.4, "What was built")
 **Related:** `SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md` (the agent-pane
 follow work, PR #3652, tracking issue #3655 — Part B below is that spec's Phase 3,
 pulled forward), `SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md` (the FLIP height
@@ -136,20 +136,24 @@ once the tool finishes.
 
 ### B.2 Why it wanders — likely causes
 
-These come from reading the code. **None is confirmed by a live repro yet**; B.4 step 1
-exists to do that. They are ordered by how well they explain "ends up in the middle".
+These come from reading the code, and cause 1 and cause 3 are reproduced by unit tests
+(see the correction below). **None is confirmed by a live repro in the running app.**
+They are ordered by how well they explain "ends up in the middle".
 
-1. **No pin when the finished result replaces the live log.** The effect's only
-   dependencies are `chunks()` and `panelHidden()`. When a tool completes, the `<Switch>`
-   swaps `ChunkList` for `ToolOverlayResult`, a different DOM tree with a different
-   height, and nothing re-pins. `scrollTop` keeps its old number, which inside the new
-   content is usually somewhere in the middle. This fits the symptom best, since it
-   happens at the end of every streamed tool call.
-2. **Only chunk arrival triggers a pin.** Anything else that changes the content or the
-   box's height doesn't: async rendering inside the result (syntax highlighting, lazy
-   renderers), the 120 ms `max-height` transition, the FLIP animation, a pane or window
-   resize. The single `requestAnimationFrame` pin can also run before such a change
-   settles, landing short of the true bottom.
+> Correction (2026-09-25, found while implementing): an earlier revision of cause 1 said
+> nothing re-pins when the finished result replaces the live log. That was wrong. The
+> effect reads `props.node` through `chunks()`, so it re-runs on **every** node update,
+> including the swap, and schedules one `requestAnimationFrame` pin. The gap is what
+> happens after that one frame, which is cause 1 as now written.
+
+1. **One pin per node update, and never after the last one.** Each node update schedules
+   a single `requestAnimationFrame` pin, and nothing else ever pins. Content that keeps
+   changing size after that frame is left with its bottom out of view once updates stop.
+   That includes async rendering inside the result (syntax highlighting, lazy
+   renderers), the running→result FLIP, the 120 ms `max-height` transition, and a pane
+   or window resize. A tool's final update is its result, so this lands at the end of
+   every tool call. That fits "ends up in the middle" best.
+2. *(merged into 1)*
 3. **Detach is decided from geometry, not from the user.** Any `scroll` event more than
    40 px from the bottom turns follow off, whoever caused it: a browser clamp when
    content shrinks, a scroll-anchoring adjustment, the output cap
@@ -238,6 +242,24 @@ Replace the 40 px rule with a user-gesture gate, re-pin on a ResizeObserver, and
 on the branch swap. It is roughly a 60-line change and can later be deleted in favour of
 the primitive.
 
+**What was built (2026-09-25): the fallback.** On 2026-09-25 #3655 had no Phase 1 work,
+and there was no branch or PR for a follow controller. Building the shared reducer
+without Agent2 risked a competing design, so the change is local to `ToolOverlayLog.tsx`:
+- FOLLOWING / DETACHED / SUSPENDED as described in B.3.
+- Pins from a ResizeObserver on the scroller and on a new content wrapper
+  (`.agent-tool-overlay-log-content`), with a `requestAnimationFrame` fallback only where
+  ResizeObserver is missing (jsdom).
+- The same 250 ms user-input window and 24 px re-attach as the pane.
+- One `[scroll-follow] tool=…` line per state change.
+
+It replaces the old per-update `requestAnimationFrame` pin, so a streaming flush no longer
+schedules a layout read per mounted tool log. It is meant to be deleted when the shared
+controller exists (the 09-24 spec's Phase 3). A note was left on #3655.
+
+Step 1's **live** repro was not done: the running app here isn't built from the branch.
+Cause 1 and cause 3 are reproduced by unit tests instead. The `[scroll-follow] tool=`
+lines give the live confirmation once the change ships.
+
 ---
 
 ## 4. Tests
@@ -259,9 +281,10 @@ the primitive.
 FLIP tests and `AgentDocumentVirtualList.pin.test.tsx` already do.
 
 1. Streaming chunks keep the log pinned to the bottom.
-2. **Running → result swap while FOLLOWING ends at the bottom.** This is the regression
-   test for B.2 cause 1 and must fail on today's code.
-3. Content growing with no new chunk (a mocked RO callback) re-pins while FOLLOWING.
+2. Running → result swap while FOLLOWING ends at the bottom.
+3. **Content growing after the last node update (a mocked RO callback, no new node)
+   re-pins while FOLLOWING.** This is the regression test for B.2 cause 1 and must fail
+   on the old code.
 4. Wheel up → DETACHED; later chunks and the result swap do not move `scrollTop`.
 5. A `scroll` event 200 px from the bottom with **no** preceding gesture does not detach.
    This is the regression test for cause 3 and must fail on today's code.
@@ -275,6 +298,14 @@ FLIP tests and `AgentDocumentVirtualList.pin.test.tsx` already do.
 10. A Read/Write/Edit/Diff preview opens at the top (DETACHED), and a user scroll to its
     bottom attaches it.
 11. All existing FLIP and no-layout-read tests in the file still pass unchanged.
+
+As built: items 2 and 3 are one test ("re-pins when the result keeps growing after the
+last node update"). Item 9 has no separate remount test: a remount is a fresh mount, which
+items 1 and 10 already exercise. The old code was run against the new tests with a
+synchronous `requestAnimationFrame`, so its one-frame pin counted. Six of the eight fail
+there: late growth, a non-user scroll, re-attach, wheel hand-off, the Read-at-top default,
+and basic growth. The two that pass (detach on a user scroll, no reads while hidden) cover
+behaviour the old code already had.
 
 Then a live check with the telemetry from B.4 step 1: run a few long Bash calls, scroll
 up mid-stream in one of them, and confirm every `[scroll-follow]` transition has a user
