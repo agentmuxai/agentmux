@@ -400,6 +400,41 @@ mod tests {
         }
     }
 
+    /// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.2): agent WAN keys
+    /// live in the channel-wide `wan.db` now, and the same purge reaches it
+    /// through both deletion paths — the name's reuser gets a new key, and
+    /// the colliding live agent keeps its own.
+    #[test]
+    fn deleting_an_agent_deletes_its_wan_key_from_the_channel_wide_store() {
+        use crate::backend::storage::agents::test_agent_def;
+        for via_instance_delete in [false, true] {
+            let store = object_store();
+            let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
+            for (id, name, slug) in [
+                ("uid-first", "AgentY", "agenty"),
+                ("uid-second", "AGENTY", "agenty-2"),
+            ] {
+                let mut def = test_agent_def(id, name, "claude", "agent", 1, "");
+                def.slug = slug.to_string();
+                store.agent_def_insert(&mut def).unwrap();
+            }
+            for name in ["agenty", "agenty-2"] {
+                wan.agent_key_ensure(name, None).unwrap();
+            }
+            let old = wan.agent_key_load("agenty-2").unwrap().unwrap();
+
+            let deleted = if via_instance_delete {
+                store.instance_delete("uid-second").unwrap()
+            } else {
+                store.agent_def_delete("uid-second").unwrap()
+            };
+            assert!(deleted, "instance_delete={via_instance_delete}");
+            assert!(wan.agent_key_load("agenty-2").unwrap().is_none(), "instance_delete={via_instance_delete}");
+            assert!(wan.agent_key_load("agenty").unwrap().is_some(), "the live agent's WAN key stays");
+            assert_ne!(wan.agent_key_ensure("agenty-2", None).unwrap().public_key, old.public_key);
+        }
+    }
+
     /// Identity M4d-1 (spec §6.5.10): deleting an agent also deletes keys
     /// filed under the other names it answered to — display name,
     /// `instance_name`, and `agent.open`'s fallback id — except a name another
