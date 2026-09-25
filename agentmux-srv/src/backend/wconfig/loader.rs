@@ -38,7 +38,7 @@ pub fn build_default_config() -> FullConfigType {
 /// must be either a leaf (non-empty `blockdef.meta`) or a parent (non-empty
 /// `children`), never neither, never both. Logged as a startup warning, not
 /// a hard failure, matching how other config issues are handled.
-fn validate_widget_configs(widgets: &HashMap<String, WidgetConfigType>) {
+pub(crate) fn validate_widget_configs(widgets: &HashMap<String, WidgetConfigType>) {
     for (key, widget) in widgets {
         let has_blockdef = !widget.block_def.meta.is_empty();
         let has_children = !widget.children.is_empty();
@@ -307,6 +307,20 @@ mod tests {
     // embedded widgets.json actually loading without triggering a warning,
     // which build_default_config's own tests below check indirectly by
     // asserting on the real parsed shape.
+    /// Pane Tab contract Phase 6: a third-party widget's `module` must survive
+    /// parsing (serde drops unknown fields) and reach the frontend unchanged.
+    #[test]
+    fn test_widget_module_survives_parse_and_serialize() {
+        let raw = r#"{"label":"Hello","module":"hello/index.js","blockdef":{"meta":{"view":"ext:hello"}}}"#;
+        let widget: WidgetConfigType = serde_json::from_str(raw).expect("parses");
+        assert_eq!(widget.module, "hello/index.js");
+        let back = serde_json::to_value(&widget).expect("serializes");
+        assert_eq!(back["module"], "hello/index.js");
+        // A built-in widget without one serializes without the key.
+        let plain = serde_json::to_value(leaf_widget()).expect("serializes");
+        assert!(plain.get("module").is_none());
+    }
+
     #[test]
     fn test_validate_widget_configs_does_not_panic() {
         let widgets: HashMap<String, WidgetConfigType> = HashMap::from([

@@ -126,6 +126,321 @@ pub(crate) extern "C" fn swizzled_is_key_window(
     0
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) static ORIG_CAN_BECOME_KEY_WINDOW: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Swizzled NSWindow::canBecomeKeyWindow — same instance-aware pattern as
+/// isMainWindow. The overlay is created with `can_activate=0`, so Chromium's
+/// own implementation returns NO and the pane can never become the key window:
+/// AppKit then delivers every keystroke to the main window, and nothing typed
+/// ever reaches the page (confirmed live 2026-09-24 — after a real click on the
+/// pane, `canBecomeKeyWindow=0` and `NSApp.keyWindow` stayed the main
+/// CefNSWindow). Returning YES for the tagged overlay lets
+/// `make_pane_overlay_key` hand it key status on an explicit pane click/focus.
+/// See docs/specs/SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md.
+#[cfg(target_os = "macos")]
+pub(crate) extern "C" fn swizzled_can_become_key_window(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+) -> u8 {
+    if is_tagged_pane_overlay(this) { return 1; }
+    let orig = ORIG_CAN_BECOME_KEY_WINDOW.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void) -> u8 =
+            unsafe { std::mem::transmute(orig) };
+        return f(this, cmd);
+    }
+    0
+}
+
+/// True if `win` is a browser-pane overlay NSWindow (tagged by
+/// SetPaneBoundsViewsTask with PANE_OVERLAY_TAG_KEY).
+#[cfg(target_os = "macos")]
+pub(crate) fn is_tagged_pane_overlay(win: *mut std::ffi::c_void) -> bool {
+    extern "C" {
+        fn objc_getAssociatedObject(
+            obj: *mut std::ffi::c_void,
+            key: *const std::ffi::c_void,
+        ) -> *mut std::ffi::c_void;
+    }
+    if win.is_null() { return false; }
+    let key = &PANE_OVERLAY_TAG_KEY as *const u8 as *const std::ffi::c_void;
+    !unsafe { objc_getAssociatedObject(win, key) }.is_null()
+}
+
+// Tiny ObjC helpers for the key-window handoff below. UI thread only.
+#[cfg(target_os = "macos")]
+mod keywin_objc {
+    use std::ffi::c_void;
+    extern "C" {
+        fn objc_msgSend();
+        fn sel_registerName(n: *const i8) -> *const c_void;
+        fn objc_getClass(name: *const i8) -> *mut c_void;
+    }
+    pub(super) unsafe fn get(obj: *mut c_void, sel: &[u8]) -> *mut c_void {
+        if obj.is_null() { return std::ptr::null_mut(); }
+        let f: extern "C" fn(*mut c_void, *const c_void) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        f(obj, sel_registerName(sel.as_ptr() as _))
+    }
+    pub(super) unsafe fn send0(obj: *mut c_void, sel: &[u8]) {
+        if obj.is_null() { return; }
+        let f: extern "C" fn(*mut c_void, *const c_void) =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        f(obj, sel_registerName(sel.as_ptr() as _));
+    }
+    pub(super) unsafe fn ns_app() -> *mut c_void {
+        get(objc_getClass(b"NSApplication\0".as_ptr() as _), b"sharedApplication\0")
+    }
+    pub(super) unsafe fn key_window() -> *mut c_void {
+        get(ns_app(), b"keyWindow\0")
+    }
+    /// First `RenderWidgetHostViewCocoa` under `win`'s contentView (the page's
+    /// input view), or null.
+    pub(super) unsafe fn find_rwhvc(win: *mut c_void) -> *mut c_void {
+        extern "C" {
+            fn object_getClass(obj: *mut c_void) -> *mut c_void;
+            fn object_getClassName(cls: *mut c_void) -> *const i8;
+        }
+        let count: extern "C" fn(*mut c_void, *const c_void) -> usize =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let at: extern "C" fn(*mut c_void, *const c_void, usize) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let sel_count = sel_registerName(b"count\0".as_ptr() as _);
+        let sel_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
+        let mut stack = vec![get(win, b"contentView\0")];
+        while let Some(view) = stack.pop() {
+            if view.is_null() { continue; }
+            let name = object_getClassName(object_getClass(view));
+            if !name.is_null()
+                && std::ffi::CStr::from_ptr(name).to_bytes().windows(25).any(|w| w == b"RenderWidgetHostViewCocoa")
+            {
+                return view;
+            }
+            let subs = get(view, b"subviews\0");
+            if !subs.is_null() {
+                for i in 0..count(subs, sel_count) { stack.push(at(subs, sel_at, i)); }
+            }
+        }
+        std::ptr::null_mut()
+    }
+    pub(super) unsafe fn make_first_responder(win: *mut c_void, view: *mut c_void) -> bool {
+        let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> i8 =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        f(win, sel_registerName(b"makeFirstResponder:\0".as_ptr() as _), view) != 0
+    }
+}
+
+/// True if the current key window is a browser-pane overlay (the page holds the
+/// keyboard). UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn key_window_is_pane_overlay() -> bool {
+    is_tagged_pane_overlay(unsafe { keywin_objc::key_window() })
+}
+
+/// Only the pane overlay that is currently key may keep its page's
+/// RenderWidgetHostViewCocoa as first responder. Any other overlay is reset
+/// to its own window. Otherwise Chromium's CommandDispatcher, which offers an
+/// unhandled key re-sent to the main window to child windows via
+/// performKeyEquivalent:, hands it to that background page. The page reports
+/// it unhandled, it is re-sent again, and it loops forever (seen live: a key
+/// typed into the app after Cmd+L spun between the main window and another
+/// pane). UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn release_inactive_pane_responders() {
+    let overlays: Vec<usize> = PANE_OVERLAY_WIN_TO_BLOCK
+        .lock()
+        .map(|m| m.keys().copied().collect())
+        .unwrap_or_default();
+    if overlays.is_empty() { return; }
+    unsafe {
+        extern "C" {
+            fn object_getClass(obj: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+            fn object_getClassName(cls: *mut std::ffi::c_void) -> *const i8;
+        }
+        let key = keywin_objc::key_window() as usize;
+        for w in overlays {
+            if w == key { continue; }
+            let win = w as *mut std::ffi::c_void;
+            let fr = keywin_objc::get(win, b"firstResponder\0");
+            if fr.is_null() || fr == win { continue; }
+            let name = object_getClassName(object_getClass(fr));
+            if !name.is_null()
+                && std::ffi::CStr::from_ptr(name).to_bytes().windows(25).any(|x| x == b"RenderWidgetHostViewCocoa")
+            {
+                keywin_objc::make_first_responder(win, std::ptr::null_mut());
+            }
+        }
+    }
+}
+
+/// Make `win` (a main/app NSWindow) the key window if a pane overlay currently
+/// holds key status — the click-back-into-the-app half of the handoff. No-op
+/// when the key window is already something other than a pane overlay, so it
+/// never fights ordinary AppKit key changes. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn reclaim_key_for_window(win: *mut std::ffi::c_void) {
+    unsafe {
+        let key = keywin_objc::key_window();
+        if !is_tagged_pane_overlay(key) || key == win { return; }
+        let target = if !win.is_null() {
+            win
+        } else {
+            // Unknown target: the overlay's parent (the window it is docked
+            // in), else the app's main window.
+            let parent = keywin_objc::get(key, b"parentWindow\0");
+            if !parent.is_null() { parent } else { keywin_objc::get(keywin_objc::ns_app(), b"mainWindow\0") }
+        };
+        if target.is_null() { return; }
+        keywin_objc::send0(target, b"makeKeyWindow\0");
+        release_inactive_pane_responders();
+        tracing::info!(target = target as usize, "[pane-key] key handed back from pane overlay to app window");
+    }
+}
+
+/// `reclaim_key_for_window` scoped to one pane: hands the keyboard back to the
+/// app only if `pane_label`'s own overlay is the key window. Used when a DOM
+/// overlay is punched through that pane, so a menu or tooltip over pane A
+/// can't take the keyboard from pane B's page. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn reclaim_key_from_pane(pane_label: &str) {
+    let win = PANE_OVERLAY_WIN_TO_BLOCK
+        .lock()
+        .ok()
+        .and_then(|m| m.iter().find(|(_, (l, _, _))| l == pane_label).map(|(w, _)| *w));
+    if let Some(w) = win {
+        if unsafe { keywin_objc::key_window() } as usize == w {
+            reclaim_key_for_window(std::ptr::null_mut());
+        }
+    }
+}
+
+// A focus request for a pane whose overlay window isn't registered yet (the
+// frontend's claim-on-create can beat SetPaneBoundsViewsTask). Applied by
+// `apply_pending_pane_key` once that task has tagged + registered the overlay.
+#[cfg(target_os = "macos")]
+static PENDING_PANE_KEY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Give the pane's overlay window key status so keystrokes reach the page.
+/// Called on the UI thread for `browser_pane_focus` (pane click, keyboard pane
+/// selection, open-with-focus). If the overlay isn't registered yet, the
+/// request is parked and applied when it is. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn make_pane_overlay_key(block_id: &str) {
+    let entry = PANE_OVERLAY_WIN_TO_BLOCK
+        .lock()
+        .ok()
+        .and_then(|m| {
+            m.iter()
+                .find(|(_, (_, b, _))| b == block_id)
+                .map(|(w, _)| *w)
+        });
+    match entry {
+        Some(w) => {
+            if let Ok(mut p) = PENDING_PANE_KEY.lock() { *p = None; }
+            let w = w as *mut std::ffi::c_void;
+            unsafe {
+                if keywin_objc::key_window() != w {
+                    keywin_objc::send0(w, b"makeKeyWindow\0");
+                }
+                // Key status alone leaves the overlay window itself as first
+                // responder (seen live), so keyDown never reaches Chromium.
+                // Point it at the page's RenderWidgetHostViewCocoa (and the
+                // sendEvent: swizzle re-points it per key event, since Views
+                // resets it). Deliberately NOT Views request_focus() on the
+                // pane's BrowserView: the overlay view belongs to the MAIN
+                // widget's views hierarchy, so that made the main window's
+                // FocusManager route the main window's own keystrokes into
+                // the page (seen live: after Cmd+L, keys typed into the app
+                // went to the page and looped through redispatch).
+                let rwhvc = keywin_objc::find_rwhvc(w);
+                let responder_ok = !rwhvc.is_null()
+                    && (keywin_objc::get(w, b"firstResponder\0") == rwhvc
+                        || keywin_objc::make_first_responder(w, rwhvc));
+                let is_key = keywin_objc::key_window() == w;
+                if !is_key {
+                    // Registered but not shown yet (a focus request right after
+                    // creation, seen live): makeKeyWindow is a silent no-op on a
+                    // window that isn't on screen. Park it; the next
+                    // SetPaneBoundsViewsTask pass applies it once shown.
+                    if let Ok(mut p) = PENDING_PANE_KEY.lock() { *p = Some(block_id.to_string()); }
+                }
+                tracing::info!(
+                    block_id, overlay = w as usize, is_key, responder_ok,
+                    "[pane-key] made pane overlay key{}", if is_key { "" } else { " — not key yet, parked" }
+                );
+            }
+        }
+        None => {
+            if let Ok(mut p) = PENDING_PANE_KEY.lock() { *p = Some(block_id.to_string()); }
+            tracing::info!(block_id, "[pane-key] overlay not registered yet — key request parked");
+        }
+    }
+}
+
+/// Apply a parked `make_pane_overlay_key` request if it is for `block_id`.
+/// Called by SetPaneBoundsViewsTask right after it registers the overlay.
+#[cfg(target_os = "macos")]
+pub(crate) fn apply_pending_pane_key(block_id: &str) {
+    let pending = PENDING_PANE_KEY.lock().ok().map_or(false, |p| p.as_deref() == Some(block_id));
+    if pending {
+        make_pane_overlay_key(block_id);
+    }
+}
+
+/// Drop a parked key request for a pane that is going away / was defocused.
+#[cfg(target_os = "macos")]
+pub(crate) fn clear_pending_pane_key() {
+    if let Ok(mut p) = PENDING_PANE_KEY.lock() { *p = None; }
+}
+
+// Identities (pointer + timestamp) of the most recent key events dispatched
+// to a pane overlay, to recognise Chromium re-sending the same NSEvent (the
+// matching keyUp can land in between, hence a few slots). The timestamp
+// guards against a freed event's address being reused by a new one.
+#[cfg(target_os = "macos")]
+static RECENT_PANE_KEY_EVENTS: std::sync::Mutex<([(usize, u64); 8], usize)> =
+    std::sync::Mutex::new(([(0, 0); 8], 0));
+
+/// True if `event` is a key event recently dispatched to a pane overlay coming
+/// round again (a Chromium unhandled-key re-send); otherwise records it.
+/// UI thread only.
+#[cfg(target_os = "macos")]
+unsafe fn is_pane_key_redispatch(event: *mut std::ffi::c_void) -> bool {
+    use std::ffi::c_void;
+    extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
+    let ts: extern "C" fn(*mut c_void, *const c_void) -> f64 =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let id = (event as usize, ts(event, sel_registerName(b"timestamp\0".as_ptr() as _)).to_bits());
+    let Ok(mut recent) = RECENT_PANE_KEY_EVENTS.lock() else { return false };
+    if recent.0.contains(&id) {
+        return true;
+    }
+    let slot = recent.1;
+    recent.0[slot] = id;
+    recent.1 = (slot + 1) % recent.0.len();
+    false
+}
+
+#[cfg(target_os = "macos")]
+mod key_tasks {
+    use cef::*;
+    wrap_task! {
+        pub struct PaneMakeKeyTask { block_id: String }
+        impl Task {
+            fn execute(&self) { super::make_pane_overlay_key(&self.block_id); }
+        }
+    }
+}
+
+/// `make_pane_overlay_key` from any thread (IPC handlers run off the UI thread).
+#[cfg(target_os = "macos")]
+pub(crate) fn post_make_pane_overlay_key(block_id: &str) {
+    let mut task = key_tasks::PaneMakeKeyTask::new(block_id.to_string());
+    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+}
+
 /// Swizzled `RenderWidgetHostViewCocoa::shouldIgnoreMouseEvent:` — always returns NO.
 ///
 /// Chromium's implementation returns YES when `[self.window isMainWindow]` and
@@ -340,6 +655,13 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                     };
 
                     if !rwhvc.is_null() {
+                        // A click on the app's own UI takes the keyboard back
+                        // from a pane that holds it (make_pane_overlay_key), so
+                        // typing follows the click. Only on button-down; a
+                        // no-op unless a pane overlay is currently key.
+                        if ev_type == 1 || ev_type == 3 {
+                            reclaim_key_for_window(win);
+                        }
                         // Restore main browser focus so Blink doesn't drop the
                         // event (CEF calls set_focus(0) on the main browser
                         // whenever the overlay gains focus).
@@ -389,6 +711,12 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                         .ok()
                         .and_then(|m| m.get(&win_usize).cloned());
                     if let Some((_, block_id, weak_state)) = hit {
+                        // The user clicked into the page: give its overlay
+                        // key status BEFORE the click is dispatched, so the
+                        // keystrokes that follow reach the page instead of
+                        // the main window (and the click itself is handled as
+                        // a key-window click).
+                        make_pane_overlay_key(&block_id);
                         if let Some(state) = weak_state.upgrade() {
                             // Route to the pane's ACTUAL owning window, not
                             // "main" — see the identical fix + rationale in
@@ -412,6 +740,48 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Keyboard events for a pane overlay (10=keyDown 11=keyUp 12=flagsChanged).
+    unsafe {
+        extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
+        let get_usize: extern "C" fn(*mut c_void, *const c_void) -> usize =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let ev_type = get_usize(event, sel_registerName(b"type\0".as_ptr() as _));
+        if matches!(ev_type, 10 | 11 | 12) {
+            let win = keywin_objc::get(event, b"window\0");
+            release_inactive_pane_responders();
+            if is_tagged_pane_overlay(win) {
+                // A key the page didn't handle comes back here from Chromium
+                // (UnhandledKeyboardEventHandler → -[CommandDispatcher
+                // redispatchKeyEvent:] → [NSApp sendEvent:], seen live) as the
+                // SAME NSEvent. In the pane overlay that re-send is routed to
+                // the page again, reported unhandled again, and re-sent
+                // forever — a 100% CPU loop on any key a page ignores. The
+                // re-send exists to give menu key equivalents a chance, so do
+                // exactly that and stop; never route it back into the pane.
+                if ev_type != 12 && is_pane_key_redispatch(event) {
+                    if ev_type == 10 {
+                        let menu = keywin_objc::get(keywin_objc::ns_app(), b"mainMenu\0");
+                        if !menu.is_null() {
+                            let pke: extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> i8 =
+                                std::mem::transmute(objc_msgSend as *const c_void);
+                            pke(menu, sel_registerName(b"performKeyEquivalent:\0".as_ptr() as _), event);
+                        }
+                    }
+                    return;
+                }
+                // Make sure the page's RenderWidgetHostViewCocoa is the first
+                // responder before AppKit routes the event. Chromium Views
+                // resets the overlay's first responder to the window itself
+                // (seen live, right after make_pane_overlay_key), which
+                // swallows every keystroke — so re-point it per event.
+                let rwhvc = keywin_objc::find_rwhvc(win);
+                if !rwhvc.is_null() && keywin_objc::get(win, b"firstResponder\0") != rwhvc {
+                    keywin_objc::make_first_responder(win, rwhvc);
                 }
             }
         }

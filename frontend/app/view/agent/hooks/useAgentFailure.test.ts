@@ -337,7 +337,7 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
 });
 
 // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md: once agent tabs stay mounted
-// while backgrounded (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES), an unmount no
+// while backgrounded (keep-alive views, `isKeepAliveView`), an unmount no
 // longer implicitly kills this countdown — a hidden tab must not silently
 // fire doRetry() (re-sending a turn to the CLI) while nobody can see it.
 describe("useAgentFailure dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md)", () => {

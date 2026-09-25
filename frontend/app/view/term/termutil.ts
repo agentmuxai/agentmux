@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const DefaultTermTheme = "default-dark";
+import { detectAgentFromEnv } from "@/app/block/autotitle";
 import { colord } from "colord";
 
 // Last-resort palette for when `document`/CSS custom properties aren't
@@ -152,3 +153,15 @@ function computeTermThemeFromSettings(fullConfig: FullConfigType): [TermThemeTyp
 }
 
 export { computeTheme, computeTermThemeFromSettings, tryDeriveTermThemeFromCss };
+
+/**
+ * A terminal pane's header name: the agent it runs (from `cmd:env`), else
+ * nothing for a `cmd` controller, else "Terminal". Lives with the terminal
+ * since Pane Tab contract Phase 5 (it was a name check in BlockFrame).
+ */
+export function termViewName(meta: MetaType | undefined): string {
+    const agentId = detectAgentFromEnv(meta?.["cmd:env"] as Record<string, string> | undefined);
+    if (agentId) return agentId;
+    if (meta?.controller == "cmd") return "";
+    return "Terminal";
+}

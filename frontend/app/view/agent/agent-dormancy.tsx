@@ -6,7 +6,7 @@
  *
  * WHY THIS EXISTS
  *
- * Keep-alive (`pane-leaf-chrome.tsx`, `KEEP_ALIVE_TYPES`) switches pane-stack
+ * Keep-alive (`pane-leaf-chrome.tsx`, `isKeepAliveView`) switches pane-stack
  * members by **visibility, not existence** — a backgrounded agent tab stays
  * mounted under `visibility: hidden`. Combined with a stream path that has no
  * visibility gate, every backgrounded-but-streaming agent pane keeps parsing

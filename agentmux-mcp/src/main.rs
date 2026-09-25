@@ -1460,7 +1460,14 @@ async fn call_tool(
                 // (server/reactive.rs, `try_cloud_relay` — "Queued is not
                 // delivered"). Report which one happened.
                 if result.get("block_id").and_then(|v| v.as_str()).is_some() {
-                    Ok(format!("Delivered to {to} — injected into their conversation."))
+                    // srv holds automated messages while the target is
+                    // mid-turn (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) and
+                    // says so with `deferred`; "injected" would be untrue.
+                    if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
+                        Ok(deferred_delivery_text(&to))
+                    } else {
+                        Ok(format!("Delivered to {to} — injected into their conversation."))
+                    }
                 } else {
                     Ok(format!(
                         "QUEUED for {to} via the cloud relay — NOT yet delivered. \
@@ -3705,9 +3712,29 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+/// `SendMessage`'s answer when srv accepted the message but holds it until the
+/// target's current turn ends (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
+fn deferred_delivery_text(to: &str) -> String {
+    format!(
+        "QUEUED for {to} — they're mid-turn, so it has not reached them yet. \
+         Their AgentMux holds it and delivers it when their current turn \
+         ends. Don't resend it."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The text an agent reads back. Pinned because a lost `\` continuation
+    /// once turned the indentation into runs of spaces (ReAgent P1 on #3763).
+    #[test]
+    fn deferred_delivery_text_is_clean_and_names_the_target() {
+        let t = deferred_delivery_text("Camper");
+        assert!(t.starts_with("QUEUED for Camper — they're mid-turn"), "{t}");
+        assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+        assert!(t.ends_with("Don't resend it."), "{t}");
+    }
 
     /// Serve exactly one HTTP response on a fresh localhost port; return the
     /// base URL.

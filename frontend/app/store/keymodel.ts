@@ -1,6 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
 import {
     atoms,
@@ -36,7 +37,7 @@ function countTermBlocks(): number {
     let count = 0;
     for (const bcm of allBCMs) {
         const viewModel = bcm.viewModel;
-        if (viewModel.viewType == "term" && viewModel.isBasicTerm?.()) {
+        if (viewModel.isBasicTerm?.()) {
             count++;
         }
     }
@@ -202,8 +203,8 @@ function registerGlobalKeys() {
     function activateSearch(event: MuxKeyboardEvent): boolean {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm == null) return false;
-        // Ctrl+f is reserved in most shells
-        if (event.control && bcm.viewModel.viewType == "term") {
+        // Ctrl+f is reserved in most shells (`shellKeys`)
+        if (event.control && paneTabCapability(bcm.viewModel.viewType, "shellKeys")) {
             return false;
         }
         if (bcm.viewModel.searchAtoms) {

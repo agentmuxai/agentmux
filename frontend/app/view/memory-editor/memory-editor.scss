@@ -198,13 +198,16 @@
 }
 
 // Markdown's own root sets `height: 100%; overflow: hidden`, so the wrapper
-// is what fills the region.
+// is what fills the region. Body text is the Armory's menu size (the
+// Global/Personal sub-nav, card titles, the editor textarea) instead of
+// Markdown's 14px default; headings are em-based and scale with it.
 .memory-content-markdown {
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
     padding: var(--space-2);
-    font-size: 11px;
+    --markdown-font-size: var(--text-sm);
+    --markdown-fixed-font-size: var(--text-sm);
 }
 
 // Compound selector needed to beat the base `.content { overflow: scroll }`

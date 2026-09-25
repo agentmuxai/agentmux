@@ -13,6 +13,7 @@ Project documentation organized by type.
 | `cef-build/` | Guides for building the patched `libcef.so` from source |
 | `cef-patches/` | Patches applied to the vendored CEF source |
 | `debug/` | Screenshots and captures attached to a specific investigation |
+| `examples/` | Working samples for extension points, e.g. a third-party pane tab widget (`examples/widgets/`) |
 | `incident/` | Incident write-ups and recovery runbooks |
 | `investigations/` | Active bug investigations with reproduction steps |
 | `plans/` | Standalone implementation plans |

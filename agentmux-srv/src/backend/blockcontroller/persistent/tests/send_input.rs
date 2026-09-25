@@ -3972,3 +3972,26 @@ async fn a_dead_air_answer_during_a_committed_restart_is_not_recorded() {
         "nothing is recorded while a restart is committed"
     );
 }
+
+/// `SendMessage` tells its caller what happened instead of "injected" for
+/// both: mid-turn is `Deferred`, idle is `Sent`, idle behind an older queued
+/// message is still `Deferred` (FIFO sends the older one), and the operator's
+/// own `Immediate` input is always `Sent`.
+#[tokio::test]
+async fn send_outcome_reports_deferred_or_sent() {
+    let (c, _rx) = busy_controller();
+    assert_eq!(c.send_user_message_outcome("mid-turn".to_string()).unwrap(), SendOutcome::Deferred);
+
+    let (c, _rx) = idle_controller();
+    assert_eq!(c.send_user_message_outcome("idle".to_string()).unwrap(), SendOutcome::Sent);
+
+    let (c, _rx) = idle_controller();
+    enqueue_deferred(&c, "older");
+    assert_eq!(c.send_user_message_outcome("newer".to_string()).unwrap(), SendOutcome::Deferred);
+
+    let (c, _rx) = busy_controller();
+    assert_eq!(
+        c.send_user_message_outcome_with_policy("stop".to_string(), DeliverPolicy::Immediate).unwrap(),
+        SendOutcome::Sent
+    );
+}

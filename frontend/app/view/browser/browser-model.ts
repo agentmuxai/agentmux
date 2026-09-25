@@ -6,7 +6,6 @@
 // native CefBrowserView for sites that block iframes.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
@@ -85,12 +84,6 @@ const DEFAULT_BROWSER_URL = "https://agentmux.ai";
 
 export class BrowserViewModel implements ViewModel {
     viewType = "browser";
-    renderPaneChrome = renderPaneChromeShell;
-    // Suppresses BlockFrame's own inline header once chrome is hoisted —
-    // required whenever a view type is added to pane-leaf-chrome.tsx's
-    // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors
-    // AgentViewModel's/TermViewModel's identical field exactly.
-    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
     blockId: string;
     nodeModel: BlockNodeModel;
 

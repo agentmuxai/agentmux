@@ -14,6 +14,7 @@
  * which calls DeleteSubBlockCommand).
  */
 
+import { registerContextMenuRegion } from "@/app/block/context-menu-region";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms, getSettingsPrefixAtom, staticTabId, MOS } from "@/app/store/global";
 import { resolveTermScrollback } from "@/app/view/term/termscrollback";
@@ -22,9 +23,11 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
-import { sendWSCommand } from "@/app/store/ws";
+import { pushNotification } from "@/app/store/flash-notifications";
+import { BlockInputSender } from "@/app/view/term/block-input-sender";
 import { TermWrap } from "@/app/view/term/termwrap";
-import { stringToBase64 } from "@/util/util";
+import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
+import { buildShellDrawerClipboardItems } from "./shell-drawer-menu";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
@@ -433,6 +436,30 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         containerRef?.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => containerRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
 
+        // Right-click in the terminal: the drawer's own Copy/Paste, and no
+        // Split / Replace With… / agent-pane view items — those act on the
+        // whole agent pane and make no sense from a terminal. Magnify, Close
+        // and Inspect stay. See shell-drawer-menu.ts and
+        // SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25.md.
+        // Registered on the terminal surface only — the info panel above and
+        // the resize handle keep the default menu.
+        if (containerRef) {
+            onCleanup(
+                registerContextMenuRegion(containerRef, {
+                    omit: ["viewItems", "clipboard", "split", "replace"],
+                    // Reads `termWrap` lazily so it follows a re-attach.
+                    items: () =>
+                        buildShellDrawerClipboardItems({
+                            getTerminal: () => termWrap?.terminal,
+                            isAgentLocked: agentLocked,
+                            readClipboard: clipboardReadText,
+                            writeClipboard: clipboardWriteText,
+                            notify: pushNotification,
+                        }),
+                })
+            );
+        }
+
         void attachShell(subBlockId());
     });
 
@@ -641,6 +668,9 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             setZoomSeeded(true);
 
             if (isStale() || !containerRef) return;
+            // Ordered, chunked blockinput sender — the same one terminal panes
+            // use, so a large paste is paced instead of one oversized frame.
+            const inputSender = new BlockInputSender(id);
             const wrap = new TermWrap(
                 id,
                 containerRef,
@@ -653,10 +683,9 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 },
                 {
                     useWebGl: true,
-                    // Bare sendDataHandler mirroring TermViewModel's fast path
-                    // (termViewModel.ts:370-379) — blockinput, not the
-                    // controllerinput RPC, so consecutive keystrokes stay in
-                    // TCP order. No chunked-paste handling for this spike.
+                    // blockinput, not the controllerinput RPC, so consecutive
+                    // keystrokes stay in TCP order; large pastes are chunked
+                    // (BlockInputSender, shared with TermViewModel).
                     sendDataHandler: (data: string) => {
                         // Dropped, not queued: while the agent holds the
                         // lock, this shell's PTY is being actively driven
@@ -664,11 +693,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                         // keystrokes too would interleave both into the
                         // same input stream. See `agentLocked` above.
                         if (agentLocked()) return;
-                        sendWSCommand({
-                            wscommand: "blockinput",
-                            blockid: id,
-                            inputdata64: stringToBase64(data),
-                        } as BlockInputWSCommand);
+                        inputSender.send(data);
                     },
                 }
             );

@@ -70,6 +70,20 @@
     }
 }
 
+// The box around the content region, below the header (PaneChrome.tsx).
+// Always rendered, so switching between tabs of different view types never
+// moves the content in the DOM (Pane Tab contract Phase 4); a view type adds
+// its own class (terminal's `term-pane-stack-body`) and leading overlays. It
+// is the same flex column the content region used to sit in directly, and
+// the positioned ancestor for those overlays.
+.pane-stack-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .pane-stack-content {
     flex: 1 1 auto;
     min-height: 0;

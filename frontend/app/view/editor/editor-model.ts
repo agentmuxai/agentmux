@@ -32,7 +32,6 @@
 
 import type { EditorView } from "codemirror";
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
 import {
     EditorPaneEvent,
@@ -110,12 +109,6 @@ function installGlobalSinkOnce(): void {
 
 export class EditorViewModel implements ViewModel {
     viewType = "editor";
-    renderPaneChrome = renderPaneChromeShell;
-    // Suppresses BlockFrame's own inline header once chrome is hoisted —
-    // required whenever a view type is added to pane-leaf-chrome.tsx's
-    // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors
-    // AgentViewModel's/TermViewModel's identical field exactly.
-    noHeader = () => this.nodeModel.paneChromeHoisted?.() === true;
     blockId: string;
     nodeModel: BlockNodeModel;
 

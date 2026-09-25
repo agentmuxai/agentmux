@@ -8,6 +8,15 @@ import {
     FullBlockProps,
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
+import { adaptPaneTabInstance, makePaneTabHostContext } from "@/app/block/pane-tab-host";
+import {
+    getPaneTab,
+    resolvePaneTabView,
+    type PaneTabHostContext,
+    type PaneTabInstance,
+    type PaneTabManifest,
+} from "@/app/block/pane-tab-registry";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
@@ -27,7 +36,7 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
@@ -49,37 +58,115 @@ const READY_GATE_FADE_MS = 200;
  * itself applies, not just a raw `meta.view === "agent"` check.
  */
 export function resolveEffectiveViewType(blockView: string): string {
-    // Migration shims:
-    //   * v0.33.197: forge was folded into the agent pane; redirect old
-    //     "forge" blocks to "agent" so they keep rendering.
-    //   * Drone rename (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18): the
-    //     Workflows feature was renamed to Drone. Existing user panes
-    //     persist `meta.view: "workflows"` in the block store; the v10
-    //     SQLite migration moves the DAG tables but does NOT rewrite
-    //     block metadata, so redirect at the view-dispatch layer instead.
-    //
-    // "identity" was previously redirected here too, but as of PR-F.2
-    // (#748) Identity is once again a first-class pane — `view: "identity"`
-    // resolves to IdentityPaneViewModel via block-registry.ts.
-    //   * Armory rename (docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md):
-    //     the Trust Center pane was renamed to Armory. Existing user panes
-    //     persist `meta.view: "trust"`; this is a pure UI rename with no
-    //     SQLite migration, so redirect at the view-dispatch layer here
-    //     (same pattern as workflows→drone).
-    let effectiveView = blockView;
-    if (effectiveView === "forge") effectiveView = "agent";
-    if (effectiveView === "workflows") effectiveView = "drone";
-    if (effectiveView === "trust") effectiveView = "armory";
-    return effectiveView;
+    // Migration aliases (forge → agent, workflows → drone, trust → armory)
+    // are declared on each view's manifest in block-registry.ts.
+    return resolvePaneTabView(blockView);
 }
 
+// Each ViewModel's own reactive root, disposed with it (`disposeViewModel`).
+const viewModelRoots = new WeakMap<ViewModel, () => void>();
+
+/**
+ * Builds a ViewModel in its OWN reactive root. It is called from inside
+ * `Block`'s effect, and a constructor's memos/effects used to belong to that
+ * effect run, while its reads (block meta, config) subscribed the effect to
+ * them. The first meta change then re-ran the effect, which disposed the run
+ * and with it every memo of the cached, reused ViewModel: Sysinfo's plot type
+ * changed once and then froze. `createRoot` gives the constructor an owner
+ * that lives as long as the ViewModel, and runs it untracked.
+ * REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §3.
+ */
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     const effectiveView = resolveEffectiveViewType(blockView);
+    const manifest = getPaneTab(effectiveView);
     const ctor = getBlockViewClass(effectiveView);
-    if (ctor != null) {
-        return new ctor(blockId, nodeModel as any);
+    let disposeRoot!: () => void;
+    const vm = createRoot((dispose) => {
+        disposeRoot = dispose;
+        if (manifest?.create != null) {
+            // A native pane tab (Pane Tab contract Phase 2b): the instance
+            // gets a host context, never the raw nodeModel.
+            const ctx = makePaneTabHostContext(blockId, nodeModel);
+            return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
+        }
+        return ctor != null
+            ? (new ctor(blockId, nodeModel as any) as ViewModel)
+            : makeDefaultViewModel(blockId, effectiveView);
+    });
+    viewModelRoots.set(vm, disposeRoot);
+    return vm;
+}
+
+/**
+ * The ViewModel a preview mount (a drag-preview thumbnail, `<Block preview>`)
+ * renders its header with. A preview NEVER builds a live instance of the view's
+ * class: every tile keeps its preview mounted (TileLayout.core.tsx's
+ * `previewElement`), and constructors can have global side effects —
+ * BrowserViewModel registers itself in the block-id-keyed browser-pane store,
+ * replacing the real pane's projections, and its dispose unregisters that slot,
+ * which left a split browser pane black
+ * (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §2).
+ *
+ * Instead, reads go to the live ViewModel registered for the block when there
+ * is one (the thumbnail shows the pane's real title), else to the default
+ * ViewModel for the view type. Nothing is registered, published or disposed on
+ * the live one's behalf; the live ViewModel's cached `nodeModel` is never used
+ * for the preview's header (BlockFrame reads `paneChromeHoisted` off its own
+ * `nodeModel` prop).
+ */
+function makePreviewViewModel(blockId: string, blockView: string): ViewModel {
+    const effectiveView = resolveEffectiveViewType(blockView);
+    let disposeRoot!: () => void;
+    const fallback = createRoot((dispose) => {
+        disposeRoot = dispose;
+        return makeDefaultViewModel(blockId, effectiveView);
+    });
+    const live = (): ViewModel | undefined => {
+        const vm = getBlockComponentModel(blockId)?.viewModel;
+        return vm != null && vm.viewType === effectiveView ? vm : undefined;
+    };
+    const preview = new Proxy(fallback, {
+        get(target, prop) {
+            if (prop === "viewComponent") return null;
+            if (prop === "dispose") return undefined;
+            const lv = live() as unknown as Record<PropertyKey, unknown> | undefined;
+            if (lv != null && prop in lv) {
+                const value = lv[prop];
+                return typeof value === "function" ? value.bind(lv) : value;
+            }
+            return (target as unknown as Record<PropertyKey, unknown>)[prop];
+        },
+    });
+    viewModelRoots.set(preview, disposeRoot);
+    return preview;
+}
+
+/**
+ * `manifest.create(ctx)`, contained: it runs here, inside `Block`'s effect and
+ * outside the pane's `BlockErrorBoundary`, so a widget that throws while
+ * starting (Pane Tab contract Phase 6: third-party code) would otherwise take
+ * the whole tab down. It gets an instance that shows the error instead.
+ */
+function createPaneTabInstance(manifest: PaneTabManifest, ctx: PaneTabHostContext): PaneTabInstance {
+    try {
+        return manifest.create!(ctx);
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error(`[pane-tab] ${manifest.view} failed to start:`, e);
+        return {
+            component: () => (
+                <CenteredDiv>
+                    {manifest.label} failed to start: {message}
+                </CenteredDiv>
+            ),
+        };
     }
-    return makeDefaultViewModel(blockId, effectiveView);
+}
+
+function disposeViewModel(vm: ViewModel): void {
+    vm.dispose?.();
+    viewModelRoots.get(vm)?.();
+    viewModelRoots.delete(vm);
 }
 
 function getViewElem(
@@ -297,9 +384,9 @@ function Block(props: BlockProps): JSX.Element {
     // nor dispose a ViewModel it merely adopted from the registry.
     let registeredBcm: BlockComponentModel | null = null;
     const createdViewModels: ViewModel[] = [];
-    // A preview mount's own ViewModel, kept across effect re-runs so the
-    // effect does not strand a live one on every run (#3482 — see the preview
-    // branch below). Rebuilt only when the view type actually changes.
+    // A preview mount's stand-in ViewModel (`makePreviewViewModel`), kept
+    // across effect re-runs (#3482 — see the preview branch below). Rebuilt
+    // only when the view type actually changes.
     let previewViewModel: ViewModel | null = null;
     let previewViewType: string | null = null;
     createEffect(() => {
@@ -334,34 +421,19 @@ function Block(props: BlockProps): JSX.Element {
         //    just a broken header, chrome could render the PREVIEW's own
         //    ViewModel instance for the real, visible pane.
         // Fixed by never letting a preview mount touch either shared
-        // surface: it gets its own private ViewModel, created fresh here,
-        // disposed on its own unmount, and never registered or published
-        // anywhere another mount could adopt or overwrite.
+        // surface: it is never registered or published anywhere another mount
+        // could adopt or overwrite. It also never builds a live instance of
+        // the view's class (`makePreviewViewModel`): a private one still hit
+        // the view's OWN block-id-keyed stores (the browser pane store, the
+        // editor store — #3483, and the black split browser pane).
         if (props.preview) {
-            // REUSE across effect re-runs rather than rebuilding. This effect
-            // re-runs while the preview stays mounted — a block's meta
-            // changing is enough — and rebuilding here stranded the previous
-            // ViewModel alive, since the component-level onCleanup below only
-            // ever disposes the last one. For an editor preview every
-            // stranded instance keeps a live `editor:file_changed`
-            // subscription, so a pane open during file churn accumulated tens
-            // of thousands of them and took the renderer down (#3482,
-            // confirmed by the leak guard's stack pointing exactly here).
-            //
-            // Deliberately fixed by NOT creating the extra ViewModel, rather
-            // than by disposing it on re-run: `dispose()` is not safe to call
-            // for a preview. A preview shares its blockId with the real mount
-            // (tabcontent.tsx's renderPreview passes the same leaf nodeModel),
-            // and some view models additionally register themselves in their
-            // OWN blockId-keyed global store — `EditorViewModel.dispose()`
-            // calls `unregisterEditorPane(this.blockId)`, which would delete
-            // the slot the still-live real editor pane depends on, making its
-            // next dispatch throw "dispatch for unregistered pane". The
-            // surrounding comment's "never registered, never published" only
-            // ever held for the BCM registry, not for those. Caught by
-            // reagentx P1 on PR #3483.
+            // REUSE across effect re-runs rather than rebuilding (this effect
+            // re-runs while the preview stays mounted — a meta change is
+            // enough; rebuilding once stranded tens of thousands of live
+            // editor ViewModels, #3482). The preview ViewModel holds no live
+            // instance, so disposing it (on unmount) touches no store.
             if (previewViewModel == null || previewViewType !== view) {
-                previewViewModel = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+                previewViewModel = makePreviewViewModel(props.nodeModel.blockId, view);
                 previewViewType = view;
                 createdViewModels.push(previewViewModel);
             }
@@ -407,9 +479,39 @@ function Block(props: BlockProps): JSX.Element {
         // us, but never dispose someone else's live vm out from under them).
         const liveVm = getBlockComponentModel(props.nodeModel.blockId)?.viewModel;
         for (const vm of createdViewModels) {
-            if (vm !== liveVm) vm?.dispose?.();
+            if (vm && vm !== liveVm) disposeViewModel(vm);
         }
     });
+
+    // Pane Tab contract Phase 3b: the host fires a tab's activation hooks from
+    // the one visibility signal, on BOTH paths — a remount tab activates by
+    // mounting, a kept-alive one by leaving dormancy or a hidden window tab —
+    // and a tab that becomes visible in a focused pane gets focus. That used
+    // to exist only as the terminal's pane-chrome tab-switch handler, which a
+    // pane only had if its FIRST tab was a terminal (spec §2.3, §2.4 #2).
+    // A preview never activates anything.
+    if (!props.preview) {
+        const visibility = usePaneTabVisibility(props.nodeModel.blockId);
+        let activeVm: ViewModel | null = null;
+        const deactivate = () => {
+            const vm = activeVm;
+            activeVm = null;
+            vm?.onDeactivate?.();
+        };
+        createEffect(() => {
+            const vm = viewModel();
+            const active = vm != null && visibility() === "active";
+            if (activeVm === (active ? vm : null)) return;
+            untrack(() => {
+                deactivate();
+                if (!active) return;
+                activeVm = vm;
+                vm.onActivate?.();
+                if (props.nodeModel.isFocused?.()) vm.giveFocus?.();
+            });
+        });
+        onCleanup(() => untrack(deactivate));
+    }
 
     const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
 

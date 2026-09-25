@@ -413,6 +413,12 @@ impl BrowserPaneManager {
     /// concurrently tearing down is the exact race documented in
     /// `SPEC_BROWSER_PANE_LIFECYCLE.md` §5 race #2.
     pub fn focus(&self, block_id: &str, state: &Arc<AppState>) {
+        // macOS: the page only receives keystrokes while its overlay NSWindow
+        // is the key window — set_focus alone leaves AppKit delivering keys to
+        // the main window. Posted even when the browser isn't live yet: the UI
+        // task parks the request until the overlay is registered.
+        #[cfg(target_os = "macos")]
+        crate::ui_tasks::post_make_pane_overlay_key(block_id);
         if let Some(browser) = self.live_browser(state, block_id) {
             if let Some(host) = browser.host() {
                 host.set_focus(1);
@@ -625,6 +631,15 @@ wrap_task! {
                     let masked = crate::ui_tasks::pane_hole_mask::apply_pane_overlay_hole_mask(
                         wnum, pane_rect, &holes,
                     );
+                    if !holes.is_empty() {
+                        // A DOM menu/popover is open over this pane and the
+                        // whole overlay now ignores the mouse: the keyboard
+                        // belongs to that DOM overlay too (Escape to close,
+                        // typing into a popover field), not the page under it.
+                        // Only when THIS pane holds the keyboard — an overlay
+                        // over pane A must not take it from pane B's page.
+                        crate::ui_tasks::reclaim_key_from_pane(&label);
+                    }
                     if masked {
                         controller.set_visible(1);
                     } else {

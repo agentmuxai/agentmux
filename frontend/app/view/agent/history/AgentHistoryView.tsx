@@ -44,7 +44,6 @@ import {
     untrack,
     type Accessor,
 } from "solid-js";
-import { isBlockDormant } from "@/app/store/block-component-registry";
 import { getFileSubject } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -53,7 +52,7 @@ import {
     unregisterPane as unregisterLayoutPane,
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
-import { useWindowTabHidden } from "@/app/workspace/window-tab-visibility";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { AgentDocumentView } from "../components/AgentDocumentView";
 import { HistoryParser } from "../parseHistoryLines";
 import {
@@ -183,9 +182,8 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         resp.stamps ?? new Array((resp.lines ?? []).length).fill(undefined);
 
     // ---- Publishing (spec §6.9: at most once a second, never while hidden) ----
-    const dormant = isBlockDormant(props.blockId);
-    const windowTabHidden = useWindowTabHidden();
-    const hidden = (): boolean => dormant() || (windowTabHidden?.() ?? false);
+    const visibility = usePaneTabVisibility(props.blockId);
+    const hidden = (): boolean => visibility() !== "active";
     let dirty = false;
     let lastPublishAt = 0;
     let publishTimer: ReturnType<typeof setTimeout> | undefined;

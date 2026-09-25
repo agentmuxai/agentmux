@@ -2,7 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { isCef, showJsContextMenu } from "./cef-api";
+
+// Track the menu's pane-overlay registrations (the airspace holes it punches
+// through browser panes) so the close paths can be checked for leaks.
+const overlayRegs = vi.hoisted(() => [] as { el: HTMLElement; released: boolean }[]);
+vi.mock("@/app/platform/pane-overlay", () => ({
+    registerPaneOverlay: (el: HTMLElement) => {
+        const reg = { el, released: false };
+        overlayRegs.push(reg);
+        return { update: () => {}, release: () => { reg.released = true; } };
+    },
+}));
+
+import { closeJsContextMenu, isCef, showJsContextMenu } from "./cef-api";
 
 // ── isCef — #52 reload lock-out fix ──────────────────────────────────────────
 //
@@ -203,5 +215,103 @@ describe("showJsContextMenu — submenu placement", () => {
         expect(menuEl.style.position).toBe("fixed");
         expect(menuEl.style.left).toMatch(/^-?\d+px$/);
         expect(menuEl.style.maxHeight).toMatch(/^\d+px$/);
+    });
+});
+
+// ── showJsContextMenu — pane airspace holes + dismissal ──────────────────────
+//
+// SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24: the menu and each submenu
+// register themselves as pane overlays (so the host punches a hole through any
+// browser pane under them — the auto-discovery service is Windows-only), and
+// every close path must release them, or the pane is left with a see-through,
+// click-through hole.
+
+describe("showJsContextMenu — pane overlay registration and close paths", () => {
+    beforeEach(() => {
+        closeJsContextMenu();
+        overlayRegs.length = 0;
+    });
+    afterEach(() => closeJsContextMenu());
+
+    const items: NativeContextMenuItem[] = [
+        { id: "reload", label: "Reload" },
+        {
+            id: "replace-with",
+            label: "Replace With...",
+            type: "submenu",
+            submenu: [{ label: "Terminal", id: "term" }],
+        },
+    ];
+
+    const open = (onClick: ((id: string) => void) | null = null) => {
+        showJsContextMenu(items, { x: 40, y: 40 }, onClick);
+        return document.getElementById("cef-context-menu-overlay")!;
+    };
+    const allReleased = () => overlayRegs.length > 0 && overlayRegs.every((r) => r.released);
+
+    test("registers the menu and each submenu as pane overlays", () => {
+        const overlay = open();
+        const els = overlayRegs.map((r) => r.el);
+        expect(els).toContain(overlay.querySelector(".menu:not(.sub-menu)"));
+        expect(els).toContain(overlay.querySelector(".sub-menu"));
+        // The full-window backdrop must never punch a hole (it would mask the whole pane).
+        expect(els).not.toContain(overlay);
+        expect(overlayRegs.some((r) => r.released)).toBe(false);
+    });
+
+    test("item click closes and releases", () => {
+        const onClick = vi.fn();
+        const overlay = open(onClick);
+        overlay.querySelector<HTMLElement>(".menu-item")!.click();
+        expect(onClick).toHaveBeenCalledWith("reload");
+        expect(overlay.isConnected).toBe(false);
+        expect(allReleased()).toBe(true);
+    });
+
+    test("backdrop mousedown closes and releases", () => {
+        const overlay = open();
+        overlay.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        expect(overlay.isConnected).toBe(false);
+        expect(allReleased()).toBe(true);
+    });
+
+    test("Escape closes and releases", () => {
+        const overlay = open();
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        expect(overlay.isConnected).toBe(false);
+        expect(allReleased()).toBe(true);
+    });
+
+    test("a click inside a browser pane (the bridge's synthetic body mousedown) closes it", () => {
+        const overlay = open();
+        document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        expect(overlay.isConnected).toBe(false);
+        expect(allReleased()).toBe(true);
+    });
+
+    test("mousedown inside the menu does not close it", () => {
+        const overlay = open();
+        overlay.querySelector<HTMLElement>(".menu-item")!
+            .dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        expect(overlay.isConnected).toBe(true);
+        expect(overlayRegs.some((r) => r.released)).toBe(false);
+    });
+
+    test("opening a new menu releases the previous menu's holes", () => {
+        open();
+        const first = overlayRegs.slice();
+        const second = open();
+        expect(first.every((r) => r.released)).toBe(true);
+        expect(second.isConnected).toBe(true);
+        expect(overlayRegs.slice(first.length).some((r) => r.released)).toBe(false);
+    });
+
+    test("listeners are removed after close — Escape later is a no-op", () => {
+        const overlay = open();
+        closeJsContextMenu();
+        expect(overlay.isConnected).toBe(false);
+        const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+        document.dispatchEvent(esc);
+        expect(esc.defaultPrevented).toBe(false);
     });
 });

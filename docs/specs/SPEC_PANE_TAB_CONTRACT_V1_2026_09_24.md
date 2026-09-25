@@ -2,7 +2,16 @@
 
 **Date:** 2026-09-24
 **Status:** active — Phase 0 (§1.5, the Help ghost) implemented in PR #3723;
-per-tab keep-alive (§5, decided) in PR #3725; Phases 1–6 not started.
+per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
+PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
+split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
+Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
+activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
+Phases 5a–5b (capabilities replace view-name checks) in #3765; 5c dropped
+(§4); Phase 6 (third-party widgets from the user's widgets.json) in #3767;
+Phase 2c part 1 (sysinfo, swarm, drone, warden, armory, media → native
+`create`) in the PR after it; 2c part 2 (editor, browser, term, agent) not
+started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -296,6 +305,29 @@ function registerPaneTab(manifest: PaneTabManifest): () => void; // returns unre
 6. **Capabilities replace view-name checks** in shared code (§2.4 #5).
 7. **Titles of unmounted tabs** come from the pure `tabTitle(meta)` first,
    and only then from the last `liveTitle` (fixes §2.4 #6).
+8. **The host owns an instance's reactive lifetime.** `create(ctx)` runs in a
+   root the host creates for that instance — untracked, so nothing the
+   instance reads while building subscribes the host's own effects — and the
+   host disposes that root together with `dispose()`. Before this, the legacy
+   path built ViewModels inside `Block`'s effect: the first meta change
+   re-ran the effect and killed every memo of the still-cached instance
+   (Sysinfo's plot type changed once, then froze; 13 view models exposed).
+   Implemented for legacy ViewModels in `block.tsx`'s `makeViewModel`
+   (PR #3754).
+9. **A preview never creates an instance.** A drag-preview thumbnail (mounted
+   for every tile, always) renders from the manifest (`label`, `icon`,
+   `tabTitle`) plus the live instance's `liveTitle` when there is one. An
+   instance's `create` may have global side effects keyed by block id — the
+   browser registered in its block-id-keyed store and unregistered it on
+   dispose, so a preview instance left a split browser pane black. Implemented
+   for legacy ViewModels in `block.tsx`'s `makePreviewViewModel`.
+10. **A block may be mounted more than once in quick succession** (split,
+    layout rebuild, hot reload). Any host-side resource keyed by block id — a
+    `nativeSurface` view's native page — belongs to the latest mount that
+    requested it; an older mount releases it only if it still owns it
+    (`use-pane-rect-sync.ts` `nativePaneOwners`).
+    REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md has the
+    evidence for 8–10.
 
 **For a future widget library:** a user widget is a trusted, locally
 installed ES module (decided, §5) whose default export is a
@@ -324,17 +356,191 @@ working throughout through a legacy adapter.
    `KEEP_ALIVE_TYPES`, aliases and `PaneTabDescriptor` from it. Migrate in
    this order: help, sysinfo, swarm, drone, warden, armory, media, editor,
    then browser, then term and agent.
+   - **2a (implemented):** `frontend/app/block/pane-tab-registry.ts` (pure,
+     imports no view) holds `PaneTabManifest`, `registerPaneTab` (returns
+     unregister; refuses a taken view or alias) and `legacyAdapter`.
+     `block-registry.ts` registers all 17 built-ins through `legacyAdapter`;
+     `getBlockViewClass`, `resolveEffectiveViewType`, `blockViewToIcon`/
+     `blockViewToName`, the keep-alive set (`isKeepAliveView`) and
+     `describePaneTab`'s descriptors all read the registry. The parallel
+     `registerPaneTabDescriptor` is gone — a descriptor is the manifest's
+     `tab`. `block-registry.test.ts` pins parity with every table replaced.
+     One deliberate difference: an alias now resolves for label and icon too
+     (a still-live `forge` block reads "Agent", not "forge").
+   - **2b (implemented):** the host's native path. A manifest has exactly
+     one of `create(ctx)` and `viewModelClass`. `makeViewModel` calls
+     `create` in the instance's own root (rule 8) with a
+     `PaneTabHostContext` — `blockId`, reactive `meta`, `setMeta`,
+     `isFocused`; no raw nodeModel, MOS or RpcApi — and
+     `pane-tab-host.tsx`'s `adaptPaneTabInstance` presents the
+     `PaneTabInstance` as the ViewModel the rest of the host consumes today.
+     Help is the pilot: `helpPaneTab` in `helpview.tsx`, its zoom read and
+     written through `ctx.meta`/`ctx.setMeta`.
+   - **2c:** the remaining views move to `create` as Phases 3–5 give them
+     what they reach around the contract for today (`ctx.visibility`,
+     per-active-tab chrome, capabilities) — migrating them first would only
+     re-home their `nodeModel` reach-ins. Order as above.
+     - **Sysinfo (implemented):** `sysinfoPaneTab("sysinfo" | "cpuplot")`
+       (sysinfo.tsx). Its model is built from `ctx` — every meta read is
+       `ctx.meta`, both plot-type writes are `ctx.setMeta` — and titles the
+       pane with the plot type (`liveTitle`). The contract grew two things it
+       needed: `PaneTabInstance.settingsMenu` (the header's Plot Type menu)
+       and the `connection` capability (the header's connection button).
+       `cpuplot`, the same view under an older name, now labels and icons
+       itself like sysinfo in its tab pill too (its header always did).
+     - **Swarm (implemented):** `swarmPaneTab` (swarm.tsx). Its model is
+       built from the block id (it never used its `nodeModel`); the view reads
+       and writes its own `term:zoom` through `ctx`; the instance forwards
+       `dispose` (the model's subscriptions and timers). The contract grew the
+       `noPadding` capability (full-bleed content).
+     - **Drone (implemented):** `dronePaneTab` (drone.tsx), keeping the
+       `workflows` alias. Its only own-block read, `frame:title`, comes from
+       `ctx.meta` and titles the pane (`liveTitle`); `dispose` is forwarded.
+     - **Warden and Armory (implemented):** `wardenPaneTab`, `armoryPaneTab`
+       (keeping the `trust` alias). Their models derive zoom, section (and
+       Armory's memory subsection) from `ctx.meta` and write through
+       `ctx.setMeta` via `model.setMeta`, so their views no longer call
+       `RpcApi` at all. Their memos had been parked in the per-block atom cache
+       (`useBlockAtom`) to survive the effect re-runs host rule 8 fixed; they
+       are plain memos in the instance's root now. The section names the pane
+       (`liveTitle`); the manifests carry the icons the headers always showed
+       (`shield-halved`, `vault`) and Armory gets its label.
+     - **Media (implemented):** `mediaPaneTab` (media.tsx). Its ViewModel was
+       only a title memo, so there is none now: the view reads and writes its
+       picked path through `ctx`, and `mediaTitle(meta)` (the file's name, or
+       "Media") titles the pane.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
    restore onto it. Make keep-alive per tab.
+   - **3a (implemented):** `usePaneTabVisibility(blockId)`
+     (`frontend/app/block/pane-tab-visibility.ts`) →
+     `"active" | "dormant" | "windowHidden"`, from pane-stack dormancy and a
+     new per-window-tab `useWindowTabDisplayed` (`workspace.tsx` provides
+     it; true in BOTH window-tab modes, and outside any window tab). A native
+     instance gets it as `ctx.visibility`. The browser's rect sync collapses
+     on anything but `"active"` — replacing its DOM walk for hidden-tab
+     markers (`isInsideHiddenTabContent`), the `data-tab-hidden-laid-out`
+     marker and the `agentmux:tab-visibility-changed` event. The agent pane's
+     and history view's render pausing read it instead of `isBlockDormant` +
+     `useWindowTabHidden` (removed). With inactive tabs kept laid out (the
+     default) this is the same behavior; with them not laid out, a
+     window-hidden agent pane now also pauses rendering, which
+     `content-visibility` already skipped. Keep-alive is per tab since #3725.
+   - **3b (implemented):** `Block` (block.tsx, real mounts only) fires a
+     tab's `onActivate`/`onDeactivate` from the visibility signal on both
+     paths — a remount tab activates by mounting, a kept-alive one by leaving
+     dormancy or a hidden window tab; unmounting while visible deactivates —
+     and a tab that becomes visible in a focused pane gets `giveFocus()`.
+     That hand-off used to be the terminal's pane-chrome `onActivate`, so a
+     pane only had it if its FIRST tab was a terminal (§2.4 #2), and then for
+     every tab; it's gone, and every pane has it. `ViewModel` and
+     `PaneTabInstance` gain `onActivate`/`onDeactivate`. The agent's question
+     auto-timeout and failure auto-retry now pause whenever the tab isn't
+     visible (their stated intent: never fire invisibly), not only while it's
+     a dormant pane-stack member.
 4. **Per-active-tab chrome:** `PaneChromeModel` becomes `instance.chrome`,
    read for the active tab.
+   - **Implemented** as a manifest field rather than an instance one:
+     `chrome?: (anchorBlockId, nodeModel) => PaneChromeModel`. A chrome model
+     is pane-level and creates signals of its own, so the chrome
+     (`PaneChrome.tsx`) builds each view type's model ONCE per pane, in its
+     own reactive scope, the first time one of its tabs is active, and reads
+     the model of the ACTIVE tab's view type reactively. Terminal and agent
+     register `buildTermPaneChromeModel` / `buildAgentPaneChromeModel` on
+     their manifests; `ViewModel.paneChromeModel` and the terminal's
+     late-binding `setTermPaneChromeModel` are gone. Fixes §2.4 #2: a
+     terminal-first pane no longer gives an agent tab the terminal's
+     connection button, background or new-tab cwd, and a Help-first pane
+     with a terminal tab gets them while the terminal is active.
+   - `wrapContent` is replaced by `bodyClass` + `renderBehindContent`: the
+     chrome always renders a body box (`.pane-stack-body`, the same flex
+     column the content region used to sit in) around a stable content
+     region, so a switch between view types changes classes and leading
+     overlays but never moves the kept-alive content in the DOM (re-wrapping
+     would, and a moved subtree can pause media or reset renderers).
 5. **Capabilities** replace the view-name checks (§2.4 #5). On the backend,
    `defaultMeta` comes from the manifest instead of the `pane.rs` allow-list.
+   - **5a (implemented): header and frame.** `PaneTabCapabilities` gains
+     `nativeSurface` (browser), `header: "surface"` (agent: an uncolored
+     header keeps the theme's block surface instead of the fixed default
+     color), `headerMic: { title }` (term: the header mic and its tooltip —
+     agent takes voice beside its composer, so it doesn't declare it),
+     `statsBadgeSetting` (term: `term:showstatsbadge`) and `hueBorder` (term:
+     `frame:hue` colors the active border). `paneTabCapability(view, key)`
+     reads one; an alias carries its view's. `blockframe.tsx`'s and
+     `PaneChrome.tsx`'s seven view-name checks for these read the
+     capabilities; `block-registry.test.ts` pins that exactly the view types
+     the old checks named declare each one.
+   - **5b (implemented): input, zoom, new blocks.** `paneZoom: {
+     baseFontSize? }` replaces `zoom.ts`'s allowlist of views using
+     `term:zoom` (term, agent, swarm, editor, armory, warden — warden was once
+     missing from it by accident) and editor's hard-coded base size (13);
+     `acceptsInput` (term) is the pane menu's Paste rule
+     (`pane-actions.ts`); `shellKeys` (term) makes Ctrl+F search stand down
+     (`keymodel.ts`); `sharesCwd` (term) gives a new block the focused
+     block's `cmd:cwd` (`keymodel-blockcreate.ts`). The basic-terminal count
+     needs no capability — only the terminal implements `isBasicTerm`. The
+     terminal's env-derived header name moved into the terminal itself
+     (`termViewName`, termutil.ts, used by `TermViewModel.viewName`).
+     `splitDropsMeta` (agent: `AGENT_SPLIT_DROPPED_META`) lists the meta a
+     split must not copy — the split rule applied that blocklist only when
+     `view === "agent"`. No view-name check remains in shared header, frame, zoom, key or
+     pane-menu code; `command-registry.ts`/`keymodel-blockcreate.ts` still
+     *create* terminals by name, which is a choice of default, not a check.
+   - **5c (dropped, 2026-09-25):** backend `defaultMeta` from the manifest.
+     On inspection `pane.rs`'s `build_pane_meta` is not a defaults table but
+     validation of the agent-facing `pane.open`'s typed arguments (an editor
+     needs `file`, a browser `url`, a terminal takes `cwd`), and it only runs
+     when no `meta` is passed. With `meta`, `pane.open` is already generic —
+     that is how an agent opens any widget, including an `ext:` one — and the
+     backend can't see frontend manifests without a new sync channel nothing
+     else needs.
 6. **Third-party loading:** trusted, locally installed ES-module widgets
    listed in widgets.json, a shared Solid runtime, `apiVersion` checks and
    error boundaries. No sandbox in v1 (decided, §5).
+   - **Design (2026-09-25):**
+     - **Where a widget lives.** A `widgets.json` entry gains `"module"`: a
+       path to an ES module, relative to `~/.agentmux/widgets/` or absolute.
+       Its `blockdef.meta.view` must be `ext:<name>`. `WidgetConfigType`
+       (`wconfig/types.rs`) gets the field — serde otherwise drops it.
+     - **The user's widgets.json.** Widgets came only from the `widgets.json`
+       embedded at build time, so there was nowhere to add one. The user's
+       own `widgets.json` beside `settings.json` (same per-channel directory,
+       `resolve_settings_dir`) is merged over the built-ins — a new key adds a
+       widget, a built-in's key replaces it — loaded at startup and reloaded
+       on change like `settings.json` (`backend/user_widgets.rs`). A parse
+       error keeps the previous widgets.
+     - **Loading** (`frontend/app/block/widget-loader.ts`). For each such
+       entry the loader reads the module's text through the existing
+       `readeditorfile` RPC (a trusted local file, like any file the editor
+       opens), rewrites its bare `solid-js`, `solid-js/web` and
+       `solid-js/store` imports to small blob modules that re-export the
+       APP's own instances — one Solid runtime, as §5 requires — and imports
+       it from a blob URL. No new server endpoint.
+     - **Validation.** The default export must be a `PaneTabManifest` with
+       `apiVersion: 1`, `view` equal to the entry's `ext:` view, and `create`
+       (native only — a widget has no ViewModel class). Anything else is
+       rejected with a logged reason and never registered; so is a module
+       that fails to read, parse or import. The next reload of the config
+       (a `widgets.json` change) registers widgets that appeared and retries
+       ones that failed; a loaded widget is left alone.
+     - **Crash containment.** A widget that throws while rendering is
+       already contained by `Block`'s per-pane `BlockErrorBoundary`. What it
+       didn't cover is `create(ctx)`, which runs in `makeViewModel` inside
+       `Block`'s effect: the host now catches a throwing `create` and gives
+       the pane an instance that shows the error. Either way only that pane
+       is affected.
+     - **Startup order.** app-init waits (up to 2 s) for the loader's first
+       pass before the first render: a persisted `ext:` pane that mounted
+       before its widget registered would build the default view model and
+       never rebuild, since `Block` only does on a view change.
+     - **Sample** (`docs/examples/widgets/hello/`): a dependency-free widget
+       using only `solid-js` primitives and DOM nodes, exercising `ctx.meta`,
+       `ctx.setMeta`, `ctx.visibility`, `liveTitle` and `onActivate`. Tests
+       cover the import rewrite, a version-mismatch and a view-mismatch
+       rejection, and crash containment; the loader's import step is
+       injectable, since a test runner can't import a blob URL.
 
 ## 5. Risks and open questions
 
