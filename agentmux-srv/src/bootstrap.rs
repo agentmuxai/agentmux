@@ -1579,6 +1579,8 @@ pub async fn bind_listeners_and_network(
         event_bus.clone(),
         config.lan_key.clone(),
     ));
+    // The LAN tier of one-live-instance-per-agent asks these peers.
+    backend::agent_admission::set_lan_discovery(lan_discovery.clone());
     // Deliberately NOT applied here. The supervisor below is the single driver
     // of `lan_discovery.apply`, so mDNS can never advertise an endpoint before
     // (or without) a socket actually listening on it. `main.rs` reads the

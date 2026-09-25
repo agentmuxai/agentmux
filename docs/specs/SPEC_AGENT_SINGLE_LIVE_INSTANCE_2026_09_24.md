@@ -369,7 +369,8 @@ lesson, and the way that incident began).
 3. **Record fencing.** Epoch on record appends; store rejects stale epochs; `fork` ledger event.
    **Built as a writer-side fence plus the epoch in the segment ledger — §14.** A store-side epoch check was not built,
    and §14 says why.
-4. **LAN — detect and yield.** Advertisement field, peer query, tie-break.
+4. **LAN — detect and yield.** Advertisement field, peer query, tie-break. **Built as a peer query plus a periodic
+   re-check — §15.**
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
    here.
 
@@ -582,3 +583,55 @@ fence covers the one realistic case, the woken holder, at no cost to the common 
     pre-turn fence);
   - `the_record_fence_confirms_and_resumes_when_the_lease_is_still_ours_after_a_gap`.
 - `continuity_segments::segments_record_the_lease_epoch_and_older_records_still_read`.
+
+---
+
+## 15. Phase 4 as built — LAN tier
+
+**Query, not advertisement.**
+- The design (§4.4) put `live_agents` into the mDNS advertisement. The built version asks instead, with
+  `GET /agentmux/agent/holding?uid=…` on each peer.
+- mDNS TXT records are small, and are refreshed on the record's TTL, not when an agent starts. A peer asked at the moment
+  of claiming answers from its live lease store.
+- The route sits with the other LAN-peer routes, behind `lan_or_full_auth_middleware`. A peer's scoped `lan_key` reads it,
+  just as it reads the agent-name list. It discloses only whether a UID is live on that host, since when, and in which
+  channel and version.
+- The spec asked for a signed request here. The existing LAN-key authentication was used instead.
+
+**Early check.**
+- `check_before_spawn` asks every LAN peer, concurrently, 1.5 s each, after the host checks.
+- A peer that holds the agent refuses the spawn: "… running … on another computer on your network (computer X, channel,
+  version)". That text classifies as `LiveElsewhere`, like every other refusal.
+- Unreachable peers, and peers too old to have the route, are skipped. This is D2's fail-open.
+
+**Simultaneous starts.**
+- Every 6th renewal (30 s), the holder asks the LAN again. If a peer holds the same UID and wins the tie-break, this
+  holder fences itself: the loss is recorded, `on_lost` kills the process, and the next turn is refused.
+- `peer_wins`: the earlier start wins. Starts within 10 s of each other are simultaneous, and the lower hostname wins.
+  Exactly one of two distinct hosts wins, whichever side evaluates.
+- Start times are each host's own clock. Only differences beyond the skew budget are trusted to order them.
+
+**Same host.** Answers from this host are ignored. A second AgentMux instance on the same machine also appears as a LAN
+peer, but it reads this machine's lease store, so it would report this process's own lease back. The host tier already
+governs this host.
+
+**Code.**
+- `agent_admission`:
+  - `set_lan_discovery`, called from `bootstrap.rs` with the LAN discovery controller;
+  - `lan_holders`, `local_holding` and `peer_wins`;
+  - the LAN refusal and LAN loss texts;
+  - the re-check in the renewal task.
+- `server/agent_takeover.rs`: `handle_agent_holding`.
+
+**Tests.**
+- The tie-break has exactly one winner: earlier start, near-simultaneous start, identical start.
+- A LAN refusal names the computer and classifies as `LiveElsewhere`.
+- This host reports holding only a live lease.
+- An answer from this host is not a LAN holder.
+- Without LAN discovery, the tier is skipped.
+
+**Limits.**
+- An overlap between two hosts lasts until the next 30 s re-check (bounded; §4.4 never promised prevention across a
+  partition).
+- Take over (§13) does not reach LAN peers: the release route is full-auth only. A LAN refusal tells the user to close
+  the agent on the other computer.
