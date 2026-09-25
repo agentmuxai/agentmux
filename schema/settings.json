@@ -413,7 +413,7 @@
         },
         "agent:livefeedturns": {
           "type": "integer",
-          "default": 3,
+          "default": 6,
           "minimum": 1,
           "description": "How many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Takes effect when a pane is next opened."
         },
