@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { outcomeText } from "./MemoryAdoptionPanel";
+import { claimedSince, releaseOutcome } from "./MemoryClaimsPanel";
 import { accountLabel, parseAdoptionMeta } from "@/app/view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
 
 describe("memory adoption", () => {
@@ -39,14 +40,15 @@ describe("memory adoption", () => {
     });
 });
 
-import { claimedSince, releaseOutcomeText } from "./MemoryClaimsPanel";
 
 describe("releasing a memory folder", () => {
     it("says a release lasts only until the agent uses the folder again", () => {
-        expect(releaseOutcomeText({ status: "done", report: { released: true } })).toContain("claims it again");
-        expect(releaseOutcomeText({ status: "done", report: { released: false } })).toContain("already gone");
-        expect(releaseOutcomeText({ status: "declined" })).toContain("cancelled");
-        expect(releaseOutcomeText({})).toBeNull();
+        expect(releaseOutcome({ status: "done", report: { released: true } })?.text).toContain("claims it again");
+        expect(releaseOutcome({ status: "done", report: { released: false } })?.text).toContain("already gone");
+        expect(releaseOutcome({ status: "declined" })?.text).toContain("cancelled");
+        // A failure is marked as one, so it renders in the error colour.
+        expect(releaseOutcome({ status: "failed", error: "x" })?.status).toBe("failed");
+        expect(releaseOutcome({})).toBeNull();
     });
 
     it("says how long ago a folder was claimed", () => {

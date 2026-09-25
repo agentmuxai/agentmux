@@ -24,16 +24,22 @@ interface MemoryClaimsPanelProps {
     agentName: string;
 }
 
-export function releaseOutcomeText(payload: any): string | null {
+export type ReleaseOutcome = { status: "done" | "declined" | "failed"; text: string };
+
+export function releaseOutcome(payload: any): ReleaseOutcome | null {
     switch (payload?.status) {
         case "done":
-            return payload?.report?.released === false
-                ? "That claim was already gone."
-                : "Released. If the agent still uses that folder, its next launch claims it again.";
+            return {
+                status: "done",
+                text:
+                    payload?.report?.released === false
+                        ? "That claim was already gone."
+                        : "Released. If the agent still uses that folder, its next launch claims it again.",
+            };
         case "declined":
-            return "Release cancelled.";
+            return { status: "declined", text: "Release cancelled." };
         case "failed":
-            return `Release failed: ${payload?.error ?? "unknown error"}`;
+            return { status: "failed", text: `Release failed: ${payload?.error ?? "unknown error"}` };
         default:
             return null;
     }
@@ -50,7 +56,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
     const [list, setList] = createSignal<NativeMemoryClaimList | null>(null);
     const [open, setOpen] = createSignal(false);
     const [waiting, setWaiting] = createSignal<number | null>(null);
-    const [outcome, setOutcome] = createSignal<string | null>(null);
+    const [outcome, setOutcome] = createSignal<ReleaseOutcome | null>(null);
 
     const load = (agentId: string) => {
         RpcApi.NativeMemoryClaimsCommand(TabRpcClient, { agent_id: agentId })
@@ -68,7 +74,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
     void listenEvent<any>("memory-adoption-result", (payload) => {
         if (payload?.agent_id !== props.agentId || payload?.kind !== "release") return;
         setWaiting(null);
-        setOutcome(releaseOutcomeText(payload));
+        setOutcome(releaseOutcome(payload));
         load(props.agentId);
     }).then((u) => {
         unlisten = u;
@@ -92,7 +98,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
             });
         } catch (e) {
             setWaiting(null);
-            setOutcome(`Couldn't open the confirmation window: ${e}`);
+            setOutcome({ status: "failed", text: `Couldn't open the confirmation window: ${e}` });
         }
     };
 
@@ -131,7 +137,7 @@ export const MemoryClaimsPanel = (props: MemoryClaimsPanelProps): JSX.Element =>
                     </div>
                 </Show>
                 <Show when={outcome()}>
-                    <p class="memory-adoption-panel-outcome">{outcome()}</p>
+                    {(o) => <p class={`memory-adoption-panel-outcome is-${o().status}`}>{o().text}</p>}
                 </Show>
             </section>
         </Show>
