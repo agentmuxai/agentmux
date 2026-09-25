@@ -1239,7 +1239,7 @@ describe("AgentShellSubblock — right-click region (SPEC_AGENT_SHELL_DRAWER_CON
 
         const [copy, paste] = resolveContextMenuRegion(surface)!.items!();
         expect(copy).toMatchObject({ label: "Copy", enabled: true });
-        expect(paste).toMatchObject({ label: "Paste", enabled: true });
+        expect(paste).toMatchObject({ label: "Paste (up to 1 MB)", enabled: true });
     });
 
     it("builds Copy and Paste disabled before the terminal exists", () => {

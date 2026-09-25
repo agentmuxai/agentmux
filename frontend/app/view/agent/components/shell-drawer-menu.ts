@@ -41,7 +41,13 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
     const selection = terminal?.getSelection() ?? "";
     const locked = deps.isAgentLocked();
 
-    const pasteSublabel = locked ? "agent is using this shell" : `up to ${formatSize(SHELL_PASTE_MAX_BYTES)}`;
+    // The reason/limit rides in the LABEL, not `sublabel`: the JS-rendered
+    // context menu (cef-api.ts showJsContextMenu) does not draw sublabels at
+    // all, so a sublabel here would be invisible. A greyed-out item then still
+    // says why.
+    const pasteLabel = locked
+        ? "Paste (agent is using this shell)"
+        : `Paste (up to ${formatSize(SHELL_PASTE_MAX_BYTES)})`;
 
     return [
         {
@@ -52,8 +58,7 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
             },
         },
         {
-            label: "Paste",
-            sublabel: pasteSublabel,
+            label: pasteLabel,
             // Disabled while the agent is driving the shell: sendDataHandler
             // would silently drop the input, which would look like a broken menu.
             enabled: terminal != null && !locked,

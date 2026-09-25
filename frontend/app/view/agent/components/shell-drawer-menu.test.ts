@@ -53,14 +53,16 @@ describe("shell drawer Paste", () => {
         expect(paste).toHaveBeenCalledWith("echo hi\nls");
     });
 
-    it("advertises the size limit in the menu", () => {
-        expect(setup().pasteItem.sublabel).toBe("up to 1 MB");
+    it("advertises the size limit in the label (the JS menu renders no sublabels)", () => {
+        const { pasteItem } = setup();
+        expect(pasteItem.label).toBe("Paste (up to 1 MB)");
+        expect(pasteItem.sublabel).toBeUndefined();
     });
 
     it("is disabled, with the reason, while the agent holds the shell", () => {
         const { pasteItem } = setup({ isAgentLocked: () => true });
         expect(pasteItem.enabled).toBe(false);
-        expect(pasteItem.sublabel).toBe("agent is using this shell");
+        expect(pasteItem.label).toBe("Paste (agent is using this shell)");
     });
 
     it("is disabled when there is no terminal yet", () => {

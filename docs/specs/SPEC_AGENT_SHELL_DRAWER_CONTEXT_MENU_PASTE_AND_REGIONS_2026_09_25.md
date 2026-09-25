@@ -188,7 +188,7 @@ Implemented as specced: the chunked sender moved out of `TermViewModel` **verbat
 
 Chunking makes big pastes *work*; it doesn't make megabytes into a shell a good idea (the line editor re-renders the text, scrollback churns, and a slow chunked send blocks typing while it drains). So the menu Paste has an explicit limit, **1 MB** (`SHELL_PASTE_MAX_BYTES`, UTF-8 bytes of the clipboard text), and the UI states it at both moments a user needs it:
 
-- **Before:** the Paste item carries a sublabel, "up to 1 MB". While the agent holds the shell the sublabel instead reads "agent is using this shell" (and the item is disabled), so a greyed-out item always says why.
+- **Before:** the item reads "Paste (up to 1 MB)". While the agent holds the shell it reads "Paste (agent is using this shell)" and is disabled, so a greyed-out item always says why. (Carried in the *label*, not `ContextMenuItem.sublabel`: the JS-rendered menu, `showJsContextMenu` in `cef-api.ts`, never draws sublabels — found by right-clicking in the running app, where the first cut's sublabel was invisible. `bind-to-agent-menu.ts`'s sublabels are invisible for the same reason; not touched here.)
 - **After, when exceeded:** nothing is sent, and a warning notification says what happened, the limit, and the alternative: "The clipboard is 3.2 MB; the shell accepts up to 1 MB. Save it to a file and reference it from the shell instead."
 
 Best-practice notes applied: state the limit up front rather than only on failure; never fail silently; refuse cleanly (nothing partially pasted) rather than truncate; name the alternative action; measure in bytes, since that is what the wire and PTY see. The limit applies to the menu Paste only. Keyboard paste goes straight through xterm's own paste handling and is unchanged apart from now being chunked.
@@ -236,6 +236,16 @@ Manual (real app — this is UI in a native-menu host, tests can't cover the vis
 8. ~100 KB paste in the drawer — record the outcome; it decides §3.4.
 
 ---
+
+### 5.1 Verified in the running app
+
+Run as a `task dev` instance of this branch and driven over CDP with real (synthesized) mouse events — the context menu is JS-rendered DOM (`showJsContextMenu`), so it can be right-clicked, read and clicked like any other element.
+
+- Right-click in the drawer's terminal: menu is exactly **Copy (disabled, nothing selected) · Paste (up to 1 MB) · Magnify Pane · Close Pane · Inspect Element** — no Split, no Replace With…, no Agent History / Quick Fork. (This is also how the invisible-sublabel problem in §3.5 was caught.)
+- **The ~100 KB gate (§3.4), done:** a 100,081-byte PowerShell here-string (2,000 lines) placed on the OS clipboard and pasted via the menu arrived intact — the shell reported `count=2000 bytes=99999`, exactly the expected line count and byte count. Chunked send, no truncation, no reordering.
+- **Over the limit:** a 1.5 MB clipboard → nothing typed into the shell; the warning notification "Paste too large for the shell — The clipboard is 1.4 MB; the shell accepts up to 1 MB. Save it to a file and reference it from the shell instead." appeared.
+
+Not exercised in the running app: Copy of a real terminal selection (covered by unit tests only), the agent-locked disabled state (unit tests only — no agent was driving the shell), and the stale-transcript-selection regression from §2.4 (unit-level only; the handler yielding is a one-line guard).
 
 ## 6. Decisions on the open questions
 
