@@ -661,6 +661,7 @@ pub fn build_router(state: AppState) -> Router {
         // target, but the caller is never anonymous in the audit log the
         // way `FleetBulkStop`'s calls are today.
         .route("/api/v1/agent/pane/close", post(app_api::pane::handle_close_pane))
+        .route("/api/v1/agent/self/quit", post(app_api::pane::handle_quit_self))
         // Native dev-proxy registration (SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
         // — `RegisterDevServer`. Same `verified_block_id` identity model as
         // the ui/* and pane/close routes above; the backend address it

@@ -442,6 +442,61 @@ pub(super) fn resolve_placement(
 /// ownership check on the TARGET (closing another agent's stuck pane without
 /// needing its cooperation is this spec's whole motivation), but the CALLER
 /// is never anonymous the way `FleetBulkStop`'s existing calls are today.
+/// `POST /api/v1/agent/self/quit` — the `QuitSelf` tool
+/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6). Always the caller's
+/// own block (from the signed `auth`); there is no target. Proceeds only
+/// when the user started the current turn, nothing else got in, and the
+/// quote is theirs (§6.3). The quit then waits for the turn to end (§4.2):
+/// 202 now, the tab closes after.
+pub(crate) async fn handle_quit_self(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    axum::Json(req): axum::Json<agentmux_common::api_types::QuitSelfRequest>,
+) -> impl axum::response::IntoResponse {
+    use crate::sagas::self_quit;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let block_id = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
+    let agent = req.auth.agent_id.clone();
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let detail = format!("{} | user said: {:?}", req.reason.trim(), req.user_instruction);
+    if self_quit::is_quitting(&block_id) {
+        return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
+    }
+    let provenance = crate::backend::blockcontroller::get_controller(&block_id).and_then(|c| c.turn_provenance());
+    if let Err(refusal) = self_quit::gate(provenance.as_ref(), &req.user_instruction) {
+        // Refusals are audited: a refused QuitSelf is exactly the event worth
+        // seeing later (§4.4).
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&agent),
+            &agent,
+            &block_id,
+            "agent.quit_self",
+            false,
+            Some(refusal.as_str()),
+            &request_id,
+            Some(&detail),
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "QuitSelf needs the user to have asked in the message that started this turn, with nothing else delivered since",
+                "refused": refusal.as_str(),
+            })),
+        )
+            .into_response();
+    }
+    if !self_quit::schedule_after_turn(&state, &block_id, detail) {
+        return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
+    }
+    (StatusCode::ACCEPTED, Json(json!({ "status": "scheduled" }))).into_response()
+}
+
 pub(crate) async fn handle_close_pane(
     axum::extract::State(state): axum::extract::State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,

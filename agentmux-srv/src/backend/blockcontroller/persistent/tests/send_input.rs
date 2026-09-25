@@ -3995,3 +3995,20 @@ async fn send_outcome_reports_deferred_or_sent() {
         SendOutcome::Sent
     );
 }
+
+/// SPEC_AGENT_SELF_QUIT §6.3: a delivery that says who it's from labels the
+/// turn it starts, and the controller reports it through the trait.
+#[tokio::test]
+async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
+    use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+    use crate::backend::blockcontroller::Controller;
+    let (c, _rx) = idle_controller();
+    let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into() };
+    assert!(matches!(c.decide_send_action_from("m", None, Some(input)), SendAction::DeliverDirect { was_active: false }));
+    let p = c.turn_provenance().expect("a turn is in flight");
+    assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
+    // A jekt arriving now is deferred to the turn boundary, not delivered
+    // into this turn, so it doesn't taint it (it starts its own turn later).
+    c.send_user_message("jekt".to_string()).unwrap();
+    assert!(!c.turn_provenance().unwrap().tainted, "deferred, not delivered into the user's turn");
+}

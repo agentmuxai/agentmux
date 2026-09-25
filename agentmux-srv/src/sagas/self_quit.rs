@@ -26,19 +26,121 @@ use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::work_queue::{work_state, WorkItem};
 use crate::server::AppState;
 
-/// Who asked. Phase 2 adds the agent's own `QuitSelf` tool.
+/// Who asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuitOrigin {
     /// The user typed `/quit` or `/exit` in the agent's composer.
     UserSlash,
+    /// The agent's own `QuitSelf` tool, in a turn the user started (§6).
+    AgentTool,
 }
 
 impl QuitOrigin {
     pub fn as_str(self) -> &'static str {
         match self {
             QuitOrigin::UserSlash => "user_slash",
+            QuitOrigin::AgentTool => "agent_tool",
         }
     }
+}
+
+/// Why `QuitSelf` doesn't proceed at once (§6.3). Until Phase 2b's override
+/// window exists, every one of these is a refusal (spec §9: the non-user path
+/// ships with 2b).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GateRefusal {
+    /// The controller can't say what started the turn (not a Claude
+    /// persistent agent, or a start nothing labelled).
+    Unknown,
+    /// The turn was started by something other than the user.
+    NotUserTurn,
+    /// The user started it, but other input got in since.
+    Tainted,
+    /// The quoted instruction isn't in the message that started the turn.
+    InstructionMismatch,
+}
+
+impl GateRefusal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GateRefusal::Unknown => "turn_origin_unknown",
+            GateRefusal::NotUserTurn => "not_user_turn",
+            GateRefusal::Tainted => "turn_tainted",
+            GateRefusal::InstructionMismatch => "user_instruction_mismatch",
+        }
+    }
+}
+
+fn normalized(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// §6.3: the quote must appear in the user's message, whitespace- and
+/// case-insensitively. An empty quote never matches.
+pub fn quote_matches(user_text: &str, quote: &str) -> bool {
+    let q = normalized(quote);
+    !q.is_empty() && normalized(user_text).contains(&q)
+}
+
+/// The §6.3 gate: may `QuitSelf` proceed without asking the user?
+pub fn gate(
+    provenance: Option<&crate::backend::blockcontroller::health::TurnProvenance>,
+    user_instruction: &str,
+) -> Result<(), GateRefusal> {
+    use crate::backend::blockcontroller::health::TurnOrigin;
+    let p = provenance.ok_or(GateRefusal::Unknown)?;
+    if p.origin != TurnOrigin::User {
+        return Err(GateRefusal::NotUserTurn);
+    }
+    if p.tainted {
+        return Err(GateRefusal::Tainted);
+    }
+    match p.user_text.as_deref() {
+        Some(text) if quote_matches(text, user_instruction) => Ok(()),
+        _ => Err(GateRefusal::InstructionMismatch),
+    }
+}
+
+/// Blocks with a `QuitSelf` waiting for their turn to end (§4.2's
+/// `mark_quitting`): a second call answers `already_quitting`.
+static QUITTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// How long a scheduled quit waits for the turn to end (§4.2); after that
+/// the graceful shutdown interrupts it.
+pub const SELF_QUIT_TURN_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+pub fn is_quitting(block_id: &str) -> bool {
+    QUITTING.lock().unwrap_or_else(|e| e.into_inner()).contains(block_id)
+        || crate::backend::blockcontroller::is_closing(block_id)
+}
+
+/// §4.2: the tool call is part of the turn that asked for it, so quit when
+/// that turn ends (or after `SELF_QUIT_TURN_GRACE`), not now. Returns false
+/// when a quit is already scheduled or under way.
+pub fn schedule_after_turn(state: &AppState, block_id: &str, detail: String) -> bool {
+    {
+        let mut q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
+        if q.contains(block_id) || crate::backend::blockcontroller::is_closing(block_id) {
+            return false;
+        }
+        q.insert(block_id.to_string());
+    }
+    let (state, block_id) = (state.clone(), block_id.to_string());
+    tokio::spawn(async move {
+        let deadline = tokio::time::Instant::now() + SELF_QUIT_TURN_GRACE;
+        while tokio::time::Instant::now() < deadline
+            && crate::backend::blockcontroller::get_controller(&block_id)
+                .is_some_and(|c| c.get_runtime_status().turn_active)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        if let Err(e) = run_with(&state, &block_id, QuitOrigin::AgentTool, Some(&detail)).await {
+            tracing::warn!(block_id = %block_id, error = %e, "self-quit (agent tool) failed");
+        }
+        QUITTING.lock().unwrap_or_else(|e| e.into_inner()).remove(&block_id);
+    });
+    true
 }
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
@@ -88,6 +190,12 @@ fn crons_targeting(jobs: &[CronJob], agent_id: &str, uid: Option<&str>) -> Vec<S
 }
 
 pub async fn run(state: &AppState, block_id: &str, origin: QuitOrigin) -> Result<QuitSummary, String> {
+    run_with(state, block_id, origin, None).await
+}
+
+/// [`run`] with an audit detail (for `QuitSelf`: the reason and the user's
+/// quoted instruction).
+pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, detail: Option<&str>) -> Result<QuitSummary, String> {
     if crate::backend::blockcontroller::is_closing(block_id) {
         return Ok(QuitSummary { status: "already_quitting", ..Default::default() });
     }
@@ -154,7 +262,10 @@ pub async fn run(state: &AppState, block_id: &str, origin: QuitOrigin) -> Result
         result.is_ok(),
         result.as_ref().err().map(String::as_str),
         &request_id,
-        Some(origin.as_str()),
+        Some(&match detail {
+            Some(d) => format!("{}: {d}", origin.as_str()),
+            None => origin.as_str().to_string(),
+        }),
     );
     tracing::info!(
         block_id,
@@ -283,6 +394,27 @@ mod tests {
         assert_eq!(queued_deletes(&state, &tab_id), vec![a.clone()], "frontend told to drop the tab");
 
         assert!(run(&state, &a, QuitOrigin::UserSlash).await.is_err(), "already gone: not found");
+    }
+
+    #[test]
+    fn the_quote_must_be_in_the_users_message_give_or_take_spacing_and_case() {
+        assert!(quote_matches("Finish the PR, then quit.", "then quit"));
+        assert!(quote_matches("finish the PR,\n  then   QUIT", "then quit"));
+        assert!(!quote_matches("finish the PR", "then quit"), "not what the user said");
+        assert!(!quote_matches("quit", ""), "an empty quote proves nothing");
+    }
+
+    #[test]
+    fn the_gate_passes_only_an_untainted_user_turn_with_a_matching_quote() {
+        use crate::backend::blockcontroller::health::{TurnOrigin, TurnProvenance};
+        let p = |origin, tainted, text: Option<&str>| TurnProvenance { origin, tainted, user_text: text.map(Into::into) };
+        let ok = p(TurnOrigin::User, false, Some("finish the PR then quit"));
+        assert_eq!(gate(Some(&ok), "then quit"), Ok(()));
+        assert_eq!(gate(None, "then quit"), Err(GateRefusal::Unknown));
+        assert_eq!(gate(Some(&p(TurnOrigin::Automated, false, None)), "quit"), Err(GateRefusal::NotUserTurn));
+        assert_eq!(gate(Some(&p(TurnOrigin::System, false, None)), "quit"), Err(GateRefusal::NotUserTurn));
+        assert_eq!(gate(Some(&p(TurnOrigin::User, true, Some("quit"))), "quit"), Err(GateRefusal::Tainted));
+        assert_eq!(gate(Some(&ok), "you may now exit"), Err(GateRefusal::InstructionMismatch));
     }
 
     #[tokio::test]

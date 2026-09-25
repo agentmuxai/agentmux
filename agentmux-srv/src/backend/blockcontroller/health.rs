@@ -254,4 +254,81 @@ mod tests {
         // read-and-write pair is indivisible under the lock.
         assert_eq!(results, vec![false, true, true, true, true]);
     }
+
+    // ---- turn provenance (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.3) ----
+
+    fn user(text: &str) -> TurnInput {
+        TurnInput { origin: TurnOrigin::User, text: text.into() }
+    }
+    fn automated() -> TurnInput {
+        TurnInput { origin: TurnOrigin::Automated, text: "jekt".into() }
+    }
+
+    #[test]
+    fn a_turn_the_user_starts_carries_their_text() {
+        let t = TurnActivityTracker::new("b".into());
+        assert!(!t.mark_turn_active_from(Some(user("finish the PR then quit"))));
+        let p = t.provenance().expect("active turn");
+        assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
+        assert_eq!(p.user_text.as_deref(), Some("finish the PR then quit"));
+    }
+
+    #[test]
+    fn automated_input_into_a_user_turn_taints_it_for_good() {
+        let t = TurnActivityTracker::new("b".into());
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_from(Some(user("also this"))); // the user steering their own turn
+        assert!(!t.provenance().unwrap().tainted);
+        t.mark_turn_active_from(Some(automated()));
+        assert!(t.provenance().unwrap().tainted);
+        t.mark_turn_active_from(Some(user("more")));
+        assert!(t.provenance().unwrap().tainted, "never undone within the turn");
+    }
+
+    #[test]
+    fn unlabelled_input_counts_as_unknown_never_as_the_user() {
+        let t = TurnActivityTracker::new("b".into());
+        t.mark_turn_active_returning_was_active();
+        assert_eq!(t.provenance(), None, "an unlabelled start is unknown");
+        t.set_active_turn(false);
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_returning_was_active(); // unlabelled input mid-turn
+        assert!(t.provenance().unwrap().tainted);
+    }
+
+    #[test]
+    fn a_label_never_outlives_its_turn() {
+        let t = TurnActivityTracker::new("b".into());
+        t.mark_turn_active_from(Some(user("go")));
+        t.set_active_turn(false);
+        assert_eq!(t.provenance(), None, "no turn, no provenance");
+        t.set_active_turn(true); // the next turn starts unlabelled
+        assert_eq!(t.provenance(), None, "the old user label must not leak into it");
+        t.set_exited(0);
+        assert_eq!(t.provenance(), None);
+    }
+
+    #[test]
+    fn a_queued_message_labels_the_turn_it_starts_later() {
+        let t = TurnActivityTracker::new("b".into());
+        t.hint_next_turn(user("first message after spawn"));
+        t.set_active_turn(true); // the spawn starts the turn
+        let p = t.provenance().unwrap();
+        assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
+        t.set_active_turn(false);
+        t.hint_next_turn(user("a"));
+        t.hint_next_turn(automated());
+        t.set_active_turn(true);
+        assert!(t.provenance().unwrap().tainted, "a jekt queued alongside taints it");
+    }
+
+    #[test]
+    fn a_boundary_release_or_tool_wait_release_is_automated() {
+        let t = TurnActivityTracker::new("b".into());
+        t.mark_turn_active_from(Some(user("go")));
+        t.note_input(TurnOrigin::Automated);
+        assert!(t.provenance().unwrap().tainted, "released while waiting on a tool");
+        t.begin_turn_from(automated());
+        assert_eq!(t.provenance().unwrap().origin, TurnOrigin::Automated, "released at the result boundary");
+    }
 }
