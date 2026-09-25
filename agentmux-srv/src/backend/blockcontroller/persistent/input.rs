@@ -649,10 +649,17 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            // One `inner` acquisition around the send AND its record: every
+            // other stdin write goes through `inner` too, so no other line can
+            // be sent — and so persisted — between this one's send and its
+            // record, and the transcript keeps delivery order (Codex review
+            // of #3703). `persist.write` never takes `inner`.
+            let guard = inner.lock().unwrap();
+            let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
                 Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
                     persist.write(&line);
+                    drop(guard);
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -747,10 +754,17 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            // One `inner` acquisition around the send AND its record: every
+            // other stdin write goes through `inner` too, so no other line can
+            // be sent — and so persisted — between this one's send and its
+            // record, and the transcript keeps delivery order (Codex review
+            // of #3703). `persist.write` never takes `inner`.
+            let guard = inner.lock().unwrap();
+            let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
                 Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
                     persist.write(&line);
+                    drop(guard);
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
@@ -872,10 +886,17 @@ impl PersistentSubprocessController {
                 "message": { "role": "user", "content": resume_msg }
             })
             .to_string();
-            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            // One `inner` acquisition around the send AND its record: every
+            // other stdin write goes through `inner` too, so no other line can
+            // be sent — and so persisted — between this one's send and its
+            // record, and the transcript keeps delivery order (Codex review
+            // of #3703). `persist.write` never takes `inner`.
+            let guard = inner.lock().unwrap();
+            let stdin_tx = guard.stdin_tx.clone();
             match stdin_tx {
                 Some(stdin_tx) if stdin_tx.try_send(line.clone()).is_ok() => {
                     persist.write(&line);
+                    drop(guard);
                     tracing::warn!(
                         block_id = %block_id,
                         tool_use_id = %tool_use_id,
