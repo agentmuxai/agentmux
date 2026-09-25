@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // View-type → ViewModel class registry.
-// To add a new block view: call registerBlockView() in this file (or in
-// the view model's own module) — block.tsx never needs to change.
+// To add a new block view: add its class to the map below — block.tsx never
+// needs to change. A runtime registration API (for user-installed pane-tab
+// widgets) is planned: SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3/§4.
 
 import { AgentViewModel } from "@/app/view/agent";
 import { ArmoryViewModel } from "@/app/view/armory/armory";

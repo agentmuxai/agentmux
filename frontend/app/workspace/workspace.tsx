@@ -285,6 +285,10 @@ function WorkspaceElem(): JSX.Element {
                                         // above. Only the active tab may receive pointer events;
                                         // every inactive one lets clicks pass through to it.
                                         "pointer-events": shown()["pointer-events"],
+                                        // A tab kept laid out but not shown: opacity 0 too,
+                                        // so nothing inside can paint through visibility:hidden
+                                        // (window-tab-visibility.ts).
+                                        opacity: shown().opacity ?? undefined,
                                         // Reveal gate (issue #774): hide the active tab while
                                         // it's still settling so the piecemeal mount cascade
                                         // doesn't paint stage-by-stage. `visibility: hidden`
