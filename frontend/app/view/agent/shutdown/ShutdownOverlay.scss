@@ -1,0 +1,55 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The closing pane's shutdown log (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5).
+// Sits inside .agent-view's own stacking context, above its content.
+.agent-shutdown-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--main-bg-color) 82%, transparent);
+    backdrop-filter: blur(1px);
+}
+
+.agent-shutdown-overlay__panel {
+    max-width: min(560px, 92%);
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--main-bg-color);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.agent-shutdown-overlay__title {
+    margin-bottom: 6px;
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-shutdown-overlay__line {
+    padding-left: 12px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-shutdown-overlay__more {
+    font-style: italic;
+}
+
+.agent-shutdown-overlay__line--error {
+    color: var(--error-color);
+}
+
+.agent-shutdown-overlay__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}

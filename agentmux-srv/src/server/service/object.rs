@@ -198,7 +198,12 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            if let Err(reason) = crate::sagas::close_pane::run(state, block_ids).await {
+            // Optional: the frontend kept the pane on screen to show the
+            // shutdown log (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5), so srv
+            // removes it member by member. Absent = the historical flow.
+            let frontend_waits: bool = service::get_arg(args, 1).unwrap_or(false);
+            let opts = crate::sagas::close_pane::CloseOpts { frontend_waits };
+            if let Err(reason) = crate::sagas::close_pane::run_with(state, block_ids, opts).await {
                 return WebReturnType::error(reason);
             }
             WebReturnType::success_empty()

@@ -146,6 +146,7 @@ import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import { createAgentAtoms } from "./state";
 import type { DocumentNode } from "./types";
+import { ShutdownOverlay } from "./shutdown/ShutdownOverlay";
 import { useAgentStream } from "./useAgentStream";
 
 // Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
@@ -2415,6 +2416,8 @@ const AgentPresentationView = ({
                 cover can't be 69%-sized by the pane zoom.
                 See REPORT_AGENT_PANE_LOADING_UI_2026_09_20.md §F. */}
             <PaneLoadingCover phase={readiness.phase} />
+            {/* Shutdown log while the pane closes in place (SPEC_AGENT_SELF_QUIT_2026_09_24.md §5.5). */}
+            <ShutdownOverlay blockId={model.blockId} agentName={agentName()} />
             {/* Stash drawer — top-anchored, directly under the pane header
                 where its own backpack toggle lives
                 (SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md §3.1).

@@ -16,6 +16,7 @@
  */
 
 import { pushNotification } from "@/app/store/flash-notifications";
+import { beginShutdownLog, endShutdownLog } from "@/app/view/agent/shutdown/shutdown-log";
 import * as services from "@/store/services";
 import type { SlashCommand, SlashResult } from "../types";
 
@@ -52,10 +53,13 @@ export const quitCommand: SlashCommand = {
     arg: { kind: "none" },
     availability: "any-agent",
     handler: async (ctx): Promise<SlashResult> => {
+        // The pane shows what srv stops while it winds the agent down (§5.5).
+        beginShutdownLog(ctx.blockId);
         let summary: QuitSummary;
         try {
             summary = (await services.ObjectService.QuitAgent(ctx.blockId)) as QuitSummary;
         } catch (e) {
+            endShutdownLog(ctx.blockId);
             return { kind: "error", message: `Couldn't quit: ${e instanceof Error ? e.message : String(e)}` };
         }
         if (summary?.status === "already_quitting") {
