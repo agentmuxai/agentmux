@@ -96,13 +96,20 @@ pub(crate) fn check_and_record_drift(
 /// be migration m0024, which ran before that and fell back to a registry
 /// guess), and later for an agent that becomes verified mid-session, e.g.
 /// on its first spawn. A file that appears in an already-known directory is
-/// left to drift detection. Returns the number of versions recorded.
+/// left to drift detection. An agent counts as seen only once its directory
+/// exists — a new agent's folder usually appears when Claude first writes
+/// to it, and those first files are this agent's, not an outside write.
+/// Returns the number of versions recorded.
 pub(crate) fn backfill_newly_verified(
     id_store: &Store,
     targets: &[(String, PathBuf)],
     known: &mut HashSet<String>,
 ) -> usize {
-    let new: Vec<(String, PathBuf)> = targets.iter().filter(|(id, _)| !known.contains(id)).cloned().collect();
+    let new: Vec<(String, PathBuf)> = targets
+        .iter()
+        .filter(|(id, dir)| !known.contains(id) && dir.is_dir())
+        .cloned()
+        .collect();
     for (id, _) in &new {
         known.insert(id.clone());
     }
@@ -476,6 +483,18 @@ mod tests {
         std::fs::write(dir2.path().join("MEMORY.md"), "second agent").unwrap();
         let more = vec![targets[0].clone(), ("agent-2".to_string(), dir2.path().to_path_buf())];
         assert_eq!(backfill_newly_verified(&store, &more, &mut known), 1);
+
+        // A verified agent whose folder doesn't exist yet isn't counted as
+        // seen: its first files, when Claude writes them, are its own.
+        let root = tempfile::tempdir().unwrap();
+        let not_yet = root.path().join("memory");
+        let pending = vec![("agent-3".to_string(), not_yet.clone())];
+        assert_eq!(backfill_newly_verified(&store, &pending, &mut known), 0);
+        assert!(!known.contains("agent-3"));
+        std::fs::create_dir_all(&not_yet).unwrap();
+        std::fs::write(not_yet.join("MEMORY.md"), "first write").unwrap();
+        assert_eq!(backfill_newly_verified(&store, &pending, &mut known), 1);
+        assert_eq!(store.agent_native_memory_version_latest("agent-3", "MEMORY.md").unwrap().unwrap().source, "agent_inferred");
         let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].source, "agent_inferred");
