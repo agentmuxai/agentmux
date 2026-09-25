@@ -21,10 +21,46 @@ import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
 import type { NodeModel } from "@/layout/index";
 import type { Accessor, JSX } from "solid-js";
 
+/** What a view type declares instead of shared code checking its name
+ *  (Pane Tab contract Phase 5, spec §2.4 #5). Every field is optional; the
+ *  default is what an unlisted view type always got. */
 export interface PaneTabCapabilities {
     /** Per TAB, never per pane: a `keepAlive` tab stays mounted while inactive,
      *  a `remount` tab (the default) is unmounted. */
     lifecycle?: "remount" | "keepAlive";
+    /** Its content is a native surface composited above the DOM (the browser's
+     *  page): it must collapse whenever the tab isn't visible. */
+    nativeSurface?: boolean;
+    /** `"surface"`: an uncolored header keeps the theme's block surface (the
+     *  agent pane) instead of the one fixed default header color every other
+     *  pane gets. */
+    header?: "default" | "surface";
+    /** The header shows a mic button (the view model's `voiceHandle`), with
+     *  this tooltip. A view that takes voice elsewhere (agent: beside its
+     *  composer) leaves this out. */
+    headerMic?: { title: string };
+    /** A boolean setting that hides this view's CPU/memory stats badge when
+     *  set to `false` (terminal: `term:showstatsbadge`). Without it the badge
+     *  always shows. */
+    statsBadgeSetting?: string;
+    /** `frame:hue` (or `frame:activebordercolor`) colors this tab's active
+     *  border — a terminal running an agent CLI shows that agent's color. */
+    hueBorder?: boolean;
+    /** Takes part in per-pane zoom (`term:zoom`, Ctrl+Scroll, the all-panes
+     *  batch), scaling from `baseFontSize` (default 15) unless the block sets
+     *  `term:fontsize`. */
+    paneZoom?: { baseFontSize?: number };
+    /** Accepts typed/pasted text, so the pane menu offers Paste into it. */
+    acceptsInput?: boolean;
+    /** Ctrl+key combinations belong to the content (a shell), so app
+     *  shortcuts that would shadow one (Ctrl+F search) stand down. */
+    shellKeys?: boolean;
+    /** A new block created while this one is focused starts in its
+     *  `cmd:cwd`. */
+    sharesCwd?: boolean;
+    /** Meta keys a split of this pane does NOT copy into the new pane (agent:
+     *  its agent-specific fields, so the new pane opens the picker). */
+    splitDropsMeta?: string[];
 }
 
 /** What the host gives a native instance — its only way in (no raw
@@ -125,6 +161,7 @@ export function legacyAdapter(
         icon?: string;
         aliases?: string[];
         lifecycle?: PaneTabCapabilities["lifecycle"];
+        capabilities?: Omit<PaneTabCapabilities, "lifecycle">;
         tab?: PaneTabDescriptor;
         chrome?: PaneTabManifest["chrome"];
     } = {}
@@ -135,7 +172,10 @@ export function legacyAdapter(
         aliases: opts.aliases,
         label: opts.label ?? view,
         icon: opts.icon ?? "square",
-        capabilities: opts.lifecycle ? { lifecycle: opts.lifecycle } : undefined,
+        capabilities:
+            opts.lifecycle || opts.capabilities
+                ? { ...opts.capabilities, ...(opts.lifecycle ? { lifecycle: opts.lifecycle } : {}) }
+                : undefined,
         tab: opts.tab,
         chrome: opts.chrome,
         viewModelClass,
@@ -155,6 +195,15 @@ export function getPaneTab(view: string | null | undefined): PaneTabManifest | u
 
 export function isKeepAliveView(view: string | null | undefined): boolean {
     return getPaneTab(view)?.capabilities?.lifecycle === "keepAlive";
+}
+
+/** One declared capability of a view type (`undefined` when it doesn't
+ *  declare it, or isn't registered). */
+export function paneTabCapability<K extends keyof PaneTabCapabilities>(
+    view: string | null | undefined,
+    key: K
+): PaneTabCapabilities[K] | undefined {
+    return getPaneTab(view)?.capabilities?.[key];
 }
 
 export function paneTabLabelFor(view: string | null | undefined): string {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it } from "vitest";
-import { tryDeriveTermThemeFromCss } from "./termutil";
+import { termViewName, tryDeriveTermThemeFromCss } from "./termutil";
 
 const TERM_TOKENS: Record<string, string> = {
     "--term-black": "#000000",
@@ -84,5 +84,21 @@ describe("tryDeriveTermThemeFromCss", () => {
         setTermTokens({});
         const theme = tryDeriveTermThemeFromCss();
         expect(theme).toBeNull();
+    });
+});
+
+// Moved from BlockFrame's `view === "term"` special case (Pane Tab contract
+// Phase 5): the terminal names itself after the agent CLI it runs.
+describe("termViewName", () => {
+    it("is the agent a terminal runs, from AGENTMUX_AGENT_ID in cmd:env", () => {
+        expect(termViewName({ "cmd:env": { AGENTMUX_AGENT_ID: "claude" } } as any)).toBe("claude");
+        expect(termViewName({ controller: "cmd", "cmd:env": { AGENTMUX_AGENT_ID: "codex" } } as any)).toBe("codex");
+    });
+
+    it("is empty for a cmd controller and \"Terminal\" otherwise", () => {
+        expect(termViewName({ controller: "cmd" } as any)).toBe("");
+        expect(termViewName({} as any)).toBe("Terminal");
+        expect(termViewName(undefined)).toBe("Terminal");
+        expect(termViewName({ "cmd:env": { AGENTMUX_AGENT_ID: "terminal" } } as any)).toBe("Terminal");
     });
 });
