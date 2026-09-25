@@ -24,7 +24,7 @@
 | 3b | The tail holds only the turn in flight (§2.2c, §3.7) | #3611 | merged |
 | 3 | Tail holds only the turn in flight | 3a + 3b | **done**; kill switch `agent:turnscopedtail` |
 | 4 | O(batch + log n) stores | — | **deferred** by the §6.9 revision (live feed keeps n small; stores ≤ 8 % at 200 turns, §3.8) |
-| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663, #3701 | **5a done**; 5b, 5c, 5e deferred by §6.9. 5d: user messages now reach the transcript **only** for panes on the per-turn subprocess controller — Kimi, muxcode/container Claude, and Codex *when not run by the app-server controller* (#3701). **Not covered:** app-server Codex, ACP; also still open: the shell journal (`out-of-band.jsonl`) |
+| 5 | Node identity and durability — re-planned as 5a–5e (spec §6.3.6) | #3619 (plan), #3620 (5d echo), #3624 (5a design), #3628–#3648 (5a-1…5a-4), #3663, #3701 | **5a done**; 5b, 5c, 5e deferred by §6.9. 5d: user messages reach the transcript for persistent Claude (stdin line, 5a-3c) and the Gemini family (CLI echo, #3620), and — **added by #3701** — for panes on the per-turn subprocess controller: Kimi, muxcode/container Claude, and Codex *not* run by the app-server controller. **Not covered:** app-server Codex, ACP (spec §6.9 PR 4c); also open: the shell journal (PR 4b) |
 | 6 | Bounded live document — **revised as the live feed with roll-off (spec §6.9)** | #3700, #3701 | **merged**, on by default; kill switch `agent:livefeed`, K = `agent:livefeedturns` (§2.2d). Every pane but ACP and app-server Codex; turns holding an in-pane shell stay until the journal |
 | 7 | History tab follows the transcript (spec §6.9) | #3695 | merged |
 | 8 | Off-main-thread markdown (decision) | — | not started |
@@ -428,5 +428,16 @@ resolving the thunks inside the segment's root; regression tests in
   verified with a real signed-in agent on a dev build — the dev instance's
   agents had no credentials; the load-time roll-off was checked on real
   transcripts (a long pane opened at 4 turns).
+- **Send-and-record ordering across stdin writers** (found in review of
+  #3703): every persistent-controller path writes a stdin line and then
+  records it in the transcript as two steps — `send_message`'s
+  `DeliverDirect` (`deliver_direct`, then `persist_message_to_blockfile`),
+  the queue drain (`tx.send(..).await`, then persist), the muxbus path
+  (`append_delivered_message`) and the dead-air fallbacks. Two writers
+  racing within that window can be recorded in the opposite order to the one
+  the CLI received. Rare (it needs two sends within milliseconds), but History
+  and conversation recovery would replay it that way. Fix: one per-controller
+  send-and-record ordering lock taken by every path, the async drain
+  included — its own PR, since it touches the hottest send path.
 - **Residual nodes after a clear:** a cleared pane can refill with a few
   transcript nodes; the bench records them (`residualNodes`).

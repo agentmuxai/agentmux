@@ -589,7 +589,7 @@ should be treated as a schema reset.
 | 5a | Fix the transcript address at the source: one authoritative stream per pane, a **generation** that changes whenever it is replaced, deleted or re-sourced, and the **absolute line index** (of that stream) on every live event, including records written today without an event. Line-count and range-read responses carry the generation. | Backend (+ event type) |
 | 5b | Positional ids `G<gen>L<line>[.k]` for counter-minted kinds only; `src` / `endLine` / `turn`; replay flushes like live; `skipIds` removed; persisted collapse/pin reset; snapshot v1 treated as a schema reset. | Frontend parser |
 | 5c | Parser and translator `checkpoint()` / `restore()` with the completeness test; checkpoints persisted per block (needs an append RPC, added in 5a or here). | Frontend (+ RPC) |
-| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. | Frontend + backend |
+| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. *Revised by §6.9:* user messages go into the transcript itself (#3701 for the subprocess controller; ACP and the Codex app-server controller still to do), AskUserQuestion answers need no journal (already in the tool result; the dead-air re-delivery is written to the transcript since #3703) — the journal is for in-pane shells only. | Frontend + backend |
 | 5e | Accepted ranges and the replay filter (§6.3.3). | Frontend |
 
 Order: 5d's Gemini echo fix can land any time (shipped in #3620); 5a before
@@ -1252,6 +1252,11 @@ last turn can't leave overdue turns resident waiting for a next trigger
   and the client-side auto-fill note are optimistic — and those fields are
   never cleared, so blocking on them would keep every such turn forever.
   Rebuilding the styled rendering on replay is a parser follow-up.
+  The one path where the CLI writes no tool result — the dead-air fallback
+  that re-sends the answer (or a decline, or a tool-permission decision) as a
+  follow-up stdin line when the CLI abandoned the pending call — now writes
+  that line to the transcript too, like every other stdin line (#3703, Codex
+  review), so every answer path is durable.
 - **A blocked turn is never rolled off — and does not stop the others.** It
   stays where it is; durable finished turns before and after it still roll
   off. Removing from the middle is as safe as removing a prefix here: the
@@ -1261,8 +1266,9 @@ last turn can't leave overdue turns resident waiting for a next trigger
   longer contiguous, a small synthetic row between them reads "N turns in
   History". The feed therefore holds K finished turns plus the blocked ones —
   bounded by what blocks (the backend keeps at most 64 shells per block
-  anyway) and visible in the dev HUD. The journal (§6.3.2, PR 4 below) makes
-  shells and answers durable and removes the blocked case.
+  anyway) and visible in the dev HUD. The shell journal (§6.3.2, PR 4b below)
+  makes shells durable and removes the blocked case. (Answered AskUserQuestion
+  tools are not blocked at all — see the PR 3 revision just above.)
 - **Live-only decoration rows are ephemeral, not content.** stderr rows,
   system notifications, "Interrupted", heuristic compaction markers and
   `compaction_started` join §6.3.2's `ephemeral` class (working indicators,
@@ -1283,7 +1289,8 @@ last turn can't leave overdue turns resident waiting for a next trigger
   the same `{"type":"user",...}` record + `echo: "stdin"` event (not for
   Gemini, whose CLI echoes it), and the Codex and Kimi translators render it
   on replay — so Codex, Kimi and subprocess-Claude panes roll off too. ACP
-  remains excluded.
+  and the Codex app-server controller remain excluded until they write the
+  same record (PR 4c below).
 
 **How.** Reducer command `RollOff { ranges }`
 (`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as
@@ -1371,7 +1378,10 @@ comes back if we want scroll-back in the feed or History anchored to a turn.
 kill switch and the top row; (4a) the per-turn subprocess controller writes
 the user's message to the transcript (#3701 — Codex, Kimi, muxcode/container
 Claude); (4b) the journal for in-pane shells (5d's second half), which lifts
-the blocked case. AskUserQuestion answers need no journal: the answer is
+the blocked case; (4c) ACP (`AcpController::send_input` and its pending-prompt
+flush) and the Codex app-server controller (`AppServerController::spawn_turn`)
+write the same user record after delivery, and their panes join the live feed
+— until then they keep today's behaviour. AskUserQuestion answers need no journal: the answer is
 already in the tool's result (PR 3 revision above); only rebuilding its
 styled rendering on replay remains, a parser follow-up. Each re-runs the
 full-conversation bench at N = 0 / 25 / 200 and records it in the tracker.
