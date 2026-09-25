@@ -8,8 +8,9 @@ split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the 
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
 activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
 Phases 5a–5b (capabilities replace view-name checks) in #3765; 5c dropped
-(§4); Phase 6 (third-party widgets from the user's widgets.json) in the PR
-after it; Phase 2c (migrating the remaining built-in views to `create`) not
+(§4); Phase 6 (third-party widgets from the user's widgets.json) in #3767;
+Phase 2c part 1 (sysinfo, swarm, drone, warden, armory, media → native
+`create`) in the PR after it; 2c part 2 (editor, browser, term, agent) not
 started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
