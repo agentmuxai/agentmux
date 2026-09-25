@@ -12,8 +12,18 @@ use crate::backend::continuity_segments as segs;
 /// The segment a spawned process belongs to: `(agent_uid, segment_id)`.
 pub(super) type SegmentRef = Option<(String, String)>;
 
-/// Config-dir env vars, in the order providers are checked.
-const CONFIG_DIR_VARS: &[&str] = &["CLAUDE_CONFIG_DIR", "CODEX_HOME", "GEMINI_CONFIG_DIR"];
+/// The config dir the spawn gives its provider: the provider's own
+/// `auth_config_dir_env_var` (Gemini's is `GEMINI_CLI_HOME`, not the
+/// `GEMINI_CONFIG_DIR` a hand-kept list here once named), else the first
+/// known provider's variable the env carries.
+fn spawn_config_dir(provider: &str, env: &std::collections::HashMap<String, String>) -> Option<String> {
+    if let Some(p) = crate::backend::providers::get_provider(provider) {
+        if let Some(v) = env.get(p.auth_config_dir_env_var) {
+            return Some(v.clone());
+        }
+    }
+    crate::backend::providers::all_providers().find_map(|p| env.get(p.auth_config_dir_env_var).cloned())
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -113,13 +123,14 @@ impl PersistentSubprocessController {
             .map(|b| b.meta)
             .unwrap_or_default();
         let definition_id = Some(crate::backend::obj::meta_get_string(&meta, "agentId", "")).filter(|d| !d.is_empty());
+        let provider = crate::backend::obj::meta_get_string(&meta, "agentProvider", "");
         let zone = crate::backend::agent_session::agent_zone_for_block_meta(&meta);
         let start = segs::Start {
             segment_id: String::new(),
             agent_uid: agent_uid.to_string(),
             definition_id,
-            provider: crate::backend::obj::meta_get_string(&meta, "agentProvider", ""),
-            config_dir: CONFIG_DIR_VARS.iter().find_map(|v| config.env_vars.get(*v).cloned()),
+            config_dir: spawn_config_dir(&provider, &config.env_vars),
+            provider,
             provider_session_id: attempted_resume_sid.map(str::to_string),
             cwd: config.working_dir.clone(),
             channel: crate::backend::reactive::registry::local_channel_id(),
@@ -165,5 +176,29 @@ pub(super) fn record_segment_end(segment: &SegmentRef, reason: segs::EndReason, 
         tracing::warn!(segment_id = %id, error = %e, "continuity: segment end not recorded");
     } else {
         tracing::info!(segment_id = %id, reason = ?reason, "continuity: segment ended");
+    }
+}
+
+#[cfg(test)]
+mod config_dir_tests {
+    use super::spawn_config_dir;
+
+    fn env(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn each_provider_records_its_own_config_dir() {
+        assert_eq!(spawn_config_dir("claude", &env(&[("CLAUDE_CONFIG_DIR", "/c")])).as_deref(), Some("/c"));
+        assert_eq!(spawn_config_dir("gemini", &env(&[("GEMINI_CLI_HOME", "/g")])).as_deref(), Some("/g"));
+        assert_eq!(spawn_config_dir("qwen", &env(&[("QWEN_HOME", "/q")])).as_deref(), Some("/q"));
+        assert_eq!(spawn_config_dir("kimi", &env(&[("KIMI_SHARE_DIR", "/k")])).as_deref(), Some("/k"));
+    }
+
+    #[test]
+    fn the_providers_own_variable_wins_over_another_in_the_env() {
+        let e = env(&[("CLAUDE_CONFIG_DIR", "/c"), ("CODEX_HOME", "/x")]);
+        assert_eq!(spawn_config_dir("codex", &e).as_deref(), Some("/x"));
+        assert_eq!(spawn_config_dir("", &env(&[])), None);
     }
 }
