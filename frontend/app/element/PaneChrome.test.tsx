@@ -329,11 +329,10 @@ describe("renderPaneChromeShell — tab derivation", () => {
 });
 
 // reagent P1, PR #3484: tabColors used to call computeFocusRingBorderColor
-// with the SAME shared atoms.tabAtom() meta for every pill — if that tab
-// had a tab-wide bg:activebordercolor override, every pill's underline
-// collapsed to that one shared value instead of each block's own color.
-// Fixed by switching to computeBlockActiveBorderColor, a pure per-block
-// helper that never consults tab-level meta at all.
+// with the SAME shared tab meta for every pill — a tab-wide override (the
+// since-removed bg:activebordercolor tier) collapsed every pill's underline
+// to one shared value instead of each block's own color. Fixed by switching
+// to computeBlockActiveBorderColor, a pure per-block helper.
 describe("renderPaneChromeShell — per-tab pane color", () => {
     it("each stack member's own color survives independently — no collapse to a shared value", () => {
         setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
