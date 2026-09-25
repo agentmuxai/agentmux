@@ -17,6 +17,7 @@ vi.mock("@/app/store/mps", () => ({
 // Static import, not `await import(...)`: vitest hoists `vi.mock` above the
 // import graph, so the mock above is already in place — and a top-level await
 // is a type error under this tsconfig's module target (TS1378).
+import type { AmbientNarrationNode } from "../types";
 import { useAmbientNarration } from "./useAmbientNarration";
 
 const emit = (data: unknown) => handlers.forEach((h) => h({ data }));
@@ -27,60 +28,66 @@ describe("useAmbientNarration", () => {
         unsubs.mockClear();
     });
 
-    it("collects narrations from the broadcast", () => {
+    const run = (fn: (got: AmbientNarrationNode[]) => void) =>
         createRoot((dispose) => {
-            const n = useAmbientNarration("block-1");
-            expect(n()).toEqual([]);
-            emit({ kind: "background_task", text: "Running task dev in the background." });
-            expect(n()).toHaveLength(1);
-            expect(n()[0].text).toBe("Running task dev in the background.");
-            expect(n()[0].kind).toBe("background_task");
+            const got: AmbientNarrationNode[] = [];
+            useAmbientNarration("block-1", (n) => got.push(n));
+            fn(got);
             dispose();
+        });
+
+    it("hands each narration from the broadcast to the callback as an ambient_narration node", () => {
+        run((got) => {
+            emit({ kind: "background_task", text: "Running task dev in the background." });
+            expect(got).toHaveLength(1);
+            expect(got[0].type).toBe("ambient_narration");
+            expect(got[0].text).toBe("Running task dev in the background.");
+            expect(got[0].kind).toBe("background_task");
+            expect(got[0].timestamp).toBeGreaterThan(0);
+        });
+    });
+
+    it("gives every narration a distinct id, even within the same millisecond", () => {
+        // The document reducer dedups by id — a collision would silently drop the
+        // second of two narrations that arrive back to back.
+        run((got) => {
+            for (let i = 0; i < 5; i++) emit({ kind: "background_task", text: `line ${i}` });
+            expect(new Set(got.map((n) => n.id)).size).toBe(5);
         });
     });
 
     it("ignores an empty or whitespace-only line rather than rendering a blank row", () => {
-        createRoot((dispose) => {
-            const n = useAmbientNarration("block-1");
+        run((got) => {
             emit({ kind: "background_task", text: "   " });
             emit({ kind: "background_task", text: "" });
-            expect(n()).toEqual([]);
-            dispose();
+            expect(got).toEqual([]);
         });
     });
 
     it("ignores a malformed payload instead of throwing into the event handler", () => {
         // This runs inside a WS event dispatch — a throw here would take out
         // whatever else that dispatch was delivering.
-        createRoot((dispose) => {
-            const n = useAmbientNarration("block-1");
+        run((got) => {
             expect(() => {
                 emit(undefined);
                 emit({});
                 emit({ text: 42 });
             }).not.toThrow();
-            expect(n()).toEqual([]);
-            dispose();
+            expect(got).toEqual([]);
         });
     });
 
-    it("retains only the most recent few", () => {
-        // These are transient asides, not a log. An unbounded list on a
-        // long-lived pane grows with nothing ever pruning it, and old entries
-        // describe work that finished long ago.
-        createRoot((dispose) => {
-            const n = useAmbientNarration("block-1");
+    it("keeps every narration in order — retention is the document store's job, not the hook's", () => {
+        run((got) => {
             for (let i = 0; i < 12; i++) emit({ kind: "background_task", text: `line ${i}` });
-            expect(n()).toHaveLength(5);
-            expect(n()[0].text).toBe("line 7");
-            expect(n()[4].text).toBe("line 11");
-            dispose();
+            expect(got).toHaveLength(12);
+            expect(got.map((n) => n.text)).toEqual(Array.from({ length: 12 }, (_, i) => `line ${i}`));
         });
     });
 
     it("unsubscribes on dispose", () => {
         createRoot((dispose) => {
-            useAmbientNarration("block-1");
+            useAmbientNarration("block-1", () => {});
             dispose();
         });
         expect(unsubs).toHaveBeenCalled();

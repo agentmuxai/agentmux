@@ -55,7 +55,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
 
 /**
  * Raw markdown text block
@@ -949,3 +949,26 @@ export const JEKT_DELIVERY_ICONS: Record<JektDeliveryTier, string> = {
     lan: "🛰️",
     wan: "☁️",
 };
+
+/**
+ * A short line AgentMux generated about something it did on its own (first
+ * consumer: a tool call the harness detached to the background), rendered
+ * in-flow in the agent's own prose styling with a small trailing `ambient` tag.
+ *
+ * Deliberately NOT a `MarkdownNode`: markdown means "model output", and code
+ * that walks the document on that assumption must not start treating AgentMux's
+ * own sentence as something the model said. The model did not write these and
+ * the CLI transcript does not contain them — the tag exists to keep that true
+ * when the line is read back later.
+ *
+ * View-only: never sent to the CLI, so it cannot alter the model's next turn.
+ * Spec: docs/specs/SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24.md.
+ */
+export interface AmbientNarrationNode {
+    type: "ambient_narration";
+    id: string;
+    /** The backend's prompt selector, e.g. `"background_task"`. */
+    kind: string;
+    text: string;
+    timestamp: number;
+}
