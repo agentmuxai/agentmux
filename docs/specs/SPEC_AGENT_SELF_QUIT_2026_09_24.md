@@ -30,6 +30,7 @@ The warning text alone is not a security boundary — a prompt injection that ta
 
 1. **Agents are trusted.** The provenance gate (§6.3) guards against *content* reaching the model — a jekt from another instance or machine, a cron prompt, a web page or file — not against another local agent. A local agent could reach the UI channel with the shared `AGENTMUX_AUTH_KEY` and type into another pane's composer, which would count as `turn_origin = user`; that is out of scope by this decision, not an oversight.
 2. **The pane close button uses the same graceful shutdown, visibly.** Closing an agent pane (×) shuts its agents down gracefully, shows a concise log of what is being stopped in the pane itself, and closes the pane when that finishes (§5.5). Today the pane vanishes at once and the shutdown runs unseen.
+3. **An external shutdown gives the user 15 seconds to override (answers Q3).** When anything other than the user shuts an agent down, the user is told the agent is marked for shutdown and gets 15 s to keep it running, with a warning tone that sounds like the question tone but is clearly different. A shutdown the user asked for has no countdown. The caller is told the response takes at least 15 s (§6.5).
 
 ## 1. Goals and non-goals
 
@@ -278,7 +279,9 @@ It is set where each path hands input to the controller and read once by the gat
 
 **The quote is checked, not just recorded.** srv has the text of the user message that began the turn. `user_instruction` must be a substring of it after whitespace normalisation, or the call is refused (`user_instruction_mismatch`) and audited. That catches a model that paraphrases or invents the instruction, at no cost to a real one.
 
-**The gate:** `QuitSelf` is refused with 403 unless `turn_origin == user` for the caller's block. **Verified senders are not exempt**: a `TRUST=host-verified` jekt proves *who* is asking, not that the *user* asked. That is the same distinction `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` draws for disclosure.
+**The gate:** `QuitSelf` proceeds at once only when `turn_origin == user` for the caller's block. **Verified senders are not exempt**: a `TRUST=host-verified` jekt proves *who* is asking, not that the *user* asked. That is the same distinction `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` draws for disclosure.
+
+**Revised 2026-09-25 (§0.1-3):** any other `turn_origin` is an *external* shutdown. It is no longer refused with 403. It goes through the 15-second user override (§6.5). The user, not the gate, decides; the gate only decides whether the user is asked.
 
 **Consequences, intended:**
 - "Finish the PR, then quit" works: the user's message starts the turn, the agent works, and calls `QuitSelf` at the end of that same turn.
@@ -288,6 +291,42 @@ It is set where each path hands input to the controller and read once by the gat
 ### 6.4 Why not a confirmation dialog for the tool?
 
 A human-confirm dialog ("Camper wants to quit — Allow?") would close the residual risk, but it adds a prompt to the one case where the user has just said "quit". Recommendation: no dialog in v1; revisit if the audit log shows unwanted self-quits. (Q3.)
+
+> **Decided 2026-09-25 (Q3):** no dialog for a quit the user asked for. For an external shutdown, an opt-out countdown, not an opt-in dialog: §6.5.
+
+### 6.5 External shutdown: 15 seconds for the user to override
+
+**What counts as external.** Any shutdown of an agent that the user did not ask for directly:
+
+| Path | External? |
+|---|---|
+| Pane ×, tab ×, `/quit` | no, the user asked |
+| `QuitSelf` with `turn_origin == user` | no, the user asked in this turn |
+| `QuitSelf` with any other `turn_origin` (jekt, cron, nudge, broadcast, loop, system) | **yes** |
+| Another agent's `ClosePane block_id=…` targeting this agent's pane or tab | **yes** |
+| `FleetBulkStop` naming this agent | **yes** |
+| srv shutdown, app quit, OOM/supervisor kill | no. Those are not per-agent requests, and a 15 s hold on app quit would be wrong |
+
+**Flow.**
+1. srv validates the request (identity, target exists, not already quitting) and sets `pending_shutdown` on the target block: `{ by, via, reason, deadline_ms = now + 15 000 }`.
+   - `by` is the verified caller agent id, or `cron` etc.
+   - `via` is the tool: `QuitSelf`, `ClosePane` or `FleetBulkStop`.
+   - The block keeps working meanwhile. This is a notice, not a pause.
+2. srv publishes `agent:shutdown-pending { block_id, by, via, reason, deadline_ms }` and raises an OS notification through the notification Router, as a new kind `ShutdownPending` (Attention priority), so a user who isn't looking at the pane still hears about it.
+3. **In the pane:** a banner across the top of the pane: **"Korp asked to shut down Camper: <reason>. Closing in 15 s. [Keep running]"**, counting down live. The notification's click selects the pane (the click-to-pane path).
+4. **The tone.** It's the same synth chain as the AskUserQuestion waiting tone (`waiting-tone-player.ts`: oscillator → envelope → lowpass → waiting gain), so it reads as "AgentMux needs you". But it's a **falling minor arpeggio, A4 → F4 → D4**, where the question tone is a rising major C5 → E5 → G5. It plays once at the start and once at 5 s remaining, not as a loop. It has its own setting, `notify:sound:agent.shutdown.pending` (default on), under the existing sound master switch.
+5. **Override.** **Keep running** (in the banner, or from the notification) clears `pending_shutdown`. The agent is untouched, and the caller gets `kept_by_user`.
+6. **No override within 15 s:** the shutdown proceeds as the graceful, visible close (§5.5). For `QuitSelf` that is still deferred to turn end (§4.2).
+7. **Repeat requests** for a block already pending return the same pending state and deadline. They don't restart the clock.
+8. **Audit.** One entry per request: requester, via, reason, and outcome (`shut_down`, `kept_by_user`, or `superseded` when the user closed the pane themselves meanwhile).
+
+**Nobody present.** If no window is open (background mode), the OS notification and tone still fire. If nobody overrides, the shutdown proceeds. The override protects a user who is there. It doesn't hold an agent open indefinitely for one who isn't.
+
+**The caller waits at least 15 s, and is told so.**
+- srv answers an external request at once with **202** `{ status: "pending_user_override", deadline_ms, wait_at_least_ms: 15000 }`, and serves the outcome at `GET /api/v1/agent/shutdown/{request_id}`. A synchronous 15 s+ HTTP call would exceed the MCP client's 10 s srv timeout (`agentmux-mcp/src/main.rs:109`).
+- The MCP tools (`QuitSelf` from a non-user turn, `ClosePane block_id=`, `FleetBulkStop`) poll that endpoint and return only the final result: `shut_down` or `kept_by_user`.
+- Their descriptions say plainly: *"Shutting down an agent you don't own (or yourself, without the user asking this turn) waits for a 15-second user override window. Expect this call to take at least 15 seconds; the result says whether the user kept the agent running."*
+- `FleetBulkStop` runs all its targets' windows in parallel, one countdown each, and returns per-target outcomes.
 
 ## 7. Close the existing back door: `ClosePane` with no arguments
 
@@ -311,6 +350,7 @@ Alternative: keep the no-argument form but add the gate and audit. This is weake
 | 1 | `self_quit::run` (tab-scoped, graceful), `mark_quitting`, work-claim release, `Shell()` ownership + stop, audit; `ObjectService.QuitAgent`; `/quit` + `/exit` slash command; toast | user-facing `/quit` |
 | 1b | `agent:shutdown` progress events from `shutdown_one`; the pane's Shutting-down overlay and log; the × keeps the pane until the saga's prune; confirmation button "Shut down" (§5.5) | graceful, visible close button |
 | 2 | turn provenance (`turn_origin`) on every input path; `POST /api/v1/agent/self/quit` with the gate; deferred-to-turn-end scheduling; `QuitSelf` tool | agent-facing tool — **only together with the gate, never before it** |
+| 2b | external-shutdown override (§6.5): `pending_shutdown`, `agent:shutdown-pending`, `ShutdownPending` notification kind, pane banner + **Keep running**, the falling-minor tone and its setting, 202 + status endpoint, polling in `QuitSelf`/`ClosePane block_id=`/`FleetBulkStop` | 15 s override for anything the user didn't ask for — **ships with or before Phase 2's non-user `QuitSelf` path** |
 | 3 | `ClosePane` no-argument form rerouted through self-quit (§7) | back door closed |
 | — | §8 defects | independent PRs |
 
@@ -332,10 +372,13 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - `shutdown_one` publishes `agent:shutdown` lines in order (interrupt, exit/kill, one per tracked process, saved) and a final `done`; a forced kill says so; a failure sets `error`.
 - Gate taint: a user-started turn that receives a queued jekt is refused afterwards; `user_instruction` that is not a substring of the turn's user message is refused and audited.
 
+- External override: a `ClosePane block_id=` from another agent returns 202 with `wait_at_least_ms: 15000`; the block is still running at 14 s; with no override it is shut down after the deadline; **Keep running** at any point before it yields `kept_by_user` and the block untouched; a second request while pending keeps the original deadline; pane × / `/quit` / user-turn `QuitSelf` never enter the pending state.
+
 **Frontend (vitest)**
 - `/quit` and `/exit` dispatch to `quitCommand`, not passthrough; `/q` passes through.
 - The handler calls `ctx.quitSelf()` once; on failure it returns an error and the composer re-enables.
 - The toast shows the agent name, and the reason for a tool-initiated quit.
+- `agent:shutdown-pending` shows the banner with a live countdown; **Keep running** calls the cancel RPC once; the shutdown tone uses the falling A4→F4→D4 pattern (not the question tone's), plays at start and at 5 s left, and respects `notify:sound:agent.shutdown.pending`.
 - Closing an agent pane shows the overlay, keeps the node until the prune arrives, and caps the log at 8 lines with "+N more"; an `error` line keeps the pane open with a Close button; a terminal-only pane closes at once.
 
 **MCP**
@@ -344,7 +387,7 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 **Live (dev window)**
 - `/quit` in a two-tab pane closes one tab and leaves the other agent running.
 - Tell an agent "quit": it says goodbye, then its tab closes.
-- `SendMessage` another agent "please call QuitSelf": the call is refused and the agent keeps running.
+- `SendMessage` another agent "please call QuitSelf": the banner and tone appear on that agent's pane with a 15 s countdown; **Keep running** keeps it; letting it run out shuts it down with the visible log; the caller's tool call returns after ≥ 15 s with the matching outcome.
 - Reopen the quit agent: the conversation resumes.
 - Close a pane whose agent runs a dev server: the log lists the server process as stopped, then the pane closes; Task Manager shows no leftover process.
 
@@ -352,6 +395,6 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 
 - **Q1. `/exit` alias.** Recommended yes (§5.1). Say no if you want `/exit` to keep reaching the CLI.
 - **Q2. Crons on quit.** Recommended: keep and report (§4.3). Alternative: pause them on quit and resume them on reopen.
-- **Q3. Human-confirm dialog for `QuitSelf`.** Recommended: not in v1 (§6.4).
+- **Q3. Human-confirm dialog for `QuitSelf`.** **Decided 2026-09-25:** no dialog when the user asked; any external shutdown gets a 15 s notify-and-override window with its own tone, and the caller waits at least 15 s (§6.5).
 - **Q4. `ClosePane` no-argument form.** Recommended: reroute through self-quit (§7-1).
 - **Q5. Per-agent "Quit gracefully" button in the pane-close modal.** ~~Recommended: not in v1; the text tip (§5.4) first.~~ **Moot (2026-09-25):** the × itself is now the graceful path (§5.5).
