@@ -23,7 +23,7 @@ import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { WardenViewModel } from "@/app/view/warden/warden";
-import { HelpViewModel } from "@/view/helpview/helpview";
+import { helpPaneTab } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
 import { agentPaneTab } from "@/app/view/agent/agent-pane-tab";
 import { termPaneTab } from "@/view/term/term-pane-tab";
@@ -42,7 +42,7 @@ const builtins = [
     legacyAdapter("editor", EditorViewModel as any, { label: "Editor", icon: "file-lines", lifecycle: "keepAlive" }),
     legacyAdapter("sysinfo", SysinfoViewModel as any, { label: "Sysinfo", icon: "chart-line" }),
     legacyAdapter("cpuplot", SysinfoViewModel as any),
-    legacyAdapter("help", HelpViewModel as any, { label: "Help", icon: "circle-question" }),
+    helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     legacyAdapter("launcher", LauncherViewModel as any),
     legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project" }),
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),

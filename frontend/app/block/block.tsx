@@ -8,7 +8,8 @@ import {
     FullBlockProps,
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
-import { resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import { adaptPaneTabInstance, makePaneTabHostContext } from "@/app/block/pane-tab-host";
+import { getPaneTab, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
@@ -70,10 +71,17 @@ const viewModelRoots = new WeakMap<ViewModel, () => void>();
  */
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     const effectiveView = resolveEffectiveViewType(blockView);
+    const manifest = getPaneTab(effectiveView);
     const ctor = getBlockViewClass(effectiveView);
     let disposeRoot!: () => void;
     const vm = createRoot((dispose) => {
         disposeRoot = dispose;
+        if (manifest?.create != null) {
+            // A native pane tab (Pane Tab contract Phase 2b): the instance
+            // gets a host context, never the raw nodeModel.
+            const ctx = makePaneTabHostContext(blockId, nodeModel);
+            return adaptPaneTabInstance(manifest, ctx, manifest.create(ctx));
+        }
         return ctor != null
             ? (new ctor(blockId, nodeModel as any) as ViewModel)
             : makeDefaultViewModel(blockId, effectiveView);

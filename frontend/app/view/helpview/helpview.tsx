@@ -1,12 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { QuickTips } from "@/app/element/quicktips";
-import { BlockNodeModel } from "@/app/block/blocktypes";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { showZoomIndicator } from "@/app/store/zoom";
-import { MOS } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal, onMount, type JSX } from "solid-js";
 
@@ -16,31 +13,25 @@ const KEYBOARD_STEP = 0.1;
 const WHEEL_STEP = 0.05;
 
 /**
- * HelpViewModel - shows QuickTips content with Ctrl+/- / Ctrl+Wheel zoom.
- * Zoom is persisted in block meta as "help:zoom".
+ * Help — QuickTips with Ctrl+/- / Ctrl+Wheel zoom, persisted in block meta as
+ * "help:zoom". The first NATIVE pane tab (Pane Tab contract Phase 2b,
+ * SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §4): it reaches its block only
+ * through the host context, never MOS/RpcApi/nodeModel directly.
  */
-class HelpViewModel implements ViewModel {
-    viewType: string;
-    blockId: string;
-    nodeModel: BlockNodeModel;
+export const helpPaneTab: PaneTabManifest = {
+    apiVersion: 1,
+    view: "help",
+    label: "Help",
+    icon: "circle-question",
+    create: () => ({ component: HelpView }),
+};
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.viewType = "help";
-        this.nodeModel = nodeModel;
-        this.blockId = blockId;
-    }
-
-    get viewComponent(): ViewComponent {
-        return HelpView as unknown as ViewComponent;
-    }
-}
-
-function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
+function HelpView(props: { ctx: PaneTabHostContext }): JSX.Element {
+    const ctx = props.ctx;
     const [zoom, setZoom] = createSignal(1.0);
 
     onMount(() => {
-        const blockData = MOS.getMuxObjectAtom<Block>(`block:${model.blockId}`)();
-        const saved = blockData?.meta?.["help:zoom"];
+        const saved = ctx.meta()?.["help:zoom"];
         if (typeof saved === "number" && saved >= MIN_ZOOM && saved <= MAX_ZOOM) {
             setZoom(saved);
         }
@@ -49,12 +40,7 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     const adjustZoom = (delta: number) => {
         const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((zoom() + delta) * 100) / 100));
         setZoom(next);
-        fireAndForget(() =>
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "help:zoom": Math.abs(next - 1.0) < 0.01 ? null : next },
-            })
-        );
+        fireAndForget(() => ctx.setMeta({ "help:zoom": Math.abs(next - 1.0) < 0.01 ? null : next }));
         showZoomIndicator(`${Math.round(next * 100)}%`);
     };
 
@@ -95,4 +81,4 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     );
 }
 
-export { HelpView, HelpViewModel };
+export { HelpView };

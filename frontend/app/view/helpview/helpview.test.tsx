@@ -15,24 +15,17 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/global", () => ({
-    MOS: {
-        makeORef: (type: string, id: string) => `${type}:${id}`,
-        getMuxObjectAtom: () => () => ({ meta: {} }),
-    },
-}));
-
+// Help is the first NATIVE pane tab (Pane Tab contract Phase 2b): it reads
+// and writes its block only through the host context.
 const setMetaMock = vi.fn((..._args: unknown[]) => Promise.resolve(undefined));
-vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: { SetMetaCommand: (...args: unknown[]) => setMetaMock(...args) },
-}));
 
 const showZoomIndicatorMock = vi.fn();
 vi.mock("@/app/store/zoom", () => ({
     showZoomIndicator: (...args: unknown[]) => showZoomIndicatorMock(...args),
 }));
 
-import { HelpView, HelpViewModel } from "./helpview";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { helpPaneTab, HelpView } from "./helpview";
 
 describe("HelpView zoom", () => {
     afterEach(() => {
@@ -41,19 +34,36 @@ describe("HelpView zoom", () => {
         showZoomIndicatorMock.mockClear();
     });
 
-    function renderHelp() {
-        const model = new HelpViewModel("test-block", {} as any);
-        return render(() => <HelpView model={model} />);
+    function renderHelp(meta: Record<string, unknown> = {}) {
+        const ctx: PaneTabHostContext = {
+            blockId: "test-block",
+            meta: () => meta as MetaType,
+            setMeta: (patch) => setMetaMock(patch),
+            isFocused: () => false,
+        };
+        return render(() => <HelpView ctx={ctx} />);
     }
 
-    it("Ctrl+Wheel writes help:zoom via SetMetaCommand", () => {
+    it("Ctrl+Wheel writes help:zoom through the host context", () => {
         const { container } = renderHelp();
         const root = container.querySelector("[tabindex]") as HTMLElement;
         root.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
-            oref: "block:test-block",
-            meta: { "help:zoom": 1.05 },
-        });
+        expect(setMetaMock).toHaveBeenCalledWith({ "help:zoom": 1.05 });
+    });
+
+    it("starts at the zoom saved in the block's meta", () => {
+        const { container } = renderHelp({ "help:zoom": 1.5 });
+        const root = container.querySelector("[tabindex]") as HTMLElement;
+        root.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "help:zoom": 1.55 });
+    });
+
+    it("registers as a native pane tab with Help's label and icon", () => {
+        expect(helpPaneTab.view).toBe("help");
+        expect(helpPaneTab.label).toBe("Help");
+        expect(helpPaneTab.icon).toBe("circle-question");
+        expect(helpPaneTab.create).toBeTypeOf("function");
+        expect(helpPaneTab.viewModelClass).toBeUndefined();
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
