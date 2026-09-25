@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Type:** Bug (macOS), plus one frontend focus bug on all platforms
-**Status:** implemented — PR #3737 (native key-window handoff + split focus + claim-on-create). Test-plan items 1–5 verified live 2026-09-24; 6–9 pending.
+**Status:** implemented — PR #3737 (native key-window handoff + split focus + claim-on-create + unhandled-key loop guards). Test plan verified live 2026-09-25 (all items except the background-tab case, which is covered by unit tests).
 **Scope:** `agentmux-cef/src/ui_tasks/{platform_macos,pane_geometry,window}.rs`,
 `agentmux-cef/src/browser_panes/clip.rs` (macOS only), and on the frontend
 `frontend/layout/lib/layoutPersistence.ts` and
@@ -102,27 +102,63 @@ request, and key status is handed back when the user goes back to the app.
 | Let the overlay become key | `swizzled_can_become_key_window`, installed next to the isMain/isKey swizzles | YES for the tagged overlay instance only; every other window gets the original answer |
 | Click into the page → the page gets the keyboard | `swizzled_nsapp_send_event`, overlay mouse-down branch | `make_pane_overlay_key(block_id)` **before** the click is dispatched |
 | Frontend focus → the page gets the keyboard | `BrowserPaneManager::focus` → `post_make_pane_overlay_key` (UI thread) | covers keyboard pane selection and open-with-focus |
-| Focus request before the overlay exists | `PENDING_PANE_KEY`, applied by `SetPaneBoundsViewsTask` right after it registers the overlay | the claim-on-create IPC beats the overlay setup |
+| Focus request before the overlay exists or is on screen | `PENDING_PANE_KEY`, applied by `SetPaneBoundsViewsTask` right after it registers the overlay | the claim-on-create IPC beats the overlay setup; `makeKeyWindow` is a silent no-op on a window not yet shown, so an unsuccessful attempt is parked too |
 | Click on the app UI → the keyboard comes back | main-window branch of the sendEvent swizzle (button-down) | `reclaim_key_for_window(win)`, a no-op unless a pane overlay is key |
 | Frontend reclaims focus (`main_window_focus`) | `MainFocusReclaimTask` | `reclaim_key_for_window` + clear the parked request |
 | A DOM menu/popover opens over the pane | `SetPaneOverlayClipViewsTask` (hole mask) | reclaim key, so Escape and typing go to the DOM overlay, not the page under it |
 | Resizes no longer steal the keyboard | `SetPaneBoundsViewsTask` | skip `makeKeyAndOrderFront:` on the main window while a pane overlay is key |
 | Keys reach Chromium, not the window | `swizzled_nsapp_send_event`, every keyDown/keyUp/flagsChanged for a tagged overlay | make the page's `RenderWidgetHostViewCocoa` first responder before dispatch |
+| Unhandled keys don't loop | same place | a key event re-sent for a pane overlay (same NSEvent: pointer + timestamp) is offered to the main menu once and dropped |
+| Only the key overlay's page takes keys | `release_inactive_pane_responders`, before every key event and on handback | any non-key overlay whose first responder is its page view is reset to its window |
 
-About the last row: making the overlay key wasn't enough. Its first responder
-was the overlay NSWindow itself, which swallowed every key. A one-off
-`makeFirstResponder:` plus Views `request_focus()` in
-`make_pane_overlay_key` got reset before the first keypress (seen live), so
-the first responder is re-pointed per key event. It's cheap: a subview walk
-only when the responder is wrong.
+About the first-responder rows: making the overlay key wasn't enough. Its
+first responder was the overlay NSWindow itself, which swallowed every key.
+A one-off `makeFirstResponder:` got reset before the first keypress (seen
+live), so the first responder is re-pointed per key event. It's cheap: a
+subview walk only when the responder is wrong.
+
+### Unhandled-key re-dispatch loops (found in live testing)
+
+The first cut of this fix, before the last two rows existed, spun the host
+at 100% CPU. Traced with a native call stack at the re-send:
+
+```
+[NSApp sendEvent:]  ← -[CommandDispatcher redispatchKeyEvent:]
+  ← NativeWidgetMacNSWindowHost::RedispatchKeyEvent
+  ← views::UnhandledKeyboardEventHandler::HandleKeyboardEvent
+  ← CefBrowserViewImpl::HandleKeyboardEvent ← WebContentsImpl::HandleKeyboardEvent
+```
+
+Chromium re-sends every key the page doesn't consume (the same NSEvent) so
+that menu key equivalents get a chance. Two loops came out of that:
+
+1. **Within a pane.** A re-sent event for the pane overlay was routed to the
+   page again (its view is now first responder), reported unhandled again,
+   and re-sent forever. Any key on a page with nothing focused triggered it.
+   Fixed by the re-dispatch guard: the re-send gets `[NSApp.mainMenu
+   performKeyEquivalent:]` and is never routed back into the pane.
+2. **Across windows.** A key typed into the app (for example after Cmd+L
+   moved the caret to the address bar) that the app's page doesn't consume
+   is re-sent to the main window. `CommandDispatcher` then offers it to
+   child windows via `performKeyEquivalent:`. Another pane overlay whose page
+   view was still first responder accepted it, and the key ping-ponged
+   between the main window and that page. Fixed by the invariant that only
+   the key overlay keeps its page view as first responder.
+
+An earlier attempt also called Views `request_focus()` on the pane's
+BrowserView. That's gone: the overlay view belongs to the **main** widget's
+views hierarchy, so it made the main window's FocusManager route the app's
+own keystrokes into the page.
 
 What deliberately doesn't change:
 - `can_activate` stays 0. Activation behaviour on creation is untouched.
 - The overlay still doesn't become *main*, so the main window's title bar
   stays active.
-- App shortcuts pressed while the page has the keyboard still reach the app
-  through the existing macOS `on_pre_key_event` → `browser-pane-shortcut`
-  path (`client/handlers.rs`).
+- While the page has the keyboard, only the pane shortcuts reach the app,
+  through the existing `on_pre_key_event` path (`client/handlers.rs`):
+  Cmd+L (address bar), Cmd+R, Alt+Left/Right. Other app chords go to the page,
+  the same as on Windows, where the pane window owns the keyboard. Menu-bar
+  key equivalents still work through the re-dispatch guard.
 
 ### Frontend
 
@@ -149,26 +185,31 @@ What deliberately doesn't change:
    keyboard: the page keeps the keyboard.
 5. With the page holding the keyboard, right-click and press Escape: the menu
    closes (see the context menu spec).
-6. With the page holding the keyboard, press an app shortcut (for example a
-   pane-navigation chord): the app handles it.
+6. With the page holding the keyboard, press Cmd+L, then type: the text goes
+   into that pane's address bar.
 7. Two browser panes: clicking each one moves the keyboard between them.
 8. Close the page's pane while it holds the keyboard: typing goes back to
    the app.
 9. Regression: sidebar and header clicks with a pane open (the #1819 case),
    and a pane opened in a background tab doesn't take the caret.
 
-**Verified live (2026-09-24, dev build, real CGEvent input):**
-- 1: `hello` typed right after a focused split open landed in Google's search
-  box.
-- 2: after clicking an app pane, `zz` went to the app, and the page was
-  unchanged.
-- 3: after clicking back into the page, `abc` went to the page.
-- 4: four forced bounds updates (resize IPC), then `e` still went to the page.
-- 5: a right-click while the page had the keyboard opened the menu over the
-  page; key status went back to the app window and Escape closed the menu.
+**Verified live (2026-09-25, dev build of #3736 + #3737 combined, real CGEvent
+input, with a CPU/key-log watchdog after every step):**
 
-Items 6–9 are not yet checked live. (The test machine locked partway
-through.)
+| # | Step | Result |
+|---|---|---|
+| 1 | focused split open, type `hi` with no click | page input = `hi` |
+| 2 | click an app pane, type `zz` | app input = `zz`; pages unchanged |
+| 3 | click into page A, type `a1` | page A = `a1` |
+| 4 | forced resizes (resize IPC), type `r` | page A = `a1a3r` |
+| 5 | right-click page A, Escape | menu shown over the page, closed by Escape |
+| 6 | page A: Cmd+L, type `zz` | address bar = `zz` |
+| 7 | click page B `b2`, back to page A `a3` | A = `a1a3`, B = `b2` |
+| 8 | close the pane holding the keyboard, type `xy` | app received `xy` |
+| – | click page body (no input), type `qj` | keys logged, no loop, idle CPU |
+
+Not checked live: a pane opened in a background tab (covered by the
+`claimFocusOnMount` guard and its unit tests).
 
 ## Follow-ups
 
