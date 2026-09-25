@@ -21,9 +21,17 @@
 // order is the sort_order column, mutated via reorderglobalbrain.
 //
 // This model is block-free (same shape as BundleViewModel) and drives off
-// the bundle_* RPCs. Mutations refresh the list afterwards; it does not
-// subscribe to memories:changed (matching BundleViewModel — the manager is
-// the only writer in practice).
+// the bundle_* RPCs. Mutations refresh the list afterwards, and it
+// subscribes to memories:changed so an agent's GlobalMemoryWrite (or another
+// window) shows up live.
+//
+// Since 2026-09-24 the view is a tile grid that opens one entry at a time in
+// a full view (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3/§2.4), so
+// editing state is ONE MemoryDraftModel for whatever is open — the inline
+// per-card editors and their two parallel sets of draft signals (ordinary vs
+// system) are gone. A save carries `base_sha256` (SHA-256 of
+// `name + "\0" + instructions`, the server's own content_hash), and a live
+// change never replaces an open draft.
 //
 // Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 
@@ -32,10 +40,50 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { PROVIDERS } from "@/app/view/agent/providers";
-import type { Bundle } from "@/app/store/rpc-api";
+import type { Bundle, GlobalMemoryVersionMeta } from "@/app/store/rpc-api";
+import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
+import type { MemoryHistorySource } from "@/app/view/memory-editor/memory-history-model";
+import { sha256Hex } from "@/util/sha256";
 
-/** Sentinel editingId for the unsaved "new section" draft. */
-export const NEW_SECTION_ID = "__new__";
+/** What the Global Memory full view is showing — one entry, a new-entry
+ *  draft, the read-only CLAUDE.md, or the combined preview. `null` = the
+ *  tile grid. */
+export type GlobalMemoryView =
+    | { kind: "entry"; id: string }
+    | { kind: "new" }
+    | { kind: "claude-config" }
+    | { kind: "preview" };
+
+/** The editable part of an entry. */
+export interface GlobalMemoryDraft {
+    name: string;
+    instructions: string;
+}
+
+/** The server's `bundle_versions::content_hash` — what `base_sha256` means
+ *  for a Global Memory save. */
+export function globalMemoryContentHash(v: GlobalMemoryDraft): Promise<string> {
+    return sha256Hex(`${v.name}\0${v.instructions}`);
+}
+
+/** `globalmemory:history/diff/revert` as a MemoryHistory data source. No
+ *  `readContent`: the entry's content comes from the bundle list. */
+export function globalMemoryHistorySource(id: string): MemoryHistorySource<GlobalMemoryVersionMeta> {
+    return {
+        listVersions: () => RpcApi.GlobalMemoryHistoryCommand(TabRpcClient, { id }).then((r) => r.versions),
+        diff: (from, to) =>
+            RpcApi.GlobalMemoryDiffCommand(TabRpcClient, { id, from_version_id: from, to_version_id: to }).then(
+                (r) => r.diff
+            ),
+        revert: (versionId) =>
+            RpcApi.GlobalMemoryRevertCommand(TabRpcClient, { id, target_version_id: versionId }).then(() => undefined),
+    };
+}
+
+/** UTF-8 byte length — the "size" on an entry tile. */
+export function utf8Bytes(s: string): number {
+    return new TextEncoder().encode(s).length;
+}
 
 /** Mirror of the backend format_global_bundle_block — keep in sync so the
  *  preview matches exactly what lands in the agent's startup instructions
@@ -100,46 +148,26 @@ export class GlobalBundleViewModel {
     allAtom: Accessor<Bundle[]> = this._all[0];
     private setAll = this._all[1];
 
-    private _editingId = createSignal<string | null>(null);
-    editingIdAtom: Accessor<string | null> = this._editingId[0];
-    private setEditingId = this._editingId[1];
+    /** The open full view; `null` = the tile grid. */
+    private _view = createSignal<GlobalMemoryView | null>(null);
+    viewAtom: Accessor<GlobalMemoryView | null> = this._view[0];
+    private setView = this._view[1];
 
-    private _draftName = createSignal<string>("");
-    draftNameAtom: Accessor<string> = this._draftName[0];
-    setDraftName = this._draftName[1];
+    /** The one draft for whatever entry is open (or being created). */
+    readonly draft: MemoryDraftModel<GlobalMemoryDraft>;
 
-    private _draftInstructions = createSignal<string>("");
-    draftInstructionsAtom: Accessor<string> = this._draftInstructions[0];
-    setDraftInstructions = this._draftInstructions[1];
+    /** Bumped on every refresh, so an open full view can reload its history
+     *  in place when the entry changes underneath it. */
+    private _refreshNonce = createSignal(0);
+    refreshNonceAtom: Accessor<number> = this._refreshNonce[0];
+    private setRefreshNonce = this._refreshNonce[1];
 
-    private _saving = createSignal<boolean>(false);
-    savingAtom: Accessor<boolean> = this._saving[0];
-    private setSaving = this._saving[1];
+    /** The entry the full view has open, if it (still) exists. */
+    openEntryAtom: Accessor<Bundle | null>;
 
     private _error = createSignal<string | null>(null);
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
-
-    private _showPreview = createSignal<boolean>(true);
-    showPreviewAtom: Accessor<boolean> = this._showPreview[0];
-    setShowPreview = this._showPreview[1];
-
-    // ---- System-tier editing state — deliberately separate signals from
-    // the ordinary editor above (not reused) so opening one editor can
-    // never leak draft state into the other. See
-    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5.
-
-    private _editingSystemId = createSignal<string | null>(null);
-    editingSystemIdAtom: Accessor<string | null> = this._editingSystemId[0];
-    private setEditingSystemId = this._editingSystemId[1];
-
-    private _draftSystemName = createSignal<string>("");
-    draftSystemNameAtom: Accessor<string> = this._draftSystemName[0];
-    setDraftSystemName = this._draftSystemName[1];
-
-    private _draftSystemInstructions = createSignal<string>("");
-    draftSystemInstructionsAtom: Accessor<string> = this._draftSystemInstructions[0];
-    setDraftSystemInstructions = this._draftSystemInstructions[1];
 
     /** Global sections, in injection order (sort_order, then name) —
      *  includes system rows (they're always is_global too). */
@@ -206,6 +234,20 @@ export class GlobalBundleViewModel {
             this.sectionsAtom().filter((m) => !m.is_system),
         );
         this.previewAtom = createMemo(() => formatGlobalBundleBlock(this.sectionsAtom()));
+        this.openEntryAtom = createMemo(() => {
+            const v = this.viewAtom();
+            if (v?.kind !== "entry") return null;
+            return this.sectionsAtom().find((m) => m.id === v.id) ?? null;
+        });
+        this.draft = new MemoryDraftModel<GlobalMemoryDraft>({
+            hash: globalMemoryContentHash,
+            equals: (a, b) => a.name === b.name && a.instructions === b.instructions,
+            save: (value, base) => this.persist(value, base),
+            fetchCurrent: async () => {
+                await this.refresh();
+                return this.currentOpenDraft();
+            },
+        });
         this.filenameGroupsAtom = createMemo(() => groupProvidersByStartupFilename());
         this.noFileProvidersAtom = createMemo(() =>
             Object.values(PROVIDERS)
@@ -237,85 +279,125 @@ export class GlobalBundleViewModel {
     }
 
 
+    /** Id of the newest `refresh()`; an older one that resolves later is
+     *  dropped, so overlapping `memories:changed` refreshes can't put stale
+     *  data (or stale content for the draft's conflict check) over fresh. */
+    private latestRefreshId = 0;
+
     async refresh(): Promise<void> {
+        const requestId = ++this.latestRefreshId;
         try {
             const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
+            if (requestId !== this.latestRefreshId) return;
             this.setAll(list);
             this.setError(null);
+            this.setRefreshNonce((n) => n + 1);
+            // The open entry may have changed underneath its view: hand the
+            // new content to the draft model, which updates silently when
+            // there's no unsaved draft and raises the banner (only on a real
+            // hash change) when there is.
+            if (this.viewAtom()?.kind === "entry") {
+                void this.draft.observeExternal(this.currentOpenDraft());
+            }
         } catch (e) {
+            if (requestId !== this.latestRefreshId) return;
             this.setError(`Failed to load global bundles: ${(e as Error).message ?? e}`);
         }
     }
 
-    /** Open the inline editor for an existing section. */
-    startEdit(section: Bundle): void {
-        this.setError(null);
-        this.setEditingId(section.id);
-        this.setDraftName(section.name);
-        this.setDraftInstructions(section.instructions ?? "");
+    /** The open entry's saved name/instructions, or null if it's gone. */
+    private currentOpenDraft(): GlobalMemoryDraft | null {
+        const entry = this.openEntryAtom();
+        return entry ? { name: entry.name, instructions: entry.instructions ?? "" } : null;
     }
 
-    /** Open a blank "new section" editor at the end of the list — where
-     *  saveEdit appends the saved section, so the draft sits where it lands. */
-    startNew(): void {
+    /** Open a full view. Callers guard a dirty draft first (`draft.dirtyAtom`). */
+    open(view: GlobalMemoryView): void {
+        this.draft.cancel();
         this.setError(null);
-        this.setEditingId(NEW_SECTION_ID);
-        this.setDraftName("");
-        this.setDraftInstructions("");
-    }
-
-    cancelEdit(): void {
-        this.setEditingId(null);
-        this.setDraftName("");
-        this.setDraftInstructions("");
-        this.setError(null);
-    }
-
-    /** Persist the current draft. Creates a new global section (appended to
-     *  the end of the order) or updates the section being edited. */
-    async saveEdit(): Promise<void> {
-        const name = this.draftNameAtom().trim();
-        if (!name) {
-            this.setError("Name is required.");
-            return;
+        this.setView(view);
+        if (view.kind === "entry") {
+            const entry = this.openEntryAtom();
+            // Seed the base so the first save after "Edit" is conditional.
+            if (entry) void this.draft.observeExternal({ name: entry.name, instructions: entry.instructions ?? "" });
+        } else if (view.kind === "new") {
+            this.draft.startNew({ name: "", instructions: "" });
         }
-        const editingId = this.editingIdAtom();
-        if (editingId === null) return;
-        this.setSaving(true);
+    }
+
+    /** Back to the tile grid. Callers guard a dirty draft first. */
+    close(): void {
+        this.draft.cancel();
         this.setError(null);
-        try {
-            const instructions = this.draftInstructionsAtom();
-            if (editingId === NEW_SECTION_ID) {
-                const saved = await RpcApi.UpsertBundleCommand(TabRpcClient, {
-                    id: "",
-                    name,
-                    is_global: true,
-                    instructions,
-                });
-                // Append the new section to the end of the order.
-                // ordinarySectionsAtom, not sectionsAtom — see move()'s doc
-                // comment above (reagent P1, PR #2782).
-                const order = [...this.ordinarySectionsAtom().map((s) => s.id), saved.id];
+        this.setView(null);
+    }
+
+    /** "Edit" in an entry's full view. */
+    startEdit(): void {
+        const current = this.currentOpenDraft();
+        if (current) this.draft.startEdit(current);
+    }
+
+    /** Save the open draft — see `persist`. Resolves true on success. The
+     *  refresh runs AFTER the draft model has left editing, so the saved
+     *  content lands as a quiet rebase, never as a "changed" banner against
+     *  the draft that produced it. */
+    async save(): Promise<boolean> {
+        const draft = this.draft.draftAtom();
+        if (draft && !draft.name.trim()) {
+            this.draft.setError("Name is required.");
+            return false;
+        }
+        const ok = await this.draft.save();
+        if (ok) await this.refresh();
+        return ok;
+    }
+
+    /** The draft model's save callback. A new entry is created and appended
+     *  to the order, then opened; an existing one goes through its own
+     *  tier's (still backend-isolated) upsert RPC with `base_sha256`. */
+    private async persist(value: GlobalMemoryDraft, base: string | null): Promise<void> {
+        const view = this.viewAtom();
+        const name = value.name.trim();
+        const instructions = value.instructions;
+        if (view?.kind === "new") {
+            const saved = await RpcApi.UpsertBundleCommand(TabRpcClient, {
+                id: "",
+                name,
+                is_global: true,
+                instructions,
+            });
+            // Append the new section to the end of the order.
+            // ordinarySectionsAtom, not sectionsAtom — see move()'s doc
+            // comment below (reagent P1, PR #2782).
+            // The entry exists from here on: open it first, so a failed
+            // reorder can't leave the draft in "new" mode, where a retry
+            // would collide with the entry just created.
+            this.setView({ kind: "entry", id: saved.id });
+            const order = [...this.ordinarySectionsAtom().map((s) => s.id), saved.id];
+            try {
                 await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids: order });
-            } else {
-                const existing = this.allAtom().find((m) => m.id === editingId);
-                if (!existing) {
-                    this.setError("Memory no longer exists.");
-                    return;
-                }
-                await RpcApi.UpsertBundleCommand(TabRpcClient, {
-                    ...existing,
-                    name,
-                    instructions,
-                    is_global: true,
-                });
+            } catch (e) {
+                this.setError(`Created, but couldn't move it to the end: ${(e as Error)?.message ?? e}`);
             }
             await this.refresh();
-            this.cancelEdit();
-        } catch (e) {
-            this.setError(`Save failed: ${(e as Error).message ?? e}`);
-        } finally {
-            this.setSaving(false);
+            return;
+        }
+        const existing = this.openEntryAtom();
+        if (!existing) throw new Error("Memory no longer exists.");
+        const baseField = base !== null ? { base_sha256: base } : {};
+        if (existing.is_system) {
+            // The dedicated upsertsystemmemory command — never
+            // UpsertBundleCommand (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5).
+            await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { ...existing, name, instructions, ...baseField });
+        } else {
+            await RpcApi.UpsertBundleCommand(TabRpcClient, {
+                ...existing,
+                name,
+                instructions,
+                is_global: true,
+                ...baseField,
+            });
         }
     }
 
@@ -327,7 +409,7 @@ export class GlobalBundleViewModel {
         this.setError(null);
         try {
             await RpcApi.UpsertBundleCommand(TabRpcClient, { ...bundle, is_global: false });
-            if (this.editingIdAtom() === id) this.cancelEdit();
+            if (this.openEntryAtom()?.id === id) this.close();
             await this.refresh();
         } catch (e) {
             this.setError(`Remove failed: ${(e as Error).message ?? e}`);
@@ -350,6 +432,23 @@ export class GlobalBundleViewModel {
         const j = i + dir;
         if (i === -1 || j < 0 || j >= ids.length) return;
         [ids[i], ids[j]] = [ids[j], ids[i]];
+        await this.persistOrder(ids);
+    }
+
+    /** Drag-to-reorder: move `id` to `targetId`'s slot among the ORDINARY
+     *  entries (system entries never reorder — see move()). No-op for an id
+     *  that isn't ordinary or a drop onto itself. */
+    async moveTo(id: string, targetId: string): Promise<void> {
+        const ids = this.ordinarySectionsAtom().map((s) => s.id);
+        const from = ids.indexOf(id);
+        const to = ids.indexOf(targetId);
+        if (from === -1 || to === -1 || from === to) return;
+        ids.splice(from, 1);
+        ids.splice(to, 0, id);
+        await this.persistOrder(ids);
+    }
+
+    private async persistOrder(ids: string[]): Promise<void> {
         this.setError(null);
         try {
             await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids });
@@ -369,60 +468,6 @@ export class GlobalBundleViewModel {
     // FROM (it's created directly), and its position is always first,
     // enforced server-side regardless of what a reorder call would send.
 
-    startEditSystem(section: Bundle): void {
-        this.setError(null);
-        this.setEditingSystemId(section.id);
-        this.setDraftSystemName(section.name);
-        this.setDraftSystemInstructions(section.instructions ?? "");
-    }
-
-    startNewSystem(): void {
-        this.setError(null);
-        this.setEditingSystemId(NEW_SECTION_ID);
-        this.setDraftSystemName("");
-        this.setDraftSystemInstructions("");
-    }
-
-    cancelEditSystem(): void {
-        this.setEditingSystemId(null);
-        this.setDraftSystemName("");
-        this.setDraftSystemInstructions("");
-        this.setError(null);
-    }
-
-    /** Persist the current system-tier draft via the dedicated
-     *  upsertsystemmemory command — never UpsertBundleCommand. */
-    async saveSystemEdit(): Promise<void> {
-        const name = this.draftSystemNameAtom().trim();
-        if (!name) {
-            this.setError("Name is required.");
-            return;
-        }
-        const editingId = this.editingSystemIdAtom();
-        if (editingId === null) return;
-        this.setSaving(true);
-        this.setError(null);
-        try {
-            const instructions = this.draftSystemInstructionsAtom();
-            if (editingId === NEW_SECTION_ID) {
-                await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { id: "", name, instructions });
-            } else {
-                const existing = this.systemSectionsAtom().find((m) => m.id === editingId);
-                if (!existing) {
-                    this.setError("Memory no longer exists.");
-                    return;
-                }
-                await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { ...existing, name, instructions });
-            }
-            await this.refresh();
-            this.cancelEditSystem();
-        } catch (e) {
-            this.setError(`Save failed: ${(e as Error).message ?? e}`);
-        } finally {
-            this.setSaving(false);
-        }
-    }
-
     /** Delete a system entry outright via the dedicated
      *  deletesystemmemory command — never DeleteBundleCommand. Unlike the
      *  ordinary tier's `remove()`, there's no "demote and keep in
@@ -431,7 +476,7 @@ export class GlobalBundleViewModel {
         this.setError(null);
         try {
             await RpcApi.DeleteSystemBundleCommand(TabRpcClient, { id });
-            if (this.editingSystemIdAtom() === id) this.cancelEditSystem();
+            if (this.openEntryAtom()?.id === id) this.close();
             await this.refresh();
         } catch (e) {
             this.setError(`Remove failed: ${(e as Error).message ?? e}`);

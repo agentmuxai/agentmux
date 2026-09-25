@@ -3,8 +3,9 @@
 
 /**
  * NativeMemoryManager — Armory's "Memory → Personal" tab: a grid of agent
- * cards that drills into the same NativeMemoryHistoryPanel a Stash pane's own
- * Memory tab uses. Both read the identical agent:memory:{list,history,diff,
+ * cards that drills into a file's full view (NativeMemoryFileView), built
+ * from the same MemoryHistory/MemoryContent pieces a Stash pane's own Memory
+ * tab uses. Both read the identical agent:memory:{list,history,diff,
  * revert} RPCs — one source of truth, two entry points (per-agent Stash,
  * cross-agent Armory) — no copy or migration step between them. See
  * docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3.
@@ -18,6 +19,11 @@
  * two screens — a file tile grid, then the history panel — and the back
  * button steps back one level rather than always returning to the agent grid.
  * See docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04.md.
+ *
+ * The full view became editable, with its editor pinned to the bottom, on
+ * 2026-09-24 (NativeMemoryFileView) — and no longer remounts on every live
+ * change, so an open draft survives one. See
+ * docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3/§2.4.
  *
  * The grid gained find/filter + sort as of 2026-09-02, once it routinely
  * rendered 30+ cards in practice — same trigger and interaction pattern as
@@ -37,11 +43,11 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import type { AgentDefinition, NativeMemoryFileMeta } from "@/app/store/rpc-api";
-import { NativeMemoryHistoryPanel } from "@/app/view/agent/components/NativeMemoryHistoryPanel";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
 import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption } from "./MemoryAgentFilterBar";
 import { MemoryFileCard } from "./MemoryFileCard";
+import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import "./native-memory-manager.scss";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
@@ -133,10 +139,15 @@ export function NativeMemoryManager(): JSX.Element {
     const [selectedFilename, setSelectedFilename] = createSignal<string>("");
     const [filesLoading, setFilesLoading] = createSignal(false);
     const [filesError, setFilesError] = createSignal<string | null>(null);
-    // Forces NativeMemoryHistoryPanel to remount on a reactive refresh even
-    // when agentId:filename is unchanged — see refetchSelectedAgentFiles's
-    // own comment (Codex P1, PR #2932).
+    // Bumped on every reactive refresh of the open agent's files so the open
+    // full view reloads in place even when agentId:filename is unchanged —
+    // see refetchSelectedAgentFiles's own comment (Codex P1, PR #2932). It
+    // used to force a REMOUNT; now it's a prop, so an open draft survives.
     const [refreshNonce, setRefreshNonce] = createSignal(0);
+    // Whether the open full view holds unsaved edits — guards Back, and
+    // stops a refresh that no longer lists the file from yanking the view
+    // (and the draft) away. SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4.
+    const [detailDirty, setDetailDirty] = createSignal(false);
     let latestRequestId = 0;
 
     // Per-agent memory counts for the grid, keyed by agent id. Fetched lazily
@@ -273,7 +284,7 @@ export function NativeMemoryManager(): JSX.Element {
 
     // Re-fetch the file list whenever the selected agent changes; clear the
     // file selection so a stale filename from a different agent can't leak
-    // into NativeMemoryHistoryPanel's props.
+    // into NativeMemoryFileView's props.
     //
     // `requestId` guards against a stale response: switching agents twice in
     // quick succession fires two overlapping fetches, and network ordering
@@ -331,19 +342,21 @@ export function NativeMemoryManager(): JSX.Element {
                 if (requestId !== latestRequestId) return;
                 setFiles(res.files);
                 setFilesError(null);
-                // Codex P1 (PR #2932): force the history panel to remount
-                // even when the selected FILENAME is unchanged — the panel
-                // is keyed on `agentId:filename`, and `NativeMemoryHistoryModel`
-                // only loads history in its own constructor (never reacts to
-                // prop changes after mount, per its own doc comment). Without
-                // this, the exact scenario the whole feature exists for — a
-                // live write to the file you're already looking at — was the
-                // one case that stayed invisible until you switched away and
-                // back. Bumped unconditionally on every successful refresh,
-                // not just when the file list itself changed.
+                // Codex P1 (PR #2932): the full view must pick up a live
+                // write to the file you're already looking at, even though
+                // the selected FILENAME is unchanged. This used to force a
+                // remount (the view was keyed on it); since 2026-09-24 the
+                // view takes it as a prop and reloads history + content in
+                // place, so an open draft isn't wiped — its draft model
+                // raises a banner instead, only when the file's hash really
+                // moved (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
+                // Bumped unconditionally on every successful refresh, not
+                // just when the file list itself changed.
                 setRefreshNonce((n) => n + 1);
                 const current = selectedFilename();
-                if (current && !res.files.some((f) => f.filename === current)) {
+                // A deleted file closes its view — unless it holds unsaved
+                // edits, which stay open under a "deleted" banner.
+                if (current && !res.files.some((f) => f.filename === current) && !untrack(detailDirty)) {
                     setSelectedFilename("");
                 }
             })
@@ -510,7 +523,14 @@ export function NativeMemoryManager(): JSX.Element {
                             <button
                                 type="button"
                                 class="native-memory-manager-back"
-                                onClick={() => (selectedFilename() ? setSelectedFilename("") : setSelectedAgent(null))}
+                                onClick={() => {
+                                    if (!selectedFilename()) {
+                                        setSelectedAgent(null);
+                                        return;
+                                    }
+                                    if (detailDirty() && !window.confirm("Discard your unsaved changes?")) return;
+                                    setSelectedFilename("");
+                                }}
                             >
                                 {selectedFilename() ? "← All files" : "← All agents"}
                             </button>
@@ -567,19 +587,20 @@ export function NativeMemoryManager(): JSX.Element {
                                 </div>
                             }
                         >
-                            <div class="native-memory-manager-body">
-                                {/* Keyed on agentId:filename:refreshNonce. The first two force
-                                    a clean remount when switching agent/file —
-                                    NativeMemoryHistoryPanel's own doc comment: it does not
-                                    react to prop changes after mount by design. refreshNonce
-                                    additionally forces a remount when a reactive
-                                    agent:memory:changed refresh lands for the SAME file
-                                    (Codex P1, PR #2932) — without it, a live write to the
-                                    file you're already looking at never showed up, since
-                                    neither agentId nor filename actually changed. */}
-                                <Show when={`${agent().id}:${selectedFilename()}:${refreshNonce()}`} keyed>
+                            <div class="native-memory-manager-body native-memory-manager-body--pinned">
+                                {/* Keyed on agentId:filename only — a clean remount
+                                    when switching agent/file. NOT on refreshNonce any
+                                    more (it was, Codex P1 PR #2932): a remount per live
+                                    change would wipe an open draft. The view reloads in
+                                    place on each refreshNonce bump instead. */}
+                                <Show when={`${agent().id}:${selectedFilename()}`} keyed>
                                     {(_key) => (
-                                        <NativeMemoryHistoryPanel agentId={agent().id} filename={selectedFilename()} />
+                                        <NativeMemoryFileView
+                                            agentId={agent().id}
+                                            filename={selectedFilename()}
+                                            refreshNonce={refreshNonce}
+                                            onDirtyChange={setDetailDirty}
+                                        />
                                     )}
                                 </Show>
                             </div>

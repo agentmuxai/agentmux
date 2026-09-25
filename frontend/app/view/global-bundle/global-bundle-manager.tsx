@@ -4,92 +4,55 @@
 // GlobalBundleManager — the Global section of the Armory "Memory" tab (moves to
 // the Bundles tab in Phase 4 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md).
 // Presents the workspace-wide global bundles (is_global rows) as an ordered
-// list of editable memories that compose into every agent's startup
-// instructions file (CLAUDE.md, GEMINI.md, or similar, depending on
-// provider) at launch.
+// set of memories that compose into every agent's startup instructions file
+// (CLAUDE.md, GEMINI.md, or similar, depending on provider) at launch.
 //
 // Context-free: owns its own GlobalBundleViewModel and drives off the
 // bundle_* RPCs. Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 //
-// Layout restructured twice: first per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_
-// DECLUTTER_2026_09_15.md (nine divergent blocks collapsed into one
-// consistently-shaped file-list, "applies to" chips removed), then per
-// docs/specs/SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md —
-// the "system tier" (AgentMux-controlled, pinned-first, override-wording
-// entries) and ordinary sections used to render as two structurally
-// separate lists with two editor components mirroring the backend's own
-// write-path isolation. That backend isolation (SPEC_GLOBAL_MEMORY_SYSTEM_
-// TIER_2026_08_24.md — is_system, the two upsert/delete RPCs, never wired
-// to any MCP tool) is real and unchanged; only the FRONTEND presentation
-// unifies here into one list, one MemoryEditor, one "Memory" vocabulary —
-// see that unify spec's postmortem for why mirroring the backend split into
-// the UI was the actual mistake, not the backend split itself. Creating a
-// NEW system-tier entry has no UI trigger anymore; existing ones remain
-// fully editable/removable via their own still-isolated RPCs.
+// Layout restructured three times: per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_
+// DECLUTTER_2026_09_15.md (one consistently-shaped file list), per
+// docs/specs/SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md (the
+// system tier and ordinary entries render as one list — the backend's
+// write-path isolation between them is real and unchanged; only the
+// presentation unified), and — since 2026-09-24 — per
+// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3: TILES FIRST,
+// then expand to full, matching an agent's Personal Memory file tiles
+// (MemoryTile, the same grid and tile CSS). The always-visible 240px preview
+// per card and the inline card editors are gone; a tile opens
+// GlobalMemoryFullView with the Personal Memory back/breadcrumb header. The
+// full view has history (globalmemory:history/diff/revert), an editor pinned
+// to the bottom, and dirty-draft protection. Creating a NEW system-tier entry
+// still has no UI trigger; existing ones remain editable/removable via their
+// own still-isolated RPCs.
 
-import { For, onCleanup, Show, type JSX } from "solid-js";
-import { Markdown } from "@/app/element/markdown";
-import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { GlobalBundleViewModel, NEW_SECTION_ID } from "./global-bundle-model";
+import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import type { Bundle } from "@/app/store/rpc-api";
+import { formatFileAge, formatFileSize } from "@/app/view/native-memory/MemoryFileCard";
+import { MemoryTile } from "@/app/view/native-memory/MemoryTile";
+import "@/app/view/native-memory/native-memory-manager.scss";
+import { GlobalMemoryFullView } from "./GlobalMemoryFullView";
+import { GlobalBundleViewModel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
 import "./global-bundle.scss";
 
-/** Inline editor card for both ordinary and (existing, `isSystem`) system
- *  memories — one component, not two, per docs/specs/SPEC_GLOBAL_MEMORY_
- *  UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md. Reads/writes whichever of the
- *  model's two draft-state signal pairs `isSystem` selects, and calls the
- *  correspondingly correct (still backend-isolated) save method — the only
- *  place that distinction survives is which RPC ends up called, never in
- *  what's rendered. */
-function MemoryEditor(props: { model: GlobalBundleViewModel; isNew: boolean; isSystem: boolean }): JSX.Element {
-    const { model, isSystem } = props;
-    const nameValue = () => (isSystem ? model.draftSystemNameAtom() : model.draftNameAtom());
-    const setNameValue = (v: string) => (isSystem ? model.setDraftSystemName(v) : model.setDraftName(v));
-    const instructionsValue = () => (isSystem ? model.draftSystemInstructionsAtom() : model.draftInstructionsAtom());
-    const setInstructionsValue = (v: string) =>
-        isSystem ? model.setDraftSystemInstructions(v) : model.setDraftInstructions(v);
-    const cancel = () => (isSystem ? model.cancelEditSystem() : model.cancelEdit());
-    const save = () => void (isSystem ? model.saveSystemEdit() : model.saveEdit());
-    const canSave = () => !model.savingAtom() && nameValue().trim().length > 0;
+/** "size · updated" for an entry tile. */
+export function entryMetaLabel(entry: Pick<Bundle, "instructions" | "updated_at">): string {
+    return [formatFileSize(utf8Bytes(entry.instructions ?? "")), formatFileAge(entry.updated_at)]
+        .filter(Boolean)
+        .join(" · ");
+}
 
-    return (
-        <div class="global-bundle-editor">
-            <label class="global-bundle-field">
-                <span class="global-bundle-field-label">Name</span>
-                <input
-                    class="global-bundle-input"
-                    type="text"
-                    value={nameValue()}
-                    onInput={(e) => setNameValue(e.currentTarget.value)}
-                    onContextMenu={showTextInputContextMenu}
-                    placeholder="e.g. Coding Standards"
-                />
-            </label>
-            <label class="global-bundle-field">
-                <span class="global-bundle-field-label">Content</span>
-                <textarea
-                    class="global-bundle-textarea"
-                    rows={8}
-                    value={instructionsValue()}
-                    onInput={(e) => setInstructionsValue(e.currentTarget.value)}
-                    onContextMenu={showTextInputContextMenu}
-                    placeholder={
-                        isSystem
-                            ? "Markdown injected FIRST into every agent's startup instructions file, wrapped in explicit override wording."
-                            : "Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
-                    }
-                    spellcheck={false}
-                />
-            </label>
-            <div class="global-bundle-editor-actions">
-                <button class="global-bundle-btn" disabled={model.savingAtom()} onClick={cancel}>
-                    Cancel
-                </button>
-                <button class="global-bundle-btn global-bundle-btn-primary" disabled={!canSave()} onClick={save}>
-                    {model.savingAtom() ? "Saving…" : props.isNew ? "Add Memory" : "Save"}
-                </button>
-            </div>
-        </div>
-    );
+function viewTitle(model: GlobalBundleViewModel, view: GlobalMemoryView): string {
+    switch (view.kind) {
+        case "new":
+            return "New memory";
+        case "claude-config":
+            return "CLAUDE.md";
+        case "preview":
+            return "Combined preview";
+        case "entry":
+            return model.openEntryAtom()?.name ?? "";
+    }
 }
 
 export const GlobalBundleManager = (): JSX.Element => {
@@ -105,189 +68,170 @@ export const GlobalBundleManager = (): JSX.Element => {
     // matching actual injection order.
     const memoryEntries = () => [...model.systemSectionsAtom(), ...model.ordinarySectionsAtom()];
 
-    return (
-        <div class="global-bundle">
+    // Leaving a full view with unsaved edits asks first — the same
+    // protection Esc has (editor-keys.ts).
+    const guardDirty = () => !model.draft.dirtyAtom() || window.confirm("Discard your unsaved changes?");
+    const openView = (view: GlobalMemoryView) => model.open(view);
+    const back = () => {
+        if (guardDirty()) model.close();
+    };
+
+    // ── Drag to reorder (ordinary entries only; system entries never
+    // reorder — see the model's move()). HTML5 DnD on the tiles; the full
+    // view's ↑/↓ are the keyboard-reachable fallback.
+    const [dragId, setDragId] = createSignal<string | null>(null);
+    const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
+    const dragHandlers = (entry: Bundle) =>
+        entry.is_system
+            ? {}
+            : {
+                  draggable: true,
+                  onDragStart: (e: DragEvent) => {
+                      setDragId(entry.id);
+                      e.dataTransfer?.setData("text/plain", entry.id);
+                      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                  },
+                  onDragOver: (e: DragEvent) => {
+                      const from = dragId();
+                      if (!from || from === entry.id) return;
+                      e.preventDefault();
+                      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                      setDropTargetId(entry.id);
+                  },
+                  onDragLeave: () => {
+                      if (dropTargetId() === entry.id) setDropTargetId(null);
+                  },
+                  onDrop: (e: DragEvent) => {
+                      e.preventDefault();
+                      const from = dragId() ?? e.dataTransfer?.getData("text/plain") ?? "";
+                      setDragId(null);
+                      setDropTargetId(null);
+                      if (from && from !== entry.id) void model.moveTo(from, entry.id);
+                  },
+                  onDragEnd: () => {
+                      setDragId(null);
+                      setDropTargetId(null);
+                  },
+              };
+
+    const grid = (
+        <div class="native-memory-manager-file-grid-view global-bundle-grid-view">
             <p class="global-bundle-intro">
-                Every agent inherits this at launch — takes effect after a restart.
+                Every agent inherits this at launch — takes effect after a restart. Drag entries to change their
+                order.
             </p>
 
             <Show when={model.errorAtom()}>
                 <div class="global-bundle-error">{model.errorAtom()}</div>
             </Show>
 
-            <div class="global-bundle-files">
+            <div class="native-memory-manager-file-grid global-bundle-grid">
+                {/* One tile per entry (system-tier first, then ordinary in
+                    injection order) — see the top-of-file comment for why
+                    they're one set, not two. */}
+                <For each={memoryEntries()}>
+                    {(entry) => (
+                        <MemoryTile
+                            icon={entry.is_system ? "fa-shield-halved" : "fa-file-lines"}
+                            title={entry.name}
+                            monoTitle={false}
+                            badges={entry.is_system ? [{ label: "system", variant: "accent" }] : []}
+                            meta={entryMetaLabel(entry)}
+                            onSelect={() => openView({ kind: "entry", id: entry.id })}
+                            testId="global-memory-tile"
+                            data={{ id: entry.id, kind: entry.is_system ? "system" : "entry" }}
+                            classList={{
+                                "memory-file-card--dragging": dragId() === entry.id,
+                                "memory-file-card--drop-target": dropTargetId() === entry.id,
+                            }}
+                            {...dragHandlers(entry)}
+                        />
+                    )}
+                </For>
+
                 {/* Read-only reference display of the CLAUDE.md in the
                     isolated config dir a default spawned agent actually
                     launches with (CLAUDE_CONFIG_DIR). NOT part of AgentMux's
-                    own Global Memory composition (that's <agent
-                    working_directory>/CLAUDE.md, previewed accurately below
-                    via "Combined preview"). See
+                    own Global Memory composition. See
                     docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7. */}
                 <Show when={model.claudeGlobalConfigAtom()}>
                     {(cfg) => (
-                        <div class="global-bundle-file global-bundle-file-readonly">
-                            <div class="global-bundle-file-header">
-                                <code
-                                    class="global-bundle-file-label"
-                                    title="Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here."
-                                >
-                                    {cfg().path}
-                                </code>
-                            </div>
-                            <Show
-                                when={cfg().exists}
-                                fallback={<p class="global-bundle-file-empty">No file at this path yet.</p>}
-                            >
-                                {/* The resize handle lives on this wrapper, not on
-                                    <Markdown> itself — Markdown's own root sets
-                                    `height: 100%; overflow: hidden`, which would
-                                    fight a resize/height override applied
-                                    directly to it. Markdown fills 100% of
-                                    whatever height this wrapper resizes to and
-                                    handles its own internal scrolling
-                                    (nativeScrollbar: a plain CSS scrollbar is
-                                    plenty for a reference-only preview panel). */}
-                                <div class="global-bundle-file-content">
-                                    <Markdown
-                                        text={cfg().content}
-                                        scrollable={true}
-                                        nativeScrollbar={true}
-                                        contentClass="global-bundle-file-markdown-content"
-                                        fontSizeOverride={11}
-                                    />
-                                </div>
-                            </Show>
-                        </div>
+                        <MemoryTile
+                            icon="fa-file-code"
+                            title="CLAUDE.md"
+                            badges={[{ label: "read-only", icon: "fa-lock", variant: "accent" }]}
+                            meta={
+                                cfg().exists
+                                    ? `${formatFileSize(utf8Bytes(cfg().content ?? ""))} · provider config`
+                                    : "No file yet · provider config"
+                            }
+                            onSelect={() => openView({ kind: "claude-config" })}
+                            testId="global-memory-tile"
+                            data={{ kind: "claude-config" }}
+                            ariaLabel={`CLAUDE.md (read-only) — ${cfg().path}`}
+                        />
                     )}
                 </Show>
 
-                {/* One list for every memory (system-tier + ordinary) — see
-                    this component's own top-of-file comment for why these
-                    used to be two lists and why that was the wrong place to
-                    carry the backend's write-path isolation. */}
-                <For each={memoryEntries()}>
-                    {(section) => {
-                        const isSystem = !!section.is_system;
-                        const isEditing = () =>
-                            isSystem ? model.editingSystemIdAtom() === section.id : model.editingIdAtom() === section.id;
-                        // Only meaningful for ordinary rows — system rows never
-                        // reorder (backend silently no-ops it, see move()'s own
-                        // doc comment in the model), so ↑/↓ isn't rendered for
-                        // them at all rather than rendered-but-inert.
-                        const ordIndex = () => model.ordinarySectionsAtom().findIndex((s) => s.id === section.id);
-                        return (
-                            <div class="global-bundle-file" classList={{ "is-editing": isEditing() }}>
-                                <Show
-                                    when={isEditing()}
-                                    fallback={
-                                        <>
-                                            <div class="global-bundle-file-header">
-                                                <span class="global-bundle-file-label">{section.name}</span>
-                                                <div class="global-bundle-file-actions">
-                                                    <Show when={!isSystem}>
-                                                        <button
-                                                            class="global-bundle-icon-btn"
-                                                            title="Move up"
-                                                            disabled={ordIndex() === 0}
-                                                            onClick={() => void model.move(section.id, -1)}
-                                                        >
-                                                            ↑
-                                                        </button>
-                                                        <button
-                                                            class="global-bundle-icon-btn"
-                                                            title="Move down"
-                                                            disabled={ordIndex() === model.ordinarySectionsAtom().length - 1}
-                                                            onClick={() => void model.move(section.id, 1)}
-                                                        >
-                                                            ↓
-                                                        </button>
-                                                    </Show>
-                                                    <button
-                                                        class="global-bundle-btn"
-                                                        onClick={() =>
-                                                            isSystem ? model.startEditSystem(section) : model.startEdit(section)
-                                                        }
-                                                    >
-                                                        Edit
-                                                    </button>
-                                                    <button
-                                                        class="global-bundle-btn global-bundle-btn-danger"
-                                                        title="Delete this Memory"
-                                                        onClick={() =>
-                                                            void (isSystem
-                                                                ? model.removeSystem(section.id)
-                                                                : model.remove(section.id))
-                                                        }
-                                                    >
-                                                        Remove
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div class="global-bundle-file-content">
-                                                <Markdown
-                                                    text={section.instructions || "(empty)"}
-                                                    scrollable={true}
-                                                    nativeScrollbar={true}
-                                                    contentClass="global-bundle-file-markdown-content"
-                                                    fontSizeOverride={11}
-                                                />
-                                            </div>
-                                        </>
-                                    }
-                                >
-                                    <MemoryEditor model={model} isNew={false} isSystem={isSystem} />
-                                </Show>
-                            </div>
-                        );
-                    }}
-                </For>
+                <MemoryTile
+                    icon="fa-layer-group"
+                    title="Combined preview"
+                    monoTitle={false}
+                    meta={`${memoryEntries().length} ${memoryEntries().length === 1 ? "entry" : "entries"} · ${formatFileSize(utf8Bytes(model.previewAtom()))}`}
+                    onSelect={() => openView({ kind: "preview" })}
+                    classList={{ "memory-file-card--action": true }}
+                    testId="global-memory-tile"
+                    data={{ kind: "preview" }}
+                />
 
-                {/* New-memory draft renders at the END — saveEdit appends it
-                    to the order, so its draft position matches where it
-                    lands. Always ordinary: creating a NEW system-tier entry
-                    has no UI trigger anymore (see top-of-file comment) —
-                    existing ones stay fully editable/removable above. */}
-                <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-bundle-file is-editing">
-                        <MemoryEditor model={model} isNew={true} isSystem={false} />
-                    </div>
-                </Show>
-
-                <Show when={memoryEntries().length === 0 && model.editingIdAtom() === null}>
-                    <div class="global-bundle-empty">No memories yet.</div>
-                </Show>
+                <MemoryTile
+                    icon="fa-plus"
+                    title="+ Add memory"
+                    monoTitle={false}
+                    meta="Appended to the end of the order"
+                    onSelect={() => openView({ kind: "new" })}
+                    classList={{ "memory-file-card--action": true }}
+                    testId="global-memory-tile"
+                    data={{ kind: "add" }}
+                />
             </div>
 
-            <button
-                class="global-bundle-add-row"
-                disabled={model.editingIdAtom() === NEW_SECTION_ID}
-                onClick={() => model.startNew()}
-            >
-                + Add Memory
-            </button>
+            <Show when={memoryEntries().length === 0}>
+                <div class="global-bundle-empty">No memories yet.</div>
+            </Show>
+        </div>
+    );
 
-            <div class="global-bundle-preview">
-                <button
-                    class="global-bundle-preview-toggle"
-                    onClick={() => model.setShowPreview(!model.showPreviewAtom())}
-                >
-                    {model.showPreviewAtom() ? "▾" : "▸"} Combined preview
-                </button>
-                <Show when={model.showPreviewAtom()}>
-                    {/* See the matching comment on the file-list preview
-                        blocks above — same reason this is a wrapper div, not
-                        a class applied directly to <Markdown>. */}
-                    <div class="global-bundle-preview-content">
-                        <Markdown
-                            text={model.previewAtom() || "(empty)"}
-                            scrollable={true}
-                            nativeScrollbar={true}
-                            contentClass="global-bundle-preview-markdown-content"
-                            fontSizeOverride={11}
-                        />
+    return (
+        <div class="global-bundle">
+            <Show when={model.viewAtom()} fallback={grid}>
+                {(view) => (
+                    <div class="native-memory-manager-detail global-bundle-detail">
+                        {/* The Personal Memory back/breadcrumb header
+                            (native-memory-manager.tsx), one level deep here. */}
+                        <div class="native-memory-manager-header">
+                            <button type="button" class="native-memory-manager-back" onClick={back}>
+                                ← All global memory
+                            </button>
+                            <span class="native-memory-manager-crumbs">
+                                <span class="native-memory-manager-agent-name">Global Memory</span>
+                                <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+                                    {"·"}
+                                </span>
+                                <span class="native-memory-manager-filename global-bundle-crumb-name">
+                                    {viewTitle(model, view())}
+                                </span>
+                            </span>
+                        </div>
+                        <Show when={model.errorAtom()}>
+                            <div class="global-bundle-error">{model.errorAtom()}</div>
+                        </Show>
+                        <div class="native-memory-manager-body native-memory-manager-body--pinned">
+                            <GlobalMemoryFullView model={model} />
+                        </div>
                     </div>
-                </Show>
-            </div>
+                )}
+            </Show>
         </div>
     );
 };

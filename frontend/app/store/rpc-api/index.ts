@@ -220,6 +220,8 @@ export type {
 export type {
     Bundle,
     BundleUpsertInput,
+    BundleUpsertRequest,
+    GlobalMemoryVersionMeta,
     BundleValidateInput,
     BundleValidationIssue,
     BundleValidationReport,

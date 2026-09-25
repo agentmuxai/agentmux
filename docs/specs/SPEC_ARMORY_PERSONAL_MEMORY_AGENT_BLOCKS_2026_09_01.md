@@ -1,7 +1,7 @@
 # Spec: Armory → Memory → Personal — browse by agent block, not a dropdown
 
 **Date:** 2026-09-01
-**Status:** Proposed
+**Status:** implemented — #2917 (agent blocks replace the agent `<select>`).
 **Motivated by:** direct request — *"in the Personal section of armory, list the
 agents out as blocks, similar to the my agents in the agent pane. when selecting
 one, that's when you can go into the memory."*
