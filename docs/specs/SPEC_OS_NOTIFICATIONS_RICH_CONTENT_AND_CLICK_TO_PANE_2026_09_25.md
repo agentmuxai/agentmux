@@ -37,11 +37,11 @@
 - **Where it is shown today:** only the Swarm view (`swarm-model.ts:1950` → `readActivitySummary()`, which falls back to `term:osc_title`). It was removed from the pane header on 2026-09-20.
 - **Reading it in srv:** a blocking SQLite read of the block (`store.get::<Block>` then `meta_get_string(.., "term:ambient_summary", "")`). The Router already does this same fetch for `agentName` inside `spawn_blocking` (`router.rs:456-485`).
 
-**Known gap in the source.** The summary is only generated while the agent's pane is mounted in some window. Two consequences:
-- An agent working in background mode, or whose pane was never opened this session, has no summary or a stale one.
-- The summary is cleared only while the pane is mounted, so a stale one can outlive its session.
+**Known gaps in the source** (verified 2026-09-25):
+- **Generation needs the pane mounted.** In practice that is almost always true: every tab of a window's workspace stays mounted, and inactive tabs are only hidden (`workspace.tsx` renders all of `allTabIds()`). A pane is unmounted only in **background mode** (every window closed while the tray keeps agents running) or when its workspace is open in no window. In those cases the agent has no summary, or a stale one.
+- **It only refreshes on the user's own messages.** It is triggered by a user submission in the pane (`TurnPhase: Submitting`, non-hidden). Turns started by jekts, cron, CI results or other agents don't refresh it, so it describes what the user last asked, which may lag what the agent is doing now.
 
-This spec does **not** fix generation (see §1.5). It only shows what exists and falls back gracefully.
+**Decision (repo owner, 2026-09-25): keep it simple.** Use the pane-generated `term:ambient_summary` as-is and leave the line out when there isn't one. How background agents work, including srv-side summaries, will be designed separately later. This spec does not change generation (§1.5).
 
 ### 1.2 Design
 
@@ -229,4 +229,4 @@ The existing `notify:os:inputwaiting` row is relabelled "Agent has a question". 
 ## 7. Open questions
 
 1. **Attribution slot vs. third text line for the summary.** This spec picks attribution (the small grey "sub-section" look) and moves it to a third line only for kinds that need provenance. Confirm that's the look you want.
-2. **Background-mode summaries** (§1.5): should srv own summary generation so toasts for agents with no open pane get a summary line too?
+2. ~~Background-mode summaries~~ **Decided 2026-09-25: no, keep it simple.** Pane-generated summary only; background agents will be designed separately later (see §1.1).
