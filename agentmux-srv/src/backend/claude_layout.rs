@@ -250,8 +250,18 @@ pub(crate) mod tests {
         assert_eq!(radix_36(0), "0");
     }
 
-    /// A repository with one commit, and a linked worktree of it outside it.
+    /// A repository with one commit, and a linked worktree of it outside it,
+    /// as the CLI's process would see them: symlinks resolved, and on Windows
+    /// without `canonicalize`'s `\\?\` prefix, which a real working directory
+    /// never has.
     pub(crate) fn repo_with_worktree(base: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        fn cli_path(p: &std::path::Path) -> std::path::PathBuf {
+            let real = p.canonicalize().unwrap();
+            match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+                Some(rest) => std::path::PathBuf::from(rest),
+                None => real,
+            }
+        }
         let (repo, wt) = (base.join("repo"), base.join("wt"));
         std::fs::create_dir_all(repo.join("sub")).unwrap();
         let git = |args: &[&str]| {
@@ -268,7 +278,7 @@ pub(crate) mod tests {
         git(&["add", "."]);
         git(&["commit", "-qm", "x"]);
         git(&["worktree", "add", "-q", wt.to_str().unwrap()]);
-        (repo.canonicalize().unwrap(), wt.canonicalize().unwrap())
+        (cli_path(&repo), cli_path(&wt))
     }
 
     #[test]
