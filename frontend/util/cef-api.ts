@@ -8,6 +8,7 @@
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { registerPaneOverlay, type PaneOverlayHandle } from "@/app/platform/pane-overlay";
 import {
     assertMenuInPaintableArea,
     computeMenuPosition,
@@ -124,6 +125,14 @@ export async function initCefApi(): Promise<void> {
 // Context menu click callback — registered by onContextMenuClick, called by showJsContextMenu.
 let contextMenuClickCallback: ((id: string) => void) | null = null;
 
+// Close function of the currently open showJsContextMenu, if any.
+let activeContextMenuClose: (() => void) | null = null;
+
+/** Close the open JS context menu (if any), releasing its pane-overlay holes. */
+export function closeJsContextMenu(): void {
+    activeContextMenuClose?.();
+}
+
 /**
  * Apply a computed MenuPositionResult to a menu element: fixed left/top plus
  * the size() max-height cap so a menu taller than the free space scrolls
@@ -153,7 +162,9 @@ export function showJsContextMenu(
     position: { x: number; y: number },
     onClick: ((id: string) => void) | null
 ) {
-    // Remove any existing menu
+    // Remove any existing menu (through its own close path, so its pane
+    // overlay holes are released too).
+    closeJsContextMenu();
     document.getElementById("cef-context-menu-overlay")?.remove();
 
     const overlay = document.createElement("div");
@@ -161,8 +172,41 @@ export function showJsContextMenu(
     Object.assign(overlay.style, {
         position: "fixed", inset: "0", zIndex: "99999",
     });
+
+    // Every close path goes through closeMenu(): it releases the pane-overlay
+    // registrations (the menu and each submenu punch a hole through any
+    // browser pane they overlap) and the document listeners before removing
+    // the DOM. A leaked registration would leave a see-through,
+    // click-through hole in the pane after the menu is gone.
+    const overlayHandles: PaneOverlayHandle[] = [];
+    const onDocMouseDown = (e: MouseEvent) => {
+        // The backdrop covers the whole window, so a real click lands on it.
+        // What reaches here from outside is the synthetic body mousedown that
+        // browser-pane-outside-click-bridge.ts fires for a click inside a
+        // native browser pane — treat it as an outside click.
+        if (!(e.target instanceof Node) || !overlay.contains(e.target)) closeMenu();
+    };
+    const onDocKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMenu();
+        }
+    };
+    function closeMenu() {
+        if (activeContextMenuClose === closeMenu) activeContextMenuClose = null;
+        for (const h of overlayHandles) h.release();
+        overlayHandles.length = 0;
+        document.removeEventListener("mousedown", onDocMouseDown, true);
+        document.removeEventListener("keydown", onDocKeyDown, true);
+        overlay.remove();
+    }
+    activeContextMenuClose = closeMenu;
+    document.addEventListener("mousedown", onDocMouseDown, true);
+    document.addEventListener("keydown", onDocKeyDown, true);
+
     overlay.addEventListener("mousedown", (e) => {
-        if (e.target === overlay) { overlay.remove(); }
+        if (e.target === overlay) closeMenu();
     });
 
     const menuEl = document.createElement("div");
@@ -250,6 +294,9 @@ export function showJsContextMenu(
                 sub.style.top = "0";
                 renderItems(sub, item.submenu);
                 row.appendChild(sub);
+                // display:none until hovered → no hole until it's shown and
+                // placed; the style observer picks up each open/close.
+                overlayHandles.push(registerPaneOverlay(sub));
                 // Positioned through the shared framework, like the top-level
                 // menu: anchored to the row, preferring right-start — flip()
                 // sends it left of the parent near the right edge, shift()
@@ -350,7 +397,7 @@ export function showJsContextMenu(
                     for (const peer of peers) peer.close();
                 });
                 row.addEventListener("click", () => {
-                    overlay.remove();
+                    closeMenu();
                     if (item.id && onClick) onClick(item.id);
                 });
             }
@@ -363,6 +410,8 @@ export function showJsContextMenu(
 
     overlay.appendChild(menuEl);
     document.body.appendChild(overlay);
+    // visibility:hidden until placed below → registers no hole until then.
+    overlayHandles.push(registerPaneOverlay(menuEl));
 
     // Position at the cursor via the shared framework — flip/shift/size keep
     // the menu on-screen near window edges. Unlike FlyoutMenu/Popover, a
