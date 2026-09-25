@@ -46,6 +46,14 @@ pub enum StoreError {
         expected: i64,
     },
 
+    /// A conditional write whose base no longer matches the stored row — the
+    /// `base_sha256` check on the Armory's Global Memory save
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4). The `conflict:`
+    /// prefix is load-bearing: the frontend keys its "changed since you
+    /// started editing" banner on it.
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     #[error("{0}")]
     Other(String),
 }

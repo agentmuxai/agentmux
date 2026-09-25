@@ -91,6 +91,34 @@ fn default_json_array_string() -> String {
     "[]".to_string()
 }
 
+/// The base check behind `bundle_upsert_with_version_based` /
+/// `bundle_upsert_system_if_changed_based`, run inside the caller's own
+/// transaction so nothing can land between the check and the write.
+fn check_bundle_base_tx(tx: &rusqlite::Transaction, id: &str, base: &str) -> Result<(), StoreError> {
+    let current: Option<(String, String)> = tx
+        .query_row(
+            "SELECT name, instructions FROM db_bundles WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match current {
+        None => Err(StoreError::Conflict(format!(
+            "Global Memory entry {id} no longer exists (your edit was based on {base}); not saved"
+        ))),
+        Some((name, instructions)) => {
+            let current_hash = super::bundle_versions::content_hash(&name, &instructions);
+            if current_hash.eq_ignore_ascii_case(base) {
+                Ok(())
+            } else {
+                Err(StoreError::Conflict(format!(
+                    "Global Memory entry {id} changed since your edit began (base {base}, current {current_hash}); not saved"
+                )))
+            }
+        }
+    }
+}
+
 /// Outcome of `Store::bundle_reseed_system_if_owned` — see that method's own
 /// doc comment for what each variant means and why the decision is made
 /// atomically rather than by the caller.
@@ -354,8 +382,32 @@ impl Store {
         source: &str,
         source_detail: &str,
     ) -> Result<Option<BundleVersion>, StoreError> {
+        self.bundle_upsert_with_version_based(memory, written_by, written_by_uid, source, source_detail, None)
+    }
+
+    /// `bundle_upsert_with_version` with an optional base: when
+    /// `base_sha256` is `Some`, the row's CURRENT `name` + `instructions`
+    /// must still hash to it (`bundle_versions::content_hash` — the same
+    /// value as the latest version's `content_hash`), checked inside the
+    /// same `IMMEDIATE` transaction as the write, else `StoreError::Conflict`
+    /// and nothing is written. A missing row is a conflict too. `None`
+    /// behaves exactly like `bundle_upsert_with_version`. The Armory's
+    /// Global Memory editor sends it (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
+    pub fn bundle_upsert_with_version_based(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        written_by_uid: &str,
+        source: &str,
+        source_detail: &str,
+        base_sha256: Option<&str>,
+    ) -> Result<Option<BundleVersion>, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        if let Some(base) = base_sha256 {
+            check_bundle_base_tx(&tx, &memory.id, base)?;
+        }
 
         let existing_is_system: Option<i64> = tx
             .query_row(
@@ -596,8 +648,26 @@ impl Store {
         source: &str,
         source_detail: &str,
     ) -> Result<Option<BundleVersion>, StoreError> {
+        self.bundle_upsert_system_if_changed_based(memory, written_by, source, source_detail, None)
+    }
+
+    /// `bundle_upsert_system_if_changed` with the same optional base check
+    /// `bundle_upsert_with_version_based` documents — the system-tier half
+    /// of the Armory's conditional Global Memory save.
+    pub fn bundle_upsert_system_if_changed_based(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        source: &str,
+        source_detail: &str,
+        base_sha256: Option<&str>,
+    ) -> Result<Option<BundleVersion>, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        if let Some(base) = base_sha256 {
+            check_bundle_base_tx(&tx, &memory.id, base)?;
+        }
 
         let existing: Option<(String, String, i64)> = tx
             .query_row(

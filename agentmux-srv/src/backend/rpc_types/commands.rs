@@ -271,6 +271,14 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// path-traversal surface) and no write counterpart. See
 /// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5, §7.
 pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
+/// Global Memory version history for the Armory UI — list / diff / revert
+/// over `db_bundle_versions`, the WebSocket counterparts of the
+/// GlobalMemoryHistory/Diff/Revert MCP tools (#3448). Unlike those, they
+/// also cover system-tier entries, which the Armory can already edit.
+/// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
+pub const COMMAND_GLOBAL_MEMORY_HISTORY: &str = "globalmemory:history";
+pub const COMMAND_GLOBAL_MEMORY_DIFF: &str = "globalmemory:diff";
+pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
