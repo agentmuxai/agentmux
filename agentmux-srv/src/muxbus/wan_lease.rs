@@ -19,8 +19,6 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use super::cloud_subscriber::MUXBUS_REST_URL;
-
 /// How often a held lease is renewed. The relay's TTL is 60 s.
 pub(crate) const RENEW_EVERY: Duration = Duration::from_secs(20);
 
@@ -119,7 +117,8 @@ pub(crate) fn note_not_holder(agent_id: &str, body: &serde_json::Value) -> Strin
 }
 
 /// Claim or renew `agent_id`'s WAN lease, at most every [`RENEW_EVERY`].
-pub(crate) async fn ensure(agent_id: &str, token: &str, http: &reqwest::Client) -> Outcome {
+/// `base` is the relay's REST base URL ([`super::relay::rest_base_url`]).
+pub(crate) async fn ensure(base: &str, agent_id: &str, token: &str, http: &reqwest::Client) -> Outcome {
     if UNSUPPORTED_UNTIL.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t > Instant::now()) {
         return Outcome::Unknown;
     }
@@ -134,15 +133,15 @@ pub(crate) async fn ensure(agent_id: &str, token: &str, http: &reqwest::Client) 
         }
     };
     let outcome = if renew_due {
-        match call(agent_id, token, http, "/agents/lease/renew").await {
+        match call(base, agent_id, token, http, "/agents/lease/renew").await {
             // Nobody holds it any more (`held_by: null`): claim again.
             Some((409, body)) if body.get("held_by").is_some_and(|h| h.is_null()) => {
-                claim_outcome(call(agent_id, token, http, "/agents/lease").await)
+                claim_outcome(call(base, agent_id, token, http, "/agents/lease").await)
             }
             other => claim_outcome(other),
         }
     } else {
-        claim_outcome(call(agent_id, token, http, "/agents/lease").await)
+        claim_outcome(call(base, agent_id, token, http, "/agents/lease").await)
     };
     record(agent_id, &outcome);
     outcome
@@ -162,7 +161,7 @@ fn claim_outcome(resp: Option<(u16, serde_json::Value)>) -> Outcome {
 }
 
 /// POST `path` for `agent_id`; `(status, json body)` or `None` on transport error.
-async fn call(agent_id: &str, token: &str, http: &reqwest::Client, path: &str) -> Option<(u16, serde_json::Value)> {
+async fn call(base: &str, agent_id: &str, token: &str, http: &reqwest::Client, path: &str) -> Option<(u16, serde_json::Value)> {
     let body = serde_json::json!({
         "agent_id": agent_id,
         "instance": instance_id(),
@@ -171,7 +170,7 @@ async fn call(agent_id: &str, token: &str, http: &reqwest::Client, path: &str) -
         "version": env!("CARGO_PKG_VERSION"),
     });
     let resp = http
-        .post(format!("{MUXBUS_REST_URL}{path}"))
+        .post(format!("{base}{path}"))
         .header("Authorization", format!("Bearer {token}"))
         .header("X-Agent-ID", agent_id)
         .json(&body)
@@ -192,14 +191,14 @@ async fn call(agent_id: &str, token: &str, http: &reqwest::Client, path: &str) -
 }
 
 /// Release `agent_id`'s lease (best effort) and forget it.
-pub(crate) async fn release(agent_id: &str, token: &str, http: &reqwest::Client) {
+pub(crate) async fn release(base: &str, agent_id: &str, token: &str, http: &reqwest::Client) {
     let was_held = STATE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&key(agent_id))
         .is_some_and(|e| e.held);
     if was_held {
-        let _ = call(agent_id, token, http, "/agents/lease/release").await;
+        let _ = call(base, agent_id, token, http, "/agents/lease/release").await;
     }
 }
 
