@@ -866,8 +866,13 @@ pub fn verify_wan_against_record(
     message: &str,
 ) -> Result<(), WanCheckFailure> {
     let agent_public_key = record.check_chain().ok_or(WanCheckFailure::CertInvalid)?;
-    if record.instance_id != carried.source_host
-        || record.channel != carried.source_channel
+    // ASCII case-insensitive for instance, channel and agent, as §2.3
+    // specifies (Codex P2 on #3727). Safe: the signature still covers the
+    // carried values exactly, the certificate the record's, and a channel that
+    // differs only in case is a different data dir, hence a different
+    // instance id.
+    if !wan_id_eq(&record.instance_id, carried.source_host)
+        || !wan_id_eq(&record.channel, carried.source_channel)
         || !wan_id_eq(&record.agent_id, carried.source_agent)
         || record.key_fp != carried.key_fp
     {
@@ -1727,6 +1732,23 @@ mod tests {
             verify_wan_against_record(&vector_carried(), &record, "hello!"),
             Err(WanCheckFailure::BadSignature)
         );
+    }
+
+    #[test]
+    fn the_record_match_is_ascii_case_insensitive_for_instance_channel_and_agent() {
+        // A record certified for channel `Stable` and a message signed under
+        // `stable`: both halves are individually valid, so the only question is
+        // the §2.3 match, which is case-insensitive.
+        let (agent_public_key, agent_private_key) = generate_wan_keypair([2; 32]);
+        let record = WanKeyRecord::certify(&[1; 32], "camper", "Stable", &agent_public_key, "narko", V_ISSUED_AT).unwrap();
+        let sig = sign_wan_jekt(&agent_private_key, "msg-1", "Camper", V_INSTANCE_ID, "stable", "agent2", V_MSG_TS, "hello").unwrap();
+        let carried = WanCarried {
+            sig: &sig,
+            source_agent: "Camper",
+            source_channel: "stable",
+            ..vector_carried()
+        };
+        assert_eq!(verify_wan_against_record(&carried, &record, "hello"), Ok(()));
     }
 
     #[test]
