@@ -162,6 +162,9 @@ impl PersistentSubprocessController {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
+        // The agent's memory is in its folder before the provider reads it.
+        self.reconcile_memory_before_spawn(&config);
+
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
             format!("failed to spawn persistent process: {e}")

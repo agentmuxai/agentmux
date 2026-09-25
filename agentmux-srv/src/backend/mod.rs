@@ -59,8 +59,8 @@ pub mod continuity;
 pub mod continuity_segments;
 #[allow(dead_code)] // wired by reconciliation (SPEC_MEMORY_FOLLOWS_THE_AGENT phase M3b)
 pub mod memory_record;
-#[allow(dead_code)] // wired by reconciliation (SPEC_MEMORY_FOLLOWS_THE_AGENT phase M3b)
 pub mod memory_dir_claims;
+pub mod memory_reconcile;
 pub mod continuity_state;
 pub mod shellexec;
 pub mod transcript_backfill;
