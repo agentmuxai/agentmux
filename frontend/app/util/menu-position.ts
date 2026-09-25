@@ -20,6 +20,7 @@ import {
     type Placement,
 } from "@floating-ui/dom";
 import type { JSX } from "solid-js";
+import { isRegisteredPaneOverlay } from "@/app/platform/pane-overlay";
 
 // ── Public types (spec §5) ──────────────────────────────────────────────────
 
@@ -352,8 +353,10 @@ export function assertMenuInPaintableArea(el: HTMLElement, label: string): void 
             violations.push(`bottom edge (bottom=${Math.round(rect.bottom)} > ${vh})`);
         }
 
-        // 2. Native-pane rects — a menu overlapping one is drawn behind it.
-        for (const pane of getNativePaneRects()) {
+        // 2. Native-pane rects — a menu overlapping one is drawn behind it,
+        //    unless it is registered to punch a hole through the pane (the
+        //    right-click context menu, which must open where the user clicked).
+        for (const pane of isRegisteredPaneOverlay(el) ? [] : getNativePaneRects()) {
             if (intersects(rect, pane)) {
                 violations.push(
                     `behind native pane (pane ${Math.round(pane.left)},` +
