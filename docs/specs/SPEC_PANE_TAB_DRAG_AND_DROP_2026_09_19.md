@@ -680,12 +680,15 @@ drag a tab within a 3+-tab pane to every position; confirm whole-Pane drag
 (grabbing the reserved space from Phase 2, or the natural dead space when
 not overflowing) still works unaffected.
 
-### Phase 4 — Cross-pane drop on content (§3.3) — REVISED 2026-09-24: body drop = header drop, no split; shipped with this revision
-Wires the new commit path into the *existing*, unmodified
-`OverlayNode`/`ComputeMove` ghost machinery. Test: dragging a Pane Tab onto
-another Pane's content in each of the 9 directions produces the same split
-`queue_target_layout_split` already produces for a whole-Pane drag; source
-leaf keeps its other members; I1/I2 hold after.
+### Phase 4 — Cross-pane drop on a pane's body (§3.3) — revised 2026-09-24, shipped in #3706
+**No split, no ghost.** The original plan here (route body drops through
+`OverlayNode`/`ComputeMove` and split the target in one of 9 directions) was
+dropped by the repo owner. As built: the cross-pane drop target (§3.4)
+registers on the whole pane (PaneChrome's root, `data-role="pane"`), so a body
+drop appends the tab to that pane exactly like a header drop, and the flash
+stays on the header. Tests: `foreignDropRootFor` widens a header strip to its
+pane and never widens a content strip; `foreignDropHighlightFor` stays on the
+header; the drop target registers on the pane root and flashes the header.
 
 ### Phase 5 — Cross-pane drop on header (§3.4)
 The new, Pane-header-scoped hover/commit target. Design-review pass on the
@@ -694,14 +697,19 @@ flash) — flagged as the one place in this plan where "verified via
 `task dev`, not just tests" matters most, matching how the universal
 redesign's own Task Group B4 flagged its own visual-verification limits.
 
-### Phase 6 — Drag out of window → floating pane (§3.5) — design revised 2026-09-24, see §3.5; the text below is the original plan
-Confirm (test, not assumption) whether `TearOffBlock` +
-`queue_source_layout_delete` is already stack-safe post-Phase-0 (§1.3 item
-3); wire the new payload kind into `performTearOff`'s existing `"tile"`
-branch. **Requires repo-owner sign-off on the §7 correction to the
-universal spec's §7 resolution 5 before this phase starts** (see Open
-Questions below) — everything else in this plan can proceed independently
-of that answer, but this phase's chosen mechanism depends on it.
+### Phase 6 — Drag out of window → floating pane (§3.5) — design revised 2026-09-24
+Build §3.5's design (points 1–7), not the original plan. The original plan
+(wire the payload into the `"tile"` branch; wait for sign-off on the
+close-and-reopen question) is superseded: the sign-off question is resolved in
+favor of `TearOffBlock` (§7 Q1), and the research behind §3.5 found that
+`TearOffBlock` + the local `performTearOff` removal is **not** stack-safe as-is
+(gap 2). Tests:
+- Rust: `TearOffBlock` of a background member and of the visible member of a
+  two-member pane keeps the sibling in the backend tree and the tab's
+  `blockids`; `RedockFloatingPane` with the "as a tab" option lands the block
+  in the target pane's stack.
+- vitest: `removeBlockFromLayout` (member vs. last tab), the pane-tab
+  monitor branch (in-window guard, escape, rollback on window-open failure).
 
 ### Cross-cutting, every phase
 - `npx tsc -p tsconfig.citypecheck.json --noEmit` clean.
