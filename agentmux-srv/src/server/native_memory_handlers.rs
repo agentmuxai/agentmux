@@ -26,6 +26,7 @@ use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_NATIVE_MEMORY_ADOPTION_LIST,
+    COMMAND_NATIVE_MEMORY_CLAIMS,
     COMMAND_NATIVE_MEMORY_DIFF,
     COMMAND_NATIVE_MEMORY_HISTORY,
     COMMAND_NATIVE_MEMORY_LIST,
@@ -33,6 +34,7 @@ use crate::backend::rpc_types::{
     COMMAND_NATIVE_MEMORY_REVERT,
     COMMAND_NATIVE_MEMORY_WRITE_FILE,
     CommandNativeMemoryAdoptionListData,
+    CommandNativeMemoryClaimsData,
     CommandNativeMemoryDiffData,
     CommandNativeMemoryHistoryData,
     CommandNativeMemoryListData,
@@ -1409,6 +1411,27 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:adoption_list: {e}"))?
                     .map_err(|e| format!("agent:memory:adoption_list: {e}"))?;
                 Ok(NativeMemoryAdoptionListResult { list })
+            }
+        },
+    );
+
+    // Offers only, like the adoption list: releasing goes through the host.
+    let mstore_claims = state.mstore.clone();
+    engine.register_typed(
+        COMMAND_NATIVE_MEMORY_CLAIMS,
+        move |cmd: CommandNativeMemoryClaimsData, _ctx| {
+            let mstore = mstore_claims.clone();
+            async move {
+                let agent = mstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:claims: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:claims: agent {} not found", cmd.agent_id))?;
+                let fs = crate::backend::agent_session::global_transcript_store()
+                    .ok_or_else(|| "agent:memory:claims: memory record store unavailable".to_string())?;
+                tokio::task::spawn_blocking(move || crate::backend::memory_release::list(fs, &agent.id))
+                    .await
+                    .map_err(|e| format!("agent:memory:claims: {e}"))?
+                    .map_err(|e| format!("agent:memory:claims: {e}"))
             }
         },
     );

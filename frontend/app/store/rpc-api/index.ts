@@ -251,6 +251,8 @@ export type {
     NativeMemoryAdoptionFile,
     NativeMemoryAdoptionList,
     NativeMemoryAdoptionListResult,
+    NativeMemoryClaimList,
+    NativeMemoryClaimedFolder,
     NativeMemoryDiffResult,
     NativeMemoryFileMeta,
     NativeMemoryHistoryResult,

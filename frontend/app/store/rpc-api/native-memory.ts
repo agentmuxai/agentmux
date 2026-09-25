@@ -31,6 +31,8 @@ export type { NativeMemoryAdoptionList } from "@/types/rpc/NativeMemoryAdoptionL
 export type { NativeMemoryAdoptionCandidate } from "@/types/rpc/NativeMemoryAdoptionCandidate";
 export type { NativeMemoryAdoptionFile } from "@/types/rpc/NativeMemoryAdoptionFile";
 export type { NativeMemoryAdoptionListResult } from "@/types/rpc/NativeMemoryAdoptionListResult";
+export type { NativeMemoryClaimList } from "@/types/rpc/NativeMemoryClaimList";
+export type { NativeMemoryClaimedFolder } from "@/types/rpc/NativeMemoryClaimedFolder";
 
 import type { CommandNativeMemoryListData } from "@/types/rpc/CommandNativeMemoryListData";
 import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeMemoryReadFileData";
@@ -40,6 +42,8 @@ import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemor
 import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
 import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
 import type { NativeMemoryAdoptionListResult as NativeMemoryAdoptionListResultT } from "@/types/rpc/NativeMemoryAdoptionListResult";
+import type { CommandNativeMemoryClaimsData } from "@/types/rpc/CommandNativeMemoryClaimsData";
+import type { NativeMemoryClaimList as NativeMemoryClaimListT } from "@/types/rpc/NativeMemoryClaimList";
 import type { NativeMemoryListResult as NativeMemoryListResultT } from "@/types/rpc/NativeMemoryListResult";
 import type { NativeMemoryReadFileResult as NativeMemoryReadFileResultT } from "@/types/rpc/NativeMemoryReadFileResult";
 import type { NativeMemoryHistoryResult as NativeMemoryHistoryResultT } from "@/types/rpc/NativeMemoryHistoryResult";
@@ -74,6 +78,19 @@ export const NativeMemoryApi = {
         opts?: RpcOpts,
     ): Promise<NativeMemoryAdoptionListResultT> {
         return client.rpcCall("agent:memory:adoption_list", data, opts);
+    },
+
+    /**
+     * The memory folders an agent has claimed, for the human "release this
+     * folder" action — SPEC_MEMORY_FOLLOWS_THE_AGENT §2.1.2. Releasing goes
+     * through the host's confirmation window, not an RPC.
+     */
+    NativeMemoryClaimsCommand(
+        client: RpcClient,
+        data: CommandNativeMemoryClaimsData,
+        opts?: RpcOpts,
+    ): Promise<NativeMemoryClaimListT> {
+        return client.rpcCall("agent:memory:claims", data, opts);
     },
 
     NativeMemoryHistoryCommand(
