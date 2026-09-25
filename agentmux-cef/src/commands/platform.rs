@@ -1076,10 +1076,14 @@ fn layout_file_stem(name: &str) -> String {
 /// and a double extension like this one least of all.
 fn with_layout_extension(path: std::path::PathBuf) -> std::path::PathBuf {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-    if name.to_ascii_lowercase().ends_with(LAYOUT_EXTENSION) {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(LAYOUT_EXTENSION) {
         return path;
     }
-    let base = name.strip_suffix(".json").unwrap_or(&name);
+    // Case-insensitive, like the check above (ReAgent P2 on #3787): `x.JSON`
+    // becomes `x.agentmux-layout.json`, not `x.JSON.agentmux-layout.json`.
+    // `.json` is ASCII, so cutting its byte length off the end is safe.
+    let base = if lower.ends_with(".json") { &name[..name.len() - ".json".len()] } else { name.as_str() };
     path.with_file_name(format!("{base}{LAYOUT_EXTENSION}"))
 }
 
@@ -1132,6 +1136,8 @@ mod layout_dialog_tests {
         let dir = PathBuf::from("layouts");
         assert_eq!(with_layout_extension(dir.join("x")), dir.join("x.agentmux-layout.json"));
         assert_eq!(with_layout_extension(dir.join("x.json")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(with_layout_extension(dir.join("x.JSON")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(with_layout_extension(dir.join("café.Json")), dir.join("café.agentmux-layout.json"));
         assert_eq!(
             with_layout_extension(dir.join("x.agentmux-layout.json")),
             dir.join("x.agentmux-layout.json")

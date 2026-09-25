@@ -374,15 +374,16 @@ fn meta_str<'a>(meta: &'a MetaMapType, key: &str) -> Option<&'a str> {
 fn home_relative(path: &str, home: Option<&Path>) -> String {
     let Some(home) = home.and_then(|h| h.to_str()) else { return path.to_string() };
     let home = home.trim_end_matches(['/', '\\']);
-    let matches_prefix = if cfg!(windows) {
-        path.len() >= home.len() && path[..home.len()].eq_ignore_ascii_case(home)
-    } else {
-        path.starts_with(home)
+    // `get`, not `[..]`: the home dir's byte length can fall inside a
+    // multi-byte character of `path`, and slicing there panics (ReAgent P1 on
+    // #3787). Such a path can't be under home anyway.
+    let (Some(prefix), Some(rest)) = (path.get(..home.len()), path.get(home.len()..)) else {
+        return path.to_string();
     };
+    let matches_prefix = if cfg!(windows) { prefix.eq_ignore_ascii_case(home) } else { prefix == home };
     if !matches_prefix {
         return path.to_string();
     }
-    let rest = &path[home.len()..];
     if rest.is_empty() {
         return "~".to_string();
     }

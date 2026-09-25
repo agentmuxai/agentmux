@@ -289,6 +289,21 @@ fn home_relative_paths() {
     assert_eq!(home_relative("/opt/x", None), "/opt/x");
 }
 
+/// ReAgent P1 on #3787: a multi-byte character straddling the home dir's
+/// byte length must not panic — the path is simply not under home.
+#[test]
+fn a_multibyte_character_at_the_home_boundary_does_not_panic() {
+    let home = Path::new(HOME);
+    // Replace home's last character with a 2-byte one, so byte `HOME.len()`
+    // falls inside it.
+    let straddling = format!("{}é{}", &HOME[..HOME.len() - 1], if cfg!(windows) { "\\x" } else { "/x" });
+    assert!(!straddling.is_char_boundary(HOME.len()), "the fixture must straddle the boundary");
+    assert_eq!(home_relative(&straddling, Some(home)), straddling);
+    // Shorter than home, and non-ASCII: also fine.
+    assert_eq!(home_relative("é", Some(home)), "é");
+    assert_eq!(home_relative(&under_home("café/menu.md"), Some(home)), "~/café/menu.md");
+}
+
 #[test]
 fn urls_lose_their_query_and_fragment() {
     assert_eq!(strip_query("https://a.b/c?d=e#f"), "https://a.b/c");
