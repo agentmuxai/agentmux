@@ -11,7 +11,7 @@
 
 import { AgentViewModel } from "@/app/view/agent";
 import { armoryPaneTab } from "@/app/view/armory/armory";
-import { BrowserViewModel } from "@/app/view/browser/browser";
+import { browserPaneTab } from "@/app/view/browser/browser";
 import { dronePaneTab } from "@/app/view/drone/drone";
 import { editorPaneTab } from "@/app/view/editor/editor";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
@@ -63,12 +63,7 @@ const builtins = [
         tab: agentPaneTab,
         chrome: buildAgentPaneChromeModel,
     }),
-    legacyAdapter("browser", BrowserViewModel as any, {
-        label: "Browser",
-        icon: "globe",
-        lifecycle: "keepAlive",
-        capabilities: { nativeSurface: true },
-    }),
+    browserPaneTab, // native — Phase 2c (keep-alive, native surface)
     editorPaneTab, // native — Phase 2c (keep-alive, zoom base 13)
     // Native (create(ctx)) — Phase 2c. "cpuplot" is the same view under an
     // older name.

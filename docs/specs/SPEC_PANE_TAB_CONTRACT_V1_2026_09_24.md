@@ -415,6 +415,12 @@ working throughout through a legacy adapter.
        hands the host its title, header text, context menu, focus and
        dispose. The contract grew `headerIcon` (a live, clickable header
        icon: the editor's file-type icon).
+     - **Browser (implemented, part 2):** `browserPaneTab` (browser.tsx) —
+       keep-alive, `nativeSurface`, full-bleed. Its model's own-meta reads
+       are `ctx.meta` and its two URL persists are `ctx.setMeta`; the page
+       title (with its placeholder flag) and favicon reach the host as
+       `liveTitle`/`liveFavicon`, and the pane's synthetic context menu
+       passes its browser context through `contextMenu`.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
