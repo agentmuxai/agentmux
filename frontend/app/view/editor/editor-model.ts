@@ -30,8 +30,8 @@
 // scope here; each will trip the same gate when its file is next touched.
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { EditorView } from "codemirror";
-import { BlockNodeModel } from "@/app/block/blocktypes";
 import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
 import {
     EditorPaneEvent,
@@ -48,7 +48,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
-import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
+import { makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
@@ -107,10 +107,10 @@ function installGlobalSinkOnce(): void {
     _sinkInstalled = true;
 }
 
-export class EditorViewModel implements ViewModel {
+export /** The editor's state behind its native pane tab (`editorPaneTab`, editor.tsx). */
+class EditorViewModel {
     viewType = "editor";
     blockId: string;
-    nodeModel: BlockNodeModel;
 
     // Populated by editor-view.tsx whenever it (re)builds the CodeMirror
     // instance — mirrors AgentViewModel.focusTargetRef / TermViewModel.termRef.
@@ -120,11 +120,7 @@ export class EditorViewModel implements ViewModel {
     viewIcon: Accessor<string | IconButtonDecl>;
     viewName: Accessor<string>;
     viewText: Accessor<string | HeaderElem[]>;
-    noPadding: Accessor<boolean> = () => true;
 
-    get viewComponent(): ViewComponent {
-        return null; // overridden by barrel via Object.defineProperty
-    }
 
     // ── Slice projection ───────────────────────────────────────────────
     // A version counter signal triggers Solid re-evaluation whenever the
@@ -191,7 +187,9 @@ export class EditorViewModel implements ViewModel {
 
     treeModel = new FileTreeModel();
 
-    blockAtom: Accessor<Block | undefined>;
+    /** The block's meta — the host context's, reactive. */
+    meta: Accessor<MetaType | undefined>;
+    private ctx: PaneTabHostContext;
     zoomAtom!: Accessor<number>;
 
     /** Tabs that started loading via openFile — used so concurrent dispatches
@@ -216,11 +214,15 @@ export class EditorViewModel implements ViewModel {
     private _unsubFileChanged: () => void = () => {};
     private _disposePendingOpenFilesEffect: () => void = () => {};
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
+    // (editor.tsx); its own block's meta comes from, and goes to, the host
+    // context.
+    constructor(ctx: PaneTabHostContext) {
+        const blockId = ctx.blockId;
+        this.ctx = ctx;
         this.blockId = blockId;
-        this.nodeModel = nodeModel;
 
-        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
+        this.meta = ctx.meta;
 
         // Register this pane's slot in the slice.
         registerEditorPane(blockId);
@@ -263,7 +265,7 @@ export class EditorViewModel implements ViewModel {
         // Part 2): reactively drains META_PENDING_OPEN_FILES whenever the
         // backend writes to it — a file an OpenEditor reuse call pushed into
         // this pane instead of creating a second Editor pane. Reactive
-        // (createEffect over blockAtom), not a one-shot construction-time
+        // (createEffect over the block's meta), not a one-shot construction-time
         // check, so it uniformly covers BOTH "this pane wasn't mounted yet
         // when the backend wrote the request" and "already mounted, backend
         // writes it later" through the same MuxObj sync path this pane
@@ -273,9 +275,9 @@ export class EditorViewModel implements ViewModel {
         // alongside the meta write) for the already-mounted case, racing
         // this same meta update. Reagent (PR #2404) found the race: the MPS
         // event is a direct WS push and arrives essentially synchronously,
-        // while the meta write reaches `blockAtom` only after an async
+        // while the meta write reaches `meta()` only after an async
         // MuxObj DB-refetch — so the live event's handler could run and try
-        // to dequeue its own path from `blockAtom()`'s meta BEFORE that same
+        // to dequeue its own path from `meta()` BEFORE that same
         // write had actually landed there, reading stale data and no-op'ing,
         // stranding the entry to be wrongly reprocessed on a later remount.
         // Removing the separate live path entirely (rather than patching the
@@ -286,7 +288,7 @@ export class EditorViewModel implements ViewModel {
         createRoot((dispose) => {
             this._disposePendingOpenFilesEffect = dispose;
             createEffect(() => {
-                const pending = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
+                const pending = this.meta()?.[META_PENDING_OPEN_FILES];
                 if (!Array.isArray(pending) || pending.length === 0) return;
                 const processed = pending.filter((p): p is string => typeof p === "string" && p.length > 0);
                 for (const path of processed) void this.openFile(path);
@@ -306,7 +308,7 @@ export class EditorViewModel implements ViewModel {
                     // client-side read-filter-write; deferred given how
                     // narrow the remaining window is (needs a third
                     // concurrent reuse call specifically inside it).
-                    const current = this.blockAtom()?.meta?.[META_PENDING_OPEN_FILES];
+                    const current = this.meta()?.[META_PENDING_OPEN_FILES];
                     const remaining = Array.isArray(current)
                         ? current.filter((p) => !processed.includes(p))
                         : [];
@@ -398,7 +400,7 @@ export class EditorViewModel implements ViewModel {
         // a tracking owner and would snapshot once.
         this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
             createMemo<number>(() => {
-                const z = this.blockAtom()?.meta?.["term:zoom"];
+                const z = this.meta()?.["term:zoom"];
                 if (typeof z !== "number" || isNaN(z)) return 1.0;
                 return Math.max(0.5, Math.min(2.0, z));
             }),
@@ -433,7 +435,7 @@ export class EditorViewModel implements ViewModel {
         this.viewText = () => [];
 
         // Restore persisted tree state from block meta.
-        const meta = this.blockAtom()?.meta;
+        const meta = this.meta();
         if (meta?.[META_TREE_EXPANDED] === false) {
             this._treeExpanded[1](false);
         }
@@ -1243,10 +1245,7 @@ export class EditorViewModel implements ViewModel {
 
     private async persistMeta(meta: Record<string, unknown>): Promise<void> {
         try {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: makeORef("block", this.blockId),
-                meta,
-            });
+            await this.ctx.setMeta(meta);
         } catch {
             // Persistence failure isn't fatal — in-memory signal still drives
             // the current pane's behavior. On reopen, the previous persisted

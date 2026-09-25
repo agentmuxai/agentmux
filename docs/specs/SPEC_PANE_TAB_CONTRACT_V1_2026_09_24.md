@@ -409,6 +409,12 @@ working throughout through a legacy adapter.
        only a title memo, so there is none now: the view reads and writes its
        picked path through `ctx`, and `mediaTitle(meta)` (the file's name, or
        "Media") titles the pane.
+     - **Editor (implemented, part 2):** `editorPaneTab` (editor.tsx) —
+       keep-alive, zoom base 13, full-bleed. Its model's four own-meta reads
+       are `ctx.meta` and its `persistMeta` is `ctx.setMeta`; the instance
+       hands the host its title, header text, context menu, focus and
+       dispose. The contract grew `headerIcon` (a live, clickable header
+       icon: the editor's file-type icon).
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

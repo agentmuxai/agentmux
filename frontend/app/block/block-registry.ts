@@ -13,7 +13,7 @@ import { AgentViewModel } from "@/app/view/agent";
 import { armoryPaneTab } from "@/app/view/armory/armory";
 import { BrowserViewModel } from "@/app/view/browser/browser";
 import { dronePaneTab } from "@/app/view/drone/drone";
-import { EditorViewModel } from "@/app/view/editor/editor";
+import { editorPaneTab } from "@/app/view/editor/editor";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
@@ -69,12 +69,7 @@ const builtins = [
         lifecycle: "keepAlive",
         capabilities: { nativeSurface: true },
     }),
-    legacyAdapter("editor", EditorViewModel as any, {
-        label: "Editor",
-        icon: "file-lines",
-        lifecycle: "keepAlive",
-        capabilities: { paneZoom: { baseFontSize: 13 } },
-    }),
+    editorPaneTab, // native — Phase 2c (keep-alive, zoom base 13)
     // Native (create(ctx)) — Phase 2c. "cpuplot" is the same view under an
     // older name.
     sysinfoPaneTab("sysinfo"),
