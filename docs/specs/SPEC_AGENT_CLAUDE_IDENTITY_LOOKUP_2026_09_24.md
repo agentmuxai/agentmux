@@ -132,11 +132,20 @@ independent, small fixes cover it:
    `db_agents.session_id`, its bound `identity_id`/account (`db_agent_identity_links`,
    confirmed empty for this agent today — a real gap this call would also
    surface, not paper over), and the transcript path via §3.1's same
-   algorithm — checking both `channels/<ch>/identities/<id>/claude/projects/`
-   and `shared/identities/<id>/claude/projects/` (the 2026-09-20 retro's
-   still-unexplained dual tree; this call does not need to explain *why*
-   both exist, only to check both and report which one actually has the
-   file, which the retro's manual method already does by hand).
+   algorithm, read from `shared/identities/<id>/claude/projects/` — the
+   single global tree, not `channels/<ch>/identities/<id>/...`, which
+   `ensure_history_link` (`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`,
+   PR #2605) turns into a junction/symlink into the shared copy at
+   `auth.start`/spawn — the 2026-09-20 retro's "dual tree" was this
+   linking, not two independently-authoritative copies. The one real gap
+   (a channel retired before that link ever ran, so its directory sat
+   real-but-unlinked) was a one-time migration, already merged
+   (`m0034_identity_history_backfill.rs`, PR #3460, 2026-09-22) — not
+   something this spec needs to redo. `GetAgentIdentity` should still fall
+   back to a channel-scoped read if `shared/` is somehow missing the file
+   (mirroring `ClaudeHistoryAdapter`'s own bounded fallback scan, per that
+   migration's doc comment), but that is a defensive fallback, not
+   evidence of an unresolved mystery.
 
 P3 is scoped narrower than the 2026-09-20 retro's original ask (which also
 wanted live pane/block metadata) — just identity + transcript path,
@@ -151,10 +160,11 @@ neither `GetAgentTranscript` nor `SearchHistory` provide.
   minted on nearly every respawn/rebind is `agentmux#3667`'s problem, not
   this spec's. This spec makes the *current* identity fast and correct to
   read, however often it changes.
-- **Not explaining the `channels/` vs `shared/` dual identity tree.** P3
-  works around it (check both, report which resolved) rather than
-  resolving which one is authoritative — that question is still open from
-  the 2026-09-20 retro and deserves its own investigation.
+- **Not re-explaining the `channels/` vs `shared/` identity tree.** §3.2
+  already resolves this: `shared/` is authoritative, `channels/.../identities/`
+  is a link into it, and the one real historical gap has its own merged fix
+  (PR #3460). This spec's P3 just has to read the right (shared) tree and
+  fall back defensively, not investigate further.
 - **Not a general "find any session by content" search** — that's
   `SearchHistory`'s job (`SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md`,
   actively being hardened this week in #3693/#3711).
@@ -184,10 +194,11 @@ instead of two failed tool calls plus a misleading circumstantial guess.
   `agent_handlers::identity` tests already cover the backfill writing
   `context.email` (`identity/account_email.rs` tests) — P2 only has to
   assert the MCP layer stops dropping a field that's already there.
-- **P3**: given a fixture with two identity roots, one holding the current
-  session's `.jsonl` and one holding a stale one (mirroring this session's
-  own `channels/` + `shared/` layout), `GetAgentIdentity` returns the root
-  that actually has the file, not the first one checked.
+- **P3**: reads `shared/identities/<id>/claude/projects/` and returns its
+  file; a fixture where `shared/` is missing the session (simulating a
+  channel from before `ensure_history_link` first ran, or one #3460's
+  backfill somehow missed) confirms the channel-scoped fallback fires
+  instead of returning nothing.
 
 ---
 
@@ -197,7 +208,8 @@ instead of two failed tool calls plus a misleading circumstantial guess.
   privacy posture for other fields) with an explicit opt-in to see it in
   full, or is an OAuth login email not sensitive enough to warrant that
   given it is already unmasked in the Armory UI (`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md`)?
-- P3's dual-root check is a workaround, not a fix. Worth a follow-up
-  investigation into whether `channels/.../identities/` or `shared/identities/`
-  is meant to be authoritative, and why both are written at all — flagged
-  in the 2026-09-20 retro, still unanswered.
+- None outstanding on the identity-tree question — resolved while writing
+  this spec (§3.2): `shared/` is authoritative, `channels/.../identities/`
+  links into it, and PR #3460 already backfilled the pre-fix orphans. Kept
+  here as a record that the 2026-09-20 retro's open question has since been
+  answered, not to re-open it.
