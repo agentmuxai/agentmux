@@ -79,6 +79,46 @@ describe("isCef", () => {
 // guard in the `.then()` continuation below.
 
 
+describe("showJsContextMenu — sublabel", () => {
+    const removeOverlay = () => document.getElementById("cef-context-menu-overlay")?.remove();
+    beforeEach(removeOverlay);
+    afterEach(removeOverlay);
+
+    const rows = (items: NativeContextMenuItem[]) => {
+        showJsContextMenu(items, { x: 0, y: 0 }, null);
+        return [...document.querySelectorAll<HTMLElement>("#cef-context-menu-overlay .menu-item")];
+    };
+
+    test("draws the sublabel after the label", () => {
+        const [row] = rows([{ id: "a", label: "Bind to Agent", sublabel: "no compatible agents in this channel", enabled: false }]);
+        const sub = row.querySelector(".menu-item-sublabel");
+        expect(sub?.textContent).toBe("no compatible agents in this channel");
+        // Label first, sublabel after it.
+        expect(row.querySelector(".label")!.compareDocumentPosition(sub!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+
+    test("draws no sublabel element when there is none, or it is empty", () => {
+        const [plain, empty] = rows([
+            { id: "a", label: "Copy" },
+            { id: "b", label: "Paste", sublabel: "" },
+        ]);
+        expect(plain.querySelector(".menu-item-sublabel")).toBeNull();
+        expect(empty.querySelector(".menu-item-sublabel")).toBeNull();
+    });
+
+    test("renders sublabels on checkbox rows and keeps the check slot first", () => {
+        const [row] = rows([{ id: "a", label: "Agent1", type: "checkbox", checked: true, sublabel: "● running" }]);
+        expect(row.firstElementChild?.classList.contains("menu-item-check")).toBe(true);
+        expect(row.querySelector(".menu-item-sublabel")?.textContent).toBe("● running");
+    });
+
+    test("uses textContent — a sublabel is never parsed as HTML", () => {
+        const [row] = rows([{ id: "a", label: "x", sublabel: "<img src=x onerror=alert(1)>" }]);
+        expect(row.querySelector(".menu-item-sublabel img")).toBeNull();
+        expect(row.querySelector(".menu-item-sublabel")?.textContent).toBe("<img src=x onerror=alert(1)>");
+    });
+});
+
 describe("showJsContextMenu — submenu placement", () => {
     const removeOverlay = () => {
         document.getElementById("cef-context-menu-overlay")?.remove();

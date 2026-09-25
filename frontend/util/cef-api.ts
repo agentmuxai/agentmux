@@ -274,6 +274,17 @@ export function showJsContextMenu(
             label.textContent = item.label ?? "";
             row.appendChild(label);
 
+            // Secondary, muted text after the label (right-aligned by the label's
+            // flex-grow) — e.g. the bind-to-agent menu's live binding overview,
+            // or the reason a row is disabled. ContextMenuItem.sublabel was
+            // accepted and forwarded here but never drawn.
+            if (item.sublabel) {
+                const sub = document.createElement("span");
+                sub.className = "menu-item-sublabel";
+                sub.textContent = item.sublabel;
+                row.appendChild(sub);
+            }
+
             if (item.submenu && item.submenu.length > 0) {
                 // Static CSS fallback (the pre-framework behavior): anchor at
                 // the row's right edge, which needs the row as positioned
