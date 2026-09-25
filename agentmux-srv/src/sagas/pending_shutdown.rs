@@ -47,6 +47,28 @@ impl Action {
             Action::ClosePane { .. } => 2,
         }
     }
+
+    /// Folds in a joiner's action of the same kind, so what runs covers
+    /// both (ReAgent P2 on #3798): the more forceful stop, every pane asked
+    /// for. A self-quit is the same either way; its detail is audit text.
+    fn merge(&mut self, other: Action) {
+        match (self, other) {
+            (Action::Stop { signal }, Action::Stop { signal: theirs }) => {
+                let forceful = |s: &Option<String>| matches!(s.as_deref(), Some("SIGKILL") | Some("SIGTERM"));
+                if theirs.as_deref() == Some("SIGKILL") || (signal.is_none() && forceful(&theirs)) {
+                    *signal = theirs;
+                }
+            }
+            (Action::ClosePane { block_ids }, Action::ClosePane { block_ids: theirs }) => {
+                for b in theirs {
+                    if !block_ids.contains(&b) {
+                        block_ids.push(b);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A request as the caller and the frontend see it (§12.2).
@@ -67,6 +89,10 @@ pub struct PendingView {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// This caller joined a request already open for the block rather than
+    /// opening one. Never stored; set on the view `request` returns.
+    #[serde(skip)]
+    pub joined: bool,
 }
 
 struct Entry {
@@ -176,8 +202,13 @@ fn request_within(
             if !existing.requesters.iter().any(|(b, v)| b == by && v == via) {
                 existing.requesters.push((by.to_string(), via.to_string()));
             }
-            let stronger = existing.view.status == "pending"
-                && existing.action.as_ref().is_some_and(|cur| action.rank() > cur.rank());
+            let pending = existing.view.status == "pending";
+            let stronger = pending && existing.action.as_ref().is_some_and(|cur| action.rank() > cur.rank());
+            if pending && !stronger {
+                if let Some(cur) = existing.action.as_mut().filter(|cur| cur.rank() == action.rank()) {
+                    cur.merge(action.clone());
+                }
+            }
             if stronger {
                 existing.action = Some(action);
                 existing.view.by = by.to_string();
@@ -186,7 +217,7 @@ fn request_within(
                     existing.view.reason = reason.trim().to_string();
                 }
             }
-            let joined = existing.view.clone();
+            let joined = PendingView { joined: true, ..existing.view.clone() };
             drop(map);
             if stronger {
                 // Same request and deadline; the banner names the new asker.
@@ -208,6 +239,7 @@ fn request_within(
             deadline_ms: now_ms() + window.as_millis() as i64,
             status: "pending",
             error: None,
+            joined: false,
         };
         map.insert(
             view.request_id.clone(),
@@ -284,8 +316,10 @@ fn audit(state: &AppState, request_id: &str, outcome: &str, error: Option<&str>)
 /// The request-time audit note: whether this caller opened the window or
 /// joined someone else's.
 pub fn audit_note(v: &PendingView, by: &str, via: &str) -> String {
-    if v.by == by && v.via == via {
+    if !v.joined {
         "pending user override".to_string()
+    } else if v.by == by && v.via == via {
+        format!("joined its own pending request {}", v.request_id)
     } else {
         format!("joined {} by {}'s pending request", v.via, v.by)
     }
@@ -420,6 +454,21 @@ mod tests {
         assert!(matches!(begin(&quit.request_id), Some(Action::SelfQuit { .. })));
         let requesters = entries().get(&quit.request_id).unwrap().requesters.clone();
         assert_eq!(requesters.len(), 2, "both are audited when it settles");
+    }
+
+    #[tokio::test]
+    async fn a_joiner_of_the_same_kind_is_folded_in_not_dropped() {
+        let state = test_state();
+        let a = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: None });
+        assert!(!a.joined);
+        let b = request(&state, "blk-p6", "Korp", "FleetBulkStop", "", Action::Stop { signal: Some("SIGKILL".into()) });
+        assert!(b.joined && b.request_id == a.request_id);
+        assert_eq!(audit_note(&b, "Korp", "FleetBulkStop"), format!("joined its own pending request {}", a.request_id));
+        assert!(matches!(begin(&a.request_id), Some(Action::Stop { signal: Some(s) }) if s == "SIGKILL"), "the forceful stop wins");
+
+        let c = request(&state, "blk-p7", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into()] });
+        request(&state, "blk-p7", "Posa", "ClosePane", "", Action::ClosePane { block_ids: vec!["x".into(), "y".into()] });
+        assert!(matches!(begin(&c.request_id), Some(Action::ClosePane { block_ids }) if block_ids == vec!["x".to_string(), "y".to_string()]));
     }
 
     #[tokio::test]
