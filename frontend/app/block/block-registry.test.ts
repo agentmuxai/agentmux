@@ -37,7 +37,7 @@ const NEW_LABELS: Record<string, string> = { cpuplot: "Sysinfo", armory: "Armory
 
 describe("built-in pane tabs (block-registry.ts)", () => {
     // Native views (create(ctx), Phase 2b) have no ViewModel class.
-    const NATIVE = ["help", "sysinfo", "cpuplot", "swarm", "drone", "warden", "armory", "media"];
+    const NATIVE = ["help", "sysinfo", "cpuplot", "swarm", "drone", "warden", "armory", "media", "editor", "browser"];
 
     it("registers an instance factory for every view the old map had", () => {
         for (const view of VIEWS) {

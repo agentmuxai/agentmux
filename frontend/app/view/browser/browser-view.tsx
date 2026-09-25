@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { elementDragInFlight } from "@/app/drag/element-drag-state";
 import { invokeCommand } from "@/app/platform/ipc";
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms } from "@/store/global";
 import type { BrowserViewModel } from "./browser-model";
 import { usePaneRectSync } from "./use-pane-rect-sync";
+import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
 import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
 import { BrowserNavBar } from "./browser-nav-bar";
@@ -18,6 +21,66 @@ import "./browser-view.scss";
 // node stays mounted this long after loadingAtom() flips false so the
 // opacity fade actually plays before unmount removes it.
 const LOADING_SPINNER_FADE_MS = 200;
+
+// How long the drag catcher waits for the page snapshot before opening the
+// hole anyway: a drop that works beats a pretty one. Captures measured
+// 50-90ms on Windows, and are usually prewarmed before the drag starts
+// (use-drag-snapshot.ts).
+const DRAG_SNAPSHOT_CAP_MS = 500;
+
+/**
+ * Covers the page for the length of an in-app drag (a pane, a Pane Tab, a
+ * Window Tab) and opens a hole through the native page. Without it the OS
+ * handed the drag to the page, which refused it: a circle-slash cursor, and
+ * dropping a tab onto a browser pane did nothing because the pane's own drop
+ * target never saw the drag.
+ *
+ * The hole alone showed the bare placeholder (the page turned grey mid-drag),
+ * so the catcher first shows a snapshot of the page and only opens the hole
+ * once that has painted, or after DRAG_SNAPSHOT_CAP_MS. The snapshot is
+ * static; a drag is short.
+ */
+function BrowserDragCatcher(props: { takeSnapshot: () => Promise<DragSnapshot | null> }): JSX.Element {
+    const [snapshot, setSnapshot] = createSignal<DragSnapshot | null>(null);
+    const [holeOpen, setHoleOpen] = createSignal(false);
+    const cap = setTimeout(() => setHoleOpen(true), DRAG_SNAPSHOT_CAP_MS);
+    let disposed = false;
+    onCleanup(() => {
+        disposed = true;
+        clearTimeout(cap);
+    });
+    void props.takeSnapshot().then((s) => {
+        if (disposed) return;
+        if (s) setSnapshot(s);
+        else setHoleOpen(true);
+    });
+    return (
+        <div class="browser-drag-catcher">
+            <Show when={snapshot()}>
+                <img
+                    class="browser-freeze-snapshot"
+                    alt=""
+                    src={snapshot()!.src}
+                    style={snapshot()!.style}
+                    // One frame after load, so the image is on screen before
+                    // the page is cut away from above it.
+                    onLoad={() => requestAnimationFrame(() => setHoleOpen(true))}
+                />
+            </Show>
+            <Show when={holeOpen()}>
+                <BrowserDragHole />
+            </Show>
+        </div>
+    );
+}
+
+/** The hole itself: registered through `usePaneOverlay` rather than
+ *  `data-pane-overlay` so it also works off Windows. */
+function BrowserDragHole(): JSX.Element {
+    let el: HTMLDivElement | undefined;
+    usePaneOverlay(() => el);
+    return <div class="browser-drag-hole" ref={el} />;
+}
 
 /**
  * Pane-scope modal host. Wraps the browser-pane content in a
@@ -37,7 +100,7 @@ const LOADING_SPINNER_FADE_MS = 200;
  * instead.
  * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md §5 (browser-auth follow-up).
  */
-export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
+export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.Element {
     return (
         <ModalLayer scope="pane">
             <BrowserViewInner model={props.model} />
@@ -70,6 +133,13 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         diag,
     });
     const freeze = useFreezeFrame({
+        model,
+        placeholderRef: () => placeholderRef,
+        paneRect: rectSync.paneRect,
+        paneCreated: rectSync.paneCreated,
+        diag,
+    });
+    const dragSnapshot = useDragSnapshot({
         model,
         placeholderRef: () => placeholderRef,
         paneRect: rectSync.paneRect,
@@ -230,6 +300,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                             <BrainSpinner />
                         </div>
                     </Show>
+                </Show>
+                <Show when={elementDragInFlight()}>
+                    <BrowserDragCatcher takeSnapshot={dragSnapshot.take} />
                 </Show>
             </div>
         </div>

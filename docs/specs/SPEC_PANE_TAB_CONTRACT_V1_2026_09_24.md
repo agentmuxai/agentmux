@@ -10,8 +10,8 @@ activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
 Phases 5a–5b (capabilities replace view-name checks) in #3765; 5c dropped
 (§4); Phase 6 (third-party widgets from the user's widgets.json) in #3767;
 Phase 2c part 1 (sysinfo, swarm, drone, warden, armory, media → native
-`create`) in the PR after it; 2c part 2 (editor, browser, term, agent) not
-started.
+`create`) in #3768; part 2a (editor, browser) in the PR after it; term and
+agent not started — they need the contract hooks listed under 2c first.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -409,6 +409,33 @@ working throughout through a legacy adapter.
        only a title memo, so there is none now: the view reads and writes its
        picked path through `ctx`, and `mediaTitle(meta)` (the file's name, or
        "Media") titles the pane.
+     - **Editor (implemented, part 2):** `editorPaneTab` (editor.tsx) —
+       keep-alive, zoom base 13, full-bleed. Its model's four own-meta reads
+       are `ctx.meta` and its `persistMeta` is `ctx.setMeta`; the instance
+       hands the host its title, header text, context menu, focus and
+       dispose. The contract grew `headerIcon` (a live, clickable header
+       icon: the editor's file-type icon).
+     - **Browser (implemented, part 2):** `browserPaneTab` (browser.tsx) —
+       keep-alive, `nativeSurface`, full-bleed. Its model's own-meta reads
+       are `ctx.meta` and its two URL persists are `ctx.setMeta`; the page
+       title (with its placeholder flag) and favicon reach the host as
+       `liveTitle`/`liveFavicon`, and the pane's synthetic context menu
+       passes its browser context through `contextMenu`.
+     - **Terminal and agent (not started — contract gaps first).** Unlike
+       the eight views above, shared code reaches INTO these two view models
+       through the host, which works only while the host holds the real
+       class; behind the native adapter each reach-in would silently read
+       `undefined`. Each needs a contract hook before the view can move:
+       | Reach-in (today) | Needed in the contract |
+       |---|---|
+       | `voiceHandle` — header mic (blockframe) and agent footer | `PaneTabInstance.voice` (handle for the mic and Ctrl+Shift+V) |
+       | `searchAtoms` — written onto the vm by `search.tsx`, read by `keymodel.ts` (Ctrl+F) | a host-owned search slot the instance subscribes to |
+       | `(viewModel as any).termRef` — `pane-actions.ts` selection + paste | `PaneTabInstance.selection()` / `paste(text)` |
+       | `agentRuntimeLabel` — term chrome badge via `activeViewModel as TermViewModel` | the chrome model reads its own per-block state, not the vm |
+       | `agentDefinitions` — agent chrome fork tabs via `activeViewModel as AgentViewModel` | same |
+       | `setProgressBarMount` — the chrome's progress slot → agent | `PaneTabInstance.progressMount` |
+       | `bcm.viewModel as TermViewModel` — cross-terminal lookup (termViewModel.ts) | a term-module registry by block id |
+       | `isBasicTerm` — the basic-terminal count (keymodel.ts) | a capability or that same registry |
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

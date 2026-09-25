@@ -89,6 +89,9 @@ export interface PaneTabInstance {
     /** Live title; `placeholder: true` while it is only a stand-in. */
     liveTitle?: Accessor<{ text: string; placeholder?: boolean }>;
     liveFavicon?: Accessor<string>;
+    /** The header's icon when it depends on state or is clickable (the
+     *  editor's file-type icon); the manifest's `icon` otherwise. */
+    headerIcon?: Accessor<string | IconButtonDecl>;
     headerText?: Accessor<string | HeaderElem[]>;
     headerActions?: Accessor<(IconButtonDecl | ToggleIconButtonDecl)[]>;
     contextMenu?(ctx?: unknown): ContextMenuItem[];

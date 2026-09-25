@@ -135,6 +135,15 @@
     pointer-events: none;
 }
 
+/* browser-view.tsx's BrowserDragCatcher: covers the page mid-drag (with a
+   snapshot of it) so the drag reaches the DOM through the hole it opens in
+   the native page. */
+.browser-drag-catcher,
+.browser-drag-hole {
+    position: absolute;
+    inset: 0;
+}
+
 .browser-empty {
     display: flex;
     flex-direction: column;

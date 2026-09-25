@@ -51,6 +51,7 @@ export function adaptPaneTabInstance(
         vm.viewNameIsPlaceholder = () => title().placeholder === true;
     }
     if (instance.liveFavicon) vm.viewFaviconUrl = instance.liveFavicon;
+    if (instance.headerIcon) vm.viewIcon = instance.headerIcon;
     if (instance.headerText) vm.viewText = instance.headerText;
     if (instance.headerActions) vm.endIconButtons = instance.headerActions;
     if (instance.contextMenu) vm.getBodyContextMenuItems = (c) => instance.contextMenu!(c);

@@ -231,7 +231,35 @@ impl DataPaths {
 
     /// Create every directory that may be written to. Idempotent.
     /// Safe to call on every launch.
+    ///
+    /// Makes the AgentMux root owner-only first (issue #3682): it holds
+    /// per-agent jekt HMAC keys and LAN private keys (in the DBs), provider
+    /// login state (identity dirs) and logs, and on Unix every directory
+    /// below it was otherwise created with the process umask — typically
+    /// `0755`, readable by other local users wherever the home dir is
+    /// traversable (macOS `/Users/<name>` is `0755` by default). Tightening
+    /// the root blocks traversal into everything beneath it, including dirs
+    /// srv creates later with plain `create_dir_all` (`shared/`, `archives/`).
+    /// Best-effort: a root this process cannot chmod (owned by another user,
+    /// read-only mount) is logged and the launch continues, as before.
     pub fn ensure_dirs(&self) -> Result<(), String> {
+        match ensure_owner_only_dir(&self.home_dir) {
+            Ok(OwnerOnlyOutcome::Tightened { previous_mode }) => tracing::warn!(
+                root = %self.home_dir.display(),
+                previous_mode = format!("{previous_mode:o}"),
+                "AgentMux data root was readable by other local users; tightened it to owner-only (0700)"
+            ),
+            Ok(OwnerOnlyOutcome::Created) => tracing::info!(
+                root = %self.home_dir.display(),
+                "created AgentMux data root owner-only (0700)"
+            ),
+            Ok(OwnerOnlyOutcome::AlreadyPrivate | OwnerOnlyOutcome::NotApplicable) => {}
+            Err(e) => tracing::warn!(
+                root = %self.home_dir.display(),
+                error = %e,
+                "could not make the AgentMux data root owner-only; continuing"
+            ),
+        }
         for d in [
             &self.instance_dir,
             &self.data_dir,
@@ -594,6 +622,91 @@ pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::
     }
 
     Ok(())
+}
+
+/// What [`ensure_owner_only_dir`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerOnlyOutcome {
+    /// The directory did not exist; it was created with mode `0700`.
+    Created,
+    /// It existed with group/other permission bits set; those were removed.
+    /// `previous_mode` is the old permission bits (e.g. `0o755`).
+    Tightened { previous_mode: u32 },
+    /// It already had no group/other access. Nothing changed.
+    AlreadyPrivate,
+    /// Nothing to do here: not a Unix platform (Windows scopes the user
+    /// profile, and so `~/.agentmux`, to its owner through ACLs), or `dir`
+    /// is the user's home directory itself — a misconfigured
+    /// `AGENTMUX_HOME_OVERRIDE`/`AGENTMUX_DATA_HOME` pointing at `$HOME`
+    /// must not chmod the whole home to `0700`.
+    NotApplicable,
+}
+
+/// Make `dir` owner-only on Unix: create it `0700` if missing (its parents
+/// with the normal umask — they are the user's, not AgentMux's), or strip
+/// group/other bits from an existing directory, keeping the owner bits as
+/// they were. See [`DataPaths::ensure_dirs`] for why (#3682).
+///
+/// Follows a symlinked root to its target, as every other access to the root
+/// already does. Errors if `dir` exists but is not a directory.
+pub fn ensure_owner_only_dir(dir: &Path) -> std::io::Result<OwnerOnlyOutcome> {
+    ensure_owner_only_dir_inner(dir, dirs::home_dir().as_deref())
+}
+
+fn ensure_owner_only_dir_inner(dir: &Path, user_home: Option<&Path>) -> std::io::Result<OwnerOnlyOutcome> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+        if let Some(home) = user_home {
+            let same = match (std::fs::canonicalize(dir), std::fs::canonicalize(home)) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => dir == home,
+            };
+            if same {
+                return Ok(OwnerOnlyOutcome::NotApplicable);
+            }
+        }
+
+        match std::fs::metadata(dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = dir.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                // Non-recursive on purpose: only the root itself is ours to
+                // make private. The requested mode is still masked by the
+                // umask, which can only remove bits — never add group/other.
+                match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+                    Ok(()) => return Ok(OwnerOnlyOutcome::Created),
+                    // Lost a race with a concurrent launch: fall through and
+                    // check what that one created.
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(e) => return Err(e),
+            Ok(_) => {}
+        }
+
+        let meta = std::fs::metadata(dir)?;
+        if !meta.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("{} exists and is not a directory", dir.display()),
+            ));
+        }
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 == 0 {
+            return Ok(OwnerOnlyOutcome::AlreadyPrivate);
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode & 0o700))?;
+        Ok(OwnerOnlyOutcome::Tightened { previous_mode: mode })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (dir, user_home);
+        Ok(OwnerOnlyOutcome::NotApplicable)
+    }
 }
 
 /// Isolated per-channel auth (identity accounts + OAuth credential dirs).
@@ -2390,5 +2503,129 @@ mod tests {
              link-following fs::metadata) — if this ever changes, ensure_history_link's migration \
              branch needs the junction::exists() check the (currently incorrect) review claimed was missing"
         );
+    }
+    // ── #3682: the AgentMux root is owner-only on Unix ──────────────────────
+
+    #[cfg(unix)]
+    fn mode_of(p: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    fn set_mode(p: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_creates_a_missing_root_0700() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("parent").join(".agentmux");
+        assert_eq!(ensure_owner_only_dir_inner(&root, None).unwrap(), OwnerOnlyOutcome::Created);
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_leaves_parents_it_had_to_create_at_the_normal_umask() {
+        // Only the root is AgentMux's to make private; a parent dir it had to
+        // create (a custom AGENTMUX_DATA_HOME) belongs to the user.
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path().join("parent");
+        let root = parent.join(".agentmux");
+        ensure_owner_only_dir_inner(&root, None).unwrap();
+        assert_ne!(mode_of(&parent), 0o700, "parent must not be forced owner-only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_tightens_an_existing_world_readable_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::create_dir(&root).unwrap();
+        set_mode(&root, 0o755);
+        assert_eq!(
+            ensure_owner_only_dir_inner(&root, None).unwrap(),
+            OwnerOnlyOutcome::Tightened { previous_mode: 0o755 }
+        );
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_keeps_the_owner_bits_it_found() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::create_dir(&root).unwrap();
+        set_mode(&root, 0o570);
+        assert_eq!(
+            ensure_owner_only_dir_inner(&root, None).unwrap(),
+            OwnerOnlyOutcome::Tightened { previous_mode: 0o570 }
+        );
+        assert_eq!(mode_of(&root), 0o500);
+        set_mode(&root, 0o700); // so TempDir can clean up
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_is_a_no_op_on_an_already_private_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::create_dir(&root).unwrap();
+        set_mode(&root, 0o700);
+        assert_eq!(ensure_owner_only_dir_inner(&root, None).unwrap(), OwnerOnlyOutcome::AlreadyPrivate);
+        assert_eq!(mode_of(&root), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_never_touches_the_users_home_itself() {
+        // A misconfigured AGENTMUX_DATA_HOME=$HOME must not chmod ~ to 0700.
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        set_mode(&home, 0o755);
+        assert_eq!(
+            ensure_owner_only_dir_inner(&home, Some(&home)).unwrap(),
+            OwnerOnlyOutcome::NotApplicable
+        );
+        assert_eq!(mode_of(&home), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_refuses_a_file_where_the_root_should_be() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        std::fs::write(&root, b"not a dir").unwrap();
+        assert!(ensure_owner_only_dir_inner(&root, None).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_dirs_leaves_the_root_owner_only_and_still_creates_the_tree() {
+        with_home_override(|root| {
+            clear_channel_env();
+            set_mode(root, 0o755); // an install from before #3682
+            let paths = DataPaths::resolve("0.0.0", &RuntimeMode::Installed).unwrap();
+            paths.ensure_dirs().unwrap();
+            assert_eq!(mode_of(root), 0o700);
+            for d in [&paths.data_dir, &paths.config_dir, &paths.agents_dir, &paths.shared_dir] {
+                assert!(d.is_dir(), "{} not created", d.display());
+            }
+            assert!(paths.data_dir.join("db").is_dir());
+        });
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn owner_only_is_not_applicable_off_unix() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join(".agentmux");
+        assert_eq!(ensure_owner_only_dir_inner(&root, None).unwrap(), OwnerOnlyOutcome::NotApplicable);
+        // Nothing created either — ensure_dirs' own create_dir_all does that.
+        assert!(!root.exists());
     }
 }

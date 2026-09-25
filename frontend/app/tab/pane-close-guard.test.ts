@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { busyMembers, describeBusyMember, type PaneCloseProbe } from "./pane-close-guard";
+import { busyMembers, closesWithShutdownLog, describeBusyMember, isAllBlocksGoneError, type PaneCloseProbe } from "./pane-close-guard";
 
 function probe(state: Record<string, { turn?: boolean | null; procs?: number; fail?: boolean }>): PaneCloseProbe {
     return {
@@ -39,5 +39,27 @@ describe("pane close guard", () => {
         expect(describeBusyMember({ blockId: "m", name: "Manoz", turnActive: false, processCount: 1 })).toBe(
             "Manoz — 1 process running"
         );
+    });
+});
+
+describe("isAllBlocksGoneError", () => {
+    it("only the whole-request pre-check means every block is gone", () => {
+        expect(isAllBlocksGoneError(new Error("ClosePane: block not found: a, b"))).toBe(true);
+    });
+    it("a partial failure's per-member error is not it: other blocks may still exist", () => {
+        expect(isAllBlocksGoneError("ClosePane: id2: DeleteBlock: block not found: id2")).toBe(false);
+        expect(isAllBlocksGoneError("ClosePane: tab not found: t")).toBe(false);
+    });
+});
+
+describe("closesWithShutdownLog (SPEC_AGENT_SELF_QUIT §5.5)", () => {
+    const isAgent = (id: string) => id.startsWith("agent");
+    it("keeps a pane that holds any agent on screen for its shutdown log", () => {
+        expect(closesWithShutdownLog(["agent-1"], isAgent)).toBe(true);
+        expect(closesWithShutdownLog(["term-1", "agent-2"], isAgent)).toBe(true);
+    });
+    it("closes terminal/editor/browser panes at once, as before", () => {
+        expect(closesWithShutdownLog(["term-1", "editor-1"], isAgent)).toBe(false);
+        expect(closesWithShutdownLog([], isAgent)).toBe(false);
     });
 });
