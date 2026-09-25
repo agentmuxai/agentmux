@@ -395,9 +395,11 @@ fn a_crash_between_a_migrations_effect_and_its_mark_resumes_without_duplicating_
     home.insert_legacy_definition("tpl-1", "Coder");
     home.insert_legacy_definition("tpl-2", "Reviewer");
 
-    // A memory file where the fixture's CLAUDE_CONFIG_DIR says it should be,
-    // so the full-registry boot below also proves m0024 reads from INSIDE
-    // the temp home (it imports the file) rather than from the real one.
+    // A memory file where the fixture's CLAUDE_CONFIG_DIR says it should be.
+    // Migrations no longer import it: m0024's filesystem backfill runs at
+    // startup, after the identity stores attach
+    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md phase M1), so the boot
+    // below must leave it unversioned.
     let memory_dir = home.agent_memory_dir("tpl-1");
     std::fs::create_dir_all(&memory_dir).unwrap();
     std::fs::write(memory_dir.join("note.md"), "# remembered\n").unwrap();
@@ -410,10 +412,7 @@ fn a_crash_between_a_migrations_effect_and_its_mark_resumes_without_duplicating_
         .unwrap()
         .agent_native_memory_version_latest("tpl-1", "note.md")
         .unwrap();
-    assert!(
-        imported.is_some_and(|v| v.content == "# remembered\n"),
-        "m0024 must import the memory file from the temp home's providers dir"
-    );
+    assert!(imported.is_none(), "migrations no longer read memory files from disk");
 
     // Simulate the crash in the window the spec names — AFTER the backfill
     // transaction committed, BEFORE the marker was written (and so before

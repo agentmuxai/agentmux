@@ -1124,6 +1124,15 @@ impl<'a> SelfOwner<'a> {
         }
     }
 
+    /// The owner's memory directory for a write: never an unverified guess
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
+    fn dir_for_write(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
+        let id = self.owner_id(mstore).map_err(|e| format!("memory: {e}"))?;
+        let agent = Self::caller_row(&id, mstore).map_err(|e| format!("memory: {e}"))?;
+        crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
+            .map_err(|e| format!("memory: {e}"))
+    }
+
     /// The owner's definition id (`db_agents.id`) — what its memory versions,
     /// mirror rows and identity links are keyed by.
     fn owner_id(self, mstore: &crate::backend::storage::store::Store) -> Result<String, String> {
@@ -1236,7 +1245,7 @@ pub(crate) fn memory_write_impl<'o>(
     if content.len() > MAX {
         return Err(format!("memory.write: content too large ({} bytes, max {MAX})", content.len()));
     }
-    let dir = owner.dir(&state.mstore).map_err(|e| format!("memory.write: {e}"))?;
+    let dir = owner.dir_for_write(&state.mstore).map_err(|e| format!("memory.write: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.write: mkdir: {e}"))?;
 
     // Version history recorded BEFORE the live-file write below — reagent
@@ -2266,7 +2275,7 @@ pub(crate) fn memory_revert_impl<'o>(
         ));
     }
 
-    let dir = owner.dir(&state.mstore).map_err(|e| format!("memory.revert: {e}"))?;
+    let dir = owner.dir_for_write(&state.mstore).map_err(|e| format!("memory.revert: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.revert: mkdir: {e}"))?;
 
     // Version recorded BEFORE the live-file write below — same fs-watch-race
