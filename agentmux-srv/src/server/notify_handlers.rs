@@ -29,9 +29,16 @@ use super::AppState;
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub enum NotifyPaneEvent {
+    /// Ignored since srv's controller status became the source of truth for
+    /// turns (the renderer's reducer can report turn-ended mid-turn). Kept so
+    /// an older frontend's calls still deserialize.
     TurnStarted,
+    /// Ignored — see `TurnStarted`.
     TurnCompleted,
+    /// Ignored — see `TurnStarted`. Real failures arrive as `agentfailure`.
     TurnErrored,
+    /// The user stopped/interrupted the turn in the pane.
+    TurnStopped,
     InputWaiting,
     InputResolved,
 }
@@ -104,10 +111,11 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
             // source (renderer or srv) sent either one (Codex P2 on #3662).
             // Emits resolve the agent name off the async workers there too.
             match p.event {
-                NotifyPaneEvent::TurnStarted => r.resolve_nonblocking(&p.block_id, Family::Turn),
+                // Turn start/finish come from srv's controller status (see
+                // router `TurnStatus`), not from the renderer.
+                NotifyPaneEvent::TurnStarted | NotifyPaneEvent::TurnCompleted | NotifyPaneEvent::TurnErrored => {}
+                NotifyPaneEvent::TurnStopped => r.turn_stopped_nonblocking(&p.block_id),
                 NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
-                NotifyPaneEvent::TurnCompleted => r.emit_nonblocking(NotifyKind::TurnCompleted, &p.block_id),
-                NotifyPaneEvent::TurnErrored => r.emit_nonblocking(NotifyKind::TurnErrored, &p.block_id),
                 NotifyPaneEvent::InputWaiting => r.input_waiting_nonblocking(&p.block_id, p.question),
             }
             Ok(NotifyOk { ok: true })

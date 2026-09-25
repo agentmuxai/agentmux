@@ -42,19 +42,20 @@ const FOCUS_HEARTBEAT_MS = 20_000;
 
 /**
  * Pure mapping from a reducer event to what the Router cares about.
- * `stopped` / `interrupted` are user-initiated — nothing to notify about.
+ *
+ * Turn start/finish are NOT reported from here: srv's controller status is
+ * the authority (the reducer can report `turn-ended` mid-turn — e.g. a queued
+ * message srv releases straight into the next turn — which produced
+ * "finished" toasts for agents still working). The renderer only tells srv
+ * when the USER stopped/interrupted a turn, so that turn-end isn't announced.
  * `waiting-ended` only resolves on "submitted": "closed" fires when the pane
  * unmounts (e.g. its window closed into background mode) while the agent is
  * still blocked on the question, which is exactly when the toast matters.
  */
 export function paneEventToNotify(ev: AgentPaneEvent): { event: NotifyPaneEvent; question?: string } | null {
     switch (ev.type) {
-        case "turn-started":
-            return { event: "turn_started" };
         case "turn-ended":
-            if (ev.outcome === "completed") return { event: "turn_completed" };
-            if (ev.outcome === "errored") return { event: "turn_errored" };
-            return null;
+            return ev.outcome === "stopped" || ev.outcome === "interrupted" ? { event: "turn_stopped" } : null;
         case "waiting-for-input":
             return { event: "input_waiting", question: ev.question };
         case "waiting-ended":

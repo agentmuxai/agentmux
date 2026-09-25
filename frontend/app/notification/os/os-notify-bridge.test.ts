@@ -45,17 +45,17 @@ describe("attentionCount", () => {
 });
 
 describe("paneEventToNotify", () => {
-    it("maps turn outcomes: completed/errored notify, stopped/interrupted don't", () => {
-        expect(paneEventToNotify({ type: "turn-ended", outcome: "completed", statsMerged: false, stoppingCleared: false } as any))
-            .toEqual({ event: "turn_completed" });
-        expect(paneEventToNotify({ type: "turn-ended", outcome: "errored", statsMerged: false, stoppingCleared: false } as any))
-            .toEqual({ event: "turn_errored" });
-        expect(paneEventToNotify({ type: "turn-ended", outcome: "stopped", statsMerged: false, stoppingCleared: false } as any)).toBeNull();
-        expect(paneEventToNotify({ type: "turn-ended", outcome: "interrupted", statsMerged: false, stoppingCleared: false } as any)).toBeNull();
+    it("never reports turn start/finish (srv's controller status owns that)", () => {
+        const ended = (outcome: string) => ({ type: "turn-ended", outcome, statsMerged: false, stoppingCleared: false }) as any;
+        expect(paneEventToNotify(ended("completed"))).toBeNull();
+        expect(paneEventToNotify(ended("errored"))).toBeNull();
+        expect(paneEventToNotify({ type: "turn-started", at: 1 } as any)).toBeNull();
     });
 
-    it("turn-started resolves a pending 'finished'", () => {
-        expect(paneEventToNotify({ type: "turn-started", at: 1 } as any)).toEqual({ event: "turn_started" });
+    it("reports the user's own stop so that turn-end isn't announced", () => {
+        const ended = (outcome: string) => ({ type: "turn-ended", outcome, statsMerged: false, stoppingCleared: false }) as any;
+        expect(paneEventToNotify(ended("stopped"))).toEqual({ event: "turn_stopped" });
+        expect(paneEventToNotify(ended("interrupted"))).toEqual({ event: "turn_stopped" });
     });
 
     it("forwards the question text with waiting-for-input", () => {
