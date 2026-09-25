@@ -16,7 +16,7 @@
 
 import type { SoundCategory } from "./sounds";
 
-interface SynthParams {
+export interface SynthParams {
     wave: OscillatorType;
     freq: number;
     /** Peak envelope gain, 0–1. Multiplied with the caller's `gain`. */
@@ -25,7 +25,14 @@ interface SynthParams {
     second?: { freq: number; delayMs: number };
 }
 
-function paramsFor(category: SoundCategory): SynthParams {
+/** Envelope shape shared by every synth tone (exported for flash-patterns.ts). */
+export const SYNTH_ENVELOPE_FLOOR = 0.0001;
+export const SYNTH_ATTACK_S = 0.01;
+/** When the decay reaches the floor, measured from the tone's onset. */
+export const SYNTH_DECAY_END_S = 0.15;
+const SYNTH_STOP_S = 0.18;
+
+export function synthParamsFor(category: SoundCategory): SynthParams {
     switch (category) {
         case "success":
             // Two-tone rising sine — "good news" interval (G5 → C6).
@@ -62,12 +69,12 @@ function playTone(
     const env = ctx.createGain();
     osc.type = wave;
     osc.frequency.setValueAtTime(freq, startAt);
-    env.gain.setValueAtTime(0.0001, startAt);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), startAt + 0.01);
-    env.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.15);
+    env.gain.setValueAtTime(SYNTH_ENVELOPE_FLOOR, startAt);
+    env.gain.exponentialRampToValueAtTime(Math.max(SYNTH_ENVELOPE_FLOOR, peak), startAt + SYNTH_ATTACK_S);
+    env.gain.exponentialRampToValueAtTime(SYNTH_ENVELOPE_FLOOR, startAt + SYNTH_DECAY_END_S);
     osc.connect(env).connect(out);
     osc.start(startAt);
-    osc.stop(startAt + 0.18);
+    osc.stop(startAt + SYNTH_STOP_S);
 }
 
 /**
@@ -82,7 +89,7 @@ export function playSynthFallback(
     gain: number,
 ): void {
     const now = ctx.currentTime;
-    const p = paramsFor(category);
+    const p = synthParamsFor(category);
     const scaledPeak = p.peak * Math.max(0, Math.min(1, gain));
     playTone(ctx, out, p.wave, p.freq, scaledPeak, now);
     if (p.second) {
