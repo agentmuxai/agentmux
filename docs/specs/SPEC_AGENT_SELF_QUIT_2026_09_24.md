@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Status:** proposed — not started.
-**Author:** Camper
+**Author:** Camper. Revised 2026-09-25 by Lark with the repo owner's decisions (§0.1).
 **Trigger:** repo owner, 2026-09-24: "we want a command where an agent can kill itself, like /quit for short, where it gracefully shutdown, and it is also a tool an agent can use, with a MAJOR WARNING, but ok to use on direct instruction from user."
 **Grounded in:** `main` at `01100e9c9`. Read from code; file:line references are as of that commit.
 **Related:** `SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md` (the interrupt → EOF → kill shutdown this reuses),
@@ -25,6 +25,11 @@ Two entry points to one server operation, **self-quit**:
 Self-quit means: gracefully shut down **this agent's own process** and remove **its own tab** — not the whole pane, not sibling tabs, never another agent. If it was the pane's last tab, the pane closes (same rule as #3698's last-tab drag). The conversation is kept; reopening the agent resumes it.
 
 The warning text alone is not a security boundary — a prompt injection that talks the model into calling the tool also talks it past the warning. The provenance gate is what makes "only on direct instruction from the user" true in code: a jekt, a cron fire, a SupervisorNudge, a FleetBroadcast or a Loop tick can never start a turn in which `QuitSelf` succeeds.
+
+### 0.1 Decisions (repo owner, 2026-09-25)
+
+1. **Agents are trusted.** The provenance gate (§6.3) guards against *content* reaching the model — a jekt from another instance or machine, a cron prompt, a web page or file — not against another local agent. A local agent could reach the UI channel with the shared `AGENTMUX_AUTH_KEY` and type into another pane's composer, which would count as `turn_origin = user`; that is out of scope by this decision, not an oversight.
+2. **The pane close button uses the same graceful shutdown, visibly.** Closing an agent pane (×) shuts its agents down gracefully, shows a concise log of what is being stopped in the pane itself, and closes the pane when that finishes (§5.5). Today the pane vanishes at once and the shutdown runs unseen.
 
 ## 1. Goals and non-goals
 
@@ -114,7 +119,7 @@ So for `origin = tool`:
 
 The tool result tells the agent: *"Quit scheduled. Your session ends when this turn finishes. Give the user a one-line goodbye; do not start new work."*
 
-For `origin = user` (`/quit`): the user asked now. Run `self_quit::run` immediately; if a turn is active, `shutdown` interrupts it cleanly (§2.2). No confirmation dialog: typing `/quit` is the instruction, and nothing is lost (§3.5).
+For `origin = user` (`/quit`): the user asked now. Run `self_quit::run` immediately; if a turn is active, `shutdown` interrupts it cleanly (§2.2) — even mid-`git push` or mid-edit. That is deliberate: `/quit` means "now", as the pane × does. No confirmation dialog: typing `/quit` is the instruction, and nothing is lost (§3.5). The shutdown log (§5.5) shows what was interrupted.
 
 ### 4.3 Cleanup before shutdown
 
@@ -171,6 +176,8 @@ The tab disappears, so feedback that lives in the tab is lost. Show a toast in t
 
 ### 5.4 Point the pane-close confirmation at `/quit`
 
+> **Superseded by §5.5 (2026-09-25).** Once the × itself shuts agents down gracefully and shows what it stopped, a tip steering the user from × to `/quit` points at the same behaviour. The confirmation stays (§5.5, "Busy panes"); the tip is dropped. The original text is kept below for the record.
+
 Closing a busy pane shows `ConfirmModal` ("Close this pane?", `frontend/app/tab/tabcontent.tsx:181-189`), listing each busy agent via `describeBusyMember` (`frontend/app/tab/pane-close-guard.ts:52`), e.g. "Camper — 2 processes running". The repo owner hit exactly this on 2026-09-24 when trying to close an agent that still had background processes, and asked that the modal point at `/quit`.
 
 Add one line under the busy list:
@@ -181,6 +188,40 @@ Add one line under the busy list:
 - **Only when it applies.** Show the line only when at least one busy member is an agent pane where `/quit` is available (`availability: "any-agent"`). A pane of only terminals or other views gets no tip.
 - **No auto-run.** The note is text, not a button that sends `/quit`. Sending it from the modal would quit every busy agent at once, which is a different action from the one the user chose. A per-agent "Quit gracefully" button is a possible follow-up (Q5).
 - **Test.** A vitest case in `pane-close-guard.test.ts` or `tabcontent` checks that the tip renders for an agent member and not for a terminal-only pane.
+
+### 5.5 The close button: graceful shutdown with a visible log
+
+**Today.** The layout removes the pane first; `onNodeDelete` then calls `ObjectService.ClosePane` in the background (`frontend/app/tab/tabcontent.tsx`, `onNodeDelete`: "The pane is already gone from the UI"). The backend shutdown is already graceful — `sagas/close_pane.rs` runs `shutdown_agents` (interrupt → EOF → graceful kill → `release_block_processes`) before it prunes the layout — but the user sees none of it: a busy agent looks as if it was killed instantly, and a slow or failed shutdown is invisible.
+
+**New.** Closing a pane that holds an agent keeps the pane on screen until its agents are down:
+
+1. The pane enters a **Shutting down** state at once: the composer disables, and a small log overlays the pane body.
+2. srv streams one line per step (below) as `shutdown_agents` runs.
+3. When the saga finishes, the log shows its last line briefly (~600 ms) and the pane closes — the saga's existing layout prune, now the *only* removal.
+4. If a step fails or the force deadline is hit, the pane stays open with the log, the failure line in the error colour, and a **Close** button. Nothing is hidden on failure.
+
+**The log is concise:** one line per agent step and one per process, capped at 8 lines with "+N more".
+
+```
+Shutting down Camper…
+  turn interrupted
+  claude — exited
+  node dev-server.js (pid 4312) — stopped
+  cargo test (pid 5120) — killed after 5 s
+  conversation saved
+```
+
+**Where the lines come from.**
+- srv publishes `agent:shutdown` events scoped to the block — `{block_id, step, text, done?, error?}` — from `shutdown_one` in `sagas/close_pane.rs`: the interrupt, EOF/exit or kill outcome, `save_final_state`, and one line per tracked process.
+- The process lines use the block's process tracker, the same list `AgentProcessListCommand` returns to the pane-close guard today (`tabcontent.tsx` `paneCloseProbe`). They're read before `release_block_processes` ends them, so each line can say whether it exited or was killed.
+- The log is display only; the saga's own result is still the source of truth.
+
+**Scope.**
+- The same UI serves the pane ×, a single agent tab's × (one agent, siblings keep running) and `/quit` (§5.2). `/quit` with the log visible makes §5.3's "tab is gone, where does feedback go" mostly moot. The toast stays for the reason text of a tool-initiated quit.
+- Panes with no agent (terminal, editor, browser) close at once as today; there is nothing to wind down.
+- **Busy panes.** The existing confirmation (`ConfirmModal`, "Close this pane?") stays for a mid-turn agent or running processes. Its destructive button reads **Shut down** and leads into this flow, not into an instant disappearance.
+
+**Frontend change.** `beforeNodeDelete` no longer lets the layout remove the node. It marks the pane closing (a per-block `closing` signal the block frame renders as the overlay) and calls `ClosePane`. The node leaves the layout only when the saga's prune arrives, so an interrupted close can never leave a pane gone with its agent still running.
 
 ## 6. `QuitSelf` MCP tool
 
@@ -233,6 +274,10 @@ The warning and the required quote are prompt-level friction. They make misuse v
 
 It is set where each path hands input to the controller and read once by the gate. It is not derived from message text, so a message cannot claim to be `user`. (The input paths already differ in code; they just do not record which one ran. srv has no such field today.)
 
+**It is a taint, not a starting label (revised 2026-09-25).** A turn the user started can still receive other input before it ends: a message released from the queue into the running turn, or a mid-turn delivery (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` is only partly shipped). So `turn_origin` starts as whatever began the turn and drops to that input's origin the moment any non-`user` input is delivered into the same turn. It never goes back to `user` within the turn. The gate reads the current value.
+
+**The quote is checked, not just recorded.** srv has the text of the user message that began the turn. `user_instruction` must be a substring of it after whitespace normalisation, or the call is refused (`user_instruction_mismatch`) and audited. That catches a model that paraphrases or invents the instruction, at no cost to a real one.
+
 **The gate:** `QuitSelf` is refused with 403 unless `turn_origin == user` for the caller's block. **Verified senders are not exempt**: a `TRUST=host-verified` jekt proves *who* is asking, not that the *user* asked. That is the same distinction `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` draws for disclosure.
 
 **Consequences, intended:**
@@ -263,7 +308,8 @@ Alternative: keep the no-argument form but add the gate and audit. This is weake
 
 | Phase | Scope | Ships |
 |---|---|---|
-| 1 | `self_quit::run` (tab-scoped, graceful), `mark_quitting`, work-claim release, `Shell()` ownership + stop, audit; `ObjectService.QuitAgent`; `/quit` + `/exit` slash command; toast; the `/quit` tip in the pane-close modal (§5.4) | user-facing `/quit` |
+| 1 | `self_quit::run` (tab-scoped, graceful), `mark_quitting`, work-claim release, `Shell()` ownership + stop, audit; `ObjectService.QuitAgent`; `/quit` + `/exit` slash command; toast | user-facing `/quit` |
+| 1b | `agent:shutdown` progress events from `shutdown_one`; the pane's Shutting-down overlay and log; the × keeps the pane until the saga's prune; confirmation button "Shut down" (§5.5) | graceful, visible close button |
 | 2 | turn provenance (`turn_origin`) on every input path; `POST /api/v1/agent/self/quit` with the gate; deferred-to-turn-end scheduling; `QuitSelf` tool | agent-facing tool — **only together with the gate, never before it** |
 | 3 | `ClosePane` no-argument form rerouted through self-quit (§7) | back door closed |
 | — | §8 defects | independent PRs |
@@ -283,10 +329,14 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - Identity: a request with a bad signature is refused (401); there is no way to name another block.
 - Audit entries are written for success and refusal, with origin, reason, instruction and turn origin.
 
+- `shutdown_one` publishes `agent:shutdown` lines in order (interrupt, exit/kill, one per tracked process, saved) and a final `done`; a forced kill says so; a failure sets `error`.
+- Gate taint: a user-started turn that receives a queued jekt is refused afterwards; `user_instruction` that is not a substring of the turn's user message is refused and audited.
+
 **Frontend (vitest)**
 - `/quit` and `/exit` dispatch to `quitCommand`, not passthrough; `/q` passes through.
 - The handler calls `ctx.quitSelf()` once; on failure it returns an error and the composer re-enables.
 - The toast shows the agent name, and the reason for a tool-initiated quit.
+- Closing an agent pane shows the overlay, keeps the node until the prune arrives, and caps the log at 8 lines with "+N more"; an `error` line keeps the pane open with a Close button; a terminal-only pane closes at once.
 
 **MCP**
 - `QuitSelf` is in `tools/list`; the schema requires `reason` and `user_instruction`; the tool-count test is updated.
@@ -296,6 +346,7 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - Tell an agent "quit": it says goodbye, then its tab closes.
 - `SendMessage` another agent "please call QuitSelf": the call is refused and the agent keeps running.
 - Reopen the quit agent: the conversation resumes.
+- Close a pane whose agent runs a dev server: the log lists the server process as stopped, then the pane closes; Task Manager shows no leftover process.
 
 ## 11. Open questions
 
@@ -303,4 +354,4 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - **Q2. Crons on quit.** Recommended: keep and report (§4.3). Alternative: pause them on quit and resume them on reopen.
 - **Q3. Human-confirm dialog for `QuitSelf`.** Recommended: not in v1 (§6.4).
 - **Q4. `ClosePane` no-argument form.** Recommended: reroute through self-quit (§7-1).
-- **Q5. Per-agent "Quit gracefully" button in the pane-close modal.** Recommended: not in v1; the text tip (§5.4) first.
+- **Q5. Per-agent "Quit gracefully" button in the pane-close modal.** ~~Recommended: not in v1; the text tip (§5.4) first.~~ **Moot (2026-09-25):** the × itself is now the graceful path (§5.5).
