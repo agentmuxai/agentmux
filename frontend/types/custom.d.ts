@@ -563,6 +563,10 @@ declare global {
 
     interface ViewModel {
         viewType: string;
+        /** The block this ViewModel renders. Every built-in ViewModel sets it;
+         *  pane chrome uses it to make sure a tab is only ever named/iconed by
+         *  its OWN ViewModel (PaneChrome's viewModelIsFor). */
+        blockId?: string;
         viewIcon?: Accessor<string | IconButtonDecl>;
         /** When set, overrides the FA icon in the block header with a favicon <img>.
          *  The consumer (blockframe) falls back to viewIcon if this is empty string. */

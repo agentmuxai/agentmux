@@ -49,6 +49,8 @@ export const TAB_VISIBILITY_CHANGED_EVENT = "agentmux:tab-visibility-changed";
 export interface TabContainerVisibility {
     "content-visibility": "visible" | "hidden";
     visibility: "hidden" | null;
+    /** `"0"` for a tab kept laid out and not shown — see below. */
+    opacity: "0" | null;
     "pointer-events": "auto" | "none";
     /** The tab is kept laid out and not shown; its agents pause rendering. */
     hiddenLaidOut: boolean;
@@ -72,6 +74,12 @@ export function tabContainerVisibility(
     return {
         "content-visibility": keepLaidOut || displayed ? "visible" : "hidden",
         visibility: gated || hiddenLaidOut ? "hidden" : null,
+        // A hidden-but-laid-out tab also gets opacity 0: content can keep
+        // painting through `visibility: hidden` (a `visibility` transition,
+        // or an explicit `visibility: visible`), which showed up as a brief
+        // "ghost" over the newly shown tab. Nothing escapes opacity.
+        // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
+        opacity: hiddenLaidOut ? "0" : null,
         "pointer-events": displayed ? "auto" : "none",
         hiddenLaidOut,
     };
