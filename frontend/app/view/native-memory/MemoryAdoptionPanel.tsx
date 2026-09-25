@@ -33,6 +33,7 @@ type Outcome = { status: "adopted" | "declined" | "failed"; text: string };
 
 export function outcomeText(payload: any): Outcome | null {
     switch (payload?.status) {
+        case "done":
         case "adopted": {
             const r = payload.report ?? {};
             const parts = [
@@ -85,10 +86,12 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
     let unlisten: (() => void) | undefined;
     void listenEvent<any>("memory-adoption-result", (payload) => {
         if (payload?.agent_id !== props.agentId) return;
+        // The same window confirms releasing a folder; that isn't ours.
+        if (payload?.kind && payload.kind !== "adopt") return;
         setWaiting(false);
         setOutcome(outcomeText(payload));
         load(props.agentId);
-        if (payload?.status === "adopted") props.onAdopted?.();
+        if (payload?.status === "done" || payload?.status === "adopted") props.onAdopted?.();
     }).then((u) => {
         unlisten = u;
     });

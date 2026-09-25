@@ -38,3 +38,32 @@ describe("memory adoption", () => {
         expect(accountLabel("e562b87a-1234")).toBe("Account e562b87a");
     });
 });
+
+import { claimedSince, releaseOutcomeText } from "./MemoryClaimsPanel";
+
+describe("releasing a memory folder", () => {
+    it("says a release lasts only until the agent uses the folder again", () => {
+        expect(releaseOutcomeText({ status: "done", report: { released: true } })).toContain("claims it again");
+        expect(releaseOutcomeText({ status: "done", report: { released: false } })).toContain("already gone");
+        expect(releaseOutcomeText({ status: "declined" })).toContain("cancelled");
+        expect(releaseOutcomeText({})).toBeNull();
+    });
+
+    it("says how long ago a folder was claimed", () => {
+        const now = 10 * 86_400_000;
+        expect(claimedSince(now - 1000, now)).toBe("today");
+        expect(claimedSince(now - 86_400_000, now)).toBe("yesterday");
+        expect(claimedSince(now - 5 * 86_400_000, now)).toBe("5 days ago");
+    });
+
+    it("the approval window knows a release from an adoption", () => {
+        const m = parseAdoptionMeta(JSON.stringify({ approval_id: "x", kind: "release", summary: { agentName: "Opaz", dir: "/d" } }));
+        expect(m?.kind).toBe("release");
+        expect(m?.summary.dir).toBe("/d");
+        expect(parseAdoptionMeta(JSON.stringify({ approval_id: "y" }))?.kind).toBe("adopt");
+    });
+
+    it("an adoption result reads the same under the new 'done' status", () => {
+        expect(outcomeText({ status: "done", kind: "adopt", report: { files_added: 1 } })?.status).toBe("adopted");
+    });
+});
