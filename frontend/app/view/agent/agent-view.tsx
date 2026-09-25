@@ -53,7 +53,6 @@ import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
 import {
-    closeBlockInStack,
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
@@ -140,6 +139,7 @@ import { liveFeedSupported, resolveLiveFeedTurns, visibleIdsOf } from "./live-fe
 import { userIsInteracting } from "./stream-scheduler";
 import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
 import { useResumePreflight } from "./hooks/useResumePreflight";
+import { closeAgentTab } from "./close-agent-tab";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
@@ -453,27 +453,22 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
         }
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
-    // Mirrors term.tsx's handleTermTabClose: resolve the block's OWNING
-    // node — for a stack member that's this pane (pop it out, delete just
-    // that block; last member closes the pane), for a cross-pane fork tab
-    // it's that other pane (same semantics apply there). closeBlockInStack
-    // guards against a blockId that isn't a member, so a stale tab entry
-    // can't close the wrong thing. Note: `node` here may be a different
-    // pane than this component's own (the cross-pane fork tab case).
+    // closeAgentTab resolves the block's OWNING node — for a stack member
+    // that's this pane, for a cross-pane fork tab it's that other pane — and
+    // closes it like closeBlockInStack does (pop it out and activate the
+    // neighbor; last member closes the pane), with one exception: the last
+    // tab of THIS pane holding a loaded agent is swapped for a fresh My
+    // Agents tab instead of closing the pane
+    // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §2).
     //
-    // No reveal gate on either branch — same reasoning as handleTabSwitch:
-    // this is only ever reachable for a resolved node whose blockStack
-    // already had >=2 members (closeBlockInStack's own stack.length<=1
-    // check delegates to a full closeNode otherwise, a different, already
-    // ungated path), which is the same precondition
-    // required for a closable pill to exist at all — and that node's own
-    // AgentPaneChrome (if it's an agent pane) is mounted for the pane's
-    // whole life and never remounts on a switch, so a gate would only hide
-    // content already covered by its own ready-gate cross-fade. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
+    // No reveal gate on the ordinary close paths — same reasoning as
+    // handleTabSwitch: that node's own AgentPaneChrome (if it's an agent
+    // pane) is mounted for the pane's whole life and never remounts on a
+    // switch, so a gate would only hide content already covered by its own
+    // ready-gate cross-fade. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
+    // The picker swap holds its own gate (see close-agent-tab.ts).
     const handleTabClose = (targetBlockId: string) => {
-        const node = layoutModel.getNodeByBlockId(targetBlockId);
-        if (!node) return;
-        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+        void closeAgentTab({ layoutModel, ownNodeId: nodeModel.nodeId, blockId: targetBlockId });
     };
     // No progress-bar slot here: the shared chrome renders it on every pane
     // and hands it to whichever view model is active (PaneChrome.tsx), so an

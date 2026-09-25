@@ -100,8 +100,11 @@ export function removeMovedBlock(model: LayoutModel, blockId: string): boolean {
  * Close a given node and update the tree state.
  * @param model The LayoutModel instance.
  * @param nodeId The id of the node that is being closed.
+ * @param opts.confirmed The caller already asked `model.beforeNodeDelete` for
+ * this pane and the user said yes — skip asking again. Used by
+ * close-agent-tab.ts, which has to ask before it changes the pane.
  */
-export async function closeNode(model: LayoutModel, nodeId: string) {
+export async function closeNode(model: LayoutModel, nodeId: string, opts?: { confirmed?: boolean }) {
     const nodeToDelete = findNode(model.treeState.rootNode, nodeId);
     if (!nodeToDelete) {
         // TODO: clean up the ephemeral node handling
@@ -124,7 +127,7 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
     // One confirmation for the whole pane, when something in it is still
     // running (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.6).
     let closingData = nodeToDelete.data;
-    if (model.beforeNodeDelete) {
+    if (model.beforeNodeDelete && !opts?.confirmed) {
         const membersAsked = effectiveStack(nodeToDelete.data).join("\n");
         if (!(await model.beforeNodeDelete(nodeToDelete.data))) return;
         // The tree may have changed while the prompt was open (a backend
