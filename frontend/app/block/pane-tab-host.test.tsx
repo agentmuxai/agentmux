@@ -116,6 +116,56 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.viewIcon?.()).toBe(icon);
     });
 
+    // What shared code used to reach into TermViewModel / AgentViewModel for
+    // (Phase 2c's gap table), now the instance's to hand over.
+    it("maps voice, selection, paste, progress mount and background", () => {
+        const handle = { appendFinal: vi.fn(), setInterim: vi.fn() };
+        const paste = vi.fn();
+        const progressMount = vi.fn();
+        const bg = { bg: "#123" } as any;
+        const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
+            component: () => null as any,
+            voice: () => handle,
+            selection: () => "picked",
+            paste,
+            progressMount,
+            background: () => bg,
+        });
+        expect(vm.voiceHandle?.()).toBe(handle);
+        expect(vm.getSelection?.()).toBe("picked");
+        vm.paste?.("text");
+        expect(paste).toHaveBeenCalledWith("text");
+        const el = {} as HTMLDivElement;
+        vm.setProgressBarMount?.(el);
+        expect(progressMount).toHaveBeenCalledWith(el);
+        expect(vm.blockBg?.()).toBe(bg);
+    });
+
+    // useSearch runs when the view mounts, after the adapter: Ctrl+F must see
+    // the find bar created later, not a copy taken at adapt time.
+    it("reads the find bar live", () => {
+        let atoms: SearchAtoms | undefined;
+        const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
+            component: () => null as any,
+            search: () => atoms,
+        });
+        expect(vm.searchAtoms).toBeUndefined();
+        atoms = { isOpen: {} } as any;
+        expect(vm.searchAtoms).toBe(atoms);
+    });
+
+    it("lets the instance decide the connection button when it depends on state", () => {
+        const [isShell, setIsShell] = createSignal(true);
+        const vm = adaptPaneTabInstance(
+            { ...manifest, capabilities: { connection: true } },
+            makePaneTabHostContext("b1", {} as any),
+            { component: () => null as any, manageConnection: isShell }
+        );
+        expect(vm.manageConnection?.()).toBe(true);
+        setIsShell(false);
+        expect(vm.manageConnection?.()).toBe(false);
+    });
+
     it("leaves out what the instance does not provide, so the host's defaults apply", () => {
         const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
             component: () => null as any,
@@ -127,5 +177,11 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.getSettingsMenuItems).toBeUndefined();
         expect(vm.manageConnection).toBeUndefined();
         expect(vm.noPadding).toBeUndefined();
+        expect(vm.voiceHandle).toBeUndefined();
+        expect(vm.searchAtoms).toBeUndefined();
+        expect(vm.getSelection).toBeUndefined();
+        expect(vm.paste).toBeUndefined();
+        expect(vm.setProgressBarMount).toBeUndefined();
+        expect(vm.blockBg).toBeUndefined();
     });
 });

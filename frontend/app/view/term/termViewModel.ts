@@ -15,7 +15,6 @@ import { TermRpcClient } from "@/app/view/term/term-rpc";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     atoms,
-    getAllBlockComponentModels,
     getBlockMetaKeyAtom,
     getConnStatusAtom,
     getOverrideConfigAtom,
@@ -40,6 +39,7 @@ import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { computeTheme, DefaultTermTheme, termViewName } from "./termutil";
 import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
+import { basicTermModels, termModels } from "./term-models";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
 
 let _terminalViewComponent: ViewComponent = null;
@@ -79,11 +79,12 @@ class TermViewModel implements ViewModel {
     agentRuntimeLabel: () => string | null;
     searchAtoms?: SearchAtoms;
     voiceHandle: () => PaneVoiceHandle;
-
+    private unregisterModel: () => void;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "term";
         this.blockId = blockId;
+        this.unregisterModel = termModels.register(blockId, this);
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
@@ -345,9 +346,18 @@ class TermViewModel implements ViewModel {
         return blockData?.meta?.controller !== "cmd";
     }
 
+    /** xterm's own selection, which survives the right-click that clears
+     *  the page's (the pane menu's Copy). */
+    getSelection(): string {
+        return this.termRef.current?.terminal?.getSelection() ?? "";
+    }
+
+    paste(text: string) {
+        this.termRef.current?.terminal?.paste(text);
+    }
+
     multiInputHandler(data: string) {
-        let tvms = getAllBasicTermModels();
-        tvms = tvms.filter((tvm) => tvm != this);
+        const tvms = basicTermModels().filter((tvm) => tvm != this);
         if (tvms.length == 0) return;
         for (const tvm of tvms) {
             tvm.sendDataToController(data);
@@ -380,6 +390,7 @@ class TermViewModel implements ViewModel {
     }
 
     dispose() {
+        this.unregisterModel();
         DefaultRouter.unregisterRoute(makeFeBlockRouteId(this.blockId));
         if (this.shellProcStatusUnsubFn) {
             this.shellProcStatusUnsubFn();
@@ -484,19 +495,6 @@ class TermViewModel implements ViewModel {
     getSettingsMenuItems(): ContextMenuItem[] {
         return buildSettingsMenuItems(this);
     }
-}
-
-function getAllBasicTermModels(): TermViewModel[] {
-    const allBCMs = getAllBlockComponentModels();
-    const rtn: TermViewModel[] = [];
-    for (const bcm of allBCMs) {
-        if (bcm.viewModel?.viewType != "term") continue;
-        const termVM = bcm.viewModel as TermViewModel;
-        if (termVM.isBasicTerm()) {
-            rtn.push(termVM);
-        }
-    }
-    return rtn;
 }
 
 function makeTerminalModel(blockId: string, nodeModel: BlockNodeModel): TermViewModel {

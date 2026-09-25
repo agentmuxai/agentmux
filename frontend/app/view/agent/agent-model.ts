@@ -8,6 +8,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
+import { agentModels } from "./agent-models";
 import { AgentBlockContent } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
@@ -56,7 +57,7 @@ export class AgentViewModel implements ViewModel {
      *  (one `useAgentDefinitions()` subscription per ViewModel instance,
      *  matching the granularity content was already reconstructed at) so
      *  both `AgentBlockContent` (via `model.agentDefinitions`) and
-     *  `AgentPaneChrome` (via `nodeModel.activeViewModel()?.agentDefinitions`)
+     *  the agent pane chrome (via `agentModels.get(activeBlockId)`)
      *  read the SAME list instead of each independently calling the hook —
      *  the exact redundant-RPC-plus-subscription pattern this file's own
      *  header comment (reagent P2 on PR #2488) already warns against. */
@@ -105,9 +106,12 @@ export class AgentViewModel implements ViewModel {
     // nothing to focus yet.
     focusTargetRef: { current: HTMLTextAreaElement | null } = { current: null };
 
+    private unregisterModel: () => void;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
+        this.unregisterModel = agentModels.register(blockId, this);
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
@@ -949,5 +953,7 @@ export class AgentViewModel implements ViewModel {
         return focusComposer(ta);
     }
 
-    dispose(): void {}
+    dispose(): void {
+        this.unregisterModel();
+    }
 }

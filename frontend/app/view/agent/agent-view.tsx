@@ -85,6 +85,7 @@ import { paneBusyForInput } from "./working-indicator";
 import { quickForkAgent } from "./quick-fork";
 import { askSideQuestion } from "./btw";
 import type { AgentViewModel } from "./agent-model";
+import { agentModels } from "./agent-models";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
@@ -407,13 +408,14 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // dedupes them against this pane's own stack) so cross-pane
     // fork-switching keeps working.
     const [openDefinitions] = useOpenDefinitionMap();
-    // ReAgent P2: reads the active ViewModel's OWN agentDefinitions
+    // ReAgent P2: reads the active tab's OWN agentDefinitions
     // (agent-model.ts) instead of calling useAgentDefinitions() again here
     // — that would be a second, independent RPC + agents:changed
     // subscription for the same pane, on top of the one AgentBlockContent
-    // already owns.
+    // already owns. Found by block id (agent-models.ts): the host's view
+    // model is only an adapter once the agent is a native pane tab.
     const forks = useForkSet({
-        definitions: () => (nodeModel.activeViewModel?.() as AgentViewModel | null)?.agentDefinitions?.() ?? [],
+        definitions: () => agentModels.get(activeBlockId())?.agentDefinitions() ?? [],
         openBlockByDef: openDefinitions,
         activeDefinitionId: () => agentId() ?? "",
     });

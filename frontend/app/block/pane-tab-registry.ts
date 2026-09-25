@@ -18,6 +18,7 @@
  */
 
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
+import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import type { NodeModel } from "@/layout/index";
 import type { Accessor, JSX } from "solid-js";
 
@@ -97,6 +98,27 @@ export interface PaneTabInstance {
     contextMenu?(ctx?: unknown): ContextMenuItem[];
     /** Items for the header's settings menu. */
     settingsMenu?(): ContextMenuItem[];
+    /** The header's background, when it follows this tab's own state (the
+     *  terminal's theme). */
+    background?: Accessor<MetaType>;
+    /** Whether the header shows the connection button right now, for a view
+     *  whose `connection` capability depends on state (a terminal running a
+     *  command has none). Omitted: the capability alone decides. */
+    manageConnection?: Accessor<boolean>;
+    /** Voice input: the handle the header mic and Ctrl+Shift+V deliver
+     *  transcripts to. */
+    voice?(): PaneVoiceHandle;
+    /** The tab's find bar (`useSearch`), for Ctrl+F / Escape. */
+    search?(): SearchAtoms | undefined;
+    /** Selected text, for the pane menu's Copy; omitted, the window's own
+     *  selection is used. */
+    selection?(): string;
+    /** Paste `text` into the tab, for the pane menu's Paste
+     *  (`acceptsInput` capability). */
+    paste?(text: string): void;
+    /** Where to portal a busy/progress indicator: the chrome's own slot, or
+     *  `null` when the tab stops being the active one. */
+    progressMount?(el: HTMLDivElement | null): void;
     focus?(): boolean;
     onKeyDown?(e: MuxKeyboardEvent): boolean;
     /** Fired by the host on BOTH paths when the tab becomes visible, and when
