@@ -3821,6 +3821,18 @@ async fn await_shutdown(
 /// What `ClosePane block_id=` tells the agent once the target's user has
 /// answered (§6.5).
 fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<String> {
+    // Joined a shutdown already under way that does less than close the pane.
+    if let Some(via) = now["via"].as_str().filter(|v| *v != "ClosePane") {
+        let by = now["by"].as_str().unwrap_or("another agent");
+        return match now["status"].as_str().unwrap_or("") {
+            "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
+            "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
+            "" | "pending" => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
+            state => Ok(format!(
+                "{by}'s {via} was already shutting pane {block:?}'s agent down ({state}); the pane itself may still be open — call ClosePane again to close it."
+            )),
+        };
+    }
     match now["status"].as_str().unwrap_or("") {
         "shut_down" => Ok(format!("Closed pane {block:?}: its user didn't keep it within 15 s.")),
         "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
@@ -3912,6 +3924,9 @@ mod tests {
         assert!(close_pane_outcome("b", &s("superseded")).is_ok());
         assert!(close_pane_outcome("b", &serde_json::json!({ "status": "failed", "error": "boom" })).unwrap_err().to_string().contains("boom"));
         assert!(close_pane_outcome("b", &Value::Null).is_err());
+        let joined = serde_json::json!({ "status": "shut_down", "via": "FleetBulkStop", "by": "Korp" });
+        let text = close_pane_outcome("b", &joined).unwrap();
+        assert!(text.contains("Korp's FleetBulkStop") && text.contains("may still be open"), "{text}");
     }
 
     #[test]

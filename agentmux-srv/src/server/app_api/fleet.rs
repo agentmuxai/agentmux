@@ -321,7 +321,7 @@ pub(crate) async fn fleet_bulk_stop_with_override(
             );
             state.reactive_handler.log_fleet_action_audit(
                 Some(by), &v.target, block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                true, None, &v.request_id, Some("pending user override"),
+                true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
             );
             v
         })
