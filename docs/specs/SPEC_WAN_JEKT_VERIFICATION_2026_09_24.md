@@ -13,6 +13,8 @@ CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
 2026-09-25. Measured against `agentmux`
 `main` @ `d01833859` and `agentmux-cloud` `main` (server `1.8.3`, GitHub
 consumer `1.4.12`), both read on 2026-09-24.
+**Tracking:** `TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md` — step status,
+what is live, and what still needs the operator.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
 was verified against code and accepted. What each one changed:
 - **Review 1:** every spawned agent holds the account's cloud token, so an
