@@ -620,6 +620,9 @@ pub const COMMAND_NATIVE_MEMORY_DIFF: &str = "agent:memory:diff";
 pub const COMMAND_NATIVE_MEMORY_REVERT: &str = "agent:memory:revert";
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4 (phase M3c).
 pub const COMMAND_NATIVE_MEMORY_ADOPTION_LIST: &str = "agent:memory:adoption_list";
+/// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2 (phase M3c): the
+/// folders an agent has claimed, for the human "release this folder" action.
+pub const COMMAND_NATIVE_MEMORY_CLAIMS: &str = "agent:memory:claims";
 
 // ---- Client type constants ----
 

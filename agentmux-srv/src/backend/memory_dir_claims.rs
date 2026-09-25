@@ -100,6 +100,10 @@ fn claims_zone(dir_id: &str) -> String {
 struct Claims {
     #[serde(default)]
     uids: BTreeMap<String, Claim>,
+    /// The folder (its [`dir_id`]), so a claim can be shown to a human —
+    /// the zone name is only its hash.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    dir: String,
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -144,6 +148,7 @@ pub(crate) fn check_and_claim(
                 .map_err(|e| StoreError::Other(format!("memory dir claims unreadable: {e}")))?,
         };
         claims.uids.retain(|claimant, c| claimant == uid || !claim_is_stale(mstore, &origin, defs.as_ref(), claimant, c));
+        claims.dir = id.clone();
         let mine = claims.uids.entry(uid.to_string()).or_insert_with(|| Claim { at_ms: agentmux_common::time::now_ms(), origin: String::new() });
         mine.origin = origin.clone();
         let other = claims.uids.keys().find(|c| c.as_str() != uid).cloned();
@@ -188,6 +193,60 @@ pub(crate) fn used_by_another(fs: &FileStore, mstore: &Store, uid: &str, dir: &P
     Ok(mstore.agent_def_list().unwrap_or_default().iter().filter(|a| a.id != uid).any(|other| {
         crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, other).is_some_and(|r| dir_id(&r.path) == id)
     }))
+}
+
+/// A folder an agent has claimed, for the human "release this folder"
+/// action (spec §2.1.2).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ClaimedFolder {
+    /// The claims zone: what a release names.
+    pub zone: String,
+    /// The folder, when the claim recorded it (claims from before it did
+    /// don't).
+    pub dir: Option<String>,
+    pub claimed_at_ms: i64,
+    /// Other agents claiming it too.
+    pub others: usize,
+}
+
+/// Every folder `uid` holds a claim on, on this machine.
+pub(crate) fn claims_of(fs: &FileStore, uid: &str) -> Result<Vec<ClaimedFolder>, StoreError> {
+    let mut out = Vec::new();
+    for zone in fs.get_all_zone_ids()? {
+        if !zone.starts_with("memory-dir:") {
+            continue;
+        }
+        let Some(bytes) = fs.read_files_consistent(&zone, &[CLAIMS_FILE])?.pop().flatten() else { continue };
+        let Ok(claims) = serde_json::from_slice::<Claims>(&bytes) else { continue };
+        if let Some(mine) = claims.uids.get(uid) {
+            out.push(ClaimedFolder {
+                zone: zone.clone(),
+                dir: (!claims.dir.is_empty()).then(|| claims.dir.clone()),
+                claimed_at_ms: mine.at_ms,
+                others: claims.uids.len() - 1,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.dir.cmp(&b.dir).then(a.zone.cmp(&b.zone)));
+    Ok(out)
+}
+
+/// Remove `uid`'s claim in `zone` — a human released the folder. Returns
+/// whether there was one. The agent re-claims it at its next spawn there.
+pub(crate) fn release(fs: &FileStore, uid: &str, zone: &str) -> Result<bool, StoreError> {
+    if !zone.starts_with("memory-dir:") {
+        return Ok(false);
+    }
+    fs.zone_txn(zone, |z| {
+        let Some(bytes) = z.read(CLAIMS_FILE)? else { return Ok(false) };
+        let mut claims: Claims =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Other(format!("memory dir claims unreadable: {e}")))?;
+        if claims.uids.remove(uid).is_none() {
+            return Ok(false);
+        }
+        z.put(CLAIMS_FILE, &serde_json::to_vec(&claims).map_err(|e| StoreError::Other(e.to_string()))?)?;
+        Ok(true)
+    })
 }
 
 /// Rules 1 and 2: no store writes.

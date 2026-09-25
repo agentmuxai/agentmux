@@ -359,6 +359,18 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
                         continue;
                     }
+                    // `.mcp.json` merges into a user's own file instead of
+                    // replacing it, and is written owner-only (#3680) — see
+                    // write_mcp_json_respecting_user_servers's doc comment.
+                    if file.path == ".mcp.json" {
+                        crate::backend::agent_config::write_mcp_json_respecting_user_servers(
+                            base_path,
+                            &file.content,
+                        )
+                        .map_err(|e| format!("failed to write .mcp.json: {e}"))?;
+                        tracing::debug!(path = %file_path.display(), "wrote config file (merged, owner-only)");
+                        continue;
+                    }
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {

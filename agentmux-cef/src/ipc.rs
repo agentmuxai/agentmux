@@ -688,6 +688,22 @@ async fn route_command(
             crate::memory_adoption::request(state, window_label, agent_id, list_id, choices, summary)
                 .map(|approval_id| serde_json::json!({ "approval_id": approval_id }))
         }
+        "memory_release_request" => {
+            // Release an agent's claim on a memory folder: only opens the
+            // approval subwindow; see `memory_adoption`.
+            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("");
+            let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+            let list_id = args.get("list_id").and_then(|v| v.as_str()).unwrap_or("");
+            let Some(index) = args.get("index").and_then(|v| v.as_u64()) else {
+                return Err("memory_release_request: index is required".into());
+            };
+            let summary = args.get("summary").cloned().unwrap_or(serde_json::Value::Null);
+            if agent_id.is_empty() || list_id.is_empty() {
+                return Err("memory_release_request: agent_id and list_id are required".into());
+            }
+            crate::memory_adoption::request_release(state, window_label, agent_id, list_id, index, summary)
+                .map(|approval_id| serde_json::json!({ "approval_id": approval_id }))
+        }
         "memory_adoption_decide" => {
             // Only the approval subwindow knows the approval_id.
             let approval_id = args.get("approval_id").and_then(|v| v.as_str()).unwrap_or("");
