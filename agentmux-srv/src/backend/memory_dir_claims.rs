@@ -13,7 +13,11 @@
 //! A directory is **shared unless proven exclusive**:
 //! 1. **Known shared locations** — a blank working directory (the
 //!    `~/.agentmux/agents/<slug>` default, shared across same-name tabs),
-//!    `$HOME`, or an ancestor of another agent's working directory.
+//!    `$HOME`, or an ancestor of another agent's working directory. And any
+//!    folder the CLI keys by a whole repository rather than this working
+//!    directory alone: a subdirectory or linked worktree of a repository, or
+//!    a main checkout with linked worktrees
+//!    ([`crate::backend::claude_layout::memory_project_root`]).
 //! 2. **Vetoes** — any other agent whose directory resolves, by any route,
 //!    to the same canonical directory. Guesses count here (a veto only ever
 //!    removes a directory; the resolver never uses one to *find* memory).
@@ -26,6 +30,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::backend::claude_layout as layout;
 use crate::backend::memory_record::sha256_hex;
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::FileStore;
@@ -44,6 +49,12 @@ pub(crate) enum SharedReason {
     /// A blank working directory, `$HOME`, or an ancestor of another
     /// agent's working directory.
     KnownSharedLocation,
+    /// The CLI keys this folder by more than the agent's own working
+    /// directory: it is a subdirectory or linked worktree of a repository
+    /// (memory is keyed by the main checkout), or the main checkout of one
+    /// with linked worktrees. Whoever works in the rest of that repository —
+    /// a person, an agent in another channel — shares it unseen.
+    RepositoryWide,
     /// Another agent resolves to the same directory.
     Vetoed { other_uid: String },
     /// Another live agent has claimed the directory.
@@ -143,7 +154,11 @@ fn known_shared_or_vetoed(
         return Some(SharedReason::KnownSharedLocation);
     }
     let cwd = crate::backend::base::expand_home_dir_safe(cwd);
-    if dirs::home_dir().is_some_and(|h| h == cwd) {
+    let root = layout::memory_project_root(&cwd);
+    if root != layout::physical_dir(&cwd) || layout::has_linked_worktrees(&root) {
+        return Some(SharedReason::RepositoryWide);
+    }
+    if dirs::home_dir().is_some_and(|h| h == cwd || layout::physical_dir(&h) == root) {
         return Some(SharedReason::KnownSharedLocation);
     }
     let agents = mstore.agent_def_list().unwrap_or_default();
@@ -154,6 +169,10 @@ fn known_shared_or_vetoed(
         if !other.working_directory.trim().is_empty() {
             let other_cwd = crate::backend::base::expand_home_dir_safe(&other.working_directory);
             if other_cwd != cwd && other_cwd.starts_with(&cwd) {
+                return Some(SharedReason::KnownSharedLocation);
+            }
+            let other_physical = layout::physical_dir(&other_cwd);
+            if other_physical != root && other_physical.starts_with(&root) {
                 return Some(SharedReason::KnownSharedLocation);
             }
         }

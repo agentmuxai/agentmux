@@ -84,12 +84,6 @@ impl PersistentSubprocessController {
         // provider that echoes back whatever --resume it was given as its
         // first stdout line, even when that id turns out to be unreachable.
         let mut attempted_resume_sid: Option<String> = None;
-        // The agent's memory is in its folder before the provider reads it.
-        // Runs before the resume claim below, not under it: a pass can take
-        // up to its one-second budget, and that lock is meant to be held only
-        // briefly (reagent P1 on #3721). A spawn then refused as held
-        // elsewhere has only cost an extra, idempotent pass.
-        self.reconcile_memory_before_spawn(&config);
         // One session, one process. Resuming a session another live process
         // is still running on — the agent's other pane, or one that is
         // closing and hasn't exited yet — puts two CLIs on one transcript.
@@ -114,6 +108,16 @@ impl PersistentSubprocessController {
         // would grow forever — reagent P2). Only resume spawns take one;
         // `spawn_process` is synchronous, and no caller holds an `inner` lock
         // across it.
+        // The agent's memory is in its folder before the provider reads it.
+        // Runs before the resume claim below, not under it: a pass can take
+        // up to its one-second budget, and that lock is meant to be held only
+        // briefly (reagent P1 on #3721). Not for a session already live in
+        // another pane — that spawn is about to be refused, and its pass
+        // would run beside the live provider writing the same folder. (A
+        // second pass for the agent at the same moment skips on its lease.)
+        if requested_sid.as_deref().is_none_or(|sid| self.session_held_elsewhere(sid).is_none()) {
+            self.reconcile_memory_before_spawn(&config);
+        }
         let resume_claim = requested_sid.as_deref().map(|sid| {
             const STRIPES: usize = 64;
             static RESUME_SPAWN_LOCKS: [Mutex<()>; STRIPES] = [const { Mutex::new(()) }; STRIPES];

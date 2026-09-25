@@ -60,6 +60,7 @@ impl PersistentSubprocessController {
                     provider: &provider,
                     config_dir: config.env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str),
                     cwd: &config.working_dir,
+                    overridden: crate::backend::memory_reconcile::spawn_overrides_memory_dir(&config.env_vars, &config.cli_args),
                 },
                 crate::backend::memory_reconcile::RECONCILE_BUDGET,
             )
