@@ -1,8 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Block } from "@/app/block/block";
-import { BlockNodeModel } from "@/app/block/blocktypes";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -15,20 +14,17 @@ import { TermRpcClient } from "@/app/view/term/term-rpc";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     atoms,
-    getBlockMetaKeyAtom,
     getConnStatusAtom,
     getOverrideConfigAtom,
     getSettingsKeyAtom,
     setIsTermMultiInput,
-    useBlockAtom,
     MOS,
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
 import { boundNumber, createSignalAtom, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
-import { createMemo, createSignal } from "solid-js";
-import type { JSX } from "solid-js";
+import { createMemo, createSignal, type Accessor } from "solid-js";
 
 // Ticks every 60 s so agentRuntimeLabel memos re-evaluate without waiting for a status event.
 // globalThis survives HMR module re-evaluation — prevents duplicate interval leak.
@@ -42,22 +38,18 @@ import { TermWrap } from "./termwrap";
 import { basicTermModels, termModels } from "./term-models";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
 
-let _terminalViewComponent: ViewComponent = null;
-
-
-export function setTerminalViewComponent(component: ViewComponent) {
-    _terminalViewComponent = component;
-}
-
-class TermViewModel implements ViewModel {
+/** The terminal's state behind its native pane tab (`terminalPaneTab`,
+ *  term.tsx). */
+class TermViewModel {
     viewType: string;
-    nodeModel: BlockNodeModel;
     connected: boolean;
     termRef: { current: TermWrap | null } = { current: null };
-    blockAtom: () => Block;
+    /** The block's meta — the host context's, reactive. */
+    meta: Accessor<MetaType | undefined>;
+    /** Whether this tab's pane has focus (multi-input follows it). */
+    isFocused: Accessor<boolean>;
     termMode: () => string;
     blockId: string;
-    viewIcon: () => string;
     viewName: () => string;
     viewText: () => HeaderElem[];
     blockBg: () => MetaType;
@@ -69,7 +61,6 @@ class TermViewModel implements ViewModel {
     termThemeNameAtom: () => string;
     termTransparencyAtom: () => number;
     scrollSensitivityAtom: () => number;
-    noPadding: SignalAtom<boolean>;
     endIconButtons: () => IconButtonDecl[];
     shellProcFullStatus: SignalAtom<BlockControllerRuntimeStatus>;
     shellProcStatus: () => string;
@@ -80,30 +71,30 @@ class TermViewModel implements ViewModel {
     searchAtoms?: SearchAtoms;
     voiceHandle: () => PaneVoiceHandle;
     private unregisterModel: () => void;
+    private ctx: PaneTabHostContext;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
+    // (term.tsx) in its own reactive root, so its memos are plain memos —
+    // they used to be parked in the per-block atom cache to
+    // outlive effect re-runs host rule 8 has since fixed. Its own block's
+    // meta comes from, and goes to, the host context.
+    constructor(ctx: PaneTabHostContext) {
+        const blockId = ctx.blockId;
+        this.ctx = ctx;
         this.viewType = "term";
         this.blockId = blockId;
+        this.meta = ctx.meta;
+        this.isFocused = ctx.isFocused;
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
-        this.nodeModel = nodeModel;
-        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
-        this.termMode = createMemo(() => {
-            const blockData = this.blockAtom();
-            return blockData?.meta?.["term:mode"] ?? "term";
-        });
+        this.termMode = createMemo(() => this.meta()?.["term:mode"] ?? "term");
 
         this.isRestarting = createSignalAtom(false);
 
-        this.viewIcon = createMemo(() => "terminal");
+        this.viewName = createMemo(() => termViewName(this.meta()));
 
-        this.viewName = createMemo(() => termViewName(this.blockAtom()?.meta));
-
-        this.isCmdController = createMemo(() => {
-            const controllerMetaAtom = getBlockMetaKeyAtom(this.blockId, "controller");
-            return controllerMetaAtom() == "cmd";
-        });
+        this.isCmdController = createMemo(() => this.meta()?.controller == "cmd");
 
         this.shellProcFullStatus = createSignalAtom<BlockControllerRuntimeStatus>(null);
 
@@ -130,7 +121,7 @@ class TermViewModel implements ViewModel {
             const rtn: HeaderElem[] = [];
             const isCmd = this.isCmdController();
             if (isCmd) {
-                const blockMeta = this.blockAtom()?.meta;
+                const blockMeta = this.meta();
                 let cmdText = blockMeta?.["cmd"];
                 let cmdArgs = blockMeta?.["cmd:args"];
                 if (cmdArgs != null && Array.isArray(cmdArgs) && cmdArgs.length > 0) {
@@ -187,7 +178,7 @@ class TermViewModel implements ViewModel {
                 });
             }
             if (!isCmd) {
-                const blockMeta = this.blockAtom()?.meta;
+                const blockMeta = this.meta();
                 const activity = blockMeta?.["term:osc_title"] as string | undefined;
                 if (activity && activity.length > 0) {
                     rtn.push({
@@ -205,17 +196,12 @@ class TermViewModel implements ViewModel {
             return !isCmd;
         });
 
-        this.termThemeNameAtom = useBlockAtom(blockId, "termthemeatom", () =>
-            createMemo<string>(() => {
-                return getOverrideConfigAtom(this.blockId, "term:theme")() ?? DefaultTermTheme;
-            })
+        this.termThemeNameAtom = createMemo<string>(
+            () => getOverrideConfigAtom(this.blockId, "term:theme")() ?? DefaultTermTheme
         );
 
-        this.termTransparencyAtom = useBlockAtom(blockId, "termtransparencyatom", () =>
-            createMemo<number>(() => {
-                let value = getOverrideConfigAtom(this.blockId, "term:transparency")() ?? 0.5;
-                return boundNumber(value, 0, 1);
-            })
+        this.termTransparencyAtom = createMemo<number>(() =>
+            boundNumber(getOverrideConfigAtom(this.blockId, "term:transparency")() ?? 0.5, 0, 1)
         );
 
         // term:scrollsensitivity has no per-block override (unlike
@@ -225,8 +211,8 @@ class TermViewModel implements ViewModel {
         // through the same shared function termwrap.ts's constructor and
         // AgentShellSubblock.tsx's own atom use, so a configured value means
         // the same thing everywhere (REPORT_TERMINAL_SCROLL_SENSITIVITY_NOT_LIVE_2026_09_22.md).
-        this.scrollSensitivityAtom = useBlockAtom(blockId, "scrollsensitivityatom", () =>
-            createMemo<number>(() => resolveTermScrollSensitivity(getSettingsKeyAtom("term:scrollsensitivity")()))
+        this.scrollSensitivityAtom = createMemo<number>(() =>
+            resolveTermScrollSensitivity(getSettingsKeyAtom("term:scrollsensitivity")())
         );
 
         this.blockBg = createMemo(() => {
@@ -239,48 +225,38 @@ class TermViewModel implements ViewModel {
         });
 
         this.connStatus = createMemo(() => {
-            const blockData = this.blockAtom();
-            const connName = blockData?.meta?.connection;
+            const connName = this.meta()?.connection;
             const connAtom = getConnStatusAtom(connName);
             return connAtom();
         });
 
-        this.termZoomAtom = useBlockAtom(blockId, "termzoomatom", () =>
-            createMemo<number>(() => {
-                const blockData = this.blockAtom();
-                const zoomFactor = blockData?.meta?.["term:zoom"];
-                if (zoomFactor == null) return 1.0;
-                if (typeof zoomFactor !== "number" || isNaN(zoomFactor)) return 1.0;
-                return Math.max(0.5, Math.min(2.0, zoomFactor));
-            })
-        );
+        this.termZoomAtom = createMemo<number>(() => {
+            const zoomFactor = this.meta()?.["term:zoom"];
+            if (zoomFactor == null) return 1.0;
+            if (typeof zoomFactor !== "number" || isNaN(zoomFactor)) return 1.0;
+            return Math.max(0.5, Math.min(2.0, zoomFactor));
+        });
 
-        this.fontSizeAtom = useBlockAtom(blockId, "fontsizeatom", () =>
-            createMemo<number>(() => {
-                const blockData = this.blockAtom();
-                const fsSettingsAtom = getSettingsKeyAtom("term:fontsize");
-                const settingsFontSize = fsSettingsAtom();
-                const connName = blockData?.meta?.connection;
-                const fullConfig = atoms.fullConfigAtom();
-                const connFontSize = fullConfig?.connections?.[connName]?.["term:fontsize"];
-                const baseFontSize = blockData?.meta?.["term:fontsize"] ?? connFontSize ?? settingsFontSize ?? 15;
-                if (typeof baseFontSize !== "number" || isNaN(baseFontSize) || baseFontSize < 4 || baseFontSize > 64) {
-                    return 15;
-                }
-                const zoomFactor = this.termZoomAtom();
-                const effectiveFontSize = baseFontSize * zoomFactor;
-                return Math.max(4, Math.min(64, Math.round(effectiveFontSize)));
-            })
-        );
-
-        this.noPadding = createSignalAtom(true);
+        this.fontSizeAtom = createMemo<number>(() => {
+            const meta = this.meta();
+            const settingsFontSize = getSettingsKeyAtom("term:fontsize")();
+            const connName = meta?.connection;
+            const fullConfig = atoms.fullConfigAtom();
+            const connFontSize = fullConfig?.connections?.[connName]?.["term:fontsize"];
+            const baseFontSize = meta?.["term:fontsize"] ?? connFontSize ?? settingsFontSize ?? 15;
+            if (typeof baseFontSize !== "number" || isNaN(baseFontSize) || baseFontSize < 4 || baseFontSize > 64) {
+                return 15;
+            }
+            const effectiveFontSize = baseFontSize * this.termZoomAtom();
+            return Math.max(4, Math.min(64, Math.round(effectiveFontSize)));
+        });
 
         this.endIconButtons = createMemo(() => {
-            const blockData = this.blockAtom();
+            const meta = this.meta();
             const shellProcStatus = this.shellProcStatus();
             const connStatus = this.connStatus();
             const isCmd = this.isCmdController();
-            if (blockData?.meta?.["controller"] != "cmd" && shellProcStatus != "done") return [];
+            if (meta?.["controller"] != "cmd" && shellProcStatus != "done") return [];
             if (connStatus?.status != "connected") return [];
             let iconName: string = null;
             let title: string = null;
@@ -341,13 +317,13 @@ class TermViewModel implements ViewModel {
         this.unregisterModel = termModels.register(blockId, this);
     }
 
-    get viewComponent(): ViewComponent {
-        return _terminalViewComponent;
+    isBasicTerm(): boolean {
+        return this.meta()?.controller !== "cmd";
     }
 
-    isBasicTerm(): boolean {
-        const blockData = this.blockAtom();
-        return blockData?.meta?.controller !== "cmd";
+    /** Writes this terminal's own block meta. */
+    setMeta(patch: MetaType): Promise<void> {
+        return this.ctx.setMeta(patch);
     }
 
     /** xterm's own selection, which survives the right-click that clears
@@ -474,10 +450,7 @@ class TermViewModel implements ViewModel {
     }
 
     setTerminalTheme(themeName: string) {
-        RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", this.blockId),
-            meta: { "term:theme": themeName },
-        });
+        void this.setMeta({ "term:theme": themeName });
     }
 
     forceRestartController() {
@@ -501,8 +474,4 @@ class TermViewModel implements ViewModel {
     }
 }
 
-function makeTerminalModel(blockId: string, nodeModel: BlockNodeModel): TermViewModel {
-    return new TermViewModel(blockId, nodeModel);
-}
-
-export { makeTerminalModel, TermViewModel };
+export { TermViewModel };

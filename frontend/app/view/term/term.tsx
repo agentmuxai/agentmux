@@ -15,7 +15,8 @@ import { resolveTermScrollback } from "./termscrollback";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
-import { setTerminalViewComponent, TermViewModel } from "./termViewModel";
+import { TermViewModel } from "./termViewModel";
+import { termPaneTab } from "./term-pane-tab";
 import { TermWrap } from "./termwrap";
 import { termModels } from "./term-models";
 import "./xterm.css";
@@ -26,6 +27,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 import type { NodeModel } from "@/layout/index";
+import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -71,16 +73,18 @@ function TermResyncHandler(props: { blockId: string; model: TermViewModel }): JS
     return null;
 }
 
-function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
-    const { blockId, model } = props;
+function TerminalView(props: { model: TermViewModel }): JSX.Element {
+    const model = props.model;
+    const blockId = model.blockId;
     let viewRef!: HTMLDivElement;
     let connectElemRef!: HTMLDivElement;
 
-    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", blockId));
+    // The block's meta comes from the host context (Pane Tab contract Phase 2c).
+    const meta = model.meta;
 
     const termSettingsAtom = getSettingsPrefixAtom("term");
     const termSettings = createMemo(() => termSettingsAtom());
-    const termMode = createMemo(() => blockData()?.meta?.["term:mode"] ?? "term");
+    const termMode = createMemo(() => meta()?.["term:mode"] ?? "term");
     const termFontSize = createMemo(() => model.fontSizeAtom());
     const termScrollSensitivity = createMemo(() => model.scrollSensitivityAtom());
     // Settings resolved once at TermWrap construction and never revisited
@@ -89,20 +93,20 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     // top-level memos so onMount and the live-apply effects further down
     // share one source of truth instead of onMount re-deriving its own copy.
     const termFontFamily = createMemo(() => {
-        const connFontFamily = (atoms.fullConfigAtom() as any)?.connections?.[blockData()?.meta?.connection]?.[
+        const connFontFamily = (atoms.fullConfigAtom() as any)?.connections?.[meta()?.connection]?.[
             "term:fontfamily"
         ];
         return resolveTermFontFamily(termSettings(), connFontFamily);
     });
-    const termScrollbackDepth = createMemo(() => resolveTermScrollback(termSettings(), blockData()?.meta));
+    const termScrollbackDepth = createMemo(() => resolveTermScrollback(termSettings(), meta()));
     // Default ON: modern shells (bash 4+, zsh, fish) all support BPM and it
     // prevents the shell from executing partial lines mid-paste. Disable
     // per-pane via term:allowbracketedpaste=false for legacy shells that
     // don't support it.
     const termAllowBracketedPaste = createMemo(() => getOverrideConfigAtom(blockId, "term:allowbracketedpaste")() ?? true);
-    const isFocused = createMemo(() => model.nodeModel.isFocused());
+    const isFocused = createMemo(() => model.isFocused());
     const isMI = createMemo(() => atoms.isTermMultiInput());
-    const isBasicTerm = createMemo(() => blockData()?.meta?.controller != "cmd");
+    const isBasicTerm = createMemo(() => meta()?.controller != "cmd");
 
     // We use a ref-holder object that useSearch captures, so we can populate it after mount
     const anchorHolder = { current: null as HTMLDivElement | null };
@@ -248,10 +252,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             const STEP = 0.1;
             const delta = ev.deltaY > 0 ? -STEP : STEP; // scroll down = zoom out
             const next = Math.max(0.5, Math.min(2.0, Math.round((currentZoom + delta) * 100) / 100));
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", blockId),
-                meta: { "term:zoom": next === 1.0 ? null : next },
-            });
+            void model.setMeta({ "term:zoom": next === 1.0 ? null : next });
         };
         viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => viewRef.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
@@ -329,7 +330,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     };
 
     const handleFilesDropped = async (paths: string[]) => {
-        const cwd = blockData()?.meta?.["cmd:cwd"];
+        const cwd = meta()?.["cmd:cwd"];
         if (!cwd) {
             console.warn("[term-drop] No working directory detected, ignoring drop");
             pushNotification({
@@ -438,7 +439,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     });
 
     const dropMessage = createMemo(() => {
-        const cwd = blockData()?.meta?.["cmd:cwd"];
+        const cwd = meta()?.["cmd:cwd"];
         return cwd ? `Copy to ${cwd}` : "No working directory detected";
     });
 
@@ -568,7 +569,48 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
 
 
 
-// Register TerminalView with the ViewModel to break the circular dependency
-setTerminalViewComponent(TerminalView);
+/** The terminal as a native pane tab (Pane Tab contract Phase 2c). */
+export const terminalPaneTab: PaneTabManifest = {
+    apiVersion: 1,
+    view: "term",
+    label: "Terminal",
+    icon: "terminal",
+    capabilities: {
+        // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1
+        // §5): remounting loses the scrollback and the running shell's view.
+        lifecycle: "keepAlive",
+        headerMic: { title: "Speak into this terminal (Ctrl+Shift+V)" },
+        statsBadgeSetting: "term:showstatsbadge",
+        hueBorder: true,
+        paneZoom: {},
+        acceptsInput: true,
+        shellKeys: true,
+        sharesCwd: true,
+        connection: true,
+        noPadding: true,
+    },
+    tab: termPaneTab,
+    chrome: buildTermPaneChromeModel,
+    create: (ctx) => {
+        const model = new TermViewModel(ctx);
+        return {
+            component: () => <TerminalView model={model} />,
+            liveTitle: () => ({ text: model.viewName() }),
+            headerText: () => model.viewText(),
+            headerActions: () => model.endIconButtons(),
+            background: () => model.blockBg(),
+            // A terminal running a command (`controller: "cmd"`) has no
+            // connection button.
+            manageConnection: () => model.manageConnection(),
+            settingsMenu: () => model.getSettingsMenuItems(),
+            voice: () => model.voiceHandle(),
+            search: () => model.searchAtoms,
+            selection: () => model.getSelection(),
+            paste: (text) => model.paste(text),
+            focus: () => model.giveFocus(),
+            dispose: () => model.dispose(),
+        };
+    },
+};
 
 export { TermViewModel };

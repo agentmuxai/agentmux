@@ -3,18 +3,18 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, MOS } from "@/store/global";
+import { atoms, getSettingsKeyAtom } from "@/store/global";
 import type { TermViewModel } from "./termViewModel";
 
 export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] {
     const fullConfig = atoms.fullConfigAtom();
     const termThemes = fullConfig?.termthemes ?? {};
     const termThemeKeys = Object.keys(termThemes);
-    const curThemeName = getBlockMetaKeyAtom(model.blockId, "term:theme")();
+    const curThemeName = model.meta()?.["term:theme"];
     const defaultFontSize = getSettingsKeyAtom("term:fontsize")() ?? 15;
-    const transparencyMeta = getBlockMetaKeyAtom(model.blockId, "term:transparency")();
-    const blockData = model.blockAtom();
-    const overrideFontSize = blockData?.meta?.["term:fontsize"];
+    const transparencyMeta = model.meta()?.["term:transparency"];
+    const meta = model.meta();
+    const overrideFontSize = meta?.["term:fontsize"];
 
     termThemeKeys.sort((a, b) => {
         return (termThemes[a]["display:order"] ?? 0) - (termThemes[b]["display:order"] ?? 0);
@@ -44,10 +44,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         type: "checkbox",
         checked: transparencyMeta == null,
         click: () => {
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "term:transparency": null },
-            });
+            void model.setMeta({ "term:transparency": null });
         },
     });
     transparencySubMenu.push({
@@ -55,10 +52,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         type: "checkbox",
         checked: transparencyMeta == 0.5,
         click: () => {
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "term:transparency": 0.5 },
-            });
+            void model.setMeta({ "term:transparency": 0.5 });
         },
     });
     transparencySubMenu.push({
@@ -66,10 +60,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         type: "checkbox",
         checked: transparencyMeta == 0,
         click: () => {
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "term:transparency": 0 },
-            });
+            void model.setMeta({ "term:transparency": 0 });
         },
     });
 
@@ -81,10 +72,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: overrideFontSize == fontSize,
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "term:fontsize": fontSize },
-                    });
+                    void model.setMeta({ "term:fontsize": fontSize });
                 },
             };
         }
@@ -94,15 +82,12 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         type: "checkbox",
         checked: overrideFontSize == null,
         click: () => {
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "term:fontsize": null },
-            });
+            void model.setMeta({ "term:fontsize": null });
         },
     });
 
     // Terminal Zoom submenu
-    const currentZoom = blockData?.meta?.["term:zoom"] ?? 1.0;
+    const currentZoom = meta?.["term:zoom"] ?? 1.0;
     const zoomLevels = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     const zoomSubMenu: ContextMenuItem[] = zoomLevels.map((zoom: number) => {
         const percentage = Math.round(zoom * 100);
@@ -111,10 +96,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
             type: "checkbox",
             checked: Math.abs(currentZoom - zoom) < 0.01,
             click: () => {
-                RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: MOS.makeORef("block", model.blockId),
-                    meta: { "term:zoom": zoom === 1.0 ? null : zoom },
-                });
+                void model.setMeta({ "term:zoom": zoom === 1.0 ? null : zoom });
             },
         };
     });
@@ -122,10 +104,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
     zoomSubMenu.push({
         label: "Reset to Default",
         click: () => {
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: MOS.makeORef("block", model.blockId),
-                meta: { "term:zoom": null },
-            });
+            void model.setMeta({ "term:zoom": null });
         },
     });
 
@@ -139,7 +118,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         click: model.forceRestartController.bind(model),
     });
 
-    const isClearOnStart = blockData?.meta?.["cmd:clearonstart"];
+    const isClearOnStart = meta?.["cmd:clearonstart"];
     fullMenu.push({
         label: "Clear Output On Restart",
         submenu: [
@@ -148,10 +127,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: isClearOnStart,
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "cmd:clearonstart": true },
-                    });
+                    void model.setMeta({ "cmd:clearonstart": true });
                 },
             },
             {
@@ -159,16 +135,13 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: !isClearOnStart,
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "cmd:clearonstart": false },
-                    });
+                    void model.setMeta({ "cmd:clearonstart": false });
                 },
             },
         ],
     });
 
-    const runOnStart = blockData?.meta?.["cmd:runonstart"];
+    const runOnStart = meta?.["cmd:runonstart"];
     fullMenu.push({
         label: "Run On Startup",
         submenu: [
@@ -177,10 +150,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: runOnStart,
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "cmd:runonstart": true },
-                    });
+                    void model.setMeta({ "cmd:runonstart": true });
                 },
             },
             {
@@ -188,26 +158,23 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: !runOnStart,
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "cmd:runonstart": false },
-                    });
+                    void model.setMeta({ "cmd:runonstart": false });
                 },
             },
         ],
     });
 
-    if (blockData?.meta?.["term:vdomtoolbarblockid"]) {
+    if (meta?.["term:vdomtoolbarblockid"]) {
         fullMenu.push({ type: "separator" });
         fullMenu.push({
             label: "Close Toolbar",
             click: () => {
-                RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: blockData.meta["term:vdomtoolbarblockid"] });
+                RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: meta["term:vdomtoolbarblockid"] });
             },
         });
     }
 
-    const debugConn = blockData?.meta?.["term:conndebug"];
+    const debugConn = meta?.["term:conndebug"];
     fullMenu.push({
         label: "Debug Connection",
         submenu: [
@@ -216,10 +183,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: !debugConn,
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "term:conndebug": null },
-                    });
+                    void model.setMeta({ "term:conndebug": null });
                 },
             },
             {
@@ -227,10 +191,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: debugConn == "info",
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "term:conndebug": "info" },
-                    });
+                    void model.setMeta({ "term:conndebug": "info" });
                 },
             },
             {
@@ -238,10 +199,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 type: "checkbox",
                 checked: debugConn == "debug",
                 click: () => {
-                    RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: MOS.makeORef("block", model.blockId),
-                        meta: { "term:conndebug": "debug" },
-                    });
+                    void model.setMeta({ "term:conndebug": "debug" });
                 },
             },
         ],

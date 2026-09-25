@@ -421,7 +421,21 @@ working throughout through a legacy adapter.
        title (with its placeholder flag) and favicon reach the host as
        `liveTitle`/`liveFavicon`, and the pane's synthetic context menu
        passes its browser context through `contextMenu`.
-     - **Terminal and agent (hooks implemented; the views move next).**
+     - **Terminal (implemented, part 2b-2):** `terminalPaneTab` (term.tsx) —
+       keep-alive, full-bleed, `connection`. Its model is built from `ctx`:
+       every own-block read is `ctx.meta`, and its writes (theme, zoom, the
+       settings menu's font size, transparency and zoom) go through
+       `model.setMeta` → `ctx.setMeta`; multi-input follows `ctx.isFocused`.
+       Its five memos that sat in the per-block atom cache (theme,
+       transparency, scroll sensitivity, zoom, font size) are plain memos in
+       its own root. The instance hands the host its title, header text and
+       actions, background, state-dependent connection button, settings
+       menu, voice handle, find bar, selection and paste. `useSearch` takes
+       any object with a `searchAtoms` slot now, not a full `ViewModel`. The
+       `setTerminalViewComponent` indirection that broke the model/view
+       import cycle is gone: the manifest builds the view directly.
+     - **Agent (next).**
+     - **Terminal and agent hooks (implemented, part 2b-1).**
        Unlike the eight views above, shared code reached INTO these two view
        models through the host, which works only while the host holds the
        real class; behind the native adapter each reach-in would silently

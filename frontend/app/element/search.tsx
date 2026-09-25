@@ -208,7 +208,9 @@ export const Search = SearchComponent;
 
 type SearchOptions = {
     anchorRef?: { current: HTMLElement | null };
-    viewModel?: ViewModel;
+    /** Gets the find bar, so the host can open and close it (Ctrl+F /
+     *  Escape). A native pane tab hands it over as `PaneTabInstance.search`. */
+    viewModel?: { searchAtoms?: SearchAtoms };
     regex?: boolean;
     caseSensitive?: boolean;
     wholeWord?: boolean;
