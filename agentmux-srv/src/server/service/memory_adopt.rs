@@ -38,6 +38,7 @@ pub(super) async fn handle_memory_adopt_service(state: &AppState, call: &WebCall
     }
     match call.method.as_str() {
         "Adopt" => handle_adopt(state, call).await,
+        "Release" => handle_release(call).await,
         other => WebReturnType::error(format!("memoryadopt: unknown method {other}")),
     }
 }
@@ -89,6 +90,38 @@ async fn handle_adopt(state: &AppState, call: &WebCallType) -> WebReturnType {
     }
 }
 
+#[derive(Deserialize)]
+struct ReleaseArgs {
+    agent_id: String,
+    list_id: String,
+    index: usize,
+}
+
+/// Release an agent's claim on a folder from its `agent:memory:claims`
+/// list — a human confirmed it in the host window (spec §2.1.2).
+async fn handle_release(call: &WebCallType) -> WebReturnType {
+    use crate::backend::memory_release::{self, ReleaseError};
+    let args: ReleaseArgs = match get_arg(&call.args, 0) {
+        Ok(a) => a,
+        Err(e) => return WebReturnType::error(format!("memoryadopt.Release: {e}")),
+    };
+    let Some(fs) = crate::backend::agent_session::global_transcript_store() else {
+        return WebReturnType::error("memoryadopt.Release: memory record store unavailable");
+    };
+    let result =
+        tokio::task::spawn_blocking(move || memory_release::release(fs, &args.agent_id, &args.list_id, args.index)).await;
+    match result {
+        Ok(Ok(released)) => WebReturnType::success(serde_json::json!({ "released": released })),
+        Ok(Err(ReleaseError::UnknownList)) => WebReturnType::error("unknown-list: the list expired or is not this agent's; list again"),
+        Ok(Err(ReleaseError::BadChoice)) => WebReturnType::error("bad-choice"),
+        Ok(Err(ReleaseError::Store(e))) => {
+            tracing::warn!("[memoryadopt] Release failed: {e}");
+            WebReturnType::error("store error")
+        }
+        Err(e) => WebReturnType::error(format!("memoryadopt.Release: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +144,19 @@ mod tests {
             let r = handle_memory_adopt_service(&state, &call(secret)).await;
             assert_eq!(r.error.as_deref(), Some("memoryadopt: host-only"), "{secret:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn an_agent_without_the_host_secret_cannot_release_a_folder() {
+        let state = crate::server::tests::test_state();
+        let call = WebCallType {
+            service: "memoryadopt".into(),
+            method: "Release".into(),
+            uicontext: None,
+            args: vec![serde_json::json!({ "agent_id": "a", "list_id": "l", "index": 0 })],
+        };
+        let r = handle_memory_adopt_service(&state, &call).await;
+        assert_eq!(r.error.as_deref(), Some("memoryadopt: host-only"));
     }
 
     #[tokio::test]
