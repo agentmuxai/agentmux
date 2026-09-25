@@ -36,6 +36,15 @@
 //!   projected content, and only in a pass that finished everything else.
 //! - The pass has a time budget; exclusivity that can't be proven in time
 //!   counts as shared.
+//! - The folder is the one the CLI really uses: keyed by the repository's
+//!   main checkout, not the working directory
+//!   ([`crate::backend::claude_layout::memory_project_root`]). A folder the
+//!   spawn or a settings file may redirect is left alone.
+//! - Each file is read again when its turn comes, and again right before
+//!   it is overwritten; a provider write in between wins, and is captured
+//!   next pass.
+//! - One pass per agent at a time, across AgentMux processes (a lease in
+//!   the global store); a second one skips.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -58,6 +67,90 @@ pub(crate) struct SpawnMemory<'a> {
     pub provider: &'a str,
     pub config_dir: Option<&'a str>,
     pub cwd: &'a str,
+    /// The spawn itself may point the CLI's memory somewhere else
+    /// ([`spawn_overrides_memory_dir`]).
+    pub overridden: bool,
+}
+
+/// Whether a spawn's environment or arguments may move the CLI's memory
+/// folder away from `projects/<root>/memory`: an override variable, or a
+/// settings file passed on the command line (it could set
+/// `autoMemoryDirectory`).
+pub(crate) fn spawn_overrides_memory_dir(env: &std::collections::HashMap<String, String>, args: &[String]) -> bool {
+    const VARS: [&str; 2] = ["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE", "CLAUDE_CODE_REMOTE_MEMORY_DIR"];
+    VARS.iter().any(|v| env.get(*v).is_some_and(|x| !x.is_empty()) || std::env::var_os(v).is_some_and(|x| !x.is_empty()))
+        || args.iter().any(|a| {
+            ["--settings", "--managed-settings"].iter().any(|f| a == f || a.starts_with(&format!("{f}=")))
+        })
+}
+
+/// Whether a settings file the CLI reads mentions `autoMemoryDirectory`,
+/// which moves its memory folder. Any mention counts, parsed or not.
+/// Remote managed settings can't be seen from here.
+fn settings_override_memory_dir(config_dir: &Path, root: &Path) -> bool {
+    let mut files = vec![
+        config_dir.join("settings.json"),
+        root.join(".claude").join("settings.json"),
+        root.join(".claude").join("settings.local.json"),
+    ];
+    if cfg!(target_os = "macos") {
+        files.push("/Library/Application Support/ClaudeCode/managed-settings.json".into());
+    } else if cfg!(windows) {
+        files.push(r"C:\Program Files\ClaudeCode\managed-settings.json".into());
+        files.push(r"C:\ProgramData\ClaudeCode\managed-settings.json".into());
+    } else {
+        files.push("/etc/claude-code/managed-settings.json".into());
+    }
+    files.iter().any(|f| std::fs::read(f).is_ok_and(|b| b.windows(19).any(|w| w == b"autoMemoryDirectory")))
+}
+
+/// A lease on `uid`'s reconcile, across every AgentMux process on this
+/// machine: two passes for one agent at once — two spawns of it, in one
+/// process or two — each act on a view of the folder the other is
+/// changing. The second one skips; its spawn goes ahead.
+const PASS_LEASE_FILE: &str = "lease.json";
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct PassLease {
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    until_ms: i64,
+}
+
+fn pass_zone(uid: &str) -> String {
+    format!("memory-pass:{}", &record::sha256_hex(uid.as_bytes())[..32])
+}
+
+/// Take the lease until `until`; `None` while another pass holds it.
+fn take_pass_lease(fs: &FileStore, uid: &str, until: Instant) -> Result<Option<String>, StoreError> {
+    let now = agentmux_common::time::now_ms();
+    // Held past the budget by a margin, in case the pass overruns it
+    // mid-file; a crashed pass frees it once that passes.
+    let until_ms = now + until.saturating_duration_since(Instant::now()).as_millis() as i64 + 5_000;
+    let owner = uuid::Uuid::new_v4().simple().to_string();
+    fs.zone_txn(&pass_zone(uid), |z| {
+        let held = z.read(PASS_LEASE_FILE)?.and_then(|b| serde_json::from_slice::<PassLease>(&b).ok());
+        if held.is_some_and(|l| l.until_ms > now) {
+            return Ok(None);
+        }
+        let lease = PassLease { owner: owner.clone(), until_ms };
+        z.put(PASS_LEASE_FILE, &serde_json::to_vec(&lease).map_err(|e| StoreError::Other(e.to_string()))?)?;
+        Ok(Some(owner.clone()))
+    })
+}
+
+fn release_pass_lease(fs: &FileStore, uid: &str, owner: &str) {
+    let released = fs.zone_txn(&pass_zone(uid), |z| {
+        let held = z.read(PASS_LEASE_FILE)?.and_then(|b| serde_json::from_slice::<PassLease>(&b).ok());
+        if held.is_some_and(|l| l.owner == owner) {
+            z.put(PASS_LEASE_FILE, &serde_json::to_vec(&PassLease::default()).map_err(|e| StoreError::Other(e.to_string()))?)?;
+        }
+        Ok(())
+    });
+    if let Err(e) = released {
+        tracing::warn!(uid, error = %e, "memory reconcile: lease not released; it expires on its own");
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -117,6 +210,29 @@ enum OnDisk {
     Unreadable,
 }
 
+/// One memory file as it is on disk now; `None` when it doesn't exist.
+fn read_one(dir: &Path, name: &str) -> Option<OnDisk> {
+    let path = dir.join(name);
+    match std::fs::metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Ok(meta) if !meta.is_file() => Some(OnDisk::Unreadable),
+        Ok(meta) if meta.len() as usize > record::MAX_BODY_BYTES => Some(OnDisk::Unreadable),
+        Ok(_) => Some(std::fs::read(&path).map(OnDisk::Body).unwrap_or(OnDisk::Unreadable)),
+        Err(_) => Some(OnDisk::Unreadable),
+    }
+}
+
+/// Whether `name` still holds content `sha` (`None`: still absent), read
+/// again immediately before overwriting it — the provider may have
+/// written it since this pass decided. What it wrote is captured next pass.
+fn disk_still_holds(dir: &Path, name: &str, sha: Option<&str>) -> bool {
+    match read_one(dir, name) {
+        None => sha.is_none(),
+        Some(OnDisk::Body(b)) => sha == Some(record::sha256_hex(&b).as_str()),
+        Some(OnDisk::Unreadable) => false,
+    }
+}
+
 /// The folder's memory files, or `None` when the folder doesn't exist. Any
 /// other listing error fails the pass rather than read as "no files".
 fn read_disk(dir: &Path) -> Result<Option<BTreeMap<String, OnDisk>>, StoreError> {
@@ -160,13 +276,32 @@ fn reconcile_inner(
         return Ok(());
     }
     let dir = crate::server::native_memory_handlers::memory_dir_for_cwd(m.config_dir.unwrap_or(""), m.cwd);
+    // `dir` is `<config>/projects/<name>/memory`.
+    let config_dir = dir.parent().and_then(Path::parent).and_then(Path::parent).unwrap_or(&dir);
+    let root = crate::backend::claude_layout::memory_project_root(&crate::backend::base::expand_home_dir_safe(m.cwd));
+    if m.overridden || settings_override_memory_dir(config_dir, &root) {
+        tracing::info!(uid = m.uid, "memory reconcile: the CLI's memory folder may be overridden; left as is");
+        report.skipped = Some("memory folder overridden");
+        return Ok(());
+    }
     if let Exclusivity::Shared(reason) = claims::check_and_claim(fs, mstore, m.uid, &dir, m.cwd, budget.deadline)? {
         tracing::info!(uid = m.uid, dir = %dir.display(), ?reason, "memory reconcile: directory not exclusive; left as is");
         report.skipped = Some("shared directory");
         return Ok(());
     }
-    let dir_id = claims::dir_id(&dir);
-    let disk = read_disk(&dir)?;
+    let Some(lease) = take_pass_lease(fs, m.uid, budget.deadline)? else {
+        tracing::info!(uid = m.uid, "memory reconcile: another pass for this agent is running; skipped");
+        report.skipped = Some("another pass running");
+        return Ok(());
+    };
+    let result = reconcile_dir(fs, m.uid, &dir, budget, report);
+    release_pass_lease(fs, m.uid, &lease);
+    result
+}
+
+fn reconcile_dir(fs: &FileStore, uid: &str, dir: &Path, budget: &mut Budget, report: &mut Report) -> Result<(), StoreError> {
+    let dir_id = claims::dir_id(dir);
+    let disk = read_disk(dir)?;
     let dir_missing = disk.is_none();
     let disk = disk.unwrap_or_default();
     report.unreadable = disk.values().filter(|d| matches!(d, OnDisk::Unreadable)).count();
@@ -176,22 +311,22 @@ fn reconcile_inner(
     // those projections first (in the record, so a refill cut short by the
     // budget or a crash still reads the rest as "never projected" next
     // time) and refill it, rather than read the absence as deletions.
-    let heads_now = record::heads(fs, m.uid)?;
+    let heads_now = record::heads(fs, uid)?;
     let projected_here = heads_now.projected.get(&dir_id).is_some_and(|p| !p.is_empty());
     let none_left = !disk.keys().any(|n| heads_now.projected.get(&dir_id).is_some_and(|p| p.contains_key(n)));
     if projected_here && (dir_missing || none_left) {
-        tracing::warn!(uid = m.uid, dir = %dir.display(), "memory folder no longer holds its files; refilling it from the record");
-        record::reset_projections(fs, m.uid, &dir_id)?;
+        tracing::warn!(uid, dir = %dir.display(), "memory folder no longer holds its files; refilling it from the record");
+        record::reset_projections(fs, uid, &dir_id)?;
     }
 
-    if record::heads(fs, m.uid)?.files.is_empty() {
-        adopt_baseline(fs, m.uid, &dir_id, &disk, budget, report)?;
+    if record::heads(fs, uid)?.files.is_empty() {
+        adopt_baseline(fs, uid, &dir_id, &disk, budget, report)?;
         return Ok(());
     }
 
     // Only names the disk scan also recognises: a name it skips would be
     // written, then read back as absent and tombstoned.
-    let mut names: Vec<String> = record::heads(fs, m.uid)?
+    let mut names: Vec<String> = record::heads(fs, uid)?
         .files
         .keys()
         .filter(|n| crate::server::native_memory_handlers::validate_filename(n).is_ok())
@@ -207,24 +342,15 @@ fn reconcile_inner(
             report.deferred = true;
             break;
         }
-        match disk.get(name) {
-            Some(OnDisk::Unreadable) => continue,
-            on_disk => {
-                let body = match on_disk {
-                    Some(OnDisk::Body(b)) => Some(b.as_slice()),
-                    _ => None,
-                };
-                reconcile_file(fs, m.uid, &dir, &dir_id, name, body, report, &mut deletions, true)?;
-            }
-        }
+        reconcile_file(fs, uid, dir, &dir_id, name, report, &mut deletions, true)?;
     }
     if report.deferred {
         return Ok(());
     }
     for d in deletions {
-        delete_if_unchanged(fs, m.uid, &dir, &dir_id, &d, report)?;
+        delete_if_unchanged(fs, uid, dir, &dir_id, &d, report)?;
     }
-    index_conflict_files(fs, m.uid, &dir, &dir_id)?;
+    index_conflict_files(fs, uid, dir, &dir_id)?;
     Ok(())
 }
 
@@ -290,13 +416,19 @@ fn reconcile_file(
     dir: &Path,
     dir_id: &str,
     name: &str,
-    on_disk: Option<&[u8]>,
     report: &mut Report,
     deletions: &mut Vec<Deletion>,
     may_retry: bool,
 ) -> Result<(), StoreError> {
-    // Always decide against the record as it is now: an earlier file in this
-    // pass may have changed it.
+    // Always decide against the disk and the record as they are now, never
+    // a listing from the start of the pass: an earlier file in this pass may
+    // have changed the record, and the provider may have written the file.
+    let on_disk = match read_one(dir, name) {
+        Some(OnDisk::Unreadable) => return Ok(()),
+        Some(OnDisk::Body(b)) => Some(b),
+        None => None,
+    };
+    let on_disk = on_disk.as_deref();
     let heads = record::heads(fs, uid)?;
     let head = heads.files.get(name).cloned();
     let head_sha = head.as_ref().and_then(|h| h.sha256.clone());
@@ -335,6 +467,9 @@ fn reconcile_file(
                 Some(sha) => {
                     let body = record::body(fs, uid, sha)?
                         .ok_or_else(|| StoreError::Other(format!("memory record: body {sha} missing")))?;
+                    if !disk_still_holds(dir, name, disk_sha.as_deref()) {
+                        return Ok(());
+                    }
                     write_atomic(dir, name, &body)?;
                     record::record_projected(fs, uid, dir_id, name, &h.version, projected_version(&heads, dir_id, name).as_deref())?;
                     report.written += 1;
@@ -374,7 +509,7 @@ fn reconcile_file(
             match outcome {
                 AppendOutcome::Appended(_) => report.captured += 1,
                 AppendOutcome::StaleParent { .. } if may_retry => {
-                    return reconcile_file(fs, uid, dir, dir_id, name, on_disk, report, deletions, false);
+                    return reconcile_file(fs, uid, dir, dir_id, name, report, deletions, false);
                 }
                 _ => {}
             }
@@ -385,6 +520,9 @@ fn reconcile_file(
                 // Deleted here, changed elsewhere: keep the record's version.
                 if let Some(sha) = &h.sha256 {
                     if let Some(body) = record::body(fs, uid, sha)? {
+                        if !disk_still_holds(dir, name, None) {
+                            return Ok(());
+                        }
                         write_atomic(dir, name, &body)?;
                         record::record_projected(fs, uid, dir_id, name, &h.version, projected_version(&heads, dir_id, name).as_deref())?;
                         report.written += 1;
@@ -417,7 +555,7 @@ fn reconcile_file(
             match outcome {
                 AppendOutcome::Appended(_) => report.conflicts += 1,
                 AppendOutcome::StaleParent { .. } if may_retry => {
-                    return reconcile_file(fs, uid, dir, dir_id, name, on_disk, report, deletions, false);
+                    return reconcile_file(fs, uid, dir, dir_id, name, report, deletions, false);
                 }
                 _ => {}
             }
@@ -496,19 +634,22 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
     if !clean {
         return Ok(());
     }
-    let mut next = String::from_utf8_lossy(on_disk.as_deref().unwrap_or_default()).into_owned();
+    // Appended to the bytes as they are: an index that isn't UTF-8 keeps
+    // every byte it had.
+    let mut next = on_disk.unwrap_or_default();
     let before = next.clone();
     for name in conflict_files {
-        if next.contains(name.as_str()) {
+        if next.windows(name.len()).any(|w| w == name.as_bytes()) {
             continue;
         }
-        if !next.is_empty() && !next.ends_with('\n') {
-            next.push('\n');
+        if !next.is_empty() && !next.ends_with(b"\n") {
+            next.push(b'\n');
         }
         let of = name.split(CONFLICT_MARK).next().unwrap_or(name);
-        next.push_str(&format!(
-            "- [{of}.md — another copy]({name}) — AgentMux kept both versions of {of}.md; merge them and delete this file\n"
-        ));
+        next.extend_from_slice(
+            format!("- [{of}.md — another copy]({name}) — AgentMux kept both versions of {of}.md; merge them and delete this file\n")
+                .as_bytes(),
+        );
     }
     if next == before {
         return Ok(());
@@ -518,7 +659,7 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
         uid,
         NewVersion {
             file: INDEX_FILE,
-            body: Some(next.as_bytes()),
+            body: Some(&next),
             expected_parent: head.map(|h| h.version.as_str()),
             merged_parent: None,
             conflicts_with: None,
@@ -528,8 +669,8 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
         },
     )?;
     // Written to disk only once recorded against the head it was based on.
-    if matches!(outcome, AppendOutcome::Appended(_)) {
-        write_atomic(dir, INDEX_FILE, next.as_bytes())?;
+    if matches!(outcome, AppendOutcome::Appended(_)) && disk_still_holds(dir, INDEX_FILE, Some(&record::sha256_hex(&before))) {
+        write_atomic(dir, INDEX_FILE, &next)?;
     }
     Ok(())
 }

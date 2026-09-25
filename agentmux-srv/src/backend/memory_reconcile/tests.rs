@@ -38,7 +38,7 @@ impl Fixture {
         reconcile_before_spawn(
             &self.fs,
             &self.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(cfg), cwd: CWD },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(cfg), cwd: CWD, overridden: false },
             Duration::from_secs(10),
         )
     }
@@ -50,7 +50,7 @@ impl Fixture {
         run(
             &self.fs,
             &self.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false },
             Budget { deadline: Instant::now() + Duration::from_secs(10), files_left: Some(files) },
         )
     }
@@ -470,4 +470,142 @@ fn a_head_the_disk_scan_skips_is_left_out() {
     assert!(f.get("notes.v2.md").is_none());
     f.run();
     assert_eq!(f.head_body("notes.v2.md").as_deref(), Some("x"), "not tombstoned");
+}
+
+/// Data-loss review 3, P1: the CLI keys memory by the repository's main
+/// checkout, so an agent at a repository root and one in a linked worktree
+/// of it (outside it) share one folder. Neither is exclusive: nothing is
+/// captured from, written into or deleted from it.
+#[test]
+fn a_repository_root_and_its_worktree_leave_their_shared_folder_alone() {
+    let f = fixture();
+    let base = tempfile::tempdir().unwrap();
+    let (repo, wt) = crate::backend::claude_layout::tests::repo_with_worktree(base.path());
+    let (repo_s, wt_s, cfg) = (repo.to_string_lossy().into_owned(), wt.to_string_lossy().into_owned(), f.cfg());
+    let shared = crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &repo_s);
+    assert_eq!(crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &wt_s), shared, "the CLI's folder for both");
+    put_in(&shared, "MEMORY.md", "root idx");
+    put_in(&shared, "wt-notes.md", "the worktree agent's fact");
+    for cwd in [repo_s.as_str(), wt_s.as_str(), &format!("{repo_s}/sub")] {
+        let r = reconcile_before_spawn(
+            &f.fs,
+            &f.store,
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            Duration::from_secs(10),
+        );
+        assert_eq!(r.skipped, Some("shared directory"), "{cwd}");
+    }
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty(), "nothing captured");
+    assert_eq!(std::fs::read_to_string(shared.join("wt-notes.md")).unwrap(), "the worktree agent's fact");
+}
+
+/// A subdirectory of a repository without worktrees is keyed by the root
+/// too: another agent at the root vetoes it, and it vetoes the root.
+#[test]
+fn a_subdirectory_agent_shares_the_repository_roots_folder() {
+    let f = fixture();
+    let base = tempfile::tempdir().unwrap();
+    let repo = base.path().canonicalize().unwrap().join("solo");
+    std::fs::create_dir_all(repo.join("sub")).unwrap();
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    let cfg = f.cfg();
+    let (root_s, sub_s) = (repo.to_string_lossy().into_owned(), repo.join("sub").to_string_lossy().into_owned());
+    assert_eq!(
+        crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &sub_s),
+        crate::server::native_memory_handlers::memory_dir_for_cwd(&cfg, &root_s)
+    );
+    let run = |cwd: &str| {
+        reconcile_before_spawn(
+            &f.fs,
+            &f.store,
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            Duration::from_secs(10),
+        )
+    };
+    assert_eq!(run(&sub_s).skipped, Some("shared directory"));
+}
+
+#[test]
+fn an_overridden_memory_folder_is_left_alone() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    let cfg = f.cfg();
+    let r = reconcile_before_spawn(
+        &f.fs,
+        &f.store,
+        &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: true },
+        Duration::from_secs(10),
+    );
+    assert_eq!(r.skipped, Some("memory folder overridden"));
+
+    std::fs::write(f.config.path().join("settings.json"), r#"{"autoMemoryDirectory":"~/elsewhere"}"#).unwrap();
+    assert_eq!(f.run().skipped, Some("memory folder overridden"));
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty(), "nothing captured");
+
+    let env = std::collections::HashMap::from([("CLAUDE_COWORK_MEMORY_PATH_OVERRIDE".to_string(), "/x".to_string())]);
+    assert!(spawn_overrides_memory_dir(&env, &[]));
+    assert!(spawn_overrides_memory_dir(&Default::default(), &["--settings".into(), "s.json".into()]));
+    assert!(!spawn_overrides_memory_dir(&Default::default(), &["--model".into(), "opus".into()]));
+}
+
+/// Data-loss review 3, P2: indexing a conflict keeps an index that isn't
+/// UTF-8 byte for byte.
+#[test]
+fn a_non_utf8_index_keeps_its_bytes_when_a_conflict_is_indexed() {
+    let f = fixture();
+    std::fs::create_dir_all(f.dir()).unwrap();
+    let idx: Vec<u8> = b"- caf\xe9 notes (latin-1)\n".to_vec();
+    std::fs::write(f.dir().join("MEMORY.md"), &idx).unwrap();
+    f.put("notes.md", "base");
+    f.run();
+    f.change_elsewhere("notes.md", Some("theirs"));
+    f.put("notes.md", "mine");
+    assert_eq!(f.run().conflicts, 1);
+    let now = std::fs::read(f.dir().join("MEMORY.md")).unwrap();
+    assert!(now.starts_with(&idx), "{now:?}");
+    assert!(now.len() > idx.len(), "the conflict line was added");
+}
+
+/// Data-loss review 3, P2: a file is decided against the disk as it is
+/// when its turn comes, not a listing from the start of the pass — so a
+/// file another pass wrote since is not taken for deleted.
+#[test]
+fn a_file_written_after_the_listing_is_not_taken_for_deleted() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.run();
+    let other = tempfile::tempdir().unwrap();
+    let other_cfg = other.path().display().to_string();
+    f.run_in(&other_cfg);
+    put_in(&Fixture::dir_for(&other_cfg), "new.md", "made in the other folder");
+    assert_eq!(f.run_in(&other_cfg).captured, 1);
+    let dir = f.dir();
+    let dir_id = crate::backend::memory_dir_claims::dir_id(&dir);
+    assert_eq!(f.run().written, 1, "pass P writes new.md here");
+    // Pass Q, which listed the folder before P wrote it, reaches new.md.
+    let (mut rep, mut dels) = (Report::default(), Vec::new());
+    reconcile_file(&f.fs, UID, &dir, &dir_id, "new.md", &mut rep, &mut dels, true).unwrap();
+    assert!(dels.is_empty());
+    assert_eq!(f.head_body("new.md").as_deref(), Some("made in the other folder"), "no deletion recorded");
+    assert_eq!(f.get("new.md").as_deref(), Some("made in the other folder"));
+}
+
+/// Two passes for one agent at once skip rather than race; the lease frees
+/// when the pass ends, and a crashed pass's lease expires.
+#[test]
+fn a_second_pass_while_one_runs_skips() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    let lease = take_pass_lease(&f.fs, UID, Instant::now() + Duration::from_secs(10)).unwrap().unwrap();
+    assert_eq!(f.run().skipped, Some("another pass running"));
+    release_pass_lease(&f.fs, UID, &lease);
+    assert_eq!(f.run().skipped, None);
+    assert_eq!(f.run().skipped, None, "a finished pass releases its lease");
+    // A lease that has run out is taken over.
+    let zone = pass_zone(UID);
+    f.fs.zone_txn(&zone, |z| {
+        z.put(PASS_LEASE_FILE, &serde_json::to_vec(&PassLease { owner: "crashed".into(), until_ms: 1 }).unwrap())
+    })
+    .unwrap();
+    assert_eq!(f.run().skipped, None);
 }
