@@ -17,3 +17,4 @@ mod shutdown;
 mod reopen_guard;
 mod eager_resume;
 mod turn_boundary;
+mod single_live_instance;

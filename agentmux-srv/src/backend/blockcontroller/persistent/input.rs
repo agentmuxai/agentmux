@@ -128,6 +128,8 @@ impl PersistentSubprocessController {
         message: String,
         policy: DeliverPolicy,
     ) -> Result<(), String> {
+        // Pre-turn fence — see `send_message`.
+        self.fence_check()?;
         let json_str = Self::encode_user_message(&message);
 
         // ONE lock acquisition covers the turn-state read, the enqueue and the

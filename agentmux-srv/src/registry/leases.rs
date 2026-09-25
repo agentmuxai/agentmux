@@ -5,7 +5,7 @@
 //! may drive turns for a given agent `instance_id` at a time.
 //!
 //! Sibling of [`super::store::Registry`] but deliberately a separate
-//! file tree (`<registry_root>/leases/<instance_id>.{lease.json,lock}`),
+//! file tree (`<registry_root>/leases/<instance_id>.{lease.json,lock,epoch}`),
 //! not new fields on [`super::schema::NamedAgentRecordV1`]:
 //! `Registry::upsert` is a blind read-modify-write (cross-process
 //! safety comes only from atomic rename, no compare-and-swap — see
@@ -13,22 +13,41 @@
 //! last-writer-wins semantics but wrong for a lock, where "I thought
 //! nobody held it" must be an atomic check.
 //!
-//! `claim`/`renew`/`release` each hold a real, blocking, per-`instance_id`
-//! OS advisory lock (`flock` on Unix, `LockFileEx` on Windows — same
-//! primitive family already used for single-instance enforcement in
-//! `backend::base::MuxLock` and `agentmux-launcher::second_instance`,
-//! just scoped per-lease instead of globally) for the short duration of
-//! the call, not across calls. An earlier draft tried to get away with
-//! pure atomic-rename/create-if-not-exists tricks and no real lock; it
-//! had two real, independently-discovered races (a create-then-write
-//! window a concurrent claimer could observe as "corrupt" and evict,
-//! and a check-then-write TOCTOU in renew that could clobber a new
-//! owner) — a real critical section is simpler AND correct, where the
-//! lock-free version was neither.
+//! `claim`/`renew`/`release`/`verify` each hold a real, blocking,
+//! per-`instance_id` OS advisory lock (`flock` on Unix, `LockFileEx` on
+//! Windows — same primitive family already used for single-instance
+//! enforcement in `backend::base::MuxLock` and
+//! `agentmux-launcher::second_instance`, just scoped per-lease instead of
+//! globally) for the short duration of the call, not across calls. An
+//! earlier draft tried to get away with pure atomic-rename/create-if-not-
+//! exists tricks and no real lock; it had two real, independently-
+//! discovered races (a create-then-write window a concurrent claimer could
+//! observe as "corrupt" and evict, and a check-then-write TOCTOU in renew
+//! that could clobber a new owner) — a real critical section is simpler
+//! AND correct, where the lock-free version was neither.
+//!
+//! Since `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` Phase 1 the key is
+//! the agent UID and interactive (persistent) panes hold a lease for as long
+//! as their CLI process lives, not just the subprocess controller per turn.
+//! That spec's review added three rules this module enforces:
+//!
+//! - **Fail closed on an unreadable lease.** A lease file that doesn't parse
+//!   proves nothing about its holder. It stays held until nobody has
+//!   rewritten it for a full TTL (a live holder renews — rewrites — it every
+//!   [`RENEW_INTERVAL_MS`]), rather than being evicted on sight.
+//! - **Epochs survive release.** Every change of owner takes the next value
+//!   of a per-key counter (`<instance_id>.epoch`) that, like the lock file,
+//!   is never deleted — so a release followed by a new claim can never
+//!   reuse an older holder's epoch.
+//! - **A dead holder is reclaimed at once.** A lease records its holder's
+//!   host, pid and process start time; on the same host a pid that is gone,
+//!   or now belongs to a different process, frees the lease immediately
+//!   instead of after the TTL.
 //!
 //! Root cause + design context:
 //! `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`,
-//! `docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`.
+//! `docs/analysis/ANALYSIS_MULTI_AGENT_SESSION_AND_WORKDIR_ISOLATION_2026-07-29.md`,
+//! `docs/specs/SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,9 +57,10 @@ use thiserror::Error;
 
 use super::atomic::write_atomic;
 
-/// How often a held lease must be renewed while a turn is in flight.
-/// Drives its own dedicated renewal task (`subprocess/host_spawn.rs`) on
-/// this interval — not piggybacked on anything else.
+/// How often a held lease must be renewed. Drives its own dedicated renewal
+/// task (`subprocess/host_spawn.rs` per turn; `backend::agent_admission` for
+/// a persistent pane's process) on this interval — not piggybacked on
+/// anything else.
 pub const RENEW_INTERVAL_MS: u64 = 5_000;
 
 /// 3x the renew interval — tolerates two missed ticks (disk hiccup, GC
@@ -54,9 +74,37 @@ pub enum LeaseError {
         instance_id: String,
         owner_boot_id: String,
         age_ms: u64,
+        /// Who holds it, when the lease file could be read — what a
+        /// refusal message names. `None` for an unreadable or vanished file.
+        holder: Option<LeaseHolder>,
     },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Who holds a lease, as recorded in its file. Fields added by the
+/// single-live-instance spec are empty/zero on a lease written by an older
+/// build; readers must treat those as "unknown", never as a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaseHolder {
+    pub owner_boot_id: String,
+    pub block_id: String,
+    pub pid: u32,
+    pub channel: String,
+    pub version: String,
+    pub hostname: String,
+    pub epoch: u64,
+    pub acquired_at_ms: i64,
+    pub renewed_at_ms: i64,
+}
+
+/// What a claimant records about itself beyond its boot id and block —
+/// shown to whoever it later refuses. Empty strings are allowed (tests,
+/// callers that don't know); they render as "unknown".
+#[derive(Debug, Clone, Default)]
+pub struct ClaimantInfo {
+    pub channel: String,
+    pub version: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,15 +120,58 @@ struct LeaseFile {
     pid: u32,
     acquired_at_ms: i64,
     renewed_at_ms: i64,
+    // ── Added by SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 1. ──
+    // `serde(default)` both ways: an older build's lease file still parses
+    // here (so version skew never looks "corrupt"), and an older build
+    // reading one of ours ignores unknown fields.
+    #[serde(default)]
+    epoch: u64,
+    #[serde(default)]
+    hostname: String,
+    /// Holder process start time, seconds since the Unix epoch (sysinfo).
+    /// 0 = unknown. Distinguishes a reused pid from the original holder.
+    #[serde(default)]
+    pid_start_s: u64,
+    #[serde(default)]
+    channel: String,
+    #[serde(default)]
+    version: String,
+    /// Fresh for every successful `claim`, including a same-block re-claim.
+    /// Only the handle carrying the current value may renew, verify or
+    /// release: a controller replaced for the same block (a forced restart)
+    /// re-claims before the old process's exit runs, and that exit must not
+    /// delete — or be fenced by — the lease the new process now holds.
+    /// Empty on a lease written by an older build (matches any handle).
+    #[serde(default)]
+    claim_id: String,
 }
 
-/// A held lease. Cheap to `Clone` (a couple of `String`s + a
-/// `PathBuf`) — both the per-turn renew task and the eventual release
-/// call need their own owned copy.
+impl LeaseFile {
+    fn holder(&self) -> LeaseHolder {
+        LeaseHolder {
+            owner_boot_id: self.owner_boot_id.clone(),
+            block_id: self.block_id.clone(),
+            pid: self.pid,
+            channel: self.channel.clone(),
+            version: self.version.clone(),
+            hostname: self.hostname.clone(),
+            epoch: self.epoch,
+            acquired_at_ms: self.acquired_at_ms,
+            renewed_at_ms: self.renewed_at_ms,
+        }
+    }
+}
+
+/// A held lease. Cheap to `Clone` (a few `String`s + a `PathBuf`) — the
+/// renew task, the pre-turn fence check and the eventual release each need
+/// their own owned copy.
 #[derive(Debug, Clone)]
 pub struct Lease {
     instance_id: String,
     owner_boot_id: Arc<str>,
+    block_id: String,
+    claim_id: String,
+    epoch: u64,
     path: PathBuf,
 }
 
@@ -88,10 +179,24 @@ impl Lease {
     pub fn instance_id(&self) -> &str {
         &self.instance_id
     }
+
+    /// The ownership generation this lease was granted under. Strictly
+    /// greater than every earlier holder's for the same key.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
 }
 
 fn now_ms() -> i64 {
     agentmux_common::time::now_ms()
+}
+
+/// The lease file as found on disk.
+enum OnDisk {
+    Missing,
+    /// Present but unparseable; `age_ms` since it was last written.
+    Unreadable { age_ms: u64 },
+    Valid(LeaseFile),
 }
 
 pub struct LeaseStore {
@@ -113,7 +218,7 @@ impl LeaseStore {
     /// Test-only constructor with a small TTL so expiry tests don't
     /// need real multi-second sleeps.
     #[cfg(test)]
-    fn open_with_ttl(registry_root: &Path, ttl_ms: u64) -> std::io::Result<Self> {
+    pub(crate) fn open_with_ttl(registry_root: &Path, ttl_ms: u64) -> std::io::Result<Self> {
         let mut s = Self::open(registry_root)?;
         s.ttl_ms = ttl_ms;
         Ok(s)
@@ -127,30 +232,49 @@ impl LeaseStore {
         self.root.join(format!("{instance_id}.lock"))
     }
 
-    /// Read the lease file at `path`, if any. `Ok(None)` covers both
-    /// "no file" and "unparseable file" — a corrupt lease is treated
-    /// as having no trustworthy owner, same as a missing one; safe to
-    /// overwrite once inside the critical section below.
-    fn read(path: &Path) -> std::io::Result<Option<LeaseFile>> {
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e),
-        };
-        Ok(serde_json::from_slice(&bytes).ok())
+    fn epoch_path(&self, instance_id: &str) -> PathBuf {
+        self.root.join(format!("{instance_id}.epoch"))
     }
 
-    /// Attempt to claim the lease for `instance_id`.
-    ///
-    /// - Already held by `boot_id` (this process) → idempotent
-    ///   re-claim, timestamp refreshed.
-    /// - Held by another owner, not yet expired → `Err(HeldByOther)`.
-    /// - Free, corrupt, or expired → claimed.
-    ///
-    /// The whole read-decide-write sequence runs inside a per-
-    /// `instance_id` exclusive lock (see module doc comment), so
-    /// there's no window for a concurrent claimer to observe an
-    /// inconsistent state.
+    fn read(path: &Path) -> std::io::Result<OnDisk> {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(OnDisk::Missing),
+            Err(e) => return Err(e),
+        };
+        match serde_json::from_slice::<LeaseFile>(&bytes) {
+            Ok(file) => Ok(OnDisk::Valid(file)),
+            Err(_) => {
+                let age_ms = std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| d.as_millis() as u64)
+                    // An mtime we can't read proves nothing either way;
+                    // treat the file as fresh (held) — fail closed.
+                    .unwrap_or(0);
+                Ok(OnDisk::Unreadable { age_ms })
+            }
+        }
+    }
+
+    /// Next ownership epoch for `instance_id`: one past the larger of the
+    /// persisted counter and `floor` (the current file's epoch, which a lease
+    /// written before the counter existed may carry alone). Must be called
+    /// inside the key's critical section.
+    fn next_epoch(&self, instance_id: &str, floor: u64) -> std::io::Result<u64> {
+        let path = self.epoch_path(instance_id);
+        let stored = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        let next = stored.max(floor) + 1;
+        write_atomic(&path, format!("{next}\n").as_bytes())?;
+        Ok(next)
+    }
+
+    /// Attempt to claim the lease for `instance_id`. Kept for the
+    /// subprocess controller's per-turn claim; see [`Self::claim_as`].
     pub fn claim(
         &self,
         instance_id: &str,
@@ -158,31 +282,102 @@ impl LeaseStore {
         block_id: &str,
         session_id_hint: Option<&str>,
     ) -> Result<Lease, LeaseError> {
+        self.claim_as(instance_id, boot_id, block_id, session_id_hint, &ClaimantInfo::default())
+    }
+
+    /// Attempt to claim the lease for `instance_id`.
+    ///
+    /// - Already held by `boot_id` (this process) for the same block →
+    ///   idempotent re-claim, timestamp refreshed, epoch kept.
+    /// - Held, not yet expired, by **another block of this same process**
+    ///   → `Err(HeldByOther)`: one driver per agent holds inside a process
+    ///   too (ReAgent P1 on #3738), and the newcomer is the one refused.
+    /// - Held by another owner, not yet expired, holder not provably
+    ///   dead → `Err(HeldByOther)`.
+    /// - Unreadable and rewritten within the TTL → `Err(HeldByOther)`
+    ///   (fail closed — see module doc).
+    /// - Free, expired, unreadable-and-stale, or held by a dead process
+    ///   → claimed under a new epoch.
+    ///
+    /// The whole read-decide-write sequence runs inside a per-
+    /// `instance_id` exclusive lock (see module doc comment), so
+    /// there's no window for a concurrent claimer to observe an
+    /// inconsistent state.
+    pub fn claim_as(
+        &self,
+        instance_id: &str,
+        boot_id: &Arc<str>,
+        block_id: &str,
+        session_id_hint: Option<&str>,
+        info: &ClaimantInfo,
+    ) -> Result<Lease, LeaseError> {
         let _cs = CriticalSection::enter(&self.lock_path(instance_id))?;
         let path = self.content_path(instance_id);
 
-        if let Some(existing) = Self::read(&path)? {
-            if existing.owner_boot_id != boot_id.as_ref() {
-                let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
+        let (kept_epoch, floor) = match Self::read(&path)? {
+            OnDisk::Missing => (None, 0),
+            OnDisk::Unreadable { age_ms } => {
                 if age_ms <= self.ttl_ms {
                     return Err(LeaseError::HeldByOther {
                         instance_id: instance_id.to_string(),
-                        owner_boot_id: existing.owner_boot_id,
+                        owner_boot_id: "<unreadable lease file>".to_string(),
                         age_ms,
+                        holder: None,
                     });
                 }
-                // Expired — falls through to the overwrite below.
+                tracing::warn!(
+                    instance_id,
+                    age_ms,
+                    "lease: unreadable lease file not rewritten for a full TTL — reclaiming"
+                );
+                (None, 0)
             }
-            // Same owner re-claiming (e.g. controller recreated on a
-            // resync with no process restart), or an expired lease
-            // from someone else — either way, safe to overwrite.
-        }
+            OnDisk::Valid(existing) => {
+                let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
+                if existing.owner_boot_id == boot_id.as_ref() && same_block(&existing, block_id) {
+                    // Same owner re-claiming (e.g. controller recreated
+                    // on a resync with no process restart): ownership
+                    // didn't change, so neither does the epoch.
+                    (Some(existing.epoch), existing.epoch)
+                } else if existing.owner_boot_id == boot_id.as_ref() {
+                    // Another block of this process holds it.
+                    if age_ms <= self.ttl_ms {
+                        return Err(LeaseError::HeldByOther {
+                            instance_id: instance_id.to_string(),
+                            owner_boot_id: existing.owner_boot_id.clone(),
+                            age_ms,
+                            holder: Some(existing.holder()),
+                        });
+                    }
+                    (None, existing.epoch)
+                } else {
+                    if age_ms <= self.ttl_ms && !holder_is_dead(&existing) {
+                        return Err(LeaseError::HeldByOther {
+                            instance_id: instance_id.to_string(),
+                            owner_boot_id: existing.owner_boot_id.clone(),
+                            age_ms,
+                            holder: Some(existing.holder()),
+                        });
+                    }
+                    // Expired, or its process is gone — take it over.
+                    (None, existing.epoch)
+                }
+            }
+        };
 
-        let bytes = lease_bytes(instance_id, boot_id, block_id, session_id_hint)?;
+        let epoch = match kept_epoch {
+            Some(e) if e > 0 => e,
+            _ => self.next_epoch(instance_id, floor)?,
+        };
+        let claim_id = uuid::Uuid::new_v4().to_string();
+        let bytes = lease_bytes(instance_id, boot_id, block_id, session_id_hint, epoch, &claim_id, info)?;
         write_atomic(&path, &bytes)?;
         Ok(Lease {
             instance_id: instance_id.to_string(),
             owner_boot_id: Arc::clone(boot_id),
+            block_id: block_id.to_string(),
+            claim_id,
+            epoch,
             path,
         })
     }
@@ -195,23 +390,7 @@ impl LeaseStore {
     /// `HeldByOther`, never a silent clobber of the new owner's file.
     pub fn renew(&self, lease: &Lease) -> Result<(), LeaseError> {
         let _cs = CriticalSection::enter(&self.lock_path(&lease.instance_id))?;
-        let Some(existing) = Self::read(&lease.path)? else {
-            // Gone entirely — already reclaimed and later released, or
-            // evicted. Nothing to renew.
-            return Err(LeaseError::HeldByOther {
-                instance_id: lease.instance_id.clone(),
-                owner_boot_id: "<unknown — lease file missing>".to_string(),
-                age_ms: 0,
-            });
-        };
-        if existing.owner_boot_id != lease.owner_boot_id.as_ref() {
-            let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
-            return Err(LeaseError::HeldByOther {
-                instance_id: lease.instance_id.clone(),
-                owner_boot_id: existing.owner_boot_id,
-                age_ms,
-            });
-        }
+        let existing = self.owned_file(lease)?;
         let renewed = LeaseFile {
             renewed_at_ms: now_ms(),
             ..existing
@@ -222,16 +401,58 @@ impl LeaseStore {
         Ok(())
     }
 
-    /// Release a held lease. If it's no longer ours (already
-    /// TTL-reclaimed by another process), this is a safe no-op —
-    /// deleting would destroy the new owner's lease, not ours.
-    /// Idempotent: releasing an already-missing lease is `Ok(())`.
+    /// Is `lease` still ours? The pre-turn fence check: a holder that was
+    /// suspended past the TTL and reclaimed must find out before it starts
+    /// another turn, not only at its next renew tick. Does not write.
+    pub fn verify(&self, lease: &Lease) -> Result<(), LeaseError> {
+        let _cs = CriticalSection::enter(&self.lock_path(&lease.instance_id))?;
+        self.owned_file(lease).map(|_| ())
+    }
+
+    /// Read the lease file and confirm `lease`'s owner still holds it.
+    /// Caller holds the critical section.
+    fn owned_file(&self, lease: &Lease) -> Result<LeaseFile, LeaseError> {
+        let existing = match Self::read(&lease.path)? {
+            OnDisk::Valid(f) => f,
+            // Gone entirely (reclaimed and later released, or evicted), or
+            // unreadable — either way not provably ours.
+            OnDisk::Missing | OnDisk::Unreadable { .. } => {
+                return Err(LeaseError::HeldByOther {
+                    instance_id: lease.instance_id.clone(),
+                    owner_boot_id: "<unknown — lease file missing or unreadable>".to_string(),
+                    age_ms: 0,
+                    holder: None,
+                });
+            }
+        };
+        // Owner, block AND claim: a lease another block of this process took
+        // over (after this one's expired), or this block re-claimed through a
+        // newer handle (a replaced controller), is not this handle's any more.
+        if !is_this_claim(&existing, lease) {
+            let age_ms = (now_ms() - existing.renewed_at_ms).max(0) as u64;
+            return Err(LeaseError::HeldByOther {
+                instance_id: lease.instance_id.clone(),
+                owner_boot_id: existing.owner_boot_id.clone(),
+                age_ms,
+                holder: Some(existing.holder()),
+            });
+        }
+        Ok(existing)
+    }
+
+    /// Release a held lease. If it's no longer ours — already
+    /// TTL-reclaimed by another process, or re-claimed by another block of
+    /// this same process — this is a safe no-op: deleting would destroy the
+    /// current holder's lease, not ours. Idempotent: releasing an
+    /// already-missing lease is `Ok(())`. The epoch counter is never
+    /// removed (see module doc).
     pub fn release(&self, lease: &Lease) -> Result<(), LeaseError> {
         let _cs = CriticalSection::enter(&self.lock_path(&lease.instance_id))?;
-        let Some(existing) = Self::read(&lease.path)? else {
-            return Ok(());
+        let existing = match Self::read(&lease.path)? {
+            OnDisk::Valid(f) => f,
+            OnDisk::Missing | OnDisk::Unreadable { .. } => return Ok(()),
         };
-        if existing.owner_boot_id != lease.owner_boot_id.as_ref() {
+        if !is_this_claim(&existing, lease) {
             return Ok(());
         }
         match std::fs::remove_file(&lease.path) {
@@ -240,6 +461,90 @@ impl LeaseStore {
             Err(e) => Err(e.into()),
         }
     }
+
+    /// The current holder of `instance_id`'s lease if it is **live** —
+    /// unexpired and not provably dead — and is not `own_boot_id`. The
+    /// read-only early check callers run before doing anything shared on
+    /// the agent's behalf (spec I9); the binding decision is still `claim`.
+    /// An unreadable, still-fresh file is reported as held with an empty
+    /// holder (fail closed).
+    pub fn live_holder_other_than(
+        &self,
+        instance_id: &str,
+        own_boot_id: &str,
+    ) -> std::io::Result<Option<LeaseHolder>> {
+        let _cs = CriticalSection::enter(&self.lock_path(instance_id))?;
+        Ok(match Self::read(&self.content_path(instance_id))? {
+            OnDisk::Missing => None,
+            OnDisk::Unreadable { age_ms } => (age_ms <= self.ttl_ms).then(|| LeaseHolder {
+                owner_boot_id: "<unreadable lease file>".to_string(),
+                block_id: String::new(),
+                pid: 0,
+                channel: String::new(),
+                version: String::new(),
+                hostname: String::new(),
+                epoch: 0,
+                acquired_at_ms: 0,
+                renewed_at_ms: 0,
+            }),
+            OnDisk::Valid(f) => {
+                let age_ms = (now_ms() - f.renewed_at_ms).max(0) as u64;
+                (f.owner_boot_id != own_boot_id && age_ms <= self.ttl_ms && !holder_is_dead(&f))
+                    .then(|| f.holder())
+            }
+        })
+    }
+}
+
+/// Does `file` belong to `block_id`? A lease written before block ids were
+/// compared (empty) matches any block of its owner.
+fn same_block(file: &LeaseFile, block_id: &str) -> bool {
+    file.block_id.is_empty() || file.block_id == block_id
+}
+
+/// Is `file` the lease `lease` was granted — same owner, same block, same
+/// claim? An empty `claim_id` (older build) matches.
+fn is_this_claim(file: &LeaseFile, lease: &Lease) -> bool {
+    file.owner_boot_id == lease.owner_boot_id.as_ref()
+        && same_block(file, &lease.block_id)
+        && (file.claim_id.is_empty() || file.claim_id == lease.claim_id)
+}
+
+/// This host's name as recorded in a lease — lowercased and trimmed so two
+/// processes on one host always agree.
+fn this_host() -> String {
+    whoami::fallible::hostname()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase()
+}
+
+/// Start time (seconds since the Unix epoch) of process `pid` on this host,
+/// `None` if no such process is running.
+fn process_start_s(pid: u32) -> Option<u64> {
+    let target = sysinfo::Pid::from(pid as usize);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[target]),
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    sys.process(target).map(|p| p.start_time())
+}
+
+/// True only when the holder is **provably** gone: it recorded this host,
+/// and its pid is not running or now belongs to a process that started at a
+/// different time. Anything we can't prove (a lease from another host — the
+/// shared root on a network drive — or one written before hosts were
+/// recorded) is treated as alive.
+fn holder_is_dead(file: &LeaseFile) -> bool {
+    if file.hostname.is_empty() || file.pid == 0 || file.hostname != this_host() {
+        return false;
+    }
+    match process_start_s(file.pid) {
+        None => true,
+        Some(start) => file.pid_start_s != 0 && start != file.pid_start_s,
+    }
 }
 
 fn lease_bytes(
@@ -247,16 +552,26 @@ fn lease_bytes(
     boot_id: &Arc<str>,
     block_id: &str,
     session_id_hint: Option<&str>,
+    epoch: u64,
+    claim_id: &str,
+    info: &ClaimantInfo,
 ) -> Result<Vec<u8>, std::io::Error> {
     let now = now_ms();
+    let pid = std::process::id();
     let file = LeaseFile {
         instance_id: instance_id.to_string(),
         owner_boot_id: boot_id.to_string(),
         block_id: block_id.to_string(),
         session_id: session_id_hint.map(str::to_string),
-        pid: std::process::id(),
+        pid,
         acquired_at_ms: now,
         renewed_at_ms: now,
+        epoch,
+        hostname: this_host(),
+        pid_start_s: process_start_s(pid).unwrap_or(0),
+        channel: info.channel.clone(),
+        version: info.version.clone(),
+        claim_id: claim_id.to_string(),
     };
     let mut bytes = serde_json::to_vec_pretty(&file).map_err(std::io::Error::from)?;
     bytes.push(b'\n');
@@ -342,6 +657,32 @@ mod tests {
         Arc::from(id)
     }
 
+    fn lease_path(tmp: &tempfile::TempDir, id: &str) -> PathBuf {
+        tmp.path().join("leases").join(format!("{id}.lease.json"))
+    }
+
+    fn on_disk(tmp: &tempfile::TempDir, id: &str) -> LeaseFile {
+        serde_json::from_slice(&std::fs::read(lease_path(tmp, id)).unwrap()).unwrap()
+    }
+
+    /// Rewrite the lease file so it names `pid` (and `start_s`) on this
+    /// host — simulates a holder that is some other process.
+    fn set_holder_process(tmp: &tempfile::TempDir, id: &str, pid: u32, start_s: u64) {
+        let mut f = on_disk(tmp, id);
+        f.pid = pid;
+        f.pid_start_s = start_s;
+        std::fs::write(lease_path(tmp, id), serde_json::to_vec(&f).unwrap()).unwrap();
+    }
+
+    /// A pid no process has: above Linux's `pid_max` ceiling (2^22) and far
+    /// above any pid Windows hands out. (Not a spawned-and-reaped child —
+    /// the srv's spawn surface is pinned by `pane_env`'s inventory test.)
+    fn exited_pid() -> u32 {
+        const NO_SUCH_PID: u32 = 4_000_000_000;
+        assert!(process_start_s(NO_SUCH_PID).is_none(), "pid {NO_SUCH_PID} unexpectedly running");
+        NO_SUCH_PID
+    }
+
     #[test]
     fn claim_succeeds_when_no_existing_lease() {
         let (_tmp, s) = store(60_000);
@@ -355,7 +696,12 @@ mod tests {
         s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
         let err = s.claim("agent-1", &boot("boot-b"), "block-2", None).unwrap_err();
         match err {
-            LeaseError::HeldByOther { owner_boot_id, .. } => assert_eq!(owner_boot_id, "boot-a"),
+            LeaseError::HeldByOther { owner_boot_id, holder, .. } => {
+                assert_eq!(owner_boot_id, "boot-a");
+                let holder = holder.expect("a readable lease names its holder");
+                assert_eq!(holder.block_id, "block-1");
+                assert_eq!(holder.pid, std::process::id());
+            }
             other => panic!("expected HeldByOther, got {other:?}"),
         }
     }
@@ -363,9 +709,9 @@ mod tests {
     #[test]
     fn claim_is_idempotent_for_same_owner() {
         let (_tmp, s) = store(60_000);
-        s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
-        let second = s.claim("agent-1", &boot("boot-a"), "block-1", None);
-        assert!(second.is_ok());
+        let first = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        let second = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        assert_eq!(first.epoch(), second.epoch(), "a same-owner re-claim is not an ownership change");
     }
 
     #[test]
@@ -380,14 +726,103 @@ mod tests {
         assert!(reclaimed.is_ok(), "expected expired lease to be reclaimable, got {reclaimed:?}");
     }
 
+    /// Codex P1 on #3730: a parse failure does not prove the holder dead.
     #[test]
-    fn corrupt_lease_file_is_treated_as_stale_and_evicted() {
+    fn a_fresh_unreadable_lease_is_held_not_evicted() {
         let (tmp, s) = store(60_000);
-        let path = tmp.path().join("leases").join("agent-1.lease.json");
+        let path = lease_path(&tmp, "agent-1");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"not json").unwrap();
+        let err = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap_err();
+        assert!(matches!(err, LeaseError::HeldByOther { holder: None, .. }), "got {err:?}");
+        assert!(s.live_holder_other_than("agent-1", "boot-a").unwrap().is_some());
+    }
+
+    #[test]
+    fn an_unreadable_lease_nobody_rewrote_for_a_ttl_is_reclaimed() {
+        let (tmp, s) = store(50);
+        let path = lease_path(&tmp, "agent-1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"not json").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
         let claimed = s.claim("agent-1", &boot("boot-a"), "block-1", None);
-        assert!(claimed.is_ok(), "expected corrupt lease to be evicted, got {claimed:?}");
+        assert!(claimed.is_ok(), "expected a stale unreadable lease to be reclaimable, got {claimed:?}");
+    }
+
+    /// Version skew: a lease written by a build that predates the added
+    /// fields must parse (and so be honoured), not read as corrupt.
+    #[test]
+    fn a_lease_in_the_old_format_is_still_honoured() {
+        let (tmp, s) = store(60_000);
+        let path = lease_path(&tmp, "agent-1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old = serde_json::json!({
+            "instance_id": "agent-1", "owner_boot_id": "boot-old", "block_id": "b",
+            "session_id": null, "pid": 1, "acquired_at_ms": now_ms(), "renewed_at_ms": now_ms(),
+        });
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let err = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap_err();
+        match err {
+            LeaseError::HeldByOther { owner_boot_id, .. } => assert_eq!(owner_boot_id, "boot-old"),
+            other => panic!("expected HeldByOther, got {other:?}"),
+        }
+    }
+
+    /// Codex P2 on #3730: release deletes the lease file, so the epoch
+    /// must live somewhere that survives it.
+    #[test]
+    fn epochs_strictly_increase_across_release_and_reclaim() {
+        let (_tmp, s) = store(60_000);
+        let a = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        s.release(&a).unwrap();
+        let b = s.claim("agent-1", &boot("boot-b"), "block-2", None).unwrap();
+        s.release(&b).unwrap();
+        let c = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        assert!(a.epoch() >= 1);
+        assert!(b.epoch() > a.epoch(), "{} !> {}", b.epoch(), a.epoch());
+        assert!(c.epoch() > b.epoch(), "{} !> {}", c.epoch(), b.epoch());
+    }
+
+    #[test]
+    fn epochs_increase_across_ttl_reclaim_too() {
+        let (_tmp, s) = store(50);
+        let a = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
+        let b = s.claim("agent-1", &boot("boot-b"), "block-2", None).unwrap();
+        assert!(b.epoch() > a.epoch());
+    }
+
+    #[test]
+    fn a_holder_whose_process_is_gone_is_reclaimed_immediately() {
+        let (tmp, s) = store(60_000);
+        s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        set_holder_process(&tmp, "agent-1", exited_pid(), 0);
+        let reclaimed = s.claim("agent-1", &boot("boot-b"), "block-2", None);
+        assert!(reclaimed.is_ok(), "a dead holder must not wait out the TTL, got {reclaimed:?}");
+        assert!(s.live_holder_other_than("agent-1", "boot-c").unwrap().is_some());
+    }
+
+    /// PID reuse: the pid is running, but it is not the process that
+    /// took the lease (different start time).
+    #[test]
+    fn a_reused_pid_does_not_keep_a_lease_alive() {
+        let (tmp, s) = store(60_000);
+        s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        let me = std::process::id();
+        let my_start = process_start_s(me).expect("this test process is running");
+        set_holder_process(&tmp, "agent-1", me, my_start.saturating_sub(3_600));
+        assert!(s.claim("agent-1", &boot("boot-b"), "block-2", None).is_ok());
+    }
+
+    #[test]
+    fn a_holder_on_another_host_is_never_presumed_dead() {
+        let (tmp, s) = store(60_000);
+        s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        let mut f = on_disk(&tmp, "agent-1");
+        f.hostname = "some-other-host".to_string();
+        f.pid = exited_pid();
+        std::fs::write(lease_path(&tmp, "agent-1"), serde_json::to_vec(&f).unwrap()).unwrap();
+        assert!(s.claim("agent-1", &boot("boot-b"), "block-2", None).is_err());
     }
 
     #[test]
@@ -418,10 +853,21 @@ mod tests {
         assert!(matches!(err, LeaseError::HeldByOther { .. }));
 
         // Must NOT have clobbered boot-b's lease.
-        let path = tmp.path().join("leases").join("agent-1.lease.json");
-        let bytes = std::fs::read(&path).unwrap();
-        let on_disk: LeaseFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(on_disk.owner_boot_id, "boot-b");
+        assert_eq!(on_disk(&tmp, "agent-1").owner_boot_id, "boot-b");
+    }
+
+    /// The fence check a holder runs before each turn.
+    #[test]
+    fn verify_detects_a_lost_lease_without_writing() {
+        let (tmp, s) = store(50);
+        let lease = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        assert!(s.verify(&lease).is_ok());
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
+        // Expired but not reclaimed: still ours.
+        assert!(s.verify(&lease).is_ok());
+        s.claim("agent-1", &boot("boot-b"), "block-2", None).unwrap();
+        assert!(matches!(s.verify(&lease), Err(LeaseError::HeldByOther { .. })));
+        assert_eq!(on_disk(&tmp, "agent-1").owner_boot_id, "boot-b");
     }
 
     #[test]
@@ -429,8 +875,7 @@ mod tests {
         let (tmp, s) = store(60_000);
         let lease = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
         s.release(&lease).unwrap();
-        let path = tmp.path().join("leases").join("agent-1.lease.json");
-        assert!(!path.exists());
+        assert!(!lease_path(&tmp, "agent-1").exists());
     }
 
     #[test]
@@ -442,11 +887,61 @@ mod tests {
 
         s.release(&lease).unwrap();
 
-        let path = tmp.path().join("leases").join("agent-1.lease.json");
-        assert!(path.exists(), "release must not delete another owner's lease");
-        let bytes = std::fs::read(&path).unwrap();
-        let on_disk: LeaseFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(on_disk.owner_boot_id, "boot-b");
+        assert!(lease_path(&tmp, "agent-1").exists(), "release must not delete another owner's lease");
+        assert_eq!(on_disk(&tmp, "agent-1").owner_boot_id, "boot-b");
+    }
+
+    /// ReAgent P1 on #3738: one process, two blocks of the same agent (two
+    /// panes, or a subprocess turn beside a persistent pane) — one driver
+    /// holds inside a process too, and the newcomer is the one refused.
+    #[test]
+    fn a_second_block_of_the_same_process_is_refused_while_the_first_holds_it() {
+        let (_tmp, s) = store(60_000);
+        let first = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        let err = s.claim("agent-1", &boot("boot-a"), "block-2", None).unwrap_err();
+        match err {
+            LeaseError::HeldByOther { holder, .. } => assert_eq!(holder.unwrap().block_id, "block-1"),
+            other => panic!("expected HeldByOther, got {other:?}"),
+        }
+        assert!(s.verify(&first).is_ok(), "the holder keeps the agent");
+        s.release(&first).unwrap();
+        assert!(s.claim("agent-1", &boot("boot-a"), "block-2", None).is_ok());
+    }
+
+    /// A controller replaced for the same block (a forced restart) re-claims
+    /// before the old process's exit runs. That exit's release must not
+    /// delete the new claim, and the old handle is the one fenced — not the
+    /// new process.
+    #[test]
+    fn a_same_block_reclaim_supersedes_the_older_handle() {
+        let (tmp, s) = store(60_000);
+        let old = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        let new = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        assert_eq!(old.epoch(), new.epoch(), "same owner and block: not an ownership change");
+        s.release(&old).unwrap();
+        assert!(lease_path(&tmp, "agent-1").exists(), "the old handle's release must not free the new claim");
+        assert!(s.verify(&new).is_ok());
+        assert!(s.renew(&new).is_ok());
+        assert!(matches!(s.verify(&old), Err(LeaseError::HeldByOther { .. })));
+        assert!(matches!(s.renew(&old), Err(LeaseError::HeldByOther { .. })));
+        s.release(&new).unwrap();
+        assert!(!lease_path(&tmp, "agent-1").exists());
+    }
+
+    /// If a same-process block does take over — after the first block's
+    /// lease expired — the first block's `verify`/`renew` fail and its
+    /// release leaves the new holder alone.
+    #[test]
+    fn a_block_superseded_after_expiry_is_fenced_and_cannot_release() {
+        let (tmp, s) = store(50);
+        let first = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
+        let second = s.claim("agent-1", &boot("boot-a"), "block-2", None).unwrap();
+        assert!(second.epoch() > first.epoch(), "a block change is an ownership change");
+        assert!(matches!(s.verify(&first), Err(LeaseError::HeldByOther { .. })));
+        assert!(matches!(s.renew(&first), Err(LeaseError::HeldByOther { .. })));
+        s.release(&first).unwrap();
+        assert_eq!(on_disk(&tmp, "agent-1").block_id, "block-2");
     }
 
     #[test]
@@ -455,6 +950,32 @@ mod tests {
         let lease = s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
         s.release(&lease).unwrap();
         assert!(s.release(&lease).is_ok());
+    }
+
+    #[test]
+    fn live_holder_ignores_self_and_names_the_holder() {
+        // A TTL well above the sysinfo process lookup a liveness read does
+        // (tens of ms on Windows) — this test asserts the lease is FRESH.
+        let (_tmp, s) = store(60_000);
+        s.claim_as(
+            "agent-1",
+            &boot("boot-a"),
+            "block-1",
+            None,
+            &ClaimantInfo { channel: "stable".into(), version: "0.57.4".into() },
+        )
+        .unwrap();
+        assert!(s.live_holder_other_than("agent-1", "boot-a").unwrap().is_none());
+        let other = s.live_holder_other_than("agent-1", "boot-b").unwrap().unwrap();
+        assert_eq!((other.channel.as_str(), other.version.as_str()), ("stable", "0.57.4"));
+    }
+
+    #[test]
+    fn live_holder_ignores_an_expired_lease() {
+        let (_tmp, s) = store(50);
+        s.claim("agent-1", &boot("boot-a"), "block-1", None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1_000));
+        assert!(s.live_holder_other_than("agent-1", "boot-b").unwrap().is_none());
     }
 
     #[test]

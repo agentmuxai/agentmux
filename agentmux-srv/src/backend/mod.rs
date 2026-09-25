@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
+pub mod agent_admission;
 pub mod agent_color;
 pub mod agent_config;
 pub mod agent_registry_lookup;

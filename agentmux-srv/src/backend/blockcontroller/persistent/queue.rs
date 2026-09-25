@@ -655,6 +655,9 @@ impl PersistentSubprocessController {
     }
 
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
+        // Pre-turn fence (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.3):
+        // a process that lost the agent to another instance starts no turn.
+        self.fence_check()?;
         // Format as stream-json user message.
         let json_msg = serde_json::json!({
             "type": "user",

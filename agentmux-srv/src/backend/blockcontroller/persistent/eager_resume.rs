@@ -72,6 +72,30 @@ impl PersistentSubprocessController {
         let resume_flag = crate::backend::obj::meta_get_string(block_meta, "agent:resume_flag", "--resume");
         let session_id_field = crate::backend::obj::meta_get_string(block_meta, "agent:session_id_field", "session_id");
 
+        // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
+        // Phase 1, I9): if another AgentMux instance on this host runs this
+        // agent, do not resume it here — and decline BEFORE the credential
+        // gate below, which writes shared identity state. In the 2026-09-25
+        // incident this exact path tried to `--resume` the other instance's
+        // live session. Only with a lease store (every production
+        // controller); `block_in_place` needs the multi-thread runtime that
+        // production, unlike these controllers' unit tests, always has.
+        if self.lease_store.is_some() {
+            let uid = crate::backend::obj::meta_get_string(block_meta, "agentId", "");
+            let name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
+            let admission = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(self.check_admission(&uid, &name))
+            });
+            if let Err(why) = admission {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    uid = %uid,
+                    why = %why,
+                    "eager-resume declined: agent is live in another AgentMux instance on this host"
+                );
+                return EagerResumeOutcome::DeclinedTo("agent is live in another AgentMux instance on this host");
+            }
+        }
         // Identity gate, MuxBus token, reserved wrapper vars (unconditional
         // overwrite — AGENTMUX_AUTH_KEY/BLOCKID), agent identity, git
         // identity, tools PATH: the SAME function a live message send

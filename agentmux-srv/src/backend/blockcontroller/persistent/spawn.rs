@@ -124,6 +124,14 @@ impl PersistentSubprocessController {
                 return Err(held_elsewhere_error(&other, closing));
             }
         }
+        // One live instance per agent, across every AgentMux instance on this
+        // host (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md Phase 1). The
+        // check above only sees this process; this lease is host-global.
+        // Claimed here — the one point all four spawn paths pass — and held
+        // for this process's lifetime (stored below once the child runs).
+        // A refusal returns before anything is spawned; any early return
+        // after this point drops the handle, which releases the lease.
+        let agent_lease = self.acquire_agent_lease(&config, requested_sid.as_deref())?;
         {
             let inner = self.inner.lock().unwrap();
             if let Some(ref sid) = inner.session_id {
@@ -445,6 +453,9 @@ impl PersistentSubprocessController {
             inner.current_pid = Some(pid);
             inner.kill_tx = Some(kill_tx);
             inner.stdin_tx = Some(msg_tx);
+            // The same `Arc` when an earlier generation's lease was reused
+            // (see `acquire_agent_lease`), so no release happens here.
+            inner.agent_lease = agent_lease;
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
         // Now visible to `session_held_elsewhere` — a concurrent resume of
@@ -1464,6 +1475,9 @@ impl PersistentSubprocessController {
                         inner.current_pid = None;
                         inner.stdin_tx = None;
                         inner.kill_tx = None;
+                        // This process no longer drives the agent: release
+                        // its single-live-instance lease (on the last `Arc`).
+                        inner.agent_lease = None;
                     }
                     // One event resolves the ENTIRE retry/error-line
                     // decision — including any earlier `StopRequested`
@@ -1847,6 +1861,9 @@ impl PersistentSubprocessController {
                         inner.current_pid = None;
                         inner.stdin_tx = None;
                         inner.kill_tx = None;
+                        // This process no longer drives the agent: release
+                        // its single-live-instance lease (on the last `Arc`).
+                        inner.agent_lease = None;
                     }
                     // A user-initiated kill overrides any resume-retry
                     // decision in flight, for a REUSED controller instance
