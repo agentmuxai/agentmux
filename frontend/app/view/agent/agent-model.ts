@@ -43,7 +43,6 @@ export class AgentViewModel implements ViewModel {
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
-    paneChromeModel: (nodeModel: NodeModel) => PaneChromeModel;
     setProgressBarMount: (el: HTMLDivElement | null) => void;
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
@@ -111,11 +110,6 @@ export class AgentViewModel implements ViewModel {
         this.nodeModel = nodeModel;
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
-        // What used to be AgentPaneChrome's bespoke component is this
-        // capability model, read by the shared chrome in its own reactive
-        // scope.
-        this.paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
-            buildAgentPaneChromeModel(this.blockId, leafNodeModel);
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);

@@ -46,14 +46,6 @@ import { buildSettingsMenuItems } from "./termSettingsMenu";
 
 let _terminalViewComponent: ViewComponent = null;
 
-// Same late-binding trick as _terminalViewComponent above, for the same
-// reason: term.tsx imports this module, so this module can't import it back.
-// `paneChromeModel` below returns whatever term.tsx registers here.
-let _termPaneChromeModel: ((anchorBlockId: string, nodeModel: NodeModel) => PaneChromeModel) | null = null;
-
-export function setTermPaneChromeModel(builder: (anchorBlockId: string, nodeModel: NodeModel) => PaneChromeModel) {
-    _termPaneChromeModel = builder;
-}
 
 export function setTerminalViewComponent(component: ViewComponent) {
     _terminalViewComponent = component;
@@ -353,12 +345,6 @@ class TermViewModel implements ViewModel {
     get viewComponent(): ViewComponent {
         return _terminalViewComponent;
     }
-
-    /** Called once by the shared chrome at its own mount, in its own
-     *  reactive scope — which is exactly the ownership the old
-     *  `createComponent(TermPaneChrome, …)` dance existed to get. */
-    paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
-        _termPaneChromeModel?.(this.blockId, leafNodeModel) ?? {};
 
     isBasicTerm(): boolean {
         const blockData = this.blockAtom();

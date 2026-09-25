@@ -530,15 +530,22 @@ declare global {
         changeConnModalAtom?: import("@/util/util").SignalAtom<boolean>;
         /** Rendered between the header row and the content region.
          *  Overlay-positioned by the view type's own CSS; the chrome only
-         *  guarantees the DOM position. Like every field here it comes from
-         *  the pane's FIRST-hoisted view type, so it is not the place for a
-         *  per-tab busy indicator — the chrome's own progress-bar slot,
-         *  reached through `ViewModel.setProgressBarMount`, is. */
+         *  guarantees the DOM position. Like every field here it applies
+         *  while a tab of THIS view type is the active one (Pane Tab
+         *  contract Phase 4); a per-tab busy indicator goes through the
+         *  chrome's own progress-bar slot (`ViewModel.setProgressBarMount`)
+         *  instead. */
         renderBelowHeader?: () => JSX.Element;
-        /** Wraps the content region, for a view type whose background/overlay
-         *  surface must span more than the content box alone (terminal's
-         *  background image + drag overlay). Identity by default. */
-        wrapContent?: (content: JSX.Element) => JSX.Element;
+        /** Extra class on the chrome's body — the box around the content
+         *  region, below the header — for a view type whose surface spans
+         *  more than the content box (terminal's `term-pane-stack-body`). */
+        bodyClass?: string;
+        /** Rendered in the body BEFORE the content region, e.g. terminal's
+         *  background image and agent-runtime badge. The body and content
+         *  elements themselves never change, so switching between tabs of
+         *  different view types never moves the (kept-alive) content in the
+         *  DOM. */
+        renderBehindContent?: () => JSX.Element;
         /** Extra block META to contribute when a new tab is added to THIS
          *  pane, given the view type being added. Lets a pane carry context
          *  from the tab you're on into the new one — terminal returns
@@ -638,20 +645,6 @@ declare global {
          *  every stack member), not a per-block one. See
          *  `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`. */
         renderPaneChrome?: (nodeModel: NodeModel, content: JSX.Element) => JSX.Element;
-        /** Trait-like opt-in: the capabilities THIS view type wants from the
-         *  one shared pane chrome, on top of the defaults every pane gets
-         *  (tabs derived from the pane's own `blockStack`, "+" opening the
-         *  widget picker, switch/close via `layoutStack`). Nothing here is
-         *  specific to any one view type — any pane can take `extraTabs`,
-         *  `rootClass`, `wrapContent`, etc. (the agent's turn-progress bar is
-         *  NOT one of these: see `setProgressBarMount` below).
-         *
-         *  Called ONCE, at chrome mount, in the chrome's own reactive scope
-         *  (so any signals/memos it creates are owned and disposed with the
-         *  chrome, not with whatever scope happened to be ambient). The
-         *  active ViewModel is latched for the pane's life by
-         *  `pane-leaf-chrome.tsx`, so re-deriving per switch would be wrong. */
-        paneChromeModel?: (nodeModel: NodeModel) => PaneChromeModel;
         /** Registers the DOM node hoisted chrome should portal a
          *  per-block busy/progress indicator into, so the indicator's own
          *  remount (tied to the active block) doesn't require the chrome
