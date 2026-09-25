@@ -4,4 +4,4 @@
  * Pane-level events the renderer reports. `question` accompanies
  * `input_waiting` only; the router redacts it (§9.2).
  */
-export type NotifyPaneEvent = "turn_started" | "turn_completed" | "turn_errored" | "input_waiting" | "input_resolved";
+export type NotifyPaneEvent = "turn_started" | "turn_completed" | "turn_errored" | "turn_stopped" | "input_waiting" | "input_resolved";
