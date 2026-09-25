@@ -513,7 +513,14 @@ export const Placeholder = (props: PlaceholderProps) => {
     return (
         <div class="placeholder-container" style={props.style}>
             <Show when={visible()}>
-                <div class="placeholder-sizer" style={lastTransform() ?? {}}>
+                {/* `data-pane-overlay`: a browser page is a native window drawn
+                    above the DOM, so without it the ghost vanished behind a
+                    browser pane (pane-overlay-auto.ts cuts a matching hole
+                    through the page). On the SIZER, not `.placeholder`: the
+                    sizer's inline transform is what moves during a drag, and
+                    the tracker re-measures on its tagged element's own style
+                    changes. */}
+                <div class="placeholder-sizer" style={lastTransform() ?? {}} data-pane-overlay>
                     <div class={clsx("placeholder", exiting() && "exiting")} />
                 </div>
             </Show>
