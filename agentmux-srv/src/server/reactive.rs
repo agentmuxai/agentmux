@@ -1528,6 +1528,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 priority,
             );
             let body = crate::backend::reactive::types::InjectionResponse {
+                deferred: None,
                 success: true,
                 request_id,
                 block_id: None,

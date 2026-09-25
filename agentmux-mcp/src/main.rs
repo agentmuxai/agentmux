@@ -1460,7 +1460,16 @@ async fn call_tool(
                 // (server/reactive.rs, `try_cloud_relay` — "Queued is not
                 // delivered"). Report which one happened.
                 if result.get("block_id").and_then(|v| v.as_str()).is_some() {
-                    Ok(format!("Delivered to {to} — injected into their conversation."))
+                    // srv holds automated messages while the target is
+                    // mid-turn (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) and
+                    // says so with `deferred`; "injected" would be untrue.
+                    if result.get("deferred").and_then(|v| v.as_bool()) == Some(true) {
+                        Ok(format!(
+                            "QUEUED for {to} — they're mid-turn, so it has not reached them yet.                              Their AgentMux holds it and delivers it when their current turn                              ends. Don't resend it."
+                        ))
+                    } else {
+                        Ok(format!("Delivered to {to} — injected into their conversation."))
+                    }
                 } else {
                     Ok(format!(
                         "QUEUED for {to} via the cloud relay — NOT yet delivered. \
