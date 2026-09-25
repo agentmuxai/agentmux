@@ -404,6 +404,10 @@ working throughout through a legacy adapter.
        are plain memos in the instance's root now. The section names the pane
        (`liveTitle`); the manifests carry the icons the headers always showed
        (`shield-halved`, `vault`) and Armory gets its label.
+     - **Media (implemented):** `mediaPaneTab` (media.tsx). Its ViewModel was
+       only a title memo, so there is none now: the view reads and writes its
+       picked path through `ctx`, and `mediaTitle(meta)` (the file's name, or
+       "Media") titles the pane.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

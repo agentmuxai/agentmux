@@ -16,7 +16,7 @@ import { dronePaneTab } from "@/app/view/drone/drone";
 import { EditorViewModel } from "@/app/view/editor/editor";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
-import { MediaViewModel } from "@/app/view/media/media";
+import { mediaPaneTab } from "@/app/view/media/media";
 import { BundleViewModel } from "@/app/view/bundle/bundle";
 import { SettingsViewModel } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
@@ -83,7 +83,7 @@ const builtins = [
     legacyAdapter("launcher", LauncherViewModel as any),
     swarmPaneTab, // native — Phase 2c
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
-    legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
+    mediaPaneTab, // native — Phase 2c
     legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c
