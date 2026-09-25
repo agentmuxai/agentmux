@@ -72,8 +72,11 @@ pub fn escape_markup(s: &str) -> String {
 }
 
 /// `(summary, body)` exactly as sent — pure, so the escaping rule is testable.
+/// (The freedesktop "summary" is our title.) The agent's session summary has
+/// no slot of its own on Linux, so it is the body's last line (rich-content
+/// spec §1.3), escaped like the rest of the body.
 pub fn texts(n: &Notification, body_markup: bool) -> (String, String) {
-    let body = n.body.clone().unwrap_or_default();
+    let body = [n.body.as_deref(), n.summary.as_deref()].into_iter().flatten().collect::<Vec<_>>().join("\n");
     (n.title.clone(), if body_markup { escape_markup(&body) } else { body })
 }
 
@@ -238,8 +241,9 @@ mod tests {
             id: "n1".into(),
             kind: "input_waiting".into(),
             priority: "attention".into(),
-            title: "lark needs your input".into(),
+            title: "lark has a question".into(),
             body: body.map(Into::into),
+            summary: None,
             tag: "t1".into(),
         }
     }
@@ -249,7 +253,15 @@ mod tests {
         let evil = "<a href='x'>click</a> & more";
         assert_eq!(texts(&n(Some(evil)), true).1, "&lt;a href='x'&gt;click&lt;/a&gt; &amp; more");
         assert_eq!(texts(&n(Some(evil)), false).1, evil);
-        assert_eq!(texts(&n(None), true), ("lark needs your input".to_string(), String::new()));
+        assert_eq!(texts(&n(None), true), ("lark has a question".to_string(), String::new()));
+    }
+
+    #[test]
+    fn summary_is_the_last_body_line_and_escaped_with_it() {
+        let with = |body: Option<&str>, summary: &str| Notification { summary: Some(summary.into()), ..n(body) };
+        assert_eq!(texts(&with(Some("Which branch?"), "Fix repaint"), false).1, "Which branch?\nFix repaint");
+        assert_eq!(texts(&with(None, "Fix repaint"), false).1, "Fix repaint");
+        assert_eq!(texts(&with(Some("a"), "<b>x</b>"), true).1, "a\n&lt;b&gt;x&lt;/b&gt;");
     }
 
     #[test]
