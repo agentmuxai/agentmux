@@ -519,7 +519,7 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
         const wasFocused = nodeModel.isFocused();
         setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         // Terminal panes keep every stack member's <Block> mounted
-        // (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES) instead of swapping
+        // (keep-alive views, `isKeepAliveView`) instead of swapping
         // which one exists — so the target tab's own onMount-driven
         // `wasFocused && giveFocus()` (TerminalView, term.tsx) only ever
         // fires on that tab's FIRST-ever activation, not on a repeat

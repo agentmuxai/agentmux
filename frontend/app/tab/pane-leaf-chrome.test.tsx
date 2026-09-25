@@ -18,6 +18,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeModel } from "@/layout/index";
+import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
 
 // Module-level, reset in afterEach — read by the mocked Block below (via a
 // live binding, not a snapshot: the factory body runs lazily on every
@@ -43,12 +44,14 @@ let lastChromeNodeModel: NodeModel | null = null;
 // DEFERRED to the next effects flush) — the exact gap that let a
 // re-invocation bug ship undetected. Matching that timing here is what
 // makes the "does not re-invoke renderPaneChrome" test below meaningful.
-// The real registry imports every view module; the chrome decision only
-// needs "is this a registered view type" (pane-leaf-chrome's hoistsOwnChrome).
-vi.mock("@/app/block/block-registry", () => {
-    const registered = new Set(["agent", "term", "browser", "editor", "help", "sysinfo", "settings", "toolchain", "swarm"]);
-    return { getBlockViewClass: (v: string) => (registered.has(v) ? class {} : undefined) };
-});
+// The real built-ins (block-registry.ts) import every view module; the chrome
+// only needs the manifests: registered → gets the chrome (hoistsOwnChrome),
+// `keepAlive` lifecycle → stays mounted while inactive. Same capabilities as
+// the real term/agent/browser/editor manifests.
+for (const view of ["agent", "term", "browser", "editor", "help", "sysinfo", "settings", "toolchain", "swarm"]) {
+    const keepAlive = ["agent", "term", "browser", "editor"].includes(view);
+    registerPaneTab(legacyAdapter(view, class {} as any, keepAlive ? { lifecycle: "keepAlive" } : {}));
+}
 vi.mock("@/app/element/PaneChrome", () => ({
     renderPaneChromeShell: (_nodeModel: NodeModel, content: JSX.Element) => (
         <div data-testid="shell-chrome-root">{content}</div>

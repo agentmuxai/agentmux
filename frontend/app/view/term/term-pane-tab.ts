@@ -10,9 +10,10 @@
 import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { registerPaneTabDescriptor } from "@/element/pane-tab-model";
+import type { PaneTabDescriptor } from "@/element/pane-tab-model";
 
-registerPaneTabDescriptor("term", {
+/** The terminal manifest's `tab` (block-registry.ts). */
+export const termPaneTab: PaneTabDescriptor = {
     // `ordinal` counts only terminal members, so numbering stays contiguous
     // when another widget type sits between them in the stack.
     label: ({ meta, ordinal }) => (meta?.["pane-title"] as string | undefined) || `Terminal ${Math.max(ordinal, 1)}`,
@@ -22,4 +23,4 @@ registerPaneTabDescriptor("term", {
             meta: { "pane-title": title } as any,
         });
     },
-});
+};

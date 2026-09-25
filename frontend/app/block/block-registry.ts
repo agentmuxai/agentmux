@@ -1,10 +1,13 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// View-type → ViewModel class registry.
-// To add a new block view: add its class to the map below — block.tsx never
-// needs to change. A runtime registration API (for user-installed pane-tab
-// widgets) is planned: SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3/§4.
+// The built-in pane tab types, registered through the ONE pane-tab registry
+// (`pane-tab-registry.ts`, Pane Tab contract v1 Phase 2 —
+// docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3/§4). To add a view:
+// register its manifest below — block.tsx, blockutil.tsx and
+// pane-leaf-chrome.tsx read everything from the registry. Labels and icons
+// reproduce the tables they replace exactly; a view with none there keeps
+// the defaults (its name, a square).
 
 import { AgentViewModel } from "@/app/view/agent";
 import { ArmoryViewModel } from "@/app/view/armory/armory";
@@ -22,27 +25,45 @@ import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { WardenViewModel } from "@/app/view/warden/warden";
 import { HelpViewModel } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
+import { agentPaneTab } from "@/app/view/agent/agent-pane-tab";
+import { termPaneTab } from "@/view/term/term-pane-tab";
+import { getPaneTab, legacyAdapter, registerPaneTab } from "./pane-tab-registry";
 
-const blockViewRegistry = new Map<string, ViewModelClass>();
-
-blockViewRegistry.set("term", TermViewModel as any);
-blockViewRegistry.set("cpuplot", SysinfoViewModel as any);
-blockViewRegistry.set("sysinfo", SysinfoViewModel as any);
-blockViewRegistry.set("help", HelpViewModel as any);
-blockViewRegistry.set("launcher", LauncherViewModel as any);
-blockViewRegistry.set("agent", AgentViewModel as any);
-blockViewRegistry.set("swarm", SwarmViewModel as any);
-blockViewRegistry.set("editor", EditorViewModel as any);
-blockViewRegistry.set("browser", BrowserViewModel as any);
-blockViewRegistry.set("memory", BundleViewModel as any);
-blockViewRegistry.set("media", MediaViewModel as any);
-blockViewRegistry.set("identity", IdentityPaneViewModel as any);
-blockViewRegistry.set("drone", DroneViewModel as any);
-blockViewRegistry.set("warden", WardenViewModel as any);
-blockViewRegistry.set("toolchain", ToolchainViewModel as any);
-blockViewRegistry.set("armory", ArmoryViewModel as any);
-blockViewRegistry.set("settings", SettingsViewModel as any);
+const builtins = [
+    // Keep-alive (term, agent, browser, editor): remounting would lose real
+    // state — the PTY/xterm instance, the parsed agent document, the page
+    // (scroll, form input), the editor's cursor and undo. Agent per
+    // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md; browser and editor per the
+    // repo owner's decision, SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
+    legacyAdapter("term", TermViewModel as any, { label: "Terminal", icon: "terminal", lifecycle: "keepAlive", tab: termPaneTab }),
+    // "forge" was folded into the agent pane in v0.33.197.
+    legacyAdapter("agent", AgentViewModel as any, { label: "Agent", icon: "sparkles", aliases: ["forge"], lifecycle: "keepAlive", tab: agentPaneTab }),
+    legacyAdapter("browser", BrowserViewModel as any, { label: "Browser", icon: "globe", lifecycle: "keepAlive" }),
+    legacyAdapter("editor", EditorViewModel as any, { label: "Editor", icon: "file-lines", lifecycle: "keepAlive" }),
+    legacyAdapter("sysinfo", SysinfoViewModel as any, { label: "Sysinfo", icon: "chart-line" }),
+    legacyAdapter("cpuplot", SysinfoViewModel as any),
+    legacyAdapter("help", HelpViewModel as any, { label: "Help", icon: "circle-question" }),
+    legacyAdapter("launcher", LauncherViewModel as any),
+    legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project" }),
+    legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
+    legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
+    legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
+    // Workflows was renamed to Drone (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18);
+    // persisted blocks still say "workflows".
+    legacyAdapter("drone", DroneViewModel as any, { label: "Drone", icon: "diagram-project", aliases: ["workflows"] }),
+    legacyAdapter("warden", WardenViewModel as any, { label: "Warden" }),
+    legacyAdapter("toolchain", ToolchainViewModel as any),
+    // The Trust Center was renamed to Armory
+    // (docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md);
+    // persisted blocks still say "trust".
+    legacyAdapter("armory", ArmoryViewModel as any, { aliases: ["trust"] }),
+    legacyAdapter("settings", SettingsViewModel as any),
+];
+const unregisterBuiltins = builtins.map(registerPaneTab);
+// A hot reload re-runs this module but not the registry; without this the
+// re-registration would throw "already registered".
+import.meta.hot?.dispose(() => unregisterBuiltins.forEach((unregister) => unregister()));
 
 export function getBlockViewClass(viewType: string): ViewModelClass | undefined {
-    return blockViewRegistry.get(viewType);
+    return getPaneTab(viewType)?.viewModelClass;
 }

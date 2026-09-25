@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
-import { getBlockViewClass } from "@/app/block/block-registry";
+import { getPaneTab, isKeepAliveView } from "@/app/block/pane-tab-registry";
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { MOS } from "@/app/store/global";
@@ -55,12 +55,15 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
  * view) stays a plain `<Block>` until it resolves.
  */
 function hoistsOwnChrome(viewType: string): boolean {
-    return viewType !== "" && getBlockViewClass(viewType) != null;
+    return getPaneTab(viewType) != null;
 }
 
 /**
- * View types (all of which get the shared chrome, see `hoistsOwnChrome`)
- * whose stack members stay mounted
+ * Keep-alive view types (`isKeepAliveView`: the manifest's
+ * `capabilities.lifecycle === "keepAlive"`, declared in block-registry.ts,
+ * which also records why each of term, agent, browser and editor is one) —
+ * all of which get the shared chrome, see `hoistsOwnChrome` — keep their
+ * stack members mounted
  * SIMULTANEOUSLY instead of being swapped one-at-a-time behind the inner
  * `<Key>` — every member's own `<Block>` (xterm instance/PTY connection for
  * term; `AgentViewModel` + parsed document for agent) is created once and
@@ -73,8 +76,8 @@ function hoistsOwnChrome(viewType: string): boolean {
  * own file tabs never do this at all (one persistent block, no remount),
  * which is why editor felt "flawless" by comparison.
  *
- * `"agent"` added per SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md, after an
- * explicit audit of the entangled per-tab state this set's own comment used
+ * Agent is keep-alive per SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md, after an
+ * explicit audit of the entangled per-tab state this comment used
  * to warn about (quick-fork, launch-in-place): both reset via mechanisms
  * already internal to a single Block (an in-place `<Show when={agentId()}>`
  * swap for launch-in-place; a `pushBlockOntoStack` for quick-fork), never by
@@ -86,7 +89,7 @@ function hoistsOwnChrome(viewType: string): boolean {
  * explicitly gated on `isBlockDormant` instead of relying on that
  * incidental pause — see each one's own doc comment.
  *
- * `"browser"` and `"editor"` added per the repo owner's decision in
+ * Browser and editor are keep-alive per the repo owner's decision in
  * SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5: remounting a browser reloads
  * its page on every switch (scroll, form input and in-page state lost, title
  * and favicon re-loading), and remounting an editor loses cursor, scroll and
@@ -94,15 +97,13 @@ function hoistsOwnChrome(viewType: string): boolean {
  * dormant (`isBlockDormant` in use-pane-rect-sync.ts), so it can't show over
  * the active tab.
  *
- * This is PER TAB: only members whose OWN view type is in this set stay
+ * This is PER TAB: only members whose OWN view type is keep-alive stay
  * mounted while inactive. Every other member (help, sysinfo, swarm, …) is
  * unmounted when it isn't the active tab, even in a pane that keeps other
  * tabs alive — see `mountedBlockIds` below. (It used to be per pane: one
  * agent or terminal tab kept every tab of its pane mounted, which is what let
- * Help's content ghost over the next tab.) This set is the stand-in for the
- * contract's per-view `capabilities.lifecycle`.
+ * Help's content ghost over the next tab.)
  */
-const KEEP_ALIVE_TYPES = new Set(["term", "agent", "browser", "editor"]);
 
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
@@ -143,11 +144,11 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         return latchedHoisted;
     });
 
-    // Same latch shape as `hoisted` above, over the narrower KEEP_ALIVE_TYPES
+    // Same latch shape as `hoisted` above, over the narrower keep-alive view types
     // set — see that const's own doc comment for what this changes and why.
     let latchedKeepAlive = false;
     const keepAlive = createMemo(() => {
-        if (!latchedKeepAlive && KEEP_ALIVE_TYPES.has(effectiveViewType())) {
+        if (!latchedKeepAlive && isKeepAliveView(effectiveViewType())) {
             latchedKeepAlive = true;
         }
         return latchedKeepAlive;
@@ -275,7 +276,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // reports the SAME, always-current value.
     //
     // Used only when !keepAlive() — the single-active-member path below,
-    // unchanged from before KEEP_ALIVE_TYPES existed.
+    // unchanged from before keep-alive view types existed.
     const scopedNodeModel = createMemo<NodeModel>(() => {
         const id = activeBlockId();
         const slot = viewModelSlotFor(id);
@@ -322,7 +323,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
 
     // Which members are actually mounted in the keep-alive branch: the active
     // one, plus any member whose OWN view type keeps its state
-    // (KEEP_ALIVE_TYPES). A remount-type member (help, sysinfo, …) mounts only
+    // (keep-alive view types). A remount-type member (help, sysinfo, …) mounts only
     // while it's the active tab and unmounts as soon as another tab is picked,
     // exactly as it would in a pane with no keep-alive tabs at all. A member
     // whose block data hasn't loaded yet counts as remount until it has.
@@ -331,7 +332,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         resolveEffectiveViewType(MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta?.view ?? "");
     const mountedBlockIds = createMemo<string[]>(() => {
         const active = activeBlockId();
-        return stackBlockIds().filter((id) => id === active || KEEP_ALIVE_TYPES.has(viewTypeOf(id)));
+        return stackBlockIds().filter((id) => id === active || isKeepAliveView(viewTypeOf(id)));
     });
 
     // The NodeModel chrome itself renders with — plain passthrough when not
