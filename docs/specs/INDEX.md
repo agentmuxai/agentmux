@@ -51,6 +51,7 @@ See also:
 | [SPEC_ASK_USER_QUESTION_2026_06_15](SPEC_ASK_USER_QUESTION_2026_06_15.md) | `ask_user_question` tool |
 | [SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06](SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md) | 30s auto-timeout + countdown, auto-selects the recommended option |
 | [SPEC_CONTEXT_VISIBILITY_2026_06_17](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | Context-meter / token-budget visibility |
+| [SPEC_AGENT_SELF_QUIT_2026_09_24](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | `/quit` for the user, `QuitSelf` tool for the agent — own tab only, graceful, gated to user-started turns |
 
 ## Shell / Terminal Pane
 
@@ -564,6 +565,7 @@ partial list.
 | [`SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12`](SPEC_AGENT_PANE_SESSION_REPLAY_2026_05_12.md) | Spec: Agent pane session-replay framework |
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
+| [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) | SPEC: Agent pane shell drawer — replace the Session/History bar with a process & shell info panel |
 | [`SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19`](SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md) | SPEC: Agent Waiting Ambient Sound |
 | [`SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21`](SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md) | SPEC: Tool-call bursts restart the agent-pane "Working…" row's type-out reveal |
