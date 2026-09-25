@@ -110,7 +110,7 @@ pub async fn run(state: &AppState, block_id: &str, origin: QuitOrigin) -> Result
     let (a, u) = (agent_id.clone(), uid.clone());
     let (released_claims, crons) = tokio::task::spawn_blocking(move || {
         let now = agentmux_common::time::now_ms();
-        let items = identity_store.work_queue_list(work_state::CLAIMED, 1000).unwrap_or_default();
+        let items = identity_store.work_queue_claimed_by(&a, u.as_deref().unwrap_or("")).unwrap_or_default();
         let released = claims_held_by(&items, &a, u.as_deref())
             .into_iter()
             .filter(|w| {
