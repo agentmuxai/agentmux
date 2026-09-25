@@ -104,7 +104,7 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
 /// today the case is unreachable; the check is here so the gate stays
 /// correct on its own terms rather than depending on a filter two modules
 /// away that a future refactor could drop.
-fn host_caller_allowed(known: Option<&str>, supplied: &str) -> bool {
+pub(super) fn host_caller_allowed(known: Option<&str>, supplied: &str) -> bool {
     match known {
         None => false,
         Some(known) if known.is_empty() => false,
