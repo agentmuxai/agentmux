@@ -79,6 +79,9 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
                                     `${formatSize(SHELL_PASTE_MAX_BYTES)}. Save it to a file and reference ` +
                                     `it from the shell instead.`,
                                 timestamp: new Date().toISOString(),
+                                // Auto-dismiss like every other warning toast; long
+                                // enough to read the two sentences.
+                                expiration: Date.now() + 10000,
                                 type: "warning",
                             });
                             return;

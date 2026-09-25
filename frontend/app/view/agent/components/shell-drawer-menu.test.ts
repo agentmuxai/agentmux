@@ -104,6 +104,7 @@ describe("shell drawer Paste", () => {
         expect(notify).toHaveBeenCalledTimes(1);
         const n = notify.mock.calls[0][0];
         expect(n.type).toBe("warning");
+        expect(n.expiration).toBeGreaterThan(Date.now());
         expect(n.message).toContain("1 MB");
         expect(n.message).toMatch(/file/i);
     });
