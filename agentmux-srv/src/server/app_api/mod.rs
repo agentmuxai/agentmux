@@ -61,6 +61,7 @@ mod memory;
 mod skill;
 mod mcp;
 mod bookmarks;
+mod layout;
 mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
@@ -79,6 +80,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     skill::register(engine, state);
     mcp::register(engine, state);
     bookmarks::register(engine, state);
+    layout::register(engine, state);
     browser_start_page::register(engine, state);
     voice::register(engine, state);
     fleet::register(engine, state);

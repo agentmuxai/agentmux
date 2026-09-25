@@ -3,7 +3,8 @@
 **Date:** 2026-09-23
 **Status:** active — Phase 1 (this doc, supersessions, dead-field removal) in #3557; Phase 2 (the
 `DeliverPolicy` queue, the actual behavior change) in #3562; Phase 3 (ACP, sender-addressed failure
-reporting, frontend interleaving tests) not started. See §5.
+reporting, frontend interleaving tests) not started; Phase 4 (release while the agent waits on a tool
+call, §4.7) amends the guarantee below. See §5.
 **Author:** Maricon
 **Scope:** all non-human-initiated delivery into a running agent's live input —
 `agentmux-srv/src/backend/reactive/**`, `backend/blockcontroller/mod.rs::deliver_agent_message`,
@@ -33,8 +34,16 @@ thought/explanation section."*
 The guarantee, stated precisely:
 
 > No message originating from anything other than the human operator's own deliberate action shall
-> be written to a running agent's live input while a turn is in flight. Such messages are delivered
-> at the next turn boundary, one per boundary.
+> be written to a running agent's live input while the agent is writing (text or thinking). Such
+> messages are delivered at the next **tool wait** (the model has finished writing and its tool call
+> is running) or turn boundary, whichever comes first, one per boundary. §4.7.
+
+*Amended 2026-09-25.* This section originally said "while a turn is in flight" and delivered only at
+the turn boundary. That was stricter than the requirement: a tool call is not part of a train of
+thought and cannot be cut into. It also starved messages: an agent working through many tool calls
+in one turn never reaches a boundary, and a message sent to it waited minutes (observed: a message
+to a busy agent was still queued after 4 minutes and about a dozen tool calls). The requirement is
+that an explanation is never cut mid-way, and nothing more.
 
 "Never" is load-bearing. This spec deliberately ships **no sender-settable urgency override** —
 an escape hatch any automated sender could flip is exactly the exception that erodes the
@@ -252,6 +261,65 @@ Whether an ACP agent honors or queues a second `session/prompt` mid-prompt is ag
 unprobed. Apply the same queue-and-flush wrapper at the `deliver_agent_message` layer rather than
 depending on unverified third-party behavior.
 
+### 4.7 Release while the agent waits on a tool call
+
+Defers only while the model is writing. The gate is `PersistentInner::tool_wait`, changed only under
+the same `inner` lock as the queue (§4.2):
+
+| State | Meaning | Messages |
+|---|---|---|
+| `Writing` (default) | the model is, or may be, producing text or thinking | wait |
+| `Open` | the message is finished and its tool calls are running | one is written |
+| `Spent` | this tool wait already released its one message | wait |
+| `Blocked` | a tool call is parked for the operator's answer (AskUserQuestion) | wait |
+
+Transitions come from the stdout reader (`tool_wait_signal`), on the agent's own top-level lines only
+(a subagent's lines, `parent_tool_use_id` set, say nothing about the parent):
+
+- **Enter** (`Writing` → `Open`): a `message_delta` with `stop_reason: "tool_use"`, i.e. the whole
+  message, every tool call in it, has been written. When the wait opens, one queued message is
+  released at once, and the blockfile append follows the current line as at a turn boundary. Only
+  the finished message opens a wait, not each `tool_use` as it streams in: a message can hold several
+  calls, and one of them can be a question.
+- **Blocked** (→ `Blocked`): an `assistant` line calling a tool that parks for the operator
+  (`tool_parks_for_operator`: AskUserQuestion, and anything `should_route_to_decision_panel` routes).
+  Enter does nothing from `Blocked`. This is set from the tool call's own line, which precedes both the
+  `message_delta` and the `control_request` that fills `pending_questions`, so the gate never depends
+  on the park having happened yet (ReAgent P1 on #3741: reading `pending_questions` alone leaves a
+  window in which the agent has asked and nothing is parked). `pending_questions` and
+  `pending_permissions` still close the gate as well.
+- **Leave** (→ `Writing`): `message_start`, or an `assistant` line with text or thinking only. This
+  is also how `Blocked` ends: once the operator answers, the model's next message starts.
+- A release inside an `Open` wait makes it `Spent`. A release anywhere else (turn boundary, idle
+  fast path, watchdog) starts a new turn, which begins `Writing`.
+- A `result` frame and every spawn reset to `Writing`. Lines from a replaced process (stale
+  generation) are ignored, as at §4.4.
+
+**Unknown stream shapes hold messages, they never release them.** Anything `tool_wait_signal` does
+not recognise leaves the state unchanged, and the default is `Writing`. Because `Enter` needs the
+`message_delta`, a CLI run without `--include-partial-messages` never opens a tool wait and simply
+delivers at the turn boundary, as before; both persistent Claude launch paths pass that flag.
+
+**Observed order (Claude Code 2.1.280).** In a probe with the persistent launch args
+(`docs/specs/evidence/tool-wait-frame-order-claude-2.1.280.txt`), every `tool_use` line, and for
+AskUserQuestion the `control_request`, arrived before the `message_delta` that opens the wait; one
+`message_delta` closed a message holding two parallel calls. A message written at that
+`message_delta` was followed: both tools finished and the reply ended with the requested word.
+One run per case, not a documented guarantee, so the design does not depend on the order: `Blocked`
+comes from the tool call's own line and `pending_questions` is checked too.
+
+**One per wait, not a burst.** Writing message #2 in the same wait as #1 is the burst §4.4 forbids.
+The next message goes out at the next tool wait or the turn boundary.
+
+**What this does not promise.** Steering still works, by design: the model reads the message when its
+tool returns and may change course (`docs/specs/evidence/steer-probe-claude-run1.txt`: an
+interrupt written at the start of a tool call, and the agent abandoned 3 of 4 planned calls). The
+guarantee is that no explanation is cut, not that the plan is untouched. Anyone who needs the plan
+untouched can be told at the turn boundary instead — that is a per-sender policy, not built here.
+
+The watchdog (§4.4.1) shares `deferred_must_wait_locked`, so it also releases during a tool wait,
+at most once per tick. It is a backstop; the reader's release is the primary path.
+
 ## 5. Implementation plan
 
 | Phase | Content | PR |
@@ -259,6 +327,7 @@ depending on unverified third-party behavior.
 | 1 | This spec; supersede the two predecessors; delete the dead `wait_for_idle` field and its 48 call sites | #3557 |
 | 2 | `DeliverPolicy` + the `inner`-guarded queue for the persistent path (§4.2–4.5), with tests | #3562 |
 | 3 | ACP (§4.6); sender-addressed failure reporting; the interleaving tests of §7 | _pending_ |
+| 4 | Release while the agent waits on a tool call (§4.7) | this change |
 
 Phase 2 is the behavior change. Phases 1 and 3 are safe to land independently.
 

@@ -182,11 +182,10 @@ describe("ToolBlock — panel mode", () => {
     });
 
     // ── Command tooltip — narrower than the removed hover-to-peek system:
-    // static text only (the bare command), no expansion. Only the command
-    // LINE is suppressed once the panel is already expanded (redundant with
-    // the visible body) — the overlay itself, and its time/estimate lines,
-    // show regardless of expand state. See ToolBlock.tsx's header comment
-    // and REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md.
+    // static text only (the bare command), no expansion. The whole overlay —
+    // command line and time/estimate lines — shows regardless of expand
+    // state. See ToolBlock.tsx's header comment and
+    // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1.
     describe("command tooltip", () => {
         // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
         // — escapes each virtualized row's own CSS stacking context, see that
@@ -255,12 +254,12 @@ describe("ToolBlock — panel mode", () => {
             }
         });
 
-        // REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md: the
-        // overlay used to be fully suppressed while expanded, on the (wrong)
-        // premise that time/estimate were "visible in context" in the panel
-        // body — they aren't, only the command is. Only the command line
-        // stays suppressed now; time/estimate still show.
-        it("expanded (pinned): hovering still shows the overlay's time/estimate, but not the redundant command line", () => {
+        // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1: the
+        // command line used to be suppressed while expanded (#2972 kept that
+        // gate as "redundant with the panel body"), but the panel doesn't
+        // reliably show the full call and the header stays truncated — hover
+        // now shows the same full overlay in both states.
+        it("expanded (pinned): hovering shows the full command line alongside time/estimate", () => {
             vi.useFakeTimers();
             try {
                 const { container } = render(() => (
@@ -268,11 +267,30 @@ describe("ToolBlock — panel mode", () => {
                 ));
                 hoverToolName(container);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
+                expect(tip).not.toBeNull();
+                expect(tip!.textContent).toBe("ls");
                 // baseTool has no timestamp, so just the token estimate line.
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 expect(metaLines.length).toBe(1);
                 expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("expanded (pinned): a long command renders in full, untruncated, in the wrapping body", () => {
+            const longPath = "/very/long/" + "segment".repeat(60) + "/file.txt";
+            const longTool: ToolNode = { ...baseTool, params: { command: `cat ${longPath}` } };
+            vi.useFakeTimers();
+            try {
+                const { container } = render(() => (
+                    <ToolBlock node={longTool} pinned={true} onTogglePin={() => {}} />
+                ));
+                hoverToolName(container);
+                const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
+                expect(tip).not.toBeNull();
+                expect(tip!.textContent).toBe(`cat ${longPath}`);
             } finally {
                 vi.useRealTimers();
             }
@@ -320,8 +338,10 @@ describe("ToolBlock — panel mode", () => {
 
         // ToolBlock instances are reused across status transitions via
         // index-based virtualization (no remount) -- this asserts the
-        // command-line suppression is reactive to a live status/pin change
+        // command line tracks a live status/pin change
         // on an ALREADY-MOUNTED instance, not just correct on first render.
+        // (Historically this asserted the command line's SUPPRESSION while
+        // expanded; that gate is gone — see the spec note on the test below.)
         //
         // Behavior change from SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25:
         // the peek anchor used to be a narrow inner span, separate from the
@@ -335,13 +355,10 @@ describe("ToolBlock — panel mode", () => {
         // `userHolding` while the panel is auto-expanded — so it now stays
         // held open (correctly: the user is visibly still reading it).
         //
-        // REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md: only
-        // the command LINE stays suppressed while held open (redundant with
-        // the visible panel body) — the overlay itself, and its time/
-        // estimate lines, now show throughout. Leaving and re-hovering
-        // afterward (a genuinely fresh hover over the now-collapsed row)
-        // shows the command line too, since the panel is no longer expanded.
-        it("keeps a running tool's command line suppressed through completion when the cursor never moves, revealing it again only on a fresh hover", () => {
+        // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1: the
+        // command line shows while running (panel auto-expanded), while held
+        // open after completion, and after a fresh hover — every state.
+        it("shows a running tool's command line throughout completion when the cursor never moves, and on a fresh hover", () => {
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
             vi.useFakeTimers();
             try {
@@ -352,31 +369,26 @@ describe("ToolBlock — panel mode", () => {
                 fireEvent.mouseEnter(row); // cursor arrives while still running (panel auto-expanded)
                 vi.advanceTimersByTime(100);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
                 setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
                 // Held open by userHolding (engaged at the mouseenter above,
-                // since the panel WAS auto-expanded at that moment) — command
-                // line stays suppressed while the detail is visible in-flow,
-                // but the overlay itself (time/estimate) keeps showing.
+                // since the panel WAS auto-expanded at that moment).
                 const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
                 expect(panel.classList.contains("agent-tool-panel--flow")).toBe(true);
-                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
 
                 // A genuine fresh hover (leave, then re-enter) after the row
-                // has actually collapsed shows the command line again too.
+                // has actually collapsed shows it too.
                 fireEvent.mouseLeave(row);
                 fireEvent.mouseEnter(row);
                 vi.advanceTimersByTime(100);
-                const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
-                expect(tip).not.toBeNull();
-                expect(tip!.textContent).toBe("ls");
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
             } finally {
                 vi.useRealTimers();
             }
         });
 
-        it("hides only the command line — not the whole overlay — the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
+        it("keeps the command line the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
             const [pinned, setPinned] = createSignal(false);
             vi.useFakeTimers();
             try {
@@ -384,11 +396,10 @@ describe("ToolBlock — panel mode", () => {
                     <ToolBlock node={baseTool} pinned={pinned()} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
                 expect(document.body.querySelector(".agent-node-peek-tooltip-body")).not.toBeNull();
                 setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
-                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe("ls");
             } finally {
                 vi.useRealTimers();
             }

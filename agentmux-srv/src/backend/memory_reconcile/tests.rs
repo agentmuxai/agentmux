@@ -38,7 +38,7 @@ impl Fixture {
         reconcile_before_spawn(
             &self.fs,
             &self.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(cfg), cwd: CWD, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(cfg), cwd: CWD, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         )
     }
@@ -50,7 +50,7 @@ impl Fixture {
         run(
             &self.fs,
             &self.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false, history_stores: Some(&[]) },
             Budget { deadline: Instant::now() + Duration::from_secs(10), files_left: Some(files) },
         )
     }
@@ -490,7 +490,7 @@ fn a_repository_root_and_its_worktree_leave_their_shared_folder_alone() {
         let r = reconcile_before_spawn(
             &f.fs,
             &f.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         );
         assert_eq!(r.skipped, Some("shared directory"), "{cwd}");
@@ -518,7 +518,7 @@ fn a_subdirectory_agent_shares_the_repository_roots_folder() {
         reconcile_before_spawn(
             &f.fs,
             &f.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         )
     };
@@ -533,7 +533,7 @@ fn an_overridden_memory_folder_is_left_alone() {
     let r = reconcile_before_spawn(
         &f.fs,
         &f.store,
-        &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: true },
+        &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: true, history_stores: Some(&[]) },
         Duration::from_secs(10),
     );
     assert_eq!(r.skipped, Some("memory folder overridden"));
@@ -633,7 +633,7 @@ fn an_agent_in_another_channel_sharing_the_folder_keeps_it_shared() {
         reconcile_before_spawn(
             &f.fs,
             store,
-            &SpawnMemory { uid, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            &SpawnMemory { uid, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         )
     };
@@ -676,4 +676,148 @@ fn a_lease_from_a_clock_far_ahead_is_taken_over() {
     })
     .unwrap();
     assert_eq!(f.run().skipped, None);
+}
+
+/// The first pass imports the agent's per-channel history — as history
+/// only: a file it once had and has since deleted is not written back.
+#[test]
+fn the_first_pass_imports_history_without_bringing_back_deleted_files() {
+    let f = fixture();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("channel.db");
+    let store = Store::open(&path).unwrap();
+    store.agent_native_memory_version_insert(UID, "gone.md", "deleted long ago", "agent", "", "").unwrap();
+    store.agent_native_memory_version_insert(UID, "MEMORY.md", "old index", "agent", "", "").unwrap();
+    f.put("MEMORY.md", "current index");
+    let cfg = f.cfg();
+    let stores = [path];
+    let run = || {
+        reconcile_before_spawn(
+            &f.fs,
+            &f.store,
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false, history_stores: Some(&stores) },
+            Duration::from_secs(10),
+        )
+    };
+    let r = run();
+    assert_eq!((r.imported, r.adopted), (2, 1), "{r:?}");
+    assert!(f.get("gone.md").is_none(), "history never becomes a head");
+    assert_eq!(f.head_body("MEMORY.md").as_deref(), Some("current index"));
+    assert_eq!(record::history(&f.fs, UID, "MEMORY.md").unwrap().len(), 2, "the old index is in its history");
+    let again = run();
+    assert_eq!((again.imported, again.written, again.captured), (0, 0, 0), "{again:?}");
+    assert!(f.get("gone.md").is_none());
+}
+
+// ── Capture while the agent runs (the drift detector's hook) ───────────
+
+#[test]
+fn a_provider_write_while_running_is_recorded_without_touching_the_folder() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.put("notes.md", "v1");
+    f.run();
+    f.put("notes.md", "v2");
+    f.put("new.md", "a new memory");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 2);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v2"));
+    assert_eq!(f.head_body("new.md").as_deref(), Some("a new memory"));
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0, "already recorded");
+    // Projected here, so the next spawn is quiet.
+    let r = f.run();
+    assert_eq!((r.captured, r.written, r.conflicts), (0, 0, 0), "{r:?}");
+}
+
+/// The record moved on elsewhere since this folder was synced: left for
+/// the next spawn's reconcile, which keeps both — never recorded over it.
+#[test]
+fn a_file_the_record_changed_elsewhere_is_left_for_the_next_spawn() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.change_elsewhere("notes.md", Some("from another account"));
+    f.put("notes.md", "written here meanwhile");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("from another account"));
+    assert_eq!(f.get("notes.md").as_deref(), Some("written here meanwhile"), "the folder is untouched");
+    assert_eq!(f.run().conflicts, 1, "the spawn keeps both");
+}
+
+#[test]
+fn nothing_is_captured_from_a_folder_no_spawn_has_synced() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty());
+}
+
+/// Re-checked before every capture: another agent claiming the folder
+/// since the spawn stops it.
+#[test]
+fn nothing_is_captured_once_another_agent_claims_the_folder() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    crate::backend::memory_dir_claims::check_and_claim(
+        &f.fs,
+        &f.store,
+        "agent-other",
+        &f.dir(),
+        "/work/other",
+        Instant::now() + Duration::from_secs(10),
+    )
+    .unwrap();
+    f.put("notes.md", "v2");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
+}
+
+#[test]
+fn nothing_is_captured_while_a_spawn_reconciles() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.put("notes.md", "v2");
+    let lease = take_pass_lease(&f.fs, UID, Instant::now() + Duration::from_secs(10)).unwrap().unwrap();
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    release_pass_lease(&f.fs, UID, &lease);
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 1);
+}
+
+/// Deletions wait for the spawn's reconcile and its missing-folder guards.
+#[test]
+fn a_deletion_while_running_is_not_recorded() {
+    let f = fixture();
+    f.put("MEMORY.md", "idx");
+    f.put("notes.md", "v1");
+    f.run();
+    std::fs::remove_file(f.dir().join("notes.md")).unwrap();
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
+}
+
+/// Claimed, but no spawn has reconciled it (the pass was skipped): its
+/// files are not the record's yet, so nothing is captured from it.
+#[test]
+fn a_claimed_folder_no_spawn_has_synced_is_not_captured_from() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    crate::backend::memory_dir_claims::check_and_claim(&f.fs, &f.store, UID, &f.dir(), CWD, Instant::now() + Duration::from_secs(10))
+        .unwrap();
+    assert!(crate::backend::memory_dir_claims::held_exclusively(&f.fs, UID, &f.dir()).unwrap());
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 0);
+    assert!(record::heads(&f.fs, UID).unwrap().files.is_empty());
+}
+
+/// A file still being written isn't captured: a torn body would become the
+/// head and be projected into the agent's other folders.
+#[test]
+fn a_file_written_moments_ago_waits_until_it_settles() {
+    let f = fixture();
+    f.put("notes.md", "v1");
+    f.run();
+    f.put("notes.md", "half-writ");
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::from_secs(60)).unwrap(), 0);
+    assert_eq!(f.head_body("notes.md").as_deref(), Some("v1"));
+    assert_eq!(capture_while_running(&f.fs, UID, &f.dir(), Duration::ZERO).unwrap(), 1);
 }

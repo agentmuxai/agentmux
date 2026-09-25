@@ -1,6 +1,10 @@
 # Report: hover-to-peek time/token panel is missing on expanded tool calls
 
 **Status:** implemented — fix + updated tests in PR #2972.
+**Superseded in part (2026-09-23):** the rule that the tool-call peek's
+command line stays hidden while the row is expanded no longer holds —
+it now shows in every state. See
+`SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md` §1.
 **Date:** 2026-09-04
 **Author:** agent3
 **Repo state:** `agentmuxai/agentmux` main @ `b2fbf8bd1`

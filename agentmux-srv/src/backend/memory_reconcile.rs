@@ -70,6 +70,10 @@ pub(crate) struct SpawnMemory<'a> {
     /// The spawn itself may point the CLI's memory somewhere else
     /// ([`spawn_overrides_memory_dir`]).
     pub overridden: bool,
+    /// Where the agent's earlier per-channel history is imported from
+    /// ([`crate::backend::memory_history_import`]); `None`: every channel
+    /// store on this machine.
+    pub history_stores: Option<&'a [std::path::PathBuf]>,
 }
 
 /// Whether a spawn's environment or arguments may move the CLI's memory
@@ -170,6 +174,8 @@ fn release_pass_lease(fs: &FileStore, uid: &str, owner: &str) {
 pub(crate) struct Report {
     pub skipped: Option<&'static str>,
     pub adopted: usize,
+    /// Versions imported from the per-channel history, the first time.
+    pub imported: usize,
     pub written: usize,
     pub captured: usize,
     pub conflicts: usize,
@@ -307,17 +313,36 @@ fn reconcile_inner(
         report.skipped = Some("another pass running");
         return Ok(());
     };
-    let result = reconcile_dir(fs, m.uid, &dir, budget, report);
+    let result = reconcile_dir(fs, m.uid, &dir, m.history_stores, budget, report);
     release_pass_lease(fs, m.uid, &lease);
     result
 }
 
-fn reconcile_dir(fs: &FileStore, uid: &str, dir: &Path, budget: &mut Budget, report: &mut Report) -> Result<(), StoreError> {
+fn reconcile_dir(
+    fs: &FileStore,
+    uid: &str,
+    dir: &Path,
+    history_stores: Option<&[std::path::PathBuf]>,
+    budget: &mut Budget,
+    report: &mut Report,
+) -> Result<(), StoreError> {
     let dir_id = claims::dir_id(dir);
     let disk = read_disk(dir)?;
     let dir_missing = disk.is_none();
     let disk = disk.unwrap_or_default();
     report.unreadable = disk.values().filter(|d| matches!(d, OnDisk::Unreadable)).count();
+
+    // The agent's earlier history, once, now that its folder is proven its
+    // own. History only; a failure leaves it for a later pass.
+    let disk_sha = |name: &str| match disk.get(name) {
+        Some(OnDisk::Body(b)) => Some(record::sha256_hex(b)),
+        _ => None,
+    };
+    match crate::backend::memory_history_import::import_once(fs, uid, history_stores, disk_sha, budget.deadline) {
+        Ok(Some(n)) => report.imported = n,
+        Ok(None) => {}
+        Err(e) => tracing::warn!(uid, error = %e, "memory reconcile: history import failed; retried next pass"),
+    }
 
     // A folder that doesn't exist, or exists but holds none of the files
     // projected into it, no longer holds what was written there: forget
@@ -687,6 +712,101 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
         write_atomic(dir, INDEX_FILE, &next)?;
     }
     Ok(())
+}
+
+/// How long a memory file must go unchanged before a capture while the
+/// agent runs takes it.
+pub(crate) const CAPTURE_SETTLE: Duration = Duration::from_secs(2);
+
+/// A file the provider changed in `dir` since it was last projected there,
+/// with the head it will be recorded on.
+struct PendingCapture {
+    name: String,
+    body: Vec<u8>,
+    head: String,
+}
+
+/// What [`capture_while_running`] would record now: files whose content
+/// differs from what was projected here, while the record hasn't moved on
+/// since (the head is still that projection). Files the record changed
+/// elsewhere meanwhile are left for the next spawn's reconcile, which
+/// raises the conflict; deletions too, with its missing-folder guards.
+fn pending_captures(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str, settle: Duration) -> Result<Vec<PendingCapture>, StoreError> {
+    let heads = record::heads(fs, uid)?;
+    let Some(projected) = heads.projected.get(dir_id) else { return Ok(Vec::new()) };
+    let Some(disk) = read_disk(dir)? else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for (name, on_disk) in disk {
+        let OnDisk::Body(body) = on_disk else { continue };
+        // Still being written (the watcher fires as the write starts): a
+        // torn body would become the head, and the next spawn elsewhere
+        // would project it. The next event or sweep takes it once settled.
+        let modified = std::fs::metadata(dir.join(&name)).and_then(|m| m.modified());
+        if modified.map_or(true, |t| t.elapsed().map_or(true, |age| age < settle)) {
+            continue;
+        }
+        let sha = record::sha256_hex(&body);
+        let head = heads.files.get(&name);
+        if head.is_some_and(|h| h.sha256.as_deref() == Some(sha.as_str())) {
+            continue;
+        }
+        let projected_here = projected.get(&name);
+        match (head, projected_here) {
+            // The provider changed a file this folder holds the head of.
+            (Some(h), Some(p)) if &h.version == p => out.push(PendingCapture { name, body, head: h.version.clone() }),
+            // A new file the record has never had.
+            (None, None) => out.push(PendingCapture { name, body, head: String::new() }),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// Record what the provider wrote to `dir` while the agent runs — the drift
+/// detector's hook (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3).
+/// Capture only: nothing is written to the folder. Only a folder a spawn
+/// has already reconciled (it holds projections), whose claim `uid` still
+/// holds alone, and only files unchanged for `settle` ([`CAPTURE_SETTLE`]).
+/// Returns how many versions were recorded.
+pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settle: Duration) -> Result<usize, StoreError> {
+    let dir_id = claims::dir_id(dir);
+    // Cheap and read-only first: most sweeps find nothing to record.
+    if pending_captures(fs, uid, dir, &dir_id, settle)?.is_empty() {
+        return Ok(0);
+    }
+    if !claims::held_exclusively(fs, uid, dir)? {
+        return Ok(0);
+    }
+    let Some(lease) = take_pass_lease(fs, uid, Instant::now() + RECONCILE_BUDGET)? else {
+        // A spawn's reconcile is running; it records this itself.
+        return Ok(0);
+    };
+    let result = (|| {
+        let mut recorded = 0;
+        // Decided again under the lease, against a fresh read.
+        for p in pending_captures(fs, uid, dir, &dir_id, settle)? {
+            let outcome = record::append_version(
+                fs,
+                uid,
+                NewVersion {
+                    file: &p.name,
+                    body: Some(&p.body),
+                    expected_parent: (!p.head.is_empty()).then_some(p.head.as_str()),
+                    merged_parent: None,
+                    conflicts_with: None,
+                    source: "provider",
+                    source_detail: "while running",
+                    project_to: Some(&dir_id),
+                },
+            )?;
+            if matches!(outcome, AppendOutcome::Appended(_)) {
+                recorded += 1;
+            }
+        }
+        Ok(recorded)
+    })();
+    release_pass_lease(fs, uid, &lease);
+    result
 }
 
 /// `<stem>__conflict_<short>.md`, the stem cut so the whole name stays

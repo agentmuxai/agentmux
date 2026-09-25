@@ -628,8 +628,9 @@ pub enum DeliverPolicy {
     /// Write to live stdin now, even mid-turn. Reserved for the human
     /// operator's own deliberate action.
     Immediate,
-    /// Queue if a turn is in flight; deliver at the next turn boundary, one
-    /// message per boundary. The default for every automated sender.
+    /// Queue while the agent is writing; deliver when it next waits on a tool
+    /// call or its turn ends, one message per wait or boundary. The default
+    /// for every automated sender.
     #[default]
     NextIdle,
 }
@@ -639,8 +640,8 @@ pub enum DeliverPolicy {
 pub enum SendOutcome {
     /// Written to the agent's input now.
     Sent,
-    /// Queued behind the turn in flight (or older queued messages); released
-    /// at a later turn boundary.
+    /// Queued behind the agent's writing (or older queued messages); released
+    /// at its next tool call or turn boundary.
     Deferred,
 }
 
@@ -652,13 +653,15 @@ pub enum AgentDelivery {
     /// needed.
     ///
     /// "Accepted", not necessarily "already written": under
-    /// [`DeliverPolicy::NextIdle`] a message arriving mid-turn is held and
-    /// released at the next turn boundary. This variant means the controller
-    /// has taken responsibility for it, not that the agent has seen it yet —
-    /// [`AgentDelivery::StructuredDeferred`] says when it is still waiting.
+    /// [`DeliverPolicy::NextIdle`] a message arriving while the agent is writing
+    /// is held and released at its next tool call or turn boundary. This
+    /// variant means the controller has taken responsibility for it, not that
+    /// the agent has seen it yet — [`AgentDelivery::StructuredDeferred`] says
+    /// when it is still waiting.
     Structured,
-    /// Accepted like [`AgentDelivery::Structured`], but held for the next
-    /// turn boundary because the agent is mid-turn (`DeliverPolicy::NextIdle`).
+    /// Accepted like [`AgentDelivery::Structured`], but held because the agent
+    /// is writing (`DeliverPolicy::NextIdle`); released at its next tool call
+    /// or turn boundary.
     StructuredDeferred,
     /// The controller is PTY/terminal-based (shell/term) or otherwise has no
     /// structured input channel. The caller should fall back to keystroke
@@ -671,9 +674,9 @@ pub enum AgentDelivery {
 ///
 /// Callers of this function are automated senders by definition — muxbus, the
 /// reactive/jekt handler, MCP `SendMessage`, the messaging bridges. Delivery is
-/// therefore [`DeliverPolicy::NextIdle`]: if the agent is mid-turn the message
-/// waits for the next turn boundary instead of cutting its explanation in half.
-/// Spec: `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`. The human
+/// therefore [`DeliverPolicy::NextIdle`]: if the agent is writing, the message
+/// waits for its next tool call or turn boundary instead of cutting its
+/// explanation in half. Spec: `docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.7. The human
 /// operator's own input does not come through here — it goes via the
 /// `agentinput` RPC — so it is unaffected.
 ///

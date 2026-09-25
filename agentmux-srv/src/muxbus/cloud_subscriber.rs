@@ -738,6 +738,27 @@ async fn sync_agent_reactive(
         reagent_msg_id: Option<String>,
         #[serde(default)]
         reagent_ts_secs: Option<i64>,
+        // W3-S carried tuple + the cloud's same-account answer
+        // (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1). Absent from an
+        // older cloud and on unsigned rows; verified by `wan_verify` below.
+        #[serde(default)]
+        wan_sig: Option<String>,
+        #[serde(default)]
+        wan_msg_id: Option<String>,
+        #[serde(default)]
+        wan_ts_secs: Option<i64>,
+        #[serde(default)]
+        wan_source_agent: Option<String>,
+        #[serde(default)]
+        wan_target_agent: Option<String>,
+        #[serde(default)]
+        wan_source_host: Option<String>,
+        #[serde(default)]
+        wan_source_channel: Option<String>,
+        #[serde(default)]
+        wan_key_fp: Option<String>,
+        #[serde(default)]
+        sender_same_account: Option<bool>,
     }
     #[derive(Deserialize)]
     struct AckResp {
@@ -1002,6 +1023,53 @@ async fn sync_agent_reactive(
             _ => None,
         };
 
+        // W3-S (§2.3): a same-account agent's WAN signature, verified here —
+        // before transcript-request resolution, and against the POLLED
+        // agent, never a row field. Every "couldn't check" is `None` and the
+        // message is delivered as today; only an active failure is
+        // `Some(false)`.
+        let wan_row = crate::muxbus::wan_verify::CarriedRow {
+            wan_sig: inj.wan_sig.clone(),
+            wan_msg_id: inj.wan_msg_id.clone(),
+            wan_ts_secs: inj.wan_ts_secs,
+            wan_source_agent: inj.wan_source_agent.clone(),
+            wan_target_agent: inj.wan_target_agent.clone(),
+            wan_source_host: inj.wan_source_host.clone(),
+            wan_source_channel: inj.wan_source_channel.clone(),
+            wan_key_fp: inj.wan_key_fp.clone(),
+            sender_same_account: inj.sender_same_account,
+        };
+        let wan_store = crate::backend::storage::wan_identity::global();
+        let wan_verdict = match (&wan_store, &inj.wan_sig) {
+            (Some(wan), Some(_)) => match wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()) {
+                Ok(own) => {
+                    let base_url = crate::muxbus::relay::rest_base_url();
+                    let dir = crate::muxbus::wan_verify::Directory {
+                        base_url: &base_url,
+                        http,
+                        token,
+                        budget: &crate::muxbus::wan_verify::GLOBAL_BUDGET,
+                    };
+                    crate::muxbus::wan_verify::verify(
+                        wan,
+                        &own.instance_id,
+                        agent_id,
+                        inj.source_agent.as_deref().unwrap_or(""),
+                        &wan_row,
+                        &inj.message,
+                        now_unix_secs(),
+                        &dir,
+                    )
+                    .await
+                }
+                Err(_) => crate::muxbus::wan_verify::WanVerdict::default(),
+            },
+            _ => crate::muxbus::wan_verify::WanVerdict::default(),
+        };
+        if wan_verdict.reason == Some("wan_not_same_account") {
+            tracing::debug!(injection_id = %inj.id, "wan verify: sender and receiver don't share an account (or a side has none)");
+        }
+
         let mut req = InjectionRequest {
             target_agent: agent_id.to_string(),
             message: inj.message.clone(),
@@ -1013,6 +1081,9 @@ async fn sync_agent_reactive(
             forward_hops: 0,
             reagent_verified,
             reagent_key_id: inj.reagent_key_id.clone(),
+            wan_verified: wan_verdict.verified,
+            wan_instance: wan_verdict.instance.clone(),
+            wan_reason: wan_verdict.reason.map(str::to_string),
             ..Default::default()
         };
         // Phase C (muxspect Phase B/C conversation visibility,
@@ -1031,6 +1102,15 @@ async fn sync_agent_reactive(
             success = delivery.success,
             "cloud_subscriber: delivered injection"
         );
+
+        // W3-S §2.5: only now, after it landed, is this signature "seen" —
+        // a release-and-redeliver after a failed delivery must not read as
+        // a replay.
+        if delivery.success {
+            if let Some(wan) = &wan_store {
+                crate::muxbus::wan_verify::record_delivered(wan, &wan_verdict, &wan_row, now_unix_secs());
+            }
+        }
 
         if !delivery.success {
             // We hold the claim but local delivery failed (e.g. agent not

@@ -1,0 +1,36 @@
+Probe: real frame order on Claude Code 2.1.280, the persistent launch args
+(--input-format stream-json --output-format stream-json --verbose
+--include-partial-messages --permission-prompt-tool stdio --permission-mode default),
+--model haiku. 2026-09-25, Maricon@charlie. content_block_delta and non-init system
+lines omitted. Times are ms since spawn.
+
+== Turn 1: text, then AskUserQuestion (control_request left unanswered)
+  2   1367ms stream_event:message_start
+  4   2630ms assistant:thinking
+  7   2965ms assistant:text
+  9   2966ms stream_event:content_block_start:tool_use(AskUserQuestion)
+ 10   3736ms assistant:tool_use(AskUserQuestion)        <- Blocked is set here
+ 11   3739ms stream_event:content_block_stop
+ 12   3742ms control_request:can_use_tool:AskUserQuestion   <- pending_questions is filled here
+ 13   3756ms stream_event:message_delta stop=tool_use   <- the only Enter signal
+ 14   3756ms stream_event:message_stop
+
+== Turn 2: text, then two parallel Bash calls; a user message written at the message_delta
+  2   1599ms stream_event:message_start
+  7   4801ms assistant:text "I'll run both commands at the same time."
+ 10   5255ms assistant:tool_use(Bash)
+ 13   5639ms assistant:tool_use(Bash)
+ 15   5655ms stream_event:message_delta stop=tool_use   <- Enter; the user message is written here
+ 16   5655ms stream_event:message_stop
+ 18   8445ms user:tool_result
+ 19   8665ms user:tool_result                            <- both tools ran to completion
+ 20   9399ms stream_event:message_start                 <- Leave
+ 25  10769ms assistant:text "Done.\n\nPINEAPPLE"        <- the message was followed; the plan was not abandoned
+ 27  10780ms stream_event:message_delta stop=end_turn
+ 29  10791ms result:success
+
+Read: every tool_use line, and (for AskUserQuestion) the control_request, arrive BEFORE the
+message_delta that opens the wait, so neither the Blocked state nor pending_questions can be
+missing when Enter is processed. One message_delta closes a message with any number of calls.
+Only one run per case; the order is not a documented guarantee, which is why Blocked is set from
+the tool call's own line and pending_questions is checked as well.

@@ -43,7 +43,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::error::StoreError;
 
 /// Bumped only by additive changes (new tables, new nullable columns).
-const SCHEMA_VERSION: i64 = 1;
+/// v2 (D2): the receiver tables — peer-record cache, known instances, and
+/// seen signatures.
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS wan_meta (
@@ -72,6 +74,40 @@ const SCHEMA: &str = "
         -- cloud directory, and when. NULL until then.
         published_fp TEXT,
         published_at INTEGER
+    );
+    -- v2 (D2, receiver side) --
+    -- Directory records fetched for verification. Self-certifying and
+    -- content-addressed by the key fingerprint, so a cached record never
+    -- expires; re-checked against its chain on every use.
+    CREATE TABLE IF NOT EXISTS wan_peer_records (
+        instance_id TEXT    NOT NULL,
+        agent_id    TEXT    NOT NULL,
+        channel     TEXT    NOT NULL,
+        key_fp      TEXT    NOT NULL,
+        record      TEXT    NOT NULL,
+        fetched_at  INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, agent_id, channel, key_fp)
+    );
+    -- Every verified instance, recorded on first sight (§2.6). approved_at is
+    -- written only by the host-gated approval window, which ships disabled;
+    -- revoked_at is sticky.
+    CREATE TABLE IF NOT EXISTS wan_known_instances (
+        instance_id           TEXT    PRIMARY KEY,
+        host_hint             TEXT    NOT NULL,
+        first_seen_at         INTEGER NOT NULL,
+        approved_at           INTEGER,
+        revoked_at            INTEGER,
+        revocation_checked_at INTEGER
+    );
+    -- (instance, agent, msgid) already delivered (§2.5). Written after
+    -- successful local delivery; pruned once the message could no longer
+    -- pass freshness.
+    CREATE TABLE IF NOT EXISTS wan_seen_sigs (
+        instance_id TEXT    NOT NULL,
+        agent_id    TEXT    NOT NULL,
+        msg_id      TEXT    NOT NULL,
+        expires_at  INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, agent_id, msg_id)
     );
 ";
 
@@ -107,6 +143,14 @@ pub struct WanAgentKey {
     pub public_key: String,
     pub private_key: String,
     pub imported: bool,
+    /// When this store first held the key. Doubles as the certificate's
+    /// `issued_at`, so re-certifying a key produces the identical record and
+    /// a re-publish is a no-op at the directory.
+    pub created_at: i64,
+    /// The fingerprint of this key's certificate once the cloud directory
+    /// accepted it; `None` until then. The relay carry gate (§2.1 condition
+    /// 4) requires it to equal the key's own fingerprint.
+    pub published_fp: Option<String>,
 }
 
 impl std::fmt::Debug for WanAgentKey {
@@ -114,12 +158,50 @@ impl std::fmt::Debug for WanAgentKey {
         f.debug_struct("WanAgentKey")
             .field("public_key", &self.public_key)
             .field("imported", &self.imported)
+            .field("created_at", &self.created_at)
+            .field("published_fp", &self.published_fp)
             .finish_non_exhaustive()
     }
 }
 
+impl WanAgentKey {
+    /// The raw public key, if the stored base64 is well-formed.
+    pub fn public_key_bytes(&self) -> Option<[u8; 32]> {
+        decode_32(&self.public_key)
+    }
+
+    /// Whether the directory is confirmed to hold this exact key.
+    pub fn is_published(&self) -> bool {
+        match (self.public_key_bytes(), &self.published_fp) {
+            (Some(public), Some(fp)) => agentmux_common::jekt_sign::wan_key_fingerprint(&public) == *fp,
+            _ => false,
+        }
+    }
+}
+
+/// What this install knows about another instance (§2.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KnownInstance {
+    pub approved_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+    pub revocation_checked_at: Option<i64>,
+}
+
 pub struct WanIdentityStore {
     conn: Mutex<Connection>,
+}
+
+static GLOBAL: std::sync::OnceLock<std::sync::Arc<WanIdentityStore>> = std::sync::OnceLock::new();
+
+/// Register the process's `wan.db` for code that has no channel object store
+/// in hand — the cloud subscriber runs against `id_store`. Set once, at
+/// bootstrap, alongside `Store::set_wan_identity`.
+pub fn install_global(store: std::sync::Arc<WanIdentityStore>) {
+    let _ = GLOBAL.set(store);
+}
+
+pub fn global() -> Option<std::sync::Arc<WanIdentityStore>> {
+    GLOBAL.get().cloned()
 }
 
 /// `<channel dir>/wan-identity/wan.db`, from the launcher-provided paths.
@@ -297,28 +379,66 @@ impl WanIdentityStore {
         Ok(Some(WanInstance { instance_id, public_key, private_key, host_hint, created_at }))
     }
 
-    /// An agent's WAN key, if this store holds one. First production caller
-    /// is D1b's publish (which certifies loaded keys); tests only until then.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// An agent's WAN key, if this store holds one.
     pub fn agent_key_load(&self, agent_id: &str) -> Result<Option<WanAgentKey>, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         Self::agent_key_load_locked(&conn, &agent_id.to_lowercase())
     }
 
+    const AGENT_KEY_COLUMNS: &'static str = "public_key, private_key, imported, created_at, published_fp";
+
+    fn agent_key_from_row(r: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<WanAgentKey> {
+        Ok(WanAgentKey {
+            public_key: r.get(offset)?,
+            private_key: r.get(offset + 1)?,
+            imported: r.get::<_, i64>(offset + 2)? != 0,
+            created_at: r.get(offset + 3)?,
+            published_fp: r.get(offset + 4)?,
+        })
+    }
+
     fn agent_key_load_locked(conn: &Connection, key: &str) -> Result<Option<WanAgentKey>, StoreError> {
         Ok(conn
             .query_row(
-                "SELECT public_key, private_key, imported FROM wan_agent_keys WHERE agent_id = ?1",
+                &format!("SELECT {} FROM wan_agent_keys WHERE agent_id = ?1", Self::AGENT_KEY_COLUMNS),
                 params![key],
-                |r| {
-                    Ok(WanAgentKey {
-                        public_key: r.get(0)?,
-                        private_key: r.get(1)?,
-                        imported: r.get::<_, i64>(2)? != 0,
-                    })
-                },
+                |r| Self::agent_key_from_row(r, 0),
             )
             .optional()?)
+    }
+
+    /// Every agent key the directory is not confirmed to hold, by agent id —
+    /// what the publisher (`muxbus/wan_publish.rs`) works through.
+    pub fn agent_keys_unpublished(&self) -> Result<Vec<(String, WanAgentKey)>, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT agent_id, {} FROM wan_agent_keys ORDER BY agent_id",
+            Self::AGENT_KEY_COLUMNS
+        ))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, Self::agent_key_from_row(r, 1)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (agent_id, key) = row?;
+            if !key.is_published() {
+                out.push((agent_id, key));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Record that the directory accepted `public_key`'s certificate. Only
+    /// marks the row if it still holds that key — an agent deleted and
+    /// recreated while the PUT was in flight must not have its new key marked
+    /// published on the strength of the old one's.
+    pub fn agent_key_mark_published(&self, agent_id: &str, public_key: &str) -> Result<bool, StoreError> {
+        let Some(public) = decode_32(public_key) else { return Ok(false) };
+        let fp = agentmux_common::jekt_sign::wan_key_fingerprint(&public);
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let updated = conn.execute(
+            "UPDATE wan_agent_keys SET published_fp = ?1, published_at = ?2 WHERE agent_id = ?3 AND public_key = ?4",
+            params![fp, agentmux_common::time::now_secs(), agent_id.to_lowercase(), public_key],
+        )?;
+        Ok(updated > 0)
     }
 
     /// An agent's WAN key, created on first call: `import` (the agent's key
@@ -354,6 +474,128 @@ impl WanIdentityStore {
         )?;
         Self::agent_key_load_locked(&conn, &key)?
             .ok_or_else(|| StoreError::Other("wan_agent_keys row missing after mint".into()))
+    }
+
+    // ── Receiver side (D2, §2.3/§2.5/§2.6) ──
+
+    /// A cached directory record for exactly this (instance, agent, channel,
+    /// fingerprint). The caller re-checks its chain; a row that no longer
+    /// parses is treated as absent.
+    pub fn peer_record_get(
+        &self,
+        instance_id: &str,
+        agent_id: &str,
+        channel: &str,
+        key_fp: &str,
+    ) -> Result<Option<agentmux_common::jekt_sign::WanKeyRecord>, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT record FROM wan_peer_records \
+                 WHERE instance_id = ?1 AND agent_id = ?2 AND channel = ?3 AND key_fp = ?4",
+                params![instance_id.to_lowercase(), agent_id.to_lowercase(), channel, key_fp],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+    }
+
+    /// Cache a record whose chain the caller has checked.
+    pub fn peer_record_put(&self, record: &agentmux_common::jekt_sign::WanKeyRecord) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR REPLACE INTO wan_peer_records \
+             (instance_id, agent_id, channel, key_fp, record, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                record.instance_id,
+                record.agent_id,
+                record.channel,
+                record.key_fp,
+                serde_json::to_string(record)?,
+                agentmux_common::time::now_secs(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Forget every cached peer record — on logout or account switch (§2.3).
+    pub fn peer_cache_clear(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute("DELETE FROM wan_peer_records", [])?;
+        Ok(())
+    }
+
+    /// Record `instance_id` as seen (first sight inserts it) and return what
+    /// is known about it.
+    pub fn known_instance_observe(&self, instance_id: &str, host_hint: &str, now: i64) -> Result<KnownInstance, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR IGNORE INTO wan_known_instances (instance_id, host_hint, first_seen_at) VALUES (?1, ?2, ?3)",
+            params![instance_id, host_hint, now],
+        )?;
+        Ok(conn.query_row(
+            "SELECT approved_at, revoked_at, revocation_checked_at FROM wan_known_instances WHERE instance_id = ?1",
+            params![instance_id],
+            |r| {
+                Ok(KnownInstance {
+                    approved_at: r.get(0)?,
+                    revoked_at: r.get(1)?,
+                    revocation_checked_at: r.get(2)?,
+                })
+            },
+        )?)
+    }
+
+    /// Record a revocation-status check. `revoked` is sticky: a later check
+    /// that says "not revoked" never clears it.
+    pub fn known_instance_record_revocation_check(
+        &self,
+        instance_id: &str,
+        revoked: bool,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "UPDATE wan_known_instances SET revocation_checked_at = ?2, \
+             revoked_at = CASE WHEN ?3 THEN COALESCE(revoked_at, ?2) ELSE revoked_at END \
+             WHERE instance_id = ?1",
+            params![instance_id, now, revoked],
+        )?;
+        Ok(())
+    }
+
+    /// Whether this (instance, agent, msgid) was already delivered.
+    pub fn seen_sig_contains(&self, instance_id: &str, agent_id: &str, msg_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM wan_seen_sigs WHERE instance_id = ?1 AND agent_id = ?2 AND msg_id = ?3",
+                params![instance_id.to_lowercase(), agent_id.to_lowercase(), msg_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Record a delivered signature until `expires_at`, and prune the rows
+    /// that could no longer pass freshness at `now` — the same clock the
+    /// verifier's freshness check used, so a row is never pruned while its
+    /// message could still verify.
+    pub fn seen_sig_record(
+        &self,
+        instance_id: &str,
+        agent_id: &str,
+        msg_id: &str,
+        expires_at: i64,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "INSERT OR IGNORE INTO wan_seen_sigs (instance_id, agent_id, msg_id, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            params![instance_id.to_lowercase(), agent_id.to_lowercase(), msg_id, expires_at],
+        )?;
+        conn.execute("DELETE FROM wan_seen_sigs WHERE expires_at < ?1", params![now])?;
+        Ok(())
     }
 
     /// Delete the keys filed under each name (folded as the key tables fold).

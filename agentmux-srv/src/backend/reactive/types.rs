@@ -298,6 +298,30 @@ pub struct InjectionRequest {
     /// `TIER=sensitive` once published keys have propagated (spec §10).
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub channel_verified: Option<bool>,
+    /// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.3): the verdict on
+    /// a same-account agent's WAN signature, computed only by the cloud
+    /// subscriber (`muxbus::wan_verify`) — never settable by an HTTP caller
+    /// (`skip_deserializing`), so the HTTP entry point's self-declared
+    /// `delivery_tier: "wan"` always leaves it `None`.
+    ///
+    /// `Some(true)` renders `TRUST=wan-verified` with `wan_instance`, and
+    /// joins the verified-sender set **only for an approved instance**; a
+    /// `new` instance is treated exactly as unverified for escalation, and a
+    /// `revoked` one as `Some(false)`. `Some(false)` — the envelope, the
+    /// certificate chain, the record match, the signature or the replay check
+    /// actively failed — is forced `TIER=sensitive`. `None` covers every
+    /// "couldn't check" case: unsigned, another account, stale, no record,
+    /// directory unreachable.
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub wan_verified: Option<bool>,
+    /// The verified sending instance, set with `wan_verified == Some(true)`.
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub wan_instance: Option<WanInstanceInfo>,
+    /// Why `wan_verified` isn't `Some(true)`, when there's something to say
+    /// (`wan_sig_stale`, `wan_sig_replay`, `wan_key_unavailable`,
+    /// `wan_cert_invalid`, …) — audit only, never rendered.
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub wan_reason: Option<String>,
     /// Server-computed: this jekt's `message` is a `transcript_request`
     /// payload (`agentmux_common::transcript_request::parse_transcript_request`)
     /// — `muxspect` Phase B/C's LAN/WAN conversation-visibility protocol.
@@ -439,6 +463,67 @@ pub struct AgentListResponse {
     pub agents: Vec<AgentRegistration>,
 }
 
+/// Whether a verified WAN instance is one a human approved (§2.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WanInstanceStatus {
+    /// This install, or one approved through the host-gated window.
+    Approved,
+    /// Verified, but nobody has said it's theirs: no relaxation.
+    New,
+    /// Its owner retired it: treated as an active failure.
+    Revoked,
+}
+
+impl WanInstanceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::New => "new",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+
+/// The instance a WAN signature was verified against (§2.6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WanInstanceInfo {
+    /// The full 26-char id the certificate chain proved.
+    pub id: String,
+    /// `<host_hint>~<id8>` — `jekt_sign::wan_instance_display_label`, the
+    /// only form ever shown to a human or an agent.
+    pub label: String,
+    pub status: WanInstanceStatus,
+}
+
+/// The WAN part of an audit entry (§2.6 "Audit and docs").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WanAudit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<WanInstanceStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl WanAudit {
+    /// `None` for a request with nothing WAN to record.
+    pub fn from_request(req: &InjectionRequest) -> Option<Self> {
+        if req.wan_verified.is_none() && req.wan_reason.is_none() {
+            return None;
+        }
+        Some(Self {
+            verified: req.wan_verified,
+            instance: req.wan_instance.as_ref().map(|i| i.id.clone()),
+            status: req.wan_instance.as_ref().map(|i| i.status),
+            reason: req.wan_reason.clone(),
+        })
+    }
+}
+
 /// Audit log entry for message injection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditLogEntry {
@@ -493,6 +578,9 @@ pub struct AuditLogEntry {
     /// delivery.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub audit_source_uid: String,
+    /// W3-S: the WAN verdict for a cloud-delivered jekt, when there was one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wan: Option<WanAudit>,
 }
 
 fn default_event_kind() -> String {
@@ -595,8 +683,9 @@ pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sy
 /// - `Ok(SenderDelivery::Delivered)` — delivered on the controller's structured
 ///   channel (persistent stream-json stdin / ACP `session/prompt`); no PTY
 ///   keystrokes needed.
-/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but held until
-///   the agent's current turn ends (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
+/// - `Ok(SenderDelivery::Deferred)` — accepted on that channel but held while
+///   the agent is writing; released at its next tool call or turn boundary
+///   (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
 ///   The message is safe; the agent just hasn't seen it yet.
 /// - `Ok(SenderDelivery::Pty)` — the controller is PTY-based; the caller should
 ///   fall back to keystroke injection.
