@@ -243,7 +243,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     //
     // `.agent-tool-overlay-log` scrolls its own overflow
     // (`overflow-y: auto`, `_tool-overlay-portal.scss`) inside
-    // `.agent-tool-panel`'s `max-height: 50vh` cap — the module's default
+    // `.agent-tool-panel`'s `max-height` cap (a third of 50vh) — the module's default
     // measurement (`offsetHeight`, the rendered box) clamps at whatever's
     // left of that budget and stops changing once content exceeds it,
     // while `scrollHeight` keeps reflecting the true content height.
@@ -258,7 +258,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // MAX_TOOL_OUTPUT_LINES (1,000) has a scrollHeight delta easily in the
     // tens of thousands of px against a short terminal result, which would
     // blow the cap and skip animating — even though the box's actual
-    // VISIBLE shrink is bounded by the same 50vh cap to at most a few
+    // VISIBLE shrink is bounded by the same vh cap to at most a few
     // hundred px. The cap exists for an unrelated phenomenon (a whole
     // pane's scrollHeight collapsing by 20,000+px — see that constant's
     // own doc comment); measured against scrollHeight here, it would fire
