@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-25
 **Severity:** Medium: the only at-a-glance "this agent is working" signal is silently missing.
-**Status:** root cause confirmed in a live 0.57.3 instance; fix not yet written.
+**Status:** fixed. Both parts of the cause were confirmed live; the fix was
+verified in a `task dev` instance (see "Verification").
 
 ## What was reported
 
@@ -52,6 +53,57 @@ In a Swarm-first stack the latched vm is the Swarm vm. It has no
 The agent does become busy (`paneBusy()` flips), but nothing is mounted to
 show it.
 
+### Part 2, found while verifying the first fix
+
+Moving the slot into the shared chrome wasn't enough on its own. In a live
+`task dev` instance, the slot rendered in a Swarm-first pane, but the agent
+tab's bar still never reached it. The cause is a second latch in
+`pane-leaf-chrome.tsx`:
+
+- `keepAlive` latches on the first time an agent (or term) member is
+  active (`pane-leaf-chrome.tsx:144-150`). A Swarm-first pane starts with
+  it off and flips it on mid-life, when the agent tab is first activated.
+  Live: the pane went from 0 to 2 `.pane-leaf-keepalive-slot`s.
+- Under keep-alive, each member reports its vm to its **own per-id slot**
+  (`keepAliveNodeModelFor`), not to the leaf NodeModel.
+- The chrome renders once and was handed a **snapshot** of
+  `chromeNodeModel()` from first hoist: the leaf's own NodeModel, because
+  keep-alive was still off then. Its `activeViewModel()` stopped following
+  the active tab (it read `null`), so the chrome's slot handoff never reached
+  the agent.
+
+The same stale `activeViewModel()` also feeds the header's `viewModel` and
+the tab strip's `liveViewModel` in these panes.
+
+## Fix
+
+1. `PaneChrome.tsx` renders `.pane-progress-bar-slot` on every pane and
+   hands it to `nodeModel.activeViewModel()?.setProgressBarMount`,
+   re-pointing on every switch. The agent's `PaneChromeModel` no longer
+   supplies the slot. The slot's styles and `--progress-bar-color` move from
+   `.agent-pane-stack` to `.pane-stack` (`PaneChrome.scss`).
+2. `pane-leaf-chrome.tsx` hands the chrome one stable NodeModel whose
+   `activeViewModel` delegates through the `chromeNodeModel()` memo, so it
+   follows the mid-life keep-alive switch.
+
+## Verification
+
+- Unit tests: `PaneChrome.test.tsx` (the slot exists without a
+  `PaneChromeModel`; it's handed to, taken back from, and moved between
+  active vms) and `pane-leaf-chrome.test.tsx` (the chrome's
+  `activeViewModel()` reports the agent tab in a Swarm-first pane after
+  keep-alive latches, and follows later switches). All six fail without
+  their half of the fix.
+- Live, `task dev`, driven over CDP. In a pane with the Swarm tab active at
+  load, switching to an agent tab (Mopeo) put the agent's
+  `.agent-pane-progress-bar` into that pane's `.pane-progress-bar-slot`.
+  Before part 2 there was none. With the `--active` class forced on,
+  the ring rendered in the pane's ring color (`--progress-bar-color`
+  resolved on `.pane-stack`) with `agent-ant-march` running. A real busy
+  turn couldn't be driven, because no agent in the dev data dir has valid
+  credentials. The `paneBusy()` → `--active` path itself is unchanged by
+  this fix.
+
 ## Scope: every stack whose first hoisted member isn't an agent
 
 This isn't specific to Swarm. Every view type in `HOISTS_OWN_CHROME`
@@ -62,15 +114,17 @@ provide `renderBelowHeader` either.
 
 Agent-specific chrome capabilities lost in these stacks for the same reason:
 
-- the busy ring (this report);
-- the agent's `extraTabs` (forked-conversation pills from other panes);
-- the `agent-pane-stack` / `-content` root classes, which carry
-  `--progress-bar-color` and the floating tab-strip overlay rules.
+- the busy ring (this report, fixed);
+- the agent's `extraTabs` (forked-conversation pills from other panes; still
+  open);
+- the `agent-pane-stack` / `-content` root classes, which carry the
+  floating tab-strip overlay rules (still open). `--progress-bar-color`
+  used to live there too; it's on `.pane-stack` now.
 
-Also related, but a separate mechanism: `KEEP_ALIVE_TYPES` is latched the same
-way (`pane-leaf-chrome.tsx:144-150`). A Swarm-first stack therefore never
-keeps its agent tab alive, and switching back to the agent tab remounts its
-`<Block>`.
+Keep-alive is latched too (`pane-leaf-chrome.tsx:144-150`), but on the
+first time a keep-alive type is active, not only at first hoist. A
+Swarm-first stack does switch to keep-alive once its agent tab is activated.
+That mid-life switch is the second half of this bug (Part 2, above).
 
 ## Why it wasn't caught
 
@@ -80,29 +134,17 @@ chrome. The pane-tab work that made mixed-type stacks possible
 "drop a Pane Tab anywhere") never re-checked the progress-bar handoff for
 an agent that is not the chrome owner.
 
-## Proposed fix
+A unit test for the chrome's slot handoff alone would also have passed while
+the live bug remained. Only driving a real Swarm-first pane exposed Part 2,
+because it lives in how `pane-leaf-chrome.tsx` and the chrome compose, not
+in either one alone.
 
-Make the slot a **chrome** feature, not an agent-chrome feature:
+## Still open (separate follow-ups)
 
-- `PaneChrome.tsx` always renders a generic progress-bar slot, whatever the
-  latched vm is.
-- The mount handoff follows the **active** member, not the latched one:
-  whenever `nodeModel.activeViewModel()` exposes `setProgressBarMount`, point
-  it at the slot, and clear it on change. This is the same
-  effect/cleanup idiom as `agent-view.tsx:485-492`, moved into the shared
-  chrome.
-- Move the slot/bar positioning and `--progress-bar-color` from
-  `.agent-pane-stack` onto `.pane-stack`, so the ring is styled identically
-  in every chrome.
+- Agent `extraTabs` and the `agent-pane-stack` overlay rules in
+  non-agent-first stacks.
 
-Regression test: a stack whose first member is `swarm` (and one that starts
-with `term`), plus an agent member. Activate the agent, make it busy, and
-assert that `.agent-pane-progress-bar--active` renders.
-
-Out of scope for this fix, to track separately: agent `extraTabs` and
-keep-alive in non-agent-first stacks.
-
-## Workaround until fixed
+## Workaround on builds without the fix
 
 Keep agents in panes that started as agent panes. Dragging the agent tab out
 into its own pane gives it agent chrome and the ring.

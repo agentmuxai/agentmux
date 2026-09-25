@@ -52,6 +52,35 @@ Caveat: headless Chrome composites in software. The live app uses CEF with
 GPU raster, which positions composited layers on the device-pixel grid through
 a different path.
 
+### Live check in real CEF (task dev, 2026-09-25)
+
+In the `task dev` build of the stack-chrome fix, `--active` was forced on for
+an agent tab in a split pane. The pane was at x=316.5, DPR 1, 312×792, with a
+neighbor to its left. The full window was captured over CDP, and every
+device-pixel column near each edge was classified over 700 rows. Note: the
+bright stripes are the same color as the focused selection ring, so only the
+dim (25%) stripe segments are distinguishable from the ring.
+
+| Edge | Stripe-band column | Ring-color rows | Dim-stripe rows |
+|---|---|---|---|
+| Left | x=319 | 398 | 302 |
+| Right | x=626 | 356 | 344 |
+
+The stripes were present, with about the same share, on both edges. So
+**under real GPU raster, at a fractional x, with a left neighbor**, the
+problem did not reproduce in that frame. That weakens candidate 2 as a
+steady-state cause, and the problem really is intermittent: a snapshot of
+the right configuration looks correct. The live capture below, taken
+while it is showing, is still the next step.
+
+Another observation for whoever picks this up: because the bright stripes
+match the ring color, the visible "teeth" are only the dim segments. A tall
+narrow pane puts its left and right edges much closer to the conic center
+than its top and bottom, so segments there are much shorter: about
+156·tan(10°) ≈ 27px near mid-edge, against about 70px on the top and bottom
+of a 312×792 pane. That makes side-edge teeth look shorter by design, but it
+affects left and right equally, so it doesn't explain a left-only report.
+
 ## Candidate causes, ranked
 
 1. **Another element overlays the left edge band above the ring's z-index.**

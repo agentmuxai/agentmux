@@ -447,6 +447,22 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         return latchedChromeVm;
     });
 
+    // What the chrome itself holds for the pane's whole life. Chrome renders
+    // ONCE, so handing it a `chromeNodeModel()` snapshot froze whichever
+    // variant was current at first hoist: a pane that started as a
+    // non-keep-alive type (Swarm) got the leaf's own NodeModel, then an
+    // agent tab latched keep-alive on and every member began reporting its
+    // vm to its own per-id slot instead — so the chrome's
+    // `activeViewModel()` stopped following the active tab, and the busy
+    // ring's slot never reached the agent
+    // (RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md).
+    // `activeViewModel` delegates through the memo instead, so it follows
+    // the keep-alive switch too.
+    const paneChromeNodeModel: NodeModel = {
+        ...nodeModel,
+        activeViewModel: () => chromeNodeModel().activeViewModel?.() ?? null,
+    };
+
     return (
         <Show when={hoisted()} fallback={content}>
             {/* Guards only the leaf's own first-hoist window, before any
@@ -455,7 +471,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                 never returns to a falsy value after its first real
                 capture. */}
             <Show when={chromeVm()}>
-                {(vm) => vm().renderPaneChrome!(chromeNodeModel(), content)}
+                {(vm) => vm().renderPaneChrome!(paneChromeNodeModel, content)}
             </Show>
         </Show>
     );
