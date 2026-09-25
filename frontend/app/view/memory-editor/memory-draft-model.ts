@@ -144,10 +144,15 @@ export class MemoryDraftModel<T> {
         try {
             const base = await this.baseSha;
             await this.opts.save(draft, base);
-            this.setEditing(false);
-            this.setDraftValue(null);
             this.setConflict(null);
             this.rebase(draft);
+            // Typing continued while the save was in flight: keep editing the
+            // newer text, now based on what was just saved, so nothing typed
+            // after pressing Save is lost.
+            const latest = this.draftAtom();
+            if (latest !== null && !this.opts.equals(latest, draft)) return true;
+            this.setEditing(false);
+            this.setDraftValue(null);
             return true;
         } catch (e) {
             if (isConflictError(e)) {

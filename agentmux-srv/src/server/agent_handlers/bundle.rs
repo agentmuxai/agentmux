@@ -432,7 +432,13 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -
     bundle.updated_at = agentmux_common::time::now_ms();
     let detail = json!({ "reverted_to": cmd.target_version_id }).to_string();
     let version = if bundle.is_system {
-        store.bundle_upsert_system_if_changed(&bundle, "armory-ui", "revert", &detail)
+        // Reverting to text AgentMux itself seeded hands the entry back to
+        // the seeder, so it keeps receiving Operator Config updates;
+        // recording it as an Armory edit would opt it out of them for good
+        // (`bundle_reseed_system_if_owned` skips any non-seeder last writer).
+        let seeder = crate::backend::operator_config_seed::WRITTEN_BY;
+        let written_by = if target.written_by == seeder { seeder } else { "armory-ui" };
+        store.bundle_upsert_system_if_changed(&bundle, written_by, "revert", &detail)
     } else {
         store.bundle_upsert_with_version(&bundle, "armory-ui", "", "revert", &detail)
     }
@@ -944,5 +950,52 @@ mod global_memory_ui_tests {
         let row = state.id_store.bundle_get("sys-hist").unwrap().unwrap();
         assert_eq!(row.instructions, "v1");
         assert!(row.is_system, "reverting must not demote a system entry");
+    }
+
+    // Reverting a system entry to the text AgentMux seeded hands it back to
+    // the seeder: later Operator Config updates apply again.
+    #[tokio::test]
+    async fn reverting_a_system_entry_to_seeded_text_restores_seeder_ownership() {
+        use crate::backend::operator_config_seed::WRITTEN_BY;
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let mut seeded = Bundle {
+            id: "sys-own".into(),
+            name: "Policy".into(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: "seeded v1".into(),
+            instructions_by_provider: "{}".into(),
+            context_files: "[]".into(),
+            mcp_servers: "[]".into(),
+            skills: "[]".into(),
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+            is_system: true,
+        };
+        state.id_store.bundle_reseed_system_if_owned(&seeded, WRITTEN_BY, "test_seed", "{}").unwrap();
+        ok::<Bundle>(&engine, &mut rx, COMMAND_UPSERT_SYSTEM_MEMORY, json!({
+            "id": "sys-own", "name": "Policy", "instructions": "local edit",
+        }))
+        .await;
+
+        let history: GlobalMemoryHistoryResult =
+            ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_HISTORY, json!({ "id": "sys-own" })).await;
+        let seeded_version = history.versions.iter().find(|v| v.written_by == WRITTEN_BY).unwrap().id.clone();
+        let reverted: GlobalMemoryRevertResult = ok(&engine, &mut rx, COMMAND_GLOBAL_MEMORY_REVERT, json!({
+            "id": "sys-own", "target_version_id": seeded_version,
+        }))
+        .await;
+        assert_eq!(reverted.version.unwrap().written_by, WRITTEN_BY);
+
+        seeded.instructions = "seeded v2".into();
+        let outcome = state.id_store.bundle_reseed_system_if_owned(&seeded, WRITTEN_BY, "test_seed", "{}").unwrap();
+        assert!(!matches!(outcome, crate::backend::storage::BundleReseedOutcome::SkippedLocalEdit), "{outcome:?}");
+        assert_eq!(state.id_store.bundle_get("sys-own").unwrap().unwrap().instructions, "seeded v2");
     }
 }

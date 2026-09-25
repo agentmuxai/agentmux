@@ -174,6 +174,28 @@ describe("MemoryDraftModel", () => {
         dispose();
     });
 
+    test("typing during an in-flight save is kept, and the next save is based on what was saved", async () => {
+        let finish!: () => void;
+        const save = vi.fn(() => new Promise<undefined>((r) => (finish = () => r(undefined))));
+        const { model, dispose } = make(save);
+        model.startEdit("base");
+        model.setDraft("first");
+        const pending = model.save();
+        await vi.waitFor(() => expect(save).toHaveBeenCalled()); // the save is in flight
+        model.setDraft("first, then more"); // typed after pressing Save
+        finish();
+        expect(await pending).toBe(true);
+        expect(model.editingAtom()).toBe(true);
+        expect(model.draftAtom()).toBe("first, then more");
+        expect(model.baseAtom()).toBe("first");
+
+        save.mockImplementation(async () => undefined);
+        await model.save();
+        expect(save).toHaveBeenLastCalledWith("first, then more", "h(first)");
+        expect(model.editingAtom()).toBe(false);
+        dispose();
+    });
+
     test("an external change raises the banner only for a dirty draft whose base hash moved", async () => {
         const { model, dispose } = make();
         model.startEdit("base");

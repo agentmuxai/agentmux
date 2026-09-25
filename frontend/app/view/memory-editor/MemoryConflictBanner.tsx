@@ -25,6 +25,9 @@ interface MemoryConflictBannerProps<T> {
     noun: string;
     /** After Discard, so the caller can re-show the saved content. */
     onDiscarded?: () => void;
+    /** Whether "Save anyway" can re-create something deleted meanwhile
+     *  (a memory file can; a Global Memory entry can't). Default true. */
+    canRecreate?: boolean;
 }
 
 export function MemoryConflictBanner<T>(props: MemoryConflictBannerProps<T>): JSX.Element {
@@ -73,15 +76,17 @@ export function MemoryConflictBanner<T>(props: MemoryConflictBannerProps<T>): JS
                         >
                             Keep editing
                         </button>
-                        <button
-                            type="button"
-                            class="memory-editor-btn"
-                            disabled={conflict().current === undefined || props.model.savingAtom()}
-                            title="Replace the saved version with your draft"
-                            onClick={() => void props.model.overwrite()}
-                        >
-                            Save anyway
-                        </button>
+                        <Show when={props.canRecreate !== false || conflict().current !== null}>
+                            <button
+                                type="button"
+                                class="memory-editor-btn"
+                                disabled={conflict().current === undefined || props.model.savingAtom()}
+                                title="Replace the saved version with your draft"
+                                onClick={() => void props.model.overwrite()}
+                            >
+                                Save anyway
+                            </button>
+                        </Show>
                         <button
                             type="button"
                             class="memory-editor-btn is-danger"

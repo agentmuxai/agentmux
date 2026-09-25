@@ -194,7 +194,10 @@ export class AgentNativeMemoryModel {
     /** Show new saved content for the open file (a live change, a revert)
      *  without touching an open draft. */
     applyExternalContent(content: string | null): void {
-        if (content !== null && !this.draft.dirtyAtom()) this.setContent(content);
+        // Always track the saved content (the editor shows the draft, not
+        // this), so cancelling a dirty draft reveals what's saved now, and
+        // the next edit is based on it — not on a stale copy.
+        if (content !== null) this.setContent(content);
         void this.draft.observeExternal(content);
     }
 

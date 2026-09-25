@@ -370,10 +370,17 @@ export class GlobalBundleViewModel {
             // Append the new section to the end of the order.
             // ordinarySectionsAtom, not sectionsAtom — see move()'s doc
             // comment below (reagent P1, PR #2782).
-            const order = [...this.ordinarySectionsAtom().map((s) => s.id), saved.id];
-            await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids: order });
-            await this.refresh();
+            // The entry exists from here on: open it first, so a failed
+            // reorder can't leave the draft in "new" mode, where a retry
+            // would collide with the entry just created.
             this.setView({ kind: "entry", id: saved.id });
+            const order = [...this.ordinarySectionsAtom().map((s) => s.id), saved.id];
+            try {
+                await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids: order });
+            } catch (e) {
+                this.setError(`Created, but couldn't move it to the end: ${(e as Error)?.message ?? e}`);
+            }
+            await this.refresh();
             return;
         }
         const existing = this.openEntryAtom();

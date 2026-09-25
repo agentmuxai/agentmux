@@ -150,7 +150,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
             <Show when={draft.errorAtom()}>
                 <div class="memory-editor-error">{draft.errorAtom()}</div>
             </Show>
-            <MemoryConflictBanner model={draft} toText={draftText} noun="this memory" />
+            <MemoryConflictBanner model={draft} toText={draftText} noun="this memory" canRecreate={false} />
             <Show when={!liveEntry() && !draft.editingAtom()}>
                 <div class="memory-editor-error">This memory no longer exists.</div>
             </Show>
