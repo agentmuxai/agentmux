@@ -126,9 +126,22 @@ PID / Data.
 
 ### 4.1 UX
 
-Turn the existing **Data** row into an action: the path text stays, a small
-folder icon-button follows it. Tooltip (`data-tip`, per the status bar's own tip
-convention — not the native `title=`):
+**The Data path itself is the link** (user, 2026-09-25: "the path underlined as a link,
+clicking it opens the file browser; no icon"). There is no separate button or icon.
+
+- Render the path in a `<button type="button">` styled as a link: underlined, the same
+  mono font, size and ellipsis truncation the path has today
+  (`HostPopover.tsx`, the Data row's `status-bar-popover-mono` span with
+  `max-width: 220px`), `cursor: pointer`, and the theme's link/accent colour on hover.
+  A real `<button>` rather than a clickable `<span>` keeps it keyboard-reachable
+  (Tab, Enter/Space) and announced as actionable. Reset the button's own chrome
+  (background, border, padding) so it looks like text.
+- Clicking it calls `open_in_file_manager`. The full path goes in the tooltip, since
+  the visible text is ellipsised.
+- The row label stays "Data".
+
+Tooltip (`data-tip`, per the status bar's own tip convention — not the native `title=`),
+showing the action and then the full path:
 
 - Windows: "Show in File Explorer"
 - macOS: "Reveal in Finder"
@@ -136,11 +149,11 @@ convention — not the native `title=`):
 
 Label via the existing `isMacOS`/`isLinux` helpers already imported in `HostPopover.tsx`.
 Data only — no Config link in this change (decided 2026-09-25, §7). The popover has no
-Config row today, and adding one just to hang a button on is clutter.
+Config row today, and adding one just to make it a link is clutter.
 
 Failure UX: on IPC error, show the error inline in the popover using the same
 warning-colour row the LAN error uses. Do not swallow it — on a headless Linux box with
-no handler, silence would look like a dead button.
+no handler, silence would look like a dead link.
 
 ### 4.2 New IPC command
 
@@ -206,8 +219,7 @@ In `HostPopover.tsx`, call through the same `invokeCommand` used for `get_host_i
 await invokeCommand("open_in_file_manager", { target: "data" });
 ```
 
-Put the button inside the existing `<Show when={props.hostInfo()}>` block, next to the
-Data path. When `get_host_info` fails (the file's `catch` sets `hostInfo` to `null`), the
+The link *is* the Data path, inside the existing `<Show when={props.hostInfo()}>` block. When `get_host_info` fails (the file's `catch` sets `hostInfo` to `null`), the
 whole block — Data row included — is already hidden, so no extra "IPC unavailable"
 handling is needed.
 
@@ -243,8 +255,8 @@ command name as a plain `string`.
 - **`get_host_info`**: assert the JSON no longer has `instanceId` / `hostType`.
 - **Frontend** — new file `frontend/app/statusbar/HostPopover.test.tsx` (none exists
   today; `TokenBreakdownPopover.test.tsx` next to it is the pattern). Cases: no `Instance`
-  label is present; the button renders with the
-  Data row; clicking calls `invokeCommand("open_in_file_manager", { target: "data" })`;
+  label is present; the Data path renders as a `<button>` whose text is the path and
+  which contains no icon element; clicking it (and pressing Enter on it) calls `invokeCommand("open_in_file_manager", { target: "data" })`;
   a rejection renders the inline warning row; the tooltip string per OS.
 - **Manual verification on all three OSes is required before merge** — the launch
   behaviour is OS-specific and cannot be proven by unit tests. Windows first (this is
@@ -268,7 +280,7 @@ None open. Resolved 2026-09-25 (user: "use best recommendations"):
 ## 8. Implementation checklist
 
 - [ ] `get_host_info`: remove `instanceId` and `hostType`.
-- [ ] `HostPopover.tsx`: update `HostInfo` type; delete the Instance row; add the file-manager button on the Data row.
+- [ ] `HostPopover.tsx`: update `HostInfo` type; delete the Instance row; make the Data path an underlined link (a `<button>`, no icon) that opens the file manager.
 - [ ] `platform.rs`: `open_in_file_manager` + `resolve_file_manager_target` + `file_manager_command`; register in `ipc.rs` next to `open_in_editor`.
 - [ ] Tests per §6, including the new `HostPopover.test.tsx`.
 - [ ] Manual check on Windows, macOS, Linux; PR states which were actually exercised.
