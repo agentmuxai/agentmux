@@ -490,7 +490,7 @@ pub(crate) async fn handle_quit_self(
             true,
             Some(refusal.as_str()),
             &pending.request_id,
-            Some(&format!("pending user override: {detail}")),
+            Some(&format!("{}: {detail}", crate::sagas::pending_shutdown::audit_note(&pending, &agent, "QuitSelf"))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
@@ -505,6 +505,9 @@ pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> s
     json!({
         "status": "pending_user_override",
         "request_id": p.request_id,
+        // Whose request this is: a caller who finds someone else here joined it.
+        "by": p.by,
+        "via": p.via,
         "deadline_ms": p.deadline_ms,
         "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
     })
@@ -604,7 +607,7 @@ pub(crate) async fn handle_close_pane(
             true,
             None,
             &pending.request_id,
-            Some(&format!("pending user override: {reason}")),
+            Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, "ClosePane"))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
