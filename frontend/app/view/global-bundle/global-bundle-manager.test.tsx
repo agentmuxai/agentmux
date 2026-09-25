@@ -30,8 +30,8 @@ const historyMock = vi.fn();
 const diffMock = vi.fn();
 const revertMock = vi.fn();
 // "Bring Global Memory from…": nothing to offer unless a test says so.
-const importSourcesMock = vi.fn(() => Promise.resolve({ list_id: "l", scope: "shared", sources: [] }));
-const importMock = vi.fn(() => Promise.resolve({ added: 0, renamed: 0 }));
+const importSourcesMock = vi.fn((..._args: unknown[]) => Promise.resolve({ list_id: "l", scope: "shared", sources: [] }));
+const importMock = vi.fn((..._args: unknown[]) => Promise.resolve({ added: 0, renamed: 0 }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListBundlesCommand: (...args: unknown[]) => listMemoriesMock(...args),
