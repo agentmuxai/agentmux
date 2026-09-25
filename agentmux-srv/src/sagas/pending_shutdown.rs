@@ -80,6 +80,23 @@ pub fn status(request_id: &str) -> Option<PendingView> {
     entries().get(request_id).map(|e| e.view.clone())
 }
 
+/// `pending` → `to`, atomically: exactly one of the window running out and
+/// the user's Keep running wins (ReAgent P1 on #3789 — checking and setting
+/// under separate locks let a late check see `pending` after a keep).
+fn transition(request_id: &str, to: &'static str) -> bool {
+    let mut map = entries();
+    match map.get_mut(request_id) {
+        Some(e) if e.view.status == "pending" => {
+            e.view.status = to;
+            if to != "proceeding" {
+                e.finished_at_ms = Some(now_ms());
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 fn set_status(request_id: &str, status: &'static str, error: Option<String>) -> Option<PendingView> {
     let mut map = entries();
     let e = map.get_mut(request_id)?;
@@ -161,10 +178,9 @@ fn request_within(
                 _ = kept.notified() => {}
             }
         }
-        if status(&v.request_id).is_none_or(|s| s.status != "pending") {
+        if !transition(&v.request_id, "proceeding") {
             return; // kept by the user
         }
-        set_status(&v.request_id, "proceeding", None);
         cleared(&state, &v, "proceeding");
         let outcome = run_action(&state, &v.block_id, action).await;
         let (status, error) = match outcome {
@@ -232,16 +248,19 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
 /// `too_late` if the shutdown had already begun (or it isn't this block's).
 pub fn keep(state: &AppState, block_id: &str, request_id: &str) -> &'static str {
     let view = {
-        let map = entries();
-        match map.get(request_id) {
+        let mut map = entries();
+        match map.get_mut(request_id) {
             Some(e) if e.view.block_id == block_id && e.view.status == "pending" => {
+                // Decided here, under the lock; the window task only wakes to
+                // find it no longer pending.
+                e.view.status = "kept_by_user";
+                e.finished_at_ms = Some(now_ms());
                 e.kept.notify_one();
                 e.view.clone()
             }
             _ => return "too_late",
         }
     };
-    set_status(request_id, "kept_by_user", None);
     cleared(state, &view, "kept_by_user");
     audit(state, &view, "kept_by_user", None);
     tracing::info!(block_id, request_id, by = %view.by, "shutdown pending: kept by the user");
@@ -273,6 +292,28 @@ mod tests {
         assert_eq!(pending_for("blk-p2"), None);
         assert_eq!(keep(&state, "blk-p2", &v.request_id), "too_late");
         assert_eq!(keep(&state, "some-other-block", &v.request_id), "too_late", "only the block it was for");
+    }
+
+    #[tokio::test]
+    async fn keep_and_the_window_running_out_never_both_win() {
+        let state = test_state();
+        for i in 0..50 {
+            let block = format!("blk-race-{i}");
+            let v = request_within(&state, &block, "Korp", "QuitSelf", "r", Action::SelfQuit { detail: String::new() }, std::time::Duration::ZERO);
+            let kept = keep(&state, &block, &v.request_id);
+            for _ in 0..100 {
+                if !matches!(status(&v.request_id).unwrap().status, "pending" | "proceeding") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let end = status(&v.request_id).unwrap().status;
+            if kept == "kept_by_user" {
+                assert_eq!(end, "kept_by_user", "a kept request must never go ahead");
+            } else {
+                assert_ne!(end, "kept_by_user");
+            }
+        }
     }
 
     #[tokio::test]
