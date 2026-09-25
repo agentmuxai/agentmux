@@ -319,7 +319,7 @@ pub(crate) async fn run_unix(
             ipc::server::ServerCtx {
                 launcher_pid: std::process::id(),
                 launcher_version: env!("CARGO_PKG_VERSION").to_string(),
-                state,
+                state: std::sync::Arc::clone(&state),
                 events_tx,
                 event_log,
                 host_pipe: std::sync::Arc::clone(&host_pipe),
@@ -364,7 +364,7 @@ pub(crate) async fn run_unix(
     // OS notification presenter (Linux: freedesktop notifications over D-Bus).
     // macOS has no backend yet (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24 §6.2).
     #[cfg(target_os = "linux")]
-    crate::notify::start(&srv_result.ws_endpoint, &srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone());
+    crate::notify::start(&srv_result.ws_endpoint, &srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone(), state.clone());
 
     // CRITICAL (same rationale as run_windows): take srv's stdin out of
     // the Child so tokio's wait() can't close it and trip srv's

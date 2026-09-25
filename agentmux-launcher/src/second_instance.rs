@@ -54,10 +54,34 @@ pub(crate) fn forward_open_new_window(
     forward_host_cmd_impl(data_dir, dir_hash, "open_new_window")
 }
 
+/// `forward_host_cmd` with an `args` object — the host's `/ipc` body is
+/// `{"cmd", "args"}` (`agentmux-cef/src/ipc.rs` `IpcRequest`). Used by the
+/// notification click path (`open_new_window {workspace_id}`,
+/// `focus_window {label}`).
+pub(crate) fn forward_host_cmd_with_args(
+    data_dir: &std::path::Path,
+    dir_hash: &str,
+    cmd: &str,
+    args: serde_json::Value,
+) -> Result<(), ForwardError> {
+    forward_host_body(data_dir, dir_hash, &serde_json::json!({ "cmd": cmd, "args": args }).to_string())
+}
+
 fn forward_host_cmd_impl(
     data_dir: &std::path::Path,
     dir_hash: &str,
     cmd: &str,
+) -> Result<(), ForwardError> {
+    // `cmd` is a fixed internal identifier chosen by call sites in this
+    // crate, never user input, so a plain format is safe here — there is no
+    // untrusted string to escape.
+    forward_host_body(data_dir, dir_hash, &format!(r#"{{"cmd":"{}"}}"#, cmd))
+}
+
+fn forward_host_body(
+    data_dir: &std::path::Path,
+    dir_hash: &str,
+    body: &str,
 ) -> Result<(), ForwardError> {
     // Read the version-scoped port file so we reach THIS version's host,
     // not a concurrent release's host that may have overwritten "ipc-port".
@@ -87,11 +111,6 @@ fn forward_host_cmd_impl(
         .set_write_timeout(Some(std::time::Duration::from_secs(2)))
         .ok();
 
-    // `cmd` is a fixed internal identifier chosen by call sites in this
-    // crate, never user input, so a plain format is safe here — there is no
-    // untrusted string to escape.
-    let body = format!(r#"{{"cmd":"{}"}}"#, cmd);
-    let body = body.as_str();
     let req = format!(
         "POST /ipc HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         token,
