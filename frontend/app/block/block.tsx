@@ -100,6 +100,50 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
     return vm;
 }
 
+/**
+ * The ViewModel a preview mount (a drag-preview thumbnail, `<Block preview>`)
+ * renders its header with. A preview NEVER builds a live instance of the view's
+ * class: every tile keeps its preview mounted (TileLayout.core.tsx's
+ * `previewElement`), and constructors can have global side effects —
+ * BrowserViewModel registers itself in the block-id-keyed browser-pane store,
+ * replacing the real pane's projections, and its dispose unregisters that slot,
+ * which left a split browser pane black
+ * (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §2).
+ *
+ * Instead, reads go to the live ViewModel registered for the block when there
+ * is one (the thumbnail shows the pane's real title), else to the default
+ * ViewModel for the view type. Nothing is registered, published or disposed on
+ * the live one's behalf; the live ViewModel's cached `nodeModel` is never used
+ * for the preview's header (BlockFrame reads `paneChromeHoisted` off its own
+ * `nodeModel` prop).
+ */
+function makePreviewViewModel(blockId: string, blockView: string): ViewModel {
+    const effectiveView = resolveEffectiveViewType(blockView);
+    let disposeRoot!: () => void;
+    const fallback = createRoot((dispose) => {
+        disposeRoot = dispose;
+        return makeDefaultViewModel(blockId, effectiveView);
+    });
+    const live = (): ViewModel | undefined => {
+        const vm = getBlockComponentModel(blockId)?.viewModel;
+        return vm != null && vm.viewType === effectiveView ? vm : undefined;
+    };
+    const preview = new Proxy(fallback, {
+        get(target, prop) {
+            if (prop === "viewComponent") return null;
+            if (prop === "dispose") return undefined;
+            const lv = live() as unknown as Record<PropertyKey, unknown> | undefined;
+            if (lv != null && prop in lv) {
+                const value = lv[prop];
+                return typeof value === "function" ? value.bind(lv) : value;
+            }
+            return (target as unknown as Record<PropertyKey, unknown>)[prop];
+        },
+    });
+    viewModelRoots.set(preview, disposeRoot);
+    return preview;
+}
+
 function disposeViewModel(vm: ViewModel): void {
     vm.dispose?.();
     viewModelRoots.get(vm)?.();
@@ -321,9 +365,9 @@ function Block(props: BlockProps): JSX.Element {
     // nor dispose a ViewModel it merely adopted from the registry.
     let registeredBcm: BlockComponentModel | null = null;
     const createdViewModels: ViewModel[] = [];
-    // A preview mount's own ViewModel, kept across effect re-runs so the
-    // effect does not strand a live one on every run (#3482 — see the preview
-    // branch below). Rebuilt only when the view type actually changes.
+    // A preview mount's stand-in ViewModel (`makePreviewViewModel`), kept
+    // across effect re-runs (#3482 — see the preview branch below). Rebuilt
+    // only when the view type actually changes.
     let previewViewModel: ViewModel | null = null;
     let previewViewType: string | null = null;
     createEffect(() => {
@@ -358,34 +402,19 @@ function Block(props: BlockProps): JSX.Element {
         //    just a broken header, chrome could render the PREVIEW's own
         //    ViewModel instance for the real, visible pane.
         // Fixed by never letting a preview mount touch either shared
-        // surface: it gets its own private ViewModel, created fresh here,
-        // disposed on its own unmount, and never registered or published
-        // anywhere another mount could adopt or overwrite.
+        // surface: it is never registered or published anywhere another mount
+        // could adopt or overwrite. It also never builds a live instance of
+        // the view's class (`makePreviewViewModel`): a private one still hit
+        // the view's OWN block-id-keyed stores (the browser pane store, the
+        // editor store — #3483, and the black split browser pane).
         if (props.preview) {
-            // REUSE across effect re-runs rather than rebuilding. This effect
-            // re-runs while the preview stays mounted — a block's meta
-            // changing is enough — and rebuilding here stranded the previous
-            // ViewModel alive, since the component-level onCleanup below only
-            // ever disposes the last one. For an editor preview every
-            // stranded instance keeps a live `editor:file_changed`
-            // subscription, so a pane open during file churn accumulated tens
-            // of thousands of them and took the renderer down (#3482,
-            // confirmed by the leak guard's stack pointing exactly here).
-            //
-            // Deliberately fixed by NOT creating the extra ViewModel, rather
-            // than by disposing it on re-run: `dispose()` is not safe to call
-            // for a preview. A preview shares its blockId with the real mount
-            // (tabcontent.tsx's renderPreview passes the same leaf nodeModel),
-            // and some view models additionally register themselves in their
-            // OWN blockId-keyed global store — `EditorViewModel.dispose()`
-            // calls `unregisterEditorPane(this.blockId)`, which would delete
-            // the slot the still-live real editor pane depends on, making its
-            // next dispatch throw "dispatch for unregistered pane". The
-            // surrounding comment's "never registered, never published" only
-            // ever held for the BCM registry, not for those. Caught by
-            // reagentx P1 on PR #3483.
+            // REUSE across effect re-runs rather than rebuilding (this effect
+            // re-runs while the preview stays mounted — a meta change is
+            // enough; rebuilding once stranded tens of thousands of live
+            // editor ViewModels, #3482). The preview ViewModel holds no live
+            // instance, so disposing it (on unmount) touches no store.
             if (previewViewModel == null || previewViewType !== view) {
-                previewViewModel = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
+                previewViewModel = makePreviewViewModel(props.nodeModel.blockId, view);
                 previewViewType = view;
                 createdViewModels.push(previewViewModel);
             }

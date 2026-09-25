@@ -71,10 +71,15 @@ class TestAgentViewModel {
     nodeModel: NodeModel;
     viewComponent = null;
     noHeader = () => (this.nodeModel as any)?.paneChromeHoisted?.() === true;
+    viewName = () => `live name of ${this.blockId}`;
+    disposed = false;
     constructor(blockId: string, nodeModel: NodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
         constructedViewModels.push({ blockId, nodeModel });
+    }
+    dispose() {
+        this.disposed = true;
     }
 }
 // Mirrors what SysinfoViewModel (and most view models) do in their
@@ -99,12 +104,17 @@ vi.mock("@/app/block/block-registry", () => ({
         view === "agent" ? TestAgentViewModel : view === "memo" ? TestMemoViewModel : null,
 }));
 
+// The ViewModel each preview mount handed its BlockFrame, by blockId.
+const previewViewModels = new Map<string, any>();
 vi.mock("./blockframe", () => ({
-    BlockFrame: (props: { nodeModel: NodeModel; viewModel: any; preview: boolean; children?: any }) => (
-        <div data-testid={`blockframe-${props.preview ? "preview" : "real"}-${props.nodeModel.blockId}`}>
-            {props.children}
-        </div>
-    ),
+    BlockFrame: (props: { nodeModel: NodeModel; viewModel: any; preview: boolean; children?: any }) => {
+        if (props.preview) previewViewModels.set(props.nodeModel.blockId, props.viewModel);
+        return (
+            <div data-testid={`blockframe-${props.preview ? "preview" : "real"}-${props.nodeModel.blockId}`}>
+                {props.children}
+            </div>
+        );
+    },
 }));
 
 // The real hook's `settled` is RE-ENTRANT — it calls setSettled(false) on every
@@ -158,6 +168,7 @@ afterEach(() => {
     registry.clear();
     constructedViewModels.length = 0;
     memoVmDisposals.length = 0;
+    previewViewModels.clear();
     setBackfillSettled(true);
 });
 
@@ -211,9 +222,9 @@ describe("Block — preview/real ViewModel isolation", () => {
         render(() => <Block nodeModel={previewNodeModel} preview={true} />);
         render(() => <Block nodeModel={realNodeModel} preview={false} />);
 
-        // Two SEPARATE ViewModels were constructed — preview never adopted
-        // into (or was adopted from) the shared registry.
-        expect(constructedViewModels).toHaveLength(2);
+        // Only the real mount constructed a ViewModel — a preview never builds
+        // a live instance (see "a preview never builds a live ViewModel").
+        expect(constructedViewModels).toHaveLength(1);
         const realVm = constructedViewModels.find((v) => v.nodeModel === realNodeModel);
         expect(realVm).toBeDefined();
         expect((realVm!.nodeModel as any).paneChromeHoisted?.()).toBe(true);
@@ -238,6 +249,45 @@ describe("Block — preview/real ViewModel isolation", () => {
         const registered = registry.get("b1") as { viewModel: TestAgentViewModel } | undefined;
         expect(registered?.viewModel.nodeModel).toBe(realNodeModel);
         expect(registered?.viewModel.noHeader()).toBe(true);
+    });
+});
+
+/**
+ * Every tile keeps a drag-preview `<Block preview>` mounted (TileLayout.core.tsx's
+ * `previewElement`). It used to construct its own ViewModel of the view's class,
+ * whose constructor can have global side effects: BrowserViewModel registers
+ * itself in the block-id-keyed browser-pane store (replacing the real pane's
+ * projections) and its dispose unregisters that slot — a split left the real
+ * browser pane black
+ * (REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md §2).
+ */
+describe("Block — a preview never builds a live ViewModel", () => {
+    it("constructs nothing for a preview mount on its own", async () => {
+        setBlockView("p1", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p1" })} preview={true} />);
+        expect(constructedViewModels).toHaveLength(0);
+        expect(previewViewModels.get("p1")).toBeDefined();
+    });
+
+    it("unmounting a preview leaves the real ViewModel alive and registered", async () => {
+        setBlockView("p2", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p2" })} preview={false} />);
+        const preview = render(() => <Block nodeModel={makeNodeModel({ blockId: "p2" })} preview={true} />);
+        preview.unmount();
+
+        expect(constructedViewModels).toHaveLength(1);
+        const registered = registry.get("p2") as { viewModel: TestAgentViewModel };
+        expect(registered.viewModel.disposed).toBe(false);
+    });
+
+    it("the preview's header shows the live ViewModel's name", async () => {
+        setBlockView("p3", "agent");
+        const Block = await loadBlock();
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={false} />);
+        render(() => <Block nodeModel={makeNodeModel({ blockId: "p3" })} preview={true} />);
+        expect(previewViewModels.get("p3").viewName()).toBe("live name of p3");
     });
 });
 
