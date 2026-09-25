@@ -1,7 +1,7 @@
 # Spec: find/filter and sort for Armory → Memory → Personal
 
 **Date:** 2026-09-02
-**Status:** Proposed
+**Status:** implemented — #2929 (find/filter + persisted sort).
 **Motivated by:** direct request — *"we want find and filter features on the
 Personal memories inside armory, similar to the my agents in agent pane."*
 
