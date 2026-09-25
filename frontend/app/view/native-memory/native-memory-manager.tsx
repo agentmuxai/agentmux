@@ -49,6 +49,7 @@ import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption }
 import { MemoryFileCard } from "./MemoryFileCard";
 import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
+import { MemoryClaimsPanel } from "./MemoryClaimsPanel";
 import "./native-memory-manager.scss";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
@@ -573,6 +574,7 @@ export function NativeMemoryManager(): JSX.Element {
                             fallback={
                                 <div class="native-memory-manager-file-grid-view">
                                     <MemoryAdoptionPanel agentId={agent().id} agentName={agentLabel(agent())} />
+                                    <MemoryClaimsPanel agentId={agent().id} agentName={agentLabel(agent())} />
                                     {/* Distinct from the "no files" empty state below:
                                         an unresolved list must not read as an agent that
                                         has remembered nothing, the same four-state care
