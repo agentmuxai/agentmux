@@ -26,6 +26,7 @@ import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
+import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { DEFAULT_TERM_SCROLLBACK } from "@/app/view/term/termscrollback";
 
 const {
@@ -36,6 +37,7 @@ const {
     resyncDeferreds,
     resyncRejections,
     termSettingsBag,
+    terminalSelection,
 } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
@@ -51,6 +53,8 @@ const {
     // attachShell down the create-new-block fallback path.
     const resyncRejections = new Set<string>();
     const termSettingsBag: Record<string, unknown> = {};
+    // What the fake xterm reports from getSelection().
+    const terminalSelection = { text: "" };
     return {
         blockDataSignals,
         seedData,
@@ -61,6 +65,7 @@ const {
         // Mutable `term:*` settings the global mock serves. Hoisted alongside
         // the other mock state so the vi.mock factory can close over it.
         termSettingsBag,
+        terminalSelection,
     };
 });
 
@@ -189,7 +194,11 @@ vi.mock("@/app/view/term/termwrap", () => {
         id: string;
         fontSize: number;
         scrollback: number | undefined;
-        terminal = { options: { fontSize: 0 } };
+        terminal = {
+            options: { fontSize: 0 },
+            getSelection: () => terminalSelection.text,
+            paste: vi.fn(),
+        };
         loaded = false;
         disposed = false;
         sendDataHandler: (data: string) => void;
@@ -264,6 +273,7 @@ beforeEach(() => {
     resyncDeferreds.clear();
     resyncRejections.clear();
     termWrapInstances.length = 0;
+    terminalSelection.text = "";
     for (const key of Object.keys(termSettingsBag)) delete termSettingsBag[key];
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
@@ -1188,5 +1198,111 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
             expect.anything(),
             expect.objectContaining({ blockid: idB })
         );
+    });
+});
+
+describe("AgentShellSubblock — right-click region (SPEC_AGENT_SHELL_DRAWER_CONTEXT_MENU_PASTE_AND_REGIONS_2026_09_25)", () => {
+    function mountFresh() {
+        const { container } = render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={undefined}
+                onSubBlockCreated={() => {}}
+            />
+        ));
+        return container.querySelector(".agent-shell-subblock") as HTMLElement;
+    }
+
+    it("registers a region on the terminal surface that strips Split / Replace / agent items and the generic clipboard", async () => {
+        const surface = mountFresh();
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        const region = resolveContextMenuRegion(surface);
+        expect(region).not.toBeNull();
+        expect(region!.omit).toEqual(expect.arrayContaining(["viewItems", "clipboard", "split", "replace"]));
+        // Magnify / Close / Inspect stay.
+        for (const kept of ["magnify", "close", "inspect"]) expect(region!.omit).not.toContain(kept);
+    });
+
+    it("resolves the same region for a click on a child of the surface (spinner, badge)", async () => {
+        const surface = mountFresh();
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        const child = surface.appendChild(document.createElement("span"));
+        expect(resolveContextMenuRegion(child)).toBe(resolveContextMenuRegion(surface));
+    });
+
+    it("offers Copy for the terminal's own selection and a live Paste", async () => {
+        const surface = mountFresh();
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        terminalSelection.text = "npm test";
+
+        const [copy, paste] = resolveContextMenuRegion(surface)!.items!();
+        expect(copy).toMatchObject({ label: "Copy", enabled: true });
+        expect(paste).toMatchObject({ label: "Paste", enabled: true });
+    });
+
+    it("builds Copy and Paste disabled before the terminal exists", () => {
+        const surface = mountFresh();
+        // termWrap is still being constructed (async attach) — no terminal yet.
+        const [copy, paste] = resolveContextMenuRegion(surface)!.items!();
+        expect(copy.enabled).toBe(false);
+        expect(paste.enabled).toBe(false);
+    });
+
+    it("disables Paste while the agent holds the shell", async () => {
+        const existingId = "region-locked-sub-block";
+        const oref = `block:${existingId}`;
+        queueSeedMeta(oref, { "term:agentlockuntil": Date.now() + 60_000 });
+        const { container } = render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+            />
+        ));
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        const surface = container.querySelector(".agent-shell-subblock") as HTMLElement;
+        const paste = resolveContextMenuRegion(surface)!.items!()[1];
+        expect(paste.enabled).toBe(false);
+    });
+
+    it("unregisters the region on unmount", async () => {
+        const surface = mountFresh();
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        cleanup();
+        expect(resolveContextMenuRegion(surface)).toBeNull();
+    });
+});
+
+describe("AgentShellSubblock — large pastes are chunked", () => {
+    it("splits a large paste into ordered frames instead of one oversized blockinput", async () => {
+        const { sendWSCommand } = await import("@/app/store/ws");
+        const existingId = "chunking-sub-block";
+        queueSeedMeta(`block:${existingId}`, {});
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+            />
+        ));
+        resolveSeedFetch(`block:${existingId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        const big = "0123456789".repeat(1000); // 10,000 bytes
+        termWrapInstances[0].sendDataHandler(big);
+        await waitFor(() => expect((sendWSCommand as any).mock.calls.length).toBeGreaterThan(2), { timeout: 1000 });
+        await new Promise((r) => setTimeout(r, 50));
+
+        const frames = (sendWSCommand as any).mock.calls.map((c: any[]) =>
+            Buffer.from(c[0].inputdata64, "base64").toString("utf8")
+        );
+        expect(frames.every((f: string) => f.length <= 4096)).toBe(true);
+        expect(frames.join("")).toBe(big);
     });
 });
