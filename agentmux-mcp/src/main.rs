@@ -3713,12 +3713,12 @@ fn format_duration(d: Duration) -> String {
 }
 
 /// `SendMessage`'s answer when srv accepted the message but holds it until the
-/// target's current turn ends (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
+/// target's next tool call or turn boundary (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
 fn deferred_delivery_text(to: &str) -> String {
     format!(
         "QUEUED for {to} — they're mid-turn, so it has not reached them yet. \
-         Their AgentMux holds it and delivers it when their current turn \
-         ends. Don't resend it."
+         Their AgentMux holds it while they are writing and delivers it at \
+         their next tool call, or when their turn ends. Don't resend it."
     )
 }
 

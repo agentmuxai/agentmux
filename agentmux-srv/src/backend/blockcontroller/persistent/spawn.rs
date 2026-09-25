@@ -225,6 +225,8 @@ impl PersistentSubprocessController {
             // Clearing per-spawn scopes the flag to the generation that
             // requested it, which is the only one it ever meant anything for.
             inner.restart_when_idle = false;
+            // A new process starts out writing, not waiting on a tool.
+            inner.tool_wait = ToolWait::Writing;
             inner.spawn_generation += 1;
             // Any spawn consumes or invalidates an adopted leftover
             // candidate — it only ever meant "for the very next spawn".
@@ -787,6 +789,36 @@ impl PersistentSubprocessController {
                     }
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
+                    // A tool call just started running: the model has stopped
+                    // writing, so a deferred message can go out now without
+                    // cutting anything (`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`
+                    // §4.7). The `result` frame below is the other release point.
+                    if !is_result_frame {
+                        if let Some(signal) = tool_wait_signal(&parsed) {
+                            let flushed = PersistentSubprocessController::tool_wait_locked(
+                                &mut inner_read.lock().unwrap(),
+                                my_generation_read,
+                                signal,
+                                &block_id_read,
+                            );
+                            match flushed {
+                                DeferredFlush::Released(released) => {
+                                    tracing::info!(
+                                        block_id = %block_id_read,
+                                        "agent is waiting on a tool — released one deferred message"
+                                    );
+                                    // Appended after THIS line, like the boundary release.
+                                    released_deferred_line = Some(released);
+                                }
+                                DeferredFlush::Held | DeferredFlush::Failed => {
+                                    if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                                        ctrl.ensure_deferred_watchdog();
+                                    }
+                                }
+                                DeferredFlush::Empty => {}
+                            }
+                        }
+                    }
                     // Claude's turn-ending marker. Persistent mode never exits
                     // between turns, so this is the only place `turn_active`
                     // can go back to false without waiting for process exit —
