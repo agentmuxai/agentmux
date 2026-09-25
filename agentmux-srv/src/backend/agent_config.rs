@@ -1142,6 +1142,10 @@ pub fn write_startup_instructions_respecting_existing(
 /// launch tell entries it owns from entries the user put there.
 pub const MANAGED_MCP_SERVERS_MANIFEST: &str = ".claude/.agentmux-managed-mcp-servers.json";
 
+/// Held (exclusively) for the whole read-merge-write in
+/// [`write_mcp_json_respecting_user_servers`]. See its doc comment.
+pub const MCP_JSON_WRITE_LOCK: &str = ".claude/.agentmux-mcp-json.lock";
+
 /// Write `.mcp.json` into `base_path` without destroying a user's own MCP
 /// server entries (issue #3680). Shared by `agent.open` and the
 /// `WriteAgentConfig` "click Launch" path — the two config-materializing call
@@ -1170,6 +1174,14 @@ pub const MANAGED_MCP_SERVERS_MANIFEST: &str = ".claude/.agentmux-managed-mcp-se
 ///   (`inject_jekt_signing_keys_into_mcp_json`), so it is written `0600` on
 ///   Unix, via a temp file renamed into place so it is never briefly visible
 ///   with the default mode.
+/// - **One launch at a time per directory.** `.mcp.json` and its manifest
+///   must describe the same launch, or a server AgentMux wrote gets mistaken
+///   for the user's and is never removed. Neither call site serializes by
+///   directory (`agent_open`'s lock is per agent; `WriteAgentConfig` has
+///   none), so the whole read-merge-write holds an exclusive lock on
+///   [`MCP_JSON_WRITE_LOCK`]. A file lock rather than an in-process mutex, so
+///   two AgentMux instances pointed at one project are serialized too; it is
+///   released when the handle drops, including on error or panic.
 ///
 /// Not addressed here: the signing material being in this file at all
 /// (the identity plan's M4d/M5 move it out — see
@@ -1191,6 +1203,9 @@ pub fn write_mcp_json_respecting_user_servers(
             "generated .mcp.json is not a JSON object",
         ));
     };
+    // Serialize concurrent launches into this directory — see the doc comment.
+    let _dir_lock = lock_mcp_json_dir(base_path)?;
+
     let ours: Map<String, Value> = generated_obj
         .get("mcpServers")
         .and_then(Value::as_object)
@@ -1262,6 +1277,22 @@ pub fn write_mcp_json_respecting_user_servers(
     write_owner_only_atomically(&path, body.as_bytes())?;
     write_managed_mcp_server_names(base_path, ours.keys());
     Ok(())
+}
+
+/// Take the exclusive per-directory write lock; released on drop.
+fn lock_mcp_json_dir(base_path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let lock_path = base_path.join(MCP_JSON_WRITE_LOCK);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    file.lock()?;
+    Ok(file)
 }
 
 fn read_managed_mcp_server_names(base_path: &std::path::Path) -> Option<std::collections::BTreeSet<String>> {
@@ -2718,9 +2749,11 @@ mod mcp_json_tests {
             .map(|i| {
                 let base = base.clone();
                 std::thread::spawn(move || {
+                    // Each "agent" brings its own extra server, so a manifest from
+                    // one launch paired with the file from another is detectable.
                     let padding = "x".repeat(i * 4096);
                     let content = format!(
-                        r#"{{"mcpServers":{{"agentmux":{{"command":"agentmux-mcp","env":{{"AGENTMUX_AGENT_ID":"a{i}","PAD":"{padding}"}}}}}}}}"#
+                        r#"{{"mcpServers":{{"agentmux":{{"command":"agentmux-mcp","env":{{"AGENTMUX_AGENT_ID":"a{i}","PAD":"{padding}"}}}},"srv{i}":{{"command":"s{i}"}}}}}}"#
                     );
                     for _ in 0..10 {
                         write_mcp_json_respecting_user_servers(&base, &content).unwrap();
@@ -2735,7 +2768,15 @@ mod mcp_json_tests {
         let v: serde_json::Value = serde_json::from_str(&raw).expect("published .mcp.json must be valid JSON");
         assert!(v["mcpServers"]["agentmux"].is_object());
         let manifest = std::fs::read_to_string(base.join(MANAGED_MCP_SERVERS_MANIFEST)).unwrap();
-        serde_json::from_str::<Vec<String>>(&manifest).expect("the manifest must not be interleaved either");
+        let managed: std::collections::BTreeSet<String> =
+            serde_json::from_str(&manifest).expect("the manifest must not be interleaved either");
+        // ReAgent P1 (round 2) on #3803: the manifest must describe the SAME
+        // launch as the file. With no user servers here, that means exactly
+        // the file's server names — and exactly one agent's set.
+        let on_disk: std::collections::BTreeSet<String> =
+            v["mcpServers"].as_object().unwrap().keys().cloned().collect();
+        assert_eq!(managed, on_disk, "manifest and .mcp.json describe different launches");
+        assert_eq!(on_disk.len(), 2, "exactly one launch's servers (agentmux + its own), got {on_disk:?}");
         for d in [base.clone(), base.join(".claude")] {
             let leftovers = std::fs::read_dir(&d)
                 .unwrap()
