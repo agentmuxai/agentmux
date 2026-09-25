@@ -9,18 +9,17 @@
 //
 // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
 
+import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { getApi } from "@/app/store/app-api";
-import { BlockNodeModel } from "@/app/block/blocktypes";
-import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
+import { makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { fireAndForget } from "@/util/util";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 const META_PATH = "media:path" as const;
 
@@ -103,39 +102,30 @@ async function fetchMediaBlob(path: string): Promise<Blob> {
     return await resp.blob();
 }
 
-class MediaViewModel implements ViewModel {
-    viewType: string;
-    blockId: string;
-    viewName: Accessor<string>;
-    nodeModel: BlockNodeModel;
-
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
-        this.viewType = "media";
-        this.nodeModel = nodeModel;
-        this.blockId = blockId;
-
-        // Header title — file basename of the persisted path, so an
-        // OpenMedia call's default (untitled) pane is distinguishable from
-        // another rather than showing a generic "Media" label for all of
-        // them. Mirrors EditorViewModel.viewName's pattern exactly
-        // (editor-model.ts:290-296): wrapped in useBlockAtom (creates a
-        // tracking root) rather than a bare createMemo, so block-frame
-        // subscribers reliably see updates.
-        this.viewName = useBlockAtom(blockId, "media-view-name", () =>
-            createMemo<string>(() => {
-                const blockData = getMuxObjectAtom<Block>(makeORef("block", blockId))();
-                const path = blockData?.meta?.[META_PATH];
-                return typeof path === "string" && path.length > 0 ? basenameOf(path) : "Media";
-            }),
-        );
-    }
-
-    get viewComponent(): ViewComponent {
-        return MediaView as unknown as ViewComponent;
-    }
+/** The pane's title: the file's basename, or "Media" before one is picked. */
+export function mediaTitle(meta: MetaType | undefined): string {
+    const path = meta?.[META_PATH];
+    return typeof path === "string" && path.length > 0 ? basenameOf(path) : "Media";
 }
 
-function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
+/**
+ * Media as a native pane tab (Pane Tab contract Phase 2c): no ViewModel — the
+ * view reads and writes its picked path through the host context, and the
+ * file's name titles the pane.
+ */
+export const mediaPaneTab: PaneTabManifest = {
+    apiVersion: 1,
+    view: "media",
+    label: "Media",
+    icon: "photo-film",
+    create: (ctx) => ({
+        component: () => <MediaView ctx={ctx} />,
+        liveTitle: () => ({ text: mediaTitle(ctx.meta()) }),
+    }),
+};
+
+function MediaView(props: { ctx: PaneTabHostContext }): JSX.Element {
+    const ctx = props.ctx;
     const [displayPath, setDisplayPath] = createSignal("");
     // Bumped on every MPS change event, even ones that leave displayPath's
     // string value unchanged (a pipeline overwriting a stable filename in
@@ -154,7 +144,7 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
     const stopWatching = () => {
         if (watchedDir != null) {
             fireAndForget(() =>
-                RpcApi.UnwatchMediaDirCommand(TabRpcClient, { path: watchedDir!, block_id: model.blockId }),
+                RpcApi.UnwatchMediaDirCommand(TabRpcClient, { path: watchedDir!, block_id: ctx.blockId }),
             );
             watchedDir = null;
         }
@@ -169,13 +159,13 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
         fireAndForget(() =>
             RpcApi.WatchMediaDirCommand(TabRpcClient, {
                 path: dir,
-                block_id: model.blockId,
+                block_id: ctx.blockId,
                 extensions: ALL_MEDIA_EXTENSIONS,
             }),
         );
         unsubFileChanged = muxEventSubscribe({
             eventType: WpsEvent.MediaFileChanged,
-            scope: makeORef("block", model.blockId),
+            scope: makeORef("block", ctx.blockId),
             handler: (event) => {
                 const path = (event as any)?.data?.path as string | undefined;
                 if (!path) return;
@@ -206,18 +196,12 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
     const pickFile = async () => {
         const path = await getApi()?.showOpenFileDialog?.();
         if (!path) return; // user cancelled
-        fireAndForget(() =>
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: makeORef("block", model.blockId),
-                meta: { [META_PATH]: path },
-            }),
-        );
+        fireAndForget(() => ctx.setMeta({ [META_PATH]: path }));
         showPath(path);
     };
 
     onMount(() => {
-        const blockData = getMuxObjectAtom<Block>(makeORef("block", model.blockId))();
-        const saved = blockData?.meta?.[META_PATH];
+        const saved = ctx.meta()?.[META_PATH];
         if (typeof saved === "string" && saved.length > 0) {
             showPath(saved);
         }
@@ -377,5 +361,3 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
         </div>
     );
 }
-
-export { MediaViewModel };

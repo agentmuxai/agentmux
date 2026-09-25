@@ -8,8 +8,9 @@ split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the 
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
 activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
 Phases 5a–5b (capabilities replace view-name checks) in #3765; 5c dropped
-(§4); Phase 6 (third-party widgets from the user's widgets.json) in the PR
-after it; Phase 2c (migrating the remaining built-in views to `create`) not
+(§4); Phase 6 (third-party widgets from the user's widgets.json) in #3767;
+Phase 2c part 1 (sysinfo, swarm, drone, warden, armory, media → native
+`create`) in the PR after it; 2c part 2 (editor, browser, term, agent) not
 started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
@@ -379,6 +380,35 @@ working throughout through a legacy adapter.
      what they reach around the contract for today (`ctx.visibility`,
      per-active-tab chrome, capabilities) — migrating them first would only
      re-home their `nodeModel` reach-ins. Order as above.
+     - **Sysinfo (implemented):** `sysinfoPaneTab("sysinfo" | "cpuplot")`
+       (sysinfo.tsx). Its model is built from `ctx` — every meta read is
+       `ctx.meta`, both plot-type writes are `ctx.setMeta` — and titles the
+       pane with the plot type (`liveTitle`). The contract grew two things it
+       needed: `PaneTabInstance.settingsMenu` (the header's Plot Type menu)
+       and the `connection` capability (the header's connection button).
+       `cpuplot`, the same view under an older name, now labels and icons
+       itself like sysinfo in its tab pill too (its header always did).
+     - **Swarm (implemented):** `swarmPaneTab` (swarm.tsx). Its model is
+       built from the block id (it never used its `nodeModel`); the view reads
+       and writes its own `term:zoom` through `ctx`; the instance forwards
+       `dispose` (the model's subscriptions and timers). The contract grew the
+       `noPadding` capability (full-bleed content).
+     - **Drone (implemented):** `dronePaneTab` (drone.tsx), keeping the
+       `workflows` alias. Its only own-block read, `frame:title`, comes from
+       `ctx.meta` and titles the pane (`liveTitle`); `dispose` is forwarded.
+     - **Warden and Armory (implemented):** `wardenPaneTab`, `armoryPaneTab`
+       (keeping the `trust` alias). Their models derive zoom, section (and
+       Armory's memory subsection) from `ctx.meta` and write through
+       `ctx.setMeta` via `model.setMeta`, so their views no longer call
+       `RpcApi` at all. Their memos had been parked in the per-block atom cache
+       (`useBlockAtom`) to survive the effect re-runs host rule 8 fixed; they
+       are plain memos in the instance's root now. The section names the pane
+       (`liveTitle`); the manifests carry the icons the headers always showed
+       (`shield-halved`, `vault`) and Armory gets its label.
+     - **Media (implemented):** `mediaPaneTab` (media.tsx). Its ViewModel was
+       only a title memo, so there is none now: the view reads and writes its
+       picked path through `ctx`, and `mediaTitle(meta)` (the file's name, or
+       "Media") titles the pane.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

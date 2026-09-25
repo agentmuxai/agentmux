@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
@@ -23,21 +24,18 @@ import { focusBlock } from "@/app/util/focus-block";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 
-export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Element {
+export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContext }): JSX.Element {
     const model = props.model;
-    const block = MOS.getMuxObjectAtom<Block>(`block:${model.blockId}`);
+    const ctx = props.ctx;
 
     const zoomFactor = createMemo(() => {
-        const z = block()?.meta?.["term:zoom"];
+        const z = ctx.meta()?.["term:zoom"];
         if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
         return Math.max(0.5, Math.min(2.0, z));
     });
     const setZoom = (next: number): void => {
         const clamped = Math.max(0.5, Math.min(2.0, Math.round(next * 100) / 100));
-        void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: MOS.makeORef("block", model.blockId),
-            meta: { "term:zoom": clamped === 1.0 ? null : clamped },
-        });
+        void ctx.setMeta({ "term:zoom": clamped === 1.0 ? null : clamped });
     };
 
     let rootRef: HTMLDivElement | undefined;

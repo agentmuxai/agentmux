@@ -51,31 +51,16 @@ vi.mock("@/app/view/skill/skill-manager", () => ({
 // sectionAtom/viewName are createMemo-derived from model.blockAtom(), so
 // reading a plain (non-reactive) stub only ever satisfies a memo's *first*
 // (eager, at-construction) computation. Backing the mock with a genuine
-// signal, and having the SetMetaCommand mock write into it, reproduces the
+// signal, and having the host context's setMeta write into it, reproduces the
 // real write -> MPS push -> blockAtom update round trip closely enough for
 // clicking a rail item to actually flip the visible/active section here,
 // the same way it does against the real backend.
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
-vi.mock("@/app/store/mos", () => ({
-    makeORef: (type: string, id: string) => `${type}:${id}`,
-    getMuxObjectAtom: () => () => ({ meta: blockMeta() }),
-    // global.ts/window-identity.ts evaluate a `tabAtom` createMemo at
-    // module-init time that calls MOS.getObjectValue — without this stub
-    // the import chain crashes during test setup (same gap browser-model
-    // .test.ts's mos mock documents).
-    getObjectValue: () => ({}),
-}));
 
-const setMetaMock = vi.fn((..._args: unknown[]) => {
-    const opts = _args[1] as { oref: string; meta: Record<string, unknown> };
-    setBlockMeta((prev) => ({ ...prev, ...opts.meta }));
-    return Promise.resolve(undefined);
+const setMetaMock = vi.fn((patch: Record<string, unknown>) => {
+    setBlockMeta((prev) => ({ ...prev, ...patch }));
+    return Promise.resolve();
 });
-vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: {
-        SetMetaCommand: (...args: unknown[]) => setMetaMock(...args),
-    },
-}));
 
 import { ArmoryViewModel } from "./armory-model";
 import { ArmoryView } from "./armory-view";
@@ -87,13 +72,10 @@ describe("ArmoryView rail", () => {
     });
 
     function renderArmory() {
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         return render(() => (
             <ArmoryView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
     }
@@ -139,13 +121,10 @@ describe("ArmoryView Memory sub-nav", () => {
     });
 
     function renderArmory() {
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         return render(() => (
             <ArmoryView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
     }
@@ -167,17 +146,14 @@ describe("ArmoryView Memory sub-nav", () => {
             (b) => b.textContent === "Personal"
         ) as HTMLButtonElement;
         personalButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
-            oref: "block:test-block",
-            meta: { "armory:memory:subsection": "personal" },
-        });
+        expect(setMetaMock).toHaveBeenCalledWith({ "armory:memory:subsection": "personal" });
         const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
         expect(personalPane?.classList.contains("is-hidden")).toBe(false);
     });
 
     it("normalizes a legacy armory:section='native_memory' value to Memory + Personal", () => {
         setBlockMeta({ "armory:section": "native_memory" });
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         expect(model.viewName()).toBe("Memory");
         expect(model.memorySubsectionAtom()).toBe("personal");
     });
@@ -191,13 +167,10 @@ describe("ArmoryView pane title", () => {
     });
 
     function renderArmory() {
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         const result = render(() => (
             <ArmoryView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
         return { ...result, model };
@@ -208,33 +181,27 @@ describe("ArmoryView pane title", () => {
         expect(model.viewName()).toBe("Accounts");
     });
 
-    it("clicking a rail item writes armory:section via SetMetaCommand and updates viewName()", () => {
+    it("clicking a rail item writes armory:section through the host context and updates viewName()", () => {
         const { model } = renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const skillsButton = Array.from(rail.querySelectorAll("button")).find((b) =>
             b.textContent?.includes("Skills")
         ) as HTMLButtonElement;
         skillsButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
-            oref: "block:test-block",
-            meta: { "armory:section": "skills" },
-        });
+        expect(setMetaMock).toHaveBeenCalledWith({ "armory:section": "skills" });
         expect(model.viewName()).toBe("Skills");
         const skillsPane = screen.getByTestId("skill-manager").closest(".bundle-manager-pane");
         expect(skillsPane?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("clicking a tab-bar item writes armory:section via SetMetaCommand and updates viewName()", () => {
+    it("clicking a tab-bar item writes armory:section through the host context and updates viewName()", () => {
         const { model } = renderArmory();
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
         const mcpButton = Array.from(tabBar.querySelectorAll("button")).find((b) =>
             b.textContent?.includes("MCP Servers")
         ) as HTMLButtonElement;
         mcpButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
-            oref: "block:test-block",
-            meta: { "armory:section": "mcp" },
-        });
+        expect(setMetaMock).toHaveBeenCalledWith({ "armory:section": "mcp" });
         expect(model.viewName()).toBe("MCP Servers");
     });
 
@@ -259,13 +226,13 @@ describe("ArmoryView pane title", () => {
 
     it("viewName() reflects a pre-seeded armory:section meta value", () => {
         setBlockMeta({ "armory:section": "bundles" });
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         expect(model.viewName()).toBe("Bundles");
     });
 
     it("falls back to 'Accounts' for an invalid armory:section meta value", () => {
         setBlockMeta({ "armory:section": "not-a-real-section" });
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         expect(model.viewName()).toBe("Accounts");
     });
 });
@@ -278,13 +245,10 @@ describe("ArmoryView zoom", () => {
     });
 
     function renderArmory() {
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         const result = render(() => (
             <ArmoryView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
         return { ...result, model };
@@ -296,18 +260,18 @@ describe("ArmoryView zoom", () => {
         expect(view.style.zoom).toBe("1");
     });
 
-    it("Ctrl+Wheel down writes a decreased term:zoom via SetMetaCommand", () => {
+    it("Ctrl+Wheel down writes a decreased term:zoom through the host context", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 0.9 } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 0.9 });
     });
 
-    it("Ctrl+Wheel up writes an increased term:zoom via SetMetaCommand", () => {
+    it("Ctrl+Wheel up writes an increased term:zoom through the host context", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 1.1 } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 1.1 });
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
@@ -332,22 +296,19 @@ describe("ArmoryView zoom", () => {
     });
 
     it("returning to 1.0 clears the metadata key (writes null)", () => {
-        const model = new ArmoryViewModel("test-block", null as any);
+        const model = new ArmoryViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
         // model.zoomAtom is what the wheel handler and render path both read;
         // overriding it directly (rather than the underlying blockAtom signal
         // it's derived from) sidesteps reactive-system timing entirely.
         (model as any).zoomAtom = () => 0.9;
         const { container } = render(() => (
             <ArmoryView
-                blockId="test-block"
                 model={model}
-                blockRef={{ current: null }}
-                contentRef={{ current: null }}
             />
         ));
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": null } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": null });
     });
 });
 
