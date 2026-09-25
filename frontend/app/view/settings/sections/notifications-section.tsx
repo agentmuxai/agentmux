@@ -48,7 +48,7 @@ export const NOTIFICATIONS_SETTINGS = {
     },
     osInputWaiting: {
         id: "notifications.os_input_waiting",
-        label: "Agent needs input",
+        label: "Agent has a question",
         description: "An agent asked a question and is waiting for your answer",
         section: "notifications",
         keywords: ["question", "waiting", "blocked", "notify:os:inputwaiting"],
@@ -101,6 +101,13 @@ export const NOTIFICATIONS_SETTINGS = {
         description: "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none.",
         section: "notifications",
         keywords: ["do not disturb", "night", "schedule", "sleep", "notify:quiethours"],
+    },
+    osSummary: {
+        id: "notifications.os_summary",
+        label: "Show what the agent is working on",
+        description: "Add the agent's current session summary as a small line under the notification",
+        section: "notifications",
+        keywords: ["summary", "subtext", "context", "task", "notify:os:summary"],
     },
     osPreview: {
         id: "notifications.os_preview",
@@ -192,6 +199,7 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnErrored, "notify:os:turnerrored")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osSummary, "notify:os:summary")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow
                     id={NOTIFICATIONS_SETTINGS.quietHours.id}
