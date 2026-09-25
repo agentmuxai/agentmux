@@ -611,6 +611,13 @@ declare global {
         }) => ContextMenuItem[];
         giveFocus?: () => boolean;
         keyDownHandler?: (e: MuxKeyboardEvent) => boolean;
+        /** Fired by the host (block.tsx) when this tab becomes visible to the
+         *  user — on mount (a remount tab) or leaving dormancy / a hidden
+         *  window tab (a kept-alive one). Pane Tab contract Phase 3b. */
+        onActivate?: () => void;
+        /** Fired by the host when this tab stops being visible, including
+         *  when it unmounts while visible. */
+        onDeactivate?: () => void;
         dispose?: () => void;
         /** Views that support voice input expose a handle accessor. Called
          *  by BlockFrame_Header (to render the mic button) and by the
