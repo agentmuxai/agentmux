@@ -204,3 +204,18 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
         }
     });
 });
+
+// SPEC_LAYOUT_FILES_2026_09_25.md §6.1: ☰ → Layouts → "Save layout…", between
+// Opacity and the divider above Settings (placement per the 08-13 spec §5.1).
+describe("Layouts entry", () => {
+    it("sits after Opacity and offers exactly Save layout…", () => {
+        render(() => <HamburgerMenu />);
+        const labels = h.menu.items.map((i) => i.label);
+        const at = labels.indexOf("Layouts");
+        expect(at).toBe(labels.indexOf("Opacity") + 1);
+        expect(h.menu.items[at + 1].divider).toBe(true);
+        expect(h.menu.items[at].subItems?.map((i) => i.label)).toEqual(["Save layout…"]);
+        expect(typeof h.menu.items[at].subItems?.[0].onClick).toBe("function");
+        cleanup();
+    });
+});

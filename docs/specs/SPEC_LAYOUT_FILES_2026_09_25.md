@@ -1,8 +1,10 @@
 # SPEC: Layout files — "Layouts → Save layout…" and the `agentmux.layout` file format
 
 **Date:** 2026-09-25
-**Status:** proposed — nothing here is built. Measured against `agentmux`
-`main` @ `c0268089b`.
+**Status:** active — Phase 1 ships in PR #3787 (spec: PR #3778): ☰ →
+Layouts → Save layout…, the host Save dialog, `layout.save`,
+`backend/layout_file.rs` and the v1 schema. Phases 2–4 are not started.
+Measured against `agentmux` `main` @ `c0268089b`.
 **Trigger:** Repo owner: *"in the hamburger we'd add a new entry 'Layouts' and a
 single submenu: 'Save layout' which would let you save it as a file (you'll
 need to write a file spec) — actually, we may want to simply extend or
