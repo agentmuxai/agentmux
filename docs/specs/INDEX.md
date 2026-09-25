@@ -429,6 +429,7 @@ partial list.
 | [`SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) | Tool block: live log popout + bottom action bar |
 | [`SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17`](SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md) | SPEC: Tee redirected tool output to the feed + render tool output as a terminal |
 | [`SPEC_TOOL_PREVIEW_DEDENT_2026_08_08`](SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md) | SPEC: Tool preview common-indentation stripping (dedent) |
+| [`SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25`](SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md) | SPEC: tool previews — cap at one third of today's height, and always follow the latest output |
 | [`SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08`](SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md) | SPEC: Tool preview scrollbar-to-edge padding removal |
 | [`SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17`](SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md) | SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale) |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
@@ -1322,12 +1323,6 @@ section above, do not bulk-restamp them.
 | Spec | Title |
 |---|---|
 | [`SPEC_VERSION_ISOLATION_2026_06_01`](SPEC_VERSION_ISOLATION_2026_06_01.md) | Version Isolation — Spec & Fix Plan |
-
-**`part`**
-
-| Spec | Title |
-|---|---|
-| [`SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25`](SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md) | SPEC: tool previews — cap at one third of today's height, and always follow the latest output |
 
 **`pr`**
 

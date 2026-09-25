@@ -2,7 +2,7 @@
 
 **Author:** Agent4
 **Date:** 2026-09-25
-**Status:** Part A — PR #3800; Part B — PR #3801 (see B.4, "What was built")
+**Status:** implemented — Part A in PR #3800, Part B in PR #3801 (see B.4, "What was built")
 **Related:** `SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md` (the agent-pane
 follow work, PR #3652, tracking issue #3655 — Part B below is that spec's Phase 3,
 pulled forward), `SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md` (the FLIP height
