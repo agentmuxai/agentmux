@@ -43,7 +43,6 @@ import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { computeTheme, DefaultTermTheme } from "./termutil";
 import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
-import "./term-pane-tab";
 
 let _terminalViewComponent: ViewComponent = null;
 

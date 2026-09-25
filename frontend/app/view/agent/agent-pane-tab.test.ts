@@ -11,7 +11,11 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { describePaneTab } from "@/element/pane-tab-model";
-import { agentTabIcon } from "./agent-pane-tab";
+import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import { agentPaneTab, agentTabIcon } from "./agent-pane-tab";
+
+// As in block-registry.ts's agent manifest.
+registerPaneTab(legacyAdapter("agent", class {} as any, { label: "Agent", icon: "sparkles", tab: agentPaneTab }));
 
 function describeAgent(meta: Record<string, unknown>) {
     return describePaneTab({ blockId: "b1", view: "agent", meta: { view: "agent", ...meta }, ordinal: 1, liveViewModel: null });

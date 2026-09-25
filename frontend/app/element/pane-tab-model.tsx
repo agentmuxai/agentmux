@@ -16,6 +16,7 @@
 
 import { createMemo, Match, Switch, type JSX } from "solid-js";
 import { blockViewToIcon, blockViewToName } from "@/app/block/blockutil";
+import { getPaneTab } from "@/app/block/pane-tab-registry";
 import { atoms } from "@/app/store/global";
 import { makeIconClass } from "@/util/util";
 import { ProviderLogo } from "./ProviderLogo";
@@ -50,12 +51,7 @@ export interface PaneTabInfo {
     rename?: (title: string) => Promise<void>;
 }
 
-const descriptors = new Map<string, PaneTabDescriptor>();
-
-export function registerPaneTabDescriptor(view: string, descriptor: PaneTabDescriptor): void {
-    descriptors.set(view, descriptor);
-}
-
+// Descriptors are part of each view's manifest (`pane-tab-registry.ts`).
 /** Live names/favicons exist only while a tab is active (dormant
  *  non-terminal tabs are unmounted), so each pane keeps the last value seen
  *  per tab — otherwise a tab would change identity the moment another tab is
@@ -106,7 +102,7 @@ export function describePaneTab(
     labelOverride?: string,
     memory: PaneTabMemory = createPaneTabMemory()
 ): PaneTabInfo {
-    const d = ctx.view ? descriptors.get(ctx.view) : undefined;
+    const d = getPaneTab(ctx.view)?.tab;
     const widget = widgetForView(ctx.view);
 
     // A freshly built ViewModel can report a stand-in name before its real

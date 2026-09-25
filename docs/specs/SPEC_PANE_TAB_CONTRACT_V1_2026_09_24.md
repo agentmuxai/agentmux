@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-24
 **Status:** active — Phase 0 (§1.5, the Help ghost) implemented in PR #3723;
-per-tab keep-alive (§5, decided) in PR #3725; Phases 1–6 not started.
+per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
+PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
+split-browser fix (#3755); Phase 2a (the registry, §4) in the PR after #3755;
+Phases 2b–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -296,6 +299,29 @@ function registerPaneTab(manifest: PaneTabManifest): () => void; // returns unre
 6. **Capabilities replace view-name checks** in shared code (§2.4 #5).
 7. **Titles of unmounted tabs** come from the pure `tabTitle(meta)` first,
    and only then from the last `liveTitle` (fixes §2.4 #6).
+8. **The host owns an instance's reactive lifetime.** `create(ctx)` runs in a
+   root the host creates for that instance — untracked, so nothing the
+   instance reads while building subscribes the host's own effects — and the
+   host disposes that root together with `dispose()`. Before this, the legacy
+   path built ViewModels inside `Block`'s effect: the first meta change
+   re-ran the effect and killed every memo of the still-cached instance
+   (Sysinfo's plot type changed once, then froze; 13 view models exposed).
+   Implemented for legacy ViewModels in `block.tsx`'s `makeViewModel`
+   (PR #3754).
+9. **A preview never creates an instance.** A drag-preview thumbnail (mounted
+   for every tile, always) renders from the manifest (`label`, `icon`,
+   `tabTitle`) plus the live instance's `liveTitle` when there is one. An
+   instance's `create` may have global side effects keyed by block id — the
+   browser registered in its block-id-keyed store and unregistered it on
+   dispose, so a preview instance left a split browser pane black. Implemented
+   for legacy ViewModels in `block.tsx`'s `makePreviewViewModel`.
+10. **A block may be mounted more than once in quick succession** (split,
+    layout rebuild, hot reload). Any host-side resource keyed by block id — a
+    `nativeSurface` view's native page — belongs to the latest mount that
+    requested it; an older mount releases it only if it still owns it
+    (`use-pane-rect-sync.ts` `nativePaneOwners`).
+    REPORT_SYSINFO_PLOT_TYPE_AND_BROWSER_PREVIEW_VM_2026_09_25.md has the
+    evidence for 8–10.
 
 **For a future widget library:** a user widget is a trusted, locally
 installed ES module (decided, §5) whose default export is a
@@ -324,6 +350,21 @@ working throughout through a legacy adapter.
    `KEEP_ALIVE_TYPES`, aliases and `PaneTabDescriptor` from it. Migrate in
    this order: help, sysinfo, swarm, drone, warden, armory, media, editor,
    then browser, then term and agent.
+   - **2a (implemented):** `frontend/app/block/pane-tab-registry.ts` (pure,
+     imports no view) holds `PaneTabManifest`, `registerPaneTab` (returns
+     unregister; refuses a taken view or alias) and `legacyAdapter`.
+     `block-registry.ts` registers all 17 built-ins through `legacyAdapter`;
+     `getBlockViewClass`, `resolveEffectiveViewType`, `blockViewToIcon`/
+     `blockViewToName`, the keep-alive set (`isKeepAliveView`) and
+     `describePaneTab`'s descriptors all read the registry. The parallel
+     `registerPaneTabDescriptor` is gone — a descriptor is the manifest's
+     `tab`. `block-registry.test.ts` pins parity with every table replaced.
+     One deliberate difference: an alias now resolves for label and icon too
+     (a still-live `forge` block reads "Agent", not "forge").
+   - **2b:** the host's native path — `create(ctx)` with a
+     `PaneTabHostContext`, adapted to what the host consumes today — and the
+     per-view migrations above, Help first as the pilot. `ctx.visibility`
+     arrives with Phase 3.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

@@ -159,7 +159,17 @@ vi.mock("@/layout/lib/layoutNode", () => ({
 
 import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
-import { registerPaneTabDescriptor } from "./pane-tab-model";
+import { legacyAdapter, registerPaneTab } from "@/app/block/pane-tab-registry";
+import type { PaneTabDescriptor } from "./pane-tab-model";
+
+// A test view type whose manifest carries only a pane-tab descriptor.
+const unregisterTestTabs: (() => void)[] = [];
+function registerPaneTabDescriptor(view: string, tab: PaneTabDescriptor): void {
+    unregisterTestTabs.push(registerPaneTab(legacyAdapter(view, class {} as any, { tab })));
+}
+afterEach(() => {
+    while (unregisterTestTabs.length) unregisterTestTabs.pop()!();
+});
 
 function fakeNodeModel(overrides: Record<string, any> = {}): any {
     return {
