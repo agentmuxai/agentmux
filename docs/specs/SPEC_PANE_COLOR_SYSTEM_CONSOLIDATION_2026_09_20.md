@@ -1,9 +1,9 @@
 # SPEC: consolidate pane/tab color systems — persist explicit agent-pane picks, unify the tab-select indicator
 
 **Date:** 2026-09-20 (revised 2026-09-24)
-**Status:** active — §2.2 shipped in PR #3476, §2.3 (pane tabs) in PR #3484
-and PR #3492; §3 (remove the dead `bg:*` border tier) is the one remaining
-item, in the PR that commits this document.
+**Status:** implemented — §2.2 in PR #3476, §2.3 (pane tabs) in PR #3484 and
+PR #3492, §3 (remove the dead `bg:*` border tier) in PR #3704. Deriving a
+window tab's color from its panes is not pursued (§2.3).
 **Author:** Camper
 **Trigger:** direct user request, same session as
 `SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md` (that spec's decommission
@@ -28,7 +28,7 @@ decision settled its main open question. Re-verified against `main` at
 | §2.1 | Header inherits the agent's color | Delivered before this spec (header-unification). Then refined by #3476: explicit hue and agent identity color now go through ONE header rule, `headerBgForEffectiveColor` (`pane-color-menu.ts`), dark/muted on dark themes, full-strength on light themes. |
 | §2.2 | An explicit pick on an agent pane persists to the agent | **Shipped in #3476, as this spec's option 1.** `setHue(blockId, hue, agentId)` writes `frame:hue` on the block and, for an agent pane, also `SetAgentContentCommand` `ui:color` = `hueToAgentIdentityColor(hue)` (same HSL as the border). Clearing ("Default") does not reset the agent's identity color. Other already-open panes of the same agent are not repainted, as recommended. §4 Q1 is therefore answered: "persist" means "follow the agent". |
 | §2.3 | The selected-tab indicator matches the pane's resolved color | **For pane tabs: shipped.** #3484 gives every pane-tab pill its own block's color (`computeBlockActiveBorderColor`: `frame:hue` first, then `frame:activebordercolor`). The active pill's underline is that color, and #3492 made the active pill paint its own color too (`SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md` §2.2). **For window tabs: not pursued**, see §2.3 below. |
-| §3 | Remove the dead `bg:activebordercolor` / `bg:bordercolor` tier | **Still open — the remaining work.** See §3. |
+| §3 | Remove the dead `bg:activebordercolor` / `bg:bordercolor` tier | **Done in #3704** (the PR that commits this document). See §3. |
 
 ## 1. Inventory (current, 2026-09-24)
 
@@ -61,7 +61,7 @@ a window tab never takes a pane's color; "the pane's color belongs to its
 pill." A window tab keeps its own `tab:color` (explicit swatch pick), which
 is a different thing, the color of the *workspace tab*, not of any pane.
 
-## 3. Remaining work: remove the dead `bg:*` border tier
+## 3. Remove the dead `bg:*` border tier (#3704)
 
 `bg:activebordercolor` / `bg:bordercolor` (inventory #4) are read by
 `computeFocusRingBorderColor` (`frontend/app/block/blockframe.tsx`) as the
