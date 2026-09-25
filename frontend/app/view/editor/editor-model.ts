@@ -107,8 +107,8 @@ function installGlobalSinkOnce(): void {
     _sinkInstalled = true;
 }
 
-export /** The editor's state behind its native pane tab (`editorPaneTab`, editor.tsx). */
-class EditorViewModel {
+/** The editor's state behind its native pane tab (`editorPaneTab`, editor.tsx). */
+export class EditorViewModel {
     viewType = "editor";
     blockId: string;
 
