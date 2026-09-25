@@ -84,6 +84,12 @@ impl PersistentSubprocessController {
         // provider that echoes back whatever --resume it was given as its
         // first stdout line, even when that id turns out to be unreachable.
         let mut attempted_resume_sid: Option<String> = None;
+        // The agent's memory is in its folder before the provider reads it.
+        // Runs before the resume claim below, not under it: a pass can take
+        // up to its one-second budget, and that lock is meant to be held only
+        // briefly (reagent P1 on #3721). A spawn then refused as held
+        // elsewhere has only cost an extra, idempotent pass.
+        self.reconcile_memory_before_spawn(&config);
         // One session, one process. Resuming a session another live process
         // is still running on — the agent's other pane, or one that is
         // closing and hasn't exited yet — puts two CLIs on one transcript.
@@ -161,9 +167,6 @@ impl PersistentSubprocessController {
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
-
-        // The agent's memory is in its folder before the provider reads it.
-        self.reconcile_memory_before_spawn(&config);
 
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
