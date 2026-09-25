@@ -50,6 +50,20 @@ impl PersistentSubprocessController {
         if crate::backend::obj::meta_get_string(&meta, "agent:memoryrecord", "") == "off" {
             return;
         }
+        // The same agent live in another pane (a second pane starting fresh
+        // beside it) writes the same folder while the pass would run: leave
+        // it to that agent's next spawn.
+        let live_elsewhere = super::super::get_all_controllers().into_iter().any(|(block_id, ctrl)| {
+            block_id != self.block_id
+                && ctrl.as_any().downcast_ref::<PersistentSubprocessController>().is_some_and(|other| {
+                    other.stable_agent_uid.lock().unwrap().as_deref() == Some(uid.as_str())
+                        && other.inner.lock().unwrap().current_pid.is_some()
+                })
+        });
+        if live_elsewhere {
+            tracing::info!(block_id = %self.block_id, uid, "memory reconcile skipped: the agent is live in another pane");
+            return;
+        }
         let provider = crate::backend::obj::meta_get_string(&meta, "agentProvider", "");
         let reconcile = || {
             crate::backend::memory_reconcile::reconcile_before_spawn(

@@ -77,7 +77,9 @@ pub(crate) struct SpawnMemory<'a> {
 /// settings file passed on the command line (it could set
 /// `autoMemoryDirectory`).
 pub(crate) fn spawn_overrides_memory_dir(env: &std::collections::HashMap<String, String>, args: &[String]) -> bool {
-    const VARS: [&str; 2] = ["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE", "CLAUDE_CODE_REMOTE_MEMORY_DIR"];
+    // CLAUDE_CODE_PROJECT_DIR_NAME replaces the `projects/<name>` folder
+    // name for every working directory (the CLI's `wyo`).
+    const VARS: [&str; 3] = ["CLAUDE_COWORK_MEMORY_PATH_OVERRIDE", "CLAUDE_CODE_REMOTE_MEMORY_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME"];
     VARS.iter().any(|v| env.get(*v).is_some_and(|x| !x.is_empty()) || std::env::var_os(v).is_some_and(|x| !x.is_empty()))
         || args.iter().any(|a| {
             ["--settings", "--managed-settings"].iter().any(|f| a == f || a.starts_with(&format!("{f}=")))
@@ -101,6 +103,14 @@ fn settings_override_memory_dir(config_dir: &Path, root: &Path) -> bool {
     } else {
         files.push("/etc/claude-code/managed-settings.json".into());
     }
+    // Drop-in fragments beside each managed-settings file.
+    let drop_ins: Vec<std::path::PathBuf> = files
+        .iter()
+        .filter(|f| f.file_name().is_some_and(|n| n == "managed-settings.json"))
+        .filter_map(|f| std::fs::read_dir(f.with_file_name("managed-settings.d")).ok())
+        .flat_map(|d| d.flatten().map(|e| e.path()))
+        .collect();
+    files.extend(drop_ins);
     files.iter().any(|f| std::fs::read(f).is_ok_and(|b| b.windows(19).any(|w| w == b"autoMemoryDirectory")))
 }
 
@@ -131,7 +141,10 @@ fn take_pass_lease(fs: &FileStore, uid: &str, until: Instant) -> Result<Option<S
     let owner = uuid::Uuid::new_v4().simple().to_string();
     fs.zone_txn(&pass_zone(uid), |z| {
         let held = z.read(PASS_LEASE_FILE)?.and_then(|b| serde_json::from_slice::<PassLease>(&b).ok());
-        if held.is_some_and(|l| l.until_ms > now) {
+        // No pass's lease legitimately runs more than a minute ahead; one
+        // further out was taken while the clock was ahead, and would
+        // otherwise block every pass until the clock caught up.
+        if held.is_some_and(|l| l.until_ms > now && l.until_ms <= now + 60_000) {
             return Ok(None);
         }
         let lease = PassLease { owner: owner.clone(), until_ms };
@@ -636,6 +649,7 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
     }
     // Appended to the bytes as they are: an index that isn't UTF-8 keeps
     // every byte it had.
+    let disk_sha = on_disk.as_deref().map(record::sha256_hex);
     let mut next = on_disk.unwrap_or_default();
     let before = next.clone();
     for name in conflict_files {
@@ -669,7 +683,7 @@ fn index_conflict_files(fs: &FileStore, uid: &str, dir: &Path, dir_id: &str) -> 
         },
     )?;
     // Written to disk only once recorded against the head it was based on.
-    if matches!(outcome, AppendOutcome::Appended(_)) && disk_still_holds(dir, INDEX_FILE, Some(&record::sha256_hex(&before))) {
+    if matches!(outcome, AppendOutcome::Appended(_)) && disk_still_holds(dir, INDEX_FILE, disk_sha.as_deref()) {
         write_atomic(dir, INDEX_FILE, &next)?;
     }
     Ok(())
