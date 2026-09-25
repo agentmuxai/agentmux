@@ -6,6 +6,7 @@
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
@@ -29,11 +30,11 @@ function getPaneSelection(viewModel?: ViewModel): string {
 }
 
 /**
- * Returns true if the pane accepts text input (i.e. paste makes sense).
- * Currently only terminal panes accept input via the PTY.
+ * Returns true if the pane accepts text input (i.e. paste makes sense) — its
+ * view's `acceptsInput` capability (today: the terminal, via its PTY).
  */
 function paneAcceptsInput(blockData: Block): boolean {
-    return blockData.meta?.view === "term";
+    return paneTabCapability(blockData.meta?.view, "acceptsInput") === true;
 }
 
 // ─── Split ────────────────────────────────────────────────────────────────────

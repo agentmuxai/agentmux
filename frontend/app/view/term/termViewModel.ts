@@ -37,7 +37,7 @@ const [nowMinute, setNowMinute] = createSignal(Math.floor(Date.now() / 60_000));
 if ((globalThis as any).__nowMinuteInterval != null) clearInterval((globalThis as any).__nowMinuteInterval);
 (globalThis as any).__nowMinuteInterval = setInterval(() => setNowMinute(Math.floor(Date.now() / 60_000)), 60_000);
 import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
-import { computeTheme, DefaultTermTheme } from "./termutil";
+import { computeTheme, DefaultTermTheme, termViewName } from "./termutil";
 import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
@@ -98,11 +98,7 @@ class TermViewModel implements ViewModel {
 
         this.viewIcon = createMemo(() => "terminal");
 
-        this.viewName = createMemo(() => {
-            const blockData = this.blockAtom();
-            if (blockData?.meta?.controller == "cmd") return "";
-            return "Terminal";
-        });
+        this.viewName = createMemo(() => termViewName(this.blockAtom()?.meta));
 
         this.isCmdController = createMemo(() => {
             const controllerMetaAtom = getBlockMetaKeyAtom(this.blockId, "controller");

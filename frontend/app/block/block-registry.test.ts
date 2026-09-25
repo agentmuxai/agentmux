@@ -74,6 +74,13 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(paneTabCapability("term", "statsBadgeSetting")).toBe("term:showstatsbadge");
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
+        // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
+        expect(holders("paneZoom")).toEqual(["agent", "armory", "editor", "swarm", "term", "warden"]);
+        expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
+        expect(paneTabCapability("term", "paneZoom")?.baseFontSize).toBeUndefined();
+        expect(holders("acceptsInput")).toEqual(["term"]);
+        expect(holders("shellKeys")).toEqual(["term"]);
+        expect(holders("sharesCwd")).toEqual(["term"]);
         // An alias carries its view's capabilities.
         expect(paneTabCapability("forge", "header")).toBe("surface");
     });

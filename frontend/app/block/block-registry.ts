@@ -45,6 +45,10 @@ const builtins = [
             headerMic: { title: "Speak into this terminal (Ctrl+Shift+V)" },
             statsBadgeSetting: "term:showstatsbadge",
             hueBorder: true,
+            paneZoom: {},
+            acceptsInput: true,
+            shellKeys: true,
+            sharesCwd: true,
         },
         tab: termPaneTab,
         chrome: buildTermPaneChromeModel,
@@ -55,7 +59,7 @@ const builtins = [
         icon: "sparkles",
         aliases: ["forge"],
         lifecycle: "keepAlive",
-        capabilities: { header: "surface" },
+        capabilities: { header: "surface", paneZoom: {} },
         tab: agentPaneTab,
         chrome: buildAgentPaneChromeModel,
     }),
@@ -65,24 +69,30 @@ const builtins = [
         lifecycle: "keepAlive",
         capabilities: { nativeSurface: true },
     }),
-    legacyAdapter("editor", EditorViewModel as any, { label: "Editor", icon: "file-lines", lifecycle: "keepAlive" }),
+    legacyAdapter("editor", EditorViewModel as any, {
+        label: "Editor",
+        icon: "file-lines",
+        lifecycle: "keepAlive",
+        capabilities: { paneZoom: { baseFontSize: 13 } },
+    }),
     legacyAdapter("sysinfo", SysinfoViewModel as any, { label: "Sysinfo", icon: "chart-line" }),
     legacyAdapter("cpuplot", SysinfoViewModel as any),
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     legacyAdapter("launcher", LauncherViewModel as any),
-    legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project" }),
+    // Swarm, Armory and Warden apply `term:zoom` as CSS zoom.
+    legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project", capabilities: { paneZoom: {} } }),
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
     legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
     legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
     // Workflows was renamed to Drone (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18);
     // persisted blocks still say "workflows".
     legacyAdapter("drone", DroneViewModel as any, { label: "Drone", icon: "diagram-project", aliases: ["workflows"] }),
-    legacyAdapter("warden", WardenViewModel as any, { label: "Warden" }),
+    legacyAdapter("warden", WardenViewModel as any, { label: "Warden", capabilities: { paneZoom: {} } }),
     legacyAdapter("toolchain", ToolchainViewModel as any),
     // The Trust Center was renamed to Armory
     // (docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md);
     // persisted blocks still say "trust".
-    legacyAdapter("armory", ArmoryViewModel as any, { aliases: ["trust"] }),
+    legacyAdapter("armory", ArmoryViewModel as any, { aliases: ["trust"], capabilities: { paneZoom: {} } }),
     legacyAdapter("settings", SettingsViewModel as any),
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);

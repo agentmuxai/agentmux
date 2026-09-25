@@ -35,7 +35,7 @@ import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
-import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
+import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { partitionHeaderElems } from "./header-elems";
 import { resolveContextMenuRegion } from "./context-menu-region";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
@@ -547,15 +547,7 @@ function BlockFrame_Header(
         if (bd?.meta?.["frame:title"]) {
             return bd.meta["frame:title"];
         }
-        let name = util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(bd?.meta?.view);
-        if (!bd?.meta?.["frame:title"] && bd?.meta?.view === "term") {
-            const blockEnv = bd.meta["cmd:env"] as Record<string, string> | undefined;
-            const agentId = detectAgentFromEnv(blockEnv);
-            if (agentId) {
-                name = agentId;
-            }
-        }
-        return name;
+        return util.useAtomValueSafe(props.viewModel?.viewName) ?? blockViewToName(bd?.meta?.view);
     });
 
     const viewIconUnion = createMemo(() => {

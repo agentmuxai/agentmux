@@ -7,8 +7,8 @@ PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
 activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
-Phase 5a (header/frame capabilities) in the PR after it; Phases 2c, 5b–6 not
-started.
+Phases 5a–5b (capabilities replace view-name checks) in the PR after it;
+Phases 2c, 5c, 6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -440,11 +440,21 @@ working throughout through a legacy adapter.
      `PaneChrome.tsx`'s seven view-name checks for these read the
      capabilities; `block-registry.test.ts` pins that exactly the view types
      the old checks named declare each one.
-   - **5b:** keyboard and new-block behavior — term's cwd for a new block
-     (`keymodel-blockcreate.ts`), basic-terminal key routing (`keymodel.ts`),
-     editor's default zoom (`zoom.ts`), paste and split rules
-     (`pane-actions.ts`) — and the terminal's env-derived header name
-     (`blockframe.tsx`), which belongs in the terminal's own view model.
+   - **5b (implemented): input, zoom, new blocks.** `paneZoom: {
+     baseFontSize? }` replaces `zoom.ts`'s allowlist of views using
+     `term:zoom` (term, agent, swarm, editor, armory, warden — warden was once
+     missing from it by accident) and editor's hard-coded base size (13);
+     `acceptsInput` (term) is the pane menu's Paste rule
+     (`pane-actions.ts`); `shellKeys` (term) makes Ctrl+F search stand down
+     (`keymodel.ts`); `sharesCwd` (term) gives a new block the focused
+     block's `cmd:cwd` (`keymodel-blockcreate.ts`). The basic-terminal count
+     needs no capability — only the terminal implements `isBasicTerm`. The
+     terminal's env-derived header name moved into the terminal itself
+     (`termViewName`, termutil.ts, used by `TermViewModel.viewName`). The
+     split rule's agent blocklist is keyed by meta field, not view name, and
+     stays. No view-name check remains in shared header, frame, zoom, key or
+     pane-menu code; `command-registry.ts`/`keymodel-blockcreate.ts` still
+     *create* terminals by name, which is a choice of default, not a check.
    - **5c:** backend `defaultMeta` from the manifest.
 6. **Third-party loading:** trusted, locally installed ES-module widgets
    listed in widgets.json, a shared Solid runtime, `apiVersion` checks and

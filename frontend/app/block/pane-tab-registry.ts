@@ -46,6 +46,18 @@ export interface PaneTabCapabilities {
     /** `frame:hue` (or `frame:activebordercolor`) colors this tab's active
      *  border — a terminal running an agent CLI shows that agent's color. */
     hueBorder?: boolean;
+    /** Takes part in per-pane zoom (`term:zoom`, Ctrl+Scroll, the all-panes
+     *  batch), scaling from `baseFontSize` (default 15) unless the block sets
+     *  `term:fontsize`. */
+    paneZoom?: { baseFontSize?: number };
+    /** Accepts typed/pasted text, so the pane menu offers Paste into it. */
+    acceptsInput?: boolean;
+    /** Ctrl+key combinations belong to the content (a shell), so app
+     *  shortcuts that would shadow one (Ctrl+F search) stand down. */
+    shellKeys?: boolean;
+    /** A new block created while this one is focused starts in its
+     *  `cmd:cwd`. */
+    sharesCwd?: boolean;
 }
 
 /** What the host gives a native instance — its only way in (no raw
