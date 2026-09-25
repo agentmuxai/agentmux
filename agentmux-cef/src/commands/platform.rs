@@ -257,10 +257,8 @@ pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
         "hostname": whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
         "os": os_info,
         "localIp": local_ip,
-        "instanceId": format!("v{}", version),
         "version": version,
         "dataDir": data_dir,
-        "hostType": "host",
         "pid": pid,
         "ports": {
             "ipc": format!("127.0.0.1:{}", ipc_port),
@@ -337,6 +335,106 @@ pub fn open_in_editor(args: &serde_json::Value) -> Result<serde_json::Value, Str
 
     #[allow(unreachable_code)]
     Ok(serde_json::Value::Null)
+}
+
+/// Open one of this instance's own directories in the OS file manager — the
+/// host popover's Data-path link.
+///
+/// Takes a closed `target` enum, never a path: the host resolves the directory
+/// itself, so the renderer cannot ask it to open an arbitrary location.
+/// Spec: SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md §4.
+pub fn open_in_file_manager(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let target = args.get("target").and_then(|v| v.as_str());
+    let data_dir = state.version_data_dir.lock().clone();
+    let path = resolve_file_manager_target(target, data_dir.as_deref())?;
+    spawn_file_manager(&path)?;
+    Ok(serde_json::Value::Null)
+}
+
+/// Map a `target` to a directory that exists. `data` is the only target today.
+fn resolve_file_manager_target(
+    target: Option<&str>,
+    data_dir: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    let dir = match target {
+        Some("data") => data_dir.ok_or_else(|| "Data dir not initialized yet".to_string())?,
+        Some(other) => return Err(format!("Unknown file manager target: {other}")),
+        None => return Err("Missing target".to_string()),
+    };
+    let path = std::path::PathBuf::from(dir);
+    if !path.is_dir() {
+        return Err(format!("Directory does not exist: {}", path.display()));
+    }
+    Ok(path)
+}
+
+/// The program and argv that open `path` (a directory) in the platform's file
+/// manager. `None` on a platform we don't support. The path is always a
+/// single argv element — no shell anywhere.
+fn file_manager_command(path: &std::path::Path) -> Option<(&'static str, Vec<std::ffi::OsString>)> {
+    #[cfg(target_os = "windows")]
+    {
+        // Explorer ignores a forward-slash path and opens its default folder
+        // instead, so normalise to backslashes.
+        let p = path.to_string_lossy().replace('/', "\\");
+        return Some(("explorer.exe", vec![p.into()]));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Some(("open", vec![path.as_os_str().to_owned()]));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return Some(("xdg-open", vec![path.as_os_str().to_owned()]));
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Spawn the file manager detached from our stdio, and reap it on a
+/// background thread so a quick-exiting launcher (`open`, `xdg-open`) doesn't
+/// linger as a zombie. Explorer's exit code is meaningless (it commonly exits
+/// 1 on success), so only a failure to spawn is an error.
+fn spawn_file_manager(path: &std::path::Path) -> Result<(), String> {
+    let (program, args) =
+        file_manager_command(path).ok_or_else(|| "Unsupported platform".to_string())?;
+    match spawn_detached(program, &args) {
+        Ok(()) => Ok(()),
+        // No xdg-open on this Linux box — try GIO before giving up.
+        #[cfg(target_os = "linux")]
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let mut gio_args = vec![std::ffi::OsString::from("open")];
+            gio_args.extend(args);
+            spawn_detached("gio", &gio_args).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    "No file manager handler found (tried xdg-open and gio)".to_string()
+                } else {
+                    format!("Failed to open file manager: {e}")
+                }
+            })
+        }
+        Err(e) => Err(format!("Failed to open file manager: {e}")),
+    }
+}
+
+fn spawn_detached(program: &str, args: &[std::ffi::OsString]) -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// Ensure settings.json exists in the config directory with the latest template.
@@ -1156,4 +1254,66 @@ fn extract_commented_setting_key(line: &str) -> Option<&str> {
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
     Some(&rest[..end])
+}
+
+#[cfg(test)]
+mod file_manager_tests {
+    use super::{file_manager_command, resolve_file_manager_target};
+
+    #[test]
+    fn resolves_data_target_to_existing_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap();
+        assert_eq!(resolve_file_manager_target(Some("data"), Some(d)).unwrap(), dir.path());
+    }
+
+    #[test]
+    fn rejects_unknown_or_missing_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str();
+        // Anything but "data" is refused — including a target that looks like a path.
+        for t in ["config", "", "DATA", "../data", r"C:\Windows"] {
+            assert!(resolve_file_manager_target(Some(t), d).is_err(), "target {t:?} must be refused");
+        }
+        assert_eq!(resolve_file_manager_target(None, d).unwrap_err(), "Missing target");
+    }
+
+    #[test]
+    fn rejects_uninitialized_or_missing_dir() {
+        assert_eq!(
+            resolve_file_manager_target(Some("data"), None).unwrap_err(),
+            "Data dir not initialized yet"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("does-not-exist");
+        assert!(resolve_file_manager_target(Some("data"), gone.to_str()).is_err());
+        // A file is not a directory.
+        let file = dir.path().join("f.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert!(resolve_file_manager_target(Some("data"), file.to_str()).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_uses_explorer_with_backslashes() {
+        let (prog, args) = file_manager_command(std::path::Path::new("C:/Users/me/.agentmux/data")).unwrap();
+        assert_eq!(prog, "explorer.exe");
+        assert_eq!(args, vec![std::ffi::OsString::from(r"C:\Users\me\.agentmux\data")]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_uses_open() {
+        let (prog, args) = file_manager_command(std::path::Path::new("/Users/me/.agentmux/data")).unwrap();
+        assert_eq!(prog, "open");
+        assert_eq!(args, vec![std::ffi::OsString::from("/Users/me/.agentmux/data")]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_uses_xdg_open() {
+        let (prog, args) = file_manager_command(std::path::Path::new("/home/me/.agentmux/data")).unwrap();
+        assert_eq!(prog, "xdg-open");
+        assert_eq!(args, vec![std::ffi::OsString::from("/home/me/.agentmux/data")]);
+    }
 }
