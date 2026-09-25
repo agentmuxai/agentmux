@@ -34,6 +34,45 @@ export function formatSize(bytes: number): string {
     return fmt(Math.max(1, Math.round((bytes / 1024) * 10) / 10), "KB");
 }
 
+/**
+ * Paste the clipboard into the drawer's terminal. Shared by the right-click
+ * menu and Ctrl+Shift+V so both obey the same size limit and lock rule.
+ */
+export async function pasteClipboardIntoShell(deps: ShellDrawerMenuDeps): Promise<void> {
+    try {
+        // Human input is dropped while an agent drives the shell (see
+        // ShellDrawerMenuDeps.isAgentLocked); pasting into that would vanish.
+        if (deps.isAgentLocked()) return;
+        const text = await deps.readClipboard();
+        if (!text) return;
+        const bytes = new TextEncoder().encode(text).length;
+        if (bytes > SHELL_PASTE_MAX_BYTES) {
+            // Say what happened, the limit, and what to do instead — a silent
+            // no-op reads as a bug.
+            deps.notify({
+                icon: "clipboard",
+                title: "Paste too large for the shell",
+                message:
+                    `The clipboard is ${formatSize(bytes)}; the shell accepts up to ` +
+                    `${formatSize(SHELL_PASTE_MAX_BYTES)}. Save it to a file and reference ` +
+                    `it from the shell instead.`,
+                timestamp: new Date().toISOString(),
+                // Auto-dismiss like every other warning toast; long enough to
+                // read the two sentences.
+                expiration: Date.now() + 10000,
+                type: "warning",
+            });
+            return;
+        }
+        // terminal.paste (not a raw write): applies bracketed-paste wrapping
+        // when the shell enabled it, then flows out through the drawer's
+        // sendDataHandler like typed input.
+        deps.getTerminal()?.paste(text);
+    } catch (e) {
+        console.error("[shell-drawer] paste failed:", e);
+    }
+}
+
 export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): ContextMenuItem[] {
     const terminal = deps.getTerminal();
     // Captured now, at right-click time — the selection can't change between
@@ -41,10 +80,8 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
     const selection = terminal?.getSelection() ?? "";
     const locked = deps.isAgentLocked();
 
-    // The reason/limit rides in the LABEL, not `sublabel`: the JS-rendered
-    // context menu (cef-api.ts showJsContextMenu) does not draw sublabels at
-    // all, so a sublabel here would be invisible. A greyed-out item then still
-    // says why.
+    // The reason/limit rides in the LABEL so a greyed-out item always says
+    // why, and the text reads as one unit with the action it qualifies.
     const pasteLabel = locked
         ? "Paste (agent is using this shell)"
         : `Paste (up to ${formatSize(SHELL_PASTE_MAX_BYTES)})`;
@@ -62,39 +99,7 @@ export function buildShellDrawerClipboardItems(deps: ShellDrawerMenuDeps): Conte
             // Disabled while the agent is driving the shell: sendDataHandler
             // would silently drop the input, which would look like a broken menu.
             enabled: terminal != null && !locked,
-            click: () => {
-                void (async () => {
-                    try {
-                        const text = await deps.readClipboard();
-                        if (!text) return;
-                        const bytes = new TextEncoder().encode(text).length;
-                        if (bytes > SHELL_PASTE_MAX_BYTES) {
-                            // Say what happened, the limit, and what to do
-                            // instead — a silent no-op reads as a bug.
-                            deps.notify({
-                                icon: "clipboard",
-                                title: "Paste too large for the shell",
-                                message:
-                                    `The clipboard is ${formatSize(bytes)}; the shell accepts up to ` +
-                                    `${formatSize(SHELL_PASTE_MAX_BYTES)}. Save it to a file and reference ` +
-                                    `it from the shell instead.`,
-                                timestamp: new Date().toISOString(),
-                                // Auto-dismiss like every other warning toast; long
-                                // enough to read the two sentences.
-                                expiration: Date.now() + 10000,
-                                type: "warning",
-                            });
-                            return;
-                        }
-                        // terminal.paste (not a raw write): applies bracketed-paste
-                        // wrapping when the shell enabled it, then flows out through
-                        // the drawer's sendDataHandler like typed input.
-                        deps.getTerminal()?.paste(text);
-                    } catch (e) {
-                        console.error("[shell-drawer] paste failed:", e);
-                    }
-                })();
-            },
+            click: () => void pasteClipboardIntoShell(deps),
         },
     ];
 }

@@ -27,7 +27,8 @@ import { pushNotification } from "@/app/store/flash-notifications";
 import { BlockInputSender } from "@/app/view/term/block-input-sender";
 import { TermWrap } from "@/app/view/term/termwrap";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
-import { buildShellDrawerClipboardItems } from "./shell-drawer-menu";
+import { handleShellDrawerKeydown } from "./shell-drawer-keys";
+import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shell-drawer-menu";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
@@ -116,6 +117,17 @@ async function waitForMuxObjectSettled(oref: string, timeoutMs = 2000): Promise<
 export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element => {
     let containerRef: HTMLDivElement | undefined;
     let termWrap: TermWrap | undefined;
+    // Clipboard actions shared by the right-click menu and Ctrl+Shift+V/C.
+    // Reads `termWrap` lazily so it follows a re-attach. `agentLocked` is a
+    // const declared further down; it is only called at click/keypress time,
+    // long after construction.
+    const menuDeps: ShellDrawerMenuDeps = {
+        getTerminal: () => termWrap?.terminal,
+        isAgentLocked: () => agentLocked(),
+        readClipboard: clipboardReadText,
+        writeClipboard: clipboardWriteText,
+        notify: pushNotification,
+    };
     let resizeObserver: ResizeObserver | undefined;
     let disposed = false;
     // Bumped at the start of every `attachShell` call — an in-flight call
@@ -447,15 +459,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             onCleanup(
                 registerContextMenuRegion(containerRef, {
                     omit: ["viewItems", "clipboard", "split", "replace"],
-                    // Reads `termWrap` lazily so it follows a re-attach.
-                    items: () =>
-                        buildShellDrawerClipboardItems({
-                            getTerminal: () => termWrap?.terminal,
-                            isAgentLocked: agentLocked,
-                            readClipboard: clipboardReadText,
-                            writeClipboard: clipboardWriteText,
-                            notify: pushNotification,
-                        }),
+                    items: () => buildShellDrawerClipboardItems(menuDeps),
                 })
             );
         }
@@ -683,6 +687,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 },
                 {
                     useWebGl: true,
+                    // Ctrl+Shift+V / Ctrl+Shift+C, as in terminal panes. Without
+                    // this Ctrl+Shift+V fell through to the app-level voice-input
+                    // hotkey and started dictation instead of pasting.
+                    keydownHandler: (e: KeyboardEvent) => handleShellDrawerKeydown(e, menuDeps),
                     // blockinput, not the controllerinput RPC, so consecutive
                     // keystrokes stay in TCP order; large pastes are chunked
                     // (BlockInputSender, shared with TermViewModel).

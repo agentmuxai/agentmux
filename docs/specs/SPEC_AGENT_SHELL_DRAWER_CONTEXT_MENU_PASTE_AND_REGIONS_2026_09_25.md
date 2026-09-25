@@ -191,9 +191,21 @@ Chunking makes big pastes *work*; it doesn't make megabytes into a shell a good 
 - **Before:** the item reads "Paste (up to 1 MB)". While the agent holds the shell it reads "Paste (agent is using this shell)" and is disabled, so a greyed-out item always says why. (Carried in the *label*, not `ContextMenuItem.sublabel`: the JS-rendered menu, `showJsContextMenu` in `cef-api.ts`, never draws sublabels — found by right-clicking in the running app, where the first cut's sublabel was invisible. `bind-to-agent-menu.ts`'s sublabels are invisible for the same reason; not touched here.)
 - **After, when exceeded:** nothing is sent, and a warning notification says what happened, the limit, and the alternative: "The clipboard is 3.2 MB; the shell accepts up to 1 MB. Save it to a file and reference it from the shell instead."
 
-Best-practice notes applied: state the limit up front rather than only on failure; never fail silently; refuse cleanly (nothing partially pasted) rather than truncate; name the alternative action; measure in bytes, since that is what the wire and PTY see. The limit applies to the menu Paste only. Keyboard paste goes straight through xterm's own paste handling and is unchanged apart from now being chunked.
+Best-practice notes applied: state the limit up front rather than only on failure; never fail silently; refuse cleanly (nothing partially pasted) rather than truncate; name the alternative action; measure in bytes, since that is what the wire and PTY see. The limit applies to menu Paste and Ctrl+Shift+V (§3.6). Plain Ctrl+V goes straight through xterm's own native paste handling and is unchanged apart from now being chunked.
 
 The 1 MB figure is a judgment call, not a measured ceiling — it is a constant in one place if it needs tuning.
+
+### 3.6 Follow-up: Ctrl+Shift+V / Ctrl+Shift+C (found by testing the shipped feature)
+
+§7 originally listed keyboard paste/copy as unverified and out of scope. Checked in the running app afterwards, with real key events:
+
+- **Ctrl+V** — works (native paste event → xterm). Left alone.
+- **Ctrl+Shift+V** — **broken, and worse than a no-op:** the drawer's `TermWrap` had no `keydownHandler`, so the chord fell through to the app-level global hotkey (`keymodel.ts`) that starts voice dictation into the agent pane. "Paste" turned the microphone on.
+- **Ctrl+Shift+C** — did nothing (clipboard unchanged).
+
+Fix: the drawer now passes `handleShellDrawerKeydown` (`shell-drawer-keys.ts`) to its `TermWrap`, mirroring `TermViewModel.handleTerminalKeydown`: Ctrl+Shift+V pastes through the same `pasteClipboardIntoShell` as the menu (same 1 MB limit, same agent-lock rule) and Ctrl+Shift+C copies the terminal selection; both `preventDefault` + `stopPropagation` so the voice hotkey cannot also fire, and Ctrl+Shift+C is swallowed even with no selection so xterm never sends it to the shell as `^C`. Consequence, same as in terminal panes: while the drawer terminal has focus, Ctrl+Shift+V pastes rather than starting dictation; the hotkey still works from the rest of the pane.
+
+Verified live after the fix: Ctrl+Shift+V pasted the clipboard at the shell prompt with the mic staying off; Ctrl+Shift+C put the selected terminal text on the clipboard; the right-click menu's Copy (enabled with a selection) copied it too.
 
 ---
 
