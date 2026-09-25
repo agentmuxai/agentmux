@@ -12,6 +12,7 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const calls: { cmd: string; args: any }[] = [];
@@ -26,10 +27,11 @@ vi.mock("@/app/platform/ipc", () => ({
     },
 }));
 vi.mock("@/app/workspace/floater-resize", () => ({ FLOATER_EDGE_RESIZE_BORDER: 4 }));
-vi.mock("@/app/workspace/window-tab-visibility", () => ({ TAB_VISIBILITY_CHANGED_EVENT: "tab-visibility-changed" }));
+// The one visibility signal (Pane Tab contract Phase 3), driven by the test.
+const [visibility, setVisibility] = createSignal<"active" | "dormant" | "windowHidden">("active");
+vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => visibility }));
 vi.mock("@/app/platform/pane-rect-registry", () => ({ registerPaneRect: () => {}, unregisterPaneRect: () => {} }));
 vi.mock("@/app/platform/pane-anim", () => ({ paneReflowActive: () => false, notifyPaneReflow: () => {} }));
-vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => () => false }));
 
 import { usePaneRectSync } from "./use-pane-rect-sync";
 
@@ -54,6 +56,27 @@ afterEach(() => {
     cleanup();
     calls.length = 0;
     pendingCreates.length = 0;
+    setVisibility("active");
+});
+
+describe("usePaneRectSync — the native page follows the tab's visibility", () => {
+    const lastResize = () => calls.filter((c) => c.cmd === "browser_pane_resize").at(-1)?.args;
+
+    it("collapses the page while its tab is dormant or its window tab is hidden, and restores it", async () => {
+        // jsdom lays nothing out; give the placeholder a real rect.
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 10, y: 20, width: 300, height: 200 } as DOMRect);
+        render(() => <Mount blockId="v1" />);
+        pendingCreates[0]();
+        await flush();
+
+        setVisibility("dormant");
+        expect(lastResize()).toMatchObject({ width: 0, height: 0 });
+        setVisibility("active");
+        expect(lastResize()).toMatchObject({ x: 10, y: 20, width: 300, height: 200 });
+        setVisibility("windowHidden");
+        expect(lastResize()).toMatchObject({ width: 0, height: 0 });
+        vi.restoreAllMocks();
+    });
 });
 
 describe("usePaneRectSync — a block's native page belongs to its latest mount", () => {

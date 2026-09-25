@@ -14,9 +14,11 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NodeModel } from "@/layout/index";
 import { getMuxObjectAtom, makeORef } from "@/store/mos";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+import { usePaneTabVisibility } from "./pane-tab-visibility";
 
 /** Call inside the instance's own reactive root (block.tsx's `makeViewModel`),
- *  which then pins the block for as long as the instance lives. */
+ *  which then pins the block for as long as the instance lives, and inherits
+ *  the block's context (its window tab, for `visibility`). */
 export function makePaneTabHostContext(blockId: string, nodeModel: NodeModel): PaneTabHostContext {
     const oref = makeORef("block", blockId);
     const block = getMuxObjectAtom<Block>(oref);
@@ -27,6 +29,7 @@ export function makePaneTabHostContext(blockId: string, nodeModel: NodeModel): P
             await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: patch as MetaType });
         },
         isFocused: () => nodeModel.isFocused?.() ?? false,
+        visibility: usePaneTabVisibility(blockId),
     };
 }
 
@@ -53,5 +56,7 @@ export function adaptPaneTabInstance(
     if (instance.contextMenu) vm.getBodyContextMenuItems = (c) => instance.contextMenu!(c);
     if (instance.focus) vm.giveFocus = () => instance.focus!();
     if (instance.onKeyDown) vm.keyDownHandler = (e) => instance.onKeyDown!(e);
+    if (instance.onActivate) vm.onActivate = () => instance.onActivate!();
+    if (instance.onDeactivate) vm.onDeactivate = () => instance.onDeactivate!();
     return vm;
 }
