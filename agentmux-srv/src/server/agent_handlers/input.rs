@@ -708,6 +708,7 @@ pub async fn run_agent_turn(
     message: String,
     message_id: Option<String>,
     registration: TurnRegistration,
+    origin: crate::backend::blockcontroller::health::TurnOrigin,
 ) -> Result<(), String> {
     let AgentTurnDeps {
         mstore,
@@ -922,7 +923,8 @@ pub async fn run_agent_turn(
             session_id: persisted_session_id,
             message_id: message_id.clone(),
         };
-        if let Err(e) = persistent_ctrl.send_message(message, config) {
+        let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone() };
+        if let Err(e) = persistent_ctrl.send_message_from(message, config, Some(input)) {
             // A single-live-instance refusal from inside the controller (the
             // spawn-time claim losing to another instance, or the pre-turn
             // fence) gets the same pane treatment as the early check above.
@@ -1326,12 +1328,20 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 } else {
                     cmd.message
                 };
+                // The pane's composer: the user — except a hidden memory
+                // reinjection, which the frontend sends on its own behalf.
+                let origin = if cmd.hidden.unwrap_or(false) {
+                    crate::backend::blockcontroller::health::TurnOrigin::System
+                } else {
+                    crate::backend::blockcontroller::health::TurnOrigin::User
+                };
                 run_agent_turn(
                     &deps,
                     cmd.blockid,
                     message,
                     cmd.message_id,
                     TurnRegistration::Register,
+                    origin,
                 )
                 .await?;
                 Ok(())
