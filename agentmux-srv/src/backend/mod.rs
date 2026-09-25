@@ -66,6 +66,7 @@ pub mod memory_reconcile;
 pub mod memory_history_import;
 pub mod memory_adopt;
 pub mod memory_release;
+pub mod global_memory_record;
 pub mod continuity_state;
 pub mod shellexec;
 pub mod transcript_backfill;

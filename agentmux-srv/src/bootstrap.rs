@@ -878,6 +878,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
+    // Global Memory's own record (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
+    // §2.1.6): write-through from id_store, attached before this start's
+    // seeding so seeded entries keep their seeder's attribution.
+    let global_memory_recorder = global_transcript_store
+        .as_ref()
+        .map(|fs| crate::backend::global_memory_record::attach(fs.clone(), id_store.clone()));
     if let Some(ref fs) = global_transcript_store {
         crate::backend::agent_session::set_global_transcript_store(fs.clone());
         // Heal global snapshots poisoned before the normalize-on-mirror fix: a
@@ -976,6 +982,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // rows invisible under the normal shared-store configuration once that
     // migration has applied. Codex P1, PR #3244.
     backend::operator_config_seed::auto_seed_on_startup(&id_store);
+    // Then record whatever the record doesn't have yet: the baseline the
+    // first time, and what older builds changed since.
+    if let Some(ref recorder) = global_memory_recorder {
+        recorder.sync_all();
+    }
 
     // The starter Skills catalog is seeded by migrations::m0015_seed_starter_skills
     // (run once ever per channel, tracked in db_migrations) — not here. See

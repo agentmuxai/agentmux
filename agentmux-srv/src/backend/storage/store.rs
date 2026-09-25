@@ -85,7 +85,27 @@ pub struct Store {
     /// dedicated lock is needed rather than reusing that one. `pub(super)`
     /// like `conn` — `muxbus.rs` is a sibling module under `backend::storage`.
     pub(super) muxbus_save_lock: Mutex<()>,
+    /// Told about every change to a Global Memory entry or its order, after
+    /// it commits — the Global Memory record's write-through
+    /// (`backend::global_memory_record`,
+    /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). `None` except on
+    /// the channel's Global Memory store at runtime.
+    global_memory_observer: Mutex<Option<GlobalMemoryObserver>>,
 }
+
+/// A change to Global Memory, for [`Store::set_global_memory_observer`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GlobalMemoryChange {
+    /// The bundle with this id was written or deleted (it may or may not be
+    /// global, before or after).
+    Entry(String),
+    /// Global Memory was reordered.
+    Order,
+}
+
+/// Must not block or call back into the store: it runs where the change was
+/// made. The record's observer only queues the change for a worker.
+pub type GlobalMemoryObserver = Arc<dyn Fn(GlobalMemoryChange) + Send + Sync>;
 
 impl Store {
     /// Open a Store backed by a file on disk.
@@ -113,6 +133,7 @@ impl Store {
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
+            global_memory_observer: Mutex::new(None),
         })
     }
 
@@ -184,6 +205,7 @@ impl Store {
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
+            global_memory_observer: Mutex::new(None),
         })
     }
 
@@ -221,6 +243,7 @@ impl Store {
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
+            global_memory_observer: Mutex::new(None),
         })
     }
 
@@ -247,6 +270,7 @@ impl Store {
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
+            global_memory_observer: Mutex::new(None),
         })
     }
 
@@ -325,6 +349,7 @@ impl Store {
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
+            global_memory_observer: Mutex::new(None),
         })
     }
 
@@ -335,6 +360,20 @@ impl Store {
     /// authoritative read path for PR A.
     pub fn set_registry(&self, registry: Arc<Registry>) {
         *self.registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(registry);
+    }
+
+    /// Attach the Global Memory record's observer (see the field).
+    pub fn set_global_memory_observer(&self, observer: GlobalMemoryObserver) {
+        *self.global_memory_observer.lock().unwrap_or_else(|e| e.into_inner()) = Some(observer);
+    }
+
+    /// Tell the observer, if any, about a committed change. Callers invoke it
+    /// once their connection lock is released.
+    pub(super) fn notify_global_memory(&self, change: GlobalMemoryChange) {
+        let observer = self.global_memory_observer.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(o) = observer {
+            o(change);
+        }
     }
 
     pub(super) fn registry(&self) -> Option<Arc<Registry>> {
