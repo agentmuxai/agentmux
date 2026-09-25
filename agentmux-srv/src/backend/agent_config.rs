@@ -1381,6 +1381,11 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
                 // certifies this agent's key.
                 env.insert("AGENTMUX_HOST_LABEL".to_string(), json!(instance.instance_id));
                 patched = true;
+                // D1b: get this key into the cloud directory before the agent
+                // needs it — until then its WAN jekts go unsigned.
+                if !key.is_published() {
+                    crate::muxbus::wan_publish::nudge();
+                }
             }
             (instance, key) => tracing::warn!(
                 agent = agent_slug,

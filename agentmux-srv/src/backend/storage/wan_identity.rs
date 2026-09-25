@@ -107,6 +107,14 @@ pub struct WanAgentKey {
     pub public_key: String,
     pub private_key: String,
     pub imported: bool,
+    /// When this store first held the key. Doubles as the certificate's
+    /// `issued_at`, so re-certifying a key produces the identical record and
+    /// a re-publish is a no-op at the directory.
+    pub created_at: i64,
+    /// The fingerprint of this key's certificate once the cloud directory
+    /// accepted it; `None` until then. The relay carry gate (§2.1 condition
+    /// 4) requires it to equal the key's own fingerprint.
+    pub published_fp: Option<String>,
 }
 
 impl std::fmt::Debug for WanAgentKey {
@@ -114,7 +122,24 @@ impl std::fmt::Debug for WanAgentKey {
         f.debug_struct("WanAgentKey")
             .field("public_key", &self.public_key)
             .field("imported", &self.imported)
+            .field("created_at", &self.created_at)
+            .field("published_fp", &self.published_fp)
             .finish_non_exhaustive()
+    }
+}
+
+impl WanAgentKey {
+    /// The raw public key, if the stored base64 is well-formed.
+    pub fn public_key_bytes(&self) -> Option<[u8; 32]> {
+        decode_32(&self.public_key)
+    }
+
+    /// Whether the directory is confirmed to hold this exact key.
+    pub fn is_published(&self) -> bool {
+        match (self.public_key_bytes(), &self.published_fp) {
+            (Some(public), Some(fp)) => agentmux_common::jekt_sign::wan_key_fingerprint(&public) == *fp,
+            _ => false,
+        }
     }
 }
 
@@ -297,28 +322,66 @@ impl WanIdentityStore {
         Ok(Some(WanInstance { instance_id, public_key, private_key, host_hint, created_at }))
     }
 
-    /// An agent's WAN key, if this store holds one. First production caller
-    /// is D1b's publish (which certifies loaded keys); tests only until then.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// An agent's WAN key, if this store holds one.
     pub fn agent_key_load(&self, agent_id: &str) -> Result<Option<WanAgentKey>, StoreError> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         Self::agent_key_load_locked(&conn, &agent_id.to_lowercase())
     }
 
+    const AGENT_KEY_COLUMNS: &'static str = "public_key, private_key, imported, created_at, published_fp";
+
+    fn agent_key_from_row(r: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<WanAgentKey> {
+        Ok(WanAgentKey {
+            public_key: r.get(offset)?,
+            private_key: r.get(offset + 1)?,
+            imported: r.get::<_, i64>(offset + 2)? != 0,
+            created_at: r.get(offset + 3)?,
+            published_fp: r.get(offset + 4)?,
+        })
+    }
+
     fn agent_key_load_locked(conn: &Connection, key: &str) -> Result<Option<WanAgentKey>, StoreError> {
         Ok(conn
             .query_row(
-                "SELECT public_key, private_key, imported FROM wan_agent_keys WHERE agent_id = ?1",
+                &format!("SELECT {} FROM wan_agent_keys WHERE agent_id = ?1", Self::AGENT_KEY_COLUMNS),
                 params![key],
-                |r| {
-                    Ok(WanAgentKey {
-                        public_key: r.get(0)?,
-                        private_key: r.get(1)?,
-                        imported: r.get::<_, i64>(2)? != 0,
-                    })
-                },
+                |r| Self::agent_key_from_row(r, 0),
             )
             .optional()?)
+    }
+
+    /// Every agent key the directory is not confirmed to hold, by agent id —
+    /// what the publisher (`muxbus/wan_publish.rs`) works through.
+    pub fn agent_keys_unpublished(&self) -> Result<Vec<(String, WanAgentKey)>, StoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT agent_id, {} FROM wan_agent_keys ORDER BY agent_id",
+            Self::AGENT_KEY_COLUMNS
+        ))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, Self::agent_key_from_row(r, 1)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (agent_id, key) = row?;
+            if !key.is_published() {
+                out.push((agent_id, key));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Record that the directory accepted `public_key`'s certificate. Only
+    /// marks the row if it still holds that key — an agent deleted and
+    /// recreated while the PUT was in flight must not have its new key marked
+    /// published on the strength of the old one's.
+    pub fn agent_key_mark_published(&self, agent_id: &str, public_key: &str) -> Result<bool, StoreError> {
+        let Some(public) = decode_32(public_key) else { return Ok(false) };
+        let fp = agentmux_common::jekt_sign::wan_key_fingerprint(&public);
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let updated = conn.execute(
+            "UPDATE wan_agent_keys SET published_fp = ?1, published_at = ?2 WHERE agent_id = ?3 AND public_key = ?4",
+            params![fp, agentmux_common::time::now_secs(), agent_id.to_lowercase(), public_key],
+        )?;
+        Ok(updated > 0)
     }
 
     /// An agent's WAN key, created on first call: `import` (the agent's key
