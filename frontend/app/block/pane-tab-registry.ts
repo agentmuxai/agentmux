@@ -18,11 +18,39 @@
  */
 
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
+import type { Accessor, JSX } from "solid-js";
 
 export interface PaneTabCapabilities {
     /** Per TAB, never per pane: a `keepAlive` tab stays mounted while inactive,
      *  a `remount` tab (the default) is unmounted. */
     lifecycle?: "remount" | "keepAlive";
+}
+
+/** What the host gives a native instance — its only way in (no raw
+ *  nodeModel, MOS or RpcApi). `visibility` arrives with Phase 3. */
+export interface PaneTabHostContext {
+    blockId: string;
+    /** The block's meta, reactive. */
+    meta: Accessor<MetaType | undefined>;
+    /** Merges `patch` into the block's meta (a `null` value removes the key). */
+    setMeta(patch: Record<string, unknown>): Promise<void>;
+    isFocused: Accessor<boolean>;
+}
+
+/** A live native tab. The host decides the header, chrome and hiding. */
+export interface PaneTabInstance {
+    component: (props: { ctx: PaneTabHostContext }) => JSX.Element;
+    /** Live title; `placeholder: true` while it is only a stand-in. */
+    liveTitle?: Accessor<{ text: string; placeholder?: boolean }>;
+    liveFavicon?: Accessor<string>;
+    headerText?: Accessor<string | HeaderElem[]>;
+    headerActions?: Accessor<(IconButtonDecl | ToggleIconButtonDecl)[]>;
+    contextMenu?(ctx?: unknown): ContextMenuItem[];
+    focus?(): boolean;
+    onKeyDown?(e: MuxKeyboardEvent): boolean;
+    /** Runs when the host disposes the instance; its reactive root (host rule
+     *  8) is disposed right after. */
+    dispose?(): void;
 }
 
 export interface PaneTabManifest {
@@ -37,9 +65,13 @@ export interface PaneTabManifest {
     capabilities?: PaneTabCapabilities;
     /** How a block of this view becomes a tab pill, beyond label and icon. */
     tab?: PaneTabDescriptor;
+    /** Native instance factory (Phase 2b). Called by the host in the
+     *  instance's own reactive root. Exactly one of `create` and
+     *  `viewModelClass`. */
+    create?(ctx: PaneTabHostContext): PaneTabInstance;
     /** Legacy instance factory: an existing ViewModel class (`legacyAdapter`).
-     *  The contract's `create(ctx)` replaces it as views migrate. */
-    viewModelClass: ViewModelClass;
+     *  Replaced by `create` as views migrate. */
+    viewModelClass?: ViewModelClass;
 }
 
 const manifests = new Map<string, PaneTabManifest>();
@@ -49,6 +81,9 @@ const aliasToView = new Map<string, string>();
  *  view or one of its aliases is already taken — a silent overwrite would let
  *  two widgets fight over the same blocks. */
 export function registerPaneTab(manifest: PaneTabManifest): () => void {
+    if ((manifest.create == null) === (manifest.viewModelClass == null)) {
+        throw new Error(`pane tab "${manifest.view}" needs exactly one of create and viewModelClass`);
+    }
     const names = [manifest.view, ...(manifest.aliases ?? [])];
     for (const name of names) {
         if (manifests.has(name) || aliasToView.has(name)) {

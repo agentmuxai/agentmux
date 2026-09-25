@@ -28,8 +28,19 @@ const OLD_LABELS: Record<string, string> = {
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
-    it("registers a ViewModel class for every view the old map had", () => {
-        for (const view of VIEWS) expect(getBlockViewClass(view), view).toBeTypeOf("function");
+    // Native views (create(ctx), Phase 2b) have no ViewModel class.
+    const NATIVE = ["help"];
+
+    it("registers an instance factory for every view the old map had", () => {
+        for (const view of VIEWS) {
+            const m = getPaneTab(view)!;
+            if (NATIVE.includes(view)) {
+                expect(m.create, view).toBeTypeOf("function");
+                expect(getBlockViewClass(view), view).toBeUndefined();
+            } else {
+                expect(getBlockViewClass(view), view).toBeTypeOf("function");
+            }
+        }
         expect(getBlockViewClass("cpuplot")).toBe(getBlockViewClass("sysinfo"));
     });
 
