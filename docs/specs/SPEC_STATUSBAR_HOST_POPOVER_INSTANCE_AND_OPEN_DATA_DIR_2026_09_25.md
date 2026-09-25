@@ -136,8 +136,24 @@ clicking it opens the file browser; no icon"). There is no separate button or ic
   button's own chrome (background, border, padding) so it looks like text.
 - **Show the full path, never truncated** (user, 2026-09-25: "we don't need the ellipsis
   on the path, just leave the full text in"). The old `max-width: 220px` and ellipsis
-  are gone. A long path wraps (`overflow-wrap: anywhere`, since a path has no spaces to
-  break at) instead of widening the popover.
+  are gone. A long path wraps instead of widening the popover.
+- **Line breaks are balanced** (user, 2026-09-25: "the line lengths are equal and there
+  are the fewest possible lines"). `word-break: break-all` makes every character a
+  break point (a path has no spaces), and `text-wrap: balance` keeps the line count
+  that plain wrapping would use, which is the fewest possible. It then evens out the
+  line lengths. The font is monospace, so equal width means equal character counts, to
+  within one when the length doesn't divide evenly. Measured live in a dev build (CEF
+  152) via CDP, as characters per line:
+
+  | Path length | Plain wrapping | Balanced |
+  |---|---|---|
+  | 55 (the real data path) | 50 + 5 | 28 + 27 |
+  | 45 | 21 + 21 + 3 | 15 + 15 + 15 |
+  | 90 | 29 + 29 + 26 + 6 | 23 + 23 + 22 + 22 |
+  | 170 | 35 ×4 + 30 | 34 ×5 |
+
+  Chromium balances at most a few lines (currently 6) and falls back to plain wrapping
+  beyond that. A data path never gets close.
 - Clicking it calls `open_in_file_manager`.
 - The row label stays "Data".
 

@@ -86,6 +86,21 @@ function renderPanel() {
     ));
 }
 
+describe("Data-path link — balanced line breaks (stylesheet contract)", () => {
+    // jsdom has no line layout; the behaviour was measured live via CDP
+    // (spec §4.1). Guard the two declarations it depends on.
+    it("breaks anywhere and balances lines", async () => {
+        const { readFileSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const scss = readFileSync(join(__dirname, "StatusBar.scss"), "utf8");
+        const start = scss.search(/^\s*\.status-bar-popover-link\s*\{/m);
+        const body = scss.slice(start, scss.indexOf("}", start));
+        expect(body).toMatch(/word-break:\s*break-all;/);
+        expect(body).toMatch(/text-wrap:\s*balance;/);
+        expect(body).not.toMatch(/text-overflow|max-width/);
+    });
+});
+
 describe("HostPopoverPanel — Instance row and Data-path link", () => {
     beforeEach(() => {
         platform = "win";
