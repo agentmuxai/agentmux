@@ -79,6 +79,7 @@ pub(crate) struct Version {
 }
 
 impl Version {
+    #[cfg(test)]
     pub(crate) fn is_tombstone(&self) -> bool {
         self.sha256.is_none()
     }
@@ -333,6 +334,20 @@ pub(crate) fn record_projected(
         }
         set_projected(z, &mut heads, dir_id, file, version)?;
         Ok(true)
+    })
+}
+
+/// Forget every projection into `dir_id`: the folder no longer holds what
+/// was written there (it was removed or emptied), so each file must read as
+/// never projected — to be written back — not as deleted.
+pub(crate) fn reset_projections(fs: &FileStore, agent_uid: &str, dir_id: &str) -> Result<(), StoreError> {
+    let zone = zone_or_err(agent_uid)?;
+    fs.zone_txn(&zone, |z| {
+        let mut heads = read_heads(z.read(HEADS_FILE)?)?;
+        if heads.projected.remove(dir_id).is_some() {
+            write_heads(z, &heads)?;
+        }
+        Ok(())
     })
 }
 

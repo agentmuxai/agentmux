@@ -58,15 +58,18 @@ use super::AppState;
 /// `app_api.rs` sets at agent spawn time. We never write to the global
 /// `~/.claude/projects/` because AgentMux always sets `CLAUDE_CONFIG_DIR`.
 ///
-/// The project folder is named by the CLI's own rule
-/// ([`crate::backend::claude_layout::project_dir_name`]).
-fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
+/// The project folder is named by the CLI's own rules: after the directory
+/// memory is keyed by ([`crate::backend::claude_layout::memory_project_root`]
+/// — the repository's main checkout, for a subdirectory or a linked
+/// worktree), sanitized by [`crate::backend::claude_layout::project_dir_name`].
+pub(crate) fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
     // Claude names the project folder from the absolute cwd, so `~` must be
     // expanded first — a spawn segment records the block's `cmd:cwd`
     // unexpanded (`~/.agentmux/agents/<slug>` for an agent.open default),
     // and `--agentmux-agents-…` is a folder Claude never writes (#3603).
     let working_directory = expand_home_dir_safe(working_directory);
-    let folder_name = crate::backend::claude_layout::project_dir_name(&working_directory.to_string_lossy());
+    let root = crate::backend::claude_layout::memory_project_root(&working_directory);
+    let folder_name = crate::backend::claude_layout::project_dir_name(&root.to_string_lossy());
 
     let base = if claude_config_dir.is_empty() {
         expand_home_dir_safe("~/.agentmux/shared/providers/claude")
@@ -441,7 +444,7 @@ pub(crate) fn parse_memory_frontmatter_type(content: &str) -> Option<String> {
 }
 
 /// Validate a filename: alphanumeric + `-_`, must end with `.md`, no path separators.
-fn validate_filename(filename: &str) -> Result<(), String> {
+pub(crate) fn validate_filename(filename: &str) -> Result<(), String> {
     if filename.is_empty() {
         return Err("filename must not be empty".to_string());
     }

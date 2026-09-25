@@ -118,6 +118,17 @@ impl Store {
         Self::configure_and_migrate(conn)
     }
 
+    /// Which store this is, stable for its lifetime: the database file, or —
+    /// for an in-memory store — its address. Lets a record written into a
+    /// machine-wide zone say which channel's store wrote it.
+    pub fn origin_id(&self) -> String {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        match conn.path() {
+            Some(p) if !p.is_empty() => p.to_string(),
+            _ => format!("memory:{:p}", self),
+        }
+    }
+
     /// TEST-ONLY: additionally install the **identity-store** schema on this
     /// store, on top of whatever schema it already carries.
     ///
