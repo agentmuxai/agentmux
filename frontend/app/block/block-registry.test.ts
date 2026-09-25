@@ -27,9 +27,15 @@ const OLD_LABELS: Record<string, string> = {
     media: "Media", memory: "Memory", swarm: "Swarm", sysinfo: "Sysinfo", term: "Terminal", warden: "Warden",
 };
 
+// Deliberate differences since the tables: "cpuplot" is sysinfo under an older
+// name, and as a native tab (Phase 2c) it names and icons itself like sysinfo
+// — its header always showed sysinfo's chart icon; only its tab pill didn't.
+const NEW_ICONS: Record<string, string> = { cpuplot: "chart-line" };
+const NEW_LABELS: Record<string, string> = { cpuplot: "Sysinfo" };
+
 describe("built-in pane tabs (block-registry.ts)", () => {
     // Native views (create(ctx), Phase 2b) have no ViewModel class.
-    const NATIVE = ["help"];
+    const NATIVE = ["help", "sysinfo", "cpuplot"];
 
     it("registers an instance factory for every view the old map had", () => {
         for (const view of VIEWS) {
@@ -41,13 +47,13 @@ describe("built-in pane tabs (block-registry.ts)", () => {
                 expect(getBlockViewClass(view), view).toBeTypeOf("function");
             }
         }
-        expect(getBlockViewClass("cpuplot")).toBe(getBlockViewClass("sysinfo"));
+        expect(getPaneTab("cpuplot")?.capabilities).toEqual(getPaneTab("sysinfo")?.capabilities);
     });
 
     it("keeps every view's old icon and label", () => {
         for (const view of VIEWS) {
-            expect(blockViewToIcon(view), view).toBe(OLD_ICONS[view] ?? "square");
-            expect(blockViewToName(view), view).toBe(OLD_LABELS[view] ?? view);
+            expect(blockViewToIcon(view), view).toBe(NEW_ICONS[view] ?? OLD_ICONS[view] ?? "square");
+            expect(blockViewToName(view), view).toBe(NEW_LABELS[view] ?? OLD_LABELS[view] ?? view);
         }
         expect(blockViewToName("")).toBe("(No View)");
     });

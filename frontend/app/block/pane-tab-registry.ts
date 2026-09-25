@@ -61,6 +61,9 @@ export interface PaneTabCapabilities {
     /** Meta keys a split of this pane does NOT copy into the new pane (agent:
      *  its agent-specific fields, so the new pane opens the picker). */
     splitDropsMeta?: string[];
+    /** The pane runs against a connection (`meta.connection`) and its header
+     *  shows the connection button (sysinfo, term). */
+    connection?: boolean;
 }
 
 /** What the host gives a native instance — its only way in (no raw
@@ -87,6 +90,8 @@ export interface PaneTabInstance {
     headerText?: Accessor<string | HeaderElem[]>;
     headerActions?: Accessor<(IconButtonDecl | ToggleIconButtonDecl)[]>;
     contextMenu?(ctx?: unknown): ContextMenuItem[];
+    /** Items for the header's settings menu. */
+    settingsMenu?(): ContextMenuItem[];
     focus?(): boolean;
     onKeyDown?(e: MuxKeyboardEvent): boolean;
     /** Fired by the host on BOTH paths when the tab becomes visible, and when

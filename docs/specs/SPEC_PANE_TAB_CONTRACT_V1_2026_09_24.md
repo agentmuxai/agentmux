@@ -379,6 +379,14 @@ working throughout through a legacy adapter.
      what they reach around the contract for today (`ctx.visibility`,
      per-active-tab chrome, capabilities) — migrating them first would only
      re-home their `nodeModel` reach-ins. Order as above.
+     - **Sysinfo (implemented):** `sysinfoPaneTab("sysinfo" | "cpuplot")`
+       (sysinfo.tsx). Its model is built from `ctx` — every meta read is
+       `ctx.meta`, both plot-type writes are `ctx.setMeta` — and titles the
+       pane with the plot type (`liveTitle`). The contract grew two things it
+       needed: `PaneTabInstance.settingsMenu` (the header's Plot Type menu)
+       and the `connection` capability (the header's connection button).
+       `cpuplot`, the same view under an older name, now labels and icons
+       itself like sysinfo in its tab pill too (its header always did).
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

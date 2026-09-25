@@ -20,7 +20,7 @@ import { MediaViewModel } from "@/app/view/media/media";
 import { BundleViewModel } from "@/app/view/bundle/bundle";
 import { SettingsViewModel } from "@/app/view/settings/settings";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
-import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
+import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { WardenViewModel } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
@@ -75,8 +75,10 @@ const builtins = [
         lifecycle: "keepAlive",
         capabilities: { paneZoom: { baseFontSize: 13 } },
     }),
-    legacyAdapter("sysinfo", SysinfoViewModel as any, { label: "Sysinfo", icon: "chart-line" }),
-    legacyAdapter("cpuplot", SysinfoViewModel as any),
+    // Native (create(ctx)) — Phase 2c. "cpuplot" is the same view under an
+    // older name.
+    sysinfoPaneTab("sysinfo"),
+    sysinfoPaneTab("cpuplot"),
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     legacyAdapter("launcher", LauncherViewModel as any),
     // Swarm, Armory and Warden apply `term:zoom` as CSS zoom.
