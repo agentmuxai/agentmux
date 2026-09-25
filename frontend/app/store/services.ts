@@ -72,6 +72,12 @@ class ObjectServiceType {
         return MOS.callBackendService("object", "ClosePane", Array.from(arguments))
     }
 
+    // end an agent gracefully and close its own tab (/quit, /exit);
+    // SPEC_AGENT_SELF_QUIT_2026_09_24.md §5. Resolves to the quit summary.
+    QuitAgent(blockId: string): Promise<any> {
+        return MOS.callBackendService("object", "QuitAgent", Array.from(arguments))
+    }
+
     // get wave object by oref
     GetObject(oref: string): Promise<MuxObj> {
         return MOS.callBackendService("object", "GetObject", Array.from(arguments))
