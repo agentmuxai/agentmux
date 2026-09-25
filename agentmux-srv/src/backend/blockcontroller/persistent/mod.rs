@@ -419,6 +419,11 @@ struct PersistentInner {
     /// finds the queue empty, so an enqueue can never observe "armed" from a
     /// watchdog that has already decided to exit.
     deferred_watchdog_armed: bool,
+    /// Whether the model is writing or waiting on its tool calls — see
+    /// [`ToolWait`]. Changed only under this lock: by the stdout reader
+    /// (`tool_wait_signal`), by each release, by a `result`, and by every
+    /// spawn. Spec: `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md` §4.7.
+    tool_wait: ToolWait,
     /// Exclusive claim held by a stale-resume retry batch flush (issue
     /// #2367; spec §4 option 2 of
     /// SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09).
@@ -962,6 +967,75 @@ pub(super) enum DeferredFlush {
     Failed,
 }
 
+/// Where the current turn is, as far as an automated message is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum ToolWait {
+    /// The model is (or may be) producing text or thinking. Messages wait.
+    #[default]
+    Writing,
+    /// The model has finished writing and its tool calls are running. One
+    /// message may be written now: the tool is not something to cut into, and
+    /// the model reads it when the tool returns.
+    Open,
+    /// This tool wait already released its one message. The rest wait for the
+    /// next one, or for the turn to end.
+    Spent,
+}
+
+/// Whether a stdout line says the model is waiting on tools or is writing again.
+#[derive(Debug, PartialEq)]
+pub(super) enum ToolWaitSignal {
+    /// A tool call is complete and running: the model is not producing text.
+    Enter,
+    /// The model is producing output again (or the turn moved on).
+    Leave,
+}
+
+/// Classify one stdout line. Only the agent's own top-level output counts: a
+/// subagent's lines (`parent_tool_use_id` set) say nothing about whether the
+/// parent is mid-sentence.
+///
+/// `Enter` on a top-level `assistant` line carrying a `tool_use` block, or a
+/// `message_delta` whose `stop_reason` is `tool_use`. `Leave` on `message_start`
+/// or an `assistant` line with only text/thinking. Anything unrecognised is
+/// `None`, which keeps the previous state — and the previous state defaults to
+/// "not waiting", so an unknown stream shape holds messages, never releases
+/// them early.
+pub(super) fn tool_wait_signal(parsed: &serde_json::Value) -> Option<ToolWaitSignal> {
+    if parsed.get("parent_tool_use_id").is_some_and(|v| !v.is_null()) {
+        return None;
+    }
+    match parsed.get("type")?.as_str()? {
+        "stream_event" => {
+            let event = parsed.get("event")?;
+            match event.get("type")?.as_str()? {
+                "message_start" => Some(ToolWaitSignal::Leave),
+                "message_delta"
+                    if event.pointer("/delta/stop_reason").and_then(|v| v.as_str())
+                        == Some("tool_use") =>
+                {
+                    Some(ToolWaitSignal::Enter)
+                }
+                _ => None,
+            }
+        }
+        "assistant" => {
+            let blocks = parsed.pointer("/message/content")?.as_array()?;
+            let has = |kind: &str| {
+                blocks.iter().any(|b| b.get("type").and_then(|t| t.as_str()) == Some(kind))
+            };
+            if has("tool_use") {
+                Some(ToolWaitSignal::Enter)
+            } else if has("text") || has("thinking") || has("redacted_thinking") {
+                Some(ToolWaitSignal::Leave)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// What a current-generation `result` frame decided — see
 /// [`PersistentSubprocessController::turn_boundary_locked`].
 #[derive(Debug, PartialEq)]
@@ -1164,6 +1238,7 @@ impl PersistentSubprocessController {
                 pending_send_messages: VecDeque::new(),
                 deferred_deliveries: VecDeque::new(),
                 deferred_watchdog_armed: false,
+                tool_wait: ToolWait::Writing,
                 drain_claim: false,
                 next_message_seq: 0,
                 drain_send_in_flight: false,
