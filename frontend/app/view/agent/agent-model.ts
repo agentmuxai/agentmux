@@ -111,7 +111,6 @@ export class AgentViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.unregisterModel = agentModels.register(blockId, this);
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
@@ -220,6 +219,11 @@ export class AgentViewModel implements ViewModel {
                 },
             ];
         };
+
+        // Last, once every field exists: registering notifies readers of
+        // this block (the pane chrome's fork tabs), which then read those
+        // fields (ReAgent P1 on #3807).
+        this.unregisterModel = agentModels.register(blockId, this);
     }
 
     /**

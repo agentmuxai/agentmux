@@ -84,7 +84,6 @@ class TermViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "term";
         this.blockId = blockId;
-        this.unregisterModel = termModels.register(blockId, this);
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
@@ -335,6 +334,11 @@ class TermViewModel implements ViewModel {
                 this.updateShellProcStatus(bcRTS);
             },
         });
+
+        // Last, once every field exists: registering notifies readers of
+        // this block (the pane chrome's runtime badge, multi-input), which
+        // then read those fields (ReAgent P1 on #3807).
+        this.unregisterModel = termModels.register(blockId, this);
     }
 
     get viewComponent(): ViewComponent {
