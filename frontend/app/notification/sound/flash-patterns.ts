@@ -21,10 +21,12 @@ import { TOOL_TONE_ATTACK_S, TOOL_TONE_ENVELOPE_FLOOR, TOOL_TONE_ENVELOPE_PEAK }
 export const FLASH_MIN_INTENSITY = 0.5;
 
 /**
- * Longest wait the flash will hold for audio output latency. Bluetooth
- * output can legitimately run 150–300 ms; beyond this, a reported latency is
- * more likely wrong than real, and a flash that late no longer reads as
- * "that one, just now".
+ * Largest offset, either way, the flash will take from audio timing. Ahead:
+ * Bluetooth output can legitimately run 150–300 ms; beyond this, a reported
+ * latency is more likely wrong than real, and a flash that late no longer
+ * reads as "that one, just now". Behind: a sound can only have started a
+ * few tens of ms before its flash is asked for (the 30 ms coalesce window
+ * plus the visual lead), so anything larger is bad clock data.
  */
 export const FLASH_MAX_AUDIO_DELAY_MS = 500;
 
@@ -134,8 +136,12 @@ export function flashPatternForSyllable(p: SyllableParams): FlashPattern {
 // ── Timing ───────────────────────────────────────────────────────────────
 
 /**
- * How long to hold a flash so its first strike lands on screen when a sound
- * scheduled at AudioContext time `startAt` is actually heard.
+ * When, relative to `nowMs`, a flash's first strike should be on screen for
+ * a sound scheduled at AudioContext time `startAt`: positive means wait that
+ * long; negative means the sound is already that far in (a call coalesced
+ * into a syllable that is already playing, or an output faster than the
+ * visual lead), so the pattern resumes mid-way rather than restarting behind
+ * the sound (Codex P2 on #3717).
  *
  * `getOutputTimestamp()` pairs a context time with the page time the output
  * device plays it at, so it already includes the device's output latency.
@@ -153,5 +159,5 @@ export function audibleFlashDelayMs(ctx: AudioContext, startAt: number, nowMs: n
     }
     const delay = audibleAt - nowMs - FLASH_VISUAL_LEAD_MS;
     if (!Number.isFinite(delay)) return 0;
-    return Math.min(FLASH_MAX_AUDIO_DELAY_MS, Math.max(0, delay));
+    return Math.min(FLASH_MAX_AUDIO_DELAY_MS, Math.max(-FLASH_MAX_AUDIO_DELAY_MS, delay));
 }

@@ -414,6 +414,11 @@ Departures from §3:
    but a coalesced `play()` now returns the start time of the syllable it was
    folded into (not null). Otherwise the second pane's flash would fire
    undelayed, ahead of the sound both panes share (ReAgent P1 on #3717).
+   The delay can also be **negative**: when that shared syllable is already
+   audible, `flashElement` places the pattern in the past so it resumes where
+   the sound is, instead of restarting up to ~46 ms behind it (Codex P2 on
+   #3717). The cap is ±500 ms, and a pattern that is already over is skipped
+   without interrupting the element's current flash.
 2. **The animation's start time is pinned** to the moment `flashElement` runs
    (`anim.startTime = performance.now()`). Otherwise a new animation starts on the
    next frame, up to ~17 ms late, and every strike lands that much after its

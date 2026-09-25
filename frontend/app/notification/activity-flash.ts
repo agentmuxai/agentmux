@@ -35,6 +35,8 @@ export interface FlashPattern {
 /**
  * One sound from `blockId`. `delayMs` is how long to wait before the
  * pattern's first strike so it lands with the audible sound, not ahead of it.
+ * Negative when the sound is already that far in: the pattern resumes
+ * mid-way instead of restarting behind it.
  */
 export type FlashTarget = { blockId: string; pattern: FlashPattern; delayMs: number };
 
@@ -243,10 +245,16 @@ export function flashElement(
 ): void {
     if (flash.pattern.strikes.length === 0) return;
     const t = now();
+    // A negative delay means the sound is already that far in: place the
+    // pattern in the past so it resumes where the sound is. One that has
+    // entirely finished has nothing left to show, and must not interrupt
+    // whatever this element is still flashing.
+    const incoming: ScheduledFlash = { startAt: t + flash.delayMs, pattern: flash.pattern };
+    if (incoming.startAt + patternDurationMs(incoming.pattern) <= t) return;
     const prev = running.get(el);
     prev?.anim?.cancel();
     const scheduled = (prev?.scheduled ?? []).filter((s) => s.startAt + patternDurationMs(s.pattern) > t);
-    scheduled.push({ startAt: t + Math.max(0, flash.delayMs), pattern: flash.pattern });
+    scheduled.push(incoming);
 
     if (baseColor) el.style.setProperty(FLASH_BASE_COLOR_VAR, baseColor);
     else el.style.removeProperty(FLASH_BASE_COLOR_VAR);

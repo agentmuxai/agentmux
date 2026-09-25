@@ -102,9 +102,18 @@ describe("audibleFlashDelayMs", () => {
         expect(audibleFlashDelayMs(ctx, 10.005, 1000)).toBeCloseTo(45 - FLASH_VISUAL_LEAD_MS, 5);
     });
 
-    it("never goes negative, never waits past the cap, and ignores garbage", () => {
-        expect(audibleFlashDelayMs(ctxWith({}), 10, 1000)).toBe(0);
+    it("goes negative when the onset is already (nearly) on screen, so the pattern resumes mid-way", () => {
+        // Heard right now: the visual lead puts its start 16 ms in the past.
+        expect(audibleFlashDelayMs(ctxWith({}), 10, 1000)).toBeCloseTo(-FLASH_VISUAL_LEAD_MS, 5);
+        // A coalesced call arriving 25 ms after the shared syllable started
+        // (Codex P2 on #3717): 25 ms elapsed plus the lead.
+        const ctx = ctxWith({ getOutputTimestamp: () => ({ contextTime: 10, performanceTime: 5000 }) });
+        expect(audibleFlashDelayMs(ctx, 10, 5025)).toBeCloseTo(-25 - FLASH_VISUAL_LEAD_MS, 5);
+    });
+
+    it("caps the wait both ways and ignores garbage", () => {
         expect(audibleFlashDelayMs(ctxWith({ outputLatency: 3 }), 10, 1000)).toBe(FLASH_MAX_AUDIO_DELAY_MS);
+        expect(audibleFlashDelayMs(ctxWith({ currentTime: 20 }), 10, 1000)).toBe(-FLASH_MAX_AUDIO_DELAY_MS);
         expect(audibleFlashDelayMs(ctxWith({ outputLatency: Number.NaN }), 10, 1000)).toBe(0);
     });
 });

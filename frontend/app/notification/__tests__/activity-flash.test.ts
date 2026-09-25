@@ -194,6 +194,24 @@ describe("flashElement", () => {
         expect(keyframes[0]).toMatchObject({ offset: 0, opacity: 0 });
     });
 
+    it("resumes a pattern whose sound started before the call (negative delay), not restart it", () => {
+        // THREE began 30 ms ago: its first strike is past, the second lands
+        // in 32 ms, and the animation ends 30 ms sooner than a fresh one.
+        flashElement(makeEl(), { pattern: THREE, delayMs: -30 });
+        const [keyframes, options] = animate.mock.calls[0];
+        const span = options.duration as number;
+        expect(span).toBeCloseTo(patternDurationMs(THREE) - 30, 5);
+        expect(keyframes[0].opacity).toBeCloseTo(patternEnvelopeAt(THREE, 30), 5);
+        const at32 = keyframes.filter((k: Keyframe) => Math.abs((k.offset as number) - 32 / span) < 1e-9);
+        expect(at32).toHaveLength(2);
+        expect(at32[1].opacity).toBe(0.5);
+    });
+
+    it("skips a sound whose whole pattern is already over", () => {
+        flashElement(makeEl(), { pattern: SINGLE, delayMs: -(TAIL_END + 1) });
+        expect(animate).not.toHaveBeenCalled();
+    });
+
     it("sets the base color it is given, and clears a stale one when given none", () => {
         const el = makeEl();
         flashElement(el, { pattern: SINGLE, delayMs: 0 }, "#f59e0b");

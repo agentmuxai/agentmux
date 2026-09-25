@@ -349,10 +349,19 @@ describe("sound-service tool-tones policy", () => {
             fireToolStarted("blk-2", "Read");
             expect(flashes[1].delayMs).toBeCloseTo(50 - FLASH_VISUAL_LEAD_MS, 3);
 
+            // Coalesced after the shared syllable is already audible (the
+            // context clock has moved 30 ms past its start): a negative
+            // delay, so the pattern resumes where the sound is instead of
+            // restarting behind it (Codex P2 on #3717).
+            (ctx as unknown as { currentTime: number }).currentTime = 1.04;
+            toolPlaySpy.mockReturnValueOnce(1.01);
+            fireToolStarted("blk-3", "Read");
+            expect(flashes[2].delayMs).toBeCloseTo(10 - FLASH_VISUAL_LEAD_MS, 3);
+
             // Nothing attached to wait for: undelayed.
             toolPlaySpy.mockReturnValueOnce(null);
-            fireToolStarted("blk-3", "Read");
-            expect(flashes[2].delayMs).toBe(0);
+            fireToolStarted("blk-4", "Read");
+            expect(flashes[3].delayMs).toBe(0);
         } finally {
             unsubscribe();
         }
