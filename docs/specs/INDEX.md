@@ -321,6 +321,7 @@ partial list.
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
+| [`SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24`](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | SPEC — macOS browser pane: show AgentMux's right-click menu above the page |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
 | [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
