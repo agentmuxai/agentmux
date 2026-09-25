@@ -22,9 +22,12 @@ import { Button } from "@/element/button";
 import "./memory-adoption-approval-window.scss";
 
 export type AdoptionSummaryFolder = { account: string; files: string[] };
-export type AdoptionSummary = { agentName: string; folders: AdoptionSummaryFolder[] };
+export type AdoptionSummary = { agentName: string; folders: AdoptionSummaryFolder[]; dir?: string };
+export type ApprovalKind = "adopt" | "release";
 
-export function parseAdoptionMeta(raw: string | null): { approvalId: string; summary: AdoptionSummary } | null {
+export function parseAdoptionMeta(
+    raw: string | null,
+): { approvalId: string; kind: ApprovalKind; summary: AdoptionSummary } | null {
     if (!raw) return null;
     try {
         const parsed = JSON.parse(raw);
@@ -38,7 +41,12 @@ export function parseAdoptionMeta(raw: string | null): { approvalId: string; sum
             : [];
         return {
             approvalId: parsed.approval_id,
-            summary: { agentName: typeof s.agentName === "string" ? s.agentName : "this agent", folders },
+            kind: parsed.kind === "release" ? "release" : "adopt",
+            summary: {
+                agentName: typeof s.agentName === "string" ? s.agentName : "this agent",
+                folders,
+                dir: typeof s.dir === "string" ? s.dir : undefined,
+            },
         };
     } catch {
         return null;
@@ -81,6 +89,33 @@ export const MemoryAdoptionApprovalWindow = (): JSX.Element => {
         return (
             <div class="memory-adoption-approval-window memory-adoption-approval-window-error">
                 <p>This window is missing its request and can't be used. Close it and try again from the Armory.</p>
+            </div>
+        );
+    }
+
+    if (meta.kind === "release") {
+        return (
+            <div class="memory-adoption-approval-window">
+                <header class="memory-adoption-approval-header">
+                    <h2>Release {meta.summary.agentName}'s claim on this folder?</h2>
+                </header>
+                <div class="memory-adoption-approval-body">
+                    <p class="memory-adoption-approval-dir">{meta.summary.dir ?? "(folder not recorded)"}</p>
+                    <p>
+                        While {meta.summary.agentName} claims it, no other agent's memory is written to or read from
+                        this folder. Release it when {meta.summary.agentName} no longer uses it, so another agent that
+                        does can sync its memory there. If {meta.summary.agentName} still uses it, its next launch
+                        claims it again.
+                    </p>
+                </div>
+                <footer class="memory-adoption-approval-footer">
+                    <Button onClick={() => decide(false)} disabled={busy()}>
+                        Cancel
+                    </Button>
+                    <Button onClick={() => decide(true)} className="green solid" disabled={busy()}>
+                        {busy() ? "Releasing…" : "Release"}
+                    </Button>
+                </footer>
             </div>
         );
     }

@@ -70,6 +70,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         NativeMemoryListCommand: (...args: unknown[]) => nativeMemoryListMock(...args),
         // The "earlier memory" panel above the file grid: nothing to offer.
         NativeMemoryAdoptionListCommand: () => Promise.resolve({ list: null }),
+        NativeMemoryClaimsCommand: () => Promise.resolve({ list_id: "l", agent_uid: "a", folders: [] }),
     },
 }));
 
