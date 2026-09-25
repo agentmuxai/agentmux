@@ -681,6 +681,23 @@ pub(crate) async fn build_persistent_spawn_env(
     Ok(env_vars)
 }
 
+/// Why `run_agent_turn` refused to spawn, before any process started.
+enum TurnGate {
+    /// Another AgentMux instance on this host runs this agent.
+    Admission(String),
+    /// The identity/credential spawn gate refused.
+    Identity(crate::identity::resolver::SpawnGateError),
+}
+
+impl std::fmt::Display for TurnGate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TurnGate::Admission(refusal) => f.write_str(refusal),
+            TurnGate::Identity(e) => write!(f, "{e}"),
+        }
+    }
+}
+
 pub async fn run_agent_turn(
     deps: &AgentTurnDeps,
     block_id: String,
@@ -736,18 +753,39 @@ pub async fn run_agent_turn(
     // comment. Broker hand-in lets the OAuth expiry probe (PR D, spec §4.4)
     // publish `identitybundlebindings:changed:<bundle_id>` when it flips a
     // token's status valid→expired etc.
-    let mut env_vars = match build_persistent_spawn_env(
-        mstore.clone(),
-        id_store.clone(),
-        identity_store.clone(),
-        Some(broker.clone()),
-        &block.meta,
-        &block_id,
-        &auth_key,
-        env_vars,
-    )
-    .await
+    //
+    // Before all of that — the env build writes shared identity state — a
+    // persistent pane about to spawn checks that no other AgentMux instance
+    // on this host runs this agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
+    // Phase 1, I9). A refusal takes the gate's error path below, so it is
+    // persisted and shown in the pane like any other spawn refusal.
+    let admission = match ctrl
+        .as_any()
+        .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
     {
+        Some(p) if p.needs_spawn() => {
+            let uid = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+            let name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
+            p.check_admission(&uid, &name).await
+        }
+        _ => Ok(()),
+    };
+    let env_result = match admission {
+        Err(refusal) => Err(TurnGate::Admission(refusal)),
+        Ok(()) => build_persistent_spawn_env(
+            mstore.clone(),
+            id_store.clone(),
+            identity_store.clone(),
+            Some(broker.clone()),
+            &block.meta,
+            &block_id,
+            &auth_key,
+            env_vars,
+        )
+        .await
+        .map_err(TurnGate::Identity),
+    };
+    let mut env_vars = match env_result {
         Ok(env) => env,
         Err(gate) => {
             let error_frame = serde_json::json!({
@@ -802,7 +840,10 @@ pub async fn run_agent_turn(
                 persist: 1,
                 data: serde_json::to_value(&gate_failure).ok(),
             });
-            return Err(format!("identity spawn gate: {gate}"));
+            return Err(match &gate {
+                TurnGate::Admission(refusal) => refusal.clone(),
+                TurnGate::Identity(e) => format!("identity spawn gate: {e}"),
+            });
         }
     };
     // Identity M2: the UID this turn's spawn env carries (M1a), kept for the

@@ -526,6 +526,13 @@ struct PersistentInner {
     /// is hardcoded `false` pending the Phase 2 policy decision
     /// (SPEC_DECISION_PROMPT_2026_04_24.md, SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §5).
     pending_permissions: HashMap<String, (String, String, serde_json::Value)>,
+    /// The single-live-instance lease the current CLI process holds
+    /// (`backend::agent_admission`, SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
+    /// Phase 1). Set by `spawn_process` once the child is running; cleared —
+    /// which releases it — by the process-exit arms for the current
+    /// generation. An `Arc` so the pre-turn fence can verify it without
+    /// holding this lock across file I/O.
+    agent_lease: Option<Arc<crate::backend::agent_admission::HeldAgentLease>>,
 }
 
 impl PersistentInner {
@@ -877,6 +884,11 @@ pub struct PersistentSubprocessController {
     /// Reports whatever is still deferred when this controller is dropped.
     /// See [`DeferredDropReport`].
     deferred_drop_report: DeferredDropReport,
+    /// Where this agent's single-live-instance lease lives, and this srv's
+    /// boot id (the lease owner). Set via `with_agent_lease_store()`; `None`
+    /// (tests, a registry that can't be opened) means no lease is taken.
+    lease_store: Option<Arc<crate::registry::LeaseStore>>,
+    boot_id: Arc<str>,
 }
 
 /// The last line of defence for §4.5: whatever is still deferred when the
@@ -1164,6 +1176,7 @@ impl PersistentSubprocessController {
                 leftover_resume_candidate: None,
                 pending_questions: HashMap::new(),
                 pending_permissions: HashMap::new(),
+                agent_lease: None,
             })),
             broker,
             event_bus,
@@ -1180,6 +1193,8 @@ impl PersistentSubprocessController {
             stable_agent_uid: Mutex::new(None),
             current_segment: Mutex::new(None),
             deferred_drop_report: DeferredDropReport(None),
+            lease_store: None,
+            boot_id: Arc::from(""),
         };
         this.deferred_drop_report =
             DeferredDropReport(Some((this.block_id.clone(), Arc::clone(&this.inner))));
@@ -1213,6 +1228,103 @@ impl PersistentSubprocessController {
         self.identity_store = identity_store;
         self.auth_key = auth_key;
         self
+    }
+
+    /// Supplies the single-live-instance lease store (under the shared agent
+    /// registry root) and this srv's boot id. A separate builder step for
+    /// the same reason as `with_identity_stores`. Without it the controller
+    /// takes no lease — the pre-Phase-1 behaviour.
+    pub fn with_agent_lease_store(
+        mut self,
+        registry: Option<Arc<crate::registry::Registry>>,
+        boot_id: Arc<str>,
+    ) -> Self {
+        self.lease_store = crate::backend::agent_admission::lease_store_for(registry);
+        self.boot_id = boot_id;
+        self
+    }
+
+    /// Claim (or keep) this agent's single-live-instance lease for the
+    /// process `spawn_process` is about to start. `Ok(None)` when leasing is
+    /// unavailable (no store) or the spawn env carries no agent UID — those
+    /// run unguarded, as before Phase 1, and are logged. `Err` is the
+    /// user-facing refusal: another instance runs this agent.
+    ///
+    /// A lease this controller already holds (an earlier generation's, still
+    /// valid) is reused rather than re-claimed: a fresh handle for the same
+    /// key would release the shared file when the old one dropped.
+    pub(super) fn acquire_agent_lease(
+        &self,
+        config: &PersistentSpawnConfig,
+        session_hint: Option<&str>,
+    ) -> Result<Option<Arc<crate::backend::agent_admission::HeldAgentLease>>, String> {
+        let Some(store) = self.lease_store.as_ref() else { return Ok(None) };
+        let uid = config
+            .env_vars
+            .get("AGENTMUX_AGENT_UID")
+            .map(|u| u.trim().to_string())
+            .filter(|u| !u.is_empty());
+        let Some(uid) = uid else {
+            tracing::warn!(
+                block_id = %self.block_id,
+                "agent_admission: spawn env carries no agent UID — no single-instance lease for this process"
+            );
+            return Ok(None);
+        };
+        let existing = self.inner.lock().unwrap().agent_lease.clone();
+        if let Some(existing) = existing {
+            existing.verify()?;
+            return Ok(Some(existing));
+        }
+        let agent = muxbus_agent_id_from_env(&config.env_vars).unwrap_or_default();
+        let inner = Arc::clone(&self.inner);
+        let block_id = self.block_id.clone();
+        let held = crate::backend::agent_admission::acquire(
+            store,
+            &uid,
+            &agent,
+            &self.boot_id,
+            &self.block_id,
+            session_hint,
+            move |why| Self::stop_after_lease_loss(&inner, &block_id, &why),
+        )?;
+        Ok(Some(Arc::new(held)))
+    }
+
+    /// The early admission check (spec I9) for this controller's agent:
+    /// refuses while another instance holds it. Runs before any shared write.
+    pub(crate) async fn check_admission(&self, uid: &str, agent: &str) -> Result<(), String> {
+        crate::backend::agent_admission::check_before_spawn(
+            self.lease_store.clone(),
+            uid,
+            agent,
+            &self.boot_id,
+        )
+        .await
+    }
+
+    /// The pre-turn fence (spec I4): `Err` if this pane's CLI process lost
+    /// its lease to another instance. Also stops that process, so it cannot
+    /// keep driving the agent. `Ok` when no lease is held (nothing spawned
+    /// yet — the spawn will claim — or leasing is unavailable).
+    pub(super) fn fence_check(&self) -> Result<(), String> {
+        let lease = self.inner.lock().unwrap().agent_lease.clone();
+        let Some(lease) = lease else { return Ok(()) };
+        if let Err(e) = lease.verify() {
+            Self::stop_after_lease_loss(&self.inner, &self.block_id, &e);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Kill the current CLI process after its lease was lost — the holder
+    /// stops rather than racing the new one (spec §4.3).
+    fn stop_after_lease_loss(inner: &Arc<Mutex<PersistentInner>>, block_id: &str, why: &str) {
+        let kill = inner.lock().unwrap().kill_tx.take();
+        tracing::error!(block_id, why, "agent_admission.fenced: stopping this pane's CLI process");
+        if let Some(tx) = kill {
+            let _ = tx.send(KillRequest::Force);
+        }
     }
 
     /// Sets the weak self-reference used by the process-waiter task to call

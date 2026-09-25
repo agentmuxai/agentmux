@@ -470,6 +470,7 @@ partial list.
 | [`SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27`](SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md) | SPEC: Agent pane tab-switch perf |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04`](SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md) | Agent Recurring-Task / Polling Primitives — Design Hardening |
+| [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30`](SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md) | SPEC: Safe unrestricted screen capture for agents |
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
 | [`SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04`](SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md) | Spec: unify the Working/Worked label with the long-running-process axis, and close the two live desync bugs |
@@ -557,7 +558,6 @@ partial list.
 | [`SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16`](SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) | SPEC: My Agents row delete — exit animation + reflow |
 | [`SPEC_AGENT_RUNTIME_DROPUP_2026_07_09`](SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md) | SPEC: Consolidate Mode / Model / Effort into a single Runtime dropup |
 | [`SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19`](SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md) | SPEC: Agent pane shell drawer — replace the Session/History bar with a process & shell info panel |
-| [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19`](SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md) | SPEC: Agent Waiting Ambient Sound |
 | [`SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21`](SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md) | SPEC: Tool-call bursts restart the agent-pane "Working…" row's type-out reveal |
 | [`SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03`](SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md) | SPEC: `AgentWorkingRow` typography refresh — drop the accent-color text, match the thinking-text font, go bold |
