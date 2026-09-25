@@ -8,6 +8,7 @@ import {
     FullBlockProps,
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
+import { resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
@@ -49,28 +50,9 @@ const READY_GATE_FADE_MS = 200;
  * itself applies, not just a raw `meta.view === "agent"` check.
  */
 export function resolveEffectiveViewType(blockView: string): string {
-    // Migration shims:
-    //   * v0.33.197: forge was folded into the agent pane; redirect old
-    //     "forge" blocks to "agent" so they keep rendering.
-    //   * Drone rename (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18): the
-    //     Workflows feature was renamed to Drone. Existing user panes
-    //     persist `meta.view: "workflows"` in the block store; the v10
-    //     SQLite migration moves the DAG tables but does NOT rewrite
-    //     block metadata, so redirect at the view-dispatch layer instead.
-    //
-    // "identity" was previously redirected here too, but as of PR-F.2
-    // (#748) Identity is once again a first-class pane — `view: "identity"`
-    // resolves to IdentityPaneViewModel via block-registry.ts.
-    //   * Armory rename (docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md):
-    //     the Trust Center pane was renamed to Armory. Existing user panes
-    //     persist `meta.view: "trust"`; this is a pure UI rename with no
-    //     SQLite migration, so redirect at the view-dispatch layer here
-    //     (same pattern as workflows→drone).
-    let effectiveView = blockView;
-    if (effectiveView === "forge") effectiveView = "agent";
-    if (effectiveView === "workflows") effectiveView = "drone";
-    if (effectiveView === "trust") effectiveView = "armory";
-    return effectiveView;
+    // Migration aliases (forge → agent, workflows → drone, trust → armory)
+    // are declared on each view's manifest in block-registry.ts.
+    return resolvePaneTabView(blockView);
 }
 
 // Each ViewModel's own reactive root, disposed with it (`disposeViewModel`).
