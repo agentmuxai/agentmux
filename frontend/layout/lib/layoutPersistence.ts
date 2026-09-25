@@ -390,6 +390,9 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 newNode: newNode,
                 position: action.position,
                 sizeFraction: action.nodesizefraction,
+                // A split-placed open (muxsh open/web, OpenEditor next to the
+                // calling pane) selects the new pane exactly like an insert does.
+                focused: action.focused,
             };
             model.treeReducer(splitAction, false);
             break;
@@ -419,6 +422,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 newNode: newNode,
                 position: action.position,
                 sizeFraction: action.nodesizefraction,
+                focused: action.focused,
             };
             model.treeReducer(splitAction, false);
             break;
