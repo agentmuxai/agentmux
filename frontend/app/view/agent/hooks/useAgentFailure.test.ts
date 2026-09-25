@@ -572,6 +572,40 @@ describe("useAgentFailure — Take over (live_elsewhere)", () => {
         });
     });
 
+    // ReAgent P1 on #3742: arm, then a fresh message is refused again — the
+    // new row must need two clicks again, not execute on the first.
+    it("a newly observed failure starts disarmed", async () => {
+        const onTakeOver = vi.fn(async () => {});
+        await createRoot(async (dispose) => {
+            const { ui } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(button(ui, "Confirm take over")).toBeDefined();
+            fire("agentfailure", liveElsewhere());
+            expect(button(ui, "Confirm take over")).toBeUndefined();
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            expect(onTakeOver).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("an externally cleared row takes its armed state with it", async () => {
+        const onTakeOver = vi.fn(async () => {});
+        await createRoot(async (dispose) => {
+            const { ui, model } = mount(onTakeOver);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            button(ui, "Take over")!.onClick!(undefined as unknown as MouseEvent);
+            simulateFreshTurnStartClearingFailure(model);
+            await Promise.resolve();
+            fire("agentfailure", liveElsewhere());
+            expect(button(ui, "Take over")).toBeDefined();
+            expect(onTakeOver).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
     it("a failed takeover keeps the row and says why", async () => {
         const onTakeOver = vi.fn(async () => {
             throw new Error("The AgentMux instance running Agent3 (channel x) is too old to hand it over.");

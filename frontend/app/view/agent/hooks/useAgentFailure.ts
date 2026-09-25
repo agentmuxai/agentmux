@@ -266,6 +266,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 const f = (event as any)?.data as AgentFailure | undefined;
                 if (!f) return;
                 cancelCountdown();
+                // A new failure never inherits an armed Take over: its row must
+                // start at the first click again (ReAgent P1 on #3742).
+                disarmTakeover();
                 setExpanded(false);
                 setRetrying(false);
                 // Reducer-side: records state.failure AND unconditionally ends
@@ -330,6 +333,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         if (hadFailure && !hasFailureNow && !selfInitiatedClear) {
             autoRetries = 0;
         }
+        // Whatever cleared the row, an armed Take over belongs to that row.
+        if (!hasFailureNow) disarmTakeover();
         hadFailure = hasFailureNow;
         selfInitiatedClear = false;
     });
