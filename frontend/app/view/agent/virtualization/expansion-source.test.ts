@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { currentExpansion, type ExpansionInputs } from "./expansion-source";
 import type {
     AgentMessageNode,
+    DocumentNode,
     MarkdownNode,
     SectionNode,
     ToolNode,
@@ -94,6 +95,20 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
         });
         it("canceled-thinking markdown is collapsed by default (its default IS derivable; only the expand click is local)", () => {
             expect(currentExpansion(markdown("m", true), inputs())).toEqual({ open: false });
+        });
+    });
+
+    describe("ambient_narration", () => {
+        it("is always open, and never returns undefined", () => {
+            // Regression: a missing switch case returned undefined, which the layout
+            // effect dispatched as `ExpansionResolved { to: undefined }` and crashed
+            // in expansionEq on the first ambient node to enter the virtualized set.
+            const node: DocumentNode = {
+                type: "ambient_narration", id: "a", kind: "background_task", text: "x", timestamp: 0,
+            };
+            expect(currentExpansion(node, inputs())).toEqual({ open: true, via: "default" });
+            // pin/collapse sets do not affect it
+            expect(currentExpansion(node, inputs(["a"], ["a"]))).toEqual({ open: true, via: "default" });
         });
     });
 });

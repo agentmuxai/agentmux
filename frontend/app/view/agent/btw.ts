@@ -80,6 +80,10 @@ function renderSnapshotLine(node: DocumentNode): string | null {
         case "history_link":
         case "resume_preflight":
             return null;
+        // AgentMux's own narration, not something the user or the model said —
+        // it must not appear in a prompt as if it were part of the conversation.
+        case "ambient_narration":
+            return null;
         default:
             return null;
     }

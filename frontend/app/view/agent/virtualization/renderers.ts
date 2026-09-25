@@ -162,6 +162,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     // Render-time synthetic continuity notice (live view) — static. Its
     // pending/resolved swap replaces the node wholesale, never streams.
     resume_preflight: false,
+    // Complete one-line narration delivered as a single broadcast — not chunked.
+    ambient_narration: false,
 };
 
 /**
@@ -185,6 +187,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "day_divider":       return 32;
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
+        case "ambient_narration": return estimateTextHeight(node.text);
     }
 }
 
@@ -229,6 +232,7 @@ export function estimateNodeForState(
             case "day_divider":       return 32;
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
+            case "ambient_narration": return estimateTextHeight(node.text);
         }
     }
     // expanded
@@ -247,5 +251,6 @@ export function estimateNodeForState(
         case "day_divider":       return 32;
         case "history_link":      return 40;
         case "resume_preflight":  return 56;
+        case "ambient_narration": return estimateTextHeight(node.text);
     }
 }

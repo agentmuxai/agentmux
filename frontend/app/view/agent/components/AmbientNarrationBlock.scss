@@ -1,0 +1,30 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Ambient narration — in-flow, in the agent's own prose face. Wrapper padding,
+// opacity and selection come from `.agent-markdown-block`; this only supplies
+// the typography `.markdown .content` would (plain text has no such wrapper) and
+// the trailing tag. See AmbientNarrationBlock.tsx for why the tag exists.
+.agent-ambient-narration {
+    font-family: var(--markdown-font-family);
+    font-size: var(--markdown-font-size);
+    line-height: 1.5;
+    overflow-wrap: break-word;
+}
+
+.agent-ambient-narration-tag {
+    // Inline, after the text. Sized down from prose and not accent-coloured: it
+    // marks provenance; it does not ask to be clicked or read first.
+    font-size: 0.7em;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color);
+    border: 1px solid rgba(from var(--secondary-text-color) r g b / 0.35);
+    border-radius: 3px;
+    padding: 0 4px;
+    opacity: 0.7;
+    white-space: nowrap;
+    // Keep the tag on the text's baseline rather than floating mid-line.
+    vertical-align: baseline;
+    cursor: default;
+}
