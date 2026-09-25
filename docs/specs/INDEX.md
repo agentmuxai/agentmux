@@ -215,6 +215,7 @@ partial list.
 | [`SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md) | Agent Pane Mount/Auth Notifications & Launch-Auth Reducer |
 | [`SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29`](SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md) | Spec: force stick-to-bottom on an agent pane's first-ever overflow |
 | [`SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15`](SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md) | SPEC: Agent pane forks + a cohesive auxiliary-pins architecture |
+| [`SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23`](SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md) | SPEC: Agent pane refinements — expanded tool-call hover text, close-last-tab returns to My Agents, composer autofocus on launch |
 | [`SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02`](SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md) | Agent-Pane Layout State Machine — unify zoom + virtualization + tool-expansion into one reducer |
 | [`SPEC_AGENT_PANE_MOUNT_AUTH_CHECK_WRONG_DIR_2026_07_31`](SPEC_AGENT_PANE_MOUNT_AUTH_CHECK_WRONG_DIR_2026_07_31.md) | SPEC — Agent-pane mount-time auth check validates the wrong directory |
 | [`SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10`](SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md) | SPEC: Move the agent pane's marching-ants progress bar above the tab strip |

@@ -18,6 +18,7 @@ import { abbreviateText } from "@/util/format-text";
 import { MicButton } from "@/app/element/MicButton";
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import type { AgentViewModel } from "../agent-model";
+import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
@@ -792,16 +793,25 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // marked focused) and switching into a tab whose agent pane wasn't
     // mounted yet, neither of which `focusManager.refocusNode()`'s own
     // one-shot attempt can reach.
+    //
+    // Right after a launch (a one-shot request from the launch path) the
+    // claim is replaced by a retrying one: launching from the launch modal
+    // mounts this footer while the modal is still open, which
+    // claimFocusOnMount deliberately skips, so it would never land.
+    // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3.
     onMount(() => {
         const vm = props.viewModel;
-        if (!vm || !textareaRef) return;
-        vm.focusTargetRef.current = textareaRef;
+        const ta = textareaRef;
+        if (!vm || !ta) return;
+        vm.focusTargetRef.current = ta;
+        const cancelLaunchFocus = takeComposerFocusRequest(vm.blockId) ? focusComposerWhenReady(ta, vm.blockId) : null;
         onCleanup(() => {
-            if (vm.focusTargetRef.current === textareaRef) {
+            cancelLaunchFocus?.();
+            if (vm.focusTargetRef.current === ta) {
                 vm.focusTargetRef.current = null;
             }
         });
-        focusManager.claimFocusOnMount(vm.blockId, () => vm.giveFocus());
+        if (!cancelLaunchFocus) focusManager.claimFocusOnMount(vm.blockId, () => vm.giveFocus());
     });
 
     // Draft cleared by Esc, held for Undo. Plain (non-reactive) — read
