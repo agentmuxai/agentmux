@@ -292,6 +292,59 @@ pub(crate) async fn fleet_bulk_stop_impl(
     result
 }
 
+/// `FleetBulkStop` from an agent (the HTTP path; the Swarm UI's own
+/// `fleet.bulk-stop` is the user and stops at once): every target running on
+/// this instance waits for its user's 15 s override, all windows in parallel
+/// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). Targets that aren't
+/// (another channel's, or not running) go through `fleet_bulk_stop_impl` as
+/// before, `staged` included.
+pub(crate) async fn fleet_bulk_stop_with_override(
+    state: &AppState,
+    by: &str,
+    targets: Vec<String>,
+    signal: Option<&str>,
+    staged: Option<StagePlanInput>,
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
+    let (local, other): (Vec<String>, Vec<String>) = targets
+        .into_iter()
+        .partition(|b| crate::backend::blockcontroller::get_controller(b).is_some());
+    let pending = local
+        .iter()
+        .map(|block_id| {
+            let mut v = crate::sagas::pending_shutdown::request(
+                state,
+                block_id,
+                by,
+                "FleetBulkStop",
+                "",
+                crate::sagas::pending_shutdown::Action::Stop { signal: signal.map(str::to_string) },
+            );
+            // A target can join a request opened for another block (its
+            // pane's close, via a sibling tab): audit and report it under the
+            // block this caller named (ReAgent P1 on #3798), with that
+            // request's id.
+            let target = state
+                .reactive_handler
+                .get_agent_by_block(block_id)
+                .map(|a| a.agent_id)
+                .unwrap_or_else(|| block_id.clone());
+            state.reactive_handler.log_fleet_action_audit(
+                Some(by), &target, block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
+            );
+            v.block_id = block_id.clone();
+            v.target = target;
+            v
+        })
+        .collect();
+    let now = if other.is_empty() {
+        FleetActionResult::default()
+    } else {
+        fleet_bulk_stop_impl(state, other, signal, staged).await
+    };
+    (now, pending)
+}
+
 /// `batch_failures / batch_len` (as a percentage) exceeds `max_pct`.
 /// Cross-multiplies instead of computing a truncated integer percentage
 /// first — `batch_failures * 100 / batch_len` rounds DOWN before
@@ -432,4 +485,99 @@ fn register_fleet_group_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// A running agent that records whether it was stopped.
+    struct Stoppable {
+        block_id: String,
+        stopped: Arc<AtomicBool>,
+    }
+
+    impl crate::backend::blockcontroller::Controller for Stoppable {
+        fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+            self.stopped.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+        fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+            crate::backend::blockcontroller::BlockControllerRuntimeStatus { blockid: self.block_id.clone(), ..Default::default() }
+        }
+        fn send_input(&self, _: crate::backend::blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn controller_type(&self) -> &str {
+            "stub"
+        }
+        fn block_id(&self) -> &str {
+            &self.block_id
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn running(prefix: &str) -> (String, Arc<AtomicBool>) {
+        let block_id = format!("{prefix}-{}", uuid::Uuid::new_v4());
+        let stopped = Arc::new(AtomicBool::new(false));
+        crate::backend::blockcontroller::register_controller(
+            &block_id,
+            Arc::new(Stoppable { block_id: block_id.clone(), stopped: stopped.clone() }),
+        );
+        (block_id, stopped)
+    }
+
+    #[tokio::test]
+    async fn an_agent_s_bulk_stop_waits_for_each_user_and_stops_when_nobody_keeps_it() {
+        let state = crate::server::tests::test_state();
+        let (a, a_stopped) = running("bulk-override-a");
+        let (b, b_stopped) = running("bulk-override-b");
+        let gone = format!("bulk-override-gone-{}", uuid::Uuid::new_v4());
+
+        let (now, pending) =
+            fleet_bulk_stop_with_override(&state, "Korp", vec![a.clone(), b.clone(), gone.clone()], None, None).await;
+        assert_eq!(now.failed.iter().map(|f| f.id.clone()).collect::<Vec<_>>(), vec![gone], "not running: fails at once");
+        assert_eq!(pending.iter().map(|p| p.block_id.clone()).collect::<Vec<_>>(), vec![a.clone(), b.clone()]);
+        assert!(pending.iter().all(|p| p.by == "Korp" && p.via == "FleetBulkStop"));
+        assert!(!a_stopped.load(Ordering::SeqCst) && !b_stopped.load(Ordering::SeqCst), "nothing stops during the window");
+
+        // The user keeps b; a's window runs out.
+        assert_eq!(crate::sagas::pending_shutdown::keep(&state, &b, &pending[1].request_id), "kept_by_user");
+        crate::sagas::pending_shutdown::expire_now(&pending[0].request_id);
+        assert_eq!(crate::sagas::pending_shutdown::settled(&pending[0].request_id).await.status, "shut_down");
+        assert_eq!(crate::sagas::pending_shutdown::settled(&pending[1].request_id).await.status, "kept_by_user");
+        assert!(a_stopped.load(Ordering::SeqCst));
+        assert!(!b_stopped.load(Ordering::SeqCst), "the user kept it");
+        crate::backend::blockcontroller::delete_controller(&a);
+        crate::backend::blockcontroller::delete_controller(&b);
+    }
+
+    #[tokio::test]
+    async fn a_target_that_joins_its_pane_s_pending_close_is_reported_under_its_own_block() {
+        let state = crate::server::tests::test_state();
+        let (tab, _) = running("bulk-join-tab");
+        let sibling = format!("bulk-join-sibling-{}", uuid::Uuid::new_v4());
+        let close = crate::sagas::pending_shutdown::request(
+            &state,
+            &sibling,
+            "Korp",
+            "ClosePane",
+            "",
+            crate::sagas::pending_shutdown::Action::ClosePane { block_ids: vec![sibling.clone(), tab.clone()] },
+        );
+
+        let (_, pending) = fleet_bulk_stop_with_override(&state, "Posa", vec![tab.clone()], None, None).await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].block_id, tab, "the block the caller named, not the sibling");
+        assert_eq!(pending[0].request_id, close.request_id, "the pane's one window");
+        assert!(pending[0].joined);
+        crate::sagas::pending_shutdown::keep(&state, &sibling, &close.request_id);
+        crate::backend::blockcontroller::delete_controller(&tab);
+    }
 }

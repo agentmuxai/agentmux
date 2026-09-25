@@ -490,7 +490,7 @@ pub(crate) async fn handle_quit_self(
             true,
             Some(refusal.as_str()),
             &pending.request_id,
-            Some(&format!("pending user override: {detail}")),
+            Some(&format!("{}: {detail}", crate::sagas::pending_shutdown::audit_note(&pending, &agent, "QuitSelf"))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
@@ -505,6 +505,9 @@ pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> s
     json!({
         "status": "pending_user_override",
         "request_id": p.request_id,
+        // Whose request this is: a caller who finds someone else here joined it.
+        "by": p.by,
+        "via": p.via,
         "deadline_ms": p.deadline_ms,
         "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
     })
@@ -540,7 +543,7 @@ pub(crate) async fn handle_close_pane(
         Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
     };
 
-    let target_block_id = req.block_id.clone().unwrap_or(verified_own_block_id);
+    let target_block_id = req.block_id.clone().unwrap_or_else(|| verified_own_block_id.clone());
     let is_cross_pane = req.block_id.is_some();
 
     // codex P2 on PR #3193: resolve the target's agent name BEFORE deleting
@@ -583,6 +586,31 @@ pub(crate) async fn handle_close_pane(
             }
         }
     };
+
+    // Another agent's pane: its user has 15 s to keep it (§6.5). Closing a
+    // pane you are in yourself is your own business.
+    if is_cross_pane && !pane_block_ids.contains(&verified_own_block_id) {
+        let reason = req.reason.clone().unwrap_or_default();
+        let pending = crate::sagas::pending_shutdown::request(
+            &state,
+            &target_block_id,
+            &caller_agent_id,
+            "ClosePane",
+            &reason,
+            crate::sagas::pending_shutdown::Action::ClosePane { block_ids: pane_block_ids },
+        );
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&caller_agent_id),
+            &target_agent,
+            &target_block_id,
+            "pane.close",
+            true,
+            None,
+            &pending.request_id,
+            Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, "ClosePane"))),
+        );
+        return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
+    }
 
     let result = crate::sagas::close_pane::run(&state, pane_block_ids).await;
 
@@ -720,7 +748,11 @@ mod close_pane_tests {
         )
         .await
         .into_response();
-        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED, "another agent's pane waits for its user");
+        let request_id = body_json(resp).await["request_id"].as_str().unwrap().to_string();
+        assert!(state.srv_state.lock().await.blocks.contains_key(&target_block), "still running during the window");
+        crate::sagas::pending_shutdown::expire_now(&request_id);
+        assert_eq!(crate::sagas::pending_shutdown::settled(&request_id).await.status, "shut_down");
 
         // Target pane gone; caller's own pane untouched.
         {
@@ -742,7 +774,43 @@ mod close_pane_tests {
         assert_eq!(entry.source_agent.as_deref(), Some(caller_id.as_str()));
         assert_eq!(entry.target_agent, target_id);
         assert!(entry.success);
-        assert_eq!(entry.reason.as_deref(), Some("verifying the fix"));
+        let reason = entry.reason.as_deref().unwrap_or_default();
+        assert!(reason.starts_with("shut_down") && reason.contains("verifying the fix"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn keep_running_leaves_another_agent_s_pane_open() {
+        let state = test_state();
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-keep-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let (_, target_block) = seed(&state).await;
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            None,
+            axum::Json(ClosePaneRequest {
+                auth: sign_auth(&state, &caller_id),
+                block_id: Some(target_block.clone()),
+                reason: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let body = body_json(resp).await;
+        assert_eq!(body["status"], "pending_user_override");
+        assert_eq!(body["wait_at_least_ms"], 15_000);
+        let request_id = body["request_id"].as_str().unwrap().to_string();
+
+        assert_eq!(crate::sagas::pending_shutdown::keep(&state, &target_block, &request_id), "kept_by_user");
+        assert_eq!(crate::sagas::pending_shutdown::settled(&request_id).await.status, "kept_by_user");
+        assert!(state.srv_state.lock().await.blocks.contains_key(&target_block), "the user kept it");
+    }
+
+    async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     /// #3202: closing a pane through the MCP tool closes every tab in it, not
@@ -794,7 +862,10 @@ mod close_pane_tests {
         )
         .await
         .into_response();
-        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert_eq!(resp.status(), axum::http::StatusCode::ACCEPTED);
+        let request_id = body_json(resp).await["request_id"].as_str().unwrap().to_string();
+        crate::sagas::pending_shutdown::expire_now(&request_id);
+        crate::sagas::pending_shutdown::settled(&request_id).await;
 
         let s = state.srv_state.lock().await;
         assert!(!s.blocks.contains_key(&visible), "visible tab closed with its pane");
