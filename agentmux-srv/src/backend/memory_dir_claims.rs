@@ -159,6 +159,19 @@ pub(crate) fn check_and_claim(
     })
 }
 
+/// Whether `uid` still holds the only claim on `dir` — the re-check before
+/// every capture while the agent runs (spec §2.1.3). Read-only: the full
+/// check ran at spawn; this sees any agent that has claimed it since.
+pub(crate) fn held_exclusively(fs: &FileStore, uid: &str, dir: &Path) -> Result<bool, StoreError> {
+    let zone = claims_zone(&dir_id(dir));
+    let Some(bytes) = fs.read_files_consistent(&zone, &[CLAIMS_FILE])?.pop().flatten() else {
+        return Ok(false);
+    };
+    let claims: Claims =
+        serde_json::from_slice(&bytes).map_err(|e| StoreError::Other(format!("memory dir claims unreadable: {e}")))?;
+    Ok(claims.uids.contains_key(uid) && claims.uids.len() == 1)
+}
+
 /// Rules 1 and 2: no store writes.
 fn known_shared_or_vetoed(
     mstore: &Store,
