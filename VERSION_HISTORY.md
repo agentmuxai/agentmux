@@ -1,5 +1,37 @@
 # AgentMux Version History
 
+## 0.57.5 — 2026-09-25
+
+- feat(agent-pane): full tool call on hover when expanded; closing the last agent tab returns to My Agents; composer takes focus when an agent loads
+- fix(shell): apply the global cmd:env setting from the live config
+- fix(panes): Settings, Toolchain, Launcher, Identity and Memory panes get the same tab strip as every other pane, with no double header
+- fix(browser-pane): on macOS the right-click menu shows over the page instead of behind it, and Escape or a click in the page closes it
+- fix(browser-pane): on macOS you can type into a browser pane, and `muxsh web` puts the keyboard straight into the page it opens
+- fix(delivery): a jekt no longer waits for the end of a long turn; it lands while the agent waits on a tool call, and is still held while the agent is writing
+- feat(sound,tabs): event sounds flash too — the single hard knock (message accepted, turn interrupted) gets one bright pulse, turn complete/error two, timed to the sound; one 'Flash the tab and pane when a sound plays' toggle for all sounds
+- fix(panes): Sysinfo switches plot type every time, not just once — and no other pane type's settings freeze after their first change
+- fix(panes): a split browser pane no longer goes black — its drag thumbnail stops hijacking the live page, and a quick remount no longer closes the page it just adopted
+- an agent's earlier per-channel memory history is imported into its memory record at its first reconcile
+- refactor(panes): one pane-tab registry — every view type's label, icon, aliases, keep-alive and tab pill come from its manifest
+- fix(editor): keep the file-tree toggle off the pane's left edge
+- refactor(panes): pane tabs can be native — create(ctx) with a host context; Help is the first
+- refactor(panes): one visibility signal per pane tab — browser pages and agent rendering follow it
+- feat(agent): right-click Paste in the agent Shell drawer (up to 1 MB, chunked), and a trimmed drawer menu — Split / Replace With / agent items dropped via a new context-menu region mechanism
+- fix(panes): switching tabs in a focused pane focuses the new tab, whatever tab the pane started with; agent auto-timeout and auto-retry pause on hidden window tabs too
+- fix(jekt): SendMessage says a message is queued when the target is mid-turn, instead of claiming it was injected
+- fix(panes): a pane's chrome follows its active tab — a terminal-first pane no longer gives other tabs the terminal's connection button, background and new-tab directory
+- refactor(panes): pane header and frame behavior comes from each view type's declared capabilities, not its name
+- feat(panes): install your own pane tab widgets — a widgets.json next to settings.json, with local ES-module widgets that run on the app's own Solid
+- refactor(panes): Sysinfo is a native pane tab — it reads and writes its block only through the host context
+- refactor(panes): Swarm, Drone, Warden, Armory and Media are native pane tabs too
+- Armory memory previews use the Armory's menu text size (12px) instead of 14px
+- feat(menu): the JS context menu now draws sublabels — bind-to-agent's binding overview and disabled reasons become visible
+- feat(swarm): right-click Copy menus on Swarm sub-rows and Drone nodes
+- fix(agent): Ctrl+Shift+V in the Shell drawer pastes instead of starting voice dictation, and Ctrl+Shift+C copies the terminal selection
+- feat(agents): /quit (and /exit) in an agent's composer ends it gracefully and closes its own tab — work claims released, its shells stopped, conversation kept
+- docs(specs): refresh the drawer-paste spec against what shipped since (#3772, #3773, #3774)
+- docs(specs): land the external-app-driving (Blender) spec, re-verified against main
+
 ## 0.57.4 — 2026-09-25
 
 - feat(history): SearchHistory searches every session in the agent's own record, including sessions whose transcript is gone

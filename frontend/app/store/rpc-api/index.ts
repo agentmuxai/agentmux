@@ -19,6 +19,7 @@ import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
 import { IdentityApi } from "./identity";
+import { LayoutApi } from "./layout";
 import { McpApi } from "./mcp";
 import { NativeMemoryApi } from "./native-memory";
 import { MiscApi } from "./misc";
@@ -297,6 +298,7 @@ export const RpcApi = {
     ...FleetApi,
     ...ReactiveApi,
     ...BookmarksApi,
+    ...LayoutApi,
     ...BrowserStartPageApi,
     ...VoiceApi,
     ...NotifyApi,

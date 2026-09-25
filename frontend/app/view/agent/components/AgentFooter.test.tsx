@@ -20,6 +20,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
 import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
+import { requestComposerFocus } from "../composer-focus";
+import { focusManager } from "@/app/store/focusManager";
 
 afterEach(() => {
     cleanup();
@@ -357,8 +359,9 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
 
 // Minimal AgentViewModel double — only the fields AgentFooter actually reads:
 // blockId (voice-target wiring), blockAtom (ghost-text suggestion meta), and
-// voiceTargetRef (onMount registers a PaneVoiceHandle onto it unconditionally
-// whenever a viewModel is present). suggestion is fixed for the lifetime of
+// voiceTargetRef / focusTargetRef (onMount registers a PaneVoiceHandle and
+// the textarea onto them unconditionally whenever a viewModel is present).
+// suggestion is fixed for the lifetime of
 // the mock, which is deliberate: these tests exist to prove editing the
 // composer never triggers a write that would clear it, not to simulate the
 // real reactive meta atom. `gen` mirrors term:next_prompt_suggestion_gen —
@@ -643,5 +646,68 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
         const { container } = render(() => <AgentWorkingRow loading={false} />);
 
         expect(container.querySelector(".agent-working-row")).toBeNull();
+    });
+});
+
+// SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3 — right
+// after a launch (one-shot request) the composer takes focus itself, with
+// retries; every other mount defers to focusManager.claimFocusOnMount
+// (SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md §3a).
+describe("AgentFooter keyboard focus", () => {
+    function makeFocusViewModel(blockId: string): AgentViewModel {
+        return {
+            blockId,
+            blockAtom: () => ({ meta: {} }) as any,
+            voiceTargetRef: { current: null },
+            focusTargetRef: { current: null },
+            giveFocus: () => false,
+        } as unknown as AgentViewModel;
+    }
+
+    function spyClaim() {
+        return vi.spyOn(focusManager, "claimFocusOnMount").mockImplementation(() => {});
+    }
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("takes focus on mount when the launch path requested it, without the generic claim", () => {
+        const claim = spyClaim();
+        const vm = makeFocusViewModel("focus-block-launch");
+        requestComposerFocus(vm.blockId);
+        render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(document.activeElement).toBe(getComposer());
+        expect(claim).not.toHaveBeenCalled();
+    });
+
+    it("defers an ordinary mount (tab switch back, layout restore) to claimFocusOnMount", () => {
+        const claim = spyClaim();
+        const vm = makeFocusViewModel("focus-block-plain");
+        render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(claim.mock.calls[0][0]).toBe(vm.blockId);
+        expect(document.activeElement).not.toBe(getComposer());
+    });
+
+    it("honors the request only once — a later remount of the same block goes through the generic claim", () => {
+        const claim = spyClaim();
+        const vm = makeFocusViewModel("focus-block-remount");
+        requestComposerFocus(vm.blockId);
+        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        unmount();
+        (document.activeElement as HTMLElement | null)?.blur();
+        render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(document.activeElement).not.toBe(getComposer());
+    });
+
+    it("registers the textarea as giveFocus()'s target and clears it on unmount", () => {
+        spyClaim();
+        const vm = makeFocusViewModel("focus-block-handle");
+        const { unmount } = render(() => <AgentFooter agentName="Test" viewModel={vm} />);
+        expect(vm.focusTargetRef.current).toBe(getComposer());
+        unmount();
+        expect(vm.focusTargetRef.current).toBeNull();
     });
 });

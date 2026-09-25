@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Block } from "@/app/block/block";
+import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { PaneLeafChrome } from "@/app/tab/pane-leaf-chrome";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { ModalLayer } from "@/element/ModalLayer";
@@ -15,7 +15,14 @@ import * as services from "@/store/services";
 import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { busyMembers, describeBusyMember, type BusyMember, type PaneCloseProbe } from "@/app/tab/pane-close-guard";
+import {
+    busyMembers,
+    closesWithShutdownLog,
+    describeBusyMember,
+    type BusyMember,
+    type PaneCloseProbe,
+} from "@/app/tab/pane-close-guard";
+import { closeWithShutdownLog } from "@/app/view/agent/shutdown/close-with-log";
 import { pushFlashError } from "@/app/store/flash-notifications";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -45,6 +52,13 @@ const paneCloseProbe: PaneCloseProbe = {
         return (meta?.["agentName"] as string) || (meta?.["agentId"] as string) || "An agent";
     },
 };
+
+/** Through the view aliases (legacy "forge" is an agent pane too), as
+ *  block.tsx requires — not a raw `meta.view === "agent"` check. */
+function isAgentBlock(blockId: string): boolean {
+    const view = MOS.getObjectValue<MuxObj>(MOS.makeORef("block", blockId))?.meta?.["view"];
+    return resolveEffectiveViewType(typeof view === "string" ? view : "") === "agent";
+}
 
 function TabContent(props: { tabId: string }): JSX.Element {
     const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
@@ -118,12 +132,23 @@ function TabContent(props: { tabId: string }): JSX.Element {
         }
 
         // One confirmation for the whole pane when an agent in it is
-        // mid-turn or has tracked processes running (spec §4.6).
+        // mid-turn or has tracked processes running (spec §4.6). Then an agent
+        // pane is closed IN PLACE (§5.5): returning false stops the layout
+        // from removing it now; srv removes it once its agents are down.
         async function beforeNodeDelete(data: TabLayoutData): Promise<boolean> {
             const blockIds = effectiveStack(data).filter(Boolean);
             const busy = await busyMembers(blockIds, paneCloseProbe);
-            if (busy.length === 0) return true;
-            return new Promise<boolean>((resolve) => setPendingCloses((q) => [...q, { busy, resolve }]));
+            if (busy.length > 0) {
+                const confirmed = await new Promise<boolean>((resolve) =>
+                    setPendingCloses((q) => [...q, { busy, resolve }])
+                );
+                if (!confirmed) return false;
+            }
+            if (closesWithShutdownLog(blockIds, isAgentBlock)) {
+                void closeWithShutdownLog(props.tabId, blockIds, isAgentBlock);
+                return false;
+            }
+            return true;
         }
 
         return {
@@ -184,7 +209,7 @@ function TabContent(props: { tabId: string }): JSX.Element {
                         open={true}
                         title="Close this pane?"
                         description="Closing stops these agents. A turn in progress is interrupted, and processes they started are stopped."
-                        confirmLabel="Close"
+                        confirmLabel="Shut down"
                         destructive
                         onConfirm={() => answerPendingClose(true)}
                         onCancel={() => answerPendingClose(false)}
