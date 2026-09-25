@@ -62,8 +62,9 @@ way, because nothing states it:
    took longer than it should have only because nothing documents that this
    is the move.
 
-Separately, `docs/RETRO_cross_agent_conversation_lookup_2026_09_20.md` (this
-same agent, four days earlier) hit the mirror-image problem for *another*
+Separately, `docs/retro/retro-cross-agent-conversation-lookup-2026-09-20.md`
+(this same agent, four days earlier — not previously in this repo; added by
+this PR alongside this spec) hit the mirror-image problem for *another*
 agent's identity: `GetAgentTranscript` reads a stale live buffer,
 `SearchHistory` is deliberately self-scoped, and the only working method was
 reading `objects.db`'s `db_agents` table by hand with a hand-rolled SQLite
