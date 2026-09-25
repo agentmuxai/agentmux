@@ -31,7 +31,9 @@ import { createEffect, createRoot } from "solid-js";
 import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { SOUNDS, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
-import { ToolTonesPlayer } from "./tool-tones-player";
+import { audibleFlashDelayMs, flashPatternForSyllable } from "./flash-patterns";
+import { paramsForTool } from "./tool-tones";
+import { TOOL_TONE_COALESCE_MS, ToolTonesPlayer } from "./tool-tones-player";
 import { WaitingTonePlayer } from "./waiting-tone-player";
 import {
     DEFAULT_MASTER_VOLUME,
@@ -50,6 +52,11 @@ const waitingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 // The player stays in waitingTones so it can be restarted when focus leaves.
 const suspendedByFocus = new Set<string>();
 const lastFiredAt = new Map<SoundId, number>();
+// `${blockId}\0${tool}` → when that pane last flashed for that tool.
+const lastToolFlashAt = new Map<string, number>();
+// Stale keys are only swept once the map grows past this, so the common
+// case does no iteration at all.
+const TOOL_FLASH_COALESCE_MAX_KEYS = 256;
 
 const WAITING_AUTO_STOP_MS = 5 * 60 * 1000;
 
@@ -326,19 +333,49 @@ function playToolToneIfAllowed(blockId: string, tool: string): void {
         }
     }
     // "window" mode (v1.5) falls through to "all" for now; see spec §8.5.
-    // The visual twin fires here — after the policy gates, before the
-    // AudioContext check — so it works before priming and at volume 0.
-    // SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2.
-    if (getSettingsKeyAtom("notify:tooltones:flash")() !== false) {
-        emitActivityFlash({ blockId });
-    }
     const ctx = player.getAudioContext();
-    if (!ctx || !toolTones.isAttached()) return; // not primed yet
-    try {
-        toolTones.play(ctx, tool);
-    } catch (e) {
-        console.warn(`[sound] tool-tone play threw for ${tool}`, e);
+    let startAt: number | null = null;
+    if (ctx && toolTones.isAttached()) {
+        try {
+            startAt = toolTones.play(ctx, tool);
+        } catch (e) {
+            console.warn(`[sound] tool-tone play threw for ${tool}`, e);
+        }
     }
+    // The visual twin fires after the policy gates whether or not audio
+    // played, so it works before priming and at volume 0
+    // (SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2). When the tone did
+    // play, the flash waits for it to become audible
+    // (SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md §3.6).
+    if (getSettingsKeyAtom("notify:tooltones:flash")() === false) return;
+    const now = nowMs();
+    if (!claimToolFlash(blockId, tool, now)) return;
+    const delayMs = ctx && typeof startAt === "number" ? audibleFlashDelayMs(ctx, startAt, now) : 0;
+    emitActivityFlash({ blockId, pattern: flashPatternForSyllable(paramsForTool(tool)), delayMs });
+}
+
+/**
+ * Mirror the tone's coalesce for the flash, per pane: a second fire of the
+ * same tool from the same pane within the tone's window is one strike, not
+ * two. Keyed by pane rather than by tool alone (as the audio is) because
+ * every pane has its own targets: two panes running Read at once make one
+ * audible syllable, and both of them made it.
+ */
+function claimToolFlash(blockId: string, tool: string, now: number): boolean {
+    const key = `${blockId}\u0000${tool}`;
+    const last = lastToolFlashAt.get(key);
+    if (last !== undefined && now - last < TOOL_TONE_COALESCE_MS) return false;
+    lastToolFlashAt.set(key, now);
+    if (lastToolFlashAt.size > TOOL_FLASH_COALESCE_MAX_KEYS) {
+        for (const [k, at] of lastToolFlashAt) {
+            if (now - at >= TOOL_TONE_COALESCE_MS) lastToolFlashAt.delete(k);
+        }
+    }
+    return true;
+}
+
+function nowMs(): number {
+    return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
 }
 
 function shouldPlay(ev: SoundEvent, windowFocused: () => boolean): boolean {
@@ -371,6 +408,7 @@ export function __resetSoundService(): void {
     replayMode = false;
     windowFocusedSignal = null;
     lastFiredAt.clear();
+    lastToolFlashAt.clear();
     toolTones.__resetCoalesce();
     for (const t of waitingTimeouts.values()) clearTimeout(t);
     waitingTimeouts.clear();
