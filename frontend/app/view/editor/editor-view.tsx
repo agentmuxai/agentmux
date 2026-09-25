@@ -75,7 +75,7 @@ async function loadLanguage(lang: string): Promise<Extension | null> {
 
 // ── Editor View Component ───────────────────────────────────────────────────
 
-export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>): JSX.Element {
+export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     // Reactive ref: the markdown preview seeds `liveDoc` from the tab-change
     // effect, which guards on the container being mounted. On first open the

@@ -5,7 +5,7 @@
 // Phase 1 uses an iframe (works for most sites). Phase 2 will add
 // native CefBrowserView for sites that block iframes.
 
-import { BlockNodeModel } from "@/app/block/blocktypes";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
@@ -23,9 +23,6 @@ import {
 } from "@/app/store/browser-pane-state-store";
 import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 
 /**
@@ -82,24 +79,18 @@ function installEventSinkOnce(): void {
  */
 const DEFAULT_BROWSER_URL = "https://agentmux.ai";
 
-export class BrowserViewModel implements ViewModel {
+/** The browser's state behind its native pane tab (`browserPaneTab`, browser.tsx). */
+export class BrowserViewModel {
     viewType = "browser";
     blockId: string;
-    nodeModel: BlockNodeModel;
 
-    viewIcon: Accessor<string> = () => "globe";
     viewName: Accessor<string>;
     viewNameIsPlaceholder: Accessor<boolean>;
     viewFaviconUrl: Accessor<string>;
     /** Disposes the createRoot that owns `viewName` and `viewFaviconUrl`.
      *  Called from `dispose()` to release the memos cleanly. */
     private _memoRootDispose: (() => void) | null = null;
-    viewText: Accessor<string | HeaderElem[]> = () => [];
-    noPadding: Accessor<boolean> = () => true;
 
-    get viewComponent(): ViewComponent {
-        return null; // overridden by barrel via Object.defineProperty
-    }
 
     private _url = createSignal<string>("");
     urlAtom: Accessor<string> = this._url[0];
@@ -159,7 +150,9 @@ export class BrowserViewModel implements ViewModel {
     /** Unsubscribe from `browser-pane-favicon-urls` IPC events. */
     private _faviconUnsub: (() => void) | null = null;
 
-    blockAtom: Accessor<Block | undefined>;
+    /** The block's meta — the host context's, reactive. */
+    meta: Accessor<MetaType | undefined>;
+    private ctx: PaneTabHostContext;
     showControlsAtom: Accessor<boolean>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
@@ -264,14 +257,18 @@ export class BrowserViewModel implements ViewModel {
     private get _diagTag(): string { return `[browser-pane:diag][${this.blockId.slice(0, 7)} vm=${this.__diagVmId}]`; }
     private diag(msg: string): void { console.log(`${this._diagTag} ${msg}`); }
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
+    // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
+    // (browser.tsx); its own block's meta comes from, and goes to, the host
+    // context.
+    constructor(ctx: PaneTabHostContext) {
+        const blockId = ctx.blockId;
+        this.ctx = ctx;
         this.blockId = blockId;
-        this.nodeModel = nodeModel;
         this.diag(`viewmodel-constructed`);
 
-        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
+        this.meta = ctx.meta;
 
-        const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
+        const ctorMetaUrl = (this.meta()?.["url"] as string | undefined) ?? "";
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
 
         // Register the pane in the slice's slot store SYNCHRONOUSLY before
@@ -362,7 +359,7 @@ export class BrowserViewModel implements ViewModel {
                 this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);
                 return v;
             });
-            this.showControlsAtom = createMemo(() => (this.blockAtom()?.meta?.["browser:show_controls"] as boolean | undefined) ?? true);
+            this.showControlsAtom = createMemo(() => (this.meta()?.["browser:show_controls"] as boolean | undefined) ?? true);
             return dispose;
         });
 
@@ -493,10 +490,7 @@ export class BrowserViewModel implements ViewModel {
             // it entirely.
             // Persist the real URL to block meta so pane restore lands
             // on the last page, not whatever was passed at create time.
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: makeORef("block", this.blockId),
-                meta: { url: payload.url },
-            }).catch(() => {});
+            this.ctx.setMeta({ url: payload.url }).catch(() => {});
         }).then((unsub) => {
             this.diag(`sub-registered name=browser-pane-nav-state`);
             if (this.closed) unsub();
@@ -549,7 +543,7 @@ export class BrowserViewModel implements ViewModel {
         // derived from fullConfigAtom, which app-init.ts already awaits and
         // populates before the app renders at all — see
         // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.2/§3.3.
-        const meta = this.blockAtom()?.meta;
+        const meta = this.meta();
         const initialUrl =
             ((meta?.["url"] as string | undefined) ?? "").trim()
             || browserStartPageAtom()
@@ -590,10 +584,7 @@ export class BrowserViewModel implements ViewModel {
         // Persist the requested URL to block meta immediately so a quick
         // pane restore before load_end still has something. The nav-state
         // event will overwrite this with the post-redirect final URL.
-        RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: makeORef("block", this.blockId),
-            meta: { url: normalized },
-        }).catch(() => {});
+        this.ctx.setMeta({ url: normalized }).catch(() => {});
     }
 
     goBack(): void {
