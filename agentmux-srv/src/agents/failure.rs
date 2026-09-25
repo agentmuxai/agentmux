@@ -49,6 +49,12 @@ pub enum FailureClass {
     /// (`SpawnGateError::AgentDeleted`, #3577). No process ran, and a retry
     /// is refused identically — the pane is done.
     AgentDeleted,
+    /// This agent is running in another AgentMux instance on this host, or
+    /// was just taken over by one
+    /// (`docs/specs/SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`). No
+    /// process ran here; a Retry is refused identically while the other
+    /// instance holds it — the recovery is Take over.
+    LiveElsewhere,
 }
 
 /// A classified agent failure: the class, a user-facing title + detail,
@@ -213,6 +219,22 @@ pub fn classify(
                 "{provider_phrase} is bound to this agent — the spawn was refused before it could run. \
                  Sign in to link one."
             ),
+            false,
+            exit_code,
+            signal,
+            &tail,
+        );
+    }
+    // A single-live-instance refusal (backend::agent_admission — our own
+    // wording, recognised by the same markers that module uses). Checked
+    // before the generic classes: its text is not provider output, and a
+    // Retry cannot succeed while the other instance holds the agent.
+    if crate::backend::agent_admission::is_admission_refusal(&combined) {
+        let taken_over = hay.contains("was taken over by another agentmux instance");
+        return build(
+            FailureClass::LiveElsewhere,
+            if taken_over { "Taken over by another AgentMux instance" } else { "Running in another AgentMux instance" },
+            frame_or_stderr_line(&combined),
             false,
             exit_code,
             signal,
@@ -723,6 +745,25 @@ mod tests {
         assert!(!f.retryable);
     }
 
+    /// SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 2: a refusal because
+    /// the agent runs elsewhere gets its own class — the row offers Take
+    /// over, never a Retry that is refused identically.
+    #[test]
+    fn a_single_live_instance_refusal_is_its_own_class() {
+        let msg = crate::backend::agent_admission::denied_message("Agent3", None);
+        let f = classify(None, None, &msg, None);
+        assert_eq!(f.code, FailureClass::LiveElsewhere);
+        assert_eq!(f.title, "Running in another AgentMux instance");
+        assert_eq!(f.detail, msg, "the detail is the refusal itself, naming the holder");
+        assert!(!f.retryable);
+        // Wrapped the way run_agent_turn persists it.
+        let framed = format!("[AgentMux] {msg}");
+        assert_eq!(classify(None, None, &framed, None).code, FailureClass::LiveElsewhere);
+        let taken = "Agent3 was taken over by another AgentMux instance on this host (channel x).";
+        assert_eq!(classify(None, None, taken, None).title, "Taken over by another AgentMux instance");
+        assert_eq!(serde_json::to_value(FailureClass::LiveElsewhere).unwrap(), "live_elsewhere");
+    }
+
     #[test]
     fn spawn_gate_missing_credentials_is_auth_not_unknown() {
         // Exact frame shape agent_handlers/input.rs emits for a
@@ -934,4 +975,14 @@ mod tests {
         assert_eq!(v["retryable"], json!(true));
         assert!(v.get("stderrTail").is_some(), "camelCase stderrTail expected: {v}");
     }
+}
+
+/// The one line of `text` that carries a single-live-instance refusal, with
+/// any `[AgentMux] ` prefix removed — the row's detail. Falls back to the
+/// whole trimmed text.
+fn frame_or_stderr_line(text: &str) -> &str {
+    text.lines()
+        .find(|l| crate::backend::agent_admission::is_admission_refusal(l))
+        .map(|l| l.trim().trim_start_matches("[AgentMux]").trim())
+        .unwrap_or_else(|| text.trim())
 }

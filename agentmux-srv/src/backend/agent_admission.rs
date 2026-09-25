@@ -169,6 +169,10 @@ pub fn acquire(
     session_id_hint: Option<&str>,
     on_lost: impl Fn(String) + Send + Sync + 'static,
 ) -> Result<HeldAgentLease, String> {
+    if let Some(refusal) = handover_hold_refusal(uid, agent) {
+        tracing::info!(agent, uid, block_id, "agent_admission.denied: inside a handover hold");
+        return Err(refusal);
+    }
     let info = claimant_info();
     let mut result = store.claim_as(uid, boot_id, block_id, session_id_hint, &info);
     if matches!(result, Err(LeaseError::Io(_))) {
@@ -276,11 +280,14 @@ fn spawn_renewal(
 
 /// A live instance on this host that is running the same agent UID but
 /// took no lease (it predates Phase 1) — found by asking it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LegacyHolder {
     pub channel: String,
     pub local_url: String,
     pub block_id: String,
+    /// That srv's full auth key, from its shared-registry entry — what a
+    /// takeover request authenticates with. Never logged.
+    pub auth_key: String,
 }
 
 /// The early, read-only admission check (see module doc). `Err` is the
@@ -293,6 +300,9 @@ pub async fn check_before_spawn(
 ) -> Result<(), String> {
     if uid.is_empty() {
         return Ok(());
+    }
+    if let Some(refusal) = handover_hold_refusal(uid, agent) {
+        return Err(refusal);
     }
     if let Some(store) = store {
         let (u, b) = (uid.to_string(), own_boot_id.to_string());
@@ -370,6 +380,7 @@ pub async fn probe_other_instances(uid: &str) -> Option<LegacyHolder> {
                     channel: entry.channel,
                     local_url: entry.local_url,
                     block_id,
+                    auth_key: entry.auth_key,
                 })
             }
             Ok(None) => {}
@@ -407,6 +418,183 @@ fn find_uid_block(regs: &[serde_json::Value], uid: &str) -> Option<String> {
             r.get("block_id").and_then(|v| v.as_str()).unwrap_or_default().to_string()
         })
     })
+}
+
+// ── Phase 2: takeover (spec §4.6) ────────────────────────────────────────
+
+/// Wording every single-live-instance refusal contains (lower-cased), so
+/// the failure classifier and callers can recognise one without a type.
+///
+/// Only refusals that mean *another instance holds the agent*. `acquire`'s
+/// lease-file I/O failure ("… Refusing to start it twice.") is deliberately
+/// not one: it is a local, possibly transient error, and classifying it as
+/// "running in another instance" would offer Take over instead of Retry
+/// (ReAgent P1 on #3742).
+pub const REFUSAL_MARKERS: [&str; 3] = [
+    "is already running in another agentmux instance",
+    "was taken over by another agentmux instance",
+    "lost its single-instance lease",
+];
+
+/// Is `message` a single-live-instance refusal (any of this module's
+/// user-facing refusal texts)?
+pub fn is_admission_refusal(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    REFUSAL_MARKERS.iter().any(|k| m.contains(k))
+}
+
+/// How long, after this srv hands an agent over to another instance, it
+/// refuses to claim that agent again on its own. Covers the gap between the
+/// holder's process exiting and the requester claiming, in which a jekt
+/// delivered here would otherwise respawn the agent and win it straight
+/// back. A takeover the user starts from this srv clears it.
+pub const HANDOVER_HOLD: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// One entry per agent this srv handed over: until when, and to whom (for
+/// the refusal text). A single map, so an expired hold goes away whole
+/// (ReAgent P2 on #3742).
+static HANDOVER_HOLDS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, String)>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Record that this srv just handed `uid` over (see [`HANDOVER_HOLD`]).
+pub fn hold_after_handover(uid: &str, to: &str) {
+    HANDOVER_HOLDS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(uid.to_string(), (std::time::Instant::now() + HANDOVER_HOLD, to.to_string()));
+}
+
+/// Drop any handover hold on `uid` — the user is taking it back.
+pub fn clear_handover_hold(uid: &str) {
+    HANDOVER_HOLDS.lock().unwrap_or_else(|e| e.into_inner()).remove(uid);
+}
+
+/// `Some(refusal)` while `uid` is inside a handover hold on this srv. An
+/// expired hold is removed here.
+fn handover_hold_refusal(uid: &str, agent: &str) -> Option<String> {
+    let mut holds = HANDOVER_HOLDS.lock().unwrap_or_else(|e| e.into_inner());
+    let (until, to) = holds.get(uid)?.clone();
+    if until <= std::time::Instant::now() {
+        holds.remove(uid);
+        return None;
+    }
+    let agent = if agent.is_empty() { "This agent" } else { agent };
+    Some(format!(
+        "{agent} was taken over by another AgentMux instance on this host{}. \
+         Use Take over to bring it back here.",
+        if to.is_empty() { String::new() } else { format!(" ({to})") }
+    ))
+}
+
+/// Where the instance currently running an agent can be reached.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HolderEndpoint {
+    pub channel: String,
+    pub local_url: String,
+    /// Never logged.
+    pub auth_key: String,
+}
+
+impl std::fmt::Debug for HolderEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HolderEndpoint")
+            .field("channel", &self.channel)
+            .field("local_url", &self.local_url)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Find the other instance on this host that runs `uid`: the lease holder
+/// (its channel's live srv, from the shared registry) or — for an instance
+/// that takes no lease — the compat probe's hit. `None` when nobody else
+/// runs it, or the holder's srv can't be found.
+pub async fn locate_holder(store: Option<Arc<LeaseStore>>, uid: &str, own_boot_id: &str) -> Option<HolderEndpoint> {
+    if let Some(store) = store {
+        let (u, b) = (uid.to_string(), own_boot_id.to_string());
+        let holder = tokio::task::spawn_blocking(move || store.live_holder_other_than(&u, &b))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten();
+        if let Some(holder) = holder.filter(|h| !h.channel.is_empty()) {
+            let shared = crate::registry::resolve_shared_reactive_dir()?;
+            let channel = holder.channel.clone();
+            let entries = tokio::task::spawn_blocking(move || {
+                crate::backend::reactive::registry::list_all_shared(&shared)
+            })
+            .await
+            .ok()?;
+            if let Some(e) = entries.into_iter().find(|e| {
+                e.channel == channel
+                    && !e.local_url.is_empty()
+                    && crate::backend::reactive::registry::pid_alive(e.pid)
+            }) {
+                return Some(HolderEndpoint { channel: e.channel, local_url: e.local_url, auth_key: e.auth_key });
+            }
+        }
+    }
+    probe_other_instances(uid).await.map(|l| HolderEndpoint {
+        channel: l.channel,
+        local_url: l.local_url,
+        auth_key: l.auth_key,
+    })
+}
+
+/// Ask the holder's srv to stop running `uid` so this instance can take it
+/// (`POST /agentmux/agent/release`). `Err` is user-facing.
+pub async fn request_release(holder: &HolderEndpoint, uid: &str, agent: &str) -> Result<(), String> {
+    let me = claimant_info();
+    let mut req = PROBE_CLIENT
+        .post(format!("{}/agentmux/agent/release", holder.local_url))
+        .json(&serde_json::json!({
+            "uid": uid,
+            "requested_by_channel": me.channel,
+            "requested_by_version": me.version,
+        }));
+    if !holder.auth_key.is_empty() {
+        req = req.header("X-AuthKey", &holder.auth_key);
+    }
+    let agent = if agent.is_empty() { "this agent" } else { agent };
+    let resp = req.send().await.map_err(|e| {
+        format!("Could not reach the AgentMux instance running {agent} (channel {}): {e}", holder.channel)
+    })?;
+    match resp.status() {
+        s if s.is_success() => Ok(()),
+        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::METHOD_NOT_ALLOWED => Err(format!(
+            "The AgentMux instance running {agent} (channel {}) is too old to hand it over. \
+             Close {agent} there, then try again.",
+            holder.channel
+        )),
+        s => {
+            let body = resp.text().await.unwrap_or_default();
+            Err(format!("The instance running {agent} refused to hand it over ({s}): {body}"))
+        }
+    }
+}
+
+/// Wait until no other instance holds `uid` (lease and compat probe both
+/// clear), polling. `Err` after `timeout`.
+pub async fn wait_until_free(
+    store: Option<Arc<LeaseStore>>,
+    uid: &str,
+    own_boot_id: &str,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if locate_holder(store.clone(), uid, own_boot_id).await.is_none()
+            && check_before_spawn(store.clone(), uid, "", own_boot_id).await.is_ok()
+        {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "The other instance did not let go within {}s. Try again in a moment.",
+                timeout.as_secs()
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
 }
 
 #[cfg(test)]
@@ -515,6 +703,66 @@ mod tests {
         ];
         assert_eq!(find_uid_block(&regs, "uid-1").as_deref(), Some("b-mine"));
         assert_eq!(find_uid_block(&regs[..2], "uid-1"), None, "a same-named agent with another or no UID is not a holder");
+    }
+
+    #[test]
+    fn every_refusal_text_is_recognised_as_one() {
+        let holder = LeaseHolder {
+            owner_boot_id: "b".into(), block_id: "x".into(), pid: 1, channel: "c".into(), version: "v".into(),
+            hostname: String::new(), epoch: 1, acquired_at_ms: 0, renewed_at_ms: 0,
+        };
+        for m in [
+            denied_message("Agent3", Some(&holder)),
+            denied_message("", None),
+            lost_message("Agent3", Some(&holder)),
+            lost_message("Agent3", None),
+        ] {
+            assert!(is_admission_refusal(&m), "not recognised: {m}");
+        }
+        assert!(!is_admission_refusal("failed to spawn persistent process: not found"));
+    }
+
+    /// ReAgent P1 on #3742: a local lease-file I/O error is not "running in
+    /// another instance" — it must keep a Retry, not get Take over.
+    #[test]
+    fn a_lease_file_io_error_is_not_classified_as_live_elsewhere() {
+        let io = "Could not confirm that Agent3 isn't already running elsewhere (lease file error: access denied). \
+                  Refusing to start it twice.";
+        assert!(!is_admission_refusal(io));
+        let f = crate::agents::failure::classify(None, None, io, None);
+        assert_ne!(f.code, crate::agents::failure::FailureClass::LiveElsewhere);
+    }
+
+    /// ReAgent P2 on #3742: an expired hold is removed whole.
+    #[test]
+    fn an_expired_handover_hold_is_removed() {
+        let uid = format!("uid-{}", uuid::Uuid::new_v4());
+        HANDOVER_HOLDS
+            .lock()
+            .unwrap()
+            .insert(uid.clone(), (std::time::Instant::now() - std::time::Duration::from_secs(1), "to".into()));
+        assert!(handover_hold_refusal(&uid, "Agent3").is_none());
+        assert!(!HANDOVER_HOLDS.lock().unwrap().contains_key(&uid));
+    }
+
+    #[test]
+    fn a_handover_hold_refuses_this_srv_until_cleared() {
+        let (_tmp, s) = store(60_000);
+        let uid = format!("uid-{}", uuid::Uuid::new_v4());
+        hold_after_handover(&uid, "channel other, v9");
+        let err = acquire(&s, &uid, "Agent3", &boot("boot-a"), "block-a", None, |_| {})
+            .err()
+            .expect("a handed-over agent is not re-claimed on its own");
+        assert!(err.contains("was taken over") && err.contains("channel other"), "{err}");
+        assert!(is_admission_refusal(&err));
+        clear_handover_hold(&uid);
+        assert!(acquire(&s, &uid, "Agent3", &boot("boot-a"), "block-a", None, |_| {}).is_ok());
+    }
+
+    #[test]
+    fn holder_endpoint_debug_never_prints_the_auth_key() {
+        let ep = HolderEndpoint { channel: "c".into(), local_url: "http://x".into(), auth_key: "sekrit".into() };
+        assert!(!format!("{ep:?}").contains("sekrit"));
     }
 
     #[test]

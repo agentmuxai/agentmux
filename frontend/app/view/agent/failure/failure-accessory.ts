@@ -45,6 +45,14 @@ export interface FailureActions {
     toggleDetails: () => void;
     /** Clear the failure (dismiss the row). */
     dismiss: () => void;
+    /**
+     * Take this agent over from the other AgentMux instance running it
+     * (`live_elsewhere`). Two-step: the first click arms, the second — while
+     * {@link FailureViewState.takeoverArmed} — confirms. The caller owns the
+     * arming; this row only renders it.
+     * Spec: SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
+     */
+    takeOver?: () => void;
 }
 
 /** Transient view state for the failure row (no backing store). */
@@ -77,6 +85,10 @@ export interface FailureViewState {
     autoRetryIn: number | null;
     /** True while a retry is in flight (disables the button). */
     retrying: boolean;
+    /** `live_elsewhere`: the Take over button was clicked once and awaits the confirming click. */
+    takeoverArmed?: boolean;
+    /** `live_elsewhere`: the takeover request is in flight (disables the button). */
+    takingOver?: boolean;
 }
 
 /** Per-class sigil. */
@@ -93,6 +105,7 @@ const ICON: Record<AgentFailure["code"], string> = {
     no_output: "❔",
     unknown_non_zero: "⚠",
     agent_deleted: "🗑",
+    live_elsewhere: "⇄",
 };
 
 /** Classes whose retry is safe to fire **automatically** (transient throttling). */
@@ -222,6 +235,25 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         case "agent_deleted":
             // The pane's agent is gone (#3577): no Retry — every respawn is
             // refused the same way. Details + Dismiss only.
+            break;
+        case "live_elsewhere":
+            // Another AgentMux instance on this host runs this agent. Retry is
+            // refused identically while it does; the recovery is to take the
+            // agent over — deliberately two clicks, since it stops the agent
+            // over there (spec §4.6, D7).
+            if (on.takeOver) {
+                actions.push({
+                    glyph: "⇄",
+                    label: view.takingOver ? "Taking over…" : view.takeoverArmed ? "Confirm take over" : "Take over",
+                    title: view.takeoverArmed
+                        ? "Click again to stop this agent in the other AgentMux instance and run it here"
+                        : "Stop this agent in the other AgentMux instance and run it here",
+                    primary: true,
+                    danger: !!view.takeoverArmed,
+                    disabled: !!view.takingOver,
+                    onClick: on.takeOver,
+                });
+            }
             break;
         default: // killed, no_output, unknown_non_zero
             actions.push({ ...retry, label: "Retry" });

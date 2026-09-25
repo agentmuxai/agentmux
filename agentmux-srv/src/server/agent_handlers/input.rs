@@ -785,14 +785,16 @@ pub async fn run_agent_turn(
         .await
         .map_err(TurnGate::Identity),
     };
-    let mut env_vars = match env_result {
-        Ok(env) => env,
-        Err(gate) => {
+    // Show a refusal that happened before any process ran in the pane: the
+    // raw frame in the output log, plus the classified failure the recovery
+    // row reads. Used by the gate below and by a single-live-instance
+    // refusal from the persistent spawn/fence path further down.
+    let surface_refusal = |message: &str| {
             let error_frame = serde_json::json!({
                 "type": "result",
                 "is_error": true,
                 "subtype": "error_during_execution",
-                "error": {"message": format!("[AgentMux] {gate}")}
+                "error": {"message": format!("[AgentMux] {message}")}
             })
             .to_string();
             // Some(&filestore_gate): the frame must be PERSISTED
@@ -826,7 +828,7 @@ pub async fn run_agent_turn(
             // Display text, exactly like health.rs's in-band-error
             // reclassification call.
             let gate_failure =
-                crate::agents::failure::classify(None, None, &gate.to_string(), None);
+                crate::agents::failure::classify(None, None, message, None);
             crate::backend::blockcontroller::core::persist_last_failure(
                 &block_id,
                 Some(&gate_failure),
@@ -840,6 +842,11 @@ pub async fn run_agent_turn(
                 persist: 1,
                 data: serde_json::to_value(&gate_failure).ok(),
             });
+    };
+    let mut env_vars = match env_result {
+        Ok(env) => env,
+        Err(gate) => {
+            surface_refusal(&gate.to_string());
             return Err(match &gate {
                 TurnGate::Admission(refusal) => refusal.clone(),
                 TurnGate::Identity(e) => format!("identity spawn gate: {e}"),
@@ -911,7 +918,15 @@ pub async fn run_agent_turn(
             session_id: persisted_session_id,
             message_id: message_id.clone(),
         };
-        persistent_ctrl.send_message(message, config)?;
+        if let Err(e) = persistent_ctrl.send_message(message, config) {
+            // A single-live-instance refusal from inside the controller (the
+            // spawn-time claim losing to another instance, or the pre-turn
+            // fence) gets the same pane treatment as the early check above.
+            if crate::backend::agent_admission::is_admission_refusal(&e) {
+                surface_refusal(&e);
+            }
+            return Err(e);
+        }
     } else if let Some(subprocess_ctrl) =
         ctrl.as_any()
             .downcast_ref::<blockcontroller::subprocess::SubprocessController>()

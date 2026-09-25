@@ -48,6 +48,9 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 
+/** How long an armed Take over waits for its confirming click. */
+export const TAKEOVER_CONFIRM_MS = 5000;
+
 /**
  * Auto-retry ladder for transient provider failures (429 rate-limited, 529
  * overloaded, network). Exponential, bounded, then manual-only.
@@ -146,6 +149,15 @@ export interface UseAgentFailureOptions {
     bindCandidates?: Accessor<{ id: string; name: string }[]>;
     /** Bind one of `bindCandidates` (or open a picker for 2+) to this agent. */
     onBindAccount?: (e?: MouseEvent) => void;
+    /**
+     * Take this agent over from the other AgentMux instance running it
+     * (`live_elsewhere`). Resolves once the agent is free here (the caller
+     * then re-runs the turn when one was attempted); rejects with a
+     * user-facing reason, which the row then shows. Only called after the
+     * row's confirming second click. Optional — without it the row offers
+     * no Take over. Spec: SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
+     */
+    onTakeOver?: (turnAttempted: boolean) => Promise<void>;
 }
 
 export interface UseAgentFailureResult {
@@ -157,6 +169,11 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     const [expanded, setExpanded] = createSignal(false);
     const [retrying, setRetrying] = createSignal(false);
     const [autoRetryIn, setAutoRetryIn] = createSignal<number | null>(null);
+    // Take over's two-step confirmation (`live_elsewhere` only). View-local,
+    // like `expanded`: nothing else needs to agree on it.
+    const [takeoverArmed, setTakeoverArmed] = createSignal(false);
+    const [takingOver, setTakingOver] = createSignal(false);
+    let disarmTimer: ReturnType<typeof setTimeout> | undefined;
 
     let countdown: ReturnType<typeof setInterval> | undefined;
     let autoRetries = 0;
@@ -176,8 +193,15 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         setAutoRetryIn(null);
     };
 
+    const disarmTakeover = () => {
+        if (disarmTimer) clearTimeout(disarmTimer);
+        disarmTimer = undefined;
+        setTakeoverArmed(false);
+    };
+
     const clear = () => {
         cancelCountdown();
+        disarmTakeover();
         opts.model.dispatchPane({ type: "FailureCleared" });
         setExpanded(false);
         setRetrying(false);
@@ -242,6 +266,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 const f = (event as any)?.data as AgentFailure | undefined;
                 if (!f) return;
                 cancelCountdown();
+                // A new failure never inherits an armed Take over: its row must
+                // start at the first click again (ReAgent P1 on #3742).
+                disarmTakeover();
                 setExpanded(false);
                 setRetrying(false);
                 // Reducer-side: records state.failure AND unconditionally ends
@@ -276,6 +303,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             unsubFailure();
             unsubTurnEnded();
             cancelCountdown();
+            disarmTakeover();
         });
     });
 
@@ -305,9 +333,44 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         if (hadFailure && !hasFailureNow && !selfInitiatedClear) {
             autoRetries = 0;
         }
+        // Whatever cleared the row, an armed Take over belongs to that row.
+        if (!hasFailureNow) disarmTakeover();
         hadFailure = hasFailureNow;
         selfInitiatedClear = false;
     });
+
+    // First click arms, the second (within TAKEOVER_CONFIRM_MS) takes over.
+    const takeOver = (turnAttempted: boolean) => {
+        if (takingOver() || !opts.onTakeOver) return;
+        if (!takeoverArmed()) {
+            setTakeoverArmed(true);
+            disarmTimer = setTimeout(disarmTakeover, TAKEOVER_CONFIRM_MS);
+            return;
+        }
+        disarmTakeover();
+        setTakingOver(true);
+        opts.onTakeOver(turnAttempted).then(
+            () => {
+                setTakingOver(false);
+                endEpisode();
+            },
+            (err: unknown) => {
+                setTakingOver(false);
+                const pf = opts.failure();
+                if (!pf) return;
+                // Keep the row, but say why the takeover failed.
+                opts.model.dispatchPane({
+                    type: "FailureObserved",
+                    failure: {
+                        ...pf.data,
+                        title: "Could not take over",
+                        detail: err instanceof Error ? err.message : String(err),
+                    },
+                    at: Date.now(),
+                });
+            },
+        );
+    };
 
     const row = (): FailureRow | null => {
         const pf = opts.failure();
@@ -323,6 +386,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // the row's accent — see failure-accessory's FailureViewState.
                 turnAttempted: pf.turnAttempted,
                 bindCandidates: opts.bindCandidates?.(),
+                takeoverArmed: takeoverArmed(),
+                takingOver: takingOver(),
             },
             {
                 retry: doRetry,
@@ -338,6 +403,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
                 dismiss: endEpisode,
+                takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,
             },
         );
     };
