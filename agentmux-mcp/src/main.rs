@@ -2623,7 +2623,9 @@ async fn call_tool(
             }
             match target_block_id {
                 Some(b) => Ok(format!("Closed pane {b:?}")),
-                None => Ok("Closed your own pane".to_string()),
+                // srv's only 200 for the no-argument form (§7): a quit already
+                // scheduled or under way.
+                None => quit_self_result(200, &Value::Null),
             }
         }
         "QuitSelf" => {
