@@ -36,7 +36,8 @@ import { Portal } from "solid-js/web";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentFromEnv, getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { partitionHeaderElems } from "./header-elems";
-import { buildPaneContextMenu } from "./pane-actions";
+import { resolveContextMenuRegion } from "./context-menu-region";
+import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
 import {
     headerBgForEffectiveColor,
     hueToActiveBorder,
@@ -1228,18 +1229,24 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         if (!blockData() || props.preview) return;
         e.preventDefault();
         e.stopPropagation();
-        const menu: ContextMenuItem[] = [];
-        const bodyItems = props.viewModel?.getBodyContextMenuItems?.(browserCtx);
-
-        if (bodyItems && bodyItems.length > 0) {
-            menu.push(...bodyItems, { type: "separator" });
-        }
-        menu.push(...buildPaneContextMenu(blockData(), {
-            magnified: isMagnified(),
-            onMagnifyToggle: nodeModel.toggleMagnify,
-            onClose: nodeModel.onClose,
-            inspectAt: { x: e.clientX, y: e.clientY },
-        }, props.viewModel));
+        // A registered region (context-menu-region.ts) under the click — e.g.
+        // the agent shell drawer — can add its own items and drop pane
+        // sections that make no sense there. No region (every other click,
+        // and the synthetic browser path, which has no DOM target): unchanged.
+        const region = resolveContextMenuRegion(e.target, frameEl());
+        const omit = new Set<PaneMenuSection>(region?.omit);
+        const menu = joinMenuGroups([
+            region?.items?.() ?? [],
+            omit.has("viewItems") ? [] : (props.viewModel?.getBodyContextMenuItems?.(browserCtx) ?? []),
+            buildPaneContextMenu(blockData(), {
+                magnified: isMagnified(),
+                onMagnifyToggle: nodeModel.toggleMagnify,
+                onClose: nodeModel.onClose,
+                inspectAt: { x: e.clientX, y: e.clientY },
+                omit,
+            }, props.viewModel),
+        ]);
+        if (menu.length === 0) return;
         ContextMenuModel.showContextMenu(menu, e);
     };
 
