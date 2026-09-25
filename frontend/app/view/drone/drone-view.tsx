@@ -5,7 +5,7 @@ import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX }
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { showCopyContextMenu, showTextInputContextMenu, type CopyMenuEntry } from "@/app/store/contextmenu";
 import { abbreviateText } from "@/util/format-text";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
@@ -469,6 +469,7 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                     "--block-color": meta.color,
                                 }}
                                 onPointerDown={(e) => onNodePointerDown(e, n)}
+                                onContextMenu={(e) => showCopyContextMenu(nodeCopyEntries(n), e)}
                             >
                                 <header class="drone-node-header">
                                     <span class="drone-node-emoji">{meta.emoji}</span>
@@ -586,6 +587,53 @@ function nodeSummary(n: FlowNode): string {
         default:
             return "";
     }
+}
+
+/**
+ * "Copy …" entries for a node's right-click menu. `.drone-node` is
+ * `user-select: none` and the collapsed summary is `truncate`d, so the full
+ * task / URL / expression / template is otherwise uncopyable until the node is
+ * selected and its editor inputs open. The inputs carry their own text menu
+ * (`showTextInputContextMenu` stops propagation), so this only fires on the
+ * header, summary, and padding. The header label is just the kind name
+ * ("Agent", "API"), so nothing there is worth copying.
+ */
+export function nodeCopyEntries(n: FlowNode): CopyMenuEntry[] {
+    const str = (key: string): string => {
+        const v = n.data[key];
+        return typeof v === "string" ? v : "";
+    };
+    const entries: CopyMenuEntry[] = [];
+    switch (n.data.kind) {
+        case "agent":
+            entries.push({ label: "Copy task", value: str("task") });
+            break;
+        case "api":
+            entries.push({ label: "Copy URL", value: str("url") }, { label: "Copy request body", value: str("body") });
+            break;
+        case "condition":
+            entries.push({ label: "Copy expression", value: str("expr") });
+            break;
+        case "response":
+            entries.push({ label: "Copy template", value: str("template") });
+            break;
+        case "variables": {
+            const vars = (n.data["entries"] as Array<{ name: string; value: string }> | undefined) ?? [];
+            entries.push({ label: "Copy variables", value: vars.map((v) => `${v.name}=${v.value}`).join("\n") });
+            break;
+        }
+    }
+    entries.push({ label: "Copy node ID", value: n.id });
+    return entries;
+}
+
+/** "Copy …" entries for a run-panel row: the id is displayed truncated to 8 chars. */
+export function runCopyEntries(r: { id: string; output: string; error?: string | null }): CopyMenuEntry[] {
+    return [
+        { label: "Copy run ID", value: r.id },
+        { label: "Copy error", value: r.error },
+        { label: "Copy output", value: r.output },
+    ];
 }
 
 const truncate = (s: string, max = 40): string => abbreviateText(s, max);
@@ -943,6 +991,7 @@ const RunPanel = (p: { model: DroneViewModel }): JSX.Element => {
                                         "drone-runpanel-row--ok": r.status === "done",
                                         "drone-runpanel-row--err": r.status === "failed",
                                     }}
+                                    onContextMenu={(e) => showCopyContextMenu(runCopyEntries(r), e)}
                                 >
                                     <span class="drone-runpanel-status">{r.status}</span>
                                     <span class="drone-runpanel-id">{r.id.slice(0, 8)}</span>
