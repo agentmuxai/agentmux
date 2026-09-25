@@ -1843,6 +1843,9 @@ async fn call_tool(
                     query_params.push((key, n.to_string()));
                 }
             }
+            if arguments.get("include_inferred").and_then(|v| v.as_bool()) == Some(true) {
+                query_params.push(("include_inferred", "true".to_string()));
+            }
 
             let body = srv_get_json(client, &url, auth_key, &query_params, "history search").await?;
             Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))

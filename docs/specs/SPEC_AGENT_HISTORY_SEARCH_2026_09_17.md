@@ -7,7 +7,9 @@ v0.56.4). Re-verified against `agentmux` @ `90aa773` on 2026-09-18:
 and `HistorySearchHit` in `agentmux-srv/src/backend/history/index.rs`. Phase 2
 (cross-agent search, §5) is deliberately out of scope here and still needs its
 own spec. Revised 2026-09-24: correctness fixes after a confident "no history"
-for sessions that existed (§8), and owner-by-token enforced server-side (§5).
+for sessions that existed (§8), owner-by-token enforced server-side (§5), and
+sessions attributed by the agent's own UID-keyed record, including sessions
+whose transcript is gone (§9).
 **Trigger:** Repo owner, after watching this gap cause three concrete failures
 in one session (§1.1). "do agents have a streamlined way to search their
 history?" — they do not.
@@ -286,7 +288,50 @@ found more ways to answer confidently and wrongly.
 | A transcript record that couldn't be parsed was skipped in silence, so the session counted as fully read (Codex P1) | the parser counts it (`skipped_records`); the session is searched but listed in `sessions_partly_read`, and the answer is incomplete (`unreadable_records`). An unterminated last line is an append in progress, not counted |
 | The MCP parsed the body before the status (a non-JSON error lost its status) and reported every non-timeout transport failure as "error sending request" (#3473) | one helper, `srv_get_json`: status first, srv's own message kept, refused connection / timeout / 401 / 503 told apart |
 
-Still open, and tracked by the history-robustness plan: attribution by the
-agent's UID-keyed record rather than account links + working directory, tool
-arguments beyond the first key, tool results and subagent transcripts, and a
-content index.
+Still open after §8: attribution by the agent's UID-keyed record rather than
+account links + working directory (§9), tool arguments beyond the first key,
+tool results and subagent transcripts, and a content index.
+
+## 9. Whose sessions: the agent's own record (2026-09-24)
+
+**Why.** Account links and working directory were the only way to say which
+sessions are an agent's, and both break: an account switch leaves the old
+account's sessions behind, a shared folder or account pulls in another agent's,
+and a transcript deleted by the provider's cleanup is gone from the search
+entirely. Measured across the 15 agents on one host: the working-directory
+match found 114 sessions, **every one** of which is also in the agent's own
+record; and **75 of the 190** sessions in those records have no provider
+transcript left. The search couldn't see 39% of its agents' history.
+
+**The record.** AgentMux mirrors every agent's provider output into the global
+transcript store: zone `agent:<id>:current`, archived as
+`agent:<id>:archive:<ms>` by "New conversation". For a user agent `<id>` is its
+UID, the same in every channel and version and across account switches.
+Every line the provider writes carries its `session_id`; a typed message
+(echoed by AgentMux, no id) belongs to the session of the next line that has
+one. `backend/history/record.rs` reads the caller's own zones — never another
+id's, never a template's shared zone — incrementally (each zone remembers how
+far it was read; a zone that shrank is read again), dates lines from
+`output.tsidx`, and adds the sessions the segment log (#3676) names.
+
+**The search.**
+- Candidates are the sessions the record names. One whose provider transcript
+  still exists is searched there (`source: "provider_transcript"`); one whose
+  transcript is gone is searched in the record (`source: "agentmux_record"`),
+  through the same message converter as the transcript parser
+  (`claude_adapter::message_from_entry`).
+- Sessions found only by working directory or account are left out when the
+  agent has a record, and counted (`inferred_sessions_excluded`);
+  `include_inferred: true` searches them, labelled `attribution: "inferred"`.
+  An agent with no record keeps them — it has nothing better.
+- A session the segment log names that neither a transcript nor the record
+  holds is reported unreadable, so the answer isn't `complete`.
+- New fields: `ledger_sessions`, `record_only_sessions`,
+  `inferred_sessions_excluded`; per hit `source`, `attribution`.
+
+**Cost** (release build, the 804 MB record of one long-lived agent, 28
+sessions): first scan 1.2 s, later scans 62 ms (only what was appended), one
+record-only session's 5,933 messages read in 157 ms. The first scan was 12 s
+until `FileStore::read_at` read a range of parts in one query instead of one
+query per 64 KB part. The provider's non-Claude output (no `session_id`) never
+starts a session here.

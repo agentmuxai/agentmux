@@ -6,6 +6,7 @@
 pub mod adapter;
 pub mod claude_adapter;
 pub mod index;
+pub(crate) mod record;
 
 use std::sync::Arc;
 
@@ -155,6 +156,32 @@ impl std::fmt::Display for HistorySearchError {
     }
 }
 
+/// What a search knows about a session only AgentMux's record holds.
+fn record_meta(session: &record::RecordSession) -> SessionMeta {
+    SessionMeta {
+        session_id: session.session_id.clone(),
+        file_path: session
+            .ranges
+            .first()
+            .map(|(zone, _, _)| format!("agentmux-record:{zone}"))
+            .unwrap_or_default(),
+        provider: "claude".to_string(),
+        model: String::new(),
+        slug: String::new(),
+        working_directory: session.cwd.clone().unwrap_or_default(),
+        created_at: session.first_ms,
+        modified_at: session.last_ms,
+        message_count: 0,
+        first_user_message: String::new(),
+        file_size_bytes: session.ranges.iter().map(|(_, start, end)| (end - start).max(0) as u64).sum(),
+        git_branch: String::new(),
+        total_tokens: 0,
+        subagent_count: 0,
+        identity_id: String::new(),
+        starts_undated: session.first_ms == 0,
+    }
+}
+
 /// SearchHistory's `since`/`until` in milliseconds. They're documented as
 /// Unix seconds, but a hit's own `timestamp` is in milliseconds and is the
 /// natural value to pass back; a value this large is already milliseconds
@@ -171,6 +198,9 @@ pub fn unix_time_to_ms(value: i64) -> i64 {
 /// The history service exposed to the RPC layer.
 pub struct HistoryService {
     index: Arc<SessionIndex>,
+    /// AgentMux's own record of each agent's conversations — which sessions
+    /// are whose, and the content of those whose transcript is gone.
+    records: record::AgentRecords,
 }
 
 impl HistoryService {
@@ -180,6 +210,7 @@ impl HistoryService {
 
         HistoryService {
             index: Arc::new(SessionIndex::new(adapters)),
+            records: record::AgentRecords::global(),
         }
     }
 
@@ -191,7 +222,12 @@ impl HistoryService {
     /// depending on `AppState::history_service`'s real filesystem scan.
     #[cfg(test)]
     pub(crate) fn from_index(index: SessionIndex) -> Self {
-        HistoryService { index: Arc::new(index) }
+        Self::from_index_and_records(index, record::AgentRecords::new(None))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_index_and_records(index: SessionIndex, records: record::AgentRecords) -> Self {
+        HistoryService { index: Arc::new(index), records }
     }
 
     /// Build the index off-thread at srv start, so the first search doesn't
@@ -413,26 +449,95 @@ impl HistoryService {
         opts: &index::HistorySearchOptions,
     ) -> Result<index::HistorySearchOutcome, HistorySearchError> {
         self.refresh_for_search()?;
-        let (all, _total, _has_more) = self
+
+        // Whose sessions these are comes from AgentMux's own record, keyed by
+        // the agent's UID (`owner.definition_id` is the caller's row id): the
+        // same in every channel and version and across account switches. A
+        // session there is searched in its provider transcript when that
+        // still exists, and in the record when it doesn't.
+        let (ledger, record_problems) = self.records.sessions_of(&owner.definition_id);
+        let in_ledger: std::collections::HashSet<String> =
+            ledger.iter().map(|s| s.session_id.clone()).collect();
+        let mut candidates: Vec<index::SearchCandidate> = Vec::with_capacity(ledger.len());
+        let mut record_only = 0u32;
+        for session in ledger {
+            let candidate = match self.index.get_meta(&session.session_id) {
+                Some(meta) => index::SearchCandidate {
+                    meta,
+                    source: index::Source::Transcript,
+                    attribution: index::Attribution::AgentRecord,
+                },
+                None => {
+                    record_only += 1;
+                    index::SearchCandidate {
+                        meta: record_meta(&session),
+                        source: index::Source::Record(session),
+                        attribution: index::Attribution::AgentRecord,
+                    }
+                }
+            };
+            candidates.push(candidate);
+        }
+
+        // Sessions found only by working directory or account. When the agent
+        // has a record they're left out (counted): none of them is in it, so
+        // they're another agent's in a shared folder or account, or older
+        // than the record (none on the host measured, 2026-09-24). An agent
+        // with no record at all has nothing better, so it keeps them.
+        let (by_folder, _total, _has_more) = self
             .sessions_for_owner(store, owner, 0, usize::MAX, "modified_at", "desc", false)
             .map_err(HistorySearchError::Failed)?;
+        let inferred: Vec<SessionMeta> =
+            by_folder.into_iter().filter(|s| !in_ledger.contains(&s.session_id)).collect();
+        let mut inferred_excluded = 0u32;
+        if in_ledger.is_empty() || opts.include_inferred {
+            candidates.extend(inferred.into_iter().map(|meta| index::SearchCandidate {
+                meta,
+                source: index::Source::Transcript,
+                attribution: index::Attribution::Inferred,
+            }));
+        } else {
+            inferred_excluded = inferred.len() as u32;
+        }
 
         // A session last written before `since` holds nothing after it, and
-        // one started after `until` holds nothing before it. An unknown start
+        // one started after `until` holds nothing before it. An unknown time
         // — no timestamp at all, or an undated record before the first dated
         // one — can't rule a session out.
-        let in_window: Vec<SessionMeta> = all
+        let mut in_window: Vec<index::SearchCandidate> = candidates
             .into_iter()
-            .filter(|s| opts.since_ms.is_none_or(|since| s.modified_at >= since))
-            .filter(|s| {
-                opts.until_ms
-                    .is_none_or(|until| s.created_at == 0 || s.starts_undated || s.created_at <= until)
+            .filter(|c| opts.since_ms.is_none_or(|since| c.meta.modified_at == 0 || c.meta.modified_at >= since))
+            .filter(|c| {
+                opts.until_ms.is_none_or(|until| {
+                    c.meta.created_at == 0 || c.meta.starts_undated || c.meta.created_at <= until
+                })
             })
             .collect();
+        in_window.sort_by(|a, b| b.meta.modified_at.cmp(&a.meta.modified_at));
 
-        let mut outcome = self.index.search_sessions(&in_window, opts);
-        outcome.add_discovery_errors(self.index.discovery_problems());
+        let mut outcome = index::search_candidates(&in_window, opts, &|c| self.load(c));
+        outcome.ledger_sessions = in_ledger.len() as u32;
+        outcome.record_only_sessions = record_only;
+        outcome.inferred_sessions_excluded = inferred_excluded;
+        let mut problems = self.index.discovery_problems();
+        problems.extend(record_problems);
+        outcome.add_discovery_errors(problems);
         Ok(outcome)
+    }
+
+    /// A candidate's conversation, from wherever it lives.
+    fn load(&self, candidate: &index::SearchCandidate) -> Result<Option<HistorySession>, HistoryError> {
+        match &candidate.source {
+            index::Source::Transcript => self.index.get_full(&candidate.meta.session_id),
+            index::Source::Record(session) if session.ranges.is_empty() => Err(HistoryError::Other(
+                "in the agent's segment log, but neither a provider transcript nor AgentMux's record holds it"
+                    .into(),
+            )),
+            index::Source::Record(session) => {
+                let (messages, skipped_records) = self.records.read(session)?;
+                Ok(Some(HistorySession { meta: candidate.meta.clone(), messages, skipped_records }))
+            }
+        }
     }
 
     /// This agent's own sessions — the actual "fast Conversation History
@@ -502,6 +607,140 @@ impl HistoryService {
         self.ensure_built();
         let deleted = self.index.clear(provider, project);
         serde_json::json!({ "deleted": deleted })
+    }
+}
+
+/// Whose sessions a search reads, from AgentMux's own record (PR 2 of the
+/// history-robustness plan).
+#[cfg(test)]
+mod agent_record_search_tests {
+    use super::record::fixtures::{append, assistant, init, store, zone, UID};
+    use super::*;
+
+    const CWD: &str = "/work/agent-a";
+
+    /// A service over a real Claude adapter rooted at `shared`, and the
+    /// agent's record in `records`.
+    fn service(shared: &std::path::Path, records: &Arc<crate::backend::storage::filestore::FileStore>) -> HistoryService {
+        HistoryService::from_index_and_records(
+            SessionIndex::with_isolated_roots(
+                vec![Box::new(ClaudeHistoryAdapter::with_roots(None, Some(shared.to_path_buf()), None))],
+                vec![],
+            ),
+            record::AgentRecords::new(Some(records.clone())),
+        )
+    }
+
+    fn transcript(shared: &std::path::Path, sid: &str, text: &str) {
+        let project = shared.join("providers").join("claude").join("projects").join("-work-agent-a");
+        std::fs::create_dir_all(&project).unwrap();
+        let line = format!(
+            r#"{{"type":"assistant","message":{{"role":"assistant","model":"m","content":[{{"type":"text","text":"{text}"}}]}},"timestamp":"2026-09-24T10:00:00Z","cwd":"{CWD}"}}"#
+        );
+        std::fs::write(project.join(format!("{sid}.jsonl")), format!("{line}\n")).unwrap();
+    }
+
+    fn search(svc: &HistoryService, query: &str, include_inferred: bool) -> index::HistorySearchOutcome {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let owner = HistoryOwner { definition_id: UID.into(), working_directory: Some(CWD.into()) };
+        let opts = index::HistorySearchOptions { query: query.into(), limit: 50, include_inferred, ..Default::default() };
+        svc.search_for_agent(&store, &owner, &opts).unwrap()
+    }
+
+    /// 39% of the sessions on the host measured have no provider transcript
+    /// left (Claude's cleanup, a deleted account folder). They're still in
+    /// AgentMux's record, and found there.
+    #[test]
+    fn a_session_whose_transcript_is_gone_is_found_in_the_agents_record() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let records = store();
+        append(&records, &zone(), &[init("s-gone", CWD), assistant("s-gone", "only the record remembers this")]);
+        let out = search(&service(tmp.path(), &records), "record remembers", false);
+        assert_eq!(out.hits.len(), 1, "{out:?}");
+        assert_eq!(out.hits[0].source, "agentmux_record");
+        assert_eq!(out.hits[0].attribution, "agent_record");
+        assert_eq!(out.hits[0].session_id, "s-gone");
+        assert_eq!((out.ledger_sessions, out.record_only_sessions), (1, 1));
+        assert!(out.complete, "{out:?}");
+    }
+
+    /// A session whose transcript still exists is read from the transcript,
+    /// once — not again from the record.
+    #[test]
+    fn a_session_with_a_transcript_is_searched_there_once() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let records = store();
+        append(&records, &zone(), &[init("s1", CWD), assistant("s1", "words in both places")]);
+        transcript(tmp.path(), "s1", "words in both places");
+        let out = search(&service(tmp.path(), &records), "both places", false);
+        assert_eq!(out.hits.len(), 1, "{out:?}");
+        assert_eq!(out.hits[0].source, "provider_transcript");
+        assert_eq!((out.ledger_sessions, out.record_only_sessions), (1, 0));
+    }
+
+    /// Found by folder but not in the agent's record: another agent's session
+    /// in a shared folder, or one older than the record. Left out and counted
+    /// — `include_inferred` searches it, labelled.
+    #[test]
+    fn a_session_found_only_by_folder_is_left_out_when_the_agent_has_a_record() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let records = store();
+        append(&records, &zone(), &[init("s1", CWD), assistant("s1", "mine")]);
+        transcript(tmp.path(), "s-other", "someone else wrote this");
+        let svc = service(tmp.path(), &records);
+
+        let out = search(&svc, "someone else", false);
+        assert!(out.hits.is_empty(), "{out:?}");
+        assert_eq!(out.inferred_sessions_excluded, 1);
+
+        let out = search(&svc, "someone else", true);
+        assert_eq!(out.hits.len(), 1, "{out:?}");
+        assert_eq!(out.hits[0].attribution, "inferred");
+    }
+
+    /// An agent with no record at all (never ran on a build that keeps one)
+    /// has nothing better than its folder, so it keeps that.
+    #[test]
+    fn an_agent_without_a_record_keeps_the_folder_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        transcript(tmp.path(), "s-folder", "found by folder");
+        let out = search(&service(tmp.path(), &store()), "by folder", false);
+        assert_eq!(out.hits.len(), 1, "{out:?}");
+        assert_eq!(out.hits[0].attribution, "inferred");
+        assert_eq!(out.ledger_sessions, 0);
+    }
+
+    /// A session the segment log names but nothing holds any more can't be
+    /// searched, and the answer says so.
+    #[test]
+    fn a_logged_session_with_no_content_anywhere_makes_the_answer_incomplete() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let records = store();
+        crate::backend::continuity_segments::record_start(
+            &records,
+            crate::backend::continuity_segments::Start {
+                segment_id: String::new(),
+                agent_uid: UID.into(),
+                definition_id: Some(UID.into()),
+                provider: "claude".into(),
+                config_dir: None,
+                provider_session_id: Some("s-lost".into()),
+                cwd: CWD.into(),
+                channel: "test".into(),
+                agentmux_version: "0.0.0".into(),
+                block_id: "b".into(),
+                zone: None,
+                byte_start: None,
+                started_at_ms: 1_000,
+                continuity_rung: crate::backend::continuity_segments::Rung::Fresh,
+                predecessor_segment_id: None,
+            },
+        )
+        .unwrap();
+        let out = search(&service(tmp.path(), &records), "anything", false);
+        assert!(!out.complete, "{out:?}");
+        assert_eq!(out.incomplete_reasons, vec!["unreadable_sessions"]);
+        assert_eq!(out.sessions_unreadable[0].session_id, "s-lost");
     }
 }
 
