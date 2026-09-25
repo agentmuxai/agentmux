@@ -387,6 +387,11 @@ working throughout through a legacy adapter.
        and the `connection` capability (the header's connection button).
        `cpuplot`, the same view under an older name, now labels and icons
        itself like sysinfo in its tab pill too (its header always did).
+     - **Swarm (implemented):** `swarmPaneTab` (swarm.tsx). Its model is
+       built from the block id (it never used its `nodeModel`); the view reads
+       and writes its own `term:zoom` through `ctx`; the instance forwards
+       `dispose` (the model's subscriptions and timers). The contract grew the
+       `noPadding` capability (full-bleed content).
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

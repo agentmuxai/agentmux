@@ -22,7 +22,9 @@ import { sysinfoPaneTab } from "./sysinfo";
 
 function fakeCtx(meta: Record<string, unknown>) {
     const [m, setM] = createSignal<Record<string, unknown>>(meta);
-    const setMeta = vi.fn(async (patch: Record<string, unknown>) => setM({ ...m(), ...patch }));
+    const setMeta = vi.fn(async (patch: Record<string, unknown>) => {
+        setM({ ...m(), ...patch });
+    });
     const ctx: PaneTabHostContext = {
         blockId: "s1",
         meta: m as any,

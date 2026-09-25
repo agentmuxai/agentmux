@@ -95,6 +95,18 @@ describe("adaptPaneTabInstance", () => {
         expect(getByTestId("native").textContent).toBe("b1");
     });
 
+    it("maps the settings menu, and the connection / noPadding capabilities", () => {
+        const menu = [{ label: "Plot Type" }];
+        const vm = adaptPaneTabInstance(
+            { ...manifest, capabilities: { connection: true, noPadding: true } },
+            makePaneTabHostContext("b1", {} as any),
+            { component: () => null as any, settingsMenu: () => menu as any }
+        );
+        expect(vm.getSettingsMenuItems?.()).toBe(menu);
+        expect(vm.manageConnection?.()).toBe(true);
+        expect(vm.noPadding?.()).toBe(true);
+    });
+
     it("leaves out what the instance does not provide, so the host's defaults apply", () => {
         const vm = adaptPaneTabInstance(manifest, makePaneTabHostContext("b1", {} as any), {
             component: () => null as any,
@@ -103,5 +115,8 @@ describe("adaptPaneTabInstance", () => {
         expect(vm.viewIcon).toBeUndefined();
         expect(vm.giveFocus).toBeUndefined();
         expect(vm.getBodyContextMenuItems).toBeUndefined();
+        expect(vm.getSettingsMenuItems).toBeUndefined();
+        expect(vm.manageConnection).toBeUndefined();
+        expect(vm.noPadding).toBeUndefined();
     });
 });

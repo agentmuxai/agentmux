@@ -19,7 +19,7 @@ import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { MediaViewModel } from "@/app/view/media/media";
 import { BundleViewModel } from "@/app/view/bundle/bundle";
 import { SettingsViewModel } from "@/app/view/settings/settings";
-import { SwarmViewModel } from "@/app/view/swarm/swarm";
+import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { WardenViewModel } from "@/app/view/warden/warden";
@@ -81,8 +81,8 @@ const builtins = [
     sysinfoPaneTab("cpuplot"),
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     legacyAdapter("launcher", LauncherViewModel as any),
-    // Swarm, Armory and Warden apply `term:zoom` as CSS zoom.
-    legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project", capabilities: { paneZoom: {} } }),
+    swarmPaneTab, // native — Phase 2c
+    // Armory and Warden apply `term:zoom` as CSS zoom.
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
     legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
     legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),

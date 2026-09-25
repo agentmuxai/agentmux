@@ -64,6 +64,8 @@ export interface PaneTabCapabilities {
     /** The pane runs against a connection (`meta.connection`) and its header
      *  shows the connection button (sysinfo, term). */
     connection?: boolean;
+    /** The content fills the pane edge to edge — no content padding (swarm). */
+    noPadding?: boolean;
 }
 
 /** What the host gives a native instance — its only way in (no raw
