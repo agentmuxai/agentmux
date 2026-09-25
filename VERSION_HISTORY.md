@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.57.3 — 2026-09-24
+
+- fix(agent): resume finds a Claude conversation whose working directory has an underscore, a space or other punctuation
+- fix(history): SearchHistory finds sessions under accounts added after start, says when its answer is complete, and refuses a caller without an identity
+- feat(panes): a pane header always shows its tabs — remove the pane:tabstrip "multi-only" setting
+- feat(panes): dragging a Pane Tab over another pane flashes its header like a Window Tab, and the tab bounces when it lands
+- feat(panes): dragging a pane's last tab into another pane closes the emptied pane
+- The History tab follows the conversation: new turns appear without reopening it, parsed as they arrive and shown at most once a second; a hidden History tab does no work and catches up when shown.
+- Agent panes keep the turn in progress plus the last 3 finished turns; older turns roll off into the History tab, so long conversations no longer slow the pane down (Claude and Gemini agents; settings agent:livefeed, agent:livefeedturns).
+- docs(memory): memory follows the agent — research and design
+- Codex, Kimi and muxcode/container Claude agents keep what you sent them: your messages are written to the conversation record, so they survive a reload, show in the History tab, and let older turns roll off the pane like Claude's.
+- An AskUserQuestion answer, decline or tool-permission decision that AgentMux has to re-send (when Claude abandoned the question) is now kept in the conversation record, so it survives a reload and shows in the History tab.
+- refactor(pane-color): remove the dead tab-level bg:* border-color tier
+- feat(panes): drop a Pane Tab anywhere on another pane — body or header — to move it there
+
 ## 0.57.2 — 2026-09-24
 
 - perf(agent): opening or reading an agent's history no longer re-scans its whole transcript after every write by an older AgentMux build (seconds on large agents)
