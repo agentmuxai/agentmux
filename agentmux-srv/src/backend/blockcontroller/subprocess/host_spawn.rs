@@ -136,8 +136,12 @@ impl SubprocessController {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_RUNNING);
         }
-        self.publish_status();
+        // Mark the turn active BEFORE publishing, so this "running" status
+        // carries turn_active=true: it is the start edge the notification
+        // Router pairs with the process_waiter's turn_active=false to detect
+        // "finished" (subprocess agents otherwise never showed a true→false).
         self.health_monitor.set_active_turn(true);
+        self.publish_status();
 
         // Build command — on Windows, .cmd batch wrappers can't be reliably spawned
         // via cmd.exe /C with piped stdio. Resolve to node <script> instead.
