@@ -71,6 +71,7 @@ See also:
 | [SPEC_BROWSER_PANE_LIFECYCLE](SPEC_BROWSER_PANE_LIFECYCLE.md) | Lifecycle: mount, navigate, unmount |
 | [SPEC_BROWSER_DOM_API](SPEC_BROWSER_DOM_API.md) | DOM injection / bridge API |
 | [SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15](SPEC_BROWSER_PANE_FAVICON_TITLE_2026-05-15.md) | Favicon + title propagation |
+| [SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | macOS: typing reaches the page — the pane overlay can become key; `muxsh web` selects and focuses the new pane |
 | [SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | macOS: the app's right-click menu draws behind the pane — register its rect for the hole punch (Windows parity) |
 
 ## Editor Pane
@@ -324,6 +325,7 @@ partial list.
 | [`SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17`](SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md) | SPEC: Linux Dock/Taskbar Instance Grouping Fix |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
 | [`SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24`](SPEC_MACOS_BROWSER_PANE_CONTEXT_MENU_2026_09_24.md) | SPEC — macOS browser pane: show AgentMux's right-click menu above the page |
+| [`SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24`](SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24.md) | SPEC — macOS browser pane: typing reaches the page |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
 | [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS/Linux users up front that MuxBus sign-in will prompt for a password |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |

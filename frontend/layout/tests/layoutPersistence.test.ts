@@ -233,6 +233,52 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
         expect(root.children![1].data?.blockId).toBe("existing");
     });
 
+    // SPEC_MACOS_BROWSER_PANE_KEYBOARD_FOCUS_2026_09_24 §frontend: a
+    // split-placed open (`muxsh web`, which always splits next to the calling
+    // terminal) dropped the action's `focused` flag, so the new pane was never
+    // selected and never claimed the caret.
+    it.each([
+        [LayoutTreeActionType.SplitHorizontal],
+        [LayoutTreeActionType.SplitVertical],
+    ])("%s with focused:true selects the new block", async (actiontype) => {
+        const model = createLayoutModel();
+        const existing = insertBlock(model, "existing");
+        expect(model.treeState.focusedNodeId).toBe(existing.id);
+
+        setPendingActions(model, [{
+            actiontype,
+            actionid: `action-focus-${actiontype}`,
+            blockid: "new-block",
+            targetblockid: "existing",
+            position: "after",
+            focused: true,
+            magnified: false,
+            ephemeral: false,
+        }]);
+        await processPendingBackendActions(model);
+
+        expect(model.treeState.focusedNodeId).toBe(findBlock(model, "new-block")!.id);
+    });
+
+    it("split with focused:false leaves the selection where it was", async () => {
+        const model = createLayoutModel();
+        const existing = insertBlock(model, "existing");
+
+        setPendingActions(model, [{
+            actiontype: LayoutTreeActionType.SplitHorizontal,
+            actionid: "action-nofocus",
+            blockid: "new-block",
+            targetblockid: "existing",
+            position: "after",
+            focused: false,
+            magnified: false,
+            ephemeral: false,
+        }]);
+        await processPendingBackendActions(model);
+
+        expect(model.treeState.focusedNodeId).toBe(existing.id);
+    });
+
     it("SplitHorizontal with nodesize — outer-direction drop assigns specified size to new node", async () => {
         const model = createLayoutModel();
         insertBlock(model, "existing");
