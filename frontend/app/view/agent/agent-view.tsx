@@ -42,6 +42,7 @@ import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import {
     accountLabel,
+    boundAccountEmail,
     loadAccounts,
     subscribeAccountChanges,
     type Account,
@@ -2014,7 +2015,20 @@ const AgentPresentationView = ({
             setLinkedAccountId(undefined);
         }
     };
-    void refreshLinkedAccountId();
+    // Re-resolve whenever the agent id or provider resolves or changes — both
+    // come from block meta, which may not have loaded on the first run, and a
+    // one-shot mount-time call left the link (and the chip's email) unset.
+    createEffect(
+        on(
+            () => [getBlockMetaKeyAtom(model.blockId, "agentId")(), provider()?.id] as const,
+            () => void refreshLinkedAccountId()
+        )
+    );
+
+    // The bound account's login email for the composer's sign-in chip
+    // (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) — live across logins and
+    // rebinds via accountCache + linkedAccountId.
+    const authEmail = createMemo(() => boundAccountEmail(accountCache(), linkedAccountId()));
 
     const bindCandidates = createMemo(() => {
         const prov = provider();
@@ -2827,6 +2841,7 @@ const AgentPresentationView = ({
                 contextTokens={(paneModel.state.lastContextTokens ?? null)}
                 contextWindow={(paneModel.state.lastContextWindow ?? null) ?? provider()?.contextWindow}
                 authStatus={loginStatus()}
+                authEmail={authEmail()}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}

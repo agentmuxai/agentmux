@@ -378,6 +378,57 @@ export function accountLabel(a: Pick<Account, "name" | "context">): string {
     return a.context?.email || a.name;
 }
 
+/** The login email of the account an agent is bound to (`linkedAccountId`),
+ *  if that account recorded one — what the agent composer's sign-in chip shows. */
+export function boundAccountEmail(
+    accounts: readonly Pick<Account, "id" | "context">[],
+    linkedAccountId: string | undefined
+): string | undefined {
+    if (!linkedAccountId) return undefined;
+    return accounts.find((a) => a.id === linkedAccountId)?.context?.email || undefined;
+}
+
+/** Keep `s`'s first `head` characters and its last `tail`, joined by "…". */
+function ellipsizeMiddle(s: string, head: number, tail: number): string {
+    if (head + 1 + tail >= s.length) return s;
+    return `${s.slice(0, head)}…${s.slice(s.length - tail)}`;
+}
+
+/**
+ * An email shortened to at most `max` characters for tight UI — the agent
+ * composer's sign-in chip — with the full address kept for its tooltip.
+ *
+ * The part before the @ shortens first, in the middle, down to its first
+ * character + last two (the tail is what tells `…one@` from `…two@`). Only
+ * when that minimum still doesn't fit does the domain shorten the same way,
+ * keeping its TLD: `asafebgi@gmail.com` → `a…gi@g…l.com`. A part already at or
+ * below its minimum is never shortened, so a pathological address can still
+ * exceed `max` rather than lose its shape.
+ */
+export function shortenEmail(email: string, max = 12): string {
+    if (email.length <= max) return email;
+    const at = email.lastIndexOf("@");
+    if (at <= 0) {
+        const keep = max - 1;
+        return ellipsizeMiddle(email, Math.ceil(keep / 2), Math.floor(keep / 2));
+    }
+    const local = email.slice(0, at);
+    const domain = email.slice(at + 1);
+
+    const localTail = Math.min(2, Math.max(0, local.length - 2));
+    const localBudget = max - 1 - domain.length;
+    if (localBudget >= 1 + 1 + localTail) {
+        return `${ellipsizeMiddle(local, localBudget - 1 - localTail, localTail)}@${domain}`;
+    }
+
+    const shortLocal = ellipsizeMiddle(local, 1, localTail);
+    const dot = domain.lastIndexOf(".");
+    // The TLD plus the character before it (`l.com`), else the last two characters.
+    const domainTail = dot > 0 ? domain.length - dot + 1 : 2;
+    const domainHead = Math.max(1, max - 1 - shortLocal.length - 1 - domainTail);
+    return `${shortLocal}@${ellipsizeMiddle(domain, domainHead, domainTail)}`;
+}
+
 export class IdentityViewModel implements ViewModel {
     viewType = "identity";
     blockId: string;

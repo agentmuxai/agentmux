@@ -156,6 +156,7 @@ import { AgentSessionStats } from "./AgentSessionStats";
 import type { SessionStats } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
+import { shortenEmail } from "@/app/view/identity/identity-model";
 
 /**
  * Rev 6 of the zone-balancing logic — see the file-header comment's Rev
@@ -605,6 +606,11 @@ interface AgentComposerStripProps {
      *  entirely for "unknown" (before the first auth check resolves), so the
      *  strip doesn't flash a wrong color for an instant on every mount. */
     authStatus?: "authenticated" | "unauthenticated" | "unknown";
+    /** Login email of the account this agent is bound to, when the provider
+     *  recorded one (Armory's `context.email`). Replaces "Logged in" with the
+     *  address, shortened to 12 characters (`shortenEmail`); the tooltip keeps
+     *  it whole. Ignored unless `authStatus` is "authenticated". */
+    authEmail?: string;
 
     /** Cumulative cost/tokens/duration for this pane, shown in the
      *  session-stats popover the context reading opens. */
@@ -794,12 +800,18 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         }}
                         title={
                             props.authStatus === "authenticated"
-                                ? "Signed in to this agent's provider"
+                                ? props.authEmail
+                                    ? `Signed in as ${props.authEmail}`
+                                    : "Signed in to this agent's provider"
                                 : "Not signed in — click Log in to continue"
                         }
                     >
                         <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
-                        {props.authStatus === "authenticated" ? "Logged in" : "Not logged in"}
+                        {props.authStatus === "authenticated"
+                            ? props.authEmail
+                                ? shortenEmail(props.authEmail)
+                                : "Logged in"
+                            : "Not logged in"}
                     </span>
                 ),
             });
