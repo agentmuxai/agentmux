@@ -1487,6 +1487,22 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     };
 
     let priority = req.priority.as_deref().unwrap_or("normal");
+    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.1): carry the
+    // sender's WAN signature as signed, but only through the carry gate —
+    // any unmet condition relays unsigned, exactly as before.
+    let carried = match crate::muxbus::relay::wan_carry_gate(
+        req,
+        state.mstore.wan_identity().as_deref(),
+        &crate::backend::reactive::registry::local_channel_id(),
+    ) {
+        Ok(carried) => Some(carried),
+        Err(reason) => {
+            if req.wan_sig.is_some() {
+                tracing::debug!(target = %req.target_agent, reason, "cloud relay: WAN signature not carried");
+            }
+            None
+        }
+    };
     let outcome = crate::muxbus::relay::relay_inject(
         &crate::muxbus::relay::rest_base_url(),
         &state.http_client,
@@ -1495,6 +1511,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
         &req.target_agent,
         &req.message,
         priority,
+        carried.as_ref(),
     )
     .await;
 
