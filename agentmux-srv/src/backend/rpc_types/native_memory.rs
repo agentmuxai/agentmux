@@ -118,6 +118,16 @@ pub struct CommandNativeMemoryWriteFileData {
     #[serde(default)]
     #[ts(optional, type = "NativeMemoryWriteProvenance")]
     pub provenance: Option<NativeMemoryWriteProvenance>,
+    /// SHA-256 (lowercase hex) of the content the caller's draft was based
+    /// on — the UTF-8 bytes of exactly what `agent:memory:read_file`
+    /// returned. When present and the file's current content hashes to
+    /// anything else (or the file no longer exists), the write is REFUSED
+    /// with a `conflict:` error and nothing is written. When absent the
+    /// write behaves exactly as it always has (last writer wins). See
+    /// docs/specs/SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4.
+    #[serde(default)]
+    #[ts(optional)]
+    pub base_sha256: Option<String>,
 }
 
 // ---- Native memory version history — agent:memory:history / diff / revert ----

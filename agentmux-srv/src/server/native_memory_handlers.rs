@@ -764,6 +764,63 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
     out
 }
 
+/// The content `agent:memory:read_file` would return for `path` right now —
+/// live FS first (lossy UTF-8, capped at [`MAX_MEMORY_FILE_BYTES`]), the
+/// durable mirror only when the live file is genuinely absent — WITHOUT
+/// that handler's mirror-upsert side effect. `Ok(None)` means the file
+/// exists in neither place. Used by `agent:memory:write_file`'s
+/// `base_sha256` check, which must hash exactly what the caller's draft was
+/// based on (the frontend hashes the `read_file` response), or every
+/// conditional save of a large or non-UTF-8 file would look like a conflict.
+fn current_memory_content(
+    id_store: &crate::backend::storage::store::Store,
+    agent_id: &str,
+    path: &std::path::Path,
+    filename: &str,
+) -> Result<Option<String>, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_file() => {
+            let mut buf = Vec::new();
+            std::fs::File::open(path)
+                .and_then(|f| {
+                    use std::io::Read;
+                    f.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)
+                })
+                .map_err(|e| format!("{filename}: {e}"))?;
+            Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
+        }
+        Ok(_) => Err(format!("{filename} is not a regular file")),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{filename}: {e}")),
+        Err(_) => id_store
+            .agent_native_memory_read(agent_id, filename)
+            .map_err(|e| format!("{filename}: mirror lookup failed: {e}")),
+    }
+}
+
+/// The optimistic-concurrency check behind `base_sha256`
+/// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4): `Ok` when `current`
+/// still hashes to `base`, otherwise an error starting `conflict:` — the
+/// marker the frontend keys its "changed since you started editing" banner
+/// on. A file that no longer exists is a conflict too: the draft's base is
+/// gone, and silently re-creating it would undo someone else's delete.
+fn check_memory_base_sha256(filename: &str, base: &str, current: Option<&str>) -> Result<(), String> {
+    match current {
+        None => Err(format!(
+            "conflict: {filename} no longer exists (your edit was based on {base}); not written"
+        )),
+        Some(content) => {
+            let current_hash = crate::backend::storage::agent_native_memory_versions::content_hash(content);
+            if current_hash.eq_ignore_ascii_case(base) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "conflict: {filename} changed since your edit began (base {base}, current {current_hash}); not written"
+                ))
+            }
+        }
+    }
+}
+
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore_list = state.mstore.clone();
     let id_store_list = state.id_store.clone();
@@ -1098,6 +1155,21 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 })?;
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
+
+                // Conditional save (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
+                // §2.4): a caller that says which content its draft started
+                // from gets a refusal, not an overwrite, when that content
+                // has since moved. Checked before the version row below so a
+                // refused write leaves no trace in history. Not atomic with
+                // the rename further down — a write landing in between still
+                // wins — but it closes the window from minutes (a human
+                // editing) to microseconds, which is the case this exists for.
+                if let Some(base) = cmd.base_sha256.as_deref() {
+                    let current = current_memory_content(&id_store, &agent.id, &dir.join(&cmd.filename), &cmd.filename)
+                        .map_err(|e| format!("agent:memory:write_file: {e}"))?;
+                    check_memory_base_sha256(&cmd.filename, base, current.as_deref())
+                        .map_err(|e| format!("agent:memory:write_file: {e}"))?;
+                }
 
                 // Version history — recorded BEFORE the live-file write below,
                 // not after. reagent P1: the drift detector's fast path
@@ -1465,6 +1537,22 @@ mod req_shape_tests {
         }))
         .expect("agent:memory:write_file must accept an omitted provenance");
         assert!(req.provenance.is_none());
+        assert!(req.base_sha256.is_none(), "an omitted base means an unconditional write");
+    }
+
+    // The Armory / Stash editors send the hash of the content their draft
+    // started from (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
+    #[test]
+    fn write_file_req_accepts_a_base_sha256() {
+        let req: CommandNativeMemoryWriteFileData = serde_json::from_value(json!({
+            "agent_id": "a1",
+            "filename": "MEMORY.md",
+            "content": "hello",
+            "provenance": {"source": "human"},
+            "base_sha256": "abc123",
+        }))
+        .expect("agent:memory:write_file must accept base_sha256");
+        assert_eq!(req.base_sha256.as_deref(), Some("abc123"));
     }
 
     // native-memory-history-model.ts:196
@@ -1788,6 +1876,115 @@ mod tests {
         )
         .await;
         assert_eq!(read.content, "written from channel A");
+    }
+
+    // ---- base_sha256 (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4) ----
+
+    fn sha256_hex(s: &str) -> String {
+        crate::backend::storage::agent_native_memory_versions::content_hash(s)
+    }
+
+    async fn read_content(
+        engine: &Arc<WshRpcEngine>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+        agent_id: &str,
+    ) -> String {
+        let read: NativeMemoryReadFileResult = call_rpc(
+            engine,
+            rx,
+            COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": agent_id, "filename": "MEMORY.md" }),
+        )
+        .await;
+        read.content
+    }
+
+    #[tokio::test]
+    async fn write_with_a_matching_base_sha256_is_applied() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-base-1", "/work/base-1", config.path(), id_store);
+
+        call_rpc::<Option<serde_json::Value>>(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+            "agent_id": "agent-base-1", "filename": "MEMORY.md", "content": "v1",
+        }))
+        .await;
+        call_rpc::<Option<serde_json::Value>>(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+            "agent_id": "agent-base-1", "filename": "MEMORY.md", "content": "v2",
+            "base_sha256": sha256_hex("v1"),
+        }))
+        .await;
+        assert_eq!(read_content(&engine, &mut rx, "agent-base-1").await, "v2");
+    }
+
+    #[tokio::test]
+    async fn write_with_a_stale_base_sha256_is_refused_as_a_conflict_and_writes_nothing() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-base-2", "/work/base-2", config.path(), id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+            "agent_id": "agent-base-2", "filename": "MEMORY.md", "content": "v1",
+        }))
+        .await;
+        // Someone else writes while the human is editing a draft based on v1.
+        call_rpc::<Option<serde_json::Value>>(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+            "agent_id": "agent-base-2", "filename": "MEMORY.md", "content": "agent wrote this",
+        }))
+        .await;
+        let versions_before = id_store.agent_native_memory_version_list("agent-base-2", "MEMORY.md").unwrap().len();
+
+        let err = call_rpc_expect_error(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+            "agent_id": "agent-base-2", "filename": "MEMORY.md", "content": "human draft",
+            "base_sha256": sha256_hex("v1"),
+        }))
+        .await;
+        assert!(err.contains("conflict:"), "a stale base must surface as a conflict, got: {err}");
+        assert_eq!(read_content(&engine, &mut rx, "agent-base-2").await, "agent wrote this", "must not overwrite");
+        assert_eq!(
+            id_store.agent_native_memory_version_list("agent-base-2", "MEMORY.md").unwrap().len(),
+            versions_before,
+            "a refused write must not record a version"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_without_base_sha256_still_overwrites_as_before() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-base-3", "/work/base-3", config.path(), id_store);
+
+        for content in ["v1", "v2 (no base, last writer wins)"] {
+            call_rpc::<Option<serde_json::Value>>(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+                "agent_id": "agent-base-3", "filename": "MEMORY.md", "content": content,
+            }))
+            .await;
+        }
+        assert_eq!(read_content(&engine, &mut rx, "agent-base-3").await, "v2 (no base, last writer wins)");
+    }
+
+    #[tokio::test]
+    async fn write_with_a_base_for_a_file_that_no_longer_exists_is_a_conflict() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-base-4", "/work/base-4", config.path(), id_store);
+
+        let err = call_rpc_expect_error(&engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE, serde_json::json!({
+            "agent_id": "agent-base-4", "filename": "MEMORY.md", "content": "draft",
+            "base_sha256": sha256_hex("v1"),
+        }))
+        .await;
+        assert!(err.contains("conflict:") && err.contains("no longer exists"), "got: {err}");
+    }
+
+    #[test]
+    fn check_memory_base_sha256_accepts_either_hex_case() {
+        let base = sha256_hex("same").to_uppercase();
+        assert!(check_memory_base_sha256("MEMORY.md", &base, Some("same")).is_ok());
     }
 
     #[tokio::test]
