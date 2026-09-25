@@ -733,8 +733,10 @@ async function initAppInner() {
                     // (irrelevant — app.tsx replaces this window's content
                     // entirely for credential-approval).
                     let coldMeta: Record<string, unknown> | undefined;
+                    // The memory-adoption approval window is the same kind.
+                    const approvalViews = ["credential-approval", "memory-adoption-approval"];
                     const seedView =
-                        coldInitialView && coldInitialView !== "credential-approval" ? coldInitialView : undefined;
+                        coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
                     if (seedView) {
                         const coldMetaRaw = coldSearchParams.get("initialMeta");
                         try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }

@@ -68,6 +68,8 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListAgentDefinitionsCommand: (...args: unknown[]) => listAgentDefinitionsMock(...args),
         NativeMemoryListCommand: (...args: unknown[]) => nativeMemoryListMock(...args),
+        // The "earlier memory" panel above the file grid: nothing to offer.
+        NativeMemoryAdoptionListCommand: () => Promise.resolve({ list: null }),
     },
 }));
 
@@ -767,6 +769,18 @@ describe("NativeMemoryManager — file grid", () => {
         fireEvent.click(await screen.findByText("Manoz"));
         await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(files.length));
     }
+
+    test("a folder found by a guess is badged unverified; the agent's own is not", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [fileMeta("MEMORY.md")], unverified: true });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        expect(await screen.findByText("Unverified folder")).toBeInTheDocument();
+        fireEvent.click(screen.getByText("← All agents"));
+        nativeMemoryListMock.mockResolvedValue({ files: [fileMeta("MEMORY.md")], unverified: false });
+        fireEvent.click(await screen.findByText("AgentY"));
+        await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(1));
+        expect(screen.queryByText("Unverified folder")).toBeNull();
+    });
 
     test("renders one tile per memory file instead of a dropdown", async () => {
         await openAgentWithFiles([fileMeta("MEMORY.md"), fileMeta("notes.md")]);

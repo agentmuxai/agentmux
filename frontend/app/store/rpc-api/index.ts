@@ -245,6 +245,10 @@ export type {
     ReactiveRemoteRegistration,
 } from "./reactive";
 export type {
+    NativeMemoryAdoptionCandidate,
+    NativeMemoryAdoptionFile,
+    NativeMemoryAdoptionList,
+    NativeMemoryAdoptionListResult,
     NativeMemoryDiffResult,
     NativeMemoryFileMeta,
     NativeMemoryHistoryResult,
