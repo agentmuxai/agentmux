@@ -38,7 +38,7 @@ impl Fixture {
         reconcile_before_spawn(
             &self.fs,
             &self.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(cfg), cwd: CWD, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(cfg), cwd: CWD, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         )
     }
@@ -50,7 +50,7 @@ impl Fixture {
         run(
             &self.fs,
             &self.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false, history_stores: Some(&[]) },
             Budget { deadline: Instant::now() + Duration::from_secs(10), files_left: Some(files) },
         )
     }
@@ -490,7 +490,7 @@ fn a_repository_root_and_its_worktree_leave_their_shared_folder_alone() {
         let r = reconcile_before_spawn(
             &f.fs,
             &f.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         );
         assert_eq!(r.skipped, Some("shared directory"), "{cwd}");
@@ -518,7 +518,7 @@ fn a_subdirectory_agent_shares_the_repository_roots_folder() {
         reconcile_before_spawn(
             &f.fs,
             &f.store,
-            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         )
     };
@@ -533,7 +533,7 @@ fn an_overridden_memory_folder_is_left_alone() {
     let r = reconcile_before_spawn(
         &f.fs,
         &f.store,
-        &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: true },
+        &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: true, history_stores: Some(&[]) },
         Duration::from_secs(10),
     );
     assert_eq!(r.skipped, Some("memory folder overridden"));
@@ -633,7 +633,7 @@ fn an_agent_in_another_channel_sharing_the_folder_keeps_it_shared() {
         reconcile_before_spawn(
             &f.fs,
             store,
-            &SpawnMemory { uid, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false },
+            &SpawnMemory { uid, provider: "claude", config_dir: Some(&cfg), cwd, overridden: false, history_stores: Some(&[]) },
             Duration::from_secs(10),
         )
     };
@@ -676,4 +676,35 @@ fn a_lease_from_a_clock_far_ahead_is_taken_over() {
     })
     .unwrap();
     assert_eq!(f.run().skipped, None);
+}
+
+/// The first pass imports the agent's per-channel history — as history
+/// only: a file it once had and has since deleted is not written back.
+#[test]
+fn the_first_pass_imports_history_without_bringing_back_deleted_files() {
+    let f = fixture();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("channel.db");
+    let store = Store::open(&path).unwrap();
+    store.agent_native_memory_version_insert(UID, "gone.md", "deleted long ago", "agent", "", "").unwrap();
+    store.agent_native_memory_version_insert(UID, "MEMORY.md", "old index", "agent", "", "").unwrap();
+    f.put("MEMORY.md", "current index");
+    let cfg = f.cfg();
+    let stores = [path];
+    let run = || {
+        reconcile_before_spawn(
+            &f.fs,
+            &f.store,
+            &SpawnMemory { uid: UID, provider: "claude", config_dir: Some(&cfg), cwd: CWD, overridden: false, history_stores: Some(&stores) },
+            Duration::from_secs(10),
+        )
+    };
+    let r = run();
+    assert_eq!((r.imported, r.adopted), (2, 1), "{r:?}");
+    assert!(f.get("gone.md").is_none(), "history never becomes a head");
+    assert_eq!(f.head_body("MEMORY.md").as_deref(), Some("current index"));
+    assert_eq!(record::history(&f.fs, UID, "MEMORY.md").unwrap().len(), 2, "the old index is in its history");
+    let again = run();
+    assert_eq!((again.imported, again.written, again.captured), (0, 0, 0), "{again:?}");
+    assert!(f.get("gone.md").is_none());
 }

@@ -70,6 +70,10 @@ pub(crate) struct SpawnMemory<'a> {
     /// The spawn itself may point the CLI's memory somewhere else
     /// ([`spawn_overrides_memory_dir`]).
     pub overridden: bool,
+    /// Where the agent's earlier per-channel history is imported from
+    /// ([`crate::backend::memory_history_import`]); `None`: every channel
+    /// store on this machine.
+    pub history_stores: Option<&'a [std::path::PathBuf]>,
 }
 
 /// Whether a spawn's environment or arguments may move the CLI's memory
@@ -170,6 +174,8 @@ fn release_pass_lease(fs: &FileStore, uid: &str, owner: &str) {
 pub(crate) struct Report {
     pub skipped: Option<&'static str>,
     pub adopted: usize,
+    /// Versions imported from the per-channel history, the first time.
+    pub imported: usize,
     pub written: usize,
     pub captured: usize,
     pub conflicts: usize,
@@ -307,17 +313,36 @@ fn reconcile_inner(
         report.skipped = Some("another pass running");
         return Ok(());
     };
-    let result = reconcile_dir(fs, m.uid, &dir, budget, report);
+    let result = reconcile_dir(fs, m.uid, &dir, m.history_stores, budget, report);
     release_pass_lease(fs, m.uid, &lease);
     result
 }
 
-fn reconcile_dir(fs: &FileStore, uid: &str, dir: &Path, budget: &mut Budget, report: &mut Report) -> Result<(), StoreError> {
+fn reconcile_dir(
+    fs: &FileStore,
+    uid: &str,
+    dir: &Path,
+    history_stores: Option<&[std::path::PathBuf]>,
+    budget: &mut Budget,
+    report: &mut Report,
+) -> Result<(), StoreError> {
     let dir_id = claims::dir_id(dir);
     let disk = read_disk(dir)?;
     let dir_missing = disk.is_none();
     let disk = disk.unwrap_or_default();
     report.unreadable = disk.values().filter(|d| matches!(d, OnDisk::Unreadable)).count();
+
+    // The agent's earlier history, once, now that its folder is proven its
+    // own. History only; a failure leaves it for a later pass.
+    let disk_sha = |name: &str| match disk.get(name) {
+        Some(OnDisk::Body(b)) => Some(record::sha256_hex(b)),
+        _ => None,
+    };
+    match crate::backend::memory_history_import::import_once(fs, uid, history_stores, disk_sha, budget.deadline) {
+        Ok(Some(n)) => report.imported = n,
+        Ok(None) => {}
+        Err(e) => tracing::warn!(uid, error = %e, "memory reconcile: history import failed; retried next pass"),
+    }
 
     // A folder that doesn't exist, or exists but holds none of the files
     // projected into it, no longer holds what was written there: forget

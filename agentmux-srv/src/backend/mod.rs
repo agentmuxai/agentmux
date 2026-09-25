@@ -62,6 +62,7 @@ pub mod continuity_segments;
 pub mod memory_record;
 pub mod memory_dir_claims;
 pub mod memory_reconcile;
+pub mod memory_history_import;
 pub mod continuity_state;
 pub mod shellexec;
 pub mod transcript_backfill;
