@@ -79,6 +79,7 @@ pub(crate) struct Version {
 }
 
 impl Version {
+    #[cfg(test)]
     pub(crate) fn is_tombstone(&self) -> bool {
         self.sha256.is_none()
     }
