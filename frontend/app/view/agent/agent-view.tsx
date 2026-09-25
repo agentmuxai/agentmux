@@ -92,6 +92,7 @@ import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentSessionNotices } from "./components/AgentSessionNotices";
 import { AgentShellInfoPanel } from "./components/AgentShellInfoPanel";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
+import { ShutdownPendingBanner } from "./shutdown/ShutdownPendingBanner";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentView";
@@ -2719,6 +2720,9 @@ const AgentPresentationView = ({
                 at the next spawn (layer 3).
                 SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §3. */}
             <AgentCredentialsRevokedChip agentId={agentId} />
+            {/* Something other than the user asked to shut this agent down:
+                15 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). */}
+            <ShutdownPendingBanner blockId={model.blockId} agentId={agentId} agentName={agentName()} />
             {/* Failure-recovery row — per-error-class actions + auto-retry,
                 rendered through the shared PaneRow accessory primitive.
                 SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}

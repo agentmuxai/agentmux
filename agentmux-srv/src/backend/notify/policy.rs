@@ -29,6 +29,9 @@ pub enum NotifyKind {
     /// A jekt that requires a human's review before the agent acts
     /// (`ESCALATE=required`). Body is fixed text — never message content.
     MessageNeedsReview,
+    /// Something other than the user asked to shut the agent down; the user
+    /// has 15 s to keep it (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
+    ShutdownPending,
     /// Rate-limit overflow digest (§5.1 step 6).
     Summary,
     Test,
@@ -43,6 +46,9 @@ impl NotifyKind {
             NotifyKind::TurnErrored => Some("turnerrored"),
             NotifyKind::AgentCrashed => Some("agentcrashed"),
             NotifyKind::MessageNeedsReview => Some("messageneedsreview"),
+            // Follows the master switch only: a shutdown the user can still
+            // stop must not be silenceable per kind.
+            NotifyKind::ShutdownPending => None,
             NotifyKind::Summary | NotifyKind::Test => None,
         }
     }
@@ -56,13 +62,18 @@ impl NotifyKind {
             // Same window as TurnErrored so the two coalesce into one toast.
             NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => 10_000,
             NotifyKind::MessageNeedsReview => 2_000,
+            // The window is only 15 s: tell the user at once.
+            NotifyKind::ShutdownPending => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
 
     pub fn priority(self) -> Priority {
         match self {
-            NotifyKind::InputWaiting | NotifyKind::AgentCrashed | NotifyKind::MessageNeedsReview => {
+            NotifyKind::InputWaiting
+            | NotifyKind::AgentCrashed
+            | NotifyKind::MessageNeedsReview
+            | NotifyKind::ShutdownPending => {
                 Priority::Attention
             }
             _ => Priority::Normal,
@@ -78,6 +89,7 @@ impl NotifyKind {
                 format!("turn:{block_id}")
             }
             NotifyKind::MessageNeedsReview => format!("review:{block_id}"),
+            NotifyKind::ShutdownPending => format!("shutdown:{block_id}"),
             NotifyKind::Summary => "summary".to_string(),
             NotifyKind::Test => "test".to_string(),
         }
@@ -223,6 +235,8 @@ pub enum Input {
 pub enum Family {
     Input,
     Turn,
+    /// A pending external shutdown was kept or went ahead (§6.5).
+    Shutdown,
 }
 
 impl Family {
@@ -232,6 +246,7 @@ impl Family {
             Family::Turn => {
                 matches!(kind, NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed)
             }
+            Family::Shutdown => kind == NotifyKind::ShutdownPending,
         }
     }
 }
@@ -326,6 +341,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::TurnErrored => format!("{agent_name} stopped with an error"),
         NotifyKind::AgentCrashed => format!("{agent_name} stopped unexpectedly"),
         NotifyKind::MessageNeedsReview => format!("A message for {agent_name} needs your review"),
+        NotifyKind::ShutdownPending => format!("{agent_name} will shut down in 15 s"),
         // Count-bearing; see `summary_title`.
         NotifyKind::Summary => "More agent updates".to_string(),
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
@@ -647,6 +663,16 @@ impl PolicyState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shutdown_pending_is_immediate_attention_and_not_silenceable_per_kind() {
+        let k = NotifyKind::ShutdownPending;
+        assert_eq!(k.setting_suffix(), None, "only the master switch can silence it");
+        assert_eq!(k.delay_ms(), 0, "the window is only 15 s");
+        assert!(matches!(k.priority(), Priority::Attention));
+        assert_eq!(k.group_key("b1"), "shutdown:b1");
+        assert_eq!(title_for(k, "Camper"), "Camper will shut down in 15 s");
+    }
 
     fn req(kind: NotifyKind, block: &str) -> Request {
         Request { kind, block_id: block.into(), agent_name: "lark".into(), body: Some("Which branch?".into()), summary: None }

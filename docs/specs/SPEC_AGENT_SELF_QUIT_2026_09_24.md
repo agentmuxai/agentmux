@@ -1,7 +1,7 @@
 # SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only)
 
 **Date:** 2026-09-24
-**Status:** active — Phase 1 (`/quit` + `/exit`, `sagas/self_quit.rs`) in PR #3779; Phases 1b, 2, 2b and 3 not started.
+**Status:** active — Phase 1 (`/quit` + `/exit`, `sagas/self_quit.rs`) merged in PR #3779; Phase 1b (visible close log) in PR #3784; Phase 2 (`QuitSelf` + gate) and Phase 2b's `QuitSelf` half (`sagas/pending_shutdown.rs`, banner, tone) in PR #3789; 2b's `ClosePane block_id=` / `FleetBulkStop` half and Phase 3 not started.
 **Author:** Camper. Revised 2026-09-25 by Lark with the repo owner's decisions (§0.1).
 **Trigger:** repo owner, 2026-09-24: "we want a command where an agent can kill itself, like /quit for short, where it gracefully shutdown, and it is also a tool an agent can use, with a MAJOR WARNING, but ok to use on direct instruction from user."
 **Grounded in:** `main` at `01100e9c9`. Read from code; file:line references are as of that commit.
@@ -325,7 +325,7 @@ A human-confirm dialog ("Camper wants to quit — Allow?") would close the resid
 **Nobody present.** If no window is open (background mode), the OS notification and tone still fire. If nobody overrides, the shutdown proceeds. The override protects a user who is there. It doesn't hold an agent open indefinitely for one who isn't.
 
 **The caller waits at least 15 s, and is told so.**
-- srv answers an external request at once with **202** `{ status: "pending_user_override", deadline_ms, wait_at_least_ms: 15000 }`, and serves the outcome at `GET /api/v1/agent/shutdown/{request_id}`. A synchronous 15 s+ HTTP call would exceed the MCP client's 10 s srv timeout (`agentmux-mcp/src/main.rs:109`).
+- srv answers an external request at once with **202** `{ status: "pending_user_override", request_id, deadline_ms, wait_at_least_ms: 15000 }`, and serves the outcome at `GET /api/v1/agent/shutdown/{request_id}`. A synchronous 15 s+ HTTP call would exceed the MCP client's 10 s srv timeout (`agentmux-mcp/src/main.rs:109`).
 - The MCP tools (`QuitSelf` from a non-user turn, `ClosePane block_id=`, `FleetBulkStop`) poll that endpoint and return only the final result: `shut_down` or `kept_by_user`.
 - Their descriptions say plainly: *"Shutting down an agent you don't own (or yourself, without the user asking this turn) waits for a 15-second user override window. Expect this call to take at least 15 seconds; the result says whether the user kept the agent running."*
 - `FleetBulkStop` runs all its targets' windows in parallel, one countdown each, and returns per-target outcomes.
@@ -447,7 +447,7 @@ Scope `block:<block_id>`. `pending` is published with persist = 1, so a window t
 | RPC | Params | Result | Used by |
 |---|---|---|---|
 | `ObjectService.QuitAgent` | `blockId` | `{ ok, status: "quitting" \| "already_quitting" }` | `/quit`, `/exit` (§5.1) |
-| `agent.shutdown.keep` | `{ block_id, request_id }` | `{ ok, outcome: "kept_by_user" \| "too_late" }` | the banner's **Keep running** (§6.5) |
+| `agentshutdownkeep` (`AgentShutdownKeepCommand`) | `{ blockid, request_id }` | `{ outcome: "kept_by_user" \| "too_late" }` | the banner's **Keep running** (§6.5) |
 
 The pane ×'s close keeps `ObjectService.ClosePane(blockIds)`. What changes is the frontend's handling (§5.5): the node stays until the saga's layout change arrives.
 
