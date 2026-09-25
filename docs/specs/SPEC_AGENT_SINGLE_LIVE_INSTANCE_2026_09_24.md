@@ -367,6 +367,8 @@ lesson, and the way that incident began).
 2. **Takeover UX.** Superseded state in the pane, fence request, the takeover dialog, observer panes; the §6 counters.
    **Built: the refusal row and Take over — §13.** The badge, a separate observer mode and the counters are still open.
 3. **Record fencing.** Epoch on record appends; store rejects stale epochs; `fork` ledger event.
+   **Built as a writer-side fence plus the epoch in the segment ledger — §14.** A store-side epoch check was not built,
+   and §14 says why.
 4. **LAN — detect and yield.** Advertisement field, peer query, tie-break.
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
    here.
@@ -539,3 +541,44 @@ UID-keyed record. It just starts no turns. There is no separate read-only pane t
   not in the server.
 - **No Superseded badge or counters yet.** A fenced or refused pane shows the failure row only, and there are still only
   logs (§6).
+
+---
+
+## 14. Phase 3 as built — record fencing
+
+**The residual risk after Phases 1–2.**
+- A holder that loses its lease is refused its next turn (the pre-turn verify) and killed (by the renewal task).
+- Until then, though, its CLI can still write to the agent's shared record, `agent:<UID>:current`.
+- The case that matters is a **suspended** holder. Its CLI, its stdout reader and its renewal task all resume together.
+  Output the CLI had buffered could reach the record before the renew notices that another instance reclaimed the
+  lease during the suspension.
+
+**The fence (`agent_admission::RecordFence`).** Every stdout-reader and process-waiter append to the shared record passes
+through `fenced_zone(zone, &fence)`. The pane's own output log is unaffected.
+- **Recent confirmation — no I/O.** While the lease was confirmed ours within the TTL, the fence answers from memory
+  alone. Nobody can have reclaimed an unexpired lease, so this is exact.
+- **Older confirmation — check the file.** After a longer gap, the first append verifies against the lease file before
+  writing. A reclaimed lease marks the handle lost, drops the write, and logs `agent_admission.fenced`. The same
+  loss is then seen by the pre-turn fence, and the process is killed.
+- The confirmation time is updated on claim, on every successful renew, and on every successful verify.
+
+**The ledger.** Each segment's `start` record now carries `lease_epoch`: the ownership generation its process held.
+- A change of epoch between consecutive segments is an ownership change — another instance, or a takeover — so it is
+  visible in the chain.
+- The field is `serde(default)` and skipped when `None`, so older records still read and older builds ignore it.
+- No separate `fork` event was added. With Phases 1–2, two lease-holding instances cannot both append, so there is no
+  divergence left for one to mark. Only lease-unaware (older) builds can still overlap, and they would not write the
+  event either.
+
+**Why not a store-side check.** "The store rejects an append with a stale epoch" would mean the transcript store
+(`FileStore`, shared by every srv on the host) reading the lease on every append — or storing epochs itself. That is a
+schema and hot-path change to a store that older builds also write, and they would bypass it anyway. The writer-side
+fence covers the one realistic case, the woken holder, at no cost to the common path.
+
+**Tests.**
+- `agent_admission`:
+  - `the_record_fence_passes_a_recently_confirmed_lease_without_io`;
+  - `the_record_fence_keeps_a_reclaimed_holders_output_out_after_a_gap` (the write is dropped, and the loss reaches the
+    pre-turn fence);
+  - `the_record_fence_confirms_and_resumes_when_the_lease_is_still_ours_after_a_gap`.
+- `continuity_segments::segments_record_the_lease_epoch_and_older_records_still_read`.

@@ -89,6 +89,13 @@ pub(crate) struct Start {
     pub started_at_ms: i64,
     pub continuity_rung: Rung,
     pub predecessor_segment_id: Option<String>,
+    /// The single-live-instance lease epoch this segment's process held
+    /// (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 3). A change between
+    /// consecutive segments is an ownership change — another instance, or a
+    /// takeover — visible in the ledger. `None`: no lease (older build, no
+    /// UID) or a record written before this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_epoch: Option<u64>,
 }
 
 /// One segment, folded from its events.
@@ -275,6 +282,32 @@ mod tests {
             started_at_ms: at,
             continuity_rung: rung,
             predecessor_segment_id: None,
+            lease_epoch: None,
+        }
+    }
+
+    /// SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 3: each segment
+    /// records the lease epoch its process held, so an ownership change
+    /// between segments is visible in the ledger; a record written before
+    /// the field existed still reads, as `None`.
+    #[test]
+    fn segments_record_the_lease_epoch_and_older_records_still_read() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let first = record_start(&fs, Start { lease_epoch: Some(3), ..start(1_000, Rung::Fresh) }).unwrap();
+        record_start(&fs, Start { lease_epoch: Some(4), ..start(2_000, Rung::Native) }).unwrap();
+        let all = segments(&fs, UID);
+        assert_eq!(all.iter().map(|s| s.start.lease_epoch).collect::<Vec<_>>(), vec![Some(3), Some(4)]);
+        assert_eq!(all[0].start.segment_id, first);
+
+        let old = serde_json::json!({
+            "event": "start", "segment_id": "s", "agent_uid": UID, "definition_id": null, "provider": "claude",
+            "config_dir": null, "provider_session_id": null, "cwd": "", "channel": "stable",
+            "agentmux_version": "0.57.0", "block_id": "b", "zone": null, "byte_start": null,
+            "started_at_ms": 1, "continuity_rung": "fresh", "predecessor_segment_id": null,
+        });
+        match serde_json::from_value::<Event>(old).unwrap() {
+            Event::Start(s) => assert_eq!(s.lease_epoch, None),
+            other => panic!("expected a start event, got {other:?}"),
         }
     }
 
