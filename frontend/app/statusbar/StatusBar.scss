@@ -272,6 +272,27 @@
         font-size: 0.95em;
     }
 
+    // A value that is itself a link (the host popover's Data path): a real
+    // <button> for keyboard access, stripped to look like underlined text.
+    .status-bar-popover-link {
+        display: block;
+        min-width: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        text-align: right;
+        white-space: nowrap;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+
+        &:hover,
+        &:focus-visible {
+            color: var(--accent-color);
+        }
+    }
+
     .status-bar-popover-divider {
         border-top: 1px solid var(--border-color);
         margin: 5px 0;

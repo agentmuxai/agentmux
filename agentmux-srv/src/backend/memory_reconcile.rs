@@ -137,7 +137,7 @@ fn pass_zone(uid: &str) -> String {
 }
 
 /// Take the lease until `until`; `None` while another pass holds it.
-fn take_pass_lease(fs: &FileStore, uid: &str, until: Instant) -> Result<Option<String>, StoreError> {
+pub(crate) fn take_pass_lease(fs: &FileStore, uid: &str, until: Instant) -> Result<Option<String>, StoreError> {
     let now = agentmux_common::time::now_ms();
     // Held past the budget by a margin, in case the pass overruns it
     // mid-file; a crashed pass frees it once that passes.
@@ -157,7 +157,7 @@ fn take_pass_lease(fs: &FileStore, uid: &str, until: Instant) -> Result<Option<S
     })
 }
 
-fn release_pass_lease(fs: &FileStore, uid: &str, owner: &str) {
+pub(crate) fn release_pass_lease(fs: &FileStore, uid: &str, owner: &str) {
     let released = fs.zone_txn(&pass_zone(uid), |z| {
         let held = z.read(PASS_LEASE_FILE)?.and_then(|b| serde_json::from_slice::<PassLease>(&b).ok());
         if held.is_some_and(|l| l.owner == owner) {

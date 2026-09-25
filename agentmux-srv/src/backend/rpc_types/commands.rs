@@ -618,6 +618,8 @@ pub const COMMAND_NATIVE_MEMORY_WRITE_FILE: &str = "agent:memory:write_file";
 pub const COMMAND_NATIVE_MEMORY_HISTORY: &str = "agent:memory:history";
 pub const COMMAND_NATIVE_MEMORY_DIFF: &str = "agent:memory:diff";
 pub const COMMAND_NATIVE_MEMORY_REVERT: &str = "agent:memory:revert";
+/// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4 (phase M3c).
+pub const COMMAND_NATIVE_MEMORY_ADOPTION_LIST: &str = "agent:memory:adoption_list";
 
 // ---- Client type constants ----
 

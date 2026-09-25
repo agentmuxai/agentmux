@@ -25,18 +25,21 @@ use std::path::PathBuf;
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
+    COMMAND_NATIVE_MEMORY_ADOPTION_LIST,
     COMMAND_NATIVE_MEMORY_DIFF,
     COMMAND_NATIVE_MEMORY_HISTORY,
     COMMAND_NATIVE_MEMORY_LIST,
     COMMAND_NATIVE_MEMORY_READ_FILE,
     COMMAND_NATIVE_MEMORY_REVERT,
     COMMAND_NATIVE_MEMORY_WRITE_FILE,
+    CommandNativeMemoryAdoptionListData,
     CommandNativeMemoryDiffData,
     CommandNativeMemoryHistoryData,
     CommandNativeMemoryListData,
     CommandNativeMemoryReadFileData,
     CommandNativeMemoryRevertData,
     CommandNativeMemoryWriteFileData,
+    NativeMemoryAdoptionListResult,
     NativeMemoryDiffResult,
     NativeMemoryFileMeta,
     NativeMemoryHistoryResult,
@@ -958,9 +961,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // reporting "no memories" for every agent #2901 was
                 // supposed to have fixed. See
                 // SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md.
-                let memory_dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
+                let resolved = resolve_memory_dir_by_id(&mstore, &agent).ok_or_else(|| {
                     format!("agent:memory:list: agent {} has no resolvable memory directory", cmd.agent_id)
                 })?;
+                let unverified = resolved.provenance == MemoryDirProvenance::Unverified;
+                let memory_dir = resolved.path;
 
                 // Existing mirror metadata (no content) for this agent, keyed by
                 // filename — lets the loop below skip the expensive full-content
@@ -1128,7 +1133,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename))
                 });
 
-                Ok(NativeMemoryListResult { files })
+                Ok(NativeMemoryListResult { files, unverified })
             }
         },
     );
@@ -1379,6 +1384,31 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // result, and no other crate invokes this command, so the
                 // difference is unobservable.
                 Ok(())
+            }
+        },
+    );
+
+    // Offers only: adopting a listed folder goes through the host's
+    // confirmation window (`service/memory_adopt.rs`), never this RPC — every
+    // agent holds the key this one is called with.
+    let mstore_adoption = state.mstore.clone();
+    engine.register_typed(
+        COMMAND_NATIVE_MEMORY_ADOPTION_LIST,
+        move |cmd: CommandNativeMemoryAdoptionListData, _ctx| {
+            let mstore = mstore_adoption.clone();
+            async move {
+                let agent = mstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:adoption_list: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:adoption_list: agent {} not found", cmd.agent_id))?;
+                let Some(fs) = crate::backend::agent_session::global_transcript_store() else {
+                    return Ok(NativeMemoryAdoptionListResult { list: None });
+                };
+                let list = tokio::task::spawn_blocking(move || crate::backend::memory_adopt::list(fs, &mstore, &agent))
+                    .await
+                    .map_err(|e| format!("agent:memory:adoption_list: {e}"))?
+                    .map_err(|e| format!("agent:memory:adoption_list: {e}"))?;
+                Ok(NativeMemoryAdoptionListResult { list })
             }
         },
     );

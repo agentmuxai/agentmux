@@ -570,3 +570,104 @@
     border-style: dashed;
     color: var(--secondary-text-color);
 }
+
+// ── Earlier memory (adoption) ────────────────────────────────────────────
+// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4. Confirmation happens
+// in a separate host window; this only lists and asks.
+
+.memory-adoption-panel {
+    margin-bottom: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+    font-size: var(--text-sm);
+}
+
+.memory-adoption-panel-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: default;
+
+    i {
+        width: 12px;
+        opacity: 0.7;
+    }
+}
+
+.memory-adoption-panel-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-1-5);
+}
+
+.memory-adoption-panel-candidate {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    align-items: baseline;
+    gap: var(--space-1-5);
+}
+
+.memory-adoption-panel-account {
+    font-weight: 600;
+}
+
+.memory-adoption-panel-files {
+    overflow: hidden;
+    color: var(--secondary-text-color);
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.memory-adoption-panel-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.memory-adoption-panel-adopt {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    cursor: default;
+
+    &:disabled {
+        opacity: 0.5;
+    }
+}
+
+.memory-adoption-panel-error,
+.memory-adoption-panel-outcome {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.memory-adoption-panel-error,
+.memory-adoption-panel-outcome.is-failed {
+    color: var(--error-color);
+}
+
+// A folder found by a guess, not the agent's own launch: read-only.
+.native-memory-manager-unverified {
+    margin-left: var(--space-1-5);
+    padding: 1px var(--space-1-5);
+    border: 1px solid color-mix(in srgb, var(--warning-color, #d29922) 60%, transparent);
+    border-radius: 999px;
+    color: var(--warning-color, #d29922);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}

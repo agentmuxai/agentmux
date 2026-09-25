@@ -439,6 +439,7 @@ async fn route_command(
         "open_login_terminal" => commands::cli_login::open_login_terminal(args),
         "ensure_settings_file" => commands::platform::ensure_settings_file(state),
         "open_in_editor" => commands::platform::open_in_editor(args),
+        "open_in_file_manager" => commands::platform::open_in_file_manager(state, args),
         "copy_file_to_dir" => commands::providers::copy_file_to_dir(args),
         "consume_drag_paths" => Ok(serde_json::json!(crate::drag_stash::take())),
 
@@ -671,6 +672,27 @@ async fn route_command(
                     Err(e)
                 }
             }
+        }
+        "memory_adoption_request" => {
+            // The Armory asks to adopt earlier accounts' memory for an agent
+            // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.4). This only
+            // opens the approval subwindow; see `memory_adoption`.
+            let window_label = args.get("window_label").and_then(|v| v.as_str()).unwrap_or("");
+            let agent_id = args.get("agent_id").and_then(|v| v.as_str()).unwrap_or("");
+            let list_id = args.get("list_id").and_then(|v| v.as_str()).unwrap_or("");
+            let choices = args.get("choices").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let summary = args.get("summary").cloned().unwrap_or(serde_json::Value::Null);
+            if agent_id.is_empty() || list_id.is_empty() {
+                return Err("memory_adoption_request: agent_id and list_id are required".into());
+            }
+            crate::memory_adoption::request(state, window_label, agent_id, list_id, choices, summary)
+                .map(|approval_id| serde_json::json!({ "approval_id": approval_id }))
+        }
+        "memory_adoption_decide" => {
+            // Only the approval subwindow knows the approval_id.
+            let approval_id = args.get("approval_id").and_then(|v| v.as_str()).unwrap_or("");
+            let approve = args.get("approve").and_then(|v| v.as_bool()).unwrap_or(false);
+            crate::memory_adoption::decide(state, approval_id, approve).await
         }
         "credential_approval_decide" => {
             // The human resolved the credential-approval subwindow —

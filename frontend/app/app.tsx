@@ -46,6 +46,7 @@ import { NotificationBubbles } from "./notification/notificationbubbles";
 import { MemoryPressureBanner } from "./notification/memory-pressure-banner";
 import { BrowserPaneOutsideClickBridge } from "./window/browser-pane-outside-click-bridge";
 import { CredentialApprovalWindow } from "./view/credential-approval/CredentialApprovalWindow";
+import { MemoryAdoptionApprovalWindow } from "./view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
 
 import "./app.scss";
 
@@ -393,6 +394,10 @@ const AppInner = () => {
     // app-init.ts's guard against firing `pane.open` for this view), so it
     // must never wait on atoms that will never populate.
     const IS_CREDENTIAL_APPROVAL = new URLSearchParams(window.location.search).get("initialView") === "credential-approval";
+    // Same shape, for adopting an agent's earlier memory (agentmux-cef
+    // `memory_adoption`).
+    const IS_MEMORY_ADOPTION_APPROVAL =
+        new URLSearchParams(window.location.search).get("initialView") === "memory-adoption-approval";
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     const client = atoms.client;
     const windowData = atoms.muxWindow;
@@ -400,6 +405,9 @@ const AppInner = () => {
 
     if (IS_CREDENTIAL_APPROVAL) {
         return <CredentialApprovalWindow />;
+    }
+    if (IS_MEMORY_ADOPTION_APPROVAL) {
+        return <MemoryAdoptionApprovalWindow />;
     }
 
     return (
