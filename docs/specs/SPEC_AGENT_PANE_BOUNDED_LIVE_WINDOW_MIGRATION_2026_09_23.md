@@ -1195,9 +1195,9 @@ prerequisites shrink to what already shipped:
 **The live feed.**
 
 - Holds the turn in flight plus the last **K finished turns**
-  (`agent:livefeedturns`, default 3, minimum 1), and never less than one
+  (`agent:livefeedturns`, default 6, minimum 1; 3 before 2026-09-25), and never less than one
   finished turn, so the reply just received always stays. A byte ceiling
-  (1 MB of finished turns, a constant) rolls off earlier when turns are huge,
+  (2 MB of finished turns, a constant; 1 MB before 2026-09-25) rolls off earlier when turns are huge,
   still keeping at least one.
 - **A turn** starts at a `user_message` node (parser-produced or optimistic);
   nodes before the first one form a leading turn. Same rule as

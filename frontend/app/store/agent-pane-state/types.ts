@@ -1088,6 +1088,9 @@ export type AgentPaneEvent =
            *  notification bridge, which forwards it to the srv router for
            *  redaction (SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md §9.2). */
           question?: string;
+          /** How many questions the pending call asks — the toast adds
+           *  " (+N more)" when it's more than one. */
+          questionCount?: number;
       }
     /**
      * Emitted when the waiting state ends — user submitted or started

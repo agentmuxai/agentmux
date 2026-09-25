@@ -12,6 +12,15 @@ this complements), `docs/specs/SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_
 
 ---
 
+## Revision 4 (2026-09-24): the flash follows its sound
+
+`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md` replaces the single fixed
+click below (40 ms hold, 300 ms total, 100 ms throttle). Each tool tone now
+flashes one pulse per audible strike, at the strike's own time and relative
+loudness, delayed to land with the audible sound. Overlapping sounds merge
+instead of being throttled. Targets, colors and overlay mechanics below are
+unchanged.
+
 ## Revision 3 (2026-09-24): the window tab is subtle and uncolored; the pill is less bright
 
 Owner feedback on Revision 2. It replaces Revision 2's item 2 (color) for both

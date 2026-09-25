@@ -36,8 +36,20 @@ vi.mock("@/app/store/mos", () => ({
 }));
 vi.mock("@/app/tab/tab-measure", () => ({ measureTabWidth: () => 100 }));
 
-import { emitActivityFlash } from "@/app/notification/activity-flash";
+import { emitActivityFlash, type FlashTarget, patternDurationMs } from "@/app/notification/activity-flash";
 import { Tab } from "./tab";
+
+// A two-strike syllable, 74 ms apart, landing 30 ms from now.
+const flashFrom = (blockId: string): FlashTarget => ({
+    blockId,
+    pattern: {
+        strikes: [
+            { atMs: 0, intensity: 0.5 },
+            { atMs: 74, intensity: 0.5 },
+        ],
+    },
+    delayMs: 30,
+});
 
 afterEach(() => cleanup());
 
@@ -102,11 +114,17 @@ describe("Tab activity flash", () => {
     it("clicks the tab's overlay for a block in this tab, without a pane color", () => {
         const { animate, restore } = stubAnimate();
         const { container } = renderTab();
-        emitActivityFlash({ blockId: "blk-1" });
+        emitActivityFlash(flashFrom("blk-1"));
         const inner = container.querySelector<HTMLDivElement>(".tab-inner")!;
         expect(animate).toHaveBeenCalledTimes(1);
         expect(animate.mock.instances[0]).toBe(inner);
         expect(animate.mock.calls[0][1]).toMatchObject({ pseudoElement: "::before" });
+        // The sound's own pattern and delay reach the animation.
+        const { pattern, delayMs } = flashFrom("blk-1");
+        expect((animate.mock.calls[0][1] as KeyframeAnimationOptions).duration).toBeCloseTo(
+            delayMs + patternDurationMs(pattern),
+            5
+        );
         expect(inner.style.getPropertyValue("--activity-flash-base")).toBe("");
         restore();
     });
@@ -114,7 +132,7 @@ describe("Tab activity flash", () => {
     it("the active tab clicks too", () => {
         const { animate, restore } = stubAnimate();
         renderTab({ active: true });
-        emitActivityFlash({ blockId: "blk-1" });
+        emitActivityFlash(flashFrom("blk-1"));
         expect(animate).toHaveBeenCalledTimes(1);
         restore();
     });
@@ -122,7 +140,7 @@ describe("Tab activity flash", () => {
     it("ignores a block that lives in another tab", () => {
         const { animate, restore } = stubAnimate();
         renderTab();
-        emitActivityFlash({ blockId: "blk-elsewhere" });
+        emitActivityFlash(flashFrom("blk-elsewhere"));
         expect(animate).not.toHaveBeenCalled();
         restore();
     });
@@ -131,7 +149,7 @@ describe("Tab activity flash", () => {
         const { animate, restore } = stubAnimate();
         const { unmount } = renderTab();
         unmount();
-        emitActivityFlash({ blockId: "blk-1" });
+        emitActivityFlash(flashFrom("blk-1"));
         expect(animate).not.toHaveBeenCalled();
         restore();
     });

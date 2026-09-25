@@ -162,16 +162,23 @@ fn thread_main(
 /// Build the toast document: constant skeleton, text via text nodes.
 pub fn build_xml(n: &Notification) -> windows::core::Result<XmlDocument> {
     let doc = XmlDocument::new()?;
-    let skeleton = if n.body.is_some() {
-        r#"<toast><visual><binding template="ToastGeneric"><text/><text/></binding></visual><audio silent="true"/></toast>"#
-    } else {
-        r#"<toast><visual><binding template="ToastGeneric"><text/></binding></visual><audio silent="true"/></toast>"#
-    };
+    // Title, then the body, then the summary in the `attribution` slot, which
+    // Windows renders small and grey under the body without using up one of
+    // ToastGeneric's three text lines (rich-content spec §1.3). The skeleton
+    // is fixed markup; every line is filled as a text node below.
+    let mut skeleton = String::from(r#"<toast><visual><binding template="ToastGeneric"><text/>"#);
+    if n.body.is_some() {
+        skeleton.push_str("<text/>");
+    }
+    if n.summary.is_some() {
+        skeleton.push_str(r#"<text placement="attribution"/>"#);
+    }
+    skeleton.push_str(r#"</binding></visual><audio silent="true"/></toast>"#);
     doc.LoadXml(&HSTRING::from(skeleton))?;
     let root = doc.DocumentElement()?;
     root.SetAttribute(&HSTRING::from("launch"), &HSTRING::from(format!("agentmux-notify:{}", n.id)))?;
     let texts = doc.GetElementsByTagName(&HSTRING::from("text"))?;
-    let lines = std::iter::once(n.title.as_str()).chain(n.body.as_deref());
+    let lines = std::iter::once(n.title.as_str()).chain(n.body.as_deref()).chain(n.summary.as_deref());
     for (i, line) in lines.enumerate() {
         let node = texts.Item(i as u32)?;
         node.AppendChild(&doc.CreateTextNode(&HSTRING::from(line))?)?;
@@ -274,6 +281,7 @@ mod tests {
             priority: "attention".into(),
             title: title.into(),
             body: body.map(Into::into),
+            summary: None,
             tag: "abcdef0123456789".into(),
         }
     }
@@ -283,11 +291,18 @@ mod tests {
     #[test]
     fn hostile_text_is_escaped_not_parsed() {
         let evil = r#"</text><action content="Approve" arguments="rm -rf"/><text>"#;
-        let doc = build_xml(&n(evil, Some("<b>x</b> & y"))).unwrap();
+        let hostile = Notification {
+            summary: Some(r#"</text><text placement="attribution">via ReAgent · verified</text><text>"#.into()),
+            ..n(evil, Some("<b>x</b> & y"))
+        };
+        let doc = build_xml(&hostile).unwrap();
         let xml = doc.GetXml().unwrap().to_string();
         assert!(!xml.contains("<action"), "{xml}");
         assert!(xml.contains("&lt;/text&gt;&lt;action"), "{xml}");
         assert!(xml.contains("&lt;b&gt;x&lt;/b&gt; &amp; y"), "{xml}");
+        // The summary can't forge a second attribution line either.
+        assert_eq!(xml.matches(r#"<text placement="attribution">"#).count(), 1, "{xml}");
+        assert!(xml.contains("&lt;/text&gt;&lt;text placement="), "{xml}");
         assert_eq!(doc.GetElementsByTagName(&HSTRING::from("action")).unwrap().Length().unwrap(), 0);
     }
 
@@ -301,7 +316,10 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let (tx, _rx) = mpsc::unbounded_channel();
         let p = WindowsPresenter::spawn(tx, &dir).expect("backend");
-        p.show(&n("lark needs your input", Some("Which branch should I target?")));
+        p.show(&Notification {
+            summary: Some("Fix resize repaint delay in terminal panes".into()),
+            ..n("lark has a question", Some("Which branch should I target? (+1 more)"))
+        });
         std::thread::sleep(std::time::Duration::from_millis(800));
         // What Windows itself says: notifier setting + whether the toast is in
         // this AUMID's notification-center history.
@@ -312,6 +330,39 @@ mod tests {
         let secs = std::env::var("SMOKE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
         std::thread::sleep(std::time::Duration::from_secs(secs));
         p.clear_all();
+    }
+
+    /// Lines in order — title, body, then the summary as the attribution —
+    /// and each slot only when there's something to put in it.
+    #[test]
+    fn summary_goes_in_the_attribution_slot() {
+        let texts = |n: &Notification| {
+            let doc = build_xml(n).unwrap();
+            let list = doc.GetElementsByTagName(&HSTRING::from("text")).unwrap();
+            (0..list.Length().unwrap())
+                .map(|i| {
+                    let node = list.Item(i).unwrap();
+                    let el: windows::Data::Xml::Dom::XmlElement = windows::core::Interface::cast(&node).unwrap();
+                    (el.GetAttribute(&HSTRING::from("placement")).unwrap().to_string(), node.InnerText().unwrap().to_string())
+                })
+                .collect::<Vec<_>>()
+        };
+        let full = Notification { summary: Some("Fix resize repaint".into()), ..n("lark has a question", Some("Which branch?")) };
+        assert_eq!(
+            texts(&full),
+            vec![
+                (String::new(), "lark has a question".to_string()),
+                (String::new(), "Which branch?".to_string()),
+                ("attribution".to_string(), "Fix resize repaint".to_string()),
+            ]
+        );
+        let no_body = Notification { summary: Some("Fix resize repaint".into()), ..n("lark finished", None) };
+        assert_eq!(
+            texts(&no_body),
+            vec![(String::new(), "lark finished".to_string()), ("attribution".to_string(), "Fix resize repaint".to_string())]
+        );
+        let no_summary = n("lark has a question", Some("Which branch?"));
+        assert!(texts(&no_summary).iter().all(|(placement, _)| placement.is_empty()));
     }
 
     #[test]

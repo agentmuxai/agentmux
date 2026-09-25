@@ -18,9 +18,9 @@ import type { DocumentNode } from "./types";
 import { isNodeInProgress, nodeBytes } from "./virtualization/streaming-buffer";
 
 /** Finished turns kept by default (`agent:livefeedturns`). */
-export const LIVE_FEED_DEFAULT_TURNS = 3;
+export const LIVE_FEED_DEFAULT_TURNS = 6;
 /** Finished turns kept are also capped by size; at least one always stays. */
-export const LIVE_FEED_MAX_FINISHED_BYTES = 1_000_000;
+export const LIVE_FEED_MAX_FINISHED_BYTES = 2_000_000;
 
 /**
  * Panes whose transcript carries everything the feed shows, user messages

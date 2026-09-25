@@ -45,6 +45,24 @@ describe("PaneRow", () => {
         expect(container.querySelector(".pane-row--neutral")).toBeInTheDocument();
     });
 
+    it("marks rows with labelled actions so narrow panes can stack them", () => {
+        const { container } = render(() => (
+            <PaneRow
+                sigil="⚠"
+                title="auth"
+                actions={[{ glyph: "🔑", label: "Log in", title: "Log in", onClick: () => {} }]}
+            />
+        ));
+        expect(container.querySelector(".pane-row--labeled-actions")).toBeInTheDocument();
+    });
+
+    it("does not mark icon-only pin rows as labelled-action rows", () => {
+        const { container } = render(() => (
+            <PaneRow sigil="⟩" title="dev" actions={[{ glyph: "■", title: "Stop", onClick: () => {} }]} />
+        ));
+        expect(container.querySelector(".pane-row--labeled-actions")).toBeNull();
+    });
+
     it("fires onActivate when the summary is clicked", async () => {
         const onActivate = vi.fn();
         render(() => <PaneRow sigil="⑂" title="fork" onActivate={onActivate} />);
