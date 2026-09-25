@@ -16,16 +16,14 @@ type SplitDirection = "up" | "down" | "left" | "right";
 // ─── Copy / Paste helpers ─────────────────────────────────────────────────────
 
 /**
- * Get the current text selection for a pane.
- * - Terminal: uses xterm.js's own selection (reliable after right-click).
- * - Other panes: falls back to browser window.getSelection().
+ * Get the current text selection for a pane: the tab's own
+ * (`ViewModel.getSelection` — a terminal's xterm keeps its selection apart
+ * from the page's, so it survives the right-click that clears the page's),
+ * else the window's.
  */
 function getPaneSelection(viewModel?: ViewModel): string {
-    // TermViewModel exposes termRef.current.terminal (xterm.js Terminal instance).
-    // xterm maintains its own selection model independently of browser focus,
-    // so getSelection() is reliable even after a right-click clears browser selection.
-    const termSel = (viewModel as any)?.termRef?.current?.terminal?.getSelection?.();
-    if (typeof termSel === "string") return termSel;
+    const own = viewModel?.getSelection?.();
+    if (typeof own === "string") return own;
     return window.getSelection()?.toString() ?? "";
 }
 
@@ -195,10 +193,7 @@ export function buildPaneContextMenu(
                         try {
                             const text = await clipboardReadText();
                             if (!text) return;
-                            const terminal = (viewModel as any)?.termRef?.current?.terminal;
-                            if (terminal) {
-                                terminal.paste(text);
-                            }
+                            viewModel?.paste?.(text);
                         } catch (e) {
                             console.error("[pane-actions] paste failed:", e);
                         }

@@ -421,21 +421,31 @@ working throughout through a legacy adapter.
        title (with its placeholder flag) and favicon reach the host as
        `liveTitle`/`liveFavicon`, and the pane's synthetic context menu
        passes its browser context through `contextMenu`.
-     - **Terminal and agent (not started — contract gaps first).** Unlike
-       the eight views above, shared code reaches INTO these two view models
-       through the host, which works only while the host holds the real
-       class; behind the native adapter each reach-in would silently read
-       `undefined`. Each needs a contract hook before the view can move:
-       | Reach-in (today) | Needed in the contract |
+     - **Terminal and agent (hooks implemented; the views move next).**
+       Unlike the eight views above, shared code reached INTO these two view
+       models through the host, which works only while the host holds the
+       real class; behind the native adapter each reach-in would silently
+       read `undefined`. Each now goes through a contract hook, while both
+       views are still legacy classes (so the hooks ship on their own, with
+       no behavior change):
+       | Reach-in (before) | Now |
        |---|---|
-       | `voiceHandle` — header mic (blockframe) and agent footer | `PaneTabInstance.voice` (handle for the mic and Ctrl+Shift+V) |
-       | `searchAtoms` — written onto the vm by `search.tsx`, read by `keymodel.ts` (Ctrl+F) | a host-owned search slot the instance subscribes to |
-       | `(viewModel as any).termRef` — `pane-actions.ts` selection + paste | `PaneTabInstance.selection()` / `paste(text)` |
-       | `agentRuntimeLabel` — term chrome badge via `activeViewModel as TermViewModel` | the chrome model reads its own per-block state, not the vm |
-       | `agentDefinitions` — agent chrome fork tabs via `activeViewModel as AgentViewModel` | same |
+       | `voiceHandle` — header mic (blockframe), Ctrl+Shift+V | `PaneTabInstance.voice()` → the adapter's `voiceHandle` |
+       | `searchAtoms` — written onto the vm by `search.tsx`, read by `keymodel.ts` (Ctrl+F) | `PaneTabInstance.search()`, read live through a getter (the find bar is created when the view mounts, after the adapter) |
+       | `(viewModel as any).termRef` — `pane-actions.ts` selection + paste | `ViewModel.getSelection` / `paste` (`PaneTabInstance.selection` / `paste`); the terminal implements them |
+       | `agentRuntimeLabel` — term chrome badge via `activeViewModel as TermViewModel` | the chrome finds the active tab's model by block id (`term-models.ts`) |
+       | `agentDefinitions` — agent chrome fork tabs via `activeViewModel as AgentViewModel` | the same, `agent-models.ts` |
        | `setProgressBarMount` — the chrome's progress slot → agent | `PaneTabInstance.progressMount` |
-       | `bcm.viewModel as TermViewModel` — cross-terminal lookup (termViewModel.ts) | a term-module registry by block id |
-       | `isBasicTerm` — the basic-terminal count (keymodel.ts) | a capability or that same registry |
+       | `bcm.viewModel as TermViewModel` — cross-terminal lookup (termViewModel.ts) | `basicTermModels()` (`term-models.ts`) |
+       | `isBasicTerm` — the basic-terminal count (keymodel.ts) | the same; `isBasicTerm` left the shared `ViewModel` type |
+
+       The registries are one reactive helper (`util/keyed-registry.ts`): a
+       model registers in its constructor and unregisters in `dispose`, and a
+       stale unregister (the old model of a rebuilt block) leaves the newer
+       registration alone. Two more instance fields the terminal needs came
+       with them: `background` (its theme's header background) and
+       `manageConnection` (a state-dependent connection button: a terminal
+       running a command has none).
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus

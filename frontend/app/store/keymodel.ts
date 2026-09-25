@@ -3,10 +3,10 @@
 
 import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
+import { basicTermModels } from "@/app/view/term/term-models";
 import {
     atoms,
     createTab,
-    getAllBlockComponentModels,
     getApi,
     getBlockComponentModel,
     getFocusedBlockId,
@@ -33,15 +33,7 @@ import {
 } from "./keymodel-nav";
 
 function countTermBlocks(): number {
-    const allBCMs = getAllBlockComponentModels();
-    let count = 0;
-    for (const bcm of allBCMs) {
-        const viewModel = bcm.viewModel;
-        if (viewModel.isBasicTerm?.()) {
-            count++;
-        }
-    }
-    return count;
+    return basicTermModels().length;
 }
 
 function registerGlobalKeys() {
