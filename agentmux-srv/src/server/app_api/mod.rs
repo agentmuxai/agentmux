@@ -1204,7 +1204,7 @@ pub(crate) fn memory_list_impl<'o>(
         });
     }
     files.sort_by(|a, b| b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename)));
-    serde_json::to_value(NativeMemoryListResult { files }).map_err(|e| e.to_string())
+    serde_json::to_value(NativeMemoryListResult { files, unverified: false }).map_err(|e| e.to_string())
 }
 
 pub(crate) fn memory_read_impl<'o>(

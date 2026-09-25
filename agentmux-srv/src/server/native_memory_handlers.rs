@@ -961,9 +961,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // reporting "no memories" for every agent #2901 was
                 // supposed to have fixed. See
                 // SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md.
-                let memory_dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
+                let resolved = resolve_memory_dir_by_id(&mstore, &agent).ok_or_else(|| {
                     format!("agent:memory:list: agent {} has no resolvable memory directory", cmd.agent_id)
                 })?;
+                let unverified = resolved.provenance == MemoryDirProvenance::Unverified;
+                let memory_dir = resolved.path;
 
                 // Existing mirror metadata (no content) for this agent, keyed by
                 // filename — lets the loop below skip the expensive full-content
@@ -1131,7 +1133,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename))
                 });
 
-                Ok(NativeMemoryListResult { files })
+                Ok(NativeMemoryListResult { files, unverified })
             }
         },
     );
