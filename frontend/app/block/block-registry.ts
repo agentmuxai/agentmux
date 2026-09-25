@@ -12,7 +12,7 @@
 import { AgentViewModel } from "@/app/view/agent";
 import { ArmoryViewModel } from "@/app/view/armory/armory";
 import { BrowserViewModel } from "@/app/view/browser/browser";
-import { DroneViewModel } from "@/app/view/drone/drone";
+import { dronePaneTab } from "@/app/view/drone/drone";
 import { EditorViewModel } from "@/app/view/editor/editor";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
@@ -86,9 +86,7 @@ const builtins = [
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
     legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
     legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
-    // Workflows was renamed to Drone (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18);
-    // persisted blocks still say "workflows".
-    legacyAdapter("drone", DroneViewModel as any, { label: "Drone", icon: "diagram-project", aliases: ["workflows"] }),
+    dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     legacyAdapter("warden", WardenViewModel as any, { label: "Warden", capabilities: { paneZoom: {} } }),
     legacyAdapter("toolchain", ToolchainViewModel as any),
     // The Trust Center was renamed to Armory

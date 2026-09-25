@@ -392,6 +392,9 @@ working throughout through a legacy adapter.
        and writes its own `term:zoom` through `ctx`; the instance forwards
        `dispose` (the model's subscriptions and timers). The contract grew the
        `noPadding` capability (full-bleed content).
+     - **Drone (implemented):** `dronePaneTab` (drone.tsx), keeping the
+       `workflows` alias. Its only own-block read, `frame:title`, comes from
+       `ctx.meta` and titles the pane (`liveTitle`); `dispose` is forwarded.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
