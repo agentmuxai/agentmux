@@ -172,6 +172,24 @@ pub(crate) fn held_exclusively(fs: &FileStore, uid: &str, dir: &Path) -> Result<
     Ok(claims.uids.contains_key(uid) && claims.uids.len() == 1)
 }
 
+/// Whether another agent uses `dir`: it has claimed it (in any channel), or
+/// resolves to it in this channel's store. Read-only. For offering a folder
+/// for adoption (spec §2.1.4), which must exclude folders shared with
+/// another agent.
+pub(crate) fn used_by_another(fs: &FileStore, mstore: &Store, uid: &str, dir: &Path) -> Result<bool, StoreError> {
+    let id = dir_id(dir);
+    if let Some(bytes) = fs.read_files_consistent(&claims_zone(&id), &[CLAIMS_FILE])?.pop().flatten() {
+        let claims: Claims =
+            serde_json::from_slice(&bytes).map_err(|e| StoreError::Other(format!("memory dir claims unreadable: {e}")))?;
+        if claims.uids.keys().any(|c| c != uid) {
+            return Ok(true);
+        }
+    }
+    Ok(mstore.agent_def_list().unwrap_or_default().iter().filter(|a| a.id != uid).any(|other| {
+        crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, other).is_some_and(|r| dir_id(&r.path) == id)
+    }))
+}
+
 /// Rules 1 and 2: no store writes.
 fn known_shared_or_vetoed(
     mstore: &Store,

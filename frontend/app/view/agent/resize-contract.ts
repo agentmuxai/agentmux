@@ -221,7 +221,7 @@ export function cancelHeightContinuity(el: HTMLElement): void {
  *  ancestor's budget and stops changing once content exceeds it, while
  *  `scrollHeight` keeps reflecting the true content height. That's exactly
  *  `ToolOverlayLog.tsx`'s `.agent-tool-overlay-log` (bounded by
- *  `.agent-tool-panel`'s `max-height: 50vh`, `overflow-y: auto` on itself)
+ *  `.agent-tool-panel`'s `max-height` (a third of 50vh), `overflow-y: auto` on itself)
  *  — the element this module's first real migration target needs to FLIP,
  *  and precisely the large-shrink case (a long raw chunk log collapsing to
  *  a short compact result) this whole effort exists to fix. Callers with
@@ -248,7 +248,7 @@ const DEFAULT_MEASURE = (el: HTMLElement): number => el.offsetHeight;
  * but a long raw chunk log easily exceeds several thousand px of
  * `scrollHeight` (the 1,000-line output cap alone gets there), while the
  * box's actual RENDERED shrink is bounded by the ancestor panel's
- * `max-height: 50vh` to at most a few hundred px. Gating the magnitude cap
+ * `max-height` (a third of 50vh) to at most a couple hundred px. Gating the magnitude cap
  * on the unclamped `scrollHeight` delta would skip animating exactly the
  * long-output transitions this module exists to smooth, for a reason
  * (`MAX_ANIMATED_DELTA_PX`) that was never about THIS element's visible

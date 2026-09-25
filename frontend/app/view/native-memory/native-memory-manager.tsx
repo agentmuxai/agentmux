@@ -48,6 +48,7 @@ import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
 import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption } from "./MemoryAgentFilterBar";
 import { MemoryFileCard } from "./MemoryFileCard";
 import { NativeMemoryFileView } from "./NativeMemoryFileView";
+import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
 import "./native-memory-manager.scss";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
@@ -136,6 +137,9 @@ export function NativeMemoryManager(): JSX.Element {
     const [agents, agentsLoading] = useAgentDefinitions();
     const [selectedAgent, setSelectedAgent] = createSignal<AgentDefinition | null>(null);
     const [files, setFiles] = createSignal<NativeMemoryFileMeta[]>([]);
+    // The folder was found by a guess, not the agent's own launch
+    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2): read-only.
+    const [unverified, setUnverified] = createSignal(false);
     const [selectedFilename, setSelectedFilename] = createSignal<string>("");
     const [filesLoading, setFilesLoading] = createSignal(false);
     const [filesError, setFilesError] = createSignal<string | null>(null);
@@ -298,6 +302,7 @@ export function NativeMemoryManager(): JSX.Element {
         const requestId = ++latestRequestId;
         setSelectedFilename("");
         setFiles([]);
+        setUnverified(false);
         setFilesError(null);
         if (!agent) return;
         setFilesLoading(true);
@@ -305,6 +310,7 @@ export function NativeMemoryManager(): JSX.Element {
             .then((res) => {
                 if (requestId !== latestRequestId) return;
                 setFiles(res.files);
+                setUnverified(res.unverified === true);
             })
             .catch((e: Error) => {
                 if (requestId !== latestRequestId) return;
@@ -341,6 +347,7 @@ export function NativeMemoryManager(): JSX.Element {
             .then((res) => {
                 if (requestId !== latestRequestId) return;
                 setFiles(res.files);
+                setUnverified(res.unverified === true);
                 setFilesError(null);
                 // Codex P1 (PR #2932): the full view must pick up a live
                 // write to the file you're already looking at, even though
@@ -536,6 +543,14 @@ export function NativeMemoryManager(): JSX.Element {
                             </button>
                             <span class="native-memory-manager-crumbs">
                                 <span class="native-memory-manager-agent-name">{agentLabel(agent())}</span>
+                                <Show when={unverified()}>
+                                    <span
+                                        class="native-memory-manager-unverified"
+                                        title="Found from the agent's settings, not from its own launch. Read-only until the agent launches."
+                                    >
+                                        Unverified folder
+                                    </span>
+                                </Show>
                                 <Show when={selectedFilename()}>
                                     {(filename) => (
                                         <>
@@ -557,6 +572,7 @@ export function NativeMemoryManager(): JSX.Element {
                             when={selectedFilename()}
                             fallback={
                                 <div class="native-memory-manager-file-grid-view">
+                                    <MemoryAdoptionPanel agentId={agent().id} agentName={agentLabel(agent())} />
                                     {/* Distinct from the "no files" empty state below:
                                         an unresolved list must not read as an agent that
                                         has remembered nothing, the same four-state care

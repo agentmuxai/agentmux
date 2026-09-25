@@ -371,7 +371,11 @@
             // outboard of the scrollbar.
             // SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md.
             padding: 0;
-            max-height: 50vh;
+            // One third of the old 50vh cap (~13 lines on a 1400 px-tall
+            // window, was ~41), still relative to window height. Shorter
+            // output renders at natural height.
+            // SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §2.
+            max-height: calc(50vh / 3);
             min-height: 0;
             overflow: hidden;
             font-family: var(--fixed-font, monospace);
@@ -849,7 +853,7 @@
         .agent-bash-output {
             // No max-height/overflow here — the enclosing
             // `.agent-tool-overlay-log` is the single scroll container
-            // (bounded by `.agent-tool-panel`'s 50vh). A second inner
+            // (bounded by `.agent-tool-panel`'s vh cap). A second inner
             // scrollbar here produced the double-scrollbar bug.
             padding: 3px var(--space-1-5);
             margin: 0;
@@ -1502,7 +1506,7 @@
 .agent-tool-record-table {
     // No max-height/overflow here — the enclosing `.agent-tool-overlay-log`
     // is the single scroll container (bounded by `.agent-tool-panel`'s
-    // 50vh). A second inner scrollbar here produced the double-scrollbar bug.
+    // vh cap). A second inner scrollbar here produced the double-scrollbar bug.
     margin: var(--space-1) 0 0 0;
 
     table {

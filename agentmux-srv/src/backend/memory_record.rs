@@ -402,6 +402,22 @@ pub(crate) fn hold_for_adoption(fs: &FileStore, agent_uid: &str, dir_id: &str, f
     })
 }
 
+/// Stop holding `files` in `dir_id` — a human adopted them (§2.1.4).
+pub(crate) fn release_held(fs: &FileStore, agent_uid: &str, dir_id: &str, files: &[String]) -> Result<(), StoreError> {
+    let zone = zone_or_err(agent_uid)?;
+    fs.zone_txn(&zone, |z| {
+        let mut heads = read_heads(z.read(HEADS_FILE)?)?;
+        let Some(per_dir) = heads.held.get_mut(dir_id) else { return Ok(()) };
+        for f in files {
+            per_dir.remove(f);
+        }
+        if per_dir.is_empty() {
+            heads.held.remove(dir_id);
+        }
+        write_heads(z, &heads)
+    })
+}
+
 /// A version from the per-channel history tables, to import.
 pub(crate) struct ImportedVersion {
     pub file: String,
@@ -424,50 +440,66 @@ pub(crate) fn import_history(fs: &FileStore, agent_uid: &str, rows: &[ImportedVe
         if heads.imported_at_ms.is_some() {
             return Ok(None);
         }
-        let log = z.read(LOG_FILE)?.unwrap_or_default();
-        let mut have: std::collections::BTreeSet<(String, String)> = log
-            .split(|b| *b == b'\n')
-            .filter_map(|line| serde_json::from_slice::<Event>(line).ok())
-            .filter_map(|e| match e {
-                Event::Version(v) => v.sha256.map(|sha| (v.file, sha)),
-                _ => None,
-            })
-            .collect();
-        let mut sorted: Vec<&ImportedVersion> = rows.iter().collect();
-        sorted.sort_by_key(|r| r.created_at_ms);
-        let mut last: BTreeMap<&str, String> = BTreeMap::new();
-        let mut lines = Vec::new();
-        for r in sorted {
-            if validate_file(&r.file).is_err() || r.body.len() > MAX_BODY_BYTES {
-                continue;
-            }
-            let sha = sha256_hex(&r.body);
-            if !have.insert((r.file.clone(), sha.clone())) {
-                continue;
-            }
-            z.put_if_absent(&format!("blob/{sha}"), &r.body)?;
-            let version = Version {
-                file: r.file.clone(),
-                version: format!("v_{}", uuid::Uuid::new_v4().simple()),
-                parent: last.get(r.file.as_str()).cloned(),
-                merged_parent: None,
-                sha256: Some(sha),
-                conflicts_with: None,
-                source: r.source.clone(),
-                source_detail: r.source_detail.clone(),
-                created_at_ms: r.created_at_ms,
-            };
-            last.insert(&r.file, version.version.clone());
-            lines.extend(log_line(&Event::Version(version))?);
-        }
-        let count = lines.iter().filter(|b| **b == b'\n').count();
-        if !lines.is_empty() {
-            z.append_lines(LOG_FILE, &lines)?;
-        }
+        let count = log_history(z, rows)?;
         heads.imported_at_ms = Some(agentmux_common::time::now_ms());
         write_heads(z, &heads)?;
         Ok(Some(count))
     })
+}
+
+/// Add `rows` to the agent's history — no head changes, content the record
+/// already has for that file skipped. For versions kept beside a head the
+/// caller doesn't replace (adoption of earlier accounts' memory, §2.1.4).
+/// Returns how many were added.
+pub(crate) fn add_history(fs: &FileStore, agent_uid: &str, rows: &[ImportedVersion]) -> Result<usize, StoreError> {
+    let zone = zone_or_err(agent_uid)?;
+    fs.zone_txn(&zone, |z| log_history(z, rows))
+}
+
+/// Log `rows` as history-only versions, oldest first and chained per file,
+/// skipping content the log already has for that file.
+fn log_history(z: &mut crate::backend::storage::filestore::ZoneTxn<'_>, rows: &[ImportedVersion]) -> Result<usize, StoreError> {
+    let log = z.read(LOG_FILE)?.unwrap_or_default();
+    let mut have: std::collections::BTreeSet<(String, String)> = log
+        .split(|b| *b == b'\n')
+        .filter_map(|line| serde_json::from_slice::<Event>(line).ok())
+        .filter_map(|e| match e {
+            Event::Version(v) => v.sha256.map(|sha| (v.file, sha)),
+            _ => None,
+        })
+        .collect();
+    let mut sorted: Vec<&ImportedVersion> = rows.iter().collect();
+    sorted.sort_by_key(|r| r.created_at_ms);
+    let mut last: BTreeMap<&str, String> = BTreeMap::new();
+    let mut lines = Vec::new();
+    for r in sorted {
+        if validate_file(&r.file).is_err() || r.body.len() > MAX_BODY_BYTES {
+            continue;
+        }
+        let sha = sha256_hex(&r.body);
+        if !have.insert((r.file.clone(), sha.clone())) {
+            continue;
+        }
+        z.put_if_absent(&format!("blob/{sha}"), &r.body)?;
+        let version = Version {
+            file: r.file.clone(),
+            version: format!("v_{}", uuid::Uuid::new_v4().simple()),
+            parent: last.get(r.file.as_str()).cloned(),
+            merged_parent: None,
+            sha256: Some(sha),
+            conflicts_with: None,
+            source: r.source.clone(),
+            source_detail: r.source_detail.clone(),
+            created_at_ms: r.created_at_ms,
+        };
+        last.insert(&r.file, version.version.clone());
+        lines.extend(log_line(&Event::Version(version))?);
+    }
+    let count = lines.iter().filter(|b| **b == b'\n').count();
+    if !lines.is_empty() {
+        z.append_lines(LOG_FILE, &lines)?;
+    }
+    Ok(count)
 }
 
 /// Every version of `file`, oldest first — by time, since imported history
