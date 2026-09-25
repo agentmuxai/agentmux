@@ -135,8 +135,8 @@ convention — not the native `title=`):
 - Linux: "Open in file manager"
 
 Label via the existing `isMacOS`/`isLinux` helpers already imported in `HostPopover.tsx`.
-Also add a second, optional link for the **Config** dir if it is cheap (see §7
-question 1); Data is the required one.
+Data only — no Config link in this change (decided 2026-09-25, §7). The popover has no
+Config row today, and adding one just to hang a button on is clutter.
 
 Failure UX: on IPC error, show the error inline in the popover using the same
 warning-colour row the LAN error uses. Do not swallow it — on a headless Linux box with
@@ -148,9 +148,11 @@ Do **not** reuse `open_in_editor`. Its job is "open this file for editing": on W
 runs `explorer <path>`, but on macOS and Linux it first tries `code`/`cursor`/`zed`/
 `subl`/`atom` and only falls back to `open`/the Linux handler if none is installed — so
 on a machine with VS Code, a folder link would open VS Code, not the file browser.
-It also takes an arbitrary renderer-supplied path, which §4.2's enum avoids. Do not reuse `open_external` — it deliberately allow-lists only
-`http(s)://`, `devtools://`, `vscode://` and refuses everything else, which is the
-right posture for it.
+It also takes an arbitrary renderer-supplied path, which the enum below avoids.
+
+Do not reuse `open_external` either. It deliberately allow-lists only `http(s)://`,
+`devtools://` and `vscode://` and refuses everything else, which is the right posture
+for it.
 
 Add `open_in_file_manager` to `agentmux-cef/src/commands/platform.rs`, registered in
 `ipc.rs` next to `open_in_editor`.
@@ -158,11 +160,12 @@ Add `open_in_file_manager` to `agentmux-cef/src/commands/platform.rs`, registere
 **Do not take a path from the renderer.** Take a closed enum instead:
 
 ```jsonc
-{ "target": "data" | "config" }
+{ "target": "data" }
 ```
 
-The host resolves the path itself from `state.version_data_dir` / `version_config_dir`
-(the same values `get_data_dir` / `get_config_dir` return). That removes the
+The host resolves the path itself from `state.version_data_dir` (the same value
+`get_data_dir` returns). `data` is the only accepted value today; the enum shape leaves
+room for `config` later without widening the command to arbitrary paths. That removes the
 "renderer can ask the host to open any path" primitive entirely; there is no path
 validation to get wrong and nothing to shell-inject. Unknown target → error.
 
@@ -230,7 +233,7 @@ command name as a plain `string`.
 - **Rust unit tests** (existing `#[cfg(test)]` module in `platform.rs`). Keep the
   command testable without an `AppState` or a real file manager by splitting it into
   two pure helpers:
-  - `resolve_file_manager_target(target: Option<&str>, data_dir: Option<&str>, config_dir: Option<&str>) -> Result<PathBuf, String>`
+  - `resolve_file_manager_target(target: Option<&str>, data_dir: Option<&str>) -> Result<PathBuf, String>`
     — tests: unknown target → `Err`; missing target → `Err`; dir `None` → `Err` with
     the "not initialized" message; nonexistent dir → `Err`; existing temp dir → `Ok`.
   - `file_manager_command(path: &Path) -> (&'static str, Vec<OsString>)` — per-OS,
@@ -253,11 +256,12 @@ command name as a plain `string`.
 
 ## 7. Open questions
 
-1. Do we want a Config-dir link as well, or Data only?
-2. Rename the `InstancePanel` / "Instance panel" wording too, now that the popover no
-   longer uses "Instance"? Out of scope here, but worth a follow-up.
+None open. Resolved 2026-09-25 (user: "use best recommendations"):
 
-(Resolved 2026-09-25: drop the Instance row, no replacement; no per-process ID.)
+1. Instance row: drop it, no replacement; no per-process ID (§3).
+2. Config-dir link: no — Data only (§4.1). `target: "config"` can be added later.
+3. Renaming the `InstancePanel` / "Instance panel" wording: out of scope; a follow-up
+   if wanted.
 
 ---
 
