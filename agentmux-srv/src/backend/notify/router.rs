@@ -42,7 +42,8 @@ enum Internal {
     /// doesn't know.
     Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
     /// Raw question text — redacted by `emit` like a renderer report.
-    InputWaiting { block_id: String, question: Option<String> },
+    /// `count`: how many questions the call asks (0 = unknown).
+    InputWaiting { block_id: String, question: Option<String>, count: usize },
     /// Resolve through the SAME ordered queue as the srv-side emits, so a
     /// resolve can never overtake the emit it cancels (Codex P2 on #3662).
     Resolve { block_id: String, family: Family },
@@ -93,6 +94,8 @@ pub fn turn_transition(prev: Option<bool>, active: bool, stopped_recently: bool)
 
 const AGENT_NAME_MAX: usize = 32;
 const BODY_MAX: usize = 80;
+/// Rich-content spec §1.2: the summary line's cap, before the `…`.
+const SUMMARY_MAX: usize = 90;
 
 pub struct Router {
     policy: Mutex<PolicyState>,
@@ -101,9 +104,6 @@ pub struct Router {
     store: Arc<Store>,
     /// Block to activate once a window connects (click while no window open).
     pending_activation: Mutex<Option<String>>,
-    /// block_id → sanitized agent name. Names change rarely; caching keeps
-    /// the store (one process-wide SQLite mutex) off the hot path.
-    names: Mutex<std::collections::HashMap<String, String>>,
     internal: tokio::sync::mpsc::UnboundedSender<Internal>,
     last_tray: Mutex<Option<TrayState>>,
     /// block_id → last `turn_active` seen in `controllerstatus`.
@@ -149,7 +149,6 @@ pub fn init(
                 config,
                 store,
                 pending_activation: Mutex::new(None),
-                names: Mutex::new(Default::default()),
                 internal: tx,
                 last_tray: Mutex::new(None),
                 turn_active: Mutex::new(Default::default()),
@@ -230,9 +229,9 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     })
                     .await;
                 }
-                Internal::InputWaiting { block_id, question } => {
+                Internal::InputWaiting { block_id, question, count } => {
                     let _ = tokio::task::spawn_blocking(move || {
-                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref())
+                        r.emit(NotifyKind::InputWaiting, &block_id, question.as_deref(), count)
                     })
                     .await;
                 }
@@ -250,7 +249,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                 Internal::TurnStatus { block_id, active } => {
                     let prev = {
                         let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
-                        // Bounded like `names`: forgetting an IDLE block is
+                        // Bounded: forgetting an IDLE block is
                         // harmless — its next `true` still reads as Started.
                         if turns.len() > TURN_MAP_MAX {
                             turns.retain(|_, active| *active);
@@ -271,7 +270,7 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                             r.resolve(&block_id, Family::Turn)
                         }
                         TurnTransition::Finished => {
-                            let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None))
+                            let _ = tokio::task::spawn_blocking(move || r.emit(NotifyKind::TurnCompleted, &block_id, None, 0))
                                 .await;
                         }
                         TurnTransition::Nothing => {}
@@ -346,6 +345,37 @@ pub fn sanitize_name(raw: &str) -> String {
 
 fn is_bidi_control(c: char) -> bool {
     matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Rich-content spec §1.2: the agent's session summary as a single line —
+/// controls and bidi stripped, whitespace collapsed, capped at 90 characters.
+/// A summary that trips the jekt keyword list is dropped, not replaced: it is
+/// decoration, not something the user needs to be told is hidden.
+pub fn sanitize_summary(raw: &str) -> Option<String> {
+    if crate::backend::reactive::sanitize::is_sensitive_message(raw) {
+        return None;
+    }
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !is_bidi_control(*c))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let mut out: String = line.chars().take(SUMMARY_MAX).collect();
+    if line.chars().count() > SUMMARY_MAX {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// Rich-content spec §2.1: " (+N more)" after the (already truncated) first
+/// question, so the count survives truncation. No body, no suffix — the
+/// title "has a question" stands on its own.
+pub fn with_question_count(body: Option<String>, count: usize) -> Option<String> {
+    body.map(|b| if count > 1 { format!("{b} (+{} more)", count - 1) } else { b })
 }
 
 /// §9.2 body policy: first line, sanitized, truncated, and replaced wholesale
@@ -428,6 +458,7 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         quiet_until_ms: setting_str(extra, "notify:quiethours")
             .and_then(|spec| quiet_hours_until(spec, chrono::Local::now()))
             .unwrap_or(0),
+        show_summary: setting_bool(extra, "notify:os:summary", true),
     };
     for kind in [
         NotifyKind::InputWaiting,
@@ -453,35 +484,23 @@ impl Router {
         matches!(self.store.get::<Block>(block_id), Ok(Some(_)))
     }
 
-    /// BLOCKING on a cache miss (SQLite behind `Store`'s process-wide mutex).
-    /// Only ever reached through `emit`, which callers must run off the async
-    /// workers — `notify_handlers.rs` uses `spawn_blocking` (the #1782 failure
-    /// class; see websocket.rs's controllerinput note).
-    fn agent_name(&self, block_id: &str) -> String {
-        if let Some(n) = self.names.lock().unwrap_or_else(|e| e.into_inner()).get(block_id) {
-            return n.clone();
+    /// The block's sanitized agent name and session summary, from one read.
+    /// BLOCKING (SQLite behind `Store`'s process-wide mutex) — only ever
+    /// reached through `emit` / `emit_fixed`, which callers must run off the
+    /// async workers (`spawn_blocking`; the #1782 failure class, see
+    /// websocket.rs's controllerinput note). Not cached: the summary changes
+    /// every turn and emits are rare, so the read the summary needs anyway
+    /// also serves the name.
+    fn block_labels(&self, block_id: &str) -> (String, Option<String>) {
+        let block = self.store.get::<Block>(block_id).ok().flatten();
+        let meta = |key: &str| {
+            block.as_ref().map(|b| crate::backend::obj::meta_get_string(&b.meta, key, "")).unwrap_or_default()
+        };
+        let mut raw_name = meta("agentName");
+        if raw_name.is_empty() {
+            raw_name = meta("agentId");
         }
-        let raw = self
-            .store
-            .get::<Block>(block_id)
-            .ok()
-            .flatten()
-            .map(|b| {
-                let name = crate::backend::obj::meta_get_string(&b.meta, "agentName", "");
-                if name.is_empty() {
-                    crate::backend::obj::meta_get_string(&b.meta, "agentId", "")
-                } else {
-                    name
-                }
-            })
-            .unwrap_or_default();
-        let name = sanitize_name(&raw);
-        let mut cache = self.names.lock().unwrap_or_else(|e| e.into_inner());
-        if cache.len() > 1024 {
-            cache.clear();
-        }
-        cache.insert(block_id.to_string(), name.clone());
-        name
+        (sanitize_name(&raw_name), sanitize_summary(&meta("term:ambient_summary")))
     }
 
     fn step(&self, input: Input) {
@@ -542,31 +561,36 @@ impl Router {
     // ── Source entry points ───────────────────────────────────────────────
 
     /// A frontend reports a pane event. `question` is only used for
-    /// `InputWaiting` and goes through `redact_body`.
+    /// `InputWaiting` and goes through `redact_body`; `question_count` adds
+    /// " (+N more)" after it.
     ///
-    /// BLOCKING (agent-name lookup may hit the store) — call from
+    /// BLOCKING (the block lookup hits the store) — call from
     /// `spawn_blocking`, never inline on an async worker.
-    pub fn emit(&self, kind: NotifyKind, block_id: &str, question: Option<&str>) {
+    pub fn emit(&self, kind: NotifyKind, block_id: &str, question: Option<&str>, question_count: usize) {
         let preview = self.settings().preview;
         let body = match kind {
-            NotifyKind::InputWaiting => question.and_then(|q| redact_body(q, preview)),
+            NotifyKind::InputWaiting => {
+                with_question_count(question.and_then(|q| redact_body(q, preview)), question_count)
+            }
             _ => None,
         };
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
     }
 
     /// srv-internal sources: the body is app-controlled fixed text, so it is
     /// not redacted — only the preview=none setting strips it (in policy).
-    /// BLOCKING on a name-cache miss, like `emit`.
+    /// BLOCKING, like `emit`.
     pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name: self.agent_name(block_id), body }));
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
     }
 
     /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
     /// from the controller's stdout reader thread. Coalesces with the
     /// renderer's own report for the same block (same `input:` group).
-    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>) {
-        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question });
+    pub fn input_waiting_nonblocking(&self, block_id: &str, question: Option<String>, count: usize) {
+        let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question, count });
     }
 
     /// Queued emit with no body (turn outcomes).
@@ -601,6 +625,7 @@ impl Router {
             block_id: String::new(),
             agent_name: String::new(),
             body: Some("You'll see alerts like this when an agent needs you.".to_string()),
+            summary: None,
         }));
     }
 
@@ -731,10 +756,36 @@ mod tests {
     }
 
     #[test]
+    fn summary_sanitization() {
+        assert_eq!(sanitize_summary("Fix resize repaint delay").as_deref(), Some("Fix resize repaint delay"));
+        assert_eq!(sanitize_summary("  two\nlines\tand   spaces ").as_deref(), Some("two lines and spaces"));
+        assert_eq!(sanitize_summary("evil\u{202E}gnp.exe").as_deref(), Some("evilgnp.exe"));
+        assert_eq!(sanitize_summary("   "), None);
+        assert_eq!(sanitize_summary(""), None);
+        // Sensitive → dropped entirely, never "sensitive content".
+        assert_eq!(sanitize_summary("Rotate the api_key for staging"), None);
+        let long = "word ".repeat(40);
+        let s = sanitize_summary(&long).unwrap();
+        assert_eq!(s.chars().count(), SUMMARY_MAX + 1);
+        assert!(s.ends_with('…'));
+    }
+
+    #[test]
+    fn question_count_suffix_survives_truncation() {
+        let long = "q".repeat(300);
+        let body = with_question_count(redact_body(&long, Preview::Redacted), 3).unwrap();
+        assert!(body.ends_with("… (+2 more)"), "{body}");
+        assert_eq!(with_question_count(Some("Which branch?".into()), 1).as_deref(), Some("Which branch?"));
+        assert_eq!(with_question_count(Some("Which branch?".into()), 0).as_deref(), Some("Which branch?"));
+        assert_eq!(with_question_count(None, 4), None, "no text → the title stands alone");
+    }
+
+    #[test]
     fn settings_defaults_and_overrides() {
         let mut extra = std::collections::HashMap::new();
         let s = settings_from_extra(&extra);
         assert!(s.enabled);
+        assert!(s.show_summary);
         assert_eq!(s.when, When::Unfocused);
         assert_eq!(s.preview, Preview::Redacted);
         extra.insert("notify:os:when".into(), serde_json::json!("never"));
@@ -743,7 +794,9 @@ mod tests {
         extra.insert("notify:os:enabled".into(), serde_json::json!(false));
         extra.insert("notify:pause:until".into(), serde_json::json!(1234));
         extra.insert("notify:os:agentcrashed".into(), serde_json::json!(false));
+        extra.insert("notify:os:summary".into(), serde_json::json!(false));
         let s = settings_from_extra(&extra);
+        assert!(!s.show_summary);
         assert_eq!(s.pause_until_ms, 1234);
         assert!(!s.pause_allow_attention);
         assert_eq!(s.kind_enabled.get(&NotifyKind::AgentCrashed), Some(&false));

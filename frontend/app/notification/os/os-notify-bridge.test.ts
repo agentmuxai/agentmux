@@ -65,6 +65,14 @@ describe("paneEventToNotify", () => {
         });
     });
 
+    it("forwards how many questions the call asks", () => {
+        expect(paneEventToNotify({ type: "waiting-for-input", question: "Which branch?", questionCount: 3 })).toEqual({
+            event: "input_waiting",
+            question: "Which branch?",
+            question_count: 3,
+        });
+    });
+
     it("resolves on submitted, but NOT on closed", () => {
         expect(paneEventToNotify({ type: "waiting-ended", reason: "submitted" } as any)).toEqual({ event: "input_resolved" });
         expect(paneEventToNotify({ type: "waiting-ended", reason: "closed" } as any)).toBeNull();

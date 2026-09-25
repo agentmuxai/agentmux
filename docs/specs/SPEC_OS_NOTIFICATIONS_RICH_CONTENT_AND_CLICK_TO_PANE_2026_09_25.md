@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-25
 **Author:** Lark
-**Status:** proposed
+**Status:** active — PR 1 of 3 (srv payload + title, §5 item 1) in progress; presenters (item 2) and click → pane (item 3) not started. Deviation from §1.2: the Router's agent-name cache is removed rather than kept — the summary needs a block read on every emit anyway, and that one read also yields the name.
 **Builds on:** [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md). That spec shipped in #3640, #3645, #3650, #3653, #3654, #3662, #3668 and #3705; its §11.5 has the current state.
 **Verified against:** `main` @ `730e74549` by direct code reading. Not prototyped.
 
