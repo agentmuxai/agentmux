@@ -8,7 +8,7 @@ split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the 
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
 activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
 Phases 5a–5b (capabilities replace view-name checks) in the PR after it;
-Phases 2c, 5c, 6 not started.
+5c dropped (§4); Phases 2c and 6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -455,7 +455,14 @@ working throughout through a legacy adapter.
      stays. No view-name check remains in shared header, frame, zoom, key or
      pane-menu code; `command-registry.ts`/`keymodel-blockcreate.ts` still
      *create* terminals by name, which is a choice of default, not a check.
-   - **5c:** backend `defaultMeta` from the manifest.
+   - **5c (dropped, 2026-09-25):** backend `defaultMeta` from the manifest.
+     On inspection `pane.rs`'s `build_pane_meta` is not a defaults table but
+     validation of the agent-facing `pane.open`'s typed arguments (an editor
+     needs `file`, a browser `url`, a terminal takes `cwd`), and it only runs
+     when no `meta` is passed. With `meta`, `pane.open` is already generic —
+     that is how an agent opens any widget, including an `ext:` one — and the
+     backend can't see frontend manifests without a new sync channel nothing
+     else needs.
 6. **Third-party loading:** trusted, locally installed ES-module widgets
    listed in widgets.json, a shared Solid runtime, `apiVersion` checks and
    error boundaries. No sandbox in v1 (decided, §5).
