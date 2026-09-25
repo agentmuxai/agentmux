@@ -1779,6 +1779,10 @@ async fn call_tool(
             if let Some(staged) = staged {
                 body["staged"] = staged;
             }
+            // Names this agent on the user's banner and in the audit log.
+            if let Ok(auth) = sign_ui_automation_auth() {
+                body["auth"] = serde_json::to_value(auth).unwrap_or(Value::Null);
+            }
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
@@ -1793,10 +1797,23 @@ async fn call_tool(
                 anyhow::bail!("fleet bulk-stop failed: HTTP {status} — {text}");
             }
 
-            let result: Value = resp
+            let mut result: Value = resp
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            if result["status"] == "pending_user_override" {
+                // Each running target's user had 15 s to keep it (§6.5). srv
+                // runs the windows in parallel, so waiting on them one after
+                // another costs no extra time.
+                let pending = result["pending"].as_array().cloned().unwrap_or_default();
+                let mut outcomes = Vec::with_capacity(pending.len());
+                for p in &pending {
+                    let request_id = p["request_id"].as_str().unwrap_or_default();
+                    let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
+                    outcomes.push((p["block_id"].as_str().unwrap_or_default().to_string(), now));
+                }
+                result = merge_bulk_stop_outcomes(result, outcomes);
+            }
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
@@ -2584,6 +2601,13 @@ async fn call_tool(
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("close failed: HTTP {status} — {text}");
             }
+            if resp.status().as_u16() == 202 {
+                // Another agent's pane: its user had 15 s to keep it (§6.5).
+                let body: Value = resp.json().await.unwrap_or(Value::Null);
+                let request_id = body["request_id"].as_str().unwrap_or_default();
+                let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
+                return close_pane_outcome(target_block_id.as_deref().unwrap_or_default(), &now);
+            }
             match target_block_id {
                 Some(b) => Ok(format!("Closed pane {b:?}")),
                 None => Ok("Closed your own pane".to_string()),
@@ -2618,24 +2642,13 @@ async fn call_tool(
             // Not the user's own ask: the user has 15 s to keep this agent
             // (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). Poll for the answer —
             // one long request would outlast the client's timeout.
-            let request_id = body["request_id"].as_str().unwrap_or_default().to_string();
-            let url = format!("{}/api/v1/agent/shutdown/{request_id}", local_url.trim_end_matches('/'));
-            let give_up = std::time::Instant::now() + std::time::Duration::from_secs(60);
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let now: Value = match client.get(&url).header("X-AuthKey", auth_key).send().await {
-                    Ok(r) => r.json().await.unwrap_or(Value::Null),
-                    Err(_) => Value::Null,
-                };
-                let state = now["status"].as_str().unwrap_or("");
-                // `proceeding` is final for QuitSelf: the shutdown waits for
-                // this very turn to end, so waiting on here would hold it up.
-                if !state.is_empty() && state != "pending" {
-                    return quit_self_outcome(state, &now);
-                }
-                if std::time::Instant::now() > give_up {
-                    anyhow::bail!("QuitSelf: no answer on the pending shutdown {request_id} after 60 s");
-                }
+            let request_id = body["request_id"].as_str().unwrap_or_default();
+            // `proceeding` is final for QuitSelf: the shutdown waits for this
+            // very turn to end, so waiting on here would hold it up.
+            let now = await_shutdown(client, local_url, auth_key, request_id, false).await;
+            match now["status"].as_str().unwrap_or("") {
+                "" | "pending" => anyhow::bail!("QuitSelf: no answer on the pending shutdown {request_id}"),
+                state => quit_self_outcome(state, &now),
             }
         }
         "RegisterDevServer" => {
@@ -3775,6 +3788,75 @@ fn quit_self_result(status: u16, body: &Value) -> anyhow::Result<String> {
     }
 }
 
+/// Polls srv for a shutdown waiting on the user's override
+/// (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5) until it leaves `pending` — and
+/// `proceeding` too when `to_the_end` — and returns the last status seen. One
+/// long request instead would outlast the client's own timeout.
+async fn await_shutdown(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    request_id: &str,
+    to_the_end: bool,
+) -> Value {
+    let url = format!("{}/api/v1/agent/shutdown/{request_id}", local_url.trim_end_matches('/'));
+    // The window, the turn end a self-quit waits for (30 s) and the graceful
+    // stop itself, with room to spare.
+    let give_up = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    let mut last = Value::Null;
+    while std::time::Instant::now() < give_up {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if let Ok(r) = client.get(&url).header("X-AuthKey", auth_key).send().await {
+            last = r.json().await.unwrap_or(last);
+        }
+        match last["status"].as_str().unwrap_or("") {
+            "" | "pending" => {}
+            "proceeding" if to_the_end => {}
+            _ => break,
+        }
+    }
+    last
+}
+
+/// What `ClosePane block_id=` tells the agent once the target's user has
+/// answered (§6.5).
+fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<String> {
+    match now["status"].as_str().unwrap_or("") {
+        "shut_down" => Ok(format!("Closed pane {block:?}: its user didn't keep it within 15 s.")),
+        "kept_by_user" => Ok(format!("Not closed: the user chose to keep pane {block:?} running.")),
+        "superseded" => Ok(format!("Pane {block:?} was already closed.")),
+        "proceeding" => Ok(format!("Pane {block:?} is shutting down: its user didn't keep it.")),
+        "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
+        _ => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
+    }
+}
+
+/// Folds each waited-on target into `FleetBulkStop`'s usual shape: stopped
+/// (or already gone) → `succeeded`; kept by the user or failed → `failed`,
+/// with the kept ones also listed in `kept_by_user`.
+fn merge_bulk_stop_outcomes(pending: Value, outcomes: Vec<(String, Value)>) -> Value {
+    let mut succeeded = pending["succeeded"].as_array().cloned().unwrap_or_default();
+    let mut failed = pending["failed"].as_array().cloned().unwrap_or_default();
+    let mut kept = Vec::new();
+    for (block, now) in outcomes {
+        match now["status"].as_str().unwrap_or("") {
+            "shut_down" | "superseded" | "proceeding" => succeeded.push(json!(block)),
+            "kept_by_user" => {
+                failed.push(json!({ "id": block, "error": "the user kept it running" }));
+                kept.push(json!(block));
+            }
+            "failed" => failed.push(json!({ "id": block, "error": now["error"].as_str().unwrap_or("stop failed") })),
+            _ => failed.push(json!({ "id": block, "error": "no answer from the user's override window" })),
+        }
+    }
+    json!({
+        "succeeded": succeeded,
+        "failed": failed,
+        "kept_by_user": kept,
+        "aborted_early": pending["aborted_early"].as_bool().unwrap_or(false),
+    })
+}
+
 /// What `QuitSelf` tells the agent once the user's override window has
 /// settled (§6.5).
 fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<String> {
@@ -3820,6 +3902,44 @@ mod tests {
         assert!(quit_self_outcome("superseded", &Value::Null).is_ok());
         let failed = quit_self_outcome("failed", &serde_json::json!({ "error": "boom" })).unwrap_err().to_string();
         assert!(failed.contains("boom"), "{failed}");
+    }
+
+    #[test]
+    fn close_pane_outcome_says_what_the_user_decided() {
+        let s = |st: &str| serde_json::json!({ "status": st });
+        assert!(close_pane_outcome("b", &s("shut_down")).unwrap().starts_with("Closed"));
+        assert!(close_pane_outcome("b", &s("kept_by_user")).unwrap().starts_with("Not closed"));
+        assert!(close_pane_outcome("b", &s("superseded")).is_ok());
+        assert!(close_pane_outcome("b", &serde_json::json!({ "status": "failed", "error": "boom" })).unwrap_err().to_string().contains("boom"));
+        assert!(close_pane_outcome("b", &Value::Null).is_err());
+    }
+
+    #[test]
+    fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
+        let pending = serde_json::json!({
+            "status": "pending_user_override",
+            "succeeded": ["x"],
+            "failed": [{ "id": "gone", "error": "NOT_RUNNING" }],
+            "aborted_early": false,
+        });
+        let out = merge_bulk_stop_outcomes(pending, vec![
+            ("a".into(), serde_json::json!({ "status": "shut_down" })),
+            ("b".into(), serde_json::json!({ "status": "kept_by_user" })),
+            ("c".into(), serde_json::json!({ "status": "failed", "error": "boom" })),
+        ]);
+        assert_eq!(out["succeeded"], serde_json::json!(["x", "a"]));
+        assert_eq!(out["kept_by_user"], serde_json::json!(["b"]));
+        let failed: Vec<&str> = out["failed"].as_array().unwrap().iter().map(|f| f["id"].as_str().unwrap()).collect();
+        assert_eq!(failed, vec!["gone", "b", "c"]);
+        assert!(out.get("status").is_none(), "the usual FleetActionResult shape");
+    }
+
+    #[test]
+    fn the_fleet_tools_warn_they_can_take_15_seconds() {
+        for tool in [CLOSE_PANE_TOOL, FLEET_BULK_STOP_TOOL] {
+            let v: Value = serde_json::from_str(tool).unwrap();
+            assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"), "{}", v["name"]);
+        }
     }
 
     #[test]

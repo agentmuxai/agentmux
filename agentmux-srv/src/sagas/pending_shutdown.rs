@@ -31,6 +31,10 @@ pub enum Action {
     /// The agent's own `QuitSelf` from a turn the user didn't start: the same
     /// self-quit, after its turn ends (§4.2).
     SelfQuit { detail: String },
+    /// Another agent's `ClosePane block_id=`: close the whole pane.
+    ClosePane { block_ids: Vec<String> },
+    /// An agent's `FleetBulkStop`: stop the controller, as `agent.stop` does.
+    Stop { signal: Option<String> },
 }
 
 /// A request as the caller and the frontend see it (§12.2).
@@ -40,6 +44,8 @@ pub struct PendingView {
     pub block_id: String,
     /// Who asked: an agent id, or `cron` etc.
     pub by: String,
+    /// The agent being shut down, resolved when asked (it may be gone after).
+    pub target: String,
     /// The tool: `QuitSelf`, `ClosePane`, `FleetBulkStop`.
     pub via: String,
     pub reason: String,
@@ -147,6 +153,11 @@ fn request_within(
             request_id: uuid::Uuid::new_v4().to_string(),
             block_id: block_id.to_string(),
             by: by.to_string(),
+            target: state
+                .reactive_handler
+                .get_agent_by_block(block_id)
+                .map(|a| a.agent_id)
+                .unwrap_or_else(|| block_id.to_string()),
             via: via.to_string(),
             reason: reason.trim().to_string(),
             deadline_ms: now_ms() + window.as_millis() as i64,
@@ -160,7 +171,8 @@ fn request_within(
     // too) and the OS notification.
     publish(state, EVENT_SHUTDOWN_PENDING, block_id, 1, serde_json::to_value(&view).unwrap_or_default());
     if let Some(router) = notify_router(state) {
-        let body = format!("{} asked to shut it down: {}. Open it to keep it running.", view.by, view.reason);
+        let why = if view.reason.is_empty() { String::new() } else { format!(": {}", view.reason) };
+        let body = format!("{} asked to shut it down{why}. Open it to keep it running.", view.by);
         let block = block_id.to_string();
         // `emit_fixed` reads the block (blocking): off the async workers.
         tokio::task::spawn_blocking(move || {
@@ -185,7 +197,8 @@ fn request_within(
         let outcome = run_action(&state, &v.block_id, action).await;
         let (status, error) = match outcome {
             Ok(()) => ("shut_down", None),
-            Err(e) if e.contains("block not found") => ("superseded", None),
+            // Already gone: the user closed or stopped it meanwhile.
+            Err(e) if e.contains("block not found") || e.starts_with("NOT_RUNNING") => ("superseded", None),
             Err(e) => ("failed", Some(e)),
         };
         audit(&state, &v, status, error.as_deref());
@@ -196,14 +209,9 @@ fn request_within(
 
 /// One entry per outcome, with the requester as its source (§6.5 step 8).
 fn audit(state: &AppState, v: &PendingView, outcome: &str, error: Option<&str>) {
-    let target = state
-        .reactive_handler
-        .get_agent_by_block(&v.block_id)
-        .map(|a| a.agent_id)
-        .unwrap_or_else(|| v.block_id.clone());
     state.reactive_handler.log_fleet_action_audit(
         Some(&v.by),
-        &target,
+        &v.target,
         &v.block_id,
         "agent.shutdown_override",
         error.is_none(),
@@ -241,7 +249,32 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 .await
                 .map(|_| ())
         }
+        Action::ClosePane { block_ids } => super::close_pane::run(state, block_ids).await.map(|_| ()),
+        Action::Stop { signal } => {
+            crate::server::app_api::agent_io::stop_one_agent_block(block_id, signal.as_deref()).map(|_| ())
+        }
     }
+}
+
+/// Tests: end the window now, as if it ran out.
+#[cfg(test)]
+pub fn expire_now(request_id: &str) {
+    if let Some(e) = entries().get(request_id) {
+        e.kept.notify_one();
+    }
+}
+
+/// Wait until a request settles; its final view. Tests only.
+#[cfg(test)]
+pub async fn settled(request_id: &str) -> PendingView {
+    for _ in 0..400 {
+        let v = status(request_id).expect("known request");
+        if !matches!(v.status, "pending" | "proceeding") {
+            return v;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("request {request_id} never settled");
 }
 
 /// "Keep running" (§12.3). `kept_by_user` if the request was still pending,
