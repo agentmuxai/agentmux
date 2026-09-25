@@ -1178,7 +1178,12 @@ impl Store {
             }
         };
         match self.agent_def_set_memory_id_if_empty(&agent.id, &bundle_id) {
-            Ok(true) => agent.memory_id = bundle_id,
+            Ok(true) => {
+                // So the agent's other channels bind this bundle instead of
+                // minting their own (m0021).
+                crate::backend::agent_bundle_sidecar::record(&agent.id, &bundle_id);
+                agent.memory_id = bundle_id
+            }
             Ok(false) => {}
             Err(e) => {
                 tracing::warn!(agent_id = %agent.id, bundle_id = %bundle_id, error = %e, "agent_def_provision_and_bind_bundle: bind failed (non-fatal)");
