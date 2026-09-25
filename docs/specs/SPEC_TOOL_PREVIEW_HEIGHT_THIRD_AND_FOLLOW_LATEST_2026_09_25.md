@@ -35,59 +35,62 @@ replaced that with (1) above. The draft is superseded, not partly kept (§7).
 The cap is `max-height` in `vh` (window height), on `.agent-tool-panel`. Nothing is in
 px or lines.
 
-| Where | Rule | Applies to |
-|---|---|---|
-| `frontend/app/view/agent/styles/_document-nodes.scss` (`.agent-tool-block .agent-tool-panel`, ~line 375) | `max-height: 50vh` | agent pane < 900 px wide |
-| `frontend/app/view/agent/styles/_responsive.scss` (Tier 4, `@container agent-pane (min-width: 900px)`, ~line 58) | `max-height: 60vh` | agent pane ≥ 900 px wide |
-| `frontend/app/view/agent/styles/_shell-node.scss` (`.agent-shell-block .agent-tool-panel`, ~line 39) | `max-height: 50vh` | persistent-shell log (not a tool preview) |
+| Where | Rule | Specificity | Takes effect? |
+|---|---|---|---|
+| `_document-nodes.scss` — `.agent-view .agent-tool-block .agent-tool-panel` | `max-height: 50vh` | 0,3,0 | **yes** — every tool preview |
+| `_responsive.scss` Tier 4 — `.agent-view .agent-tool-panel` inside `@container agent-pane (min-width: 900px)` | `max-height: 60vh` | 0,2,0 | **no** (see below) |
+| `_shell-node.scss` — `.agent-shell-block .agent-tool-panel` | `max-height: 50vh` | 0,2,0 | yes — persistent-shell log |
 
-Log lines are 12 px × 1.4 = 16.8 px (`_tool-overlay-portal.scss`, `.agent-tool-log-line`).
+> Correction (2026-09-25, found while implementing): an earlier revision of this spec
+> said wide panes get `60vh`. They don't. A container query adds no specificity, so the
+> Tier 4 rule (0,2,0) loses to the tool block's own rule (0,3,0). It ties with the shell
+> block's rule but loads earlier, so it loses there too. Only `ToolBlock.tsx` and
+> `PersistentShellBlock.tsx` use the class, so the rule never applied anywhere. The
+> tallest preview today is `50vh` at every pane width.
+
+**Measured live, 2026-09-25:** in a ~507 px-wide agent pane, a full tool preview's panel
+was **698 px** tall. That is 50vh of a ~1396 px window, or ≈ 41 lines at 16.8 px/line
+(`.agent-tool-log-line`: 12 px × 1.4). This matches the user's "about 40 lines". The
+reading was taken with `UIQuery` on this agent's own pane.
+
 The panel has `padding: 0`; the log inside it (`.agent-tool-overlay-log`) is the single
 scroll container and carries its own padding. Content shorter than the cap already
 renders at natural height; that does not change.
 
-The user's "about 40 lines" matches 60 vh on a ~1150 px-tall window or 50 vh on a
-~1370 px-tall one. That is an inference from the numbers, not a measurement.
-
 ### A.2 Change
 
-Keep the scheme; divide both values by three. Put the number behind one custom property
-so the two tiers cannot drift apart.
+Keep the scheme and divide the one real value by three:
 
 ```scss
-// _document-nodes.scss, on the agent-pane container (or .agent-tool-block)
---agent-tool-panel-max-h: calc(50vh / 3);   // was 50vh  (≈16.7vh)
-
-// _responsive.scss, Tier 4 container query
---agent-tool-panel-max-h: calc(60vh / 3);   // was 60vh  (= 20vh)
-
-// .agent-tool-block .agent-tool-panel
-max-height: var(--agent-tool-panel-max-h);
+// _document-nodes.scss — .agent-view .agent-tool-block .agent-tool-panel
+max-height: calc(50vh / 3);   // was 50vh (≈ 16.7vh)
 ```
 
-Writing it as `calc(50vh / 3)` keeps the "one third of what it was" intent readable in
-the source.
+Writing it as `calc(50vh / 3)` keeps "one third of what it was" readable in the source.
+No custom property is needed now that there is only one value.
 
-Approximate visible lines at the cap (panel height ÷ 16.8 px, minus ~1 line for log
+Delete the dead Tier 4 rule and leave a comment saying why. Behaviour doesn't change,
+and it stops the next reader from believing wide panes get a taller cap.
+
+Approximate visible lines at the new cap (panel height ÷ 16.8 px, minus ~1 line for log
 padding; a failed/denied/awaiting tool's header row takes about one more):
 
-| Window height | < 900 px pane (16.7vh) | ≥ 900 px pane (20vh) |
-|---|---|---|
-| 800 px | ~7 | ~8 |
-| 1080 px | ~10 | ~12 |
-| 1200 px | ~11 | ~13 |
-| 1440 px | ~13 | ~16 |
+| Window height | Lines at `calc(50vh / 3)` |
+|---|---|
+| 800 px | ~7 |
+| 1080 px | ~10 |
+| 1200 px | ~11 |
+| 1400 px (the measured window) | ~13 |
 
-So "40 → about 13–15" holds on the user's setup. On small windows it gets short (~7 lines
-at 800 px); no floor is added (§7 item 1).
+That takes the user's "about 40" to about 13, close to their "15 or so". On small
+windows it gets short (~7 lines at 800 px); no floor is added (§7 item 1).
 
 ### A.3 Scope
 
-- **In:** tool previews (`.agent-tool-block .agent-tool-panel`), both width tiers.
+- **In:** tool previews (`.agent-tool-block .agent-tool-panel`), at every pane width.
 - **Out:** the persistent-shell log (`.agent-shell-block`). It is a long-running
-  build/dev log rather than a tool preview and keeps `50vh` (§7 item 2). It must not
-  pick up the new custom property by
-  accident: the property is set on the tool-block scope, not globally.
+  build/dev log rather than a tool preview and keeps `50vh` (§7 item 2). Its own rule is
+  separate, so the change above doesn't touch it.
 - **Out:** the px-based composer / decision / question panel caps.
 
 ### A.4 Knock-on edits
@@ -242,12 +245,12 @@ the primitive.
 **Height (Part A)**
 
 - jsdom can't lay out, so unit tests can't check `vh`. Assert the stylesheet contract
-  instead: `.agent-tool-block .agent-tool-panel` reads `var(--agent-tool-panel-max-h)`,
-  and the shell block keeps `50vh`. A small SCSS-source test, or skip it and rely on the
+  instead: `.agent-tool-block .agent-tool-panel` has `max-height: calc(50vh / 3)`, and
+  the shell block keeps `50vh`. A small SCSS-source test, or skip it and rely on the
   pixel check.
 - **Pixel check** (`scripts/ui-screenshots/`): a 200-line Bash output at window heights
-  800 / 1080 / 1440 in both pane-width tiers. Assert the panel height is within ±2 px of
-  `innerHeight × 0.5 / 3` (or `× 0.6 / 3` in the wide tier). A 3-line output renders at
+  800 / 1080 / 1440, in a narrow and a ≥ 900 px pane. Assert the panel height is within
+  ±2 px of `innerHeight × 0.5 / 3` at both widths. A 3-line output renders at
   natural height with no empty gap. Repeat at a **non-100% app zoom**: I haven't verified
   how the app's zoom handling (`docs/specs/zoom-architecture.md`) interacts with `vh`, so
   check it rather than assume it.
@@ -293,9 +296,9 @@ transcript.
 
 ## 6. Implementation checklist
 
-- [ ] A: `--agent-tool-panel-max-h` at `calc(50vh / 3)` and `calc(60vh / 3)`; panel reads it; shell block untouched.
+- [ ] A: `.agent-tool-block .agent-tool-panel` → `max-height: calc(50vh / 3)`; delete the dead Tier 4 rule; shell block untouched.
 - [ ] A: update the `50vh` comments listed in A.4.
-- [ ] A: pixel check across window heights, both tiers, and one non-100% zoom.
+- [ ] A: pixel check across window heights, a narrow and a ≥ 900 px pane, and one non-100% zoom.
 - [ ] B: telemetry + CDP repro; record which B.2 cause(s) were confirmed, in this spec.
 - [ ] B: coordinate with Agent2 / issue #3655 on the reducer.
 - [ ] B: follow controller in `ToolOverlayLog` (shared reducer or the Phase-0-style fallback); tests 1–11.

@@ -51,14 +51,15 @@
         }
     }
 
-    // Tier 4 — Wide pane (≥900px): slightly taller panel cap at wide widths.
+    // Tier 4 — Wide pane (≥900px): no rules today. It used to set
+    // `.agent-tool-panel { max-height: 60vh }`, but that selector (0,2,0)
+    // lost to both panels that use the class — `.agent-view .agent-tool-block
+    // .agent-tool-panel` (0,3,0, _document-nodes.scss) and `.agent-shell-block
+    // .agent-tool-panel` (same specificity, loaded later) — so it never
+    // applied; removed 2026-09-25
+    // (SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md §2).
     // Two-column param/result grid is Phase 3 (deferred — needs pane-width
     // context to drive inert/aria-hidden; see SPEC_AGENT_PANE_RESPONSIVE_AUX_INFO).
-    @container agent-pane (min-width: 900px) {
-        .agent-tool-panel {
-            max-height: 60vh;
-        }
-    }
 
     // Tier 5 — Ultra-wide pane (≥1200px): Glob file list goes multi-column.
     @container agent-pane (min-width: 1200px) {
