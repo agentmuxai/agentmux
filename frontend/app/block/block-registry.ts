@@ -10,7 +10,7 @@
 // the defaults (its name, a square).
 
 import { AgentViewModel } from "@/app/view/agent";
-import { ArmoryViewModel } from "@/app/view/armory/armory";
+import { armoryPaneTab } from "@/app/view/armory/armory";
 import { BrowserViewModel } from "@/app/view/browser/browser";
 import { dronePaneTab } from "@/app/view/drone/drone";
 import { EditorViewModel } from "@/app/view/editor/editor";
@@ -22,7 +22,7 @@ import { SettingsViewModel } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
-import { WardenViewModel } from "@/app/view/warden/warden";
+import { wardenPaneTab } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
 import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "@/app/view/agent/agent-pane-tab";
@@ -82,17 +82,13 @@ const builtins = [
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     legacyAdapter("launcher", LauncherViewModel as any),
     swarmPaneTab, // native — Phase 2c
-    // Armory and Warden apply `term:zoom` as CSS zoom.
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
     legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
     legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
-    legacyAdapter("warden", WardenViewModel as any, { label: "Warden", capabilities: { paneZoom: {} } }),
+    wardenPaneTab, // native — Phase 2c
     legacyAdapter("toolchain", ToolchainViewModel as any),
-    // The Trust Center was renamed to Armory
-    // (docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md);
-    // persisted blocks still say "trust".
-    legacyAdapter("armory", ArmoryViewModel as any, { aliases: ["trust"], capabilities: { paneZoom: {} } }),
+    armoryPaneTab, // native — Phase 2c (keeps the "trust" alias)
     legacyAdapter("settings", SettingsViewModel as any),
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);

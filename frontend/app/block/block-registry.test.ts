@@ -30,12 +30,14 @@ const OLD_LABELS: Record<string, string> = {
 // Deliberate differences since the tables: "cpuplot" is sysinfo under an older
 // name, and as a native tab (Phase 2c) it names and icons itself like sysinfo
 // — its header always showed sysinfo's chart icon; only its tab pill didn't.
-const NEW_ICONS: Record<string, string> = { cpuplot: "chart-line" };
-const NEW_LABELS: Record<string, string> = { cpuplot: "Sysinfo" };
+// Warden and Armory likewise always showed their own icon in the header
+// (`shield-halved`, `vault`) but not in their pills; Armory had no label.
+const NEW_ICONS: Record<string, string> = { cpuplot: "chart-line", warden: "shield-halved", armory: "vault" };
+const NEW_LABELS: Record<string, string> = { cpuplot: "Sysinfo", armory: "Armory" };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
     // Native views (create(ctx), Phase 2b) have no ViewModel class.
-    const NATIVE = ["help", "sysinfo", "cpuplot", "swarm", "drone"];
+    const NATIVE = ["help", "sysinfo", "cpuplot", "swarm", "drone", "warden", "armory"];
 
     it("registers an instance factory for every view the old map had", () => {
         for (const view of VIEWS) {

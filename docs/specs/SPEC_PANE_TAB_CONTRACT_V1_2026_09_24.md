@@ -395,6 +395,15 @@ working throughout through a legacy adapter.
      - **Drone (implemented):** `dronePaneTab` (drone.tsx), keeping the
        `workflows` alias. Its only own-block read, `frame:title`, comes from
        `ctx.meta` and titles the pane (`liveTitle`); `dispose` is forwarded.
+     - **Warden and Armory (implemented):** `wardenPaneTab`, `armoryPaneTab`
+       (keeping the `trust` alias). Their models derive zoom, section (and
+       Armory's memory subsection) from `ctx.meta` and write through
+       `ctx.setMeta` via `model.setMeta`, so their views no longer call
+       `RpcApi` at all. Their memos had been parked in the per-block atom cache
+       (`useBlockAtom`) to survive the effect re-runs host rule 8 fixed; they
+       are plain memos in the instance's root now. The section names the pane
+       (`liveTitle`); the manifests carry the icons the headers always showed
+       (`shield-halved`, `vault`) and Armory gets its label.
 3. **Unified visibility:** `ctx.visibility` on both paths and for window
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
