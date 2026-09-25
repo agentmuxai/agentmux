@@ -43,9 +43,9 @@
 // saga hard-kills.)
 //
 // This saga is therefore the right primitive for a close srv starts
-// itself on one tab (SPEC_AGENT_SELF_QUIT_2026_09_24.md §12.4): unlike
-// `close_pane::run` with one id, step 2b updates an already-loaded
-// frontend.
+// itself on one tab: unlike `close_pane::run` with one id, which queues a
+// frontend action only when the whole leaf goes, step 2b updates an
+// already-loaded frontend.
 //
 // **Compensation:** delete sagas are awkward to compensate — once
 // the block row + controller are gone, "un-delete" requires
