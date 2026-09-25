@@ -45,6 +45,8 @@ export type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBac
 export type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
 export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
 export type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
+export type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
+export type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 export type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 
 import type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
@@ -63,6 +65,8 @@ import type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBac
 import type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
 import type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
 import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
+import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
+import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 
 export const BlockApi = {
@@ -126,6 +130,16 @@ export const BlockApi = {
     // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     AgentCancelCommand(client: RpcClient, data: CommandAgentCancelData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("agentcancel", data, opts);
+    },
+
+    // The pending-shutdown banner's "Keep running".
+    // Spec: docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3.
+    AgentShutdownKeepCommand(
+        client: RpcClient,
+        data: CommandAgentShutdownKeepData,
+        opts?: RpcOpts,
+    ): Promise<AgentShutdownKeepResult> {
+        return client.rpcCall("agentshutdownkeep", data, opts);
     },
 
     ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {

@@ -662,6 +662,9 @@ pub fn build_router(state: AppState) -> Router {
         // way `FleetBulkStop`'s calls are today.
         .route("/api/v1/agent/pane/close", post(app_api::pane::handle_close_pane))
         .route("/api/v1/agent/self/quit", post(app_api::pane::handle_quit_self))
+        // The outcome of a shutdown waiting on the user's override (§6.5):
+        // the MCP tools poll it after their 202.
+        .route("/api/v1/agent/shutdown/{request_id}", get(app_api::pane::handle_shutdown_status))
         // Native dev-proxy registration (SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md)
         // — `RegisterDevServer`. Same `verified_block_id` identity model as
         // the ui/* and pane/close routes above; the backend address it

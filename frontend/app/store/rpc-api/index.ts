@@ -209,6 +209,8 @@ export type {
     CommandBlockfileWriteStateData,
     BackgroundTaskView,
     CommandAgentCancelData,
+    CommandAgentShutdownKeepData,
+    AgentShutdownKeepResult,
     CommandAmbientNarrateData,
     CommandBackgroundTaskCompletionData,
     CommandBackgroundTaskPidData,

@@ -2612,7 +2612,31 @@ async fn call_tool(
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
             let status = resp.status();
             let body: Value = resp.json().await.unwrap_or(Value::Null);
-            quit_self_result(status.as_u16(), &body)
+            if status.as_u16() != 202 || body["status"] != "pending_user_override" {
+                return quit_self_result(status.as_u16(), &body);
+            }
+            // Not the user's own ask: the user has 15 s to keep this agent
+            // (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). Poll for the answer —
+            // one long request would outlast the client's timeout.
+            let request_id = body["request_id"].as_str().unwrap_or_default().to_string();
+            let url = format!("{}/api/v1/agent/shutdown/{request_id}", local_url.trim_end_matches('/'));
+            let give_up = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let now: Value = match client.get(&url).header("X-AuthKey", auth_key).send().await {
+                    Ok(r) => r.json().await.unwrap_or(Value::Null),
+                    Err(_) => Value::Null,
+                };
+                let state = now["status"].as_str().unwrap_or("");
+                // `proceeding` is final for QuitSelf: the shutdown waits for
+                // this very turn to end, so waiting on here would hold it up.
+                if !state.is_empty() && state != "pending" {
+                    return quit_self_outcome(state, &now);
+                }
+                if std::time::Instant::now() > give_up {
+                    anyhow::bail!("QuitSelf: no answer on the pending shutdown {request_id} after 60 s");
+                }
+            }
         }
         "RegisterDevServer" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -3751,6 +3775,20 @@ fn quit_self_result(status: u16, body: &Value) -> anyhow::Result<String> {
     }
 }
 
+/// What `QuitSelf` tells the agent once the user's override window has
+/// settled (§6.5).
+fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<String> {
+    match state {
+        "kept_by_user" => Ok("The user chose to keep you running. Do NOT quit and do not call QuitSelf again for this; carry on.".to_string()),
+        "proceeding" | "shut_down" => Ok("The user didn't stop it: you shut down when this turn ends. Give the user a one-line goodbye and start no new work.".to_string()),
+        "superseded" => Ok("The user closed you themselves meanwhile.".to_string()),
+        _ => anyhow::bail!(
+            "QuitSelf: the shutdown {state}: {}",
+            body.get("error").and_then(|v| v.as_str()).unwrap_or("no detail")
+        ),
+    }
+}
+
 /// `SendMessage`'s answer when srv accepted the message but holds it until the
 /// target's next tool call or turn boundary (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
 fn deferred_delivery_text(to: &str) -> String {
@@ -3772,6 +3810,22 @@ mod tests {
         let refused = quit_self_result(403, &serde_json::json!({ "refused": "not_user_turn" })).unwrap_err().to_string();
         assert!(refused.contains("not_user_turn") && refused.contains("/quit"), "{refused}");
         assert!(quit_self_result(401, &Value::Null).is_err());
+    }
+
+    #[test]
+    fn quit_self_outcome_says_whether_the_user_kept_it() {
+        assert!(quit_self_outcome("kept_by_user", &Value::Null).unwrap().contains("keep you running"));
+        assert!(quit_self_outcome("proceeding", &Value::Null).unwrap().contains("goodbye"));
+        assert!(quit_self_outcome("shut_down", &Value::Null).unwrap().contains("goodbye"));
+        assert!(quit_self_outcome("superseded", &Value::Null).is_ok());
+        let failed = quit_self_outcome("failed", &serde_json::json!({ "error": "boom" })).unwrap_err().to_string();
+        assert!(failed.contains("boom"), "{failed}");
+    }
+
+    #[test]
+    fn quit_self_warns_it_can_take_15_seconds() {
+        let v: Value = serde_json::from_str(QUIT_SELF_TOOL).unwrap();
+        assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"));
     }
 
     #[test]

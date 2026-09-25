@@ -284,6 +284,10 @@
           "type": "boolean",
           "description": "Play a sound when an agent has been idle and waiting for user input for a while. Default true."
         },
+        "notify:sound:agent.shutdown.pending": {
+          "type": "boolean",
+          "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 15 seconds to keep it running. Default true."
+        },
         "notify:sounds:waiting:volume": {
           "type": "number",
           "minimum": 0,
