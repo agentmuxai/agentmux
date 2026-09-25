@@ -483,7 +483,9 @@ fn quit_self(
     use axum::Json;
 
     let detail = format!("{reason} | user said: {user_instruction:?}");
-    if self_quit::is_quitting(block_id) {
+    // Scheduled, closing, or a user-override window that already ran out.
+    let under_way = crate::sagas::pending_shutdown::active_for(block_id).is_some_and(|v| v.status == "proceeding");
+    if self_quit::is_quitting(block_id) || under_way {
         return (StatusCode::OK, Json(json!({ "status": "already_quitting" }))).into_response();
     }
     let provenance = crate::backend::blockcontroller::get_controller(block_id).and_then(|c| c.turn_provenance());
@@ -506,7 +508,7 @@ fn quit_self(
             true,
             Some(refusal.as_str()),
             &pending.request_id,
-            Some(&format!("pending user override ({via}): {detail}")),
+            Some(&format!("{} ({via}): {detail}", crate::sagas::pending_shutdown::audit_note(&pending, agent, via))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
@@ -521,6 +523,9 @@ pub(crate) fn pending_body(p: &crate::sagas::pending_shutdown::PendingView) -> s
     json!({
         "status": "pending_user_override",
         "request_id": p.request_id,
+        // Whose request this is: a caller who finds someone else here joined it.
+        "by": p.by,
+        "via": p.via,
         "deadline_ms": p.deadline_ms,
         "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
     })
@@ -628,7 +633,7 @@ pub(crate) async fn handle_close_pane(
             true,
             None,
             &pending.request_id,
-            Some(&format!("pending user override: {reason}")),
+            Some(&format!("{}: {reason}", crate::sagas::pending_shutdown::audit_note(&pending, &caller_agent_id, "ClosePane"))),
         );
         return (StatusCode::ACCEPTED, Json(pending_body(&pending))).into_response();
     }
