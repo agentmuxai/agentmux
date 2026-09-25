@@ -125,6 +125,42 @@
     }
 }
 
+// Labelled-action rows (failure recovery: Log in / Login via terminal / Bind /
+// Armory) wrap their buttons instead of clipping them. Buttons keep their normal
+// look; only the flow changes.
+//
+// Wrapping is content-driven, NOT tied to a pane-width breakpoint: how wide the
+// row must be depends on the title, meta and button labels (which vary per
+// failure code and provider), so a fixed breakpoint clipped the buttons well
+// before it kicked in. When everything fits, the row is still one line with the
+// buttons right-aligned; when it doesn't, the buttons that no longer fit drop
+// onto their own line(s).
+.pane-row--labeled-actions > .pane-row-summary {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+    padding-block: var(--space-1);
+    white-space: normal;
+
+    // The title takes the slack instead of the buttons' `margin-left: auto`, so
+    // the cluster stays right-aligned on one line but flows left once wrapped
+    // (an auto margin would push a wrapped button to the far right).
+    .pane-row-title {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .pane-row-action:first-of-type { margin-left: 0; }
+}
+
+// Very narrow panes (<= 249px, the `agent-pane` tier in styles/_responsive.scss —
+// see docs/specs/responsive-agent-pane.md): one button per line, full width.
+@container agent-pane (max-width: 249px) {
+    .pane-row--labeled-actions > .pane-row-summary .pane-row-action--labeled {
+        flex: 1 0 100%;
+        justify-content: flex-start;
+    }
+}
+
 // Expanded body for the failure-recovery row: explanation + stderr/result tail.
 .pane-row-body .agent-failure-detail {
     display: flex;
