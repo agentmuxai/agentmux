@@ -90,7 +90,7 @@ The persistent controller spawns lazily on the first message (`persistent/mod.rs
 One server operation, `self_quit::run(state, block_id, origin)`, used by both entry points.
 
 1. **Scope: this block only.** The target is always the caller's own block — for the tool, the `verified_block_id`; for `/quit`, the block whose composer received it. There is no target parameter anywhere, so neither entry point can be pointed at another agent.
-2. **Tab, not pane.** Closes this block's tab via the same path as the tab × (`sagas/delete_block.rs`). Sibling tabs keep running; the pane's active tab moves to a neighbour. If this was the last tab, the pane closes (the #3698 rule).
+2. **Tab, not pane.** Closes this block's tab via `delete_block::run` (§12.4 says why it, not `close_pane::run` with one id). Sibling tabs keep running; the pane's active tab moves to a neighbour. If this was the last tab, the pane closes (the #3698 rule).
 3. **Graceful.** Shutdown is §2.2's `shutdown_agents`, never `ctrl.stop()`.
 4. **Nothing left acting in its name** (§4.3): the agent's work claims are released, and its `Shell()` children are stopped.
 5. **Conversation kept.** `save_final_state` keeps the session id; reopening the agent (launcher, `OpenAgent`) resumes it.
@@ -402,3 +402,61 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - **Q3. Human-confirm dialog for `QuitSelf`.** **Decided 2026-09-25:** no dialog when the user asked; any external shutdown gets a 15 s notify-and-override window with its own tone, and the caller waits at least 15 s (§6.5).
 - **Q4. `ClosePane` no-argument form.** Recommended: reroute through self-quit (§7-1).
 - **Q5. Per-agent "Quit gracefully" button in the pane-close modal.** ~~Recommended: not in v1; the text tip (§5.4) first.~~ **Moot (2026-09-25):** the × itself is now the graceful path (§5.5).
+
+## 12. Contracts (srv ↔ frontend), for building in parallel
+
+Added 2026-09-25 after Camper's review. Lark builds the srv/MCP side and Camper the frontend (§5.5 overlay and log, the "Shut down" confirm, `/quit` + `/exit`, the §6.5 banner and tone). These shapes are the interface between them.
+
+### 12.1 `agent:shutdown` — the shutdown log (§5.5)
+
+MPS event, scope `block:<block_id>`, published by `shutdown_one` (`sagas/close_pane.rs`) for every agent it shuts down, whoever asked: pane ×, tab ×, `/quit`, `QuitSelf`, or an external close after its §6.5 window.
+
+```jsonc
+{
+  "block_id": "…",
+  "seq": 3,                    // per block, from 1, strictly increasing: order by it, not arrival
+  "step": "interrupt" | "exit" | "kill" | "process" | "saved" | "done" | "error",
+  "text": "claude — exited",   // one display line, ≤ 80 chars, already concise
+  "process": { "pid": 4312, "name": "node dev-server.js", "outcome": "stopped" | "killed" },  // step == "process" only
+  "forced_after_ms": 5000,     // step == "kill" only: the grace ran out
+  "error": "…"                 // step == "error" only
+}
+```
+
+- **Terminal events:** `done` means the pane will close when the saga's layout change arrives. `error` means the pane stays open with the log and a **Close** button.
+- **Process lines:** one `process` event per tracked process, read before `release_block_processes` ends them.
+- **Display:** the frontend shows at most 8 lines plus "+N more".
+- **Not persisted:** the frontend subscribes when the close starts, and srv publishes only after that.
+
+### 12.2 `agent:shutdown-pending` / `agent:shutdown-pending-cleared` (§6.5)
+
+Scope `block:<block_id>`. `pending` is published with persist = 1, so a window that opens during the countdown still shows the banner; `cleared` replaces it.
+
+```jsonc
+// agent:shutdown-pending
+{ "block_id": "…", "request_id": "…", "by": "Korp" | "cron" | …, "via": "QuitSelf" | "ClosePane" | "FleetBulkStop",
+  "reason": "…", "deadline_ms": 1790353313015 }
+// agent:shutdown-pending-cleared
+{ "block_id": "…", "request_id": "…", "outcome": "kept_by_user" | "proceeding" | "superseded" }
+```
+
+`proceeding` is followed by the §12.1 stream. `superseded` means the user closed the pane themselves meanwhile.
+
+### 12.3 RPCs from the frontend (trusted UI channel)
+
+| RPC | Params | Result | Used by |
+|---|---|---|---|
+| `ObjectService.QuitAgent` | `blockId` | `{ ok, status: "quitting" \| "already_quitting" }` | `/quit`, `/exit` (§5.1) |
+| `agent.shutdown.keep` | `{ block_id, request_id }` | `{ ok, outcome: "kept_by_user" \| "too_late" }` | the banner's **Keep running** (§6.5) |
+
+The pane ×'s close keeps `ObjectService.ClosePane(blockIds)`. What changes is the frontend's handling (§5.5): the node stays until the saga's layout change arrives.
+
+### 12.4 Closing one tab from srv: `delete_block::run`, not `close_pane::run` with one id
+
+A close srv starts itself (self-quit, a `ClosePane` with no arguments, an external close after its window) must also update any frontend that already has the tab loaded. Otherwise the dead tab's pill stays, an active one leaves an empty slot, and the frontend's next layout push writes the member back. `delete_block::run` already does all of it:
+
+1. `close_pane::shutdown_agents` for the block: the graceful shutdown, and the §12.1 events. Its later `delete_controller` is idempotent cleanup of an already-stopped controller.
+2. `LayoutDeleteNodeByBlock`: the reducer removes only that stack member and keeps the pane and its other tabs (`reducer/layout.rs`, "One tab of a stacked pane: remove just that member"). The last member takes the leaf with it (the #3698 rule).
+3. `queue_source_layout_delete`: queues the frontend `delete` layout action. Its handler (`layoutPersistence.ts` `DeleteNode` → `removeBlockFromLeaf` → `removeMemberFromStack`) removes only that member and activates the right-hand neighbour (`nextStack[min(idx, len-1)]`, the same rule as `next_visible_member`). It never calls `closeNode`, so it can't delete the block a second time.
+
+`close_pane::run` with one id does 1 and a leaf-aware 2, but it queues a frontend action **only when the whole leaf goes**. It relies on the frontend having already shortened the stack, which is true only for the frontend's own `closeBlockInStack` (Camper, 2026-09-25). So it stays the primitive for frontend-started closes, and srv-started closes use `delete_block::run`. **No new frontend layout action is needed.**
