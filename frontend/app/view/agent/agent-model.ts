@@ -28,7 +28,7 @@ import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
-import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import "./agent-pane-tab";
 import { quickForkAgent } from "./quick-fork";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
@@ -156,6 +156,7 @@ export class AgentViewModel implements ViewModel {
         this.viewName = () => {
             const meta = this.blockAtom()?.meta;
             const name = meta?.["agentName"];
+            if (meta?.[HISTORY_TAB_FOR_META_KEY]) return historyTabLabel(name);
             if (typeof name === "string" && name.length > 0) return name;
             // No agent launched into this pane yet (the picker state) — same
             // label a newly-"+"-created tab falls back to (agent-view.tsx's
