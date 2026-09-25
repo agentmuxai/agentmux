@@ -55,6 +55,16 @@
         z-index: 50;
     }
 
+    // The busy indicator's stripe color mirrors the selection ring above
+    // exactly — same var() chain, exposed as a custom property so the bar
+    // portaled into `.pane-progress-bar-slot` (agent-view.scss's
+    // `.agent-pane-progress-bar`) reads the identical value.
+    --progress-bar-color: var(--pane-ring-color, var(--border-color));
+
+    &.pane-stack-focused {
+        --progress-bar-color: var(--pane-ring-color, var(--accent-color));
+    }
+
     &.pane-stack-focused-alone::after {
         border-color: transparent;
     }
@@ -74,4 +84,35 @@
     .block-mask {
         border-color: transparent !important;
     }
+}
+
+// The busy indicator's slot — rendered by the chrome on EVERY pane, so an
+// agent tab gets its marching-ants ring whatever view type the pane started
+// as (RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md;
+// it used to be agent-chrome-only, as `.agent-pane-progress-bar-slot`).
+// Empty until the active view model's content portals a bar into it via
+// `setProgressBarMount` (PaneChrome.tsx).
+//
+// Overlays the full pane rect without reserving layout space
+// (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md), positioned
+// against `.pane-stack` above.
+//
+// A transparent 2px BORDER, not `inset: 2px` — deliberate: the same
+// box-model mechanism as `.pane-stack::after`'s own 2px border, so both
+// round to the same device pixels on fractional pane sizes and the bar
+// nests exactly inside the selection ring. `inset: 2px` rounded
+// differently and left a one-edge gap —
+// docs/retro/RETRO_AGENT_PANE_PROGRESS_RING_TOP_EDGE_GAP_2026_09_19.md.
+.pane-progress-bar-slot {
+    position: absolute;
+    inset: 0;
+    border: 2px solid transparent;
+    // Matches the ring's own radius so the masked frame inside doesn't poke
+    // square corners past the pane's rounded ones.
+    border-radius: var(--block-border-radius);
+    overflow: hidden;
+    pointer-events: none;
+    // Above a floating pane tab strip (z: var(--z-pane-overlay, 4)) so the
+    // bar draws over the strip's top edge — both sit at top: 0.
+    z-index: calc(var(--z-pane-overlay, 4) + 1);
 }
