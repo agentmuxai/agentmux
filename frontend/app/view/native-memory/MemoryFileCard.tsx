@@ -21,10 +21,16 @@
  * other by changing its own.
  *
  * See docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04.md.
+ *
+ * Since 2026-09-24 a thin wrapper over the generic MemoryTile, which the
+ * Global Memory tile grid shares
+ * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3). The markup and classes
+ * are unchanged.
  */
 
-import { Show, type JSX } from "solid-js";
+import type { JSX } from "solid-js";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
+import { MemoryTile, type MemoryTileBadge } from "./MemoryTile";
 
 interface MemoryFileCardProps {
     file: NativeMemoryFileMeta;
@@ -65,52 +71,24 @@ export function fileMetaLabel(file: NativeMemoryFileMeta): string {
 }
 
 export const MemoryFileCard = (props: MemoryFileCardProps): JSX.Element => {
-    const select = () => props.onSelect(props.file.filename);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            select();
-        }
-    };
-
+    // The index file is the one loaded into every session, so it earns a
+    // marker the other tiles don't get.
+    const badges = (): MemoryTileBadge[] => [
+        ...(props.file.is_index ? [{ label: "index", variant: "accent" as const }] : []),
+        ...(props.file.metadata_type ? [{ label: props.file.metadata_type }] : []),
+    ];
     return (
-        <div
-            class="memory-file-card"
+        <MemoryTile
+            icon={props.file.is_index ? "fa-list" : "fa-file-lines"}
+            title={props.file.filename}
+            badges={badges()}
+            meta={fileMetaLabel(props.file)}
+            onSelect={() => props.onSelect(props.file.filename)}
             classList={{ "memory-file-card--index": props.file.is_index }}
-            role="button"
-            tabIndex={0}
-            onClick={select}
-            onKeyDown={handleKeyDown}
-            data-testid="memory-file-card"
-            data-filename={props.file.filename}
-            aria-label={`${props.file.filename} — ${fileMetaLabel(props.file)}`}
-        >
-            <i
-                class="memory-file-card-icon fa-sharp fa-solid"
-                classList={{
-                    "fa-list": props.file.is_index,
-                    "fa-file-lines": !props.file.is_index,
-                }}
-                aria-hidden="true"
-            />
-            <span class="memory-file-card-info">
-                <span class="memory-file-card-title" title={props.file.filename}>
-                    {props.file.filename}
-                </span>
-                <span class="memory-file-card-badges">
-                    {/* The index file is the one loaded into every session, so it
-                        earns a marker the other tiles don't get. */}
-                    <Show when={props.file.is_index}>
-                        <span class="memory-file-card-badge memory-file-card-badge--index">index</span>
-                    </Show>
-                    <Show when={props.file.metadata_type}>
-                        {(type) => <span class="memory-file-card-badge">{type()}</span>}
-                    </Show>
-                </span>
-                <span class="memory-file-card-meta">{fileMetaLabel(props.file)}</span>
-            </span>
-        </div>
+            testId="memory-file-card"
+            data={{ filename: props.file.filename }}
+            ariaLabel={`${props.file.filename} — ${fileMetaLabel(props.file)}`}
+        />
     );
 };
 

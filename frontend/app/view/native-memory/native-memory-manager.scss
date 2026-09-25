@@ -538,3 +538,35 @@
     flex-direction: column;
     overflow: hidden;
 }
+
+// ── MemoryTile extras (2026-09-24) ───────────────────────────────────────
+// The generic tile (MemoryTile.tsx) reuses every .memory-file-card rule
+// above; these are the only additions the Global Memory grid needs.
+// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.3.
+
+// Entry names aren't filenames — the mono face is for files.
+.memory-file-card-title--plain {
+    font-family: inherit;
+}
+
+.memory-file-card-badge--warning {
+    border-color: color-mix(in srgb, var(--warning-color) 50%, var(--border-color));
+    color: var(--warning-color);
+}
+
+// Drag-to-reorder feedback (Global Memory entries).
+.memory-file-card--dragging {
+    opacity: 0.5;
+}
+
+.memory-file-card--drop-target {
+    border-color: var(--accent-color);
+    box-shadow: inset 0 2px 0 var(--accent-color);
+}
+
+// Secondary tiles (Combined preview, + Add memory) read as actions, not
+// entries.
+.memory-file-card--action {
+    border-style: dashed;
+    color: var(--secondary-text-color);
+}
