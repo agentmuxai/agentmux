@@ -1,7 +1,7 @@
 # Activity flash matches its sound: same strikes, same timing, same relative intensity
 
 **Status:** active — Phase 1 (tool tones) shipped in PR #3717; Phase 2 (event
-sounds) in the PR that adds §9; Phase 3 (waiting loop) not started, pending Q3.
+sounds) in PR #3740; Phase 3 (waiting loop) not started, pending Q3.
 See §8–§9 for what shipped and where it departs from §3.
 **Date:** 2026-09-24.
 **Requested by:** repo owner (asafebgi).
