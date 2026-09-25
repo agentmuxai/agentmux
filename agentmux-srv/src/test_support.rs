@@ -70,6 +70,7 @@ pub(crate) fn broker_recording(event_type: &str) -> (crate::backend::mps::Broker
 /// be built into a fresh temp dir that was deliberately leaked every run —
 /// 4.4 MB each, gigabytes of `/tmp` on a machine where many agents run the
 /// srv tests.
+#[cfg(test)]
 pub(crate) fn fake_app_server_binary() -> &'static std::path::PathBuf {
     static BINARY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     BINARY.get_or_init(|| {
@@ -104,8 +105,11 @@ pub(crate) fn fake_app_server_binary() -> &'static std::path::PathBuf {
             "fake App Server compilation failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        if std::fs::rename(&partial, &binary).is_err() {
+        // A failed rename is fine only if another process put its build in
+        // place first (Windows won't rename over an existing file).
+        if let Err(e) = std::fs::rename(&partial, &binary) {
             let _ = std::fs::remove_file(&partial);
+            assert!(binary.is_file(), "install fake App Server binary at {}: {e}", binary.display());
         }
         binary
     })
