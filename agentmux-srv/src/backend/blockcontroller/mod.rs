@@ -779,6 +779,11 @@ pub fn resync_controller(
     registry: Option<Arc<crate::registry::Registry>>,
     boot_id: Arc<str>,
     auth_key: &str,
+    // The live, file-watched config (`AppState::config_watcher`). Only the
+    // shell/cmd controller reads it, for the global `cmd:env` defaults its
+    // interactive-shell spawn applies. `None` (tests) means no global
+    // defaults.
+    config: Option<Arc<crate::backend::wconfig::ConfigState>>,
 ) -> Result<(), String> {
     let block_id = &block.oid;
     let block_meta = &block.meta;
@@ -911,7 +916,8 @@ pub fn resync_controller(
                 mstore,
                 filestore,
                 auth_key.to_string(),
-            );
+            )
+            .with_config(config);
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
             let result = ctrl.start(block_meta.clone(), rt_opts, force);
@@ -1242,7 +1248,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, Arc::from("test-boot"), "test-key", None);
         assert!(result.is_ok(), "resync_controller failed: {result:?}");
 
         assert_eq!(
@@ -1380,7 +1386,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key", None);
         assert!(result.is_ok());
     }
 
@@ -1397,7 +1403,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key", None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }

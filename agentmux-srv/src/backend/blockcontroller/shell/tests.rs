@@ -660,7 +660,7 @@ use std::sync::Arc;
             ..Default::default()
         };
 
-        let result = super::super::resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key");
+        let result = super::super::resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, None, None, std::sync::Arc::from("test-boot"), "test-key", None);
         assert!(result.is_ok());
 
         let ctrl = super::super::get_controller("resync-test-block");
