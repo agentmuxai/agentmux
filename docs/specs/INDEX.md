@@ -341,6 +341,7 @@ partial list.
 | [`SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07`](SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md) | SPEC: Durable, location-consistent, transparent native memory |
 | [`SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10`](SPEC_NEXT_PROMPT_SUGGESTION_RESTORE_ON_CLEAR_2026_08_10.md) | SPEC: Restore the ghost-text suggestion when the composer is cleared back to empty |
 | [`SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20`](SPEC_ORPHAN_RECONCILER_CROSS_PLATFORM_LIVENESS_2026_09_20.md) | SPEC: Real crash-orphan liveness check on macOS/Linux (closes #1569) |
+| [`SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25`](SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md) | SPEC: OS notifications — agent summary line, "has a question", and reliable click-to-pane |
 | [`SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22`](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) | Pane block-stack mount flicker — root causes + reveal-gate generalization |
 | [`SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18`](SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md) | SPEC: A pane's chrome must resolve its own tab's LayoutModel, never "whichever tab is globally active" |
 | [`SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23`](SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md) | Clicking an input in an unselected pane should focus that input — in one click |
@@ -510,7 +511,6 @@ partial list.
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
-| [`SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25`](SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md) | SPEC: OS notifications — agent summary line, "has a question", and reliable click-to-pane |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18`](SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md) | SPEC: Pane tabs as reducer commands — one writer for "which blocks are in which pane" |
