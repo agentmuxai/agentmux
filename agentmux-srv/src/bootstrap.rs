@@ -1167,8 +1167,9 @@ pub fn spawn_background_subsystems(
     // keystrokes only for terminal-based agents.
     reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str| {
         match backend::blockcontroller::deliver_agent_message(block_id, message) {
-            Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(true),
-            Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(false),
+            Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(reactive::SenderDelivery::Delivered),
+            Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => Ok(reactive::SenderDelivery::Deferred),
+            Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(reactive::SenderDelivery::Pty),
             Err(e) => Err(e),
         }
     }));
@@ -2146,8 +2147,11 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 .is_some();
             if !is_subprocess {
                 match backend::blockcontroller::deliver_agent_message(block_id, message) {
-                    Ok(backend::blockcontroller::AgentDelivery::Structured) => return Ok(true),
-                    Ok(backend::blockcontroller::AgentDelivery::Pty) => return Ok(false),
+                    Ok(backend::blockcontroller::AgentDelivery::Structured) => return Ok(reactive::SenderDelivery::Delivered),
+                    Ok(backend::blockcontroller::AgentDelivery::StructuredDeferred) => {
+                        return Ok(reactive::SenderDelivery::Deferred)
+                    }
+                    Ok(backend::blockcontroller::AgentDelivery::Pty) => return Ok(reactive::SenderDelivery::Pty),
                     Err(e) => {
                         // A persistent controller that is REGISTERED BUT NOT YET
                         // SPAWNED can't be steered — `deliver_agent_message`
@@ -2254,7 +2258,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 ))
             });
             match started {
-                Ok(()) => Ok(true),
+                Ok(()) => Ok(reactive::SenderDelivery::Delivered),
                 Err(e) => {
                     tracing::error!(
                         block_id = %block_id_owned,
