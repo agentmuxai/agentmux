@@ -953,7 +953,9 @@ pub fn resync_controller(
                 mstore,
                 filestore,
             )
-            .with_identity_stores(id_store, identity_store, auth_key.to_string());
+            .with_identity_stores(id_store, identity_store, auth_key.to_string())
+            // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24).
+            .with_agent_lease_store(registry, boot_id);
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());

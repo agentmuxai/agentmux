@@ -1,9 +1,9 @@
 # SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN
 
 **Date:** 2026-09-24
-**Status:** proposed — nothing built. Design only; §9 is the delivery order. §10's decisions are taken at their
-recommended option (repo owner, 2026-09-25: proceed to implementation without further sign-off). §11's open questions are
-all answered from logs and code.
+**Status:** active — Phase 1 (host tier: lease, admission, fencing) implemented; see §12 for what was built and what
+was left out. Phases 2–5 not started. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
+proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-09-24: *"by mistake I opened up an instance of you in a 57.2 version running on the same
 host … we want a best practice method to ensure that 2 agents can't open simultaneously, even across the 3 tiers."*
@@ -173,11 +173,15 @@ that is live elsewhere writes nothing shared at all until the user chooses obser
   user agent that equals the definition id and the registry's `instance_id` — `fb3e692d…` for all three in Agent3's
   registry record **[verified]**. Template launches get a fresh UID per launch **[spec]**, so they correctly never collide.
 - **Store:** extend `registry::LeaseStore` rather than write a second one. Add to `LeaseFile`: `epoch` (u64, incremented on
-  **every ownership change**, never reused), `channel`, `version`, `srv_url`, `hostname`, `host_id`, and the holder's
-  `pid` **plus process start time** (PID alone is reusable). `boot_id` stays the owner id.
-- **Lifetime:** the claim is per **pane/controller lifetime**, not per turn (the `subprocess` path's per-turn claim leaves
-  the gaps between turns open). Taken when the controller registers; renewed every 5 s by a task **independent of turns**;
-  released on close/exit.
+  **every ownership change**, never reused), `channel`, `version`, `hostname`, and the holder's `pid` **plus process start
+  time** (PID alone is reusable). `boot_id` stays the owner id. All new fields are `serde(default)`, so a lease written by
+  an older build still parses — version skew must never look like corruption. **The epoch lives in its own per-key
+  counter file (`<uid>.epoch`), never deleted** — release deletes the lease file, so an epoch kept only there would restart
+  after a clean release and let a stale writer's epoch be reused (Codex P2 on #3730).
+- **Lifetime:** the claim is per **CLI process lifetime**, not per turn (the `subprocess` path's per-turn claim leaves
+  the gaps between turns open). Taken right before the process is spawned; renewed every 5 s by a task **independent of
+  turns**; released when that process exits. A respawn in the same pane keeps the lease it already holds instead of
+  re-claiming. A persistent controller with no process holds nothing — it is not driving the agent.
 - **One entry point:** `AgentAdmission::acquire(uid) -> Granted{epoch} | Denied{holder} | Unknown{reason}`. **Every** path
   that can start an agent calls it before spawning — eager resume, first spawn, resume retry, the queue's leftover respawn,
   picker "Continue", `agent.open`, cron/work-queue spawns, jekt-triggered spawns. Per-path checks are exactly how today's
@@ -193,15 +197,21 @@ The shared root is host-global and already carries the cross-channel registry (`
 this tier can be a real critical section, not a best effort.
 
 1. `acquire(uid)` enters the per-UID critical section and reads the lease.
-2. **Free / expired / corrupt →** claim, `epoch += 1`.
+2. **Free / expired →** claim, `epoch` = next value of the counter. **Unreadable → held (fail closed)** until the file has
+   not been rewritten for a full TTL: a parse failure proves nothing about the holder, and a live holder rewrites the file
+   on every renewal (Codex P1 on #3730).
 3. **Held, unexpired, by another `boot_id` →** `Denied{holder}`.
 4. **Held, but the holder is provably dead** (same host: `pid` gone or start time differs) → reclaim **immediately**, do not
-   wait 15 s. Reuse the orphan reconciler's cross-platform probe.
+   wait 15 s. Only when the lease names **this** host — a holder on another host (a shared root on a network drive) is
+   never presumed dead. (The orphan reconciler named in Related probes CEF windows, not pids; `sysinfo` is used instead.)
 5. **Compatibility probe for lease-unaware holders (every version before this ships).** No lease file exists for them.
    Before granting, also read the host-global cross-channel registry (`~/.agentmux/shared/agents/reactive`, `AgentEntry`:
-   `agent_id`, `local_url`, `block_id`, `pid`, `channel`) for an entry for **this agent on another channel** — matched by
-   name, since older entries carry no UID — whose `pid` is alive **and** whose `local_url` answers. Such an entry ⇒ treat as
-   holder (`Denied{holder, lease: none}`). In §1.1 OLD's entry was exactly this (channel `local-main-b28b7a-27a8ae9b`,
+   `agent_id`, `local_url`, `block_id`, `pid`, `channel`) for every **other** channel's live srv (`pid` alive), and ask each
+   one — `GET <local_url>/agentmux/reactive/agents` with that entry's `auth_key` — for its registrations. A registration
+   whose **`uid`** equals this agent's ⇒ treat as holder (`Denied{holder, lease: none}`). **Never matched by name**: display
+   names are not unique, so a same-named but different agent must not block this one (Codex P2 on #3730). Registrations
+   carry `uid` since #3560, before v0.57.0; an instance too old to report one, or one that does not answer within 1.5 s,
+   is skipped and logged — not evidence either way. In §1.1 OLD's entry was exactly this (channel `local-main-b28b7a-27a8ae9b`,
    `127.0.0.1:61134`, visible to NEW as `cross_channel` in `DiscoverAgents`). Remove the probe once the oldest supported
    version carries the lease. (The registry's `registration_nonce` cannot serve as an epoch here: it is a per-srv counter
    that restarts at 1 — `persistent/mod.rs:116` — and the frontend presence path writes `0`.)
@@ -214,8 +224,10 @@ this tier can be a real critical section, not a best effort.
 
 ### 4.3 Fencing — a lost claim must stop the holder (I4)
 
-- The controller **checks** the claim (cheap, in-memory epoch compared with the last renewal result) before every turn
-  starts, and treats a failed renew as **lost** once it has failed for > TTL.
+- **In Phase 1, not deferred** (Codex P1 on #3730: TTL reclaim without fencing lets a woken holder and the new one both
+  drive). The controller **verifies** the lease before every turn starts — both send paths, a read under the key's lock —
+  and the renewal task treats a renew that finds another owner as **lost**. Either way the CLI process is killed and the
+  turn refused; a transient I/O error is not a loss.
 - On loss it enters a **Superseded** state: no new turns, no injected input accepted, the pane shows *"Agent3 is now driven
   by v0.57.2 on this host"* with **[Open read-only]**, and the controller goes through the existing graceful shutdown
   (`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN`). It does not race the new holder.
@@ -347,11 +359,11 @@ lesson, and the way that incident began).
 
 0. **Now, no code:** treat "start a second instance of a live agent" as unsafe — the retro's rule; open a different agent,
    or a fresh test agent, for anything experimental.
-1. **Host tier — prevent.** `AgentAdmission::acquire` keyed by UID over the extended `LeaseStore`; wire the `persistent`
-   controller (claim at register, independent renewal, release on exit); route **every** spawn path through it; admission
-   before any shared write (I9); pid-probe reclaim; compat probe for lease-unaware holders; UI message naming the holder.
-   This alone closes today's incident.
-2. **Fencing + takeover UX.** Pre-turn check, Superseded state, fence request, the takeover dialog, observer panes.
+1. **Host tier — prevent, with fencing.** `agent_admission::acquire` keyed by UID over the extended `LeaseStore`; wire the
+   `persistent` controller (claim at spawn, independent renewal, release on exit); admission before any shared write (I9);
+   pid-probe reclaim; compat probe for lease-unaware holders; pre-turn verify and kill-on-loss; refusal message naming the
+   holder. This alone closes today's incident. **Implemented — §12.**
+2. **Takeover UX.** Superseded state in the pane, fence request, the takeover dialog, observer panes; the §6 counters.
 3. **Record fencing.** Epoch on record appends; store rejects stale epochs; `fork` ledger event.
 4. **LAN — detect and yield.** Advertisement field, peer query, tie-break.
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
@@ -393,3 +405,50 @@ missing is the wiring and the key.
 Still open, deliberately left to implementation: the exact list of spawn paths for test §7.5 (enumerated when Phase 1
 routes them), and whether the 0.57.0 srv's "row not found" came from reading a per-channel account table or a schema gap —
 irrelevant to the fix, which is I9.
+
+---
+
+## 12. Phase 1 as built
+
+**Code.**
+- `agentmux-srv/src/registry/leases.rs`: `claim_as` with `ClaimantInfo`, the epoch counter, unreadable-is-held, the dead
+  and reused-pid reclaim, `verify`, `live_holder_other_than`, and a block-aware `release` (a superseded block of the same
+  process must not drop the lease a newer block holds).
+- `agentmux-srv/src/backend/agent_admission.rs` (new):
+  - `acquire` returns a `HeldAgentLease`, which has its own renewal task, `verify`, and release on drop. It fails closed on
+    I/O after one retry (D2).
+  - `check_before_spawn` is the early read-only check: the lease plus the compat probe.
+  - `denied_message` is the refusal text.
+- `persistent/`:
+  - `with_agent_lease_store`, used by the one place persistent controllers are built (`blockcontroller/mod.rs`).
+  - `acquire_agent_lease` in `spawn_process`, just before `cmd.spawn()`. All four spawn paths pass through that point.
+  - Release in both current-generation exit arms.
+  - `fence_check` at the top of `send_message` and `send_user_message_with_policy`.
+  - The early check in `try_eager_resume`, before the spawn claim and the credential gate.
+- Early checks elsewhere:
+  - `run_agent_turn`, before `build_persistent_spawn_env`. A refusal takes the gate's error path, so it is persisted and
+    shown in the pane.
+  - `agent.open`, right after its per-agent lock and before any write; the error is `AGENT_LIVE_ELSEWHERE: …`.
+  - The frontend presence registration (`POST /agentmux/reactive/register`). It answers 409 and registers nothing, because
+    delivery prefers the freshest cross-instance entry, so registering a refused pane would pull the live instance's
+    jekts. This is a fourth I9 write that §1.1 had not listed.
+
+**Tests.**
+- `registry::leases`: 22 tests. Among them: fail-closed on an unreadable file, reclaim of a stale unreadable file, old
+  format honoured, epochs across release and across TTL reclaim, dead pid, reused pid, another host, `verify`, and the
+  superseded-block release.
+- `backend::agent_admission`: 9 tests. Among them: refusal naming the holder, a takeover reported by the renewal task
+  through `on_lost`, and the probe matching by UID only.
+- `persistent::tests::single_live_instance`: 5 tests. Refused before spawn; lease held until the process exits; a pane that
+  lost its lease starts no turn and is killed; no UID takes no lease; the early check.
+- `agent_open::single_live_instance_tests`: the I9 test (§7.9). It passes with the check and fails when the check is
+  removed.
+
+**Not in Phase 1.**
+- §4.2 step 6, the volume check for an overridden shared root.
+- The §6 counters. Phase 1 has structured logs only: `agent_admission.{granted,denied,fenced,unknown,compat_probe_hit}`.
+- The Superseded, observer and takeover UI. A refusal and a fenced turn surface as the spawn-gate error text in the pane.
+- A spawn env without an agent UID takes no lease and is logged: tokenless and legacy panes (D3's minting is outside this
+  spec).
+- The subprocess controller keeps its per-turn claim on the same key. It now also sees persistent holders, which is
+  intended.
