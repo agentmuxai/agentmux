@@ -1356,22 +1356,39 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
     // no live agent on day one. Exactly the same reasoning that made
     // un-respawned agents render TRUST=self-declared for months after
     // host-tier signing shipped (REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md).
-    if let Ok(keypair) = mstore.agent_wan_key_ensure(agent_slug) {
-        env.insert("AGENTMUX_WAN_KEY".to_string(), json!(keypair.private_key));
-        // §2.1.2: the WAN signature binds the sending INSTANCE, not just the
-        // agent, because one account can run the same agent name on several
-        // instances and each mints its own keypair. The host half is written
-        // explicitly for the same reason `AGENTMUX_CHANNEL` above is: relying
-        // on the agent's ambient environment would let a scrubbed or nested
-        // env sign under a different instance identity than the one this
-        // instance publishes its public key under — and a mismatch there does
-        // not fail loudly, it selects the wrong key and renders legitimate
-        // traffic as an active forgery.
-        env.insert(
-            "AGENTMUX_HOST_LABEL".to_string(),
-            json!(crate::backend::reactive::registry::local_host_label()),
-        );
-        patched = true;
+    //
+    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2): the key and the
+    // instance both come from the channel-wide `wan.db`, so they survive an
+    // upgrade. The agent's key from this version's `db_agent_wan_keys` is
+    // read first (outside any `wan.db` lock) and carried over only the first
+    // time. With no `wan.db` attached, the agent gets no WAN key at all —
+    // never one minted somewhere else.
+    if let Some(wan) = mstore.wan_identity() {
+        let legacy = mstore.agent_wan_key_load(agent_slug).ok().flatten();
+        let import = legacy.as_ref().map(|k| (k.public_key.as_str(), k.private_key.as_str()));
+        match (
+            wan.instance_ensure(&crate::backend::reactive::registry::local_host_label()),
+            wan.agent_key_ensure(agent_slug, import),
+        ) {
+            (Ok(instance), Ok(key)) => {
+                env.insert("AGENTMUX_WAN_KEY".to_string(), json!(key.private_key));
+                // §2.1.2: the WAN signature binds the sending INSTANCE, not
+                // just the agent. Since W3-S the instance is its
+                // self-certifying id rather than the live hostname, which
+                // collides and changes. Written explicitly for the same
+                // reason `AGENTMUX_CHANNEL` above is: a scrubbed or nested env
+                // must not sign as a different instance than the one that
+                // certifies this agent's key.
+                env.insert("AGENTMUX_HOST_LABEL".to_string(), json!(instance.instance_id));
+                patched = true;
+            }
+            (instance, key) => tracing::warn!(
+                agent = agent_slug,
+                instance_error = ?instance.err(),
+                key_error = ?key.err(),
+                "wan identity: could not provision this agent's WAN key — its WAN jekts go unsigned"
+            ),
+        }
     }
     if !patched {
         return None;
@@ -1958,6 +1975,7 @@ mod tests {
     #[test]
     fn inject_jekt_signing_keys_into_mcp_json_patches_both_keys_into_the_env_block() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
         let content = serde_json::to_string(&json!({
             "mcpServers": { "agentmux": { "type": "stdio", "command": "agentmux-mcp", "env": { "AGENTMUX_AGENT_ID": "aria" } } }
         }))
@@ -1981,10 +1999,17 @@ mod tests {
         // §2.1.2: the WAN signature binds the sending instance, so the host
         // label must travel with the key. A missing one would make the sender
         // sign under a different instance identity than srv publishes.
+        // W3-S §2.2: that instance identity is now the id of the instance
+        // that certifies the key, and the key is the one held in wan.db.
         assert_eq!(
             env["AGENTMUX_HOST_LABEL"],
-            json!(crate::backend::reactive::registry::local_host_label()),
-            "the MCP env must carry the same host label this instance publishes its WAN key under"
+            json!(wan.instance_ensure("unused").unwrap().instance_id),
+            "the MCP env must carry the instance id that certifies this agent's WAN key"
+        );
+        assert_eq!(
+            env["AGENTMUX_WAN_KEY"],
+            json!(wan.agent_key_load("aria").unwrap().unwrap().private_key),
+            "the WAN key must be the one held in the channel-wide wan.db"
         );
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B: the channel the
         // sender signs under must be the one the shared registry publishes.
@@ -2008,6 +2033,42 @@ mod tests {
         let first_key = serde_json::from_str::<Value>(&first).unwrap()["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].clone();
         let second_key = serde_json::from_str::<Value>(&second).unwrap()["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].clone();
         assert_eq!(first_key, second_key, "minted-on-first-use key must be reused, not re-minted, on every materialization");
+    }
+
+    /// W3-S §2.2: without a `wan.db` the agent gets no WAN key and no
+    /// instance label — never a key minted in `objects.db` instead. Host and
+    /// LAN keys are unaffected.
+    #[test]
+    fn inject_jekt_signing_keys_gives_no_wan_key_without_a_wan_identity_store() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let content = serde_json::to_string(&json!({
+            "mcpServers": { "agentmux": { "env": { "AGENTMUX_AGENT_ID": "aria" } } }
+        }))
+        .unwrap();
+        let rewritten = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
+        let env = serde_json::from_str::<Value>(&rewritten).unwrap()["mcpServers"]["agentmux"]["env"].clone();
+        assert!(env["AGENTMUX_JEKT_KEY"].is_string());
+        assert!(env["AGENTMUX_LAN_KEY"].is_string());
+        assert!(env.get("AGENTMUX_WAN_KEY").is_none());
+        assert!(env.get("AGENTMUX_HOST_LABEL").is_none());
+        assert!(store.agent_wan_key_load("aria").unwrap().is_none(), "nothing minted in objects.db");
+    }
+
+    /// W3-S §2.2: an agent's existing `objects.db` WAN key is carried into
+    /// `wan.db` on first use, so an agent upgraded onto D1 keeps its key.
+    #[test]
+    fn inject_jekt_signing_keys_imports_the_legacy_wan_key_once() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let legacy = store.agent_wan_key_ensure("aria").unwrap();
+        let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
+        let content = serde_json::to_string(&json!({
+            "mcpServers": { "agentmux": { "env": { "AGENTMUX_AGENT_ID": "aria" } } }
+        }))
+        .unwrap();
+        let rewritten = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
+        let env = serde_json::from_str::<Value>(&rewritten).unwrap()["mcpServers"]["agentmux"]["env"].clone();
+        assert_eq!(env["AGENTMUX_WAN_KEY"], json!(legacy.private_key));
+        assert!(wan.agent_key_load("aria").unwrap().unwrap().imported);
     }
 
     #[test]

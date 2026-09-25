@@ -1283,7 +1283,7 @@ impl Store {
             let scope = Self::scope_for_row(&conn, id);
             // Identity M4a: also read before the DELETE.
             tombstone_key_names(&conn, id)?;
-            purge_name_keyed_keys(&conn, id)?;
+            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref())?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed
@@ -2347,7 +2347,7 @@ impl Store {
             }
             // Identity M4a: read the names before the row goes.
             tombstone_key_names(&conn, id)?;
-            purge_name_keyed_keys(&conn, id)?;
+            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref())?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and
@@ -2736,7 +2736,20 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
 /// ([`key_name_used_by_another`]) is that agent's key and is left alone.
 /// Folded as the key tables fold (`to_lowercase`). A template row is
 /// skipped, as in [`tombstone_key_names`]. Idempotent.
-fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
+///
+/// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.2): agent WAN keys now
+/// live in the channel-wide `wan.db`, so the same names are deleted there
+/// too — otherwise a new agent of the name would inherit the key across an
+/// upgrade. A `wan.db` failure fails the delete rather than being skipped:
+/// every statement here is idempotent, so a retry converges, whereas a skipped
+/// purge would hand the key to the next agent of that name. Lock order is
+/// `objects.db` (held by the caller) → `wan.db`, as `wan_identity.rs`
+/// documents.
+fn purge_name_keyed_keys(
+    conn: &rusqlite::Connection,
+    id: &str,
+    wan: Option<&super::wan_identity::WanIdentityStore>,
+) -> Result<usize, StoreError> {
     let names: Option<(String, String, String)> = conn
         .query_row(
             "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
@@ -2760,11 +2773,16 @@ fn purge_name_keyed_keys(conn: &rusqlite::Connection, id: &str) -> Result<usize,
             }
         }
     }
+    let mut purged_names = Vec::new();
     for key_name in candidates {
         if key_name_used_by_another(conn, id, &key_name)? {
             continue;
         }
         removed += delete_key_rows(conn, &key_name)?;
+        purged_names.push(key_name);
+    }
+    if let Some(wan) = wan {
+        removed += wan.agent_keys_delete(&purged_names)?;
     }
     if removed > 0 {
         tracing::info!(
