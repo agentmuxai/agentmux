@@ -65,7 +65,15 @@ import {
     setReplayMode,
 } from "../sound-service";
 import { __resetSoundListeners } from "../sound-events";
-import { __resetActivityFlash, onActivityFlash, type FlashTarget } from "../../activity-flash";
+import {
+    __resetActivityFlash,
+    FLASH_VISUAL_LEAD_MS,
+    onActivityFlash,
+    type FlashTarget,
+} from "../../activity-flash";
+import { flashPatternForSyllable } from "../flash-patterns";
+import { paramsForTool } from "../tool-tones";
+import { TOOL_TONE_COALESCE_MS } from "../tool-tones-player";
 
 describe("sound-service policy", () => {
     let playSpy: ReturnType<typeof vi.spyOn>;
@@ -221,7 +229,7 @@ describe("sound-service tool-tones policy", () => {
             .mockReturnValue(true);
         toolPlaySpy = vi
             .spyOn(__getToolTonesPlayer(), "play")
-            .mockImplementation(() => {});
+            .mockImplementation(() => null);
 
         cleanup = installSoundService();
     });
@@ -231,6 +239,7 @@ describe("sound-service tool-tones policy", () => {
         ctxSpy.mockRestore();
         attachedSpy.mockRestore();
         toolPlaySpy.mockRestore();
+        __resetActivityFlash();
         setReplayMode(false);
     });
 
@@ -319,6 +328,44 @@ describe("sound-service tool-tones policy", () => {
         fireToolStarted("blk-1", "Read");
         expect(toolPlaySpy).not.toHaveBeenCalled();
     });
+
+    it("holds the flash until the tone is audible (SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC §3.6)", () => {
+        const flashes: FlashTarget[] = [];
+        const unsubscribe = onActivityFlash((t) => flashes.push(t));
+        try {
+            // Scheduled 10 ms ahead of the context clock, 40 ms of output latency.
+            const ctx = { currentTime: 1, baseLatency: 0.01, outputLatency: 0.03 } as unknown as AudioContext;
+            ctxSpy.mockReturnValue(ctx);
+            toolPlaySpy.mockReturnValueOnce(1.01);
+            fireToolStarted("blk-1", "Read");
+            expect(flashes).toHaveLength(1);
+            expect(flashes[0].delayMs).toBeCloseTo(50 - FLASH_VISUAL_LEAD_MS, 3);
+
+            // Another pane's Read, coalesced by the player into the syllable
+            // above: the player hands back that syllable's start time, so
+            // this pane's flash waits for the same audible onset
+            // (ReAgent P1 on #3717: it used to fire undelayed).
+            toolPlaySpy.mockReturnValueOnce(1.01);
+            fireToolStarted("blk-2", "Read");
+            expect(flashes[1].delayMs).toBeCloseTo(50 - FLASH_VISUAL_LEAD_MS, 3);
+
+            // Coalesced after the shared syllable is already audible (the
+            // context clock has moved 30 ms past its start): a negative
+            // delay, so the pattern resumes where the sound is instead of
+            // restarting behind it (Codex P2 on #3717).
+            (ctx as unknown as { currentTime: number }).currentTime = 1.04;
+            toolPlaySpy.mockReturnValueOnce(1.01);
+            fireToolStarted("blk-3", "Read");
+            expect(flashes[2].delayMs).toBeCloseTo(10 - FLASH_VISUAL_LEAD_MS, 3);
+
+            // Nothing attached to wait for: undelayed.
+            toolPlaySpy.mockReturnValueOnce(null);
+            fireToolStarted("blk-4", "Read");
+            expect(flashes[3].delayMs).toBe(0);
+        } finally {
+            unsubscribe();
+        }
+    });
 });
 
 // ──────────────────────────────────────────────────────────────────────
@@ -351,22 +398,49 @@ describe("sound-service activity flash", () => {
         setReplayMode(false);
     });
 
-    function fireToolStarted(blockId: string): void {
+    function fireToolStarted(blockId: string, tool = "Read"): void {
         if (!captured) throw new Error("multicast listener was never installed");
-        captured(blockId, { type: "tool-started", name: "Read" });
+        captured(blockId, { type: "tool-started", name: tool });
     }
+
+    const blockIds = () => flashes.map((f) => f.blockId);
 
     it("emits one flash per tone, even before audio is primed", () => {
         fireToolStarted("blk-1");
         fireToolStarted("blk-2");
-        expect(flashes).toEqual([{ blockId: "blk-1" }, { blockId: "blk-2" }]);
+        expect(blockIds()).toEqual(["blk-1", "blk-2"]);
+    });
+
+    it("carries the tool's own strike pattern, undelayed when no audio played", () => {
+        fireToolStarted("blk-1", "Edit");
+        fireToolStarted("blk-1", "Read");
+        expect(flashes[0].pattern).toEqual(flashPatternForSyllable(paramsForTool("Edit")));
+        expect(flashes[0].pattern.strikes).toHaveLength(3);
+        expect(flashes[1].pattern.strikes).toHaveLength(2);
+        expect(flashes.map((f) => f.delayMs)).toEqual([0, 0]);
+    });
+
+    it("mirrors the tone's coalesce per pane: a repeat from the same pane is one strike", () => {
+        vi.useFakeTimers();
+        try {
+            fireToolStarted("blk-1");
+            fireToolStarted("blk-1"); // same pane, same tool, same instant
+            fireToolStarted("blk-2"); // another pane made the same sound
+            fireToolStarted("blk-1", "Grep"); // another tool is another sound
+            expect(blockIds()).toEqual(["blk-1", "blk-2", "blk-1"]);
+            vi.advanceTimersByTime(TOOL_TONE_COALESCE_MS);
+            fireToolStarted("blk-1");
+            expect(blockIds()).toEqual(["blk-1", "blk-2", "blk-1", "blk-1"]);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("flashes for the focused pane in a focused window too", () => {
         focusState.focusedBlockId = "blk-1";
         focusState.windowFocused = true;
         fireToolStarted("blk-1");
-        expect(flashes).toEqual([{ blockId: "blk-1" }]);
+        expect(blockIds()).toEqual(["blk-1"]);
     });
 
     it("notify:tooltones:flash=false removes the flash", () => {

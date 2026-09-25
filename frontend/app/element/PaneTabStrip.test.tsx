@@ -11,8 +11,14 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { emitActivityFlash } from "@/app/notification/activity-flash";
+import { emitActivityFlash, type FlashTarget } from "@/app/notification/activity-flash";
 import { dropPositionForPointerX, foreignDropHighlightFor, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
+
+const flashFrom = (blockId: string): FlashTarget => ({
+    blockId,
+    pattern: { strikes: [{ atMs: 0, intensity: 0.5 }] },
+    delayMs: 0,
+});
 
 afterEach(() => cleanup());
 
@@ -859,20 +865,20 @@ describe("PaneTabStrip activity flash", () => {
 
     it("clicks only the matching pill, including a background stack member", () => {
         const { container } = renderStrip(true);
-        emitActivityFlash({ blockId: "b" });
+        emitActivityFlash(flashFrom("b"));
         expect(animate).toHaveBeenCalledTimes(1);
         expect(animate.mock.instances[0]).toBe(container.querySelectorAll(".pane-tab")[1]);
     });
 
     it("ignores other blocks", () => {
         renderStrip(true);
-        emitActivityFlash({ blockId: "zzz" });
+        emitActivityFlash(flashFrom("zzz"));
         expect(animate).not.toHaveBeenCalled();
     });
 
     it("a strip without flashOnActivity never clicks", () => {
         renderStrip(false);
-        emitActivityFlash({ blockId: "b" });
+        emitActivityFlash(flashFrom("b"));
         expect(animate).not.toHaveBeenCalled();
     });
 });

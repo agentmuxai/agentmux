@@ -50,6 +50,9 @@ pub struct NotifyEmitParams {
     pub event: NotifyPaneEvent,
     #[ts(optional)]
     pub question: Option<String>,
+    /// How many questions the pending call asks; > 1 adds " (+N more)".
+    #[ts(optional)]
+    pub question_count: Option<u32>,
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
@@ -142,7 +145,9 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
                 NotifyPaneEvent::TurnStarted | NotifyPaneEvent::TurnCompleted | NotifyPaneEvent::TurnErrored => {}
                 NotifyPaneEvent::TurnStopped => r.turn_stopped_nonblocking(&p.block_id),
                 NotifyPaneEvent::InputResolved => r.resolve_nonblocking(&p.block_id, Family::Input),
-                NotifyPaneEvent::InputWaiting => r.input_waiting_nonblocking(&p.block_id, p.question),
+                NotifyPaneEvent::InputWaiting => {
+                    r.input_waiting_nonblocking(&p.block_id, p.question, p.question_count.unwrap_or(0) as usize)
+                }
             }
             Ok(NotifyOk { ok: true })
         }

@@ -56,12 +56,14 @@ const FOCUS_HEARTBEAT_MS = 20_000;
  * unmounts (e.g. its window closed into background mode) while the agent is
  * still blocked on the question, which is exactly when the toast matters.
  */
-export function paneEventToNotify(ev: AgentPaneEvent): { event: NotifyPaneEvent; question?: string } | null {
+export function paneEventToNotify(
+    ev: AgentPaneEvent
+): { event: NotifyPaneEvent; question?: string; question_count?: number } | null {
     switch (ev.type) {
         case "turn-ended":
             return ev.outcome === "stopped" || ev.outcome === "interrupted" ? { event: "turn_stopped" } : null;
         case "waiting-for-input":
-            return { event: "input_waiting", question: ev.question };
+            return { event: "input_waiting", question: ev.question, question_count: ev.questionCount };
         case "waiting-ended":
             return ev.reason === "submitted" ? { event: "input_resolved" } : null;
         default:
@@ -72,7 +74,12 @@ export function paneEventToNotify(ev: AgentPaneEvent): { event: NotifyPaneEvent;
 function emit(blockId: string, ev: AgentPaneEvent): void {
     const m = paneEventToNotify(ev);
     if (!m) return;
-    RpcApi.NotifyEmitCommand(TabRpcClient, { block_id: blockId, event: m.event, question: m.question }).catch(() => {});
+    RpcApi.NotifyEmitCommand(TabRpcClient, {
+        block_id: blockId,
+        event: m.event,
+        question: m.question,
+        question_count: m.question_count,
+    }).catch(() => {});
 }
 
 async function raiseThisWindow(): Promise<void> {
