@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Status:** active — Phase 0 (§1.5, the Help ghost) implemented in PR #3723;
-per-tab keep-alive (§5, decided) is next; Phases 1–6 not started.
+per-tab keep-alive (§5, decided) in PR #3725; Phases 1–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -377,9 +377,10 @@ working throughout through a legacy adapter.
     warden, armory, media, …), *even in a pane that also holds keep-alive
     tabs*.
 
-  This ships ahead of the full contract, as its own PR after Phase 0: a
-  per-tab lifecycle in `pane-leaf-chrome.tsx`, driven by the view-type set
-  that the manifest's `capabilities.lifecycle` later replaces.
+  Shipped ahead of the full contract in PR #3725: a per-tab lifecycle in
+  `pane-leaf-chrome.tsx` (`KEEP_ALIVE_TYPES` + `mountedBlockIds`), driven by
+  the view-type set that the manifest's `capabilities.lifecycle` later
+  replaces.
 
 ## 6. Test plan (per phase)
 

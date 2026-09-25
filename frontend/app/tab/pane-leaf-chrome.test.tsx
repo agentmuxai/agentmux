@@ -438,6 +438,32 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
     // own dormancy-pause fixes depend on: a hidden stack member is marked
     // dormant (visibility:hidden, pointer-events:none), not merely "not the
     // active one" — see setKeepAliveBlockDormant's own call site below.
+    // Per-tab keep-alive (SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5): only a
+    // member whose OWN view type keeps state stays mounted while inactive.
+    // It used to be per pane: one agent tab kept Help mounted too, which is
+    // what let Help's content ghost over the next tab.
+    it("keeps browser tabs mounted while inactive, but unmounts a Help tab you switch away from", async () => {
+        setBlockView("b1", "agent");
+        setBlockView("b2", "browser");
+        setBlockView("b3", "help");
+        setBlockStack("node-1", ["b1", "b2", "b3"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("b3");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        setActiveBlockId("b1"); // agent active: pane is keep-alive now
+        expect(screen.queryByTestId("block-b1")).not.toBeNull();
+        expect(screen.queryByTestId("block-b2")).not.toBeNull(); // browser: kept alive
+        expect(screen.queryByTestId("block-b3")).toBeNull(); // help: unmounted
+
+        setActiveBlockId("b3"); // back to Help: mounted again, fresh
+        expect(screen.queryByTestId("block-b3")).not.toBeNull();
+        setActiveBlockId("b2");
+        expect(screen.queryByTestId("block-b3")).toBeNull();
+        expect(screen.queryByTestId("block-b1")).not.toBeNull(); // agent: kept alive
+    });
+
     it("marks a hidden stack member's slot with visibility:hidden and pointer-events:none", async () => {
         setBlockView("b1", "agent");
         setBlockView("b2", "agent");
