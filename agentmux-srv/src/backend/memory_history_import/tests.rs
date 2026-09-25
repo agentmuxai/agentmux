@@ -147,3 +147,28 @@ fn the_record_refuses_a_second_import() {
     assert_eq!(record::import_history(&fs, UID, &rows()).unwrap(), None);
     assert_eq!(record::history(&fs, UID, "notes.md").unwrap().len(), 1);
 }
+
+/// Every store layout: the stable channel's shared store, each channel's,
+/// and a dev instance's at `dev/<branch>/<clone>/` or, in the older layout,
+/// `dev/<branch>/` itself (ReAgent P1 on #3756 — the import runs once, so a
+/// store it misses is never read).
+#[test]
+fn every_store_layout_on_the_machine_is_found() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path();
+    let want = [
+        h.join("shared/store.db"),
+        h.join("channels/local-main-abc/identity-store.db"),
+        h.join("dev/main/identity-store.db"),
+        h.join("dev/main/c8fd090d2b4adf1d/identity-store.db"),
+    ];
+    for p in &want {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"").unwrap();
+    }
+    let mut got = history_store_paths_under(&h.join("shared"));
+    got.sort();
+    let mut want = want.to_vec();
+    want.sort();
+    assert_eq!(got, want);
+}
