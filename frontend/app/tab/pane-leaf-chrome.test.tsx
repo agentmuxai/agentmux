@@ -451,11 +451,17 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
         const slotFor = (blockId: string) => screen.getByTestId(`block-${blockId}`).parentElement as HTMLElement;
         expect(slotFor("b1").style.visibility).toBe("inherit"); // not "visible": it would show through a hidden window tab
         expect(slotFor("b2").style.visibility).toBe("hidden");
+        // Opacity too: content can paint through visibility:hidden (a
+        // `visibility` transition held the Help tab visible as a "ghost").
+        expect(slotFor("b1").style.opacity).toBe("1");
+        expect(slotFor("b2").style.opacity).toBe("0");
         expect(slotFor("b2").style.pointerEvents).toBe("none");
 
         setActiveBlockId("b2");
         expect(slotFor("b1").style.visibility).toBe("hidden");
+        expect(slotFor("b1").style.opacity).toBe("0");
         expect(slotFor("b2").style.visibility).toBe("inherit");
+        expect(slotFor("b2").style.opacity).toBe("1");
     });
 
     // Reproduced live: a pane went permanently blank — no header, no

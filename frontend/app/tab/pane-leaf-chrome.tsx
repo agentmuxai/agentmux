@@ -402,6 +402,17 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                                 // would show through a hidden window tab kept laid out
                                 // with `visibility: hidden` (workspace.tsx).
                                 visibility: id === activeBlockId() ? "inherit" : "hidden",
+                                // Opacity as well as visibility: a descendant can keep
+                                // painting through `visibility: hidden` (a CSS transition
+                                // on `visibility` holds it `visible` for its duration, and
+                                // an explicit `visibility: visible` escapes it outright),
+                                // which showed the Help tab's content as a ~300ms "ghost"
+                                // over the newly selected tab. Nothing escapes a
+                                // container's opacity, and it keeps the slot's real size
+                                // (unlike display:none / content-visibility:hidden, which
+                                // the keep-alive guarantee above rules out).
+                                // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §1.
+                                opacity: id === activeBlockId() ? "1" : "0",
                                 "pointer-events": id === activeBlockId() ? "auto" : "none",
                             }}
                         >
