@@ -2404,6 +2404,10 @@ pub(super) struct HistorySearchQuery {
     max_sessions: usize,
     #[serde(default = "default_history_limit")]
     limit: usize,
+    /// Also search sessions found only by working directory or account,
+    /// which the agent's own record doesn't name.
+    #[serde(default)]
+    include_inferred: bool,
 }
 
 /// `GET /agentmux/reactive/history/search` — search an agent's own past
@@ -2454,6 +2458,7 @@ pub(super) async fn handle_reactive_history_search(
         since_ms: params.since.map(crate::backend::history::unix_time_to_ms),
         until_ms: params.until.map(crate::backend::history::unix_time_to_ms),
         max_sessions: Some(params.max_sessions.clamp(1, HISTORY_SEARCH_MAX_SESSIONS_CAP)),
+        include_inferred: params.include_inferred,
     };
 
     // Identity M4c-2c (spec §6.5.9): the owner is the caller's own row, from

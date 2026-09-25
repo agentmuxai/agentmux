@@ -255,6 +255,102 @@ fn metadata_or_note(problems: &mut Vec<String>, file: &Path) -> Option<fs::Metad
     file.metadata().map_err(|e| note_unreadable(problems, file, &e)).ok()
 }
 
+/// One conversation message from a Claude record — a transcript line or a
+/// line of the stream-json output AgentMux keeps (`agent:<id>:current`); the
+/// two share the message shape. `None` for anything that isn't a user or
+/// assistant message with something in it (a tool-result frame, thinking only).
+pub(crate) fn message_from_entry(entry: &serde_json::Value, timestamp: i64) -> Option<HistoryMessage> {
+    let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if entry_type == "user" {
+        let content = if let Some(msg) = entry.pointer("/message/content") {
+            if let Some(text) = msg.as_str() {
+                text.to_string()
+            } else if let Some(arr) = msg.as_array() {
+                arr.iter()
+                    .filter_map(|block| {
+                        if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                            block.get("text").and_then(|v| v.as_str()).map(String::from)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        return (!content.is_empty()).then(|| HistoryMessage {
+            role: "user".to_string(),
+            content,
+            timestamp,
+            tool_uses: vec![],
+        });
+    } else if entry_type == "assistant" {
+        let mut text_parts = Vec::new();
+        let mut tool_uses = Vec::new();
+
+        if let Some(content_arr) = entry.pointer("/message/content").and_then(|v| v.as_array()) {
+            for block in content_arr {
+                let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match block_type {
+                    "text" => {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            text_parts.push(text.to_string());
+                        }
+                    }
+                    "tool_use" => {
+                        let name = block
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        // Summarize first argument
+                        let arg_summary = if let Some(input) = block.get("input") {
+                            if let Some(obj) = input.as_object() {
+                                // Take first key-value pair as summary
+                                obj.iter()
+                                    .next()
+                                    .map(|(k, v)| {
+                                        let val_str = if let Some(s) = v.as_str() {
+                                            s.chars().take(100).collect::<String>()
+                                        } else {
+                                            v.to_string().chars().take(100).collect::<String>()
+                                        };
+                                        format!("{}: {}", k, val_str)
+                                    })
+                                    .unwrap_or_default()
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        };
+                        tool_uses.push(ToolUseSummary {
+                            name,
+                            argument_summary: arg_summary,
+                        });
+                    }
+                    // Skip "thinking" blocks — they're internal reasoning
+                    _ => {}
+                }
+            }
+        }
+
+        let content = text_parts.join("\n");
+        return (!content.is_empty() || !tool_uses.is_empty()).then(|| HistoryMessage {
+            role: "assistant".to_string(),
+            content,
+            timestamp,
+            tool_uses,
+        });
+    }
+    None
+}
+
 impl HistoryAdapter for ClaudeHistoryAdapter {
     fn provider(&self) -> &str {
         "claude"
@@ -583,8 +679,6 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
                 }
             };
 
-            let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
             // Extract timestamp
             let timestamp = entry
                 .get("timestamp")
@@ -593,96 +687,8 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
                 .map(|dt| dt.timestamp_millis())
                 .unwrap_or(0);
 
-            if entry_type == "user" {
-                let content = if let Some(msg) = entry.pointer("/message/content") {
-                    if let Some(text) = msg.as_str() {
-                        text.to_string()
-                    } else if let Some(arr) = msg.as_array() {
-                        arr.iter()
-                            .filter_map(|block| {
-                                if block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                                    block.get("text").and_then(|v| v.as_str()).map(String::from)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-
-                if !content.is_empty() {
-                    messages.push(HistoryMessage {
-                        role: "user".to_string(),
-                        content,
-                        timestamp,
-                        tool_uses: vec![],
-                    });
-                }
-            } else if entry_type == "assistant" {
-                let mut text_parts = Vec::new();
-                let mut tool_uses = Vec::new();
-
-                if let Some(content_arr) = entry.pointer("/message/content").and_then(|v| v.as_array()) {
-                    for block in content_arr {
-                        let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        match block_type {
-                            "text" => {
-                                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                                    text_parts.push(text.to_string());
-                                }
-                            }
-                            "tool_use" => {
-                                let name = block
-                                    .get("name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown")
-                                    .to_string();
-                                // Summarize first argument
-                                let arg_summary = if let Some(input) = block.get("input") {
-                                    if let Some(obj) = input.as_object() {
-                                        // Take first key-value pair as summary
-                                        obj.iter()
-                                            .next()
-                                            .map(|(k, v)| {
-                                                let val_str = if let Some(s) = v.as_str() {
-                                                    s.chars().take(100).collect::<String>()
-                                                } else {
-                                                    v.to_string().chars().take(100).collect::<String>()
-                                                };
-                                                format!("{}: {}", k, val_str)
-                                            })
-                                            .unwrap_or_default()
-                                    } else {
-                                        String::new()
-                                    }
-                                } else {
-                                    String::new()
-                                };
-                                tool_uses.push(ToolUseSummary {
-                                    name,
-                                    argument_summary: arg_summary,
-                                });
-                            }
-                            // Skip "thinking" blocks — they're internal reasoning
-                            _ => {}
-                        }
-                    }
-                }
-
-                let content = text_parts.join("\n");
-                if !content.is_empty() || !tool_uses.is_empty() {
-                    messages.push(HistoryMessage {
-                        role: "assistant".to_string(),
-                        content,
-                        timestamp,
-                        tool_uses,
-                    });
-                }
+            if let Some(message) = message_from_entry(&entry, timestamp) {
+                messages.push(message);
             }
         }
 

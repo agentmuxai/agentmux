@@ -170,6 +170,7 @@ dependencies = [
  "keyring",
  "libc",
  "mdns-sd",
+ "memchr",
  "minidumper",
  "notify",
  "parking_lot",
