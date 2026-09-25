@@ -332,6 +332,36 @@ impl Store {
         }
     }
 
+    /// Every version of every file of `agent_id`, with content, oldest
+    /// first — the one-time import into the agent's memory record
+    /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
+    pub fn agent_native_memory_versions_for_agent(&self, agent_id: &str) -> Result<Vec<NativeMemoryVersion>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at
+             FROM db_agent_native_memory_versions
+             WHERE agent_id = ?1
+             ORDER BY created_at ASC, rowid ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![agent_id], |row| {
+                Ok(NativeMemoryVersion {
+                    id: row.get(0)?,
+                    agent_id: agent_id.to_string(),
+                    filename: row.get(1)?,
+                    content: row.get(2)?,
+                    content_hash: row.get(3)?,
+                    parent_version_id: row.get(4)?,
+                    source: row.get(5)?,
+                    source_detail: row.get(6)?,
+                    session_id: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Every distinct `(agent_id, filename)` pair with at least one recorded
     /// version — the retention sweep's (`native_memory_retention.rs`) work
     /// list, so it doesn't need its own separate source of "which files

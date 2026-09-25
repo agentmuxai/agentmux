@@ -109,6 +109,10 @@ pub(crate) struct Heads {
     /// Per directory, per file: the version last projected there.
     #[serde(default)]
     pub projected: BTreeMap<String, BTreeMap<String, String>>,
+    /// When the agent's per-channel version history was imported
+    /// ([`import_history`]); `None` until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_at_ms: Option<i64>,
     /// Fields a newer build added, kept when this build rewrites the file.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -351,18 +355,89 @@ pub(crate) fn reset_projections(fs: &FileStore, agent_uid: &str, dir_id: &str) -
     })
 }
 
-/// Every version of `file`, oldest first.
+/// A version from the per-channel history tables, to import.
+pub(crate) struct ImportedVersion {
+    pub file: String,
+    pub body: Vec<u8>,
+    pub source: String,
+    pub source_detail: String,
+    pub created_at_ms: i64,
+}
+
+/// Import the agent's earlier history, once: every version goes into the
+/// log, oldest first and chained per file, keeping its source and time.
+/// History only — no head changes, so a file deleted long ago is never
+/// written back; heads still come from the folder. A version whose content
+/// the record already has for that file is skipped. Returns how many were
+/// imported; `None` if the record already imported its history.
+pub(crate) fn import_history(fs: &FileStore, agent_uid: &str, rows: &[ImportedVersion]) -> Result<Option<usize>, StoreError> {
+    let zone = zone_or_err(agent_uid)?;
+    fs.zone_txn(&zone, |z| {
+        let mut heads = read_heads(z.read(HEADS_FILE)?)?;
+        if heads.imported_at_ms.is_some() {
+            return Ok(None);
+        }
+        let log = z.read(LOG_FILE)?.unwrap_or_default();
+        let mut have: std::collections::BTreeSet<(String, String)> = log
+            .split(|b| *b == b'\n')
+            .filter_map(|line| serde_json::from_slice::<Event>(line).ok())
+            .filter_map(|e| match e {
+                Event::Version(v) => v.sha256.map(|sha| (v.file, sha)),
+                _ => None,
+            })
+            .collect();
+        let mut sorted: Vec<&ImportedVersion> = rows.iter().collect();
+        sorted.sort_by_key(|r| r.created_at_ms);
+        let mut last: BTreeMap<&str, String> = BTreeMap::new();
+        let mut lines = Vec::new();
+        for r in sorted {
+            if validate_file(&r.file).is_err() || r.body.len() > MAX_BODY_BYTES {
+                continue;
+            }
+            let sha = sha256_hex(&r.body);
+            if !have.insert((r.file.clone(), sha.clone())) {
+                continue;
+            }
+            z.put_if_absent(&format!("blob/{sha}"), &r.body)?;
+            let version = Version {
+                file: r.file.clone(),
+                version: format!("v_{}", uuid::Uuid::new_v4().simple()),
+                parent: last.get(r.file.as_str()).cloned(),
+                merged_parent: None,
+                sha256: Some(sha),
+                conflicts_with: None,
+                source: r.source.clone(),
+                source_detail: r.source_detail.clone(),
+                created_at_ms: r.created_at_ms,
+            };
+            last.insert(&r.file, version.version.clone());
+            lines.extend(log_line(&Event::Version(version))?);
+        }
+        let count = lines.iter().filter(|b| **b == b'\n').count();
+        if !lines.is_empty() {
+            z.append_lines(LOG_FILE, &lines)?;
+        }
+        heads.imported_at_ms = Some(agentmux_common::time::now_ms());
+        write_heads(z, &heads)?;
+        Ok(Some(count))
+    })
+}
+
+/// Every version of `file`, oldest first — by time, since imported history
+/// is logged after the versions it predates.
 pub(crate) fn history(fs: &FileStore, agent_uid: &str, file: &str) -> Result<Vec<Version>, StoreError> {
     let zone = zone_or_err(agent_uid)?;
     let log = fs.read_files_consistent(&zone, &[LOG_FILE])?.pop().flatten().unwrap_or_default();
-    Ok(log
+    let mut versions: Vec<Version> = log
         .split(|b| *b == b'\n')
         .filter_map(|line| serde_json::from_slice::<Event>(line).ok())
         .filter_map(|e| match e {
             Event::Version(v) if v.file == file => Some(v),
             _ => None,
         })
-        .collect())
+        .collect();
+    versions.sort_by_key(|v| v.created_at_ms);
+    Ok(versions)
 }
 
 #[cfg(test)]
