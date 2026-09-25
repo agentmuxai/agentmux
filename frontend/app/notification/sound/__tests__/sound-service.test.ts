@@ -341,11 +341,18 @@ describe("sound-service tool-tones policy", () => {
             expect(flashes).toHaveLength(1);
             expect(flashes[0].delayMs).toBeCloseTo(50 - FLASH_VISUAL_LEAD_MS, 3);
 
-            // Coalesced by the player (nothing played): the flash still
-            // shows, undelayed, since there is no sound to wait for.
-            toolPlaySpy.mockReturnValueOnce(null);
+            // Another pane's Read, coalesced by the player into the syllable
+            // above: the player hands back that syllable's start time, so
+            // this pane's flash waits for the same audible onset
+            // (ReAgent P1 on #3717: it used to fire undelayed).
+            toolPlaySpy.mockReturnValueOnce(1.01);
             fireToolStarted("blk-2", "Read");
-            expect(flashes[1].delayMs).toBe(0);
+            expect(flashes[1].delayMs).toBeCloseTo(50 - FLASH_VISUAL_LEAD_MS, 3);
+
+            // Nothing attached to wait for: undelayed.
+            toolPlaySpy.mockReturnValueOnce(null);
+            fireToolStarted("blk-3", "Read");
+            expect(flashes[2].delayMs).toBe(0);
         } finally {
             unsubscribe();
         }

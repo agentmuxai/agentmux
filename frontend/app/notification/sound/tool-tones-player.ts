@@ -42,7 +42,8 @@ export class ToolTonesPlayer {
     private filter: BiquadFilterNode | null = null;
     private gain: GainNode | null = null;
     private toolGainValue = DEFAULT_TOOLTONES_VOLUME;
-    private lastFiredAt = new Map<string, number>();
+    /** tool → when it last played (page time) and that syllable's context start time. */
+    private lastFiredAt = new Map<string, { at: number; startAt: number }>();
 
     /**
      * Wire the chain into the given AudioContext and master GainNode.
@@ -82,9 +83,10 @@ export class ToolTonesPlayer {
      * attached. Coalesces a second fire of the same tool within
      * `TOOL_TONE_COALESCE_MS`.
      *
-     * Returns the AudioContext time the first tone was scheduled at, or
-     * null when nothing played. The activity flash uses it to line its
-     * pulses up with what is actually heard.
+     * Returns the AudioContext time of the syllable the caller will hear:
+     * the one just scheduled or, for a coalesced call (say, another pane's
+     * Read 5 ms later), the one it was folded into. Null only when not
+     * attached. The activity flash times its pulses from it.
      */
     play(ctx: AudioContext, tool: string): number | null {
         const out = this.gain;
@@ -93,10 +95,11 @@ export class ToolTonesPlayer {
             typeof performance !== "undefined" && performance.now
                 ? performance.now()
                 : Date.now();
-        const last = this.lastFiredAt.get(tool) ?? 0;
-        if (now - last < TOOL_TONE_COALESCE_MS) return null;
-        this.lastFiredAt.set(tool, now);
-        return playSyllable(ctx, out, paramsForTool(tool));
+        const last = this.lastFiredAt.get(tool);
+        if (last !== undefined && now - last.at < TOOL_TONE_COALESCE_MS) return last.startAt;
+        const startAt = playSyllable(ctx, out, paramsForTool(tool));
+        this.lastFiredAt.set(tool, { at: now, startAt });
+        return startAt;
     }
 
     /** Test/dev helper — clear the coalesce map. */

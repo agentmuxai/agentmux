@@ -344,8 +344,9 @@ function playToolToneIfAllowed(blockId: string, tool: string): void {
     }
     // The visual twin fires after the policy gates whether or not audio
     // played, so it works before priming and at volume 0
-    // (SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2). When the tone did
-    // play, the flash waits for it to become audible
+    // (SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md §2.2). When there is a
+    // tone to hear — this call's own, or the one it was coalesced into — the
+    // flash waits for it to become audible
     // (SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md §3.6).
     if (getSettingsKeyAtom("notify:tooltones:flash")() === false) return;
     const now = nowMs();

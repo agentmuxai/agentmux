@@ -410,7 +410,10 @@ Departures from §3:
    sound; its tab and pill are the only way to see that. The flash coalesces by
    (pane, tool) over the same `TOOL_TONE_COALESCE_MS` instead. A pane's own
    repeats (parallel tool calls) still show as one strike, like the audio, and
-   every strike shown is one you heard. The player's own coalesce is unchanged.
+   every strike shown is one you heard. The player's own coalesce is unchanged,
+   but a coalesced `play()` now returns the start time of the syllable it was
+   folded into (not null). Otherwise the second pane's flash would fire
+   undelayed, ahead of the sound both panes share (ReAgent P1 on #3717).
 2. **The animation's start time is pinned** to the moment `flashElement` runs
    (`anim.startTime = performance.now()`). Otherwise a new animation starts on the
    next frame, up to ~17 ms late, and every strike lands that much after its
