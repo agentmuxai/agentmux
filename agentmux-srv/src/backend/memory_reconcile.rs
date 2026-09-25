@@ -23,8 +23,10 @@
 //!
 //! Safety rules, each from a data-loss review of the first version:
 //! - A file that can't be read is left alone — never taken for deleted, and
-//!   never overwritten. A folder that can't be listed skips the pass; a
-//!   folder that doesn't exist is refilled, never tombstoned.
+//!   never overwritten. A folder that can't be listed skips the pass. A
+//!   folder that doesn't exist, or holds none of the files projected into
+//!   it, has its projections forgotten first and is refilled — never
+//!   tombstoned, even if the refill stops part-way.
 //! - MEMORY.md is reconciled first, and every file is decided against a
 //!   fresh read of the record, never a snapshot from the start of the pass.
 //! - MEMORY.md is edited (to index a conflict file) only when disk, the
@@ -165,18 +167,36 @@ fn reconcile_inner(
     }
     let dir_id = claims::dir_id(&dir);
     let disk = read_disk(&dir)?;
-    // A folder that doesn't exist has nothing projected into it any more:
-    // refill it from the record rather than read its absence as deletions.
     let dir_missing = disk.is_none();
     let disk = disk.unwrap_or_default();
     report.unreadable = disk.values().filter(|d| matches!(d, OnDisk::Unreadable)).count();
+
+    // A folder that doesn't exist, or exists but holds none of the files
+    // projected into it, no longer holds what was written there: forget
+    // those projections first (in the record, so a refill cut short by the
+    // budget or a crash still reads the rest as "never projected" next
+    // time) and refill it, rather than read the absence as deletions.
+    let heads_now = record::heads(fs, m.uid)?;
+    let projected_here = heads_now.projected.get(&dir_id).is_some_and(|p| !p.is_empty());
+    let none_left = !disk.keys().any(|n| heads_now.projected.get(&dir_id).is_some_and(|p| p.contains_key(n)));
+    if projected_here && (dir_missing || none_left) {
+        tracing::warn!(uid = m.uid, dir = %dir.display(), "memory folder no longer holds its files; refilling it from the record");
+        record::reset_projections(fs, m.uid, &dir_id)?;
+    }
 
     if record::heads(fs, m.uid)?.files.is_empty() {
         adopt_baseline(fs, m.uid, &dir_id, &disk, budget, report)?;
         return Ok(());
     }
 
-    let mut names: Vec<String> = record::heads(fs, m.uid)?.files.keys().cloned().collect();
+    // Only names the disk scan also recognises: a name it skips would be
+    // written, then read back as absent and tombstoned.
+    let mut names: Vec<String> = record::heads(fs, m.uid)?
+        .files
+        .keys()
+        .filter(|n| crate::server::native_memory_handlers::validate_filename(n).is_ok())
+        .cloned()
+        .collect();
     names.extend(disk.keys().cloned());
     names.sort_by(|a, b| (a != INDEX_FILE, a).cmp(&(b != INDEX_FILE, b)));
     names.dedup();
@@ -194,7 +214,7 @@ fn reconcile_inner(
                     Some(OnDisk::Body(b)) => Some(b.as_slice()),
                     _ => None,
                 };
-                reconcile_file(fs, m.uid, &dir, &dir_id, dir_missing, name, body, report, &mut deletions, true)?;
+                reconcile_file(fs, m.uid, &dir, &dir_id, name, body, report, &mut deletions, true)?;
             }
         }
     }
@@ -269,7 +289,6 @@ fn reconcile_file(
     uid: &str,
     dir: &Path,
     dir_id: &str,
-    dir_missing: bool,
     name: &str,
     on_disk: Option<&[u8]>,
     report: &mut Report,
@@ -282,7 +301,7 @@ fn reconcile_file(
     let head = heads.files.get(name).cloned();
     let head_sha = head.as_ref().and_then(|h| h.sha256.clone());
     let disk_sha = on_disk.map(record::sha256_hex);
-    let projected = if dir_missing { None } else { projected_version(&heads, dir_id, name) };
+    let projected = projected_version(&heads, dir_id, name);
 
     // Rule 0: disk already holds the head (or both are absent).
     if disk_sha == head_sha {
@@ -334,8 +353,7 @@ fn reconcile_file(
             }
         }
         (true, false) => {
-            // A deletion is captured only against a real projection here
-            // (never for a folder that isn't there any more — `dir_missing`).
+            // A deletion is captured only against a real projection here.
             if on_disk.is_none() && projected.is_none() {
                 return Ok(());
             }
@@ -356,7 +374,7 @@ fn reconcile_file(
             match outcome {
                 AppendOutcome::Appended(_) => report.captured += 1,
                 AppendOutcome::StaleParent { .. } if may_retry => {
-                    return reconcile_file(fs, uid, dir, dir_id, dir_missing, name, on_disk, report, deletions, false);
+                    return reconcile_file(fs, uid, dir, dir_id, name, on_disk, report, deletions, false);
                 }
                 _ => {}
             }
@@ -374,6 +392,14 @@ fn reconcile_file(
                 }
                 return Ok(());
             };
+            // The other side is written and recorded FIRST: if anything
+            // fails before the winner is recorded, the conflict is simply
+            // raised again next pass; the reverse order could lose it.
+            if let Some(sha) = &h.sha256 {
+                if let Some(theirs) = record::body(fs, uid, sha)? {
+                    keep_conflict_copy(fs, uid, dir, dir_id, &conflict_file_name(name, &h.version), &theirs)?;
+                }
+            }
             let outcome = record::append_version(
                 fs,
                 uid,
@@ -389,16 +415,9 @@ fn reconcile_file(
                 },
             )?;
             match outcome {
-                AppendOutcome::Appended(_) => {
-                    if let Some(sha) = &h.sha256 {
-                        if let Some(theirs) = record::body(fs, uid, sha)? {
-                            keep_conflict_copy(fs, uid, dir, dir_id, &conflict_file_name(name, &h.version), &theirs)?;
-                            report.conflicts += 1;
-                        }
-                    }
-                }
+                AppendOutcome::Appended(_) => report.conflicts += 1,
                 AppendOutcome::StaleParent { .. } if may_retry => {
-                    return reconcile_file(fs, uid, dir, dir_id, dir_missing, name, on_disk, report, deletions, false);
+                    return reconcile_file(fs, uid, dir, dir_id, name, on_disk, report, deletions, false);
                 }
                 _ => {}
             }
