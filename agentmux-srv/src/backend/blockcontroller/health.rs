@@ -187,6 +187,33 @@ impl TurnActivityTracker {
         }
     }
 
+    /// An unlabelled message queued for the next turn: it can't be proven to
+    /// be the user, so a turn already labelled by an earlier queued message is
+    /// tainted. (Queued first, it leaves the turn unknown anyway.)
+    pub fn hint_next_turn_unlabelled(&self) {
+        if let Some(p) = self.inner.lock().unwrap().next_turn.as_mut() {
+            p.tainted = true;
+        }
+    }
+
+    /// The turn is active because messages already accounted for are being
+    /// delivered — the queue drained after a spawn, a retry flush. Not new
+    /// input: an idle tracker starts the turn with whatever was queued for it,
+    /// and a running turn is left as it is (ReAgent P1 on #3789 — the plain
+    /// unlabelled mark tainted every freshly spawned user turn).
+    pub fn mark_turn_active_for_queued(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        let was_active = inner.active_turn;
+        inner.active_turn = true;
+        inner.exit_code = None;
+        if !was_active {
+            inner.start_unlabelled();
+        }
+        drop(inner);
+        tracing::info!(block_id = %self.block_id, active = true, was_active, "[health] turn_active flip (queued delivery)");
+        was_active
+    }
+
     /// The turn goes on but a new one logically begins — a deferred message
     /// released at a `result` boundary, where `turn_active` never dropped.
     pub fn begin_turn_from(&self, input: TurnInput) {
@@ -320,6 +347,31 @@ mod tests {
         t.hint_next_turn(automated());
         t.set_active_turn(true);
         assert!(t.provenance().unwrap().tainted, "a jekt queued alongside taints it");
+    }
+
+    #[test]
+    fn delivering_the_queue_after_a_spawn_keeps_the_user_s_label() {
+        let t = TurnActivityTracker::new("b".into());
+        t.hint_next_turn(user("do X then quit"));
+        t.set_active_turn(true); // spawn_process
+        assert!(t.mark_turn_active_for_queued(), "already active");
+        let p = t.provenance().unwrap();
+        assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false), "bookkeeping, not new input");
+
+        // Idle, the same mark starts the turn with what was queued for it.
+        t.set_active_turn(false);
+        t.hint_next_turn(user("again"));
+        assert!(!t.mark_turn_active_for_queued());
+        assert_eq!(t.provenance().unwrap().user_text.as_deref(), Some("again"));
+    }
+
+    #[test]
+    fn an_unlabelled_message_queued_behind_the_user_s_taints_that_turn() {
+        let t = TurnActivityTracker::new("b".into());
+        t.hint_next_turn(user("go"));
+        t.hint_next_turn_unlabelled();
+        t.set_active_turn(true);
+        assert!(t.provenance().unwrap().tainted);
     }
 
     #[test]
