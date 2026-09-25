@@ -10,6 +10,7 @@ import {
 import { getBlockViewClass } from "@/app/block/block-registry";
 import { adaptPaneTabInstance, makePaneTabHostContext } from "@/app/block/pane-tab-host";
 import { getPaneTab, resolvePaneTabView } from "@/app/block/pane-tab-registry";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { invokeCommand } from "@/app/platform/ipc";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
@@ -453,6 +454,36 @@ function Block(props: BlockProps): JSX.Element {
             if (vm && vm !== liveVm) disposeViewModel(vm);
         }
     });
+
+    // Pane Tab contract Phase 3b: the host fires a tab's activation hooks from
+    // the one visibility signal, on BOTH paths — a remount tab activates by
+    // mounting, a kept-alive one by leaving dormancy or a hidden window tab —
+    // and a tab that becomes visible in a focused pane gets focus. That used
+    // to exist only as the terminal's pane-chrome tab-switch handler, which a
+    // pane only had if its FIRST tab was a terminal (spec §2.3, §2.4 #2).
+    // A preview never activates anything.
+    if (!props.preview) {
+        const visibility = usePaneTabVisibility(props.nodeModel.blockId);
+        let activeVm: ViewModel | null = null;
+        const deactivate = () => {
+            const vm = activeVm;
+            activeVm = null;
+            vm?.onDeactivate?.();
+        };
+        createEffect(() => {
+            const vm = viewModel();
+            const active = vm != null && visibility() === "active";
+            if (activeVm === (active ? vm : null)) return;
+            untrack(() => {
+                deactivate();
+                if (!active) return;
+                activeVm = vm;
+                vm.onActivate?.();
+                if (props.nodeModel.isFocused?.()) vm.giveFocus?.();
+            });
+        });
+        onCleanup(() => untrack(deactivate));
+    }
 
     const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
 

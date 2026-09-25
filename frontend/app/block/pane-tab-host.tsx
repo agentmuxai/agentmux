@@ -56,5 +56,7 @@ export function adaptPaneTabInstance(
     if (instance.contextMenu) vm.getBodyContextMenuItems = (c) => instance.contextMenu!(c);
     if (instance.focus) vm.giveFocus = () => instance.focus!();
     if (instance.onKeyDown) vm.keyDownHandler = (e) => instance.onKeyDown!(e);
+    if (instance.onActivate) vm.onActivate = () => instance.onActivate!();
+    if (instance.onDeactivate) vm.onDeactivate = () => instance.onDeactivate!();
     return vm;
 }
