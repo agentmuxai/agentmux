@@ -285,13 +285,23 @@ impl Store {
         Ok(existing.map(|v| v != 0))
     }
 
+    /// [`Self::bundle_upsert_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_upsert(&self, memory: &Bundle) -> Result<(), StoreError> {
+        let r = self.bundle_upsert_unobserved(memory);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(memory.id.clone()));
+        }
+        r
+    }
+
     /// Generic Global Bundle upsert — used by the ordinary Armory editor,
     /// the per-agent Bundle editor, ABF import, and internal seeding.
     /// Refuses outright to touch an existing `is_system=1` row (content
     /// included, not just the flag) — see
     /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.2. Use
     /// `bundle_upsert_system` to create/edit a system entry.
-    pub fn bundle_upsert(&self, memory: &Bundle) -> Result<(), StoreError> {
+    fn bundle_upsert_unobserved(&self, memory: &Bundle) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(true) {
             return Err(StoreError::Other(
@@ -385,6 +395,16 @@ impl Store {
         self.bundle_upsert_with_version_based(memory, written_by, written_by_uid, source, source_detail, None)
     }
 
+    /// [`Self::bundle_upsert_with_version_based_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_upsert_with_version_based(&self, memory: &Bundle, written_by: &str, written_by_uid: &str, source: &str, source_detail: &str, base_sha256: Option<&str>) -> Result<Option<BundleVersion>, StoreError> {
+        let r = self.bundle_upsert_with_version_based_unobserved(memory, written_by, written_by_uid, source, source_detail, base_sha256);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(memory.id.clone()));
+        }
+        r
+    }
+
     /// `bundle_upsert_with_version` with an optional base: when
     /// `base_sha256` is `Some`, the row's CURRENT `name` + `instructions`
     /// must still hash to it (`bundle_versions::content_hash` — the same
@@ -393,7 +413,7 @@ impl Store {
     /// and nothing is written. A missing row is a conflict too. `None`
     /// behaves exactly like `bundle_upsert_with_version`. The Armory's
     /// Global Memory editor sends it (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
-    pub fn bundle_upsert_with_version_based(
+    fn bundle_upsert_with_version_based_unobserved(
         &self,
         memory: &Bundle,
         written_by: &str,
@@ -479,6 +499,16 @@ impl Store {
         Ok(version)
     }
 
+    /// [`Self::bundle_upsert_system_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_upsert_system(&self, memory: &Bundle) -> Result<(), StoreError> {
+        let r = self.bundle_upsert_system_unobserved(memory);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(memory.id.clone()));
+        }
+        r
+    }
+
     /// The ONLY path that can write `is_system=1`. Refuses the mirror-image
     /// case of `bundle_upsert`'s guard: converting an EXISTING
     /// non-system row into a system one by id collision is not allowed —
@@ -486,7 +516,7 @@ impl Store {
     /// `is_blank`/`is_global`/`is_system` are hardcoded (not read from
     /// `memory`) so this method can never produce anything other than a
     /// well-formed system row regardless of what the caller passed in.
-    pub fn bundle_upsert_system(&self, memory: &Bundle) -> Result<(), StoreError> {
+    fn bundle_upsert_system_unobserved(&self, memory: &Bundle) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(false) {
             return Err(StoreError::Other(
@@ -532,6 +562,16 @@ impl Store {
         Ok(())
     }
 
+    /// [`Self::bundle_upsert_system_with_version_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_upsert_system_with_version(&self, memory: &Bundle, written_by: &str, source: &str, source_detail: &str) -> Result<BundleVersion, StoreError> {
+        let r = self.bundle_upsert_system_with_version_unobserved(memory, written_by, source, source_detail);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(memory.id.clone()));
+        }
+        r
+    }
+
     /// Same as `bundle_upsert_system`, but also appends a `db_bundle_versions`
     /// row in the SAME transaction — the system-tier counterpart of
     /// `bundle_upsert_with_version`, for the same atomicity reason (codex P2,
@@ -546,7 +586,7 @@ impl Store {
     /// Shares `bundle_upsert_system`'s exact guard and SQL, duplicated for
     /// the same non-reentrant-`Mutex` reason `bundle_upsert_with_version`
     /// documents on itself.
-    pub fn bundle_upsert_system_with_version(
+    fn bundle_upsert_system_with_version_unobserved(
         &self,
         memory: &Bundle,
         written_by: &str,
@@ -651,10 +691,20 @@ impl Store {
         self.bundle_upsert_system_if_changed_based(memory, written_by, source, source_detail, None)
     }
 
+    /// [`Self::bundle_upsert_system_if_changed_based_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_upsert_system_if_changed_based(&self, memory: &Bundle, written_by: &str, source: &str, source_detail: &str, base_sha256: Option<&str>) -> Result<Option<BundleVersion>, StoreError> {
+        let r = self.bundle_upsert_system_if_changed_based_unobserved(memory, written_by, source, source_detail, base_sha256);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(memory.id.clone()));
+        }
+        r
+    }
+
     /// `bundle_upsert_system_if_changed` with the same optional base check
     /// `bundle_upsert_with_version_based` documents — the system-tier half
     /// of the Armory's conditional Global Memory save.
-    pub fn bundle_upsert_system_if_changed_based(
+    fn bundle_upsert_system_if_changed_based_unobserved(
         &self,
         memory: &Bundle,
         written_by: &str,
@@ -745,6 +795,16 @@ impl Store {
         Ok(version)
     }
 
+    /// [`Self::bundle_reseed_system_if_owned_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_reseed_system_if_owned(&self, memory: &Bundle, seeder_identity: &str, source: &str, source_detail: &str) -> Result<BundleReseedOutcome, StoreError> {
+        let r = self.bundle_reseed_system_if_owned_unobserved(memory, seeder_identity, source, source_detail);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(memory.id.clone()));
+        }
+        r
+    }
+
     /// Atomically decide-and-apply an Operator Config reseed for one system
     /// row — the ownership check (is this row still owned by AgentMux's own
     /// seeder, or has a human/another writer claimed it) and the resulting
@@ -781,7 +841,7 @@ impl Store {
     /// - Existing row, latest version's `content_hash` already matches the
     ///   target (`name`+`instructions`) -> `Unchanged`, no write.
     /// - Otherwise -> upsert + version insert, `Updated`.
-    pub fn bundle_reseed_system_if_owned(
+    fn bundle_reseed_system_if_owned_unobserved(
         &self,
         memory: &Bundle,
         seeder_identity: &str,
@@ -990,10 +1050,20 @@ impl Store {
         })
     }
 
+    /// [`Self::bundle_delete_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let r = self.bundle_delete_unobserved(id);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(id.to_string()));
+        }
+        r
+    }
+
     /// Delete a Bundle. Refuses to delete the blank singleton, a
     /// seeded bundle, or (new) a system entry — use
     /// `bundle_delete_system` for the last case.
-    pub fn bundle_delete(&self, id: &str) -> Result<bool, StoreError> {
+    fn bundle_delete_unobserved(&self, id: &str) -> Result<bool, StoreError> {
         if id == "blank" {
             return Err(StoreError::Other(
                 "cannot delete the blank Memory singleton".to_string(),
@@ -1017,9 +1087,19 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// [`Self::bundle_delete_system_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_delete_system(&self, id: &str) -> Result<bool, StoreError> {
+        let r = self.bundle_delete_system_unobserved(id);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(id.to_string()));
+        }
+        r
+    }
+
     /// The ONLY path that can remove an `is_system=1` row — structurally
     /// incapable of deleting anything else, even if misused.
-    pub fn bundle_delete_system(&self, id: &str) -> Result<bool, StoreError> {
+    fn bundle_delete_system_unobserved(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
             "DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1",
@@ -1041,6 +1121,16 @@ impl Store {
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// [`Self::bundle_delete_system_if_owned_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_delete_system_if_owned(&self, id: &str, seeder_identity: &str, caller_manifest_version: u32) -> Result<bool, StoreError> {
+        let r = self.bundle_delete_system_if_owned_unobserved(id, seeder_identity, caller_manifest_version);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Entry(id.to_string()));
+        }
+        r
     }
 
     /// Atomically deletes an `is_system=1` row ONLY if its latest version is
@@ -1088,7 +1178,7 @@ impl Store {
     /// edit outright — strictly worse than the overwrite the reseed-path
     /// fix was built to prevent, since deletion cannot be undone from
     /// `db_bundles` alone. ReAgent P1, PR #3244.
-    pub fn bundle_delete_system_if_owned(
+    fn bundle_delete_system_if_owned_unobserved(
         &self,
         id: &str,
         seeder_identity: &str,
@@ -1145,6 +1235,16 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// [`Self::bundle_reorder_unobserved`], then tell the Global Memory record's
+    /// observer (`GlobalMemoryChange`).
+    pub fn bundle_reorder(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
+        let r = self.bundle_reorder_unobserved(ordered_ids);
+        if r.is_ok() {
+            self.notify_global_memory(super::store::GlobalMemoryChange::Order);
+        }
+        r
+    }
+
     /// Assign `sort_order` to the given bundle ids in the order supplied
     /// (position 0, 1, 2, …). Drives the Armory global bundles ordering,
     /// which in turn controls CLAUDE.md injection order. Ids not present in
@@ -1153,7 +1253,7 @@ impl Store {
     /// `bundle_list_global`) and never disturbed by the generic
     /// reorder command. Runs in a single transaction so a partial reorder
     /// never lands. Returns the number of rows updated.
-    pub fn bundle_reorder(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
+    fn bundle_reorder_unobserved(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let mut updated = 0usize;
