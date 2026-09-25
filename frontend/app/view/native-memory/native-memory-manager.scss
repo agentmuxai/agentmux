@@ -529,3 +529,12 @@
         width: 100%;
     }
 }
+
+// The full view (NativeMemoryFileView) is a PinnedEditorLayout: it owns its
+// own scrolling (top region) and fill (bottom region), so the body must be a
+// definite-height flex column rather than a scroll container of its own.
+.native-memory-manager-body--pinned {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}

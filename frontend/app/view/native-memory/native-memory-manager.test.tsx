@@ -71,18 +71,29 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
-// The history panel does its own RPC work on mount and is covered by its own
-// tests; this suite is about navigation and the grid. `historyPanelMountCount`
-// increments once per MOUNT (a Solid component's own function body runs once
-// at creation, not per-render) — used by the Codex P1 regression test below
-// to prove the panel actually remounted (and so would re-fetch fresh
-// history) rather than just re-rendering with identical text content, which
-// a plain toHaveTextContent check can't distinguish.
+// The full view (NativeMemoryFileView) does its own RPC work on mount and is
+// covered by its own tests; this suite is about navigation and the grid.
+// `historyPanelMountCount` increments once per MOUNT (a Solid component's own
+// function body runs once at creation, not per-render); the mock also renders
+// the `refreshNonce` it was handed and captures `onDirtyChange`, so the
+// reactive tests can tell an in-place refresh (same mount, nonce bumped —
+// the 2026-09-24 behaviour that keeps an open draft alive) from a remount.
 let historyPanelMountCount = 0;
-vi.mock("@/app/view/agent/components/NativeMemoryHistoryPanel", () => ({
-    NativeMemoryHistoryPanel: (props: { agentId: string; filename: string }) => {
+let reportDirty: ((dirty: boolean) => void) | undefined;
+vi.mock("./NativeMemoryFileView", () => ({
+    NativeMemoryFileView: (props: {
+        agentId: string;
+        filename: string;
+        refreshNonce: () => number;
+        onDirtyChange?: (dirty: boolean) => void;
+    }) => {
         historyPanelMountCount++;
-        return <div data-testid="history-panel">{`${props.agentId}:${props.filename}`}</div>;
+        reportDirty = props.onDirtyChange;
+        return (
+            <div data-testid="history-panel" data-refresh-nonce={String(props.refreshNonce())}>
+                {`${props.agentId}:${props.filename}`}
+            </div>
+        );
     },
 }));
 
@@ -105,6 +116,7 @@ beforeEach(() => {
     localStorage.clear();
     mpsHub.handlers.clear();
     historyPanelMountCount = 0;
+    reportDirty = undefined;
 });
 
 describe("NativeMemoryManager — agent grid", () => {
@@ -514,25 +526,70 @@ describe("NativeMemoryManager — reactive updates", () => {
     });
 
     // Codex P1, PR #2932: a live write to the file already open in the
-    // detail view is the scenario this whole feature exists for. The panel
-    // is keyed on agentId:filename, which don't change when only the SAME
-    // file's content changes — without a forced remount, the new content/
-    // history stayed invisible until the user switched away and back.
-    test("an event for the open file re-mounts the history panel, not just re-renders it", async () => {
+    // detail view is the scenario this whole feature exists for — the view
+    // must pick it up even though agentId:filename don't change. It used to
+    // be forced by a REMOUNT per event; since
+    // SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4 a remount would wipe an
+    // open draft, so the view stays mounted and gets a bumped refreshNonce,
+    // on which it reloads history + content in place.
+    test("an event for the open file refreshes the full view in place, without remounting it", async () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz"));
         await openFile("MEMORY.md");
-        await screen.findByTestId("history-panel");
+        const panel = await screen.findByTestId("history-panel");
         const mountsBefore = historyPanelMountCount;
+        const nonceBefore = Number(panel.getAttribute("data-refresh-nonce"));
 
         // Same file list, same selected file — nothing about agentId or
         // filename changes, only the file's own content on the backend.
         mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
-        await waitFor(() => expect(historyPanelMountCount).toBeGreaterThan(mountsBefore));
-        // Still showing the same agent/file — a remount, not a navigation.
+        await waitFor(() =>
+            expect(Number(screen.getByTestId("history-panel").getAttribute("data-refresh-nonce"))).toBeGreaterThan(
+                nonceBefore
+            )
+        );
+        expect(historyPanelMountCount).toBe(mountsBefore);
         expect(screen.getByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+    });
+
+    test("a refresh that no longer lists the open file keeps it open while it holds unsaved edits", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        await openFile("MEMORY.md");
+        await screen.findByTestId("history-panel");
+        reportDirty?.(true);
+
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "OTHER.md" }] });
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
+
+        // The refresh lands (the nonce moves) but the draft's view survives —
+        // it shows a "deleted" banner instead of vanishing with the edits.
+        await waitFor(() =>
+            expect(Number(screen.getByTestId("history-panel").getAttribute("data-refresh-nonce"))).toBeGreaterThan(0)
+        );
+        expect(screen.getByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+    });
+
+    test("back from a full view with unsaved edits asks first", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        await openFile("MEMORY.md");
+        await screen.findByTestId("history-panel");
+        reportDirty?.(true);
+
+        const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+        fireEvent.click(screen.getByText("← All files"));
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId("history-panel")).toBeInTheDocument();
+
+        confirmSpy.mockReturnValueOnce(true);
+        fireEvent.click(screen.getByText("← All files"));
+        await waitFor(() => expect(screen.queryByTestId("history-panel")).toBeNull());
+        confirmSpy.mockRestore();
     });
 
     // Codex P2, PR #2932: refetchSelectedAgentFiles shares latestRequestId

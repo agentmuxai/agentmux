@@ -14,12 +14,20 @@
  * lets the user view, edit, prune, and create those files.
  *
  * Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md §5/§8.
+ *
+ * The edit lifecycle is the shared MemoryDraftModel since 2026-09-24: a save
+ * carries `base_sha256`, and a live `agent:memory:changed` for this agent
+ * refreshes the open file in place without ever replacing an unsaved draft
+ * (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.4).
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { muxEventSubscribe } from "@/app/store/mps";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
+import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
+import { sha256Hex } from "@/util/sha256";
 
 /** Validate a filename the same way the backend does, so the user gets
  *  feedback before the RPC round-trips. Mirrors validate_filename() in
@@ -74,27 +82,24 @@ export class AgentNativeMemoryModel {
 
     private _content = createSignal<string | null>(null);
     contentAtom: Accessor<string | null> = this._content[0];
-    // Not private: NativeMemoryHistoryPanel's revert flow (mounted as a
-    // sibling view inside the same detail pane, see AgentNativeMemoryModal)
-    // pushes the newly-restored content here directly rather than doing a
-    // second read_file round trip of its own.
+    // Not private: kept settable for callers that already hold fresh
+    // content; the history panel's revert flow goes through
+    // applyExternalContent (below) so an open draft is never replaced.
     setContent = this._content[1];
 
-    private _editing = createSignal<boolean>(false);
-    editingAtom: Accessor<boolean> = this._editing[0];
-    private setEditing = this._editing[1];
-
-    private _draft = createSignal<string>("");
-    draftContentAtom: Accessor<string> = this._draft[0];
-    setDraftContent = this._draft[1];
+    /** The open file's edit lifecycle (draft, base hash, conflict banner). */
+    readonly draft: MemoryDraftModel<string>;
+    editingAtom: Accessor<boolean>;
+    draftContentAtom: Accessor<string>;
 
     private _loading = createSignal<boolean>(false);
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading = this._loading[1];
 
-    private _saving = createSignal<boolean>(false);
-    savingAtom: Accessor<boolean> = this._saving[0];
-    private setSaving = this._saving[1];
+    /** A create in flight (the draft model owns the save-edit flag). */
+    private _creating = createSignal<boolean>(false);
+    private setCreating = this._creating[1];
+    savingAtom: Accessor<boolean>;
 
     private _error = createSignal<string | null>(null);
     errorAtom: Accessor<string | null> = this._error[0];
@@ -102,6 +107,9 @@ export class AgentNativeMemoryModel {
 
     /** The selected file's metadata row, or null. */
     selectedMetaAtom: Accessor<NativeMemoryFileMeta | null>;
+
+    private unsubChanged: () => void;
+    private changeDebounce: ReturnType<typeof setTimeout> | undefined;
 
     constructor(agentId: string, agentName: string) {
         this.agentId = agentId;
@@ -111,7 +119,83 @@ export class AgentNativeMemoryModel {
             if (!name) return null;
             return this.filesAtom().find((f) => f.filename === name) ?? null;
         });
+        this.draft = new MemoryDraftModel<string>({
+            hash: sha256Hex,
+            equals: (a, b) => a === b,
+            save: async (content, base) => {
+                const filename = this.selectedFilenameAtom();
+                if (!filename) throw new Error("No file selected.");
+                await RpcApi.NativeMemoryWriteFileCommand(TabRpcClient, {
+                    agent_id: this.agentId,
+                    filename,
+                    content,
+                    // reagent P1 on PR #2678: without this, the backend
+                    // defaults to "agent_inferred", permanently mislabeling a
+                    // human-authored Stash edit as "Agent" in the history UI.
+                    provenance: { source: "human" },
+                    ...(base !== null ? { base_sha256: base } : {}),
+                });
+            },
+            fetchCurrent: () => this.readSelected(),
+        });
+        this.editingAtom = this.draft.editingAtom;
+        this.draftContentAtom = () => this.draft.draftAtom() ?? "";
+        this.savingAtom = () => this._creating[0]() || this.draft.savingAtom();
         void this.loadFiles();
+        // Live updates, debounced like the Armory's own subscription
+        // (native-memory-manager.tsx): a burst of writes is one refresh.
+        this.unsubChanged = muxEventSubscribe({
+            eventType: `agent:memory:changed:${agentId}`,
+            handler: () => {
+                if (this.changeDebounce !== undefined) clearTimeout(this.changeDebounce);
+                this.changeDebounce = setTimeout(() => {
+                    this.changeDebounce = undefined;
+                    void this.refreshFromChange();
+                }, 250);
+            },
+        });
+    }
+
+    setDraftContent(value: string): void {
+        this.draft.setDraft(value);
+    }
+
+    /** Current saved content of the selected file; `null` if it's gone. */
+    private async readSelected(): Promise<string | null> {
+        const filename = this.selectedFilenameAtom();
+        if (!filename) return null;
+        try {
+            const res = await RpcApi.NativeMemoryReadFileCommand(TabRpcClient, { agent_id: this.agentId, filename });
+            return res.content;
+        } catch (e) {
+            if (/not found/i.test((e as Error)?.message ?? "")) return null;
+            throw e;
+        }
+    }
+
+    /** A change event for this agent: refresh the list, and the open file in
+     *  place — through the draft model, so a dirty draft is never replaced
+     *  (it gets the "changed since you started editing" banner instead, and
+     *  only if the file's hash actually moved off the draft's base). */
+    private async refreshFromChange(): Promise<void> {
+        await this.loadFiles();
+        const filename = this.selectedFilenameAtom();
+        if (!filename) return;
+        let current: string | null;
+        try {
+            current = await this.readSelected();
+        } catch {
+            return;
+        }
+        if (this.selectedFilenameAtom() !== filename) return;
+        this.applyExternalContent(current);
+    }
+
+    /** Show new saved content for the open file (a live change, a revert)
+     *  without touching an open draft. */
+    applyExternalContent(content: string | null): void {
+        if (content !== null && !this.draft.dirtyAtom()) this.setContent(content);
+        void this.draft.observeExternal(content);
     }
 
     /** Re-fetch the file list. No longer auto-selects a file on load (see
@@ -179,43 +263,25 @@ export class AgentNativeMemoryModel {
     }
 
     startEdit(): void {
-        this.setDraftContent(this.contentAtom() ?? "");
-        this.setEditing(true);
+        this.draft.startEdit(this.contentAtom() ?? "");
         this.setError(null);
     }
 
     cancelEdit(): void {
-        this.setEditing(false);
-        this.setDraftContent("");
+        this.draft.cancel();
         this.setError(null);
     }
 
-    /** Persist the current draft to the selected file. */
+    /** Persist the current draft to the selected file, against its base
+     *  (a moved base is refused and surfaces as the draft's conflict). */
     async saveEdit(): Promise<void> {
-        const filename = this.selectedFilenameAtom();
-        if (!filename) return;
-        this.setSaving(true);
+        if (!this.selectedFilenameAtom()) return;
+        const content = this.draftContentAtom();
         this.setError(null);
-        try {
-            const content = this.draftContentAtom();
-            await RpcApi.NativeMemoryWriteFileCommand(TabRpcClient, {
-                agent_id: this.agentId,
-                filename,
-                content,
-                // reagent P1 on PR #2678: without this, the backend
-                // defaults to "agent_inferred", permanently mislabeling a
-                // human-authored Stash edit as "Agent" in the history UI.
-                provenance: { source: "human" },
-            });
+        if (await this.draft.save()) {
             this.setContent(content);
-            this.setEditing(false);
-            this.setDraftContent("");
             // Refresh so size/modified_at update in the list.
             await this.loadFiles();
-        } catch (e) {
-            this.setError(`Save failed: ${(e as Error).message ?? e}`);
-        } finally {
-            this.setSaving(false);
         }
     }
 
@@ -231,7 +297,7 @@ export class AgentNativeMemoryModel {
             this.setError(`${filename} already exists.`);
             return;
         }
-        this.setSaving(true);
+        this.setCreating(true);
         this.setError(null);
         try {
             await RpcApi.NativeMemoryWriteFileCommand(TabRpcClient, {
@@ -245,7 +311,7 @@ export class AgentNativeMemoryModel {
         } catch (e) {
             this.setError(`Create failed: ${(e as Error).message ?? e}`);
         } finally {
-            this.setSaving(false);
+            this.setCreating(false);
         }
     }
 
@@ -256,6 +322,7 @@ export class AgentNativeMemoryModel {
     }
 
     dispose(): void {
-        // Solid signals are GC'd with the instance; nothing to unsubscribe.
+        this.unsubChanged();
+        if (this.changeDebounce !== undefined) clearTimeout(this.changeDebounce);
     }
 }
