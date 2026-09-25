@@ -9,6 +9,7 @@ describe("tabContainerVisibility", () => {
         expect(tabContainerVisibility(false, false, false)).toEqual({
             "content-visibility": "hidden",
             visibility: null,
+            opacity: null,
             "pointer-events": "none",
             hiddenLaidOut: false,
         });
@@ -18,6 +19,8 @@ describe("tabContainerVisibility", () => {
         expect(tabContainerVisibility(false, true, false)).toEqual({
             "content-visibility": "visible",
             visibility: "hidden",
+            // Nothing inside can paint through (a `visibility` transition would).
+            opacity: "0",
             "pointer-events": "none",
             hiddenLaidOut: true,
         });
@@ -28,6 +31,7 @@ describe("tabContainerVisibility", () => {
             expect(tabContainerVisibility(true, keep, false)).toEqual({
                 "content-visibility": "visible",
                 visibility: null,
+                opacity: null,
                 "pointer-events": "auto",
                 hiddenLaidOut: false,
             });

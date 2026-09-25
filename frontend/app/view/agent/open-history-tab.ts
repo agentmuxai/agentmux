@@ -34,6 +34,12 @@ import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reve
  *  conversation's own launch meta. */
 export const HISTORY_TAB_FOR_META_KEY = "agent:historyTabFor";
 
+/** Tab / pane title for a history reader. Carries the agent's name so it
+ *  can't be mistaken for (or lost among) other agents' history tabs. */
+export function historyTabLabel(agentName: unknown): string {
+    return `${typeof agentName === "string" && agentName.length > 0 ? agentName : "Agent"}'s History`;
+}
+
 /** Block-meta key carrying the ORIGINAL live block's id — the history
  *  tab's own block is never actually launched, so it has no local output
  *  of its own; `AgentHistoryView` reads transcripts through this id

@@ -305,7 +305,7 @@
         "notify:os:inputwaiting": {
           "type": "boolean",
           "default": true,
-          "description": "Notify when an agent asks a question and waits for your answer."
+          "description": "Notify when an agent asks a question and waits for your answer (\"<agent> has a question\")."
         },
         "notify:os:turncompleted": {
           "type": "boolean",
@@ -346,6 +346,11 @@
           "type": "boolean",
           "default": true,
           "description": "Badge the AgentMux taskbar button (and flash it once) while an agent needs you. Windows only for now."
+        },
+        "notify:os:summary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the agent's current session summary as a small line under its notifications. Left out when the agent has none. See docs/specs/SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md §1."
         },
         "notify:os:preview": {
           "type": "string",
@@ -413,7 +418,7 @@
         },
         "agent:livefeedturns": {
           "type": "integer",
-          "default": 3,
+          "default": 6,
           "minimum": 1,
           "description": "How many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Takes effect when a pane is next opened."
         },

@@ -53,6 +53,42 @@ describe("pane tab memory", () => {
     const dormant = (blockId: string) =>
         ({ blockId, view: "browser", meta: { view: "browser" }, ordinal: 1, liveViewModel: null }) as any;
 
+    // A rebuilt browser ViewModel reports stand-in names ("Browser", then the
+    // URL hostname) until the page's title arrives, and says so via
+    // `viewNameIsPlaceholder`. Stand-ins must not flash over the remembered
+    // title when the tab becomes active again.
+    const liveP = (blockId: string, name: string, placeholder: boolean) =>
+        ({
+            blockId,
+            view: "browser",
+            meta: { view: "browser" },
+            ordinal: 1,
+            liveViewModel: { viewName: () => name, viewNameIsPlaceholder: () => placeholder },
+        }) as any;
+
+    it("doesn't let a rebuilt ViewModel's stand-in names replace the remembered title", () => {
+        const memory = createPaneTabMemory();
+        describePaneTab(liveP("b1", "A Very Long Page Title", false), undefined, memory);
+        expect(describePaneTab(dormant("b1"), undefined, memory).label).toBe("A Very Long Page Title");
+        // Reactivated: "Browser", then the hostname, both flagged as stand-ins...
+        expect(describePaneTab(liveP("b1", "Browser", true), undefined, memory).label).toBe("A Very Long Page Title");
+        expect(describePaneTab(liveP("b1", "agentmux.ai", true), undefined, memory).label).toBe("A Very Long Page Title");
+        // ...then the real title arrives (and a real change still updates).
+        expect(describePaneTab(liveP("b1", "Another Page", false), undefined, memory).label).toBe("Another Page");
+    });
+
+    it("still shows a stand-in when nothing better has been seen yet", () => {
+        const memory = createPaneTabMemory();
+        expect(describePaneTab(liveP("b2", "agentmux.ai", true), undefined, memory).label).toBe("agentmux.ai");
+    });
+
+    it("a real name equal to the view's generic name is NOT treated as a stand-in", () => {
+        // e.g. a Swarm tab whose real name is "Swarm": no flag, so it updates.
+        const memory = createPaneTabMemory();
+        describePaneTab(live("b3", "Something Else"), undefined, memory);
+        expect(describePaneTab(live("b3", "Browser"), undefined, memory).label).toBe("Browser");
+    });
+
     it("keeps a tab's last live name once it goes dormant", () => {
         const memory = createPaneTabMemory();
         describePaneTab(live("b1", "Example Domain"), undefined, memory);

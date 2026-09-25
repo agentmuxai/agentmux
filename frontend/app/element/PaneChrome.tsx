@@ -18,7 +18,7 @@
  * §4.1/§4.5.
  */
 
-import { createMemo, createSignal, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import {
     computeBlockActiveBorderColor,
     computeBlockColorBg,
@@ -41,6 +41,13 @@ import type { PaneTabColors } from "./PaneTabStrip";
 
 function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+/** Whether `vm` is `blockId`'s own ViewModel. A ViewModel that doesn't
+ *  expose its blockId is trusted (it can't be checked). */
+function viewModelIsFor(vm: ViewModel | null, blockId: string): boolean {
+    const owner = (vm as { blockId?: unknown } | null)?.blockId;
+    return typeof owner !== "string" || owner === blockId;
 }
 
 export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
@@ -110,7 +117,19 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             infos.set(
                 blockId,
                 describePaneTab(
-                    { blockId, view, meta, ordinal, liveViewModel: blockId === activeId ? liveVm : null },
+                    {
+                        blockId,
+                        view,
+                        meta,
+                        ordinal,
+                        // Only this block's OWN ViewModel may name it: a live
+                        // name/favicon read from another tab's ViewModel gets
+                        // remembered under this tab (pills showing another
+                        // tab's title, or a browser's favicon on every pill).
+                        // pane-leaf-chrome keys `activeViewModel` by the active
+                        // block now; this is the belt-and-braces check.
+                        liveViewModel: blockId === activeId && viewModelIsFor(liveVm, blockId) ? liveVm : null,
+                    },
                     extraLabels.get(blockId),
                     tabMemory
                 )
@@ -291,6 +310,23 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
 
+    // The busy-indicator slot is the chrome's own, on every pane, not a
+    // `model` capability: `model` belongs to whichever view was active when
+    // this pane first hoisted (pane-leaf-chrome.tsx latches it), so an agent
+    // added as a tab to a pane that started as Swarm or a terminal got no
+    // slot and its busy ring never rendered
+    // (RETRO_AGENT_PANE_BUSY_RING_MISSING_IN_NON_AGENT_FIRST_STACK_2026_09_25.md).
+    // The handoff follows the ACTIVE view model instead, re-pointing on
+    // every switch; a view model without `setProgressBarMount` just leaves
+    // the slot empty.
+    const [progressSlotEl, setProgressSlotEl] = createSignal<HTMLDivElement | null>(null);
+    createEffect(() => {
+        const vm = nodeModel.activeViewModel?.() ?? null;
+        const el = progressSlotEl();
+        vm?.setProgressBarMount?.(el);
+        onCleanup(() => vm?.setProgressBarMount?.(null));
+    });
+
     const renderHeader = (viewModel: ViewModel | null): JSX.Element => (
         <PaneHeaderTabStrip
             tabs={tabIds()}
@@ -348,6 +384,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                 {renderHeader(activeViewModelOrUndefined() ?? null)}
             </ErrorBoundary>
             {model?.renderBelowHeader?.()}
+            <div class="pane-progress-bar-slot" ref={setProgressSlotEl} />
             {model?.wrapContent ? model.wrapContent(contentRegion) : contentRegion}
         </div>
     );

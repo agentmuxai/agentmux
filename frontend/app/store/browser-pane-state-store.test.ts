@@ -28,6 +28,7 @@ function mkProj(): MockProj {
         canGoBack: [] as unknown[],
         canGoForward: [] as unknown[],
         title: [] as unknown[],
+        titleIsReal: [] as unknown[],
         url: [] as unknown[],
         faviconUrl: [] as unknown[],
         tabs: [] as unknown[],
@@ -40,6 +41,7 @@ function mkProj(): MockProj {
         canGoBack: (v) => calls.canGoBack.push(v),
         canGoForward: (v) => calls.canGoForward.push(v),
         title: (v) => calls.title.push(v),
+        titleIsReal: (v) => calls.titleIsReal.push(v),
         url: (v) => calls.url.push(v),
         faviconUrl: (v) => calls.faviconUrl.push(v),
         tabs: (v) => calls.tabs.push(v),
@@ -84,6 +86,15 @@ describe("browser-pane-state-store (slice #9 — Phase 1A multi-tab)", () => {
     // Projection — active-tab fields
     // ─────────────────────────────────────────────────────────────
     describe("active-tab projections", () => {
+        it("the hostname stand-in title from OpenTab is not flagged as real", () => {
+            const proj = mkProj();
+            registerPane("blk-1", proj);
+            dispatch("blk-1", { type: "OpenTab", url: "https://example.com" });
+            expect(proj.calls.title).toEqual(["example.com"]);
+            // false -> false: no titleIsReal projection at all.
+            expect(proj.calls.titleIsReal).toEqual([]);
+        });
+
         it("OpenTab projects url + title + loading + faviconUrl from the new active tab", () => {
             const proj = mkProj();
             registerPane("blk-1", proj);
@@ -207,6 +218,9 @@ describe("browser-pane-state-store (slice #9 — Phase 1A multi-tab)", () => {
                 title: "Real Title",
             });
             expect(proj.calls.title).toEqual(["Real Title"]);
+            // The title is the page's own now, not a stand-in — the pane-tab
+            // pill uses this to stop ignoring it (viewNameIsPlaceholder).
+            expect(proj.calls.titleIsReal).toEqual([true]);
             expect(proj.calls.url).toEqual([]);
             expect(proj.calls.loading).toEqual([]);
             expect(proj.calls.faviconUrl).toEqual([]);

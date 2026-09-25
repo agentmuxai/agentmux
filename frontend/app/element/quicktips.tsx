@@ -98,7 +98,7 @@ const KeyBinding = (props: { keyDecl: string }): JSX.Element => {
 const QuickTips = (): JSX.Element => {
     return (
         <div class="flex flex-col w-full gap-6 @container">
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Header Icons</span>
@@ -140,7 +140,7 @@ const QuickTips = (): JSX.Element => {
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Important Keybindings</span>
@@ -217,7 +217,7 @@ const QuickTips = (): JSX.Element => {
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">More Tips</span>
@@ -250,7 +250,7 @@ const QuickTips = (): JSX.Element => {
                 </div>
             </div>
 
-            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-all duration-300">
+            <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Need More Help?</span>

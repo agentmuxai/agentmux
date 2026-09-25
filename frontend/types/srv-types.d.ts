@@ -1122,6 +1122,7 @@ declare global {
         "notify:taskbar:attention"?: boolean;
         "notify:quiethours"?: string;
         "notify:os:preview"?: "redacted" | "full" | "none";
+        "notify:os:summary"?: boolean;
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;
         "notify:sounds:suppresswhenfocused"?: boolean;

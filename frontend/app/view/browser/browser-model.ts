@@ -96,6 +96,7 @@ export class BrowserViewModel implements ViewModel {
 
     viewIcon: Accessor<string> = () => "globe";
     viewName: Accessor<string>;
+    viewNameIsPlaceholder: Accessor<boolean>;
     viewFaviconUrl: Accessor<string>;
     /** Disposes the createRoot that owns `viewName` and `viewFaviconUrl`.
      *  Called from `dispose()` to release the memos cleanly. */
@@ -114,6 +115,10 @@ export class BrowserViewModel implements ViewModel {
     private _title = createSignal<string>(TITLE_FALLBACK);
     titleAtom: Accessor<string> = this._title[0];
     setTitle = this._title[1];
+    /** Whether `titleAtom` is the page's real title yet (the reducer's
+     *  `titleOverridden`), vs. the "Browser" fallback / hostname stand-in
+     *  every freshly built ViewModel starts with. */
+    private _titleIsReal = createSignal<boolean>(false);
 
     private _favicon = createSignal<string>("");
     /** Pane favicon URL. Derived projection of `state.url` per the
@@ -323,6 +328,9 @@ export class BrowserViewModel implements ViewModel {
                 this.diag(`state-write key=canGoForward value=${next}`);
                 this.setCanGoForward(next);
             },
+            titleIsReal: (next) => {
+                this._titleIsReal[1](next);
+            },
             title: (next) => {
                 this.diag(`state-write key=title value=${JSON.stringify(next)}`);
                 this.setTitle(next);
@@ -355,6 +363,7 @@ export class BrowserViewModel implements ViewModel {
         // them to `dispose()` instead.
         this._memoRootDispose = createRoot((dispose) => {
             this.viewName = createMemo(() => this.titleAtom());
+            this.viewNameIsPlaceholder = createMemo(() => !this._titleIsReal[0]());
             this.viewFaviconUrl = createMemo(() => {
                 const v = this.faviconUrlAtom();
                 this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);

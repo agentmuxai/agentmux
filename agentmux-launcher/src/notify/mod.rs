@@ -44,6 +44,11 @@ pub struct Notification {
     pub title: String,
     #[serde(default)]
     pub body: Option<String>,
+    /// What the agent is working on — a small line under the body
+    /// (`SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md`
+    /// §1.3). Absent from an older srv, and when the agent has none.
+    #[serde(default)]
+    pub summary: Option<String>,
     pub tag: String,
 }
 
