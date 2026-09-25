@@ -112,6 +112,9 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
         expect(link).toHaveClass("status-bar-popover-link");
         expect(link.textContent).toBe(DATA_DIR);
         expect(link.children).toHaveLength(0);
+        // Full text, never truncated.
+        expect(link.style.textOverflow).toBe("");
+        expect(link.style.maxWidth).toBe("");
     });
 
     it("clicking the path opens the data dir via a target, never the path string", async () => {
@@ -132,9 +135,9 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
         ["win", "Show in File Explorer"],
         ["mac", "Reveal in Finder"],
         ["linux", "Open in file manager"],
-    ] as const)("tooltip on %s names the action and the full path", (os, label) => {
+    ] as const)("tooltip on %s names the action (the path itself is shown in full)", (os, label) => {
         platform = os;
         renderPanel();
-        expect(screen.getByRole("button", { name: DATA_DIR })).toHaveAttribute("data-tip", `${label}: ${DATA_DIR}`);
+        expect(screen.getByRole("button", { name: DATA_DIR })).toHaveAttribute("data-tip", label);
     });
 });

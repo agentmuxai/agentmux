@@ -274,6 +274,8 @@
 
     // A value that is itself a link (the host popover's Data path): a real
     // <button> for keyboard access, stripped to look like underlined text.
+    // Shows the full text — no ellipsis — wrapping anywhere, since a path
+    // has no spaces to break at.
     .status-bar-popover-link {
         display: block;
         min-width: 0;
@@ -282,7 +284,8 @@
         background: none;
         color: inherit;
         text-align: right;
-        white-space: nowrap;
+        white-space: normal;
+        overflow-wrap: anywhere;
         text-decoration: underline;
         text-underline-offset: 2px;
         cursor: pointer;

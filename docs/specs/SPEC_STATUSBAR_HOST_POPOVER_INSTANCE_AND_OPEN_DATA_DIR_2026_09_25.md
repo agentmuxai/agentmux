@@ -129,19 +129,20 @@ PID / Data.
 **The Data path itself is the link** (user, 2026-09-25: "the path underlined as a link,
 clicking it opens the file browser; no icon"). There is no separate button or icon.
 
-- Render the path in a `<button type="button">` styled as a link: underlined, the same
-  mono font, size and ellipsis truncation the path has today
-  (`HostPopover.tsx`, the Data row's `status-bar-popover-mono` span with
-  `max-width: 220px`), `cursor: pointer`, and the theme's link/accent colour on hover.
-  A real `<button>` rather than a clickable `<span>` keeps it keyboard-reachable
-  (Tab, Enter/Space) and announced as actionable. Reset the button's own chrome
-  (background, border, padding) so it looks like text.
-- Clicking it calls `open_in_file_manager`. The full path goes in the tooltip, since
-  the visible text is ellipsised.
+- Render the path in a `<button type="button">` styled as a link. It is underlined and
+  uses the same mono font and size the path had, with `cursor: pointer` and the theme's
+  link/accent colour on hover. A real `<button>` rather than a clickable `<span>` keeps
+  it keyboard-reachable (Tab, Enter/Space) and announced as actionable. Reset the
+  button's own chrome (background, border, padding) so it looks like text.
+- **Show the full path, never truncated** (user, 2026-09-25: "we don't need the ellipsis
+  on the path, just leave the full text in"). The old `max-width: 220px` and ellipsis
+  are gone. A long path wraps (`overflow-wrap: anywhere`, since a path has no spaces to
+  break at) instead of widening the popover.
+- Clicking it calls `open_in_file_manager`.
 - The row label stays "Data".
 
 Tooltip (`data-tip`, per the status bar's own tip convention — not the native `title=`),
-showing the action and then the full path:
+naming the action only, since the full path is already on screen:
 
 - Windows: "Show in File Explorer"
 - macOS: "Reveal in Finder"
