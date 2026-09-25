@@ -262,7 +262,7 @@ pub(crate) async fn run_windows(
     // are already resolved.
     //
     // Deliberately fire-and-forget: `start_if_enabled` returns None when the
-    // tray is off (the default) or fails to start, and the action loop is a
+    // tray is off or fails to start, and the action loop is a
     // detached thread (`tray::spawn_action_loop`, shared with the Unix
     // supervisor). A cosmetic icon must never be able to stall or kill the
     // supervisor that owns srv + host.

@@ -267,7 +267,7 @@ export function NotificationsSection(): JSX.Element {
                 description={NOTIFICATIONS_SETTINGS.runInBackground.description}
                 control={
                     <ToggleControl
-                        checked={!!(s()["app:runinbackground"] as boolean)}
+                        checked={(s()["app:runinbackground"] as boolean | undefined) ?? true}
                         onChange={(v) => set("app:runinbackground", v)}
                     />
                 }

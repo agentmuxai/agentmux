@@ -35,16 +35,30 @@
 //! supervisor spawns. A new backend only has to turn native events into
 //! `TrayAction`s and call `spawn_action_loop` from its supervisor.
 //!
-//! ## Opt-in
+//! ## When it runs
 //!
-//! Off unless `AGENTMUX_TRAY` is set (presence-based, matching the
-//! `AGENTMUX_DEV` / `AGENTMUX_BACKGROUND_SERVICE` idiom). Workstream 4 of the
-//! issue requires the feature be opt-in and off by default, and requires the
-//! icon to be a *reliable* indicator that the background service is running —
-//! so the tray is only meaningful alongside `AGENTMUX_BACKGROUND_SERVICE`, and
-//! `should_enable` encodes that pairing rather than leaving it to callers.
+//! Only when `AGENTMUX_TRAY` is set (presence-based, matching the
+//! `AGENTMUX_DEV` / `AGENTMUX_BACKGROUND_SERVICE` idiom). `background_config`
+//! sets it from the `app:runinbackground` setting, which is **on by default**
+//! (repo owner's decision, 2026-09-25). The icon must be a *reliable* indicator
+//! that the background service is running, so the tray is only meaningful
+//! alongside `AGENTMUX_BACKGROUND_SERVICE` (`should_enable` encodes that
+//! pairing), and the converse holds too: when the tray was requested but
+//! failed to start, [`unavailable`] tells the host spawn to drop background
+//! mode, so there is never a resident process without an icon.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+
+/// Set when the tray was requested but could not start. Read by the host spawn.
+static TRAY_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// The tray was requested but failed to start, so background mode must not be
+/// handed to the host: closing the last window would otherwise leave a
+/// resident process with no icon and no visible way to quit it.
+pub fn unavailable() -> bool {
+    TRAY_UNAVAILABLE.load(Ordering::SeqCst)
+}
 
 pub(crate) mod notify_menu;
 #[cfg(target_os = "windows")]
@@ -294,7 +308,11 @@ pub fn start_if_enabled(
             Some(rx)
         }
         Err(e) => {
-            crate::log(&format!("tray: failed to start, continuing without it: {}", e));
+            TRAY_UNAVAILABLE.store(true, Ordering::SeqCst);
+            crate::log(&format!(
+                "tray: failed to start, continuing without it and without background mode: {}",
+                e
+            ));
             None
         }
     }

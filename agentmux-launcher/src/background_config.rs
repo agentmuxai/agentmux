@@ -24,9 +24,17 @@
 //! ## Precedence
 //!
 //! Either env var already present (developer override) → on. Otherwise
-//! `--background` → on. Otherwise `settings.json` `"app:runinbackground": true`
-//! → on. **Fail-safe:** any error reading/parsing settings resolves to *off* —
-//! a broken read must never silently turn a foreground app into a resident one.
+//! `--background` → on. Otherwise `settings.json` `"app:runinbackground"`,
+//! which **defaults to on**: a missing file (fresh install) or a missing key
+//! reads as on, and only an explicit `false` turns it off. **Fail-safe:** a
+//! settings file that exists but cannot be read or parsed, or holds a non-bool
+//! value, resolves to *off*; the user's real choice is unknown, and a broken
+//! read must never silently turn a foreground app into a resident one.
+//!
+//! Default-on is safe only because a resident process always shows an icon: if
+//! the tray cannot start (e.g. Linux without a StatusNotifier host), the host
+//! is spawned without background mode (`tray::unavailable`), so closing the
+//! last window still quits.
 //!
 //! The two switches are always set together, preserving `tray::should_enable`'s
 //! deliberate pairing (a tray without background mode would lie about whether
@@ -46,15 +54,21 @@ pub fn should_run_in_background(env_already_set: bool, background_flag: bool, se
 }
 
 /// Read `"app:runinbackground"` from a settings.json file.
-/// Missing file / parse error / missing or non-bool key → `false`.
+/// Missing file or missing key → `true` (the default). Unreadable file, parse
+/// error or non-bool value → `false` (fail-safe).
 pub fn settings_run_in_background(settings_path: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(settings_path) else {
-        return false;
+    let text = match std::fs::read_to_string(settings_path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
         return false;
     };
-    json.get(SETTINGS_KEY).and_then(|v| v.as_bool()).unwrap_or(false)
+    match json.get(SETTINGS_KEY) {
+        None => true,
+        Some(v) => v.as_bool().unwrap_or(false),
+    }
 }
 
 /// Resolve background mode and, when on, export both switches into the
@@ -124,18 +138,27 @@ mod tests {
     }
 
     #[test]
-    fn setting_false_or_absent_reads_off() {
+    fn an_explicit_false_turns_it_off() {
         let p = write_tmp("off", r#"{"app:runinbackground": false}"#);
-        assert!(!settings_run_in_background(&p));
-        let _ = std::fs::remove_file(&p);
-        let p = write_tmp("absent", r#"{"term:fontsize": 14}"#);
         assert!(!settings_run_in_background(&p));
         let _ = std::fs::remove_file(&p);
     }
 
+    /// On by default: a fresh install has no settings.json, and an existing
+    /// one without the key never chose.
     #[test]
-    fn fail_safe_off_on_missing_bad_or_wrong_type() {
-        assert!(!settings_run_in_background(Path::new("/no/such/agentmux-settings.json")));
+    fn a_missing_file_or_key_defaults_on() {
+        assert!(settings_run_in_background(Path::new("/no/such/agentmux-settings.json")));
+        let p = write_tmp("absent", r#"{"term:fontsize": 14}"#);
+        assert!(settings_run_in_background(&p));
+        let _ = std::fs::remove_file(&p);
+        let p = write_tmp("empty-obj", "{}");
+        assert!(settings_run_in_background(&p));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn fail_safe_off_on_bad_or_wrong_type() {
         let p = write_tmp("bad", "not json {");
         assert!(!settings_run_in_background(&p));
         let _ = std::fs::remove_file(&p);

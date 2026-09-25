@@ -50,9 +50,10 @@
 
     // -- App --
     // Keep running with a system-tray icon when all windows are closed
-    // (background-service mode). Applies at the NEXT launch: the launcher
-    // reads this before the app itself is running.
-    // "app:runinbackground":      false,
+    // (background-service mode). On by default; set false to quit when the
+    // last window closes. Applies at the NEXT launch: the launcher reads this
+    // before the app itself is running.
+    // "app:runinbackground":      true,
     // "app:globalhotkey":         "",
     // "app:defaultnewblock":      "",
     // "app:showoverlayblocknums": false,
