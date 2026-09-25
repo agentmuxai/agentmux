@@ -3187,6 +3187,7 @@ mod tests {
             started_at_ms: at,
             continuity_rung: crate::backend::continuity_segments::rung_for_spawn(false, false),
             predecessor_segment_id: None,
+            lease_epoch: None,
         }
     }
 

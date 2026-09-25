@@ -89,6 +89,10 @@ pub struct HeldAgentLease {
     /// #3738), not a detail-less fallback.
     lost: Arc<LostReason>,
     stopped: Arc<AtomicBool>,
+    /// When the lease was last confirmed ours (claim, renew or verify), in
+    /// ms. [`RecordFence`] trusts the in-memory state only while this is
+    /// within the TTL.
+    last_ok_ms: Arc<std::sync::atomic::AtomicI64>,
 }
 
 /// The first loss message, kept for every later refusal.
@@ -107,6 +111,23 @@ impl LostReason {
 }
 
 impl HeldAgentLease {
+    /// The ownership generation this lease was granted under.
+    pub fn epoch(&self) -> u64 {
+        self.lease.epoch()
+    }
+
+    /// A cheap handle the agent's output writer checks before each append
+    /// to the agent's shared record (spec §4.3, Phase 3).
+    pub fn record_fence(&self) -> RecordFence {
+        RecordFence {
+            store: Arc::clone(&self.store),
+            lease: self.lease.clone(),
+            agent: self.agent.clone(),
+            lost: Arc::clone(&self.lost),
+            last_ok_ms: Arc::clone(&self.last_ok_ms),
+        }
+    }
+
     /// The pre-turn fence check (spec I4). `Err` means another instance now
     /// holds this agent: do not start the turn. A transient I/O error is not
     /// a loss — the renewal task decides that — so it does not refuse.
@@ -115,7 +136,10 @@ impl HeldAgentLease {
             return Err(why);
         }
         match self.store.verify(&self.lease) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.last_ok_ms.store(agentmux_common::time::now_ms(), Ordering::SeqCst);
+                Ok(())
+            }
             Err(LeaseError::HeldByOther { holder, .. }) => {
                 Err(self.lost.set_first(lost_message(&self.agent, holder.as_ref())))
             }
@@ -211,6 +235,7 @@ pub fn acquire(
         agent: agent.to_string(),
         lost: Arc::new(LostReason::default()),
         stopped: Arc::new(AtomicBool::new(false)),
+        last_ok_ms: Arc::new(std::sync::atomic::AtomicI64::new(agentmux_common::time::now_ms())),
     };
     spawn_renewal(
         Arc::clone(store),
@@ -218,6 +243,7 @@ pub fn acquire(
         agent.to_string(),
         Arc::clone(&held.lost),
         Arc::clone(&held.stopped),
+        Arc::clone(&held.last_ok_ms),
         on_lost,
     );
     Ok(held)
@@ -229,6 +255,7 @@ fn spawn_renewal(
     agent: String,
     lost: Arc<LostReason>,
     stopped: Arc<AtomicBool>,
+    last_ok_ms: Arc<std::sync::atomic::AtomicI64>,
     on_lost: impl Fn(String) + Send + Sync + 'static,
 ) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
@@ -255,7 +282,7 @@ fn spawn_renewal(
                 break;
             }
             match renewed {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => last_ok_ms.store(agentmux_common::time::now_ms(), Ordering::SeqCst),
                 Ok(Err(LeaseError::HeldByOther { holder, owner_boot_id, .. })) => {
                     let why = lost.set_first(lost_message(&agent, holder.as_ref()));
                     tracing::error!(
@@ -486,6 +513,63 @@ fn handover_hold_refusal(uid: &str, agent: &str) -> Option<String> {
     ))
 }
 
+/// The writer-side fence on the agent's shared record (spec §4.3, Phase 3).
+///
+/// Cheap in the common case: while the lease was confirmed ours within the
+/// TTL, nobody can have reclaimed it, so appends go ahead on in-memory state
+/// alone. After a longer gap — the holder was suspended, and its CLI and
+/// output reader resume together with the renewal task — the first append
+/// checks the lease file before writing, so output a reclaimed holder
+/// flushes on waking never reaches the record the new holder is writing.
+#[derive(Clone)]
+pub struct RecordFence {
+    store: Arc<LeaseStore>,
+    lease: Lease,
+    agent: String,
+    lost: Arc<LostReason>,
+    last_ok_ms: Arc<std::sync::atomic::AtomicI64>,
+}
+
+impl RecordFence {
+    /// May this process append to the agent's shared record now?
+    pub fn may_write(&self) -> bool {
+        if self.lost.get().is_some() {
+            return false;
+        }
+        let now = agentmux_common::time::now_ms();
+        let age = now - self.last_ok_ms.load(Ordering::SeqCst);
+        if age >= 0 && (age as u64) <= crate::registry::LEASE_TTL_MS {
+            return true;
+        }
+        match self.store.verify(&self.lease) {
+            Ok(()) => {
+                self.last_ok_ms.store(now, Ordering::SeqCst);
+                true
+            }
+            Err(LeaseError::HeldByOther { holder, .. }) => {
+                self.lost.set_first(lost_message(&self.agent, holder.as_ref()));
+                tracing::error!(
+                    agent = %self.agent,
+                    instance_id = %self.lease.instance_id(),
+                    "agent_admission.fenced: output from a process that lost its lease kept out of the shared record"
+                );
+                false
+            }
+            // An I/O hiccup is not a loss (same rule as `verify`).
+            Err(LeaseError::Io(_)) => true,
+        }
+    }
+}
+
+/// `zone` unless `fence` says this process may no longer write the agent's
+/// shared record.
+pub fn fenced_zone<'a>(zone: Option<&'a str>, fence: &Option<RecordFence>) -> Option<&'a str> {
+    match fence {
+        Some(f) if zone.is_some() && !f.may_write() => None,
+        _ => zone,
+    }
+}
+
 /// Where the instance currently running an agent can be reached.
 #[derive(Clone, PartialEq, Eq)]
 pub struct HolderEndpoint {
@@ -703,6 +787,46 @@ mod tests {
         ];
         assert_eq!(find_uid_block(&regs, "uid-1").as_deref(), Some("b-mine"));
         assert_eq!(find_uid_block(&regs[..2], "uid-1"), None, "a same-named agent with another or no UID is not a holder");
+    }
+
+    /// Phase 3: the writer trusts in-memory state within the TTL…
+    #[test]
+    fn the_record_fence_passes_a_recently_confirmed_lease_without_io() {
+        let (_tmp, s) = store(60_000);
+        let held = acquire(&s, "uid-1", "Agent3", &boot("boot-a"), "block-a", None, |_| {}).unwrap();
+        let fence = held.record_fence();
+        assert!(fence.may_write());
+        assert_eq!(fenced_zone(Some("agent:uid-1:current"), &Some(fence)), Some("agent:uid-1:current"));
+        assert_eq!(fenced_zone(Some("z"), &None), Some("z"), "no lease, no fence");
+    }
+
+    /// …and after a gap longer than the TTL (a suspended holder) it checks
+    /// the lease file before writing: a reclaimed holder's output is kept
+    /// out of the shared record.
+    #[test]
+    fn the_record_fence_keeps_a_reclaimed_holders_output_out_after_a_gap() {
+        let (tmp, s) = store(60_000);
+        let held = acquire(&s, "uid-1", "Agent3", &boot("boot-a"), "block-a", None, |_| {}).unwrap();
+        let fence = held.record_fence();
+        // Suspended past the TTL…
+        held.last_ok_ms.store(agentmux_common::time::now_ms() - crate::registry::LEASE_TTL_MS as i64 - 1_000, Ordering::SeqCst);
+        // …while another instance took the agent over.
+        std::fs::remove_file(tmp.path().join("leases").join("uid-1.lease.json")).unwrap();
+        let _new = acquire(&s, "uid-1", "Agent3", &boot("boot-b"), "block-b", None, |_| {}).unwrap();
+        assert!(!fence.may_write());
+        assert_eq!(fenced_zone(Some("agent:uid-1:current"), &Some(fence.clone())), None);
+        assert!(held.verify().unwrap_err().contains("taken over"), "the loss is recorded for the pre-turn fence too");
+    }
+
+    #[test]
+    fn the_record_fence_confirms_and_resumes_when_the_lease_is_still_ours_after_a_gap() {
+        let (_tmp, s) = store(60_000);
+        let held = acquire(&s, "uid-1", "Agent3", &boot("boot-a"), "block-a", None, |_| {}).unwrap();
+        let fence = held.record_fence();
+        let stale = agentmux_common::time::now_ms() - crate::registry::LEASE_TTL_MS as i64 - 1_000;
+        held.last_ok_ms.store(stale, Ordering::SeqCst);
+        assert!(fence.may_write(), "nobody reclaimed it: still ours");
+        assert!(held.last_ok_ms.load(Ordering::SeqCst) > stale, "confirmed again");
     }
 
     #[test]
