@@ -109,16 +109,18 @@ export function describePaneTab(
     const d = ctx.view ? descriptors.get(ctx.view) : undefined;
     const widget = widgetForView(ctx.view);
 
-    // A view's generic name ("Browser") is what a freshly mounted ViewModel
-    // reports before its real name loads: a browser pane's page title
-    // arrives from the host a moment after its ViewModel is (re)created on
-    // becoming the active tab. Letting that placeholder overwrite the
-    // remembered name flashed "Browser" on every switch to the tab, then
-    // swapped back to the page title. A placeholder only fills in when
-    // nothing better has been seen yet.
+    // A freshly built ViewModel can report a stand-in name before its real
+    // one loads: a browser pane's ViewModel is rebuilt each time its tab
+    // becomes active and says "Browser", then the URL's hostname, until the
+    // page reports its title. Remembering those flashed the stand-ins over
+    // the page title on every switch. The ViewModel says so explicitly
+    // (`viewNameIsPlaceholder`) rather than being guessed from the string,
+    // which would also freeze a tab whose real name happens to equal its
+    // view's generic name. A stand-in only fills in when nothing better has
+    // been seen for this tab yet.
     const liveName = readLive<string>(ctx.liveViewModel?.viewName);
     if (typeof liveName === "string" && liveName.length > 0) {
-        const isPlaceholder = liveName === widget?.label || liveName === blockViewToName(ctx.view);
+        const isPlaceholder = readLive<boolean>(ctx.liveViewModel?.viewNameIsPlaceholder) === true;
         if (!isPlaceholder || !memory.names.has(ctx.blockId)) memory.names.set(ctx.blockId, liveName);
     }
     const liveFavicon = readLive<string>(ctx.liveViewModel?.viewFaviconUrl);
