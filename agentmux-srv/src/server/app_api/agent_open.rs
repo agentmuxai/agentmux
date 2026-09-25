@@ -417,6 +417,7 @@ pub(crate) async fn open_agent_impl(
                             Some(app_state.id_store.clone()), Some(app_state.identity_store.clone()),
                             mstore.shared_agent_registry(),
                             app_state.boot_id.clone(), &app_state.auth_key,
+                            Some(app_state.config_watcher.clone()),
                         );
                     }
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
@@ -893,6 +894,7 @@ pub(crate) async fn open_agent_impl(
                     mstore.shared_agent_registry(),
                     app_state.boot_id.clone(),
                     &app_state.auth_key,
+                    Some(app_state.config_watcher.clone()),
                 )?;
 
                 // 10. Broadcast block + tab + layout updates to frontend

@@ -768,7 +768,7 @@ mod tests {
         blockcontroller::mark_closing(&block.oid);
         let err = blockcontroller::resync_controller(
             &block, "tab-1", None, false, true, None, None, None, None, None, None, None,
-            std::sync::Arc::from("test-boot"), "test-key",
+            std::sync::Arc::from("test-boot"), "test-key", None,
         )
         .unwrap_err();
         blockcontroller::unmark_closing(&block.oid);

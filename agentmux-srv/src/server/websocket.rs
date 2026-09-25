@@ -994,6 +994,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     let identity_store_resync = state.identity_store.clone();
     let boot_id_resync = state.boot_id.clone();
     let auth_key_resync = state.auth_key.clone();
+    let config_watcher_resync = state.config_watcher.clone();
     engine.register_handler(
         COMMAND_CONTROLLER_RESYNC,
         Box::new(move |data, _ctx| {
@@ -1005,6 +1006,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let identity_store = identity_store_resync.clone();
             let boot_id = boot_id_resync.clone();
             let auth_key = auth_key_resync.clone();
+            let config_watcher = config_watcher_resync.clone();
             Box::pin(async move {
                 let cmd: CommandControllerResyncData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerresync: {e}"))?;
@@ -1038,6 +1040,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     registry,
                     boot_id,
                     &auth_key,
+                    Some(config_watcher),
                 )?;
                 Ok(None)
             })
