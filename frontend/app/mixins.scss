@@ -38,6 +38,13 @@
     // Tab pills start flush at the pane's left edge.
     &.block-frame-default-header--has-tabstrip {
         padding-left: 0;
+
+        // …but a view-icon control ahead of them (the editor's file-tree
+        // toggle, blockframe.tsx's `viewIconControlElem`) keeps the inset an
+        // ordinary header gives its icon, instead of touching the pane edge.
+        .block-frame-view-icon-control {
+            margin-left: 10px;
+        }
     }
 
     // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
