@@ -230,6 +230,9 @@ pub fn rewrite_local_url_for_container(local_url: &str) -> String {
 /// instead — see [`ContainerMountSpec::claude_config_host_dir`].
 pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
+    // Deliberately dropped even though `backend::gh_guard` sets it on every
+    // agent spawn: the guard dir is a host path that means nothing inside the
+    // image, and the image controls its own `gh` state.
     "GH_CONFIG_DIR",
     "PATH",
     "HOME",

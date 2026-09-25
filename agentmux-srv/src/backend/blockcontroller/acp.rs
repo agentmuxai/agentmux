@@ -688,6 +688,7 @@ impl AcpController {
                 &mut env_vars,
             );
         }
+        crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
         env_vars
     }
 }
@@ -939,6 +940,23 @@ mod tests {
         assert_eq!(
             env.get("AGENTMUX_AGENT_TOKEN"),
             store.agent_token_load("uid-acp").unwrap().as_ref()
+        );
+    }
+
+    /// Plain-`gh` guard on the ACP spawn path: `GH_CONFIG_DIR` from `cmd:env`
+    /// is replaced by the guard dir, not passed through.
+    #[test]
+    fn an_acp_spawn_env_overrides_gh_config_dir_with_the_guard_dir() {
+        let mut meta = super::super::super::obj::MetaMapType::new();
+        meta.insert(
+            "cmd:env".to_string(),
+            serde_json::json!({"GH_CONFIG_DIR": "/home/human/.config/gh", "AGENTMUX_AGENT_SLUG": "acpy"}),
+        );
+        let ctrl = AcpController::new("tab".to_string(), "block-acp-gh".to_string(), None, None, None, None);
+        let env = ctrl.spawn_env(&meta);
+        assert_eq!(
+            std::path::PathBuf::from(&env["GH_CONFIG_DIR"]),
+            crate::backend::gh_guard::guard_config_home().join("gh-acpy")
         );
     }
 
