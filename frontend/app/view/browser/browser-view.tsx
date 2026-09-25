@@ -37,7 +37,7 @@ const LOADING_SPINNER_FADE_MS = 200;
  * instead.
  * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md §5 (browser-auth follow-up).
  */
-export function BrowserViewComponent(props: ViewComponentProps<BrowserViewModel>): JSX.Element {
+export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.Element {
     return (
         <ModalLayer scope="pane">
             <BrowserViewInner model={props.model} />

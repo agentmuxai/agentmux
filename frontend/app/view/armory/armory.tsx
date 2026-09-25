@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Armory module barrel — wires viewComponent to avoid circular import.
+// Armory module barrel — its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { ArmoryViewModel } from "./armory-model";
