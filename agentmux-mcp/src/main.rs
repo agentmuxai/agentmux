@@ -2602,11 +2602,24 @@ async fn call_tool(
                 anyhow::bail!("close failed: HTTP {status} — {text}");
             }
             if resp.status().as_u16() == 202 {
-                // Another agent's pane: its user had 15 s to keep it (§6.5).
                 let body: Value = resp.json().await.unwrap_or(Value::Null);
                 let request_id = body["request_id"].as_str().unwrap_or_default();
-                let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
-                return close_pane_outcome(target_block_id.as_deref().unwrap_or_default(), &now);
+                return match target_block_id.as_deref() {
+                    // Another agent's pane: its user had 15 s to keep it (§6.5).
+                    Some(b) => {
+                        let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
+                        close_pane_outcome(b, &now)
+                    }
+                    // Yourself (§7): as QuitSelf, done once it's proceeding —
+                    // the quit waits for this very turn to end.
+                    None => {
+                        let now = await_shutdown(client, local_url, auth_key, request_id, false).await;
+                        match now["status"].as_str().unwrap_or("") {
+                            "" | "pending" => anyhow::bail!("ClosePane: no answer on the pending shutdown {request_id}"),
+                            state => quit_self_outcome(state, &now),
+                        }
+                    }
+                };
             }
             match target_block_id {
                 Some(b) => Ok(format!("Closed pane {b:?}")),
