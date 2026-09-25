@@ -97,6 +97,10 @@ struct Handle {
     presenter: Arc<dyn Presenter>,
 }
 
+/// The launcher's reducer state — where a clicked toast's window is looked up
+/// (backend window id → label → HWND).
+pub type LauncherState = Arc<tokio::sync::Mutex<crate::state::State>>;
+
 static HANDLE: OnceLock<Handle> = OnceLock::new();
 
 /// The user-action channel exists from first use, not from `start`: the tray
@@ -133,7 +137,13 @@ fn make_presenter(actions: mpsc::UnboundedSender<UserAction>, data_dir: &std::pa
 }
 
 /// Start the presenter. Idempotent: a second call only updates the endpoint.
-pub fn start(ws_endpoint: &str, auth_key: &str, data_dir: std::path::PathBuf, dir_hash: String) {
+pub fn start(
+    ws_endpoint: &str,
+    auth_key: &str,
+    data_dir: std::path::PathBuf,
+    dir_hash: String,
+    state: LauncherState,
+) {
     let ep = Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string() };
     if let Some(h) = HANDLE.get() {
         let _ = h.endpoint.send(Some(ep));
@@ -151,12 +161,15 @@ pub fn start(ws_endpoint: &str, auth_key: &str, data_dir: std::path::PathBuf, di
     if HANDLE.set(Handle { endpoint: ep_tx, presenter: presenter.clone() }).is_err() {
         return;
     }
-    tokio::spawn(run(ep_rx, act_rx, presenter, data_dir, dir_hash));
+    tokio::spawn(run(ep_rx, act_rx, presenter, data_dir, dir_hash, state));
 }
 
-/// srv was respawned: reconnect to its new endpoint.
+/// srv was respawned: reconnect to its new endpoint. The toasts on screen
+/// name ids the new srv never issued — clear them rather than leave clicks
+/// that can't find their pane (rich-content spec §3.3 F).
 pub fn update_endpoint(ws_endpoint: &str, auth_key: &str) {
     if let Some(h) = HANDLE.get() {
+        h.presenter.clear_all();
         let _ = h.endpoint.send(Some(Endpoint { ws: ws_endpoint.to_string(), auth_key: auth_key.to_string() }));
     }
 }
@@ -209,8 +222,53 @@ pub enum Frame {
     Show(Notification),
     Retract(String),
     State(crate::tray::notify_menu::NotifyTrayState),
-    Response { reqid: String, has_window: Option<bool> },
+    Response { reqid: String, ack: AckResponse },
     Other,
+}
+
+/// srv's `notify.ack` answer (`NotifyAckResult`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct AckResponse {
+    #[serde(default)]
+    pub has_window: Option<bool>,
+    #[serde(default)]
+    pub window_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+}
+
+/// What a click makes the launcher do (rich-content spec §3.3 C, D, F).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClickPlan {
+    /// Raise this open window (backend window id); its frontend selects the
+    /// pane from `notification:activate`.
+    Raise(String),
+    /// The pane's workspace is open in no window: open one on it.
+    OpenWorkspace(String),
+    /// No window at all (background mode, or the pane is gone): open one.
+    OpenWindow,
+    Nothing,
+}
+
+/// Pure: srv decided the target; this only maps its answer to an action.
+pub fn click_plan(ack: &AckResponse) -> ClickPlan {
+    if let Some(w) = ack.window_id.as_ref().filter(|w| !w.is_empty()) {
+        return ClickPlan::Raise(w.clone());
+    }
+    if let Some(ws) = ack.workspace_id.as_ref().filter(|w| !w.is_empty()) {
+        return ClickPlan::OpenWorkspace(ws.clone());
+    }
+    if ack.has_window == Some(false) {
+        return ClickPlan::OpenWindow;
+    }
+    ClickPlan::Nothing
+}
+
+/// The host window showing backend window `window_id`: `(label, hwnd, iconic)`.
+pub fn window_for(state: &crate::state::State, window_id: &str) -> Option<(String, Option<u64>, bool)> {
+    let label = state.backend_window_ids.iter().find(|(_, w)| w.as_str() == window_id).map(|(l, _)| l.clone())?;
+    let mirror = state.windows.get(&label);
+    Some((label, mirror.and_then(|m| m.hwnd), mirror.is_some_and(|m| m.iconic)))
 }
 
 /// Parse one srv WS text frame. Events arrive as
@@ -224,7 +282,7 @@ pub fn parse_frame(text: &str) -> Frame {
     if let Some(resid) = data.get("resid").and_then(|r| r.as_str()) {
         return Frame::Response {
             reqid: resid.to_string(),
-            has_window: data.get("data").and_then(|d| d.get("has_window")).and_then(|b| b.as_bool()),
+            ack: data.get("data").and_then(|d| serde_json::from_value(d.clone()).ok()).unwrap_or_default(),
         };
     }
     if data.get("command").and_then(|c| c.as_str()) != Some("eventrecv") {
@@ -266,6 +324,7 @@ async fn run(
     presenter: Arc<dyn Presenter>,
     data_dir: std::path::PathBuf,
     dir_hash: String,
+    state: LauncherState,
 ) {
     let mut backoff_ms = 500u64;
     loop {
@@ -276,7 +335,7 @@ async fn run(
             }
             continue;
         };
-        match session(&ep, &mut ep_rx, &mut act_rx, &presenter, &data_dir, &dir_hash).await {
+        match session(&ep, &mut ep_rx, &mut act_rx, &presenter, &data_dir, &dir_hash, &state).await {
             SessionEnd::EndpointChanged => {
                 backoff_ms = 500;
                 continue;
@@ -305,6 +364,7 @@ async fn session(
     presenter: &Arc<dyn Presenter>,
     data_dir: &std::path::Path,
     dir_hash: &str,
+    state: &LauncherState,
 ) -> SessionEnd {
     let uri: tokio_tungstenite::tungstenite::http::Uri = match ws_url(&ep.ws).parse() {
         Ok(u) => u,
@@ -370,21 +430,16 @@ async fn session(
                     Frame::Show(n) => presenter.show(&n),
                     Frame::Retract(tag) => presenter.retract(&tag),
                     Frame::State(state) => crate::tray::notify_menu::set(state),
-                    Frame::Response { reqid, has_window } => {
-                        if pending_clicks.remove(&reqid) && has_window == Some(false) {
-                            // Clicked with no window open (background mode):
-                            // open one; its frontend picks the target up via
-                            // notify.takeactivation.
+                    Frame::Response { reqid, ack } => {
+                        if pending_clicks.remove(&reqid) {
+                            let plan = click_plan(&ack);
+                            crate::logging::log(&format!("notify: click → {plan:?}"));
+                            let window = match &plan {
+                                ClickPlan::Raise(w) => window_for(&*state.lock().await, w),
+                                _ => None,
+                            };
                             let (dd, dh) = (data_dir.to_path_buf(), dir_hash.to_string());
-                            tokio::task::spawn_blocking(move || {
-                                use crate::second_instance::ForwardError;
-                                match crate::second_instance::forward_open_new_window(&dd, &dh) {
-                                    Ok(()) => {}
-                                    Err(ForwardError::Transient(r)) | Err(ForwardError::Fatal(r)) => {
-                                        crate::logging::log(&format!("notify: open_new_window for click failed: {r}"))
-                                    }
-                                }
-                            });
+                            tokio::task::spawn_blocking(move || carry_out_click(plan, window, &dd, &dh));
                         }
                     }
                     Frame::Other => {}
@@ -394,9 +449,114 @@ async fn session(
     }
 }
 
+/// Raise first, in this process: the toast click made the launcher the
+/// foreground-eligible process, and that right is what a raise needs —
+/// waiting for the pane selection to go srv → renderer → host first can
+/// lose it (rich-content spec §3.3 C, F4). Every branch logs.
+fn carry_out_click(
+    plan: ClickPlan,
+    window: Option<(String, Option<u64>, bool)>,
+    data_dir: &std::path::Path,
+    dir_hash: &str,
+) {
+    use crate::second_instance::{forward_host_cmd_with_args, forward_open_new_window, ForwardError};
+    let log_err = |what: &str, r: Result<(), ForwardError>| {
+        if let Err(ForwardError::Transient(e) | ForwardError::Fatal(e)) = r {
+            crate::logging::log(&format!("notify: {what} for click failed: {e}"));
+        }
+    };
+    match plan {
+        ClickPlan::Raise(window_id) => {
+            let Some((label, hwnd, iconic)) = window else {
+                // The window reported itself to srv but the launcher hasn't
+                // mapped it (yet): let the host raise it by its frontend's own
+                // request instead — the frontend calls focus_window itself.
+                crate::logging::log(&format!("notify: click window {window_id} not in the launcher's mirror"));
+                return;
+            };
+            if hwnd.is_some_and(|h| raise_hwnd(h, iconic)) {
+                return;
+            }
+            crate::logging::log(&format!("notify: raising {label} directly failed; asking the host"));
+            log_err("focus_window", forward_host_cmd_with_args(data_dir, dir_hash, "focus_window", serde_json::json!({ "label": label })));
+            if let Some(h) = hwnd {
+                flash_hwnd(h);
+            }
+        }
+        ClickPlan::OpenWorkspace(workspace_id) => log_err(
+            "open_new_window {workspace_id}",
+            forward_host_cmd_with_args(data_dir, dir_hash, "open_new_window", serde_json::json!({ "workspace_id": workspace_id })),
+        ),
+        ClickPlan::OpenWindow => log_err("open_new_window", forward_open_new_window(data_dir, dir_hash)),
+        ClickPlan::Nothing => {}
+    }
+}
+
+/// Restore if minimized, then bring to the foreground. False when Windows
+/// refused the foreground change.
+#[cfg(target_os = "windows")]
+fn raise_hwnd(hwnd: u64, iconic: bool) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE};
+    let h = hwnd as usize as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        if iconic || IsIconic(h) != 0 {
+            ShowWindow(h, SW_RESTORE);
+        }
+        SetForegroundWindow(h) != 0
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn raise_hwnd(_hwnd: u64, _iconic: bool) -> bool {
+    false
+}
+
+/// Windows' own fallback when the foreground change is refused: flash the
+/// taskbar button so the user at least sees where to go.
+#[cfg(target_os = "windows")]
+fn flash_hwnd(hwnd: u64) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FlashWindowEx, FLASHWINFO, FLASHW_ALL, FLASHW_TIMERNOFG};
+    let info = FLASHWINFO {
+        cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+        hwnd: hwnd as usize as windows_sys::Win32::Foundation::HWND,
+        dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+        uCount: 3,
+        dwTimeout: 0,
+    };
+    unsafe {
+        FlashWindowEx(&info);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn flash_hwnd(_hwnd: u64) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn click_plan_follows_srvs_answer() {
+        let ack = |window: Option<&str>, ws: Option<&str>, has: Option<bool>| AckResponse {
+            has_window: has,
+            window_id: window.map(Into::into),
+            workspace_id: ws.map(Into::into),
+        };
+        assert_eq!(click_plan(&ack(Some("w1"), None, Some(true))), ClickPlan::Raise("w1".into()));
+        assert_eq!(click_plan(&ack(None, Some("ws1"), Some(false))), ClickPlan::OpenWorkspace("ws1".into()));
+        assert_eq!(click_plan(&ack(None, None, Some(false))), ClickPlan::OpenWindow);
+        // An older srv: only has_window.
+        assert_eq!(click_plan(&ack(None, None, Some(true))), ClickPlan::Nothing);
+        assert_eq!(click_plan(&ack(Some(""), Some(""), None)), ClickPlan::Nothing);
+    }
+
+    #[test]
+    fn window_for_maps_backend_id_to_label_hwnd_and_minimized() {
+        let mut s = crate::state::State::default();
+        s.backend_window_ids.insert("main".into(), "wid-1".into());
+        assert_eq!(window_for(&s, "wid-1"), Some(("main".into(), None, false)), "label known before its HWND");
+        assert_eq!(window_for(&s, "wid-2"), None);
+    }
 
     #[test]
     fn ws_url_forms() {
@@ -425,7 +585,18 @@ mod tests {
         let r = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification:retract","data":{"id":"n1","tag":"t1"}}}}"#;
         assert_eq!(parse_frame(r), Frame::Retract("t1".into()));
         let resp = r#"{"eventtype":"rpc","data":{"resid":"q1","data":{"has_window":false}}}"#;
-        assert_eq!(parse_frame(resp), Frame::Response { reqid: "q1".into(), has_window: Some(false) });
+        assert_eq!(
+            parse_frame(resp),
+            Frame::Response { reqid: "q1".into(), ack: AckResponse { has_window: Some(false), ..Default::default() } }
+        );
+        let resp = r#"{"eventtype":"rpc","data":{"resid":"q2","data":{"has_window":true,"known":true,"window_id":"w1"}}}"#;
+        assert_eq!(
+            parse_frame(resp),
+            Frame::Response {
+                reqid: "q2".into(),
+                ack: AckResponse { has_window: Some(true), window_id: Some("w1".into()), workspace_id: None }
+            }
+        );
         let st = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification:state","data":{"attention":[{"id":"n1","block_id":"b1","title":"lark needs your input"}],"paused_until_ms":5}}}}"#;
         match parse_frame(st) {
             Frame::State(s) => {
@@ -494,7 +665,8 @@ mod tests {
         let (_ep_tx, ep_rx) = watch::channel(Some(Endpoint { ws: addr.to_string(), auth_key: "k1".into() }));
         let (act_tx, act_rx) = mpsc::unbounded_channel();
         let dir = std::env::temp_dir();
-        tokio::spawn(run(ep_rx, act_rx, presenter, dir, "h".into()));
+        let state: LauncherState = Default::default();
+        tokio::spawn(run(ep_rx, act_rx, presenter, dir, "h".into(), state));
 
         let sub1 = got_rx.recv().await.unwrap();
         let sub2 = got_rx.recv().await.unwrap();

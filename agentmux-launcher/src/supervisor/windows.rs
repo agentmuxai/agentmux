@@ -391,7 +391,7 @@ pub(crate) async fn run_windows(
             ipc::server::ServerCtx {
                 launcher_pid: std::process::id(),
                 launcher_version: env!("CARGO_PKG_VERSION").to_string(),
-                state,
+                state: std::sync::Arc::clone(&state),
                 events_tx,
                 event_log,
                 host_pipe: std::sync::Arc::clone(&host_pipe),
@@ -451,6 +451,7 @@ pub(crate) async fn run_windows(
         &srv_result.auth_key,
         paths.data_dir.clone(),
         dir_hash.clone(),
+        state.clone(),
     );
 
     // CRITICAL: tokio::process::Child::wait() proactively drops

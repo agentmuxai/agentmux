@@ -230,6 +230,23 @@ sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p
     )
 }
 
+/// An srv object id (a UUID): ASCII letters, digits and `-`, 1–64 chars.
+fn is_object_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+#[cfg(test)]
+mod object_id_tests {
+    #[test]
+    fn only_id_characters_pass() {
+        assert!(super::is_object_id("6f1c1a2e-8b1d-4c3e-9f00-1234567890ab"));
+        assert!(!super::is_object_id(""));
+        assert!(!super::is_object_id("ws&ipc_token=x"));
+        assert!(!super::is_object_id("../x"));
+        assert!(!super::is_object_id(&"a".repeat(65)));
+    }
+}
+
 /// Open a new full AgentMux instance (status-bar version click, Ctrl+Shift+N,
 /// second `agentmux.exe` launch). Independent top-level window, own taskbar
 /// entry, independent lifecycle. See
@@ -248,6 +265,16 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    // An existing workspace to show instead of a fresh one: a toast click
+    // whose agent pane's workspace is open in no window
+    // (SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md
+    // §3.3 D). It ends up in the new window's URL, so only an id's character
+    // set is accepted.
+    let workspace_id = match args.get("workspace_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        Some(ws) if is_object_id(ws) => Some(ws.to_string()),
+        Some(_) => return Err("open_new_window: invalid workspace_id".to_string()),
+        None => None,
+    };
     // H.7 invariant — also enforced inside open_window_with_kind (cold path).
     if state.any_browser_pane_closing() {
         tracing::warn!(
@@ -282,7 +309,14 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     #[cfg(not(target_os = "windows"))]
     let (pos_x, pos_y) = new_window_origin(win_w, win_h, None);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
-        state, pos_x, pos_y, win_w, win_h, initial_view.clone(), initial_meta.clone(),
+        state,
+        pos_x,
+        pos_y,
+        win_w,
+        win_h,
+        initial_view.clone(),
+        initial_meta.clone(),
+        workspace_id.as_deref(),
     ) {
         tracing::info!(
             target: "pool:new-window",
@@ -293,6 +327,23 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     }
 
     // Cold path — spin up a fresh CEF window (~2.5–3.5 s).
+    if let Some(ws) = workspace_id {
+        // `open_window_with_kind` has no workspace parameter (its URL makes a
+        // fresh workspace); the tear-off cold path appends `&workspaceId=` —
+        // the same choice the pool's liveness fallback makes.
+        return crate::commands::drag::open_window_at_position(
+            state,
+            &serde_json::json!({
+                "workspaceId": ws,
+                "screenX": pos_x,
+                "screenY": pos_y,
+                "tabAnchorX": pos_x,
+                "tabAnchorY": pos_y,
+                "width": win_w,
+                "height": win_h,
+            }),
+        );
+    }
     open_window_with_kind(
         state,
         crate::state::WindowKind::FullInstance,

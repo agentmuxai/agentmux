@@ -19,7 +19,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::backend::mps::{Broker, MuxEvent};
-use crate::backend::obj::Block;
+use crate::backend::obj::{Block, Tab, Window, Workspace};
 use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
 
@@ -92,6 +92,87 @@ pub fn turn_transition(prev: Option<bool>, active: bool, stopped_recently: bool)
     }
 }
 
+/// A click's target is picked up by a newly opened window only this long
+/// after the click (rich-content spec §3.3 D) — never "jumps to an old block
+/// much later".
+pub const PENDING_ACTIVATION_MAX_AGE_MS: i64 = 30_000;
+
+/// Where a toast click lands (rich-content spec §3.3 A). Resolved by srv from
+/// its own store for the notification the click acked — never taken from the
+/// toast's launch argument (§3.4).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClickTarget {
+    pub block_id: String,
+    pub tab_id: String,
+    /// `None` when the tab belongs to no workspace any more.
+    pub workspace_id: Option<String>,
+    /// Every `Window` object showing that workspace. Whether one is actually
+    /// open is the policy's call (a connected frontend reports it).
+    pub window_ids: Vec<String>,
+}
+
+/// Walk block → tab → workspace → windows. `None` when the block or its tab
+/// is gone. BLOCKING (store reads).
+pub fn resolve_click_target(store: &Store, block_id: &str) -> Option<ClickTarget> {
+    let block = store.get::<Block>(block_id).ok().flatten()?;
+    let tab_id = block.parentoref.strip_prefix("tab:")?.to_string();
+    store.get::<Tab>(&tab_id).ok().flatten()?;
+    let workspace_id = store
+        .get_all::<Workspace>()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|w| w.tabids.contains(&tab_id) || w.pinnedtabids.contains(&tab_id))
+        .map(|w| w.oid);
+    let mut window_ids: Vec<String> = match &workspace_id {
+        Some(ws) => store
+            .get_all::<Window>()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| &w.workspaceid == ws)
+            .map(|w| w.oid)
+            .collect(),
+        None => Vec::new(),
+    };
+    window_ids.sort();
+    Some(ClickTarget { block_id: block_id.to_string(), tab_id, workspace_id, window_ids })
+}
+
+/// What a click asks of the launcher (the `notify.ack` response).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AckOutcome {
+    /// The ack named a live notification. An unknown id (a toast from before
+    /// an srv restart) still raises the app (§3.3 F).
+    pub known: bool,
+    /// The window to raise, when one is open. For a pane's toast it is the
+    /// window showing the pane; otherwise the most recently focused window.
+    pub window_id: Option<String>,
+    /// For a pane whose workspace is open in no window: open a window on it.
+    pub workspace_id: Option<String>,
+    /// Kept for launchers older than `window_id`: false means "open a window".
+    pub has_window: bool,
+}
+
+/// A click that arrived while its pane's workspace was open in no window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingActivation {
+    pub block_id: String,
+    pub tab_id: String,
+    pub workspace_id: Option<String>,
+    pub at_ms: i64,
+}
+
+/// Pure: may a window showing `workspace_id` (None = an older frontend that
+/// doesn't say) take `pending` at `now_ms`?
+pub fn may_take_pending(pending: &PendingActivation, workspace_id: Option<&str>, now_ms: i64) -> bool {
+    if now_ms - pending.at_ms > PENDING_ACTIVATION_MAX_AGE_MS {
+        return false;
+    }
+    match (pending.workspace_id.as_deref(), workspace_id) {
+        (Some(want), Some(have)) => want == have,
+        _ => true,
+    }
+}
+
 const AGENT_NAME_MAX: usize = 32;
 const BODY_MAX: usize = 80;
 /// Rich-content spec §1.2: the summary line's cap, before the `…`.
@@ -102,8 +183,9 @@ pub struct Router {
     broker: Arc<Broker>,
     config: Arc<ConfigState>,
     store: Arc<Store>,
-    /// Block to activate once a window connects (click while no window open).
-    pending_activation: Mutex<Option<String>>,
+    /// A click whose pane's workspace was open in no window: taken by the
+    /// window the launcher opens on that workspace.
+    pending_activation: Mutex<Option<PendingActivation>>,
     internal: tokio::sync::mpsc::UnboundedSender<Internal>,
     last_tray: Mutex<Option<TrayState>>,
     /// block_id → last `turn_active` seen in `controllerstatus`.
@@ -314,7 +396,9 @@ fn spawn_ticker(r: std::sync::Weak<Router>) {
         loop {
             iv.tick().await;
             match r.upgrade() {
-                Some(r) => r.step(Input::Tick),
+                Some(r) => {
+                    r.step(Input::Tick);
+                }
                 None => return,
             }
         }
@@ -503,7 +587,9 @@ impl Router {
         (sanitize_name(&raw_name), sanitize_summary(&meta("term:ambient_summary")))
     }
 
-    fn step(&self, input: Input) {
+    /// Run the policy and publish what it decided. `Activate` is returned,
+    /// not published: only `ack` produces it, and it needs a store lookup.
+    fn step(&self, input: Input) -> Vec<Action> {
         let settings = self.settings();
         let now = now_ms();
         let (actions, tray) = {
@@ -511,10 +597,11 @@ impl Router {
             let actions = p.step(input, now, &settings);
             (actions, p.tray_state(&settings, now))
         };
-        for a in actions {
+        for a in &actions {
             self.publish(a);
         }
         self.publish_tray_if_changed(tray);
+        actions
     }
 
     fn publish_tray_if_changed(&self, tray: TrayState) {
@@ -534,20 +621,17 @@ impl Router {
         });
     }
 
-    fn publish(&self, action: Action) {
+    fn publish(&self, action: &Action) {
         let (event, data) = match action {
-            Action::Show(n) => (EVENT_NOTIFICATION, serde_json::to_value(&n).ok()),
+            Action::Show(n) => (EVENT_NOTIFICATION, serde_json::to_value(n).ok()),
             Action::Retract { id, tag } => (EVENT_NOTIFICATION_RETRACT, Some(serde_json::json!({ "id": id, "tag": tag }))),
-            Action::Activate { id, block_id } => {
-                if !self.has_window() {
-                    *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) = Some(block_id.clone());
-                }
-                (
-                    EVENT_NOTIFICATION_ACTIVATE,
-                    Some(serde_json::json!({ "id": id, "block_id": block_id, "at_ms": now_ms() })),
-                )
-            }
+            // Resolved and published by `ack`.
+            Action::Activate { .. } => return,
         };
+        self.publish_event(event, data);
+    }
+
+    fn publish_event(&self, event: &str, data: Option<serde_json::Value>) {
         tracing::info!(event, "notify: publish");
         self.broker.publish(MuxEvent {
             event: event.to_string(),
@@ -637,20 +721,84 @@ impl Router {
         self.step(Input::Disconnect { conn_id: conn_id.to_string() });
     }
 
-    /// Presenter feedback. Returns whether a window is connected so a
-    /// click-while-no-window caller knows to open one.
-    pub fn ack(&self, id: &str, clicked: bool) -> bool {
-        self.step(Input::Ack { id: id.to_string(), clicked });
-        self.has_window()
+    /// Presenter feedback (rich-content spec §3.3 A–D, F). For a click on a
+    /// pane's toast: find the open window showing the pane and tell only it
+    /// to select the pane (`notification:activate` names the window); if the
+    /// pane's workspace is open nowhere, park the click for the window the
+    /// launcher will open on it. The outcome tells the launcher what to raise
+    /// or open — every click ends with something in front.
+    ///
+    /// BLOCKING (store reads) — call from `spawn_blocking`.
+    pub fn ack(&self, id: &str, clicked: bool) -> AckOutcome {
+        let actions = self.step(Input::Ack { id: id.to_string(), clicked });
+        // A live notification always retracts on ack; an unknown id yields nothing.
+        let known = !actions.is_empty();
+        let activated = actions.into_iter().find_map(|a| match a {
+            Action::Activate { id, block_id } => Some((id, block_id)),
+            _ => None,
+        });
+        let target = activated.as_ref().and_then(|(_, block_id)| resolve_click_target(&self.store, block_id));
+        let (open_window, raise, any_window) = {
+            let p = self.policy.lock().unwrap_or_else(|e| e.into_inner());
+            let raise = p.raise_window();
+            let open: Vec<&String> = target.iter().flat_map(|t| t.window_ids.iter()).filter(|w| p.window_open(w)).collect();
+            // Two windows on one workspace: prefer the one the user was last in.
+            let pick = open.iter().find(|w| Some(w.as_str()) == raise.as_deref()).or(open.first()).map(|w| (*w).clone());
+            (pick, raise, p.has_window())
+        };
+        let mut outcome = AckOutcome { known, window_id: None, workspace_id: None, has_window: any_window };
+        match (activated, target) {
+            (Some((id, _)), Some(t)) => {
+                if let Some(window_id) = open_window {
+                    self.publish_event(
+                        EVENT_NOTIFICATION_ACTIVATE,
+                        Some(serde_json::json!({
+                            "id": id,
+                            "block_id": t.block_id,
+                            "tab_id": t.tab_id,
+                            "window_id": window_id,
+                            "workspace_id": t.workspace_id,
+                            "at_ms": now_ms(),
+                        })),
+                    );
+                    outcome.window_id = Some(window_id);
+                    outcome.has_window = true;
+                } else {
+                    tracing::info!(workspace = ?t.workspace_id, "notify: click target's workspace is open in no window");
+                    outcome.workspace_id = t.workspace_id.clone();
+                    outcome.has_window = false;
+                    *self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()) = Some(PendingActivation {
+                        block_id: t.block_id,
+                        tab_id: t.tab_id,
+                        workspace_id: t.workspace_id,
+                        at_ms: now_ms(),
+                    });
+                }
+            }
+            (Some((_, block_id)), None) => {
+                tracing::info!(block_id, "notify: click target is gone; raising the app");
+                outcome.window_id = raise;
+            }
+            // A summary toast, or an id this srv never issued: raise the app.
+            (None, _) if clicked => outcome.window_id = raise,
+            (None, _) => {}
+        }
+        outcome
     }
 
-    pub fn has_window(&self) -> bool {
-        self.policy.lock().unwrap_or_else(|e| e.into_inner()).has_window()
-    }
-
-    /// One-shot: the block a click asked for before any window existed.
-    pub fn take_pending_activation(&self) -> Option<String> {
-        self.pending_activation.lock().unwrap_or_else(|e| e.into_inner()).take()
+    /// One-shot: the pane a click asked for while its workspace was open in
+    /// no window. Only a window on that workspace takes it (`workspace_id`
+    /// None = an older frontend, which takes any), and only for 30 s.
+    pub fn take_pending_activation(&self, workspace_id: Option<&str>) -> Option<PendingActivation> {
+        let mut slot = self.pending_activation.lock().unwrap_or_else(|e| e.into_inner());
+        let now = now_ms();
+        if slot.as_ref().is_some_and(|p| now - p.at_ms > PENDING_ACTIVATION_MAX_AGE_MS) {
+            *slot = None;
+        }
+        if slot.as_ref().is_some_and(|p| may_take_pending(p, workspace_id, now)) {
+            return slot.take();
+        }
+        None
     }
 }
 
@@ -741,6 +889,32 @@ mod tests {
         assert_eq!(failure_body("killed"), Some("Was stopped by the system (possibly out of memory)."));
         assert_eq!(failure_body("agent_deleted"), None);
         assert_eq!(failure_body("<script>"), None);
+    }
+
+    #[test]
+    fn pending_activation_is_scoped_to_its_workspace_and_expires() {
+        let p = PendingActivation { block_id: "b".into(), tab_id: "t".into(), workspace_id: Some("ws1".into()), at_ms: 1_000 };
+        assert!(may_take_pending(&p, Some("ws1"), 2_000));
+        assert!(!may_take_pending(&p, Some("ws2"), 2_000), "another workspace's window must not steal it");
+        assert!(may_take_pending(&p, None, 2_000), "an older frontend doesn't say");
+        assert!(may_take_pending(&p, Some("ws1"), 1_000 + PENDING_ACTIVATION_MAX_AGE_MS));
+        assert!(!may_take_pending(&p, Some("ws1"), 1_001 + PENDING_ACTIVATION_MAX_AGE_MS), "30 s, then gone");
+        let orphan = PendingActivation { workspace_id: None, ..p };
+        assert!(may_take_pending(&orphan, Some("ws2"), 2_000));
+    }
+
+    #[test]
+    fn click_target_walks_block_to_tab_workspace_and_windows() {
+        let store = Store::open_in_memory().unwrap();
+        crate::backend::wcore::ensure_initial_data(&store).unwrap();
+        let block = store.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let t = resolve_click_target(&store, &block.oid).expect("resolves");
+        let ws = store.get_all::<Workspace>().unwrap().into_iter().next().unwrap();
+        let win = store.get_all::<Window>().unwrap().into_iter().next().unwrap();
+        assert_eq!(t.workspace_id.as_deref(), Some(ws.oid.as_str()));
+        assert!(ws.tabids.contains(&t.tab_id) || ws.pinnedtabids.contains(&t.tab_id));
+        assert_eq!(t.window_ids, vec![win.oid]);
+        assert_eq!(resolve_click_target(&store, "gone"), None);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-25
 **Author:** Lark
-**Status:** active — §5 item 1 (srv payload + title) in PR #3732; item 2 (presenters) in PR #3733; item 3 (click → pane) not started. Deviation from §1.2: the Router's agent-name cache is removed rather than kept — the summary needs a block read on every emit anyway, and that one read also yields the name.
+**Status:** implemented — §5 item 1 (srv payload + title) in PR #3732, item 2 (presenters) in PR #3733, item 3 (click → pane) in PR #3735. The §6 manual on-screen matrix has not been run yet. Deviations and findings are in §8.
 **Builds on:** [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md). That spec shipped in #3640, #3645, #3650, #3653, #3654, #3662, #3668 and #3705; its §11.5 has the current state.
 **Verified against:** `main` @ `730e74549` by direct code reading. Not prototyped.
 
@@ -230,3 +230,11 @@ The existing `notify:os:inputwaiting` row is relabelled "Agent has a question". 
 
 1. **Attribution slot vs. third text line for the summary.** This spec picks attribution (the small grey "sub-section" look) and moves it to a third line only for kinds that need provenance. Confirm that's the look you want.
 2. ~~Background-mode summaries~~ **Decided 2026-09-25: no, keep it simple.** Pane-generated summary only; background agents will be designed separately later (see §1.1).
+
+## 8. As built (2026-09-25)
+
+- **§1.2 name cache removed, not kept.** The summary can't be cached and needs a block read on every emit; that same read returns the name, so the cache saved nothing (#3732).
+- **"Open" is a connected frontend, not a `Window` row.** `notify.focus` carries the window's own `Window` oid. Rows can outlive their window after a crash, and a row appears before the host registers the window, so srv treats a window as open only while a frontend reports it (#3735).
+- **F2 (background mode) has no pane to reopen.** Closing a workspace's last window deletes the workspace and its tabs and blocks (`window_close.rs` → `delete_workspace`). A click in background mode therefore finds no target and opens a plain window, as before, instead of doing nothing. §3.3 D's "reopen the block's own workspace" applies to a workspace that still exists but is shown in no window, e.g. after a window switched workspace.
+- **§3.3 D's "re-home the block into a new tab" is not built.** No block outlives its workspace (previous bullet), so there is nothing to re-home.
+- **Launcher raise order:** `ShowWindow(SW_RESTORE)` if minimized → `SetForegroundWindow` → host `focus_window` → `FlashWindowEx`. The frontend's `raiseThisWindow` stays as a harmless second attempt.
