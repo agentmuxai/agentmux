@@ -2,10 +2,11 @@
 
 **Date:** 2026-09-24
 **Status:** active — the pure primitives (identifiers, certificate,
-revocation, envelope and freshness checks; §2.7) ship in PR #3727; C1
-(agentmux-cloud#91) and D1a (`wan.db`, instance key, agent keys, purge; PR
-#3734) are in review; D1b (certify, publish, carry gate) and D2 (verifier,
-marker, tier rules) are not started. Verified 2026-09-24. Measured against `agentmux`
+revocation, envelope and freshness checks; §2.7) shipped in PR #3727; C1
+shipped in agentmux-cloud#91 (merged, not yet deployed); D1a (`wan.db`,
+instance key, agent keys, purge) ships in PR #3734; D1b (certify, publish,
+carry gate) and D2 (verifier, marker, tier rules) are not started. Verified
+2026-09-25. Measured against `agentmux`
 `main` @ `d01833859` and `agentmux-cloud` `main` (server `1.8.3`, GitHub
 consumer `1.4.12`), both read on 2026-09-24.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
