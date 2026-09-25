@@ -61,7 +61,12 @@ use super::AppState;
 /// The project folder is named by the CLI's own rule
 /// ([`crate::backend::claude_layout::project_dir_name`]).
 fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
-    let folder_name = crate::backend::claude_layout::project_dir_name(working_directory);
+    // Claude names the project folder from the absolute cwd, so `~` must be
+    // expanded first — a spawn segment records the block's `cmd:cwd`
+    // unexpanded (`~/.agentmux/agents/<slug>` for an agent.open default),
+    // and `--agentmux-agents-…` is a folder Claude never writes (#3603).
+    let working_directory = expand_home_dir_safe(working_directory);
+    let folder_name = crate::backend::claude_layout::project_dir_name(&working_directory.to_string_lossy());
 
     let base = if claude_config_dir.is_empty() {
         expand_home_dir_safe("~/.agentmux/shared/providers/claude")
@@ -3230,5 +3235,21 @@ mod tests {
         let targets = list_memory_targets_with(&mstore, None);
         let ids: Vec<&str> = targets.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, ["agent-solo"], "{targets:?}");
+    }
+
+    #[test]
+    fn a_spawn_recorded_with_an_unexpanded_home_names_claudes_real_folder() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("agent-tilde", "");
+        mstore.agent_def_insert(&mut def).unwrap();
+        let fs = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+        crate::backend::continuity_segments::record_start(&fs, segment_start("agent-tilde", Some("/cfg"), "~/.agentmux/agents/tilde", 1_000)).unwrap();
+
+        let r = resolve_memory_dir_with(&mstore, &def, Some(&fs)).unwrap();
+        let expanded = expand_home_dir_safe("~/.agentmux/agents/tilde");
+        let folder = crate::backend::claude_layout::project_dir_name(&expanded.to_string_lossy());
+        assert_eq!(r.path, std::path::PathBuf::from("/cfg").join("projects").join(&folder).join("memory"));
+        assert!(!folder.starts_with("--"), "the home dir is part of the folder name: {folder}");
     }
 }

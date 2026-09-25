@@ -1128,7 +1128,12 @@ impl<'a> SelfOwner<'a> {
     /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
     fn dir_for_write(self, mstore: &crate::backend::storage::store::Store) -> Result<std::path::PathBuf, String> {
         let id = self.owner_id(mstore).map_err(|e| format!("memory: {e}"))?;
-        let agent = Self::caller_row(&id, mstore).map_err(|e| format!("memory: {e}"))?;
+        let agent = mstore
+            .agent_def_get(&id)
+            .map_err(|e| format!("memory: store: {e}"))?
+            .ok_or_else(|| {
+                format!("memory: agent {} has no local row, so its memory directory can't be verified for a write", self.label())
+            })?;
         crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
             .map_err(|e| format!("memory: {e}"))
     }

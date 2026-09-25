@@ -66,9 +66,17 @@ pub(super) async fn bundle_import_for_agent_impl(
     // mirror's row count. A missing/unresolvable working directory is not
     // an error here (nothing to refresh from); the emptiness check below
     // still runs against whatever the mirror already has.
-    let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent_by_id(mstore, &agent);
+    // Only a verified directory is refreshed from: an unverified guess can be
+    // another agent's folder, and refreshing from it would write that
+    // agent's files into this one's mirror (SPEC_MEMORY_FOLLOWS_THE_AGENT
+    // §2.1.2).
+    let resolved = crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, &agent);
+    let verified = resolved.as_ref().is_some_and(|r| {
+        r.provenance != crate::server::native_memory_handlers::MemoryDirProvenance::Unverified
+    });
+    let memory_dir = resolved.map(|r| r.path);
     let mut warnings: Vec<String> = Vec::new();
-    if let Some(dir) = &memory_dir {
+    if let Some(dir) = memory_dir.as_ref().filter(|_| verified) {
         if let Err(e) = crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(&agent.id, dir, id_store) {
             warnings.push(format!("native memory refresh failed (checking mirror as-is): {e}"));
         }
