@@ -12,7 +12,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emitActivityFlash } from "@/app/notification/activity-flash";
-import { dropPositionForPointerX, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
+import { dropPositionForPointerX, foreignDropHighlightFor, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
 
 afterEach(() => cleanup());
 
@@ -475,6 +475,33 @@ describe("foreignDropRootFor", () => {
         expect(foreignDropRootFor(strip)).toBe(strip);
     });
 
+    // Repo owner, 2026-09-24: a tab dropped on another pane's BODY does the
+    // same as dropping it on the header (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.3).
+    const inPane = (inner: HTMLElement) => {
+        const pane = document.createElement("div");
+        pane.setAttribute("data-role", "pane");
+        pane.appendChild(inner);
+        return pane;
+    };
+
+    it("resolves to the whole pane — header AND body — when the header is inside a pane root", () => {
+        const strip = document.createElement("div");
+        const header = withHeader(strip);
+        const pane = inPane(header);
+        pane.appendChild(document.createElement("div")); // the body
+        expect(foreignDropRootFor(strip)).toBe(pane);
+    });
+
+    it("never widens a strip that lives in a pane's CONTENT to the pane around it", () => {
+        // Editor file tabs / the agent History strip: inside a pane, not in
+        // its header. Their drop zone must stay the strip itself.
+        const strip = document.createElement("div");
+        const body = document.createElement("div");
+        body.appendChild(strip);
+        inPane(withHeader(document.createElement("div"))).appendChild(body);
+        expect(foreignDropRootFor(strip)).toBe(strip);
+    });
+
     it("resolves to the NEAREST header when panes are nested in the DOM", () => {
         // Sibling panes aren't nested, but a pane's content can host a
         // surface that has its own header-like chrome; nearest-wins is the
@@ -485,6 +512,25 @@ describe("foreignDropRootFor", () => {
         const outer = withHeader(inner);
         expect(foreignDropRootFor(strip)).toBe(inner);
         expect(foreignDropRootFor(strip)).not.toBe(outer);
+    });
+});
+
+describe("foreignDropHighlightFor", () => {
+    it("flashes the header row even though the drop zone is the whole pane", () => {
+        const strip = document.createElement("div");
+        const header = document.createElement("div");
+        header.setAttribute("data-role", "block-header");
+        header.appendChild(strip);
+        const pane = document.createElement("div");
+        pane.setAttribute("data-role", "pane");
+        pane.appendChild(header);
+        expect(foreignDropHighlightFor(strip)).toBe(header);
+        expect(foreignDropRootFor(strip)).toBe(pane);
+    });
+
+    it("falls back to the strip box outside a header", () => {
+        const strip = document.createElement("div");
+        expect(foreignDropHighlightFor(strip)).toBe(strip);
     });
 });
 

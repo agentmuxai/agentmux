@@ -89,6 +89,40 @@ describe("PaneTabStrip — cross-pane drop target (§3.4)", () => {
         expect(config.element).not.toBe(strip);
     });
 
+    // Repo owner, 2026-09-24: dropping on another pane's BODY does the same as
+    // dropping on its header (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.3).
+    it("inside a pane root: registers on the WHOLE pane, but flashes the header", async () => {
+        const { container } = render(() => (
+            <div data-role="pane">
+                <div data-role="block-header">
+                    <div class="block-frame-default-header-tabstrip">
+                        <PaneTabStrip
+                            tabs={TABS}
+                            activeId="a"
+                            getId={(t: T) => t.id}
+                            getLabel={(t: T) => t.label}
+                            onActivate={vi.fn()}
+                            paneKey="pane-self"
+                            onReceiveForeignTab={vi.fn()}
+                        />
+                    </div>
+                </div>
+                <div class="pane-body" />
+            </div>
+        ));
+        const pane = container.querySelector<HTMLElement>('[data-role="pane"]')!;
+        const header = container.querySelector<HTMLElement>('[data-role="block-header"]')!;
+        expect(dropTargetCalls).toHaveLength(1);
+        expect(dropTargetCalls[0].element).toBe(pane);
+        dropTargetCalls[0].onDragEnter();
+        await Promise.resolve();
+        expect(header.classList.contains("pane-header--foreign-hover")).toBe(true);
+        expect(pane.classList.contains("pane-header--foreign-hover")).toBe(false);
+        dropTargetCalls[0].onDragLeave();
+        await Promise.resolve();
+        expect(header.classList.contains("pane-header--foreign-hover")).toBe(false);
+    });
+
     it("registers nothing without onReceiveForeignTab — every existing consumer is untouched", () => {
         render(() => (
             <div data-role="block-header">

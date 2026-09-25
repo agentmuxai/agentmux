@@ -106,20 +106,28 @@ export function dropPositionForPointerX(rect: Pick<DOMRect, "left" | "width">, c
  *  outside-in lookup, while the class name is styling. */
 const PANE_HEADER_SELECTOR = '[data-role="block-header"]';
 
+/** Selector for a whole Pane — PaneChrome's root (`.pane-stack`), header
+ *  and body together. Matched by `data-role` for the same reason as the
+ *  header selector above: it's the stable contract, the class is styling. */
+const PANE_SELECTOR = '[data-role="pane"]';
+
 /**
- * Which element is the cross-pane drop zone for a strip — the whole Pane
- * header row when this strip is hosted in one (the normal case, via
- * PaneHeaderTabStrip), else the strip box itself.
+ * Which element is the cross-pane drop zone for a strip: the WHOLE Pane
+ * (PaneChrome's root, header and body together) when the strip is that
+ * pane's header strip, else the header row (a header outside PaneChrome),
+ * else the strip box itself (a strip that isn't in a header at all).
  *
- * The drop zone is deliberately the ENTIRE header, not just the pills: a
- * pane with one short tab leaves most of its header as empty space, and
- * aiming at a ~100px strip to move a tab there is fussy — the whole row
- * reads as "this pane's tab area" to a user mid-drag. Widening it costs
- * nothing, because every drop target inside the header either accepts the
- * drag itself (the per-pill same-pane reorder targets) or declines and lets
- * it bubble here (pragmatic-dnd walks up the DOM on a false `canDrop`), and
- * the header's other chrome — ConnectionButton, EndIcons, the reserved §3.6
- * drag-handle spacer — registers no element drop target at all.
+ * Dropping a Pane Tab anywhere on another pane, header or body, does the same
+ * thing: the tab joins that pane (repo owner, 2026-09-24,
+ * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.3). It was the header row alone
+ * before, and before that just the pills: aiming at a thin strip to move a tab
+ * there is fussy, and the whole pane is what reads as "into this pane" mid-drag.
+ * Widening it is free: every drop target inside the pane either accepts the
+ * drag itself (the per-pill same-pane reorder targets) or declines and lets it
+ * bubble here (pragmatic-dnd walks up the DOM on a false `canDrop`). Nothing
+ * else inside a pane registers an element drop target, and the tile overlay
+ * that sits above pane bodies only takes pointer events during a whole-PANE
+ * drag (`layoutModel.activeDrag`), never during a pane-TAB drag.
  *
  * Pure and exported for the same reason as `dropPositionForPointerX` above:
  * the gesture itself can't be unit-tested (no real drag pipeline in jsdom),
@@ -127,9 +135,25 @@ const PANE_HEADER_SELECTOR = '[data-role="block-header"]';
  * silent, since pragmatic-dnd simply never fires a handler for an element
  * the pointer never reaches (cf. ReAgent's P0 on PR #3447, a cross-pane
  * move that was dead in the UI while its own unit tests passed).
- * SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4.
  */
 export function foreignDropRootFor(strip: HTMLElement): HTMLElement {
+    // Widen to the pane only from a strip that IS the pane's header strip. A
+    // strip rendered inside a pane's content (editor file tabs, the agent
+    // History strip) must never resolve to the pane around it.
+    const header = strip.closest<HTMLElement>(PANE_HEADER_SELECTOR);
+    if (!header) return strip;
+    return header.closest<HTMLElement>(PANE_SELECTOR) ?? header;
+}
+
+/**
+ * Which element shows the "valid drop target" flash while a foreign tab
+ * hovers the drop zone: the header row, wherever over the pane the pointer
+ * is. The header is where the tab will appear, and the flash is the Window
+ * Tab look, which is sized for a strip, not a whole pane body
+ * (SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3).
+ * Falls back to the strip box for a strip not hosted in a header.
+ */
+export function foreignDropHighlightFor(strip: HTMLElement): HTMLElement {
     return strip.closest<HTMLElement>(PANE_HEADER_SELECTOR) ?? strip;
 }
 
@@ -247,13 +271,13 @@ export interface PaneTabStripProps<T> {
     /** Opt in to cross-pane drop-to-append (Phase 4 of
      *  SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.4): fires with the
      *  dragged pill's `blockId` when a pill dragged from a DIFFERENT pane
-     *  (a different `sourceNodeId`) is dropped anywhere on this pane's
-     *  whole header row — including its empty space and its non-tab chrome,
-     *  not just the pills (`foreignDropRootFor` resolves that element and
-     *  documents why it's the entire row). Position within the row is
-     *  irrelevant: a foreign tab always appends. Same-pane drops onto a
-     *  specific pill are `onReorder`'s job instead.
-     *  Registers a SEPARATE `dropTargetForElements` on that row, not a
+     *  (a different `sourceNodeId`) is dropped anywhere on this pane —
+     *  header or body, empty space and non-tab chrome included
+     *  (`foreignDropRootFor` resolves that element and documents why it's
+     *  the whole pane). Where on the pane is irrelevant: a foreign tab
+     *  always appends. Same-pane drops onto a specific pill are
+     *  `onReorder`'s job instead.
+     *  Registers a SEPARATE `dropTargetForElements` on that element, not a
      *  second one on any pill — pragmatic-dnd's registry
      *  is one-registration-per-DOM-element (confirmed via its source, not
      *  assumed), so this deliberately targets a different element than the
@@ -307,19 +331,20 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         const strip = stripRef;
         if (!strip || !props.onReceiveForeignTab || !props.paneKey) return;
         const paneKey = props.paneKey;
-        // The whole header row, not just the strip — see
-        // `foreignDropRootFor`'s own doc comment for why, and why the
-        // widening is free with respect to the header's other chrome.
+        // The whole pane, header and body — see `foreignDropRootFor`'s own
+        // doc comment for why, and why the widening is free.
         const el = foreignDropRootFor(strip);
-        if (el !== strip) {
+        // The flash goes on the header either way (`foreignDropHighlightFor`).
+        const highlightEl = foreignDropHighlightFor(strip);
+        if (highlightEl !== strip) {
             setHighlightStrip(false);
-            // `el` is blockframe.tsx's element, outside this component's own
-            // JSX, so the class goes on imperatively. Removed on cleanup:
-            // the header's lifetime isn't tied to this strip's, and a stale
-            // accent outline left on a header that outlives it would be
-            // permanent.
-            createEffect(() => el.classList.toggle("pane-header--foreign-hover", foreignHover()));
-            onCleanup(() => el.classList.remove("pane-header--foreign-hover"));
+            // `highlightEl` is blockframe.tsx's element, outside this
+            // component's own JSX, so the class goes on imperatively. Removed
+            // on cleanup: the header's lifetime isn't tied to this strip's,
+            // and a stale accent outline left on a header that outlives it
+            // would be permanent.
+            createEffect(() => highlightEl.classList.toggle("pane-header--foreign-hover", foreignHover()));
+            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover"));
         }
         const cleanup = dropTargetForElements({
             element: el,
