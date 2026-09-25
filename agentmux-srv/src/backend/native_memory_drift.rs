@@ -369,7 +369,7 @@ fn spawn_fast_path(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    refresh_subscriptions(&fs_watch_pool, &mstore, &mut watched_dirs, &mut dir_to_agent);
+                    refresh_subscriptions(&fs_watch_pool, &mstore, &id_store, &mut watched_dirs, &mut dir_to_agent);
                 }
                 event = events.recv() => {
                     let event = match event {
@@ -434,6 +434,7 @@ fn spawn_fast_path(
 fn refresh_subscriptions(
     fs_watch_pool: &Arc<FsWatchPool>,
     mstore: &Store,
+    id_store: &Store,
     watched_dirs: &mut HashSet<PathBuf>,
     dir_to_agent: &mut std::collections::HashMap<PathBuf, String>,
 ) {
@@ -444,6 +445,11 @@ fn refresh_subscriptions(
         // see subscribe_dir's own doc comment).
         let canonical = memory_dir.canonicalize().unwrap_or_else(|_| memory_dir.clone());
         if watched_dirs.insert(canonical.clone()) {
+            // Record the files already here BEFORE watching, so a write
+            // landing right after the subscription is a change against them
+            // — never the first sighting that skips their own version. The
+            // slow sweep runs the same idempotent backfill.
+            backfill_first_sight_versions_for(id_store, &[(agent_id.clone(), memory_dir.clone())]);
             fs_watch_pool.subscribe_dir(&memory_dir);
             dir_to_agent.insert(canonical, agent_id);
         }
@@ -500,6 +506,40 @@ mod tests {
 
         let drifted = check_and_record_drift(&store, "agent-1", "MEMORY.md", "pre-existing", "reconciliation_sweep").unwrap();
         assert!(!drifted, "unchanged content is not an outside write");
+    }
+
+    /// The fast path records a folder's existing files before it starts
+    /// watching, so an edit right after subscribing is a change against
+    /// them, not their first sighting (ReAgent P1 on #3707).
+    #[tokio::test]
+    async fn the_fast_path_backfills_a_folder_before_watching_it() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let id_store = shared_store();
+        let mstore = Store::open_in_memory().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("agent-fp", "Agent FP", "claude", "agent", 1, "");
+        def.working_directory = "/work/fp".to_string();
+        mstore.agent_def_insert(&mut def).unwrap();
+        mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+        let dir = memory_dir_for_agent_by_id(&mstore, &def).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("MEMORY.md"), "before watching").unwrap();
+
+        let pool = FsWatchPool::new();
+        let mut watched = HashSet::new();
+        let mut dir_to_agent = std::collections::HashMap::new();
+        refresh_subscriptions(&pool, &mstore, &id_store, &mut watched, &mut dir_to_agent);
+
+        let v = id_store.agent_native_memory_version_latest(&def.id, "MEMORY.md").unwrap().unwrap();
+        assert_eq!(v.source, "agent_inferred");
+        assert_eq!(v.content, "before watching");
     }
 
     #[test]
