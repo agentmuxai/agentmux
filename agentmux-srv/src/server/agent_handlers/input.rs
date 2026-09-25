@@ -765,7 +765,8 @@ pub async fn run_agent_turn(
     {
         Some(p) if p.needs_spawn() => {
             let uid = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
-            p.check_admission(&uid, "").await
+            let name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
+            p.check_admission(&uid, &name).await
         }
         _ => Ok(()),
     };

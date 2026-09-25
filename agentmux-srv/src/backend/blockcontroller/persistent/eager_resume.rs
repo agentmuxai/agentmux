@@ -82,8 +82,9 @@ impl PersistentSubprocessController {
         // production, unlike these controllers' unit tests, always has.
         if self.lease_store.is_some() {
             let uid = crate::backend::obj::meta_get_string(block_meta, "agentId", "");
+            let name = crate::backend::obj::meta_get_string(block_meta, "agentName", "");
             let admission = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.check_admission(&uid, ""))
+                tokio::runtime::Handle::current().block_on(self.check_admission(&uid, &name))
             });
             if let Err(why) = admission {
                 tracing::warn!(
