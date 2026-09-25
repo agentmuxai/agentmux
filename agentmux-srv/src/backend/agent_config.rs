@@ -1274,13 +1274,15 @@ fn read_managed_mcp_server_names(base_path: &std::path::Path) -> Option<std::col
 fn write_managed_mcp_server_names<'a>(base_path: &std::path::Path, names: impl Iterator<Item = &'a String>) {
     let names: std::collections::BTreeSet<&String> = names.collect();
     let manifest_path = base_path.join(MANAGED_MCP_SERVERS_MANIFEST);
+    // Atomic for the same reason as the .mcp.json write itself: concurrent
+    // launches into one directory must not interleave into one manifest.
     let result = serde_json::to_string(&names)
         .map_err(std::io::Error::other)
         .and_then(|json| {
             if let Some(parent) = manifest_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(&manifest_path, json)
+            write_owner_only_atomically(&manifest_path, json.as_bytes())
         });
     if let Err(e) = result {
         tracing::warn!(
@@ -2732,12 +2734,16 @@ mod mcp_json_tests {
         let raw = std::fs::read_to_string(base.join(".mcp.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).expect("published .mcp.json must be valid JSON");
         assert!(v["mcpServers"]["agentmux"].is_object());
-        let leftovers = std::fs::read_dir(&base)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().contains("agentmux-tmp"))
-            .count();
-        assert_eq!(leftovers, 0);
+        let manifest = std::fs::read_to_string(base.join(MANAGED_MCP_SERVERS_MANIFEST)).unwrap();
+        serde_json::from_str::<Vec<String>>(&manifest).expect("the manifest must not be interleaved either");
+        for d in [base.clone(), base.join(".claude")] {
+            let leftovers = std::fs::read_dir(&d)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().contains("agentmux-tmp"))
+                .count();
+            assert_eq!(leftovers, 0, "temp files left in {}", d.display());
+        }
     }
 
     #[cfg(unix)]
