@@ -12,7 +12,7 @@ import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { registerPaneTabDescriptor, type PaneTabIcon } from "@/element/pane-tab-model";
-import { HISTORY_TAB_FOR_META_KEY } from "./open-history-tab";
+import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 
 /** Same precedence as AgentViewModel.viewIcon; undefined falls through to
@@ -34,8 +34,8 @@ export function agentTabIcon(meta: MetaType | undefined): PaneTabIcon | undefine
 registerPaneTabDescriptor("agent", {
     label: ({ meta }) => {
         // A history reader carries its live sibling's agentName, so it has
-        // to read distinctly.
-        if (meta?.[HISTORY_TAB_FOR_META_KEY]) return "History";
+        // to read distinctly — and name whose history it is.
+        if (meta?.[HISTORY_TAB_FOR_META_KEY]) return historyTabLabel(meta?.["agentName"]);
         const name = meta?.["agentName"];
         // Repo-owner call (PR #3341): the unlaunched-picker fallback reads
         // "Agent", not "New Agent" — both fallbacks (pane title and tab)
