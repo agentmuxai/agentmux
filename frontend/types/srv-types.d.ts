@@ -1133,6 +1133,7 @@ declare global {
         "notify:sound:agent.message.accepted"?: boolean;
         "notify:sound:agent.message.rejected"?: boolean;
         "notify:sound:agent.waiting.for.input"?: boolean;
+        "notify:sound:agent.shutdown.pending"?: boolean;
         "notify:sounds:waiting:volume"?: number;
         "notify:tooltones:enabled"?: boolean;
         "notify:tooltones:volume"?: number;

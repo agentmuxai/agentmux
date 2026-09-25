@@ -100,6 +100,13 @@ export const SOUNDS_SETTINGS = {
         section: "sounds",
         keywords: ["waiting for input sound", "ambient tone", "blocked sound", "notify:sound:agent.waiting.for.input"],
     },
+    shutdownToneEnabled: {
+        id: "sounds.shutdown_tone_enabled",
+        label: "Shutdown warning chime",
+        description: "Play a falling chime when something other than you asks to shut an agent down, at the start of the 15-second window to keep it and again with 5 seconds left",
+        section: "sounds",
+        keywords: ["shutdown sound", "quit warning", "keep running", "notify:sound:agent.shutdown.pending"],
+    },
     waitingToneVolume: {
         id: "sounds.waiting_tone_volume",
         label: "Volume",
@@ -284,6 +291,18 @@ export function SoundsSection(): JSX.Element {
                     }
                 />
             </Show>
+            <SectionHeader label="Shutdown warning" />
+            <SettingRow
+                id={SOUNDS_SETTINGS.shutdownToneEnabled.id}
+                label={SOUNDS_SETTINGS.shutdownToneEnabled.label}
+                description={SOUNDS_SETTINGS.shutdownToneEnabled.description}
+                control={
+                    <ToggleControl
+                        checked={s()["notify:sound:agent.shutdown.pending"] !== false}
+                        onChange={(v) => set("notify:sound:agent.shutdown.pending", v)}
+                    />
+                }
+            />
         </div>
     );
 }

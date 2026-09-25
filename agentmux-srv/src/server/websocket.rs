@@ -29,6 +29,7 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER, COMMAND_AGENT_CANCEL,
+    COMMAND_AGENT_SHUTDOWN_KEEP, CommandAgentShutdownKeepData, AgentShutdownKeepResult,
     CommandAgentAnswerData, CommandAgentCancelData,
     COMMAND_AMBIENT_NARRATE, CommandAmbientNarrateData,
     COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
@@ -1676,6 +1677,20 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                          requires a persistent (host) agent; container/one-shot agents are \
                          not yet supported (Phase 2)".to_string())
                 }
+        },
+    );
+
+    // The pending-shutdown banner's "Keep running"
+    // (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5).
+    let state_keep = state.clone();
+    engine.register_typed(
+        COMMAND_AGENT_SHUTDOWN_KEEP,
+        move |cmd: CommandAgentShutdownKeepData, _ctx| {
+            let state = state_keep.clone();
+            async move {
+                let outcome = crate::sagas::pending_shutdown::keep(&state, &cmd.blockid, &cmd.request_id);
+                Ok(AgentShutdownKeepResult { outcome: outcome.to_string() })
+            }
         },
     );
 

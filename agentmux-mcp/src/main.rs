@@ -38,7 +38,7 @@ use agentmux_common::api_types::{
     UiBrowserDispatchKeyRequest, UiBrowserEvalRequest, UiBrowserFocusElementRequest,
     UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest, UiClickRequest,
     UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse, WindowFocusRequest,
-    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest,
+    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };
 use anyhow::Result;
@@ -203,6 +203,7 @@ async fn main() {
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
                 let close_pane: Value =
                     serde_json::from_str(CLOSE_PANE_TOOL).expect("static json");
+                let quit_self: Value = serde_json::from_str(QUIT_SELF_TOOL).expect("static json");
                 let register_dev_server: Value =
                     serde_json::from_str(REGISTER_DEV_SERVER_TOOL).expect("static json");
                 let browser_navigate: Value =
@@ -268,7 +269,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, quit_self, register_dev_server, browser_navigate, browser_back, browser_forward, browser_reload, browser_eval, browser_dispatch_key, browser_focus_element, browser_focus_info, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, global_memory_history, global_memory_diff, global_memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -2588,6 +2589,55 @@ async fn call_tool(
                 None => Ok("Closed your own pane".to_string()),
             }
         }
+        "QuitSelf" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let field = |k: &str| {
+                arguments
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow::anyhow!("missing required parameter: {k}"))
+            };
+            let (reason, user_instruction) = (field("reason")?, field("user_instruction")?);
+            let auth = sign_ui_automation_auth()?;
+            let url = format!("{}/api/v1/agent/self/quit", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&QuitSelfRequest { auth, reason, user_instruction })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            if status.as_u16() != 202 || body["status"] != "pending_user_override" {
+                return quit_self_result(status.as_u16(), &body);
+            }
+            // Not the user's own ask: the user has 15 s to keep this agent
+            // (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). Poll for the answer —
+            // one long request would outlast the client's timeout.
+            let request_id = body["request_id"].as_str().unwrap_or_default().to_string();
+            let url = format!("{}/api/v1/agent/shutdown/{request_id}", local_url.trim_end_matches('/'));
+            let give_up = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let now: Value = match client.get(&url).header("X-AuthKey", auth_key).send().await {
+                    Ok(r) => r.json().await.unwrap_or(Value::Null),
+                    Err(_) => Value::Null,
+                };
+                let state = now["status"].as_str().unwrap_or("");
+                // `proceeding` is final for QuitSelf: the shutdown waits for
+                // this very turn to end, so waiting on here would hold it up.
+                if !state.is_empty() && state != "pending" {
+                    return quit_self_outcome(state, &now);
+                }
+                if std::time::Instant::now() > give_up {
+                    anyhow::bail!("QuitSelf: no answer on the pending shutdown {request_id} after 60 s");
+                }
+            }
+        }
         "RegisterDevServer" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
@@ -3712,6 +3762,33 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+/// What `QuitSelf` tells the agent, from srv's answer (§4.2, §6.3).
+fn quit_self_result(status: u16, body: &Value) -> anyhow::Result<String> {
+    match status {
+        202 => Ok("Quit scheduled. Your session ends when this turn finishes: give the user a one-line goodbye and start no new work.".to_string()),
+        200 => Ok("Already quitting — nothing more to do.".to_string()),
+        403 => anyhow::bail!(
+            "QuitSelf refused ({}): only the user's own message that started this turn can ask you to quit, and nothing else may have been delivered since. Do NOT retry. Tell the user they can type /quit in your pane.",
+            body.get("refused").and_then(|v| v.as_str()).unwrap_or("not allowed")
+        ),
+        _ => anyhow::bail!("QuitSelf failed: HTTP {status} — {}", body),
+    }
+}
+
+/// What `QuitSelf` tells the agent once the user's override window has
+/// settled (§6.5).
+fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<String> {
+    match state {
+        "kept_by_user" => Ok("The user chose to keep you running. Do NOT quit and do not call QuitSelf again for this; carry on.".to_string()),
+        "proceeding" | "shut_down" => Ok("The user didn't stop it: you shut down when this turn ends. Give the user a one-line goodbye and start no new work.".to_string()),
+        "superseded" => Ok("The user closed you themselves meanwhile.".to_string()),
+        _ => anyhow::bail!(
+            "QuitSelf: the shutdown {state}: {}",
+            body.get("error").and_then(|v| v.as_str()).unwrap_or("no detail")
+        ),
+    }
+}
+
 /// `SendMessage`'s answer when srv accepted the message but holds it until the
 /// target's next tool call or turn boundary (SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).
 fn deferred_delivery_text(to: &str) -> String {
@@ -3725,6 +3802,40 @@ fn deferred_delivery_text(to: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quit_self_result_tells_the_agent_what_happened() {
+        assert!(quit_self_result(202, &Value::Null).unwrap().starts_with("Quit scheduled"));
+        assert!(quit_self_result(200, &Value::Null).unwrap().starts_with("Already quitting"));
+        let refused = quit_self_result(403, &serde_json::json!({ "refused": "not_user_turn" })).unwrap_err().to_string();
+        assert!(refused.contains("not_user_turn") && refused.contains("/quit"), "{refused}");
+        assert!(quit_self_result(401, &Value::Null).is_err());
+    }
+
+    #[test]
+    fn quit_self_outcome_says_whether_the_user_kept_it() {
+        assert!(quit_self_outcome("kept_by_user", &Value::Null).unwrap().contains("keep you running"));
+        assert!(quit_self_outcome("proceeding", &Value::Null).unwrap().contains("goodbye"));
+        assert!(quit_self_outcome("shut_down", &Value::Null).unwrap().contains("goodbye"));
+        assert!(quit_self_outcome("superseded", &Value::Null).is_ok());
+        let failed = quit_self_outcome("failed", &serde_json::json!({ "error": "boom" })).unwrap_err().to_string();
+        assert!(failed.contains("boom"), "{failed}");
+    }
+
+    #[test]
+    fn quit_self_warns_it_can_take_15_seconds() {
+        let v: Value = serde_json::from_str(QUIT_SELF_TOOL).unwrap();
+        assert!(v["description"].as_str().unwrap().contains("at least 15 seconds"));
+    }
+
+    #[test]
+    fn quit_self_takes_no_target_and_requires_the_users_quote() {
+        let v: Value = serde_json::from_str(QUIT_SELF_TOOL).unwrap();
+        let props = v["inputSchema"]["properties"].as_object().unwrap();
+        assert!(!props.contains_key("block_id") && !props.contains_key("agent"), "no way to aim it at another agent");
+        assert_eq!(v["inputSchema"]["required"], serde_json::json!(["reason", "user_instruction"]));
+        assert!(v["description"].as_str().unwrap().starts_with("⚠️ MAJOR WARNING"));
+    }
 
     /// The text an agent reads back. Pinned because a lost `\` continuation
     /// once turned the indentation into runs of spaces (ReAgent P1 on #3763).
@@ -4300,6 +4411,7 @@ mod tests {
             DISCOVER_WINDOWS_TOOL,
             LIST_CONVERSATIONS_TOOL,
             CLOSE_PANE_TOOL,
+            QUIT_SELF_TOOL,
             REGISTER_DEV_SERVER_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
@@ -4342,7 +4454,7 @@ mod tests {
         // but had no MCP tool wrapper until now) — same reasoning, not fixing
         // the pre-existing drift between this running total and the prose
         // breakdown.
-        assert_eq!(defs.len(), 52, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
+        assert_eq!(defs.len(), 53, "+ 1 QuitSelf; tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane + 4 GlobalMemory + 1 RegisterDevServer + 3 GlobalMemory-version-history");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
