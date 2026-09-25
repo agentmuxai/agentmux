@@ -528,9 +528,12 @@ declare global {
         addTitle?: string;
         connBtnRef?: { current: HTMLDivElement | null };
         changeConnModalAtom?: import("@/util/util").SignalAtom<boolean>;
-        /** Rendered between the header row and the content region — a
-         *  progress/status bar slot. Overlay-positioned by the view type's own
-         *  CSS; the chrome only guarantees the DOM position. */
+        /** Rendered between the header row and the content region.
+         *  Overlay-positioned by the view type's own CSS; the chrome only
+         *  guarantees the DOM position. Like every field here it comes from
+         *  the pane's FIRST-hoisted view type, so it is not the place for a
+         *  per-tab busy indicator — the chrome's own progress-bar slot,
+         *  reached through `ViewModel.setProgressBarMount`, is. */
         renderBelowHeader?: () => JSX.Element;
         /** Wraps the content region, for a view type whose background/overlay
          *  surface must span more than the content box alone (terminal's
@@ -628,9 +631,9 @@ declare global {
          *  one shared pane chrome, on top of the defaults every pane gets
          *  (tabs derived from the pane's own `blockStack`, "+" opening the
          *  widget picker, switch/close via `layoutStack`). Nothing here is
-         *  specific to any one view type — a browser pane can take
-         *  `renderBelowHeader` for a page-load bar exactly as an agent pane
-         *  takes it for its turn-progress bar.
+         *  specific to any one view type — any pane can take `extraTabs`,
+         *  `rootClass`, `wrapContent`, etc. (the agent's turn-progress bar is
+         *  NOT one of these: see `setProgressBarMount` below).
          *
          *  Called ONCE, at chrome mount, in the chrome's own reactive scope
          *  (so any signals/memos it creates are owned and disposed with the
@@ -641,7 +644,11 @@ declare global {
         /** Registers the DOM node hoisted chrome should portal a
          *  per-block busy/progress indicator into, so the indicator's own
          *  remount (tied to the active block) doesn't require the chrome
-         *  itself to remount. `null` on unmount/teardown. */
+         *  itself to remount. The shared chrome (PaneChrome.tsx) renders
+         *  that node on every pane and calls this on whichever ViewModel is
+         *  ACTIVE, re-pointing on every tab switch — so it works whatever
+         *  view type the pane started as. `null` when this ViewModel stops
+         *  being the active one, or on teardown. */
         setProgressBarMount?: (el: HTMLDivElement | null) => void;
     }
 
