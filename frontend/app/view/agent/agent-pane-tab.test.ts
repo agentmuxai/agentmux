@@ -40,9 +40,14 @@ describe("agent pane tab", () => {
         expect(tab.rename).toBeTypeOf("function");
     });
 
-    it("a history tab reads as History and can't rename the shared definition", () => {
+    it("a history tab reads as \"<agent>'s History\" and can't rename the shared definition", () => {
         const tab = describeAgent({ agentName: "Camper", agentId: "def-1", "agent:historyTabFor": "b0" });
-        expect(tab.label).toBe("History");
+        expect(tab.label).toBe("Camper's History");
         expect(tab.rename).toBeUndefined();
+    });
+
+    it("a history tab with no agent name still says whose kind of pane it is", () => {
+        const tab = describeAgent({ "agent:historyTabFor": "b0" });
+        expect(tab.label).toBe("Agent's History");
     });
 });
