@@ -136,6 +136,10 @@ function resolveDeferredResync(id: string) {
 }
 
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/util/clipboard", () => ({
+    readText: vi.fn(() => Promise.resolve("pasted text")),
+    writeText: vi.fn(() => Promise.resolve()),
+}));
 vi.mock("@/app/store/ws", () => ({ sendWSCommand: vi.fn() }));
 
 vi.mock("@/app/store/global", async () => {
@@ -187,6 +191,7 @@ const termWrapInstances: Array<{
     disposed: boolean;
     terminal: any;
     sendDataHandler: (data: string) => void;
+    keydownHandler: ((e: KeyboardEvent) => boolean) | undefined;
 }> = [];
 
 vi.mock("@/app/view/term/termwrap", () => {
@@ -202,12 +207,14 @@ vi.mock("@/app/view/term/termwrap", () => {
         loaded = false;
         disposed = false;
         sendDataHandler: (data: string) => void;
+        keydownHandler: ((e: KeyboardEvent) => boolean) | undefined;
         constructor(
             id: string,
             _container: HTMLElement,
             options: { fontSize: number; scrollback?: number },
-            muxOptions: { sendDataHandler: (data: string) => void }
+            muxOptions: { sendDataHandler: (data: string) => void; keydownHandler?: (e: KeyboardEvent) => boolean }
         ) {
+            this.keydownHandler = muxOptions.keydownHandler;
             this.id = id;
             this.fontSize = options.fontSize;
             this.scrollback = options.scrollback;
@@ -1275,6 +1282,28 @@ describe("AgentShellSubblock — right-click region (SPEC_AGENT_SHELL_DRAWER_CON
         await waitFor(() => expect(termWrapInstances.length).toBe(1));
         cleanup();
         expect(resolveContextMenuRegion(surface)).toBeNull();
+    });
+});
+
+describe("AgentShellSubblock — Ctrl+Shift+V / Ctrl+Shift+C", () => {
+    it("wires a key handler that pastes on Ctrl+Shift+V instead of letting the voice hotkey fire", async () => {
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={undefined}
+                onSubBlockCreated={() => {}}
+            />
+        ));
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        const handler = termWrapInstances[0].keydownHandler;
+        expect(handler).toBeTypeOf("function");
+
+        const ev = new KeyboardEvent("keydown", { key: "V", code: "KeyV", ctrlKey: true, shiftKey: true, cancelable: true });
+        const stop = vi.spyOn(ev, "stopPropagation");
+        expect(handler!(ev)).toBe(false);
+        expect(stop).toHaveBeenCalled();
+        await waitFor(() => expect(termWrapInstances[0].terminal.paste).toHaveBeenCalled());
     });
 });
 
