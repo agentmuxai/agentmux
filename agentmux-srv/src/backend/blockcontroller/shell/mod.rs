@@ -31,7 +31,7 @@ mod file_ops;
 mod indexing;
 mod lifecycle;
 mod pty;
-mod stamps;
+pub(crate) mod stamps;
 mod translation;
 
 // Flat re-exports preserving the pre-split `shell::<item>` call sites used

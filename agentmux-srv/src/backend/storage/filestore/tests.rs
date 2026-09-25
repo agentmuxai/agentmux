@@ -540,6 +540,30 @@ fn test_read_at_past_end() {
     assert!(data.is_empty());
 }
 
+/// Reads spanning several parts, starting and ending mid-part, return exactly
+/// the bytes written.
+#[test]
+fn test_read_at_across_parts() {
+    let store = make_store();
+    store
+        .make_file("z1", "f1", FileMeta::new(), FileOpts::default())
+        .unwrap();
+    let data: Vec<u8> = (0..PART_DATA_SIZE * 3 + PART_DATA_SIZE / 2).map(|i| (i * 7 % 251) as u8).collect();
+    store.write_file("z1", "f1", &data).unwrap();
+
+    for (offset, len) in [
+        (0, data.len()),
+        (PART_DATA_SIZE - 3, 10),
+        (PART_DATA_SIZE / 2, PART_DATA_SIZE * 2),
+        (PART_DATA_SIZE * 3 - 1, PART_DATA_SIZE),
+    ] {
+        let (at, got) = store.read_at("z1", "f1", offset as i64, len as i64).unwrap();
+        assert_eq!(at, offset as i64);
+        let end = (offset + len).min(data.len());
+        assert_eq!(got, &data[offset..end], "offset {offset} len {len}");
+    }
+}
+
 #[test]
 fn test_read_at_clamps_size() {
     let store = make_store();

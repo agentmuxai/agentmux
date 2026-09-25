@@ -46,6 +46,9 @@ pub struct HistorySearchOptions {
     /// Open at most this many of the candidates, in the order given. The rest
     /// are counted in `sessions_skipped`, never silently dropped.
     pub max_sessions: Option<usize>,
+    /// Also search sessions found only by working directory or account, not
+    /// in the agent's own record (see `HistoryService::search_for_agent`).
+    pub include_inferred: bool,
 }
 
 /// One match.
@@ -59,6 +62,52 @@ pub struct HistorySearchHit {
     /// `Some(name)` when the hit is a tool call rather than message prose.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// Where the text was read: `"provider_transcript"` or `"agentmux_record"`
+    /// (the transcript is gone; AgentMux's own record of the session).
+    pub source: &'static str,
+    /// Why the session is the caller's: `"agent_record"` (its id is in the
+    /// agent's own record or segment log) or `"inferred"` (found by working
+    /// directory or account only).
+    pub attribution: &'static str,
+}
+
+/// Where a searched session's content comes from.
+#[derive(Debug, Clone)]
+pub(crate) enum Source {
+    Transcript,
+    Record(super::record::RecordSession),
+}
+
+/// Why a session is the caller's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Attribution {
+    /// Its id is in the agent's own record or segment log.
+    AgentRecord,
+    /// Found by working directory or account only.
+    Inferred,
+}
+
+/// A session a search may open.
+#[derive(Debug, Clone)]
+pub(crate) struct SearchCandidate {
+    pub meta: SessionMeta,
+    pub source: Source,
+    pub attribution: Attribution,
+}
+
+impl SearchCandidate {
+    fn source_label(&self) -> &'static str {
+        match self.source {
+            Source::Transcript => "provider_transcript",
+            Source::Record(_) => "agentmux_record",
+        }
+    }
+    fn attribution_label(&self) -> &'static str {
+        match self.attribution {
+            Attribution::AgentRecord => "agent_record",
+            Attribution::Inferred => "inferred",
+        }
+    }
 }
 
 /// Result of a bounded search.
@@ -91,6 +140,15 @@ pub struct HistorySearchOutcome {
     /// What the index refresh behind this search couldn't read. A session
     /// there may be missing from the candidates.
     pub discovery_errors: Vec<String>,
+    /// Sessions the agent's own record or segment log names.
+    pub ledger_sessions: u32,
+    /// Of those, sessions whose provider transcript is gone, searched in
+    /// AgentMux's record instead.
+    pub record_only_sessions: u32,
+    /// Sessions found only by working directory or account and left out,
+    /// because the agent's own record doesn't name them. `include_inferred`
+    /// searches them too.
+    pub inferred_sessions_excluded: u32,
 }
 
 /// At most this many discovery errors are listed in a search's answer.
@@ -200,11 +258,12 @@ fn snippet_around(haystack: &str, match_at: usize) -> String {
 
 /// Every match within one message: its prose, plus each tool call.
 fn match_message(
-    meta: &SessionMeta,
+    candidate: &SearchCandidate,
     msg: &HistoryMessage,
     needle: &str,
     opts: &HistorySearchOptions,
 ) -> Vec<HistorySearchHit> {
+    let meta = &candidate.meta;
     let mut hits = Vec::new();
 
     // Tool-call matches. When `tool` is set the search is structural: the
@@ -238,6 +297,8 @@ fn match_message(
                     role: msg.role.clone(),
                     snippet: snippet_around(&tu.argument_summary, at),
                     tool_name: Some(tu.name.clone()),
+                    source: candidate.source_label(),
+                    attribution: candidate.attribution_label(),
                 });
             }
             continue;
@@ -261,6 +322,8 @@ fn match_message(
                 role: msg.role.clone(),
                 snippet: snippet_around(&tu.argument_summary, at),
                 tool_name: Some(tu.name.clone()),
+                    source: candidate.source_label(),
+                    attribution: candidate.attribution_label(),
             });
         }
     }
@@ -276,11 +339,122 @@ fn match_message(
                 role: msg.role.clone(),
                 snippet: snippet_around(&msg.content, at),
                 tool_name: None,
+                source: candidate.source_label(),
+                attribution: candidate.attribution_label(),
             });
         }
     }
 
     hits
+}
+
+/// Search message content and tool calls across a chosen set of sessions,
+/// whose content `load` reads — from a provider transcript or from AgentMux's
+/// record. See [`SessionIndex::search_sessions`] for why stopping early is
+/// always reported.
+pub(crate) fn search_candidates(
+    candidates: &[SearchCandidate],
+    opts: &HistorySearchOptions,
+    load: &dyn Fn(&SearchCandidate) -> Result<Option<HistorySession>, HistoryError>,
+) -> HistorySearchOutcome {
+    let needle = opts.query.to_lowercase();
+    let mut hits: Vec<HistorySearchHit> = Vec::new();
+    let mut sessions_scanned = 0u32;
+    let mut sessions_unreadable: Vec<UnreadableSession> = Vec::new();
+    let mut sessions_partly_read: Vec<UnreadableSession> = Vec::new();
+    let mut truncated = false;
+
+    let opened = opts.max_sessions.map_or(candidates.len(), |max| max.min(candidates.len()));
+    let sessions_skipped = (candidates.len() - opened) as u32;
+
+    for candidate in &candidates[..opened] {
+        let meta = &candidate.meta;
+        if hits.len() >= opts.limit {
+            // More candidates remained that were never opened.
+            truncated = true;
+            break;
+        }
+        // A session that fails to parse is skipped, not fatal: one
+        // malformed file must not make the whole audit unanswerable. But
+        // it's reported, never counted as read.
+        let session = match load(candidate) {
+            Ok(Some(session)) => session,
+            Ok(None) => {
+                sessions_unreadable.push(UnreadableSession {
+                    session_id: meta.session_id.clone(),
+                    reason: "no longer readable (moved, deleted or emptied)".into(),
+                });
+                continue;
+            }
+            Err(e) => {
+                sessions_unreadable.push(UnreadableSession {
+                    session_id: meta.session_id.clone(),
+                    reason: e.to_string(),
+                });
+                continue;
+            }
+        };
+        sessions_scanned += 1;
+        if session.skipped_records > 0 {
+            sessions_partly_read.push(UnreadableSession {
+                session_id: meta.session_id.clone(),
+                reason: format!(
+                    "{} record(s) could not be read and were not searched",
+                    session.skipped_records
+                ),
+            });
+        }
+        for msg in &session.messages {
+            if let Some(role) = opts.role.as_deref() {
+                if msg.role != role {
+                    continue;
+                }
+            }
+            if !within_window(msg.timestamp, opts) {
+                continue;
+            }
+            if hits.len() >= opts.limit {
+                truncated = true;
+                break;
+            }
+            for hit in match_message(candidate, msg, &needle, opts) {
+                if hits.len() >= opts.limit {
+                    truncated = true;
+                    break;
+                }
+                hits.push(hit);
+            }
+        }
+    }
+
+    let mut incomplete_reasons = Vec::new();
+    if truncated {
+        incomplete_reasons.push("hit_limit");
+    }
+    if sessions_skipped > 0 {
+        incomplete_reasons.push("max_sessions");
+    }
+    if !sessions_unreadable.is_empty() {
+        incomplete_reasons.push("unreadable_sessions");
+    }
+    if !sessions_partly_read.is_empty() {
+        incomplete_reasons.push("unreadable_records");
+    }
+    HistorySearchOutcome {
+        hits,
+        sessions_scanned,
+        total_sessions: candidates.len() as u32,
+        truncated,
+        complete: incomplete_reasons.is_empty(),
+        incomplete_reasons,
+        sessions_skipped,
+        sessions_unreadable,
+        sessions_partly_read,
+        discovery_errors: Vec::new(),
+        ledger_sessions: 0,
+        record_only_sessions: 0,
+        inferred_sessions_excluded: 0,
+    }
 }
 
 /// AgentMux-ISOLATED provider-home roots under which delete/clear is permitted:
@@ -750,100 +924,15 @@ impl SessionIndex {
         candidates: &[SessionMeta],
         opts: &HistorySearchOptions,
     ) -> HistorySearchOutcome {
-        let needle = opts.query.to_lowercase();
-        let mut hits: Vec<HistorySearchHit> = Vec::new();
-        let mut sessions_scanned = 0u32;
-        let mut sessions_unreadable: Vec<UnreadableSession> = Vec::new();
-        let mut sessions_partly_read: Vec<UnreadableSession> = Vec::new();
-        let mut truncated = false;
-
-        let opened = opts.max_sessions.map_or(candidates.len(), |max| max.min(candidates.len()));
-        let sessions_skipped = (candidates.len() - opened) as u32;
-
-        for meta in &candidates[..opened] {
-            if hits.len() >= opts.limit {
-                // More candidates remained that were never opened.
-                truncated = true;
-                break;
-            }
-            // A session that fails to parse is skipped, not fatal: one
-            // malformed file must not make the whole audit unanswerable. But
-            // it's reported, never counted as read.
-            let session = match self.get_full(&meta.session_id) {
-                Ok(Some(session)) => session,
-                Ok(None) => {
-                    sessions_unreadable.push(UnreadableSession {
-                        session_id: meta.session_id.clone(),
-                        reason: "no longer readable (moved, deleted or emptied)".into(),
-                    });
-                    continue;
-                }
-                Err(e) => {
-                    sessions_unreadable.push(UnreadableSession {
-                        session_id: meta.session_id.clone(),
-                        reason: e.to_string(),
-                    });
-                    continue;
-                }
-            };
-            sessions_scanned += 1;
-            if session.skipped_records > 0 {
-                sessions_partly_read.push(UnreadableSession {
-                    session_id: meta.session_id.clone(),
-                    reason: format!(
-                        "{} record(s) could not be read and were not searched",
-                        session.skipped_records
-                    ),
-                });
-            }
-            for msg in &session.messages {
-                if let Some(role) = opts.role.as_deref() {
-                    if msg.role != role {
-                        continue;
-                    }
-                }
-                if !within_window(msg.timestamp, opts) {
-                    continue;
-                }
-                if hits.len() >= opts.limit {
-                    truncated = true;
-                    break;
-                }
-                for hit in match_message(meta, msg, &needle, opts) {
-                    if hits.len() >= opts.limit {
-                        truncated = true;
-                        break;
-                    }
-                    hits.push(hit);
-                }
-            }
-        }
-
-        let mut incomplete_reasons = Vec::new();
-        if truncated {
-            incomplete_reasons.push("hit_limit");
-        }
-        if sessions_skipped > 0 {
-            incomplete_reasons.push("max_sessions");
-        }
-        if !sessions_unreadable.is_empty() {
-            incomplete_reasons.push("unreadable_sessions");
-        }
-        if !sessions_partly_read.is_empty() {
-            incomplete_reasons.push("unreadable_records");
-        }
-        HistorySearchOutcome {
-            hits,
-            sessions_scanned,
-            total_sessions: candidates.len() as u32,
-            truncated,
-            complete: incomplete_reasons.is_empty(),
-            incomplete_reasons,
-            sessions_skipped,
-            sessions_unreadable,
-            sessions_partly_read,
-            discovery_errors: Vec::new(),
-        }
+        let candidates: Vec<SearchCandidate> = candidates
+            .iter()
+            .map(|meta| SearchCandidate {
+                meta: meta.clone(),
+                source: Source::Transcript,
+                attribution: Attribution::AgentRecord,
+            })
+            .collect();
+        search_candidates(&candidates, opts, &|c| self.get_full(&c.meta.session_id))
     }
 
     /// Check if the index has been populated.
