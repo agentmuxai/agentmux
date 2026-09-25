@@ -1319,6 +1319,7 @@ mod tests {
     #[test]
     fn writeagentconfig_extracts_slug_and_injects_signing_keys_into_the_real_mcp_json_shape() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
         let files = vec![AgentConfigFile {
             path: ".mcp.json".to_string(),
             content: serde_json::to_string(&serde_json::json!({
@@ -1365,10 +1366,11 @@ mod tests {
         // §2.1.2: the WAN signature binds the sending instance, so the host
         // label must travel with the key. A missing one would make the sender
         // sign under a different instance identity than srv publishes.
+        // W3-S §2.2: the id of the instance that certifies the key.
         assert_eq!(
             env["AGENTMUX_HOST_LABEL"],
-            serde_json::json!(crate::backend::reactive::registry::local_host_label()),
-            "the MCP env must carry the same host label this instance publishes its WAN key under"
+            serde_json::json!(wan.instance_ensure("unused").unwrap().instance_id),
+            "the MCP env must carry the instance id that certifies this agent's WAN key"
         );
 
     }

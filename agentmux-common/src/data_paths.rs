@@ -444,6 +444,18 @@ impl DataPaths {
     pub fn provider_auth_dir(&self, auth_dir_name: &str) -> PathBuf {
         self.shared_dir.join("providers").join(auth_dir_name)
     }
+
+    /// `instance_dir/wan-identity/` — the channel-wide WAN identity store
+    /// (`wan.db`: the instance key, agent WAN keys, and WAN verification
+    /// state). Beside `config/` and `agents/` rather than under the
+    /// per-version `data_dir`, so an upgrade keeps the same instance and the
+    /// same agent keys. Deliberately not `identity/`, which would sit next to
+    /// the unrelated `identities/`. For dev builds this is the branch (or
+    /// clone) dir, so each dev checkout is its own instance.
+    /// `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.2.
+    pub fn wan_identity_dir(&self) -> PathBuf {
+        self.instance_dir.join("wan-identity")
+    }
 }
 
 /// Best-effort: ensure `link_path` (a `projects/` subdirectory inside an
@@ -1188,6 +1200,20 @@ mod tests {
             assert!(p1.data_dir.to_string_lossy().contains("0.40.2"));
             assert!(p2.data_dir.to_string_lossy().contains("0.41.0"));
             let _ = root; // suppress unused warning
+        });
+    }
+
+    #[test]
+    fn the_wan_identity_dir_is_channel_wide_not_per_version() {
+        // An upgrade must keep the same WAN instance and agent keys
+        // (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2).
+        with_home_override(|root| {
+            clear_channel_env();
+            let p1 = DataPaths::resolve("0.40.2", &RuntimeMode::Installed).unwrap();
+            let p2 = DataPaths::resolve("0.41.0", &RuntimeMode::Installed).unwrap();
+            assert_eq!(p1.wan_identity_dir(), root.join("channels").join("stable").join("wan-identity"));
+            assert_eq!(p1.wan_identity_dir(), p2.wan_identity_dir());
+            assert!(!p1.wan_identity_dir().starts_with(&p1.data_dir));
         });
     }
 

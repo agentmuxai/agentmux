@@ -719,6 +719,34 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         Ok(_) => tracing::info!("identity: agent token index attached"),
         Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
     }
+    // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2): the channel-wide
+    // WAN identity store. Opened and its instance minted here, once, so every
+    // spawn signs as the same instance. Best-effort and never redirected: if
+    // the file can't be opened or the instance can't be minted, WAN signing
+    // is simply off for this process (agents get no WAN key), which degrades
+    // every WAN jekt to today's unsigned `TRUST=network-claimed`.
+    match backend::storage::wan_identity::resolve_wan_identity_path() {
+        Some(path) => match backend::storage::wan_identity::WanIdentityStore::open(&path).and_then(|store| {
+            let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;
+            Ok((store, instance))
+        }) {
+            Ok((store, instance)) => {
+                tracing::info!(
+                    path = %path.display(),
+                    instance = %instance.instance_id,
+                    host_hint = %instance.host_hint,
+                    "wan identity: store attached"
+                );
+                mstore_raw.set_wan_identity(Arc::new(store));
+            }
+            Err(e) => tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "wan identity: store unavailable — WAN jekt signing is off for this process"
+            ),
+        },
+        None => tracing::warn!("wan identity: channel dir unresolved — WAN jekt signing is off for this process"),
+    }
     let mstore = Arc::new(mstore_raw);
     // Identity M4a: lets spawn sites tell a row-backed block from a row-less
     // one when the environment carries no UID.
