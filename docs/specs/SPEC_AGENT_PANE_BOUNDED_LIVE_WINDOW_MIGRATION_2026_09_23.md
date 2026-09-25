@@ -1,7 +1,7 @@
 # SPEC: Agent pane bounded live window — migration plan
 
 **Date:** 2026-09-23
-**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5 groundwork recorded in §6.3.6 and the 5a design in §6.3.7 (2026-09-24); Phases 4–10 not started. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
+**Status:** active — Phases 0–3 shipped (#3593, #3598, #3599, #3604, #3607, #3610, #3611); Phase 5a shipped (#3628–#3648, design §6.3.7). **Plan revised 2026-09-24 (§6.9): the bounded live document ships as the "live feed" with turns rolling off into History** — replacing Phases 6–7 as written in §6.3.4–§6.3.5 and §6.4, and deferring Phases 4, 5b, 5c and 5e. Progress: `TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md`.
 **Author:** Manoz
 **Priorities (set by the user, 2026-09-23):** performance and robust stability
 above everything else. Engineering cost and time are not constraints. Nothing
@@ -18,6 +18,21 @@ there because a decision depends on data, not to save work.
 `docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`.
 
 ---
+
+## 0. Terms (agreed with the user, 2026-09-24)
+
+"Conversation" meant two different things in this work. From here on:
+
+| Term | Meaning |
+|---|---|
+| **Transcript** | The agent's complete record on disk — the source of truth. |
+| **Live feed** | What the agent pane shows: the turn in flight plus the last few finished turns. Bounded. |
+| **History** | The History tab: a static reader over the whole transcript. |
+| **Roll off** | A finished turn leaves the live feed. Nothing is copied — it is already in the transcript, and History shows it. |
+
+"Archive" is avoided: the code already uses it for session archiving
+(`session:archive`). Older sections say "live pane", "live window" and
+"evict"; they mean live feed and roll off.
 
 ## 1. Summary
 
@@ -243,7 +258,8 @@ applicable) a CI guardrail.
    preserves the first visible node and its offset (§6.3.5).
 3. **No jump.** Nothing visible moves when content is added, migrated or
    evicted.
-4. **No loss.** Only a finished node whose provenance is durable is evicted:
+4. **No loss.** Only a finished content node whose provenance is durable is
+   evicted (`ephemeral` rows — §6.3.2, §6.9 — are not content):
    its **last** contributing transcript line (`src.endLine`) or journal line
    (`journalEnd`) is covered by that file's line count, so the History tab can
    show all of it (§6.3.1–§6.3.2).
@@ -573,7 +589,7 @@ should be treated as a schema reset.
 | 5a | Fix the transcript address at the source: one authoritative stream per pane, a **generation** that changes whenever it is replaced, deleted or re-sourced, and the **absolute line index** (of that stream) on every live event, including records written today without an event. Line-count and range-read responses carry the generation. | Backend (+ event type) |
 | 5b | Positional ids `G<gen>L<line>[.k]` for counter-minted kinds only; `src` / `endLine` / `turn`; replay flushes like live; `skipIds` removed; persisted collapse/pin reset; snapshot v1 treated as a schema reset. | Frontend parser |
 | 5c | Parser and translator `checkpoint()` / `restore()` with the completeness test; checkpoints persisted per block (needs an append RPC, added in 5a or here). | Frontend (+ RPC) |
-| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. | Frontend + backend |
+| 5d | Durability for out-of-band nodes: render the Gemini-family user echo (a bug fix that stands alone); journal (`out-of-band.jsonl`) for shells, AskUserQuestion answers and user messages of providers without an echo. *Revised by §6.9:* user messages go into the transcript itself (#3701 for the subprocess controller; ACP and the Codex app-server controller still to do), AskUserQuestion answers need no journal (already in the tool result; the dead-air re-delivery is written to the transcript since #3703) — the journal is for in-pane shells only. | Frontend + backend |
 | 5e | Accepted ranges and the replay filter (§6.3.3). | Frontend |
 
 Order: 5d's Gemini echo fix can land any time (shipped in #3620); 5a before
@@ -1154,6 +1170,226 @@ whether fixed). Before enabling, assert no pin/measure path reads layout
 inside a skipped row (Chromium logs a console warning; the soak fails on it).
 After B, few finished rows stay mounted, so expect a small win.
 
+### 6.9 Revised plan: the live feed and roll-off (2026-09-24)
+
+**Why revise.** §6.3–§6.4 keep up to 30 turns / 2 MB live and let the reader
+scroll back through the live pane (paging older content in, and a detached
+reading window with a gap row). That is what needs positional ids (5b),
+parser checkpoints (5c) and multi-range replay filtering (5e) first. The user
+asked for something more aggressive and simpler: keep the live feed small so
+live appending stays fast, and do the reading in History, which is static and
+therefore smooth even when large. With scroll-back out of the live feed, the
+prerequisites shrink to what already shipped:
+
+- **No resurrection.** Since 5a-4 the pane places every transcript record by
+  line (`transcript-cursor.ts`): anything below the cursor's `next` is a
+  duplicate and dropped, including a reconnect replay. A rolled-off turn is
+  below `next`, so it cannot come back — whichever turns were removed, so
+  removal need not be a prefix (a blocked turn can stay while turns around it
+  go, below). No accepted-range state is needed: §6.3.3's ranges exist for
+  range reads into a detached window, which this plan drops.
+- **No range parses in the live feed.** It no longer pages older content in,
+  so there is no second parser whose counter ids could collide (§6.3.1's
+  reason for positional ids in the live pane).
+
+**The live feed.**
+
+- Holds the turn in flight plus the last **K finished turns**
+  (`agent:livefeedturns`, default 3, minimum 1), and never less than one
+  finished turn, so the reply just received always stays. A byte ceiling
+  (1 MB of finished turns, a constant) rolls off earlier when turns are huge,
+  still keeping at least one.
+- **A turn** starts at a `user_message` node (parser-produced or optimistic);
+  nodes before the first one form a leading turn. Same rule as
+  `turnScopedFrontier` (`frontend/app/view/agent/virtualization/streaming-buffer.ts`,
+  Phase 3b, §6.2). A turn is **finished** when it is not the
+  last turn and none of its nodes is in progress (`isNodeInProgress`, same file).
+- **Kill switch:** `agent:livefeed` (default true). Off restores today's
+  behaviour exactly, paging included.
+
+**When turns roll off** — never mid-render, never mid-turn:
+
+- when a turn ends (the edge of `turnJustEndedAtom`,
+  `frontend/app/view/agent/agent-view.tsx`);
+- when a new `user_message` enters the feed (the next send);
+- when the pane becomes dormant (hidden tab or window tab);
+- once after the initial history load, so a pane opens with K turns, not the
+  load window's worth.
+
+Each point schedules one roll-off pass off the input path
+(`requestIdleCallback`, 1 s timeout — the stream scheduler,
+`frontend/app/view/agent/stream-scheduler.ts`, has no housekeeping lane yet).
+If the user typed in the last 150 ms the pass is **re-queued**, never dropped:
+it runs at the latest at the 1 s deadline, even with input pending, so a fast
+last turn can't leave overdue turns resident waiting for a next trigger
+(Codex review). A pass is a single reducer command, O(nodes kept).
+
+**Which turns may go.**
+
+- **Only rows wholly above the viewport.** While pinned this is the whole
+  front of the feed except what is on screen; a short turn still visible at
+  the top stays until new content scrolls it out. Removing rows above the
+  viewport while pinned moves nothing on screen (the pin holds the bottom).
+- **While the reader is scrolled up in the feed**, the feed keeps the turns
+  intersecting the viewport, the newest K finished turns, the turn in flight
+  and blocked turns; every other eligible turn rolls off at the usual points —
+  those **below** the viewport (between what is being read and the newest K)
+  move nothing on screen, and those **above** it keep the first visible row at
+  the same offset (the anchor mechanism the virtual list already uses for
+  prepends, applied to a front removal). A reader parked at the top therefore
+  holds their slice plus K turns, not everything since (Codex review).
+- **Only turns whose content is reproducible from the transcript.** A turn
+  holding any of these is **blocked**:
+  - `shell` nodes (AgentMux's in-pane shell runs, `useShellNodeStream.ts` —
+    not the agent's Bash tool, which is a durable `tool` node; backend memory
+    ring only, §6.3.2),
+  - an optimistic `user_message` not yet paired with its echo.
+
+  *Revised in PR 3 (ReAgent review):* an answered AskUserQuestion is **not**
+  blocked. The answer reaches the transcript as the tool's result (the CLI
+  writes "User has answered your questions: …" when the turn resumes), so
+  History shows it; only the styled rendering (`answerText` / `questionText`)
+  and the client-side auto-fill note are optimistic — and those fields are
+  never cleared, so blocking on them would keep every such turn forever.
+  Rebuilding the styled rendering on replay is a parser follow-up.
+  The one path where the CLI writes no tool result — the dead-air fallback
+  that re-sends the answer (or a decline, or a tool-permission decision) as a
+  follow-up stdin line when the CLI abandoned the pending call — now writes
+  that line to the transcript too, like every other stdin line (#3703, Codex
+  review), so every answer path is durable.
+- **A blocked turn is never rolled off — and does not stop the others.** It
+  stays where it is; durable finished turns before and after it still roll
+  off. Removing from the middle is as safe as removing a prefix here: the
+  live cursor never re-delivers a line below its position, whatever was
+  removed, and the feed does no range parses (Codex review of this revision:
+  a blocker must not stop every later removal). Where kept turns are no
+  longer contiguous, a small synthetic row between them reads "N turns in
+  History". The feed therefore holds K finished turns plus the blocked ones —
+  bounded by what blocks (the backend keeps at most 64 shells per block
+  anyway) and visible in the dev HUD. The shell journal (§6.3.2, PR 4b below)
+  makes shells durable and removes the blocked case. (Answered AskUserQuestion
+  tools are not blocked at all — see the PR 3 revision just above.)
+- **Live-only decoration rows are ephemeral, not content.** stderr rows,
+  system notifications, "Interrupted", heuristic compaction markers and
+  `compaction_started` join §6.3.2's `ephemeral` class (working indicators,
+  synthetic rows): never in the transcript, dropped by every reload today,
+  never shown by History. They roll off with their turn; invariant 4 and its
+  runtime assertion apply to content, and `ephemeral` is outside it by
+  definition (Codex review).
+- **Providers whose user messages never reach the transcript** (Codex, Kimi,
+  ACP — §6.3.6's durability table) would have every turn blocked by its first
+  node. For them roll-off is **off** until the journal (PR 4) records user
+  messages: they keep today's behaviour exactly, which is no regression.
+  Claude and the Gemini family (whose echo shipped in #3620) are covered from
+  PR 3 (Codex review) — Claude only under the **persistent** controller: the
+  per-turn subprocess controller (muxcode, container agents) writes the
+  prompt to the CLI's stdin without persisting it, so those panes are in the
+  "never reach the transcript" group too (found while building PR 3).
+  *PR 4a:* the subprocess controller now writes each message it sends as
+  the same `{"type":"user",...}` record + `echo: "stdin"` event (not for
+  Gemini, whose CLI echoes it), and the Codex and Kimi translators render it
+  on replay — so Codex, Kimi and subprocess-Claude panes roll off too. ACP
+  and the Codex app-server controller remain excluded until they write the
+  same record (PR 4c below).
+
+**How.** Reducer command `RollOff { ranges }`
+(`frontend/app/store/agent-document/reducer.ts`): removes whole turns given as
+index ranges — usually one prefix, more only around a blocked turn — in one
+pass, rebuilding the id set and index as `clampToSessionScope` in that file
+does, and emitting `turns-rolled-off { removedCount, turns }`. The layout store already prunes
+ids no longer present (`NodesChanged` → `pruneMap`,
+`frontend/app/store/agent-pane-layout/reducer.ts`); the document state's
+collapsed / pinned / expanded id sets are pruned in the same pass. The pane
+keeps a count of turns rolled off since mount.
+
+**The top of the live feed.** Paging older content into the feed is off
+while `agent:livefeed` is on (`onLoadOlder` not passed, `hasOlderHistory`
+false; `frontend/app/view/agent/hooks/useHistoryPagination.ts`). The existing
+`history_link` row (`frontend/app/view/agent/inject-history-link.ts`) shows whenever anything rolled off or
+the load didn't start at line 0, and reads "N earlier turns · open in
+History" when N is known (turns rolled off since mount, and the load started
+at line 0), otherwise "Earlier turns · open in History". Clicking it opens or
+focuses History as today. Opening History *at* the first turn still in the
+feed needs node identity shared across parsers (5b) and is deferred; History
+opens at its end, which is where the rolled-off turns are.
+
+**History follows the transcript** (replaces §6.4's design with the same
+goal):
+
+- The History tab (`frontend/app/view/agent/history/AgentHistoryView.tsx`)
+  keeps **one incremental parser** (`HistoryParser`, the body of
+  `parseHistoryLines` in `frontend/app/view/agent/parseHistoryLines.ts` made
+  resumable) for the range it has loaded; new
+  lines go through the same instance, so open text runs continue and counter
+  ids don't collide. `parseHistoryLines` becomes "a `HistoryParser` fed once",
+  and a test requires feeding in arbitrary chunks to give identical nodes.
+- It reuses `TranscriptCursor` (`frontend/app/view/agent/transcript-cursor.ts`)
+  as-is on the source block's output file subject: settled from its own
+  initial read (`historyPin`, same file), gaps filled by
+  range reads (a gap it won't fill makes History reload — "No silent holes"
+  below), duplicates dropped, the same 5 s line-count poll for other
+  writers to the agent's shared zone while visible. Echoes are parsed (they
+  are the user's messages; History has no optimistic copy).
+- Parsing an append is O(new lines). Publishing is coalesced to at most once
+  a second and costs O(loaded nodes) — day dividers are re-derived and the
+  virtual list takes a new node array, as the live feed's stores do per flush
+  (the class of cost Phase 4 removes, deferred on measurement). The History
+  PR records the publish cost at 200 turns in the tracker; if it shows as a
+  stall, dividers and the document become incremental there (Codex review).
+- **A dormant tab does no work** (Codex review): events are not handed to the
+  cursor at all, so nothing is decoded or parsed; the tab only notes that one
+  arrived — and whether any of them was a truncate, replace or delete. On
+  reveal: a missed truncate/replace/delete reloads; otherwise one line-count
+  read decides — a different stream or generation than the cursor's pin
+  reloads (`TranscriptCursor` ignores such counts, so they must not be handed
+  to it), a gap within `GAP_FILL_MAX_LINES` (5,000) is filled by the cursor's
+  chunked range reads, and a larger one reloads the newest page.
+- **No silent holes** (Codex review): the cursor skips a gap over 5,000 lines
+  (or a read that fails or names a vanished generation) by advancing past it,
+  which in History would leave lines missing *below* the loaded range, where
+  `loadOlder` can't reach them. History watches the cursor's `linesSkipped`
+  counter; when it moves (and on the reveal-time reload cases above), History
+  stops showing appends — what follows the hole would be out of place — and:
+  - if the reader is following the bottom, reloads the newest page at once
+    (it keeps them at the tail, where they were);
+  - otherwise keeps the reader's pages and position untouched and shows
+    "Newer turns — jump to latest" in the History header; the reload happens
+    when they click it or scroll back to the bottom (Codex review: recovery
+    must not yank an active long-history read).
+
+  Either way what History shows is always a contiguous range of the
+  transcript.
+- `loadOlder` keeps today's wholesale reparse, and the reparse becomes the new
+  incremental parser, so appends continue from it.
+- Truncate / replace / delete of the stream: reload from scratch.
+- **A parser error is not a silent skip** (Codex review): the cursor advances
+  past a record before delivering it and only logs a throw, so History catches
+  a `HistoryParser` failure itself and treats it like a skipped gap (the
+  recovery above), rather than showing a range with the failed records
+  missing.
+
+**Deferred by this plan:** Phase 4 (n is now small;
+`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md` §3.8 measured the
+stores at ≤ 8 % at 200 turns), 5b, 5c, 5e, the detached reading window (§6.3.5) and
+opening History at a position. None is needed for a bounded live feed; each
+comes back if we want scroll-back in the feed or History anchored to a turn.
+
+**PRs.** (1) this revision; (2) History follows; (3) live feed roll-off,
+kill switch and the top row; (4a) the per-turn subprocess controller writes
+the user's message to the transcript (#3701 — Codex, Kimi, muxcode/container
+Claude); (4b) the journal for in-pane shells (5d's second half), which lifts
+the blocked case; (4c) ACP (`AcpController::send_input` and its pending-prompt
+flush) and the Codex app-server controller (`AppServerController::spawn_turn`)
+write the same user record after delivery, and their panes join the live feed
+— until then they keep today's behaviour. AskUserQuestion answers need no journal: the answer is
+already in the tool's result (PR 3 revision above); only rebuilding its
+styled rendering on replay remains, a parser follow-up. Each re-runs the
+full-conversation bench at N = 0 / 25 / 200 and records it in the tracker.
+**Exit criteria for (3):** DOM, JS heap and per-flush cost flat from N = 25 to
+N = 200 with the pane pinned, apart from blocked turns (counted in the HUD); nothing on screen moves when turns roll off
+(frame-by-frame recording); kill switch restores paging; no reproducible
+node is lost from History (every rolled-off turn is there).
+
 ## 7. Migration plan
 
 Every phase:
@@ -1177,8 +1413,8 @@ Every phase:
 | **3 — Turn-scoped tail (B)** | §6.2 | Tail DOM independent of N; replaceChild crash repro suite and streaming-buffer tests green; zero invariant-1/3 assertions in soak; frame-by-frame screen recording shows no movement at turn end |
 | **4 — O(log n) stores (D)** | §6.6 | Property tests: 100k random sequences per run in CI, 10M locally, 0 divergences; reducer bench flat from 1k to 100k nodes |
 | **5 — Node identity and durability (C prerequisites)** — re-planned as 5a–5e in §6.3.6 | §6.3.1–§6.3.3: positional ids with file generation, `src`/`endLine`/`turn`, full-pipeline parser checkpoints + `parser-checkpoints.jsonl` + one-time index rebuild, id-consumer migration, provenance per node kind, `out-of-band.jsonl` (backend + History-tab merge), generation-keyed accepted source ranges, ring-replay handling | Property test: parsing any line range restored from any checkpoint, in any page order, yields the same ids, nodes and turn ordinals as a parse from line 0 (100k random splits per CI run, every provider format, hidden reinjection included); the checkpoint-schema key test is in CI; replay-after-eviction suite (prefix, middle-gap and cross-generation cases) produces zero duplicates and drops no new-generation line; every node kind has a declared provenance (a test enumerates the `DocumentNode` union); shells appear in the History tab |
-| **6 — Bounded live document (C)** | §6.3.4–§6.3.5 | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
-| **7 — History tab follows (C)** | §6.4 | Visible tab shows new turns ≤ 1 s after turn end; appends cost O(new lines) (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
+| **6 — Bounded live document (C)** | **Revised: §6.9 live feed + roll-off** (supersedes §6.3.4–§6.3.5) | Memory and per-flush cost flat in N, pinned **and** while reading far from the bottom for 1 h of streaming; invariant 4 verified by killing the backend mid-eviction; no non-durable node ever evicted (runtime assertion, soak) |
+| **7 — History tab follows (C)** | **Revised: §6.9 "History follows the transcript"** (supersedes §6.4); ships before 6 | Visible tab shows new turns ≤ 1 s after turn end; parsing an append costs O(new lines), republishing ≤ 1 Hz (profile); hidden tab does zero work and catches up on reveal; tail-parser loss recovers with no duplicates; long-history read meets the same targets |
 | **8 — Worker decision (F)** | §6.7 criterion evaluated; build if triggered | §4 targets met on all three OSes |
 | **9 — Default on** | Remove flags once each phase has soaked; update `SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md` Status to point here | 8 h soak and fault suite green on all three OSes; user sign-off after daily use |
 | **10 — `content-visibility` (§6.8)** | flagged experiment | memory flat over 8 h on all three OSes *and* measurable frame win; otherwise documented as rejected |

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { parseHistoryLines } from "./parseHistoryLines";
+import { HistoryParser, parseHistoryLines } from "./parseHistoryLines";
 import { contextCompactedNodeId } from "./compact-boundary";
 import { composeReinjectionMessage } from "./memory-reinjection";
 import type { ToolNode } from "./types";
@@ -491,4 +491,111 @@ describe("parseHistoryLines — restored user messages keep their historical tim
         const user = nodes.find((n) => n.type === "user_message") as { timestamp?: number };
         expect(user.timestamp === undefined || user.timestamp < before).toBe(true);
     });
+});
+
+describe("HistoryParser (resumable parseHistoryLines)", () => {
+    // A transcript exercising every piece of state that spans lines: text and
+    // thinking runs, a tool whose result lands later, a compaction boundary
+    // and a session outcome (both bypass the translator and flush the parser),
+    // usage-bearing session_end, and several turns.
+    const transcript = [
+        line({ type: "user_message", message: "first question" }),
+        line({ type: "thinking", content: "Let me " }),
+        line({ type: "thinking", content: "Let me think" }),
+        line({ type: "text", content: "Looking " }),
+        line({ type: "text", content: "Looking at it" }),
+        line({ type: "tool_call", tool: "Read", id: "tool-a", params: { file_path: "a.ts" } }),
+        line({ type: "text", content: "while it reads" }),
+        line({ type: "tool_result", tool: "Read", id: "tool-a", status: "success", duration: 0.2 }),
+        line({ type: "session_end", stats: { input_tokens: 120, output_tokens: 12 } }),
+        JSON.stringify({
+            type: "system",
+            subtype: "compact_boundary",
+            content: "Conversation compacted",
+            level: "info",
+            compactMetadata: { trigger: "auto", preTokens: 1000, postTokens: 100, durationMs: 50 },
+            timestamp: "2026-09-24T10:00:00Z",
+        }),
+        line({ type: "user_message", message: "second question" }),
+        line({ type: "text", content: "Answer " }),
+        line({ type: "text", content: "Answer two" }),
+        JSON.stringify({
+            type: "system",
+            subtype: "agentmux_session_outcome",
+            outcome: "resumed",
+            attempted_sid: "sid-1",
+            actual_sid: "sid-1",
+            timestamp: "2026-09-24T10:05:00Z",
+        }),
+        line({ type: "user_message", message: "third question" }),
+        line({ type: "tool_call", tool: "Bash", id: "tool-b", params: { command: "ls" } }),
+        line({ type: "tool_result", tool: "Bash", id: "tool-b", status: "success", duration: 0.1 }),
+        line({ type: "text", content: "done" }),
+        line({ type: "session_end", stats: { input_tokens: 300, output_tokens: 30 } }),
+    ];
+    const stamps = transcript.map((_, i) => 1_790_000_000_000 + i * 1000);
+    const opts = { includeResumedOutcomes: true };
+
+    const feedInChunks = (cuts: number[]) => {
+        const parser = new HistoryParser("claude-stream-json", "me", opts);
+        let from = 0;
+        for (const to of [...cuts, transcript.length]) {
+            parser.feed(transcript.slice(from, to), stamps.slice(from, to));
+            from = to;
+        }
+        return parser;
+    };
+
+    it("feeding in any two chunks gives exactly the nodes of one parse", () => {
+        const whole = parseHistoryLines(transcript, "claude-stream-json", "me", stamps, opts);
+        expect(whole.nodes.length).toBeGreaterThan(8);
+        for (let cut = 0; cut <= transcript.length; cut++) {
+            const parser = feedInChunks([cut]);
+            expect(parser.nodes, `cut at ${cut}`).toEqual(whole.nodes);
+            expect(parser.lastSessionStats, `cut at ${cut}`).toEqual(whole.lastSessionStats);
+        }
+    });
+
+    it("feeding line by line gives exactly the nodes of one parse", () => {
+        const whole = parseHistoryLines(transcript, "claude-stream-json", "me", stamps, opts);
+        const parser = feedInChunks(transcript.map((_, i) => i).slice(1));
+        expect(parser.nodes).toEqual(whole.nodes);
+    });
+
+    it("reports the ids each feed added or replaced", () => {
+        const parser = new HistoryParser("claude-stream-json", "me", opts);
+        parser.feed(transcript.slice(0, 6), stamps.slice(0, 6));
+        const toolIndex = parser.nodes.findIndex((n) => n.id === "tool-a");
+        expect(toolIndex).toBeGreaterThanOrEqual(0);
+        // The tool's result arrives in the next chunk: the tool is reported
+        // as changed and stays where its call appeared.
+        const changed = parser.feed(transcript.slice(6, 8), stamps.slice(6, 8));
+        expect(changed.has("tool-a")).toBe(true);
+        expect(parser.nodes[toolIndex].id).toBe("tool-a");
+        expect((parser.nodes[toolIndex] as ToolNode).status).toBe("success");
+    });
+});
+
+describe("user messages persisted for CLIs that don't echo them (spec §6.9)", () => {
+    // What the per-turn subprocess controller writes before each turn
+    // (agentmux-srv subprocess::user_record) — the same line the persistent
+    // Claude controller writes for stdin.
+    const userRecord = (content: string) => JSON.stringify({ type: "user", message: { role: "user", content } });
+
+    it.each(["codex-json", "kimi-stream-json", "claude-stream-json"])(
+        "%s: replays the record as the user's message",
+        (format) => {
+            const { nodes } = parseHistoryLines([userRecord("fix the build")], format);
+            const user = nodes.find((n) => n.type === "user_message") as { message?: string } | undefined;
+            expect(user?.message).toBe("fix the build");
+        }
+    );
+
+    it.each(["codex-json", "kimi-stream-json"])(
+        "%s: a live translator doesn't render it (the pane already shows it)",
+        async (format) => {
+            const { createTranslator } = await import("./providers/translator-factory");
+            expect(createTranslator(format).translate(JSON.parse(userRecord("hi")))).toEqual([]);
+        }
+    );
 });

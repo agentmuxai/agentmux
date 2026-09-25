@@ -120,15 +120,6 @@ pub struct SettingsType {
     #[serde(rename = "tab:preset", default, skip_serializing_if = "String::is_empty")]
     pub tab_preset: String,
 
-    // -- Pane settings --
-    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-    // §4.1/§7 resolution 1). Frontend-typed as "always" | "multi-only"
-    // (frontend/types/srv-types.d.ts); kept as a plain String here, same as
-    // tab_preset above — the backend doesn't validate/consume this value,
-    // only round-trips it.
-    #[serde(rename = "pane:tabstrip", default, skip_serializing_if = "String::is_empty")]
-    pub pane_tabstrip: String,
-
     // -- Widget settings --
     #[serde(rename = "widget:*", default, skip_serializing_if = "is_false")]
     pub widget_clear: bool,
@@ -190,6 +181,14 @@ pub struct SettingsType {
 
     #[serde(rename = "window:savelastwindow", default, skip_serializing_if = "is_false")]
     pub window_save_last_window: bool,
+
+    /// Keep inactive window tabs laid out (`visibility: hidden`) instead of
+    /// skipping their layout (`content-visibility: hidden`), so switching
+    /// back has nothing to catch up on. On unless `false` (the frontend
+    /// treats unset as on); see
+    /// docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md §7.
+    #[serde(rename = "window:keepinactivetabslaidout", default, skip_serializing_if = "Option::is_none")]
+    pub window_keep_inactive_tabs_laid_out: Option<bool>,
 
     #[serde(rename = "window:dimensions", default, skip_serializing_if = "String::is_empty")]
     pub window_dimensions: String,

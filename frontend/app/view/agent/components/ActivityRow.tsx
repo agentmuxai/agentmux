@@ -74,7 +74,7 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
     const tick = useTick(1000);
 
     // Landing flash on first mount — same visual as a tab landing after a
-    // drag/drop (tab-bounce, tabbar.scss), reused here rather than a new
+    // drag/drop (tab-bounce, drop-feedback.scss), reused here rather than a new
     // bespoke animation. Cleared after EXIT_FLASH_MS so it plays once, not
     // on every re-render.
     const [entering, setEntering] = createSignal(true);

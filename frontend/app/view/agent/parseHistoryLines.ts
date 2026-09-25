@@ -9,10 +9,10 @@
  * from onMount without touching SolidJS reactivity.
  */
 
+import { contextCompactedNodeId, parseCompactBoundaryFrame } from "./compact-boundary";
 import { createTranslator } from "./providers/translator-factory";
-import { ClaudeCodeStreamParser } from "./stream-parser";
-import { parseCompactBoundaryFrame, contextCompactedNodeId } from "./compact-boundary";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
+import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode, SessionStats } from "./types";
 
 export interface ParsedHistory {
@@ -61,24 +61,40 @@ export function parseHistoryLines(
     outputFormat: string,
     agentName?: string,
     stamps?: number[],
-    opts?: {
-        /**
-         * Materialize `resumed` session outcomes as nodes. False (default)
-         * for the working view (§3.5 demotion); true for the Agent History
-         * view, where process-restart landmarks are useful context (§4.1).
-         */
-        includeResumedOutcomes?: boolean;
-    },
+    opts?: HistoryParserOptions
 ): ParsedHistory {
-    const translator = createTranslator(outputFormat, { replay: true });
+    const parser = new HistoryParser(outputFormat, agentName, opts);
+    parser.feed(lines, stamps);
+    return { nodes: parser.nodes, lastSessionStats: parser.lastSessionStats };
+}
+
+export interface HistoryParserOptions {
+    /**
+     * Materialize `resumed` session outcomes as nodes. False (default)
+     * for the working view (§3.5 demotion); true for the Agent History
+     * view, where process-restart landmarks are useful context (§4.1).
+     */
+    includeResumedOutcomes?: boolean;
+}
+
+/**
+ * `parseHistoryLines`, resumable: one translator + parser whose state
+ * carries across `feed` calls, so lines appended later continue open
+ * text/thinking runs and pending tools, and counter ids never collide.
+ * Feeding a range in any number of chunks yields exactly the nodes of one
+ * `parseHistoryLines` over the whole range. The History tab tails the
+ * transcript through one of these (spec §6.9, "History follows the
+ * transcript").
+ */
+export class HistoryParser {
     // isReplay: true — thinking/tool_call events carry no wire timestamp of
     // their own, so stamping Date.now() here would show every replayed
     // clump/call as "just now" (reagent P2 on PR #2392). See
     // ClaudeCodeStreamParser's isReplay doc comment.
-    const parser = new ClaudeCodeStreamParser({ isReplay: true });
-    if (agentName) parser.setAgentId(agentName);
-    const nodes: DocumentNode[] = [];
-    let lastSessionStats: SessionStats | null = null;
+    private readonly translator: ReturnType<typeof createTranslator>;
+    private readonly parser = new ClaudeCodeStreamParser({ isReplay: true });
+    /** Ordered, deduped by id. Same-id events replace in place. */
+    readonly nodes: DocumentNode[] = [];
     // Same-id events update IN PLACE rather than first-wins.
     // The previous "skip if seen" rule dropped legitimate state
     // transitions during replay — most importantly, a `tool_result`
@@ -88,197 +104,213 @@ export function parseHistoryLines(
     // markdown/thinking deltas also share an id; same rule means the
     // accumulated tail (the last delta containing the full text) wins,
     // which is the same end state the live stream produces.
-    const indexById = new Map<string, number>();
+    private readonly indexById = new Map<string, number>();
+    lastSessionStats: SessionStats | null = null;
 
-    // Batch receive-time for line i, or undefined when unknown. 0 is the
-    // backend's "unknown" sentinel and must never leak onto a node (§4.4
-    // sentinel hygiene — hover gates on `!= null` and would render 1970).
-    const stampFor = (i: number): number | undefined => {
-        const s = stamps?.[i];
-        return typeof s === "number" && s > 0 ? s : undefined;
-    };
-    // Stamp a freshly-created node from its line's batch time when the wire
-    // frame carried no usable timestamp of its own.
-    const stampIfMissing = (node: DocumentNode, stampMs: number | undefined): DocumentNode => {
-        if (stampMs == null) return node;
-        const ts = (node as { timestamp?: number }).timestamp;
-        if (ts != null && ts !== 0) return node;
-        return { ...node, timestamp: stampMs } as DocumentNode;
-    };
-    // An in-place same-id replacement (tool_call → tool_result, accumulated
-    // text deltas) must not wipe the stamp the node got when it was first
-    // created — the replacement event is typically timestamp-less too.
-    const carryTimestamp = (prior: DocumentNode, replacement: DocumentNode): DocumentNode => {
-        const rts = (replacement as { timestamp?: number }).timestamp;
-        if (rts != null && rts !== 0) return replacement;
-        const pts = (prior as { timestamp?: number }).timestamp;
-        if (pts == null || pts === 0) return replacement;
-        return { ...replacement, timestamp: pts } as DocumentNode;
-    };
+    constructor(
+        outputFormat: string,
+        agentName?: string,
+        private readonly opts?: HistoryParserOptions
+    ) {
+        this.translator = createTranslator(outputFormat, { replay: true });
+        if (agentName) this.parser.setAgentId(agentName);
+    }
 
-    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-        const line = lines[lineIdx];
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("{")) continue;
-
-        let rawEvent: any;
-        try {
-            rawEvent = JSON.parse(trimmed);
-        } catch {
-            // Corrupt line — skip silently (same as useAgentStream behaviour)
-            continue;
-        }
-
-        // Handle stderr events (unlikely in persisted history, but be safe)
-        if (rawEvent.type === "stderr") continue;
-
-        // Real compaction-boundary completion data. Same raw-frame
-        // interception as useAgentStream.ts's live path (shared parsing
-        // via compact-boundary.ts) — this frame has no StreamEvent shape
-        // in the provider translator, so without this the replay pipeline
-        // silently dropped every historical compact_boundary along with
-        // its exact token/duration record (Codex P1, PR #2378 round 2).
-        if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
-            // Bypassing parser.parseLine() below means the parser's
-            // currentTextNode/currentThinkingNode accumulator never sees
-            // this line — without closing it explicitly, text AFTER the
-            // boundary would keep accumulating onto the SAME node id as
-            // text BEFORE it (same bug class as Codex P1 #1104's
-            // tool_call/tool_result merge issue, just for the text
-            // accumulator instead), silently merging content across the
-            // compaction and reordering it before the compaction marker
-            // in the replayed transcript. Flushed unconditionally — even
-            // a boundary frame whose metadata fails to parse below is
-            // still a real boundary in the underlying conversation.
-            // flushPending()'s return value is discarded: those nodes are
-            // already correctly represented in `nodes` from when the
-            // per-line loop processed them.
-            parser.flushPending();
-            const data = parseCompactBoundaryFrame(rawEvent);
-            if (data) {
-                const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
-                const node: ContextCompactedNode = {
-                    type: "context_compacted",
-                    // Codex P2, PR #2378 round 12: shares useAgentStream.ts's
-                    // exact id-construction function (including its
-                    // content-derived fallback for the timestamp-less
-                    // case) instead of independently reimplementing it here
-                    // with a different fallback (previously nodes.length,
-                    // a batch-relative counter) — the same underlying
-                    // boundary seen live AND via a history-replay overlap
-                    // must always land on the identical id, or the
-                    // document store's same-id dedup can't merge them.
-                    id: contextCompactedNodeId(data),
-                    tokensBefore: data.preTokens,
-                    tokensAfter: data.postTokens,
-                    // Wire timestamp wins; batch stamp fills the timestamp-less
-                    // case; 0 only when neither exists (type requires number).
-                    timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
-                    source: "real",
-                    trigger: data.trigger,
-                    durationMs: data.durationMs,
-                };
-                const existing = indexById.get(node.id);
-                if (existing != null) {
-                    nodes[existing] = node;
-                } else {
-                    indexById.set(node.id, nodes.length);
-                    nodes.push(node);
-                }
+    /**
+     * Parse more lines, in order, after everything fed so far. `stamps` are
+     * receive-time stamps (unix ms) parallel to `lines`; see
+     * `parseHistoryLines`. Returns the ids of nodes added or replaced.
+     */
+    feed(lines: string[], stamps?: (number | undefined)[]): Set<string> {
+        const { translator, parser, indexById, opts, nodes } = this;
+        const changed = new Set<string>();
+        const put = (node: DocumentNode, existing: number | undefined): void => {
+            if (existing != null) nodes[existing] = node;
+            else {
+                indexById.set(node.id, nodes.length);
+                nodes.push(node);
             }
-            continue;
-        }
+            changed.add(node.id);
+        };
 
-        // AgentMux's own resume-outcome marker — same raw-frame interception
-        // as useAgentStream.ts's live path (shared parsing via
-        // session-outcome.ts). See
-        // docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
-        if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
-            parser.flushPending();
-            // reagentx P1, PR #3502, second review round: a hidden
-            // memory-reinjection turn (tryParseMemoryReinjection) landing
-            // as the LAST turn of a session before this boundary would
-            // otherwise leave the parser's hiding-suppression state stuck
-            // on across it, silently dropping every event of the NEXT
-            // session until some future real user_message appears.
-            // Unconditional on this frame merely being SEEN (not gated on
-            // `data` parsing successfully or on which outcome it reports,
-            // unlike the narrower `lastSessionStats` reset below) — any
-            // session boundary is a safe point to stop trusting a flag
-            // that was only ever meant to span a single turn, and a stuck
-            // suppression that silently eats real history is a worse
-            // failure than an occasional no-op reset.
-            parser.clearHiddenReinjectionState();
-            const data = parseSessionOutcomeFrame(rawEvent);
-            // `resumed` outcomes are demoted out of the working transcript
-            // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
-            // _2026_08_09.md §3.5): a confirmed resume fires on
-            // user-invisible process recycles and its persisted line lands
-            // AFTER the first post-resume exchange — as a divider row it
-            // announces a non-event in the wrong place. The line stays in
-            if (data && data.outcome === "fresh") {
-                // codex P2 on PR #2507: a usage-bearing `session_end` seen
-                // BEFORE this boundary belongs to the old session — the
-                // fresh model has none of those tokens in context. Without
-                // this reset, a restore window shaped [old result → fresh
-                // boundary → no new result yet] hydrates the context-fill
-                // bar (`ReconcileContextFromHistory`) with the dead
-                // session's count. Only post-boundary usage may seed it.
-                lastSessionStats = null;
+        // Batch receive-time for line i, or undefined when unknown. 0 is the
+        // backend's "unknown" sentinel and must never leak onto a node (§4.4
+        // sentinel hygiene — hover gates on `!= null` and would render 1970).
+        const stampFor = (i: number): number | undefined => {
+            const s = stamps?.[i];
+            return typeof s === "number" && s > 0 ? s : undefined;
+        };
+        // Stamp a freshly-created node from its line's batch time when the wire
+        // frame carried no usable timestamp of its own.
+        const stampIfMissing = (node: DocumentNode, stampMs: number | undefined): DocumentNode => {
+            if (stampMs == null) return node;
+            const ts = (node as { timestamp?: number }).timestamp;
+            if (ts != null && ts !== 0) return node;
+            return { ...node, timestamp: stampMs } as DocumentNode;
+        };
+        // An in-place same-id replacement (tool_call → tool_result, accumulated
+        // text deltas) must not wipe the stamp the node got when it was first
+        // created — the replacement event is typically timestamp-less too.
+        const carryTimestamp = (prior: DocumentNode, replacement: DocumentNode): DocumentNode => {
+            const rts = (replacement as { timestamp?: number }).timestamp;
+            if (rts != null && rts !== 0) return replacement;
+            const pts = (prior as { timestamp?: number }).timestamp;
+            if (pts == null || pts === 0) return replacement;
+            return { ...replacement, timestamp: pts } as DocumentNode;
+        };
+
+        for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+            const line = lines[lineIdx];
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith("{")) continue;
+
+            let rawEvent: any;
+            try {
+                rawEvent = JSON.parse(trimmed);
+            } catch {
+                // Corrupt line — skip silently (same as useAgentStream behaviour)
+                continue;
             }
-            if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
-                const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
-                const node: SessionOutcomeNode = {
-                    type: "session_outcome",
-                    // Shares useAgentStream.ts's exact id-construction
-                    // function — same rationale as context_compacted above.
-                    id: sessionOutcomeNodeId(data),
-                    outcome: data.outcome,
-                    attemptedSid: data.attemptedSid,
-                    actualSid: data.actualSid,
-                    // Same wire-wins-then-stamp rule as context_compacted above.
-                    timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
-                };
-                const existing = indexById.get(node.id);
-                if (existing != null) {
-                    nodes[existing] = node;
-                } else {
-                    indexById.set(node.id, nodes.length);
-                    nodes.push(node);
-                }
-            }
-            continue;
-        }
 
-        // Translate provider-specific envelope → StreamEvent[]
-        const streamEvents = translator.translate(rawEvent);
+            // Handle stderr events (unlikely in persisted history, but be safe)
+            if (rawEvent.type === "stderr") continue;
 
-        for (const event of streamEvents) {
-            if (event.type === "session_end") {
-                // Only overwrite when this session_end actually carries usage —
-                // skip the empty-stats per-turn boundary marker so it can't
-                // clobber a real result's stats seen earlier in the window.
-                if (event.stats
-                    && (typeof event.stats.input_tokens === "number"
-                        || typeof event.stats.output_tokens === "number")) {
-                    lastSessionStats = event.stats;
+            // Real compaction-boundary completion data. Same raw-frame
+            // interception as useAgentStream.ts's live path (shared parsing
+            // via compact-boundary.ts) — this frame has no StreamEvent shape
+            // in the provider translator, so without this the replay pipeline
+            // silently dropped every historical compact_boundary along with
+            // its exact token/duration record (Codex P1, PR #2378 round 2).
+            if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
+                // Bypassing parser.parseLine() below means the parser's
+                // currentTextNode/currentThinkingNode accumulator never sees
+                // this line — without closing it explicitly, text AFTER the
+                // boundary would keep accumulating onto the SAME node id as
+                // text BEFORE it (same bug class as Codex P1 #1104's
+                // tool_call/tool_result merge issue, just for the text
+                // accumulator instead), silently merging content across the
+                // compaction and reordering it before the compaction marker
+                // in the replayed transcript. Flushed unconditionally — even
+                // a boundary frame whose metadata fails to parse below is
+                // still a real boundary in the underlying conversation.
+                // flushPending()'s return value is discarded: those nodes are
+                // already correctly represented in `nodes` from when the
+                // per-line loop processed them.
+                parser.flushPending();
+                const data = parseCompactBoundaryFrame(rawEvent);
+                if (data) {
+                    const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
+                    const node: ContextCompactedNode = {
+                        type: "context_compacted",
+                        // Codex P2, PR #2378 round 12: shares useAgentStream.ts's
+                        // exact id-construction function (including its
+                        // content-derived fallback for the timestamp-less
+                        // case) instead of independently reimplementing it here
+                        // with a different fallback (previously nodes.length,
+                        // a batch-relative counter) — the same underlying
+                        // boundary seen live AND via a history-replay overlap
+                        // must always land on the identical id, or the
+                        // document store's same-id dedup can't merge them.
+                        id: contextCompactedNodeId(data),
+                        tokensBefore: data.preTokens,
+                        tokensAfter: data.postTokens,
+                        // Wire timestamp wins; batch stamp fills the timestamp-less
+                        // case; 0 only when neither exists (type requires number).
+                        timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
+                        source: "real",
+                        trigger: data.trigger,
+                        durationMs: data.durationMs,
+                    };
+                    put(node, indexById.get(node.id));
                 }
                 continue;
             }
-            const node = parser.parseLine(JSON.stringify(event));
-            if (!node) continue;
-            const existing = indexById.get(node.id);
-            if (existing != null) {
+
+            // AgentMux's own resume-outcome marker — same raw-frame interception
+            // as useAgentStream.ts's live path (shared parsing via
+            // session-outcome.ts). See
+            // docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
+            if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
+                parser.flushPending();
+                // reagentx P1, PR #3502, second review round: a hidden
+                // memory-reinjection turn (tryParseMemoryReinjection) landing
+                // as the LAST turn of a session before this boundary would
+                // otherwise leave the parser's hiding-suppression state stuck
+                // on across it, silently dropping every event of the NEXT
+                // session until some future real user_message appears.
+                // Unconditional on this frame merely being SEEN (not gated on
+                // `data` parsing successfully or on which outcome it reports,
+                // unlike the narrower `lastSessionStats` reset below) — any
+                // session boundary is a safe point to stop trusting a flag
+                // that was only ever meant to span a single turn, and a stuck
+                // suppression that silently eats real history is a worse
+                // failure than an occasional no-op reset.
+                parser.clearHiddenReinjectionState();
+                const data = parseSessionOutcomeFrame(rawEvent);
+                // `resumed` outcomes are demoted out of the working transcript
+                // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
+                // _2026_08_09.md §3.5): a confirmed resume fires on
+                // user-invisible process recycles and its persisted line lands
+                // AFTER the first post-resume exchange — as a divider row it
+                // announces a non-event in the wrong place. The line stays in
+                if (data && data.outcome === "fresh") {
+                    // codex P2 on PR #2507: a usage-bearing `session_end` seen
+                    // BEFORE this boundary belongs to the old session — the
+                    // fresh model has none of those tokens in context. Without
+                    // this reset, a restore window shaped [old result → fresh
+                    // boundary → no new result yet] hydrates the context-fill
+                    // bar (`ReconcileContextFromHistory`) with the dead
+                    // session's count. Only post-boundary usage may seed it.
+                    this.lastSessionStats = null;
+                }
+                if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
+                    const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
+                    const node: SessionOutcomeNode = {
+                        type: "session_outcome",
+                        // Shares useAgentStream.ts's exact id-construction
+                        // function — same rationale as context_compacted above.
+                        id: sessionOutcomeNodeId(data),
+                        outcome: data.outcome,
+                        attemptedSid: data.attemptedSid,
+                        actualSid: data.actualSid,
+                        continued: data.continued,
+                        // Same wire-wins-then-stamp rule as context_compacted above.
+                        timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
+                    };
+                    put(node, indexById.get(node.id));
+                }
+                continue;
+            }
+
+            // Translate provider-specific envelope → StreamEvent[]
+            const streamEvents = translator.translate(rawEvent);
+
+            for (const event of streamEvents) {
+                if (event.type === "session_end") {
+                    // Only overwrite when this session_end actually carries usage —
+                    // skip the empty-stats per-turn boundary marker so it can't
+                    // clobber a real result's stats seen earlier in the window.
+                    if (
+                        event.stats &&
+                        (typeof event.stats.input_tokens === "number" || typeof event.stats.output_tokens === "number")
+                    ) {
+                        this.lastSessionStats = event.stats;
+                    }
+                    continue;
+                }
+                const node = parser.parseLine(JSON.stringify(event));
+                if (!node) continue;
+                const existing = indexById.get(node.id);
                 // Replace at the original position so insertion order
                 // tracks where the id first appeared (which is where
                 // the live render would have placed it).
-                nodes[existing] = carryTimestamp(nodes[existing], node);
-            } else {
-                indexById.set(node.id, nodes.length);
-                nodes.push(stampIfMissing(node, stampFor(lineIdx)));
+                put(
+                    existing != null ? carryTimestamp(nodes[existing], node) : stampIfMissing(node, stampFor(lineIdx)),
+                    existing
+                );
             }
         }
-    }
 
-    return { nodes, lastSessionStats };
+        return changed;
+    }
 }

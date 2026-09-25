@@ -1,7 +1,7 @@
 # SPEC: durable conversation memory — one continuous conversation per agent, in every case
 
 **Date:** 2026-09-23
-**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P1, P2, P4–P6 and P3's rolling LLM state block not started.
+**Status:** active — P0 done: P0a #3626 (a first spawn continues the session its pane renders), P0b #3605, P0c #3638 (history index warmed, incremental), P0d #3637 (180-day transcript retention). P3 deterministic packet in #3643 (a fresh session onto prior history gets AgentMux's record on its first message). P3 rolling state block v1 in `backend/continuity_state.rs` (§4.4.1): Claude agents keep a running summary beside their global transcript, and the packet leads with it. Also reused after compaction (§4.4.1). P1 v1: every spawn records a segment in an event log in the global store (§4.1.1). First ladder slice: a rejected resume falls through to R3, never to older history (§4.2.1). The pane labels a fresh session that carries the record "Session continued · reconstructed context" (§4.8). P2, P4–P6, and P3's resolver ladder and pane chip not started. Exact identifiers are extracted deterministically into the packet (§4.4.1).
 **Author:** agenty (Claude), at the repo owner's direction.
 **Trigger:** Repo owner, after `agenty` lost its conversation on reopen:
 *"sometimes I can leave and come back the agent has ready access to our
@@ -199,6 +199,53 @@ segment.
   writes for Claude, to a value matching the raw retention. Otherwise native
   resume of a month-old session silently degrades to virtualized.
 
+### 4.1.1 What P1 v1 ships: an event log, not a table
+
+`agentmux-srv/src/backend/continuity_segments.rs`, hooked in by
+`blockcontroller/persistent/segments.rs`.
+
+**Storage decision.** The segments are an append-only event log,
+`segments.jsonl` in the global transcript store's
+`agent-uid:<uid>:segments` zone. They are not a SQL table. Mapping the code
+turned up three facts:
+- `db_agent_instances` was dropped at object schema v32.
+- `db_agents` is per-channel and keeps only the latest launch.
+- A new table in `identity-store.db` means bumping its schema version, and
+  `check_schema_compat` then makes every older build refuse the file and
+  fall back to per-channel storage. That breaks the cross-version case this
+  spec exists for.
+
+The global transcript `filestore.db` is shared by every srv and takes
+additions without a version bump. The log is keyed by the agent's UID, not
+its definition id: a template launch shares the template's transcript zone
+but is a different agent. It's also a separate zone from the transcript, so
+"New conversation" (which clears `agent:<defId>:current`) never erases the
+chain.
+
+**Events.**
+- **`start`**, at spawn once the agent's UID is known. It carries the §4.1
+  columns: UID, definition id, provider, config dir, the resumed session id
+  if any, cwd, channel, AgentMux version, block, the transcript zone and its
+  size, the start time, the rung and the predecessor. The rung is `native`
+  when the spawn passed `--resume`, `virtualized` when it carries a
+  continuation packet, and `fresh` otherwise. The predecessor is the newest
+  earlier segment for the UID.
+- **`session`**, when a fresh process first reports its provider session id.
+- **`end`**, from the process waiter. A natural exit is `exited` (code 0)
+  or `crashed`. A kill is `closed` (pane close, `shutdown_generation`),
+  `restarted` (runtime-config restart, `restart_pending`) or `stopped`.
+
+`segments(uid)` folds the events back into rows, oldest first. The first
+`end` for a segment wins, and corrupt lines are skipped.
+
+**Not in v1:**
+- Backfilling from existing FileStore zones.
+- Closing segments that were left open when srv died (at boot, from
+  `session_recovery::scan_orphans`).
+- Re-pointing `zone`/`byte_*` when "New conversation" archives the zone.
+- The account id (only the config dir is recorded) and the model.
+- Any reader. The R0–R4 resolver (§4.2) is the first consumer.
+
 ### 4.2 The continuity resolver: runs on every launch
 
 A single server-side function, `resolve_continuity(agent_uid, launch_ctx) -> ContinuityPlan`.
@@ -235,6 +282,30 @@ Rules:
   the default.
 - The resolver's verdict replaces `resume_preflight`'s advisory table. The
   preflight module becomes the resolver's reachability probe.
+
+### 4.2.1 First slice of the ladder: a rejected resume falls through to R3
+
+Before the full resolver exists, the segment chain already fixes the
+account-switch case for a pane that is still open:
+- The pane holds the old account's session id. The spawn passes `--resume`,
+  and the new account's CLI answers "No conversation found".
+- `retry_after_resume_failure` then looked for the largest session under the
+  new config dir and cwd. Often that's the same agent's session from the last
+  time it ran under this account, so the pane showed "Resumed" on older
+  history. If there was none, the retry started fresh, but the continuation
+  packet was gated to a controller's first spawn, so the retry got no record
+  at all.
+
+Now:
+- **Recovery only continues the head of the chain.** The head is the
+  provider session of the newest segment before the one that just failed
+  (`continuity_segments::head_session` / `recovery_allowed`). Any other
+  candidate is refused. With no known head (an agent from before the
+  segment index), recovery works as before.
+- **Every spawn without `--resume` onto prior history carries the packet**,
+  whatever the generation, so the refused recovery lands on R3. The "fresh
+  start" disclosure stays first-spawn-only, because the retry path emits its
+  own.
 
 ### 4.3 Case matrix
 
@@ -358,6 +429,70 @@ commitments and "context that hooks added earlier" is summarized away
 (<https://code.claude.com/docs/en/context-window>), so our block is the
 backstop for goals, pending items and user preferences.
 
+### 4.4.1 What v1 of the rolling state block ships
+
+The first cut of "Generation" above, in `agentmux-srv/src/backend/continuity_state.rs`.
+It keeps the design and defers everything that needs P1's segment index.
+
+- **Storage.** Versions are appended to `continuity.state.jsonl` in the
+  agent's global `agent:<defId>:current` zone, one JSON line each:
+  `{version, created_at_ms, based_on, sha256, text, tokens?}`. `based_on` is the byte
+  length of `output` the version covers, standing in for `based_on_seq` until
+  P1. Versions are never rewritten. "New conversation" clears the file with
+  the rest of the zone (`archive.rs`, `clear_global_current_zone`). A version
+  whose `based_on` exceeds the current `output` is ignored, so a missed clear
+  can't leak an old summary into a new conversation.
+- **Trigger.** After every successful turn (`persistent/spawn.rs`, the
+  non-error `result` branch), in the background. An update runs when there's
+  no version yet and at least one person turn, or 3+ person turns since the
+  last version, or 1+ turns and the last version is 10+ minutes old. Relayed
+  agent messages (`[JEKT:`) don't count. One update at a time per agent. The
+  `PreCompact` and `SessionEnd` triggers wait for hooks.
+- **Scope.** Claude agents anchored to a definition (`agentProvider =
+  claude`, valid `agentId`). Opt out per agent with `agent:continuity = off`
+  (§4.7).
+- **Summarizer.** One Haiku call through the agent's own CLI and account
+  (`invoke_ambient_haiku_call_with_timeout`, 90 s). It's admitted through the
+  Ambient Model Call gateway (purpose `continuity_state`, keyed by agent
+  zone, with the transcript size as the generation). Its token usage is
+  stored on the version it produced. Input: the previous state,
+  plus the newest ~30k characters of new turns, redacted, with tool output
+  omitted. The reply must contain `## Last user request`. Any closing
+  paragraph addressed to the reader is cut, then the reply is capped at 12k
+  characters, redacted and defused. A failed call (for example, the account
+  is out of quota) leaves the last good version in place, and the next turn
+  retries.
+- **Delivery.** `build_continuation_packet` puts the newest version first as
+  "Running summary of the whole conversation", with its timestamp and a note
+  that the verbatim exchange below is newer and wins where they differ. Then
+  come the last request and the exchange, per §4.4's order.
+- **Exact identifiers.** `continuity.rs` `identifiers()` pulls PR and issue
+  references (`#N`, `owner/repo#N`), URLs, repo-relative file paths (a
+  trailing `:line` is dropped) and commit ids (7–40 hex digits with both a
+  digit and a letter) out of the record's turns. The list is deduplicated,
+  newest first, and capped at 40. The packet lists them right after the
+  running summary as "trust these over a paraphrase". Extraction runs on
+  redacted text, so a credential inside a URL never makes the list. On
+  today's 101-turn transcript it produced 40 real identifiers and no noise.
+- **Compaction reuse.** When the hidden memory reinjection that follows a
+  compaction reaches srv (`agent_handlers/input.rs`, `hidden: true`, carrying
+  `memory-reinjection.ts`'s compaction clause), srv appends the newest version
+  as a final `# Running summary of this conversation` section
+  (`with_state_after_compaction`). It's a `#` section like the memory ones,
+  so the frontend's replay parser still counts the entries right. A
+  fresh-session reinjection doesn't get it, because its continuation packet
+  already leads with the summary.
+- **Live check, 2026-09-24.** Run on a real 101-turn transcript (the account
+  switch that prompted this). Haiku took 27 s, which is why the call gets its
+  own timeout instead of the 15 s default. The first prompt produced a good
+  state, but ended by answering the conversation's last question. The rule
+  "you are not the agent", plus the trailing-paragraph cut, fixed that. The
+  output still had small errors, like a commit id attached to the wrong PR.
+  That's the case for the deterministic identifier extraction below.
+
+**Not in v1:** the resolver ladder (R0–R4), the pane chip, per-version prompt logging, the Armory diff/revert view, and other
+providers.
+
 ### 4.5 Recall: pulling older detail on demand
 
 The packet stays small because older detail can be fetched just-in-time
@@ -438,6 +573,14 @@ the other providers need only an adapter plus an injection hook.
   It is persisted on the segment row and replaces the ad-hoc `session:resume_failed` / `fresh` disclosure.
 - Pane chip: `Resumed`, `Resumed (relocated)`, `Continued · reconstructed
   context (<reason>)` with a "view packet" action, or `New conversation`.
+  **v1 shipped:** the existing session-outcome row gains a `continued` flag on
+  its `fresh` frame (`session_outcome_line_with`). It's set whenever the
+  fresh session carries the continuation packet: the first-spawn disclosure,
+  the retry after a rejected resume, and the empty-retry settle. The row
+  reads "Session continued · reconstructed context" and says what was
+  carried over. The outcome stays `fresh`, so scrollback scoping
+  (`lastFreshBoundaryIndex` and friends) is unchanged. The reason text and
+  the "view packet" action aren't built yet.
 - Armory → agent → **Continuity** tab: the segment chain, packet versions
   (diff and revert), and the redaction summary.
 - Metric: the share of launches landing on `fresh` for agents *with* a
@@ -448,9 +591,9 @@ the other providers need only an adapter plus an injection hook.
 | Phase | Scope | Closes |
 |---|---|---|
 | **P0** Stop the bleeding | (a) **Done in #3626.** A persistent controller's first spawn with no sid continues the session of the history its pane renders: the last provider session id in the pane's own transcript, else the agent's global zone. It's used only when `--resume` can reach it and no other pane holds it. It reads AgentMux's own record, not a provider-dir scan, so archived conversations and subagent transcripts are never picked up. It doesn't trust the registry `session_id` either, which `STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20` §3 shows is write-once and can be stale or a subagent's id. (b) ~~`SearchHistory` by UID~~, done in #3605. (c) **In #3638.** Cold history index vs the MCP's 10 s timeout (§4.5, revised): warm at srv start, re-parse only changed files, answer "still building" rather than time out. (d) **In #3637.** Seed `cleanupPeriodDays: 180` into AgentMux-owned Claude config dirs. They junction `projects` to shared history, so the CLI's 30-day default swept every channel's history | §1.1 incident, retention sweep |
-| **P1** Segment index | `conversation_segments` written at spawn and close. Backfill from existing FileStore zones and `db_agent_instances` | G3, G4 |
+| **P1** Segment index | v1 shipped as an event log (§4.1.1). `conversation_segments` written at spawn and close. Backfill from existing FileStore zones and `db_agent_instances` | G3, G4 |
 | **P2** Projection + recall | Claude adapter, redaction, dedup. `SearchHistory` over the projection; `ReadHistory` | G5 |
-| **P3** Virtualized continuity (Claude) | Deterministic packet first, then the rolling LLM state block. R3 injection via #3502. Resolver ladder R0–R4 incl. fall-through. Pane chip | G1, G2 for Claude, including account switch |
+| **P3** Virtualized continuity (Claude) | Deterministic packet first (#3643), then the rolling LLM state block (v1 shipped, §4.4.1). R3 injection via #3502. Resolver ladder R0–R4 incl. fall-through. Pane chip | G1, G2 for Claude, including account switch |
 | **P4** Relocation | R2 via `--resume <path>` / pinned project dir; restore from raw layer after a sweep | Different cwd, swept transcripts |
 | **P5** Other providers | Codex, Gemini, Kimi adapters and injection. Codex app-server failure → R3 | G1 for all providers |
 | **P6** Continuity UI + evals | Armory Continuity tab; §6 eval suite in CI | G4, regression protection |

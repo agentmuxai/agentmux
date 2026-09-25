@@ -132,17 +132,14 @@ fn set_display_name_on_unknown_agent_is_noop_and_reports_not_found() {
 
 #[test]
 fn read_task_prompt_extracts_plain_string_content_from_first_line() {
-    // Pre-existing bug fixed in passing: this and its two sibling tests
-    // below all shared one directory keyed on std::process::id() (constant
-    // for the whole test binary, not per-test) — under parallel test
-    // execution, one test's std::fs::remove_dir_all teardown could race
-    // another's still-in-progress create_dir_all/write/read, producing
-    // flaky failures unrelated to what each test actually exercises.
-    // now_millis() (already used elsewhere in this file for the same
-    // per-test-uniqueness purpose) gives each test its own directory.
-    let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let jsonl_path = dir.join("agent-prompt-string.jsonl");
+    // This and its two sibling tests below each need their own directory:
+    // under parallel test execution one test's teardown removed the
+    // directory another was still writing. Keying it on std::process::id()
+    // (constant for the whole test binary) and then on now_millis() (two
+    // tests can start in the same millisecond — seen 2026-09-24) both
+    // collided; a tempdir is unique and removed when dropped.
+    let dir = tempfile::tempdir().unwrap();
+    let jsonl_path = dir.path().join("agent-prompt-string.jsonl");
     std::fs::write(
         &jsonl_path,
         "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Analyze the shell module\"}}\n\
@@ -152,15 +149,12 @@ fn read_task_prompt_extracts_plain_string_content_from_first_line() {
 
     let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
     assert_eq!(prompt.as_deref(), Some("Analyze the shell module"));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn read_task_prompt_extracts_joined_text_blocks_from_content_array() {
-    let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let jsonl_path = dir.join("agent-prompt-array.jsonl");
+    let dir = tempfile::tempdir().unwrap();
+    let jsonl_path = dir.path().join("agent-prompt-array.jsonl");
     std::fs::write(
         &jsonl_path,
         "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Part one\"},{\"type\":\"text\",\"text\":\"Part two\"}]}}\n",
@@ -169,15 +163,12 @@ fn read_task_prompt_extracts_joined_text_blocks_from_content_array() {
 
     let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
     assert_eq!(prompt.as_deref(), Some("Part one\nPart two"));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn read_task_prompt_returns_none_when_first_line_is_not_a_user_record() {
-    let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let jsonl_path = dir.join("agent-prompt-none.jsonl");
+    let dir = tempfile::tempdir().unwrap();
+    let jsonl_path = dir.path().join("agent-prompt-none.jsonl");
     std::fs::write(
         &jsonl_path,
         "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
@@ -185,8 +176,6 @@ fn read_task_prompt_returns_none_when_first_line_is_not_a_user_record() {
     .unwrap();
 
     assert!(read_task_prompt(jsonl_path.to_str().unwrap()).is_none());
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]

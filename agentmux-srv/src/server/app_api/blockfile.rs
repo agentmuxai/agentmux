@@ -260,48 +260,12 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .map(|l| l.to_string())
                             .collect();
 
-                        // Receive-time stamps for the returned lines, joined
-                        // from the output.tsidx sidecar (batch byte offset →
-                        // unix ms; see agent_session::TSIDX_FILE). Per line:
-                        // the newest batch stamp at-or-before the line's own
-                        // byte offset. Best-effort — any failure yields no
-                        // stamps, never a failed read.
-                        let stamps: Option<Vec<i64>> = (|| {
-                            // Read in the same snapshot as the lines (Codex on #3634).
-                            let raw_ts = read.tsidx.as_deref()?;
-                            let mut entries: Vec<(u64, i64)> = String::from_utf8_lossy(raw_ts)
-                                .lines()
-                                .filter_map(|l| {
-                                    let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
-                                    Some((v.get("off")?.as_u64()?, v.get("ms")?.as_i64()?))
-                                })
-                                .collect();
-                            if entries.is_empty() {
-                                return None;
-                            }
-                            // Appends serialize on the store so offsets are
-                            // already monotonic in practice; sort defensively
-                            // (cross-channel mirrors racing into the global
-                            // zone).
-                            entries.sort_by_key(|(off, _)| *off);
-
-                            // Byte offset of every returned line: from the same
-                            // snapshot as the lines themselves.
-                            if read.line_offsets.len() != lines.len() {
-                                return None;
-                            }
-                            let stamps = read
-                                .line_offsets
-                                .iter()
-                                .map(|&line_off| {
-                                    match entries.partition_point(|(off, _)| *off <= line_off) {
-                                        0 => 0,
-                                        p => entries[p - 1].1,
-                                    }
-                                })
-                                .collect();
-                            Some(stamps)
-                        })();
+                        // Receive-time stamps for the returned lines, from the
+                        // output.tsidx sidecar in the same snapshot as the lines
+                        // (`read_via_index`; only a window of the sidecar is
+                        // read). Best-effort: no stamps is never a failed read.
+                        // Offsets and lines must pair up one to one.
+                        let stamps = read.stamps.filter(|s| s.len() == lines.len());
 
                         Some(BlockfileReadRangeResult { lines, total: total_lines, stamps, ..Default::default() })
                         };

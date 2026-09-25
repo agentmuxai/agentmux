@@ -5734,9 +5734,11 @@ async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
     for (uri, counter) in [
         ("/api/v1/agent/identity/accounts?agent_id=m4c2c-nobody", "m4c.identity_owner_by_name"),
         ("/api/v1/agent/preset/get?agent_id=m4c2c-nobody", "m4c.preset_owner_by_name"),
+        // History search no longer resolves a name at all: Unattributed, it's
+        // refused (see `history_search_without_an_identity_token_is_refused_not_guessed`).
         (
             "/agentmux/reactive/history/search?agent=m4c2c-nobody&query=x",
-            "m4c.history_owner_by_name",
+            "history.search_refused_unattributed",
         ),
     ] {
         let (status, body) = get(uri, Some(gone.clone())).await;
@@ -5747,6 +5749,121 @@ async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
         assert!(!body.contains("calling agent"), "{uri}: {body}");
         assert!(m4a2_count(counter) > before, "{uri}: Unattributed is counted");
     }
+}
+
+// ---- SearchHistory: owner by token only, found wherever it was written ----
+
+async fn history_search_get(
+    state: &AppState,
+    token: Option<&str>,
+    query: &str,
+) -> (StatusCode, serde_json::Value) {
+    let mut req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/agentmux/reactive/history/search?{query}"))
+        .header("X-AuthKey", "test-secret-key");
+    if let Some(t) = token {
+        req = req.header("X-Agent-Token", t);
+    }
+    let resp = build_router(state.clone())
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null))
+}
+
+/// A search without a per-agent token is refused — never answered by
+/// resolving the name it declares. On 2026-09-24 that kind of guess answered
+/// "no history" with `truncated: false` for an agent whose sessions were on
+/// disk.
+#[tokio::test]
+async fn history_search_without_an_identity_token_is_refused_not_guessed() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let state = test_state();
+    let counter = "history.search_refused_unattributed";
+    let before = m4a2_count(counter);
+
+    let (status, v) = history_search_get(&state, None, "agent=agent3&query=x").await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert!(v["error"].as_str().unwrap_or_default().contains("X-Agent-Token"), "{v}");
+    assert!(m4a2_count(counter) > before, "refusals are counted");
+}
+
+/// The whole path, with the real Claude adapter and parser: an attributed
+/// caller finds a session written in its working directory under an identity
+/// bundle created after the history service was built (an account switched
+/// mid-run — the 2026-09-24 incident); a bare `SendMessage` filter finds the
+/// MCP-prefixed call; `since`/`until` in seconds select by message time; and
+/// the answer says it's complete. No `agent` parameter is needed.
+#[tokio::test]
+async fn an_attributed_history_search_finds_a_session_in_a_bundle_created_after_start() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    use crate::backend::history::{claude_adapter::ClaudeHistoryAdapter, index::SessionIndex, HistoryService};
+    use crate::backend::storage::agents::test_agent_def;
+    let tmp = tempfile::tempdir().unwrap();
+    let shared = tmp.path().join("shared");
+    std::fs::create_dir_all(&shared).unwrap();
+    let mut state = test_state();
+    state.history_service = std::sync::Arc::new(HistoryService::from_index(SessionIndex::new(vec![
+        Box::new(ClaudeHistoryAdapter::with_roots(None, Some(shared.clone()), None)),
+    ])));
+
+    let cwd = "/work/history-agent";
+    let mut def = test_agent_def("uid-history-search", "HistoryAgent", "claude", "agent", 1, "");
+    def.slug = "historyagent".to_string();
+    def.working_directory = cwd.to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.mstore.attach_token_index().unwrap();
+    let token = state.mstore.agent_token_ensure("uid-history-search").unwrap();
+
+    // The bundle appears only now, after the service was built.
+    let project = shared
+        .join("identities")
+        .join("account-added-later")
+        .join("claude")
+        .join("projects")
+        .join("-work-history-agent");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("sess-after-switch.jsonl"),
+        [
+            r#"{"type":"user","message":{"role":"user","content":"please ping Agent4"},"timestamp":"2026-09-24T10:00:00Z","cwd":"/work/history-agent","sessionId":"sess-after-switch"}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus","content":[{"type":"text","text":"sending"},{"type":"tool_use","name":"mcp__agentmux__SendMessage","input":{"message":"ping","to":"Agent4"}}]},"timestamp":"2026-09-24T10:00:05Z","cwd":"/work/history-agent"}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let (status, v) = history_search_get(&state, Some(&token), "query=&tool=SendMessage").await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["hits"].as_array().map(Vec::len), Some(1), "{v}");
+    assert_eq!(v["hits"][0]["tool_name"], "mcp__agentmux__SendMessage", "{v}");
+    assert_eq!(v["hits"][0]["session_id"], "sess-after-switch", "{v}");
+    assert_eq!(v["complete"], true, "{v}");
+    assert_eq!(v["total_sessions"], 1, "{v}");
+    assert_eq!(v["sessions_scanned"], 1, "{v}");
+
+    let secs = |t: &str| chrono::DateTime::parse_from_rfc3339(t).unwrap().timestamp();
+    let (_, v) = history_search_get(
+        &state,
+        Some(&token),
+        &format!("query=ping&until={}", secs("2026-09-24T10:00:02Z")),
+    )
+    .await;
+    let snippets: Vec<&str> = v["hits"].as_array().unwrap().iter().filter_map(|h| h["snippet"].as_str()).collect();
+    assert_eq!(snippets, vec!["please ping Agent4"], "only the message before `until`: {v}");
+    assert_eq!(v["complete"], true, "{v}");
+
+    let (_, v) = history_search_get(
+        &state,
+        Some(&token),
+        &format!("query=ping&since={}", secs("2026-09-24T11:00:00Z")),
+    )
+    .await;
+    assert_eq!(v["hits"].as_array().map(Vec::len), Some(0), "nothing after `since`: {v}");
 }
 
 // ---- identity M4c-2d: the sender's UID is exposed beside its name ----

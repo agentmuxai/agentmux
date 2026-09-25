@@ -1,0 +1,97 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Layer 2 install console — SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4.2.
+
+.install-log {
+    // Bounded: scrolls inside itself and never pushes the dialog's footer
+    // out of view. About twelve rows; eight in a narrow pane.
+    height: 200px;
+    overflow: auto;
+    padding: var(--space-1) 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--main-text-color);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    user-select: text;
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+
+    @container modal-mount (max-width: 400px) {
+        height: 140px;
+    }
+}
+
+.install-log-spacer {
+    position: relative;
+    min-width: 100%;
+    width: max-content;
+}
+
+.install-log-window {
+    will-change: transform;
+}
+
+// One row per line; must match LOG_ROW_PX in LogView.tsx.
+.install-log-line {
+    height: 16px;
+    line-height: 16px;
+    padding: 0 var(--space-1-5);
+    white-space: pre;
+
+    &[data-tone="command"],
+    &[data-tone="marker"] {
+        color: var(--secondary-text-color);
+    }
+
+    &[data-tone="marker"] {
+        font-style: italic;
+    }
+
+    &[data-tone="warning"] {
+        color: var(--warning-color);
+    }
+
+    &[data-tone="error"] {
+        color: var(--error-color);
+    }
+}
+
+// ANSI SGR colours (ansi.ts). Mapped onto theme tokens so every theme
+// stays legible; the bright variants share their base token.
+.log-bold {
+    font-weight: 700;
+}
+
+.log-fg-red,
+.log-fg-bright-red {
+    color: var(--error-color);
+}
+
+.log-fg-yellow,
+.log-fg-bright-yellow {
+    color: var(--warning-color);
+}
+
+.log-fg-green,
+.log-fg-bright-green {
+    color: var(--success-color);
+}
+
+.log-fg-blue,
+.log-fg-bright-blue,
+.log-fg-cyan,
+.log-fg-bright-cyan,
+.log-fg-magenta,
+.log-fg-bright-magenta {
+    color: var(--accent-color);
+}
+
+.log-fg-black,
+.log-fg-bright-black {
+    color: var(--secondary-text-color);
+}

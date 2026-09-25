@@ -128,6 +128,20 @@ fn session_outcome_line(
     attempted_sid: String,
     actual_sid: Option<String>,
 ) -> String {
+    session_outcome_line_with(outcome, attempted_sid, actual_sid, false)
+}
+
+/// [`session_outcome_line`], plus whether the fresh session was given
+/// AgentMux's record of the conversation (`continued`, SPEC_DURABLE_
+/// CONVERSATION_MEMORY_2026_09_23.md §4.8). The outcome stays `fresh`: the
+/// provider session is new, and every consumer that scopes scrollback on
+/// `fresh` keeps doing so. Only the pane's label changes.
+fn session_outcome_line_with(
+    outcome: persistent_resume::SessionOutcome,
+    attempted_sid: String,
+    actual_sid: Option<String>,
+    continued: bool,
+) -> String {
     let outcome_str = match outcome {
         persistent_resume::SessionOutcome::Resumed => "resumed",
         persistent_resume::SessionOutcome::Fresh => "fresh",
@@ -140,6 +154,7 @@ fn session_outcome_line(
             "outcome": outcome_str,
             "attempted_sid": attempted_sid,
             "actual_sid": actual_sid,
+            "continued": continued,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })
     )
@@ -855,6 +870,10 @@ pub struct PersistentSubprocessController {
     /// the spawn env carried no UID (no `db_agents` row yet). See
     /// `Controller::stable_agent_uid`.
     stable_agent_uid: Mutex<Option<String>>,
+    /// The segment the latest spawn recorded (`segments.rs`), so a resume
+    /// retry can tell the agent's previous segment from the one that just
+    /// failed. `None` until a spawn with an agent UID.
+    current_segment: Mutex<Option<String>>,
     /// Reports whatever is still deferred when this controller is dropped.
     /// See [`DeferredDropReport`].
     deferred_drop_report: DeferredDropReport,
@@ -1159,6 +1178,7 @@ impl PersistentSubprocessController {
             agent_id: Mutex::new(None),
             stable_agent_id: Mutex::new(None),
             stable_agent_uid: Mutex::new(None),
+            current_segment: Mutex::new(None),
             deferred_drop_report: DeferredDropReport(None),
         };
         this.deferred_drop_report =
@@ -1490,6 +1510,7 @@ mod input;
 mod lifecycle;
 mod queue;
 mod resume_retry;
+mod segments;
 pub(crate) use resume_retry::pane_history_session_id;
 mod spawn;
 mod status;

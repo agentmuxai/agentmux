@@ -20,6 +20,13 @@ export interface SessionOutcomeData {
     attemptedSid: string;
     actualSid: string | null;
     /**
+     * A `fresh` session that was given AgentMux's record of the conversation
+     * (the continuation packet, SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md
+     * §4.8). The outcome stays `fresh` so scrollback scoping is unchanged;
+     * only the pane's label differs. `false` for frames that predate it.
+     */
+    continued?: boolean;
+    /**
      * The frame's own `timestamp` field, verbatim — used only to build a
      * stable node id shared by both consumers (same rationale as
      * `compact-boundary.ts`'s `frameTimestamp`: a live-seen event and the
@@ -47,7 +54,8 @@ export function parseSessionOutcomeFrame(rawEvent: unknown): SessionOutcomeData 
 
     const actualSid = typeof e.actual_sid === "string" ? e.actual_sid : null;
     const frameTimestamp = typeof e.timestamp === "string" ? e.timestamp : null;
-    return { outcome, attemptedSid, actualSid, frameTimestamp };
+    const continued = e.continued === true;
+    return { outcome, attemptedSid, actualSid, continued, frameTimestamp };
 }
 
 /**

@@ -34,3 +34,21 @@ export interface OutputTranslator {
      */
     parsePermissionRequest?(raw: unknown): PermissionRequestEvent | null;
 }
+
+/**
+ * The user's message as the backend writes it into the transcript for CLIs
+ * that don't echo their prompt (Claude's stdin line; for Codex and Kimi, the
+ * per-turn subprocess controller's `persist_user_message`): a
+ * `{"type":"user","message":{"content":"…"}}` record. On replay it becomes the
+ * user_message node. Live, the pane already shows the message optimistically
+ * and the transcript cursor hands the record to its echo ledger, so a live
+ * translator must not render it again — hence replay-only, as Gemini's echo.
+ * Returns null when the record isn't one.
+ */
+export function replayedUserMessage(rawEvent: unknown, replay: boolean | undefined): StreamEvent[] | null {
+    const rec = rawEvent as { type?: unknown; message?: { content?: unknown } } | null;
+    if (rec?.type !== "user") return null;
+    const content = rec.message?.content;
+    if (!replay || typeof content !== "string" || !content) return [];
+    return [{ type: "user_message", message: content }];
+}

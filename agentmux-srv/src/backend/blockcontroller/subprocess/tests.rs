@@ -408,3 +408,28 @@ fn spawn_turn_refuses_when_lease_held_by_another_process() {
     // blocked by this controller's own busy-lock, not just the lease.
     assert!(!ctrl.run_lock.load(Ordering::SeqCst));
 }
+
+// ---- User-message records (SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9) ----
+
+#[test]
+fn persists_user_record_only_for_clis_that_dont_echo_the_prompt() {
+    assert!(persists_user_record("claude-stream-json"));
+    assert!(persists_user_record("codex-json"));
+    assert!(persists_user_record("kimi-stream-json"));
+    // Gemini's CLI writes the prompt into its own output: a second record
+    // would show the message twice on replay.
+    assert!(!persists_user_record("gemini-json"));
+    assert!(!persists_user_record("acp"));
+    assert!(!persists_user_record(""));
+}
+
+#[test]
+fn user_record_matches_the_persistent_controllers_stdin_line() {
+    let rec = user_record("hello\nworld");
+    assert_eq!(rec["type"], "user");
+    assert_eq!(rec["message"]["role"], "user");
+    assert_eq!(rec["message"]["content"], "hello\nworld");
+    // One JSON line: an embedded newline is escaped, so the record stays a
+    // single transcript line.
+    assert!(!rec.to_string().contains('\n'));
+}

@@ -1,0 +1,83 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// <InstallDialog> layout (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4.3):
+// the panel never scrolls as a whole. Header and footer stay in view; the
+// body is the only scroll container.
+//
+// Sized on the PANEL, not on the body. ModalLayer panels are
+// `data-size="fit"` (shrink-to-fit), so a `min(640px, 100%)` on content
+// inside the panel resolves its percentage against the panel's own
+// shrink-to-fit width and collapses to 0 — the AgentSetupModal bug
+// (SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.1). On the panel
+// the percentage resolves against the modal root, which is definite.
+// The `.modal-panel[data-size]` prefix outranks modal.scss's
+// `.modal-panel[data-size="fit"] { width: auto }`, which a bare class
+// loses to — measured live: the panel stayed 250px wide in a 595px pane.
+//
+// One selector per ModalLayer kind that renders an InstallDialog
+// (`modal-panel--<kind>` comes from ModalLayer).
+.modal-panel[data-size].modal-panel--install-agent {
+    width: min(640px, 100%);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    > .modal-layer-content {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+}
+
+.install-dialog {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+
+    > .modal-panel-header,
+    > .modal-panel-footer {
+        flex: none;
+    }
+}
+
+.install-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+}
+
+.install-dialog-icon {
+    margin-right: var(--space-2);
+}
+
+.install-dialog-version {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    background: color-mix(in oklab, var(--accent-color) 15%, var(--block-bg-solid-color));
+    color: var(--accent-color);
+    vertical-align: middle;
+    margin-left: 8px;
+    user-select: none;
+}
+
+// Elapsed time, left-aligned in the footer (§4.1).
+.install-dialog-elapsed {
+    margin-right: auto;
+    align-self: center;
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--secondary-text-color);
+}

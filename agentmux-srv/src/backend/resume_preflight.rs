@@ -257,7 +257,7 @@ mod tests {
     /// given sizes, mirroring Claude Code's own on-disk layout.
     fn config_dir_with(working_dir: &str, sessions: &[(&str, usize)]) -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
-        let slug = session_backfill::encode_project_slug(working_dir);
+        let slug = crate::backend::claude_layout::project_dir_name(working_dir);
         let dir = tmp.path().join("projects").join(slug);
         fs::create_dir_all(&dir).unwrap();
         for (sid, size) in sessions {

@@ -200,7 +200,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // so it would under-discriminate on a light-theme mixed pane.
         const headerKeyOf = (meta: Block["meta"] | undefined): string =>
             computeBlockColorBg(meta, isLightTheme) ??
-            (meta?.view === "agent" ? " agent-default" : " non-agent-default");
+            (meta?.view === "agent" ? "\u0000agent-default" : "\u0000non-agent-default");
         const distinct = new Set<string>();
         for (const blockId of ids) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
@@ -274,9 +274,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // (a view type may need its own confirmation/cleanup), reordering never
     // changes membership or requires side effects beyond the stack itself,
     // so there's nothing for a view type to meaningfully override.
-    const handleReorder = (blockId: string, targetId: string, position: "before" | "after") => {
+    const handleReorder = (blockId: string, targetId: string, position: "before" | "after") =>
         moveBlockInStack(layoutModel, blockId, targetId, position);
-    };
     // Cross-pane drop-to-append (Phase 4, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
     // §3.4): a pill dragged from a DIFFERENT pane was dropped on this
     // Pane's header — append it, active, at the end of THIS pane's stack.
@@ -287,8 +286,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // exactly what made the first version a silent no-op).
     const handleReceiveForeignTab = (blockId: string) => {
         const target = activeBlockId();
-        if (!target) return;
-        moveBlockInStack(layoutModel, blockId, target, "end", true);
+        if (!target) return false;
+        return moveBlockInStack(layoutModel, blockId, target, "end", true);
     };
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;

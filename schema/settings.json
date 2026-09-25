@@ -110,9 +110,6 @@
         "tab:skipcloseconfirm": {
           "type": "boolean"
         },
-        "pane:tabstrip": {
-          "type": "string"
-        },
         "widget:*": {
           "type": "boolean"
         },
@@ -171,6 +168,9 @@
           "type": "boolean"
         },
         "window:savelastwindow": {
+          "type": "boolean"
+        },
+        "window:keepinactivetabslaidout": {
           "type": "boolean"
         },
         "window:dimensions": {
@@ -405,6 +405,17 @@
           "type": "boolean",
           "default": true,
           "description": "Agent panes keep only the turn in flight (plus anything still running) always mounted; older messages are virtualized. Set false to restore the previous behaviour (the last 50 messages always mounted). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2."
+        },
+        "agent:livefeed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Agent panes keep the turn in flight plus the last few finished turns (agent:livefeedturns); older turns roll off into the History tab, which follows the conversation, so long conversations don't slow the pane down. Applies to Claude, Codex, Kimi and Gemini agents (not ACP). Set false to keep every turn in the pane and page older ones in by scrolling up. Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.9."
+        },
+        "agent:livefeedturns": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "description": "How many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Takes effect when a pane is next opened."
         },
         "agent:askquestiontimeoutms": {
           "type": "integer",
