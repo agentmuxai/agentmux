@@ -1,9 +1,11 @@
 # SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay
 
 **Date:** 2026-09-24
-**Status:** active — being built. The pure primitives (identifiers, certificate,
-revocation, envelope and freshness checks; §2.7) are built in
-`agentmux-common`. C1, D1 and D2 are not. Measured against `agentmux`
+**Status:** active — the pure primitives (identifiers, certificate,
+revocation, envelope and freshness checks; §2.7) ship in PR #3727; C1
+(agentmux-cloud#91) and D1a (`wan.db`, instance key, agent keys, purge; PR
+#3734) are in review; D1b (certify, publish, carry gate) and D2 (verifier,
+marker, tier rules) are not started. Verified 2026-09-24. Measured against `agentmux`
 `main` @ `d01833859` and `agentmux-cloud` `main` (server `1.8.3`, GitHub
 consumer `1.4.12`), both read on 2026-09-24.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
