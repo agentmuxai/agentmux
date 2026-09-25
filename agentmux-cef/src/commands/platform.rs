@@ -1050,6 +1050,99 @@ pub async fn show_open_bundle_dialog(
     })
 }
 
+/// The extension every layout file carries
+/// (docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.1). Mirrors
+/// `agentmux-srv`'s `layout_file::LAYOUT_EXTENSION`, which refuses any other.
+const LAYOUT_EXTENSION: &str = ".agentmux-layout.json";
+
+/// A layout name as a file stem: path separators and characters Windows
+/// rejects become `-`; empty becomes `layout`.
+fn layout_file_stem(name: &str) -> String {
+    let stem: String = name
+        .trim()
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '-' } else { c })
+        .collect();
+    let stem = stem.trim_matches(['.', ' ']).to_string();
+    if stem.is_empty() {
+        "layout".to_string()
+    } else {
+        stem
+    }
+}
+
+/// The path the dialog returned, with the layout extension added if the user
+/// typed a bare name. OS dialogs append a filter's extension inconsistently,
+/// and a double extension like this one least of all.
+fn with_layout_extension(path: std::path::PathBuf) -> std::path::PathBuf {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+    if name.to_ascii_lowercase().ends_with(LAYOUT_EXTENSION) {
+        return path;
+    }
+    let base = name.strip_suffix(".json").unwrap_or(&name);
+    path.with_file_name(format!("{base}{LAYOUT_EXTENSION}"))
+}
+
+/// Save dialog for a layout file — Phase 1 of
+/// docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §6.1, and the first save dialog
+/// in the app. Opens in `~/.agentmux/shared/layouts/` (created if missing,
+/// cross-channel so a layout saved in one build is found by every other) with
+/// `<defaultName>.agentmux-layout.json` suggested; the user may save
+/// anywhere. Returns the chosen absolute path, or `null` on cancel. Writes
+/// nothing itself — the srv's `layout.save` does.
+pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let stem = layout_file_stem(args.get("defaultName").and_then(|v| v.as_str()).unwrap_or(""));
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
+    if let Some(dir) = &dir {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let path = tokio::task::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save layout")
+            .set_file_name(format!("{stem}{LAYOUT_EXTENSION}"))
+            .add_filter("AgentMux layout", &["agentmux-layout.json", "json"]);
+        if let Some(dir) = dir.filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.save_file()
+    })
+    .await
+    .map_err(|e| format!("show_save_layout_dialog: task join error: {e}"))?;
+    Ok(match path {
+        Some(p) => serde_json::json!(with_layout_extension(p).to_string_lossy()),
+        None => serde_json::Value::Null,
+    })
+}
+
+#[cfg(test)]
+mod layout_dialog_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn names_become_safe_file_stems() {
+        assert_eq!(layout_file_stem("Review setup"), "Review setup");
+        assert_eq!(layout_file_stem("a/b\\c:d*e?f\"g<h>i|j"), "a-b-c-d-e-f-g-h-i-j");
+        assert_eq!(layout_file_stem("  "), "layout");
+        assert_eq!(layout_file_stem("..."), "layout");
+    }
+
+    #[test]
+    fn the_extension_is_added_only_when_missing() {
+        let dir = PathBuf::from("layouts");
+        assert_eq!(with_layout_extension(dir.join("x")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(with_layout_extension(dir.join("x.json")), dir.join("x.agentmux-layout.json"));
+        assert_eq!(
+            with_layout_extension(dir.join("x.agentmux-layout.json")),
+            dir.join("x.agentmux-layout.json")
+        );
+        assert_eq!(
+            with_layout_extension(dir.join("X.AgentMux-Layout.JSON")),
+            dir.join("X.AgentMux-Layout.JSON")
+        );
+    }
+}
+
 fn extract_commented_setting_key(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
     let rest = trimmed.strip_prefix("//")?;
