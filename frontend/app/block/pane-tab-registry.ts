@@ -18,6 +18,7 @@
  */
 
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
+import type { NodeModel } from "@/layout/index";
 import type { Accessor, JSX } from "solid-js";
 
 export interface PaneTabCapabilities {
@@ -74,6 +75,11 @@ export interface PaneTabManifest {
     capabilities?: PaneTabCapabilities;
     /** How a block of this view becomes a tab pill, beyond label and icon. */
     tab?: PaneTabDescriptor;
+    /** What this view type contributes to the shared pane chrome while one
+     *  of its tabs is the active one (Pane Tab contract Phase 4). Built once
+     *  per pane, in the chrome's own reactive scope, the first time a tab of
+     *  this view type is active there; `anchorBlockId` is that tab. */
+    chrome?: (anchorBlockId: string, nodeModel: NodeModel) => PaneChromeModel;
     /** Native instance factory (Phase 2b). Called by the host in the
      *  instance's own reactive root. Exactly one of `create` and
      *  `viewModelClass`. */
@@ -120,6 +126,7 @@ export function legacyAdapter(
         aliases?: string[];
         lifecycle?: PaneTabCapabilities["lifecycle"];
         tab?: PaneTabDescriptor;
+        chrome?: PaneTabManifest["chrome"];
     } = {}
 ): PaneTabManifest {
     return {
@@ -130,6 +137,7 @@ export function legacyAdapter(
         icon: opts.icon ?? "square",
         capabilities: opts.lifecycle ? { lifecycle: opts.lifecycle } : undefined,
         tab: opts.tab,
+        chrome: opts.chrome,
         viewModelClass,
     };
 }

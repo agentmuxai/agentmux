@@ -6,7 +6,8 @@ per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
 PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
-activation, focus hand-off) in the PR after it; Phases 2c, 4–6 not started.
+activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in the PR
+after it; Phases 2c, 5–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -407,6 +408,24 @@ working throughout through a legacy adapter.
      a dormant pane-stack member.
 4. **Per-active-tab chrome:** `PaneChromeModel` becomes `instance.chrome`,
    read for the active tab.
+   - **Implemented** as a manifest field rather than an instance one:
+     `chrome?: (anchorBlockId, nodeModel) => PaneChromeModel`. A chrome model
+     is pane-level and creates signals of its own, so the chrome
+     (`PaneChrome.tsx`) builds each view type's model ONCE per pane, in its
+     own reactive scope, the first time one of its tabs is active, and reads
+     the model of the ACTIVE tab's view type reactively. Terminal and agent
+     register `buildTermPaneChromeModel` / `buildAgentPaneChromeModel` on
+     their manifests; `ViewModel.paneChromeModel` and the terminal's
+     late-binding `setTermPaneChromeModel` are gone. Fixes §2.4 #2: a
+     terminal-first pane no longer gives an agent tab the terminal's
+     connection button, background or new-tab cwd, and a Help-first pane
+     with a terminal tab gets them while the terminal is active.
+   - `wrapContent` is replaced by `bodyClass` + `renderBehindContent`: the
+     chrome always renders a body box (`.pane-stack-body`, the same flex
+     column the content region used to sit in) around a stable content
+     region, so a switch between view types changes classes and leading
+     overlays but never moves the kept-alive content in the DOM (re-wrapping
+     would, and a moved subtree can pause media or reset renderers).
 5. **Capabilities** replace the view-name checks (§2.4 #5). On the backend,
    `defaultMeta` comes from the manifest instead of the `pane.rs` allow-list.
 6. **Third-party loading:** trusted, locally installed ES-module widgets

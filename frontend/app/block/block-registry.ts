@@ -26,6 +26,8 @@ import { WardenViewModel } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
 import { agentPaneTab } from "@/app/view/agent/agent-pane-tab";
+import { buildAgentPaneChromeModel } from "@/app/view/agent/agent-view";
+import { buildTermPaneChromeModel } from "@/view/term/term";
 import { termPaneTab } from "@/view/term/term-pane-tab";
 import { getPaneTab, legacyAdapter, registerPaneTab } from "./pane-tab-registry";
 
@@ -35,9 +37,9 @@ const builtins = [
     // (scroll, form input), the editor's cursor and undo. Agent per
     // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md; browser and editor per the
     // repo owner's decision, SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
-    legacyAdapter("term", TermViewModel as any, { label: "Terminal", icon: "terminal", lifecycle: "keepAlive", tab: termPaneTab }),
+    legacyAdapter("term", TermViewModel as any, { label: "Terminal", icon: "terminal", lifecycle: "keepAlive", tab: termPaneTab, chrome: buildTermPaneChromeModel }),
     // "forge" was folded into the agent pane in v0.33.197.
-    legacyAdapter("agent", AgentViewModel as any, { label: "Agent", icon: "sparkles", aliases: ["forge"], lifecycle: "keepAlive", tab: agentPaneTab }),
+    legacyAdapter("agent", AgentViewModel as any, { label: "Agent", icon: "sparkles", aliases: ["forge"], lifecycle: "keepAlive", tab: agentPaneTab, chrome: buildAgentPaneChromeModel }),
     legacyAdapter("browser", BrowserViewModel as any, { label: "Browser", icon: "globe", lifecycle: "keepAlive" }),
     legacyAdapter("editor", EditorViewModel as any, { label: "Editor", icon: "file-lines", lifecycle: "keepAlive" }),
     legacyAdapter("sysinfo", SysinfoViewModel as any, { label: "Sysinfo", icon: "chart-line" }),

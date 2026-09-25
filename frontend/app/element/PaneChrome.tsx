@@ -18,7 +18,7 @@
  * §4.1/§4.5.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, getOwner, onCleanup, runWithOwner, untrack, type JSX } from "solid-js";
 import {
     computeBlockActiveBorderColor,
     computeBlockColorBg,
@@ -27,6 +27,7 @@ import {
     computeFocusRingBorderColor,
     computeMixedPaneHeaderBg,
 } from "@/app/block/blockframe";
+import { getPaneTab, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -67,13 +68,27 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta)
     );
 
-    // The active ViewModel's opted-in capabilities, resolved ONCE here (not
-    // in a memo): `pane-leaf-chrome.tsx` latches the chrome ViewModel for the
-    // pane's whole life, so re-deriving per switch would both contradict that
-    // and re-create any signals the model builds. A view type that opts out
-    // entirely (the nine that never implement it) leaves this null and gets
-    // every default below unchanged.
-    const model: PaneChromeModel | null = nodeModel.activeViewModel?.()?.paneChromeModel?.(nodeModel) ?? null;
+    // What the ACTIVE tab's view type contributes to this chrome (its
+    // manifest's `chrome`, Pane Tab contract Phase 4). It used to be resolved
+    // once, from whichever tab was active when the chrome mounted, and then
+    // applied to every tab for the pane's life (spec §2.4 #2): a terminal-first
+    // pane gave an agent tab the terminal's connection button and background.
+    // Each view type's model is built ONCE per pane — it creates signals of
+    // its own — in the chrome's own reactive scope, the first time one of its
+    // tabs is active; switching tabs only changes which model is read. A view
+    // type without `chrome` gets every default below.
+    const chromeOwner = getOwner();
+    const chromeModels = new Map<string, PaneChromeModel | null>();
+    const activeView = createMemo(() => resolvePaneTabView((activeBlockData()?.meta?.view as string | undefined) ?? ""));
+    const model = createMemo<PaneChromeModel | null>(() => {
+        const view = activeView();
+        if (!chromeModels.has(view)) {
+            const build = getPaneTab(view)?.chrome;
+            const anchor = untrack(activeBlockId);
+            chromeModels.set(view, build ? (runWithOwner(chromeOwner, () => untrack(() => build(anchor, nodeModel))) ?? null) : null);
+        }
+        return chromeModels.get(view) ?? null;
+    });
 
     // Tabs are keyed by blockId strings, so PaneTabStrip's <For> keeps each
     // pill's DOM node across recomputes; label/icon are looked up per id.
@@ -86,7 +101,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         undefined,
         { equals: sameIds }
     );
-    const extraTabs = createMemo(() => model?.extraTabs?.() ?? []);
+    const extraTabs = createMemo(() => model()?.extraTabs?.() ?? []);
     const tabIds = createMemo<string[]>(
         () => {
             const stack = stackIds();
@@ -274,20 +289,20 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // A view type whose tabs can live in OTHER panes (agent's cross-pane
         // forks) handles activation itself and returns true; anything else
         // falls through to the ordinary same-pane stack switch.
-        if (model?.onActivate?.(blockId) === true) return;
+        if (model()?.onActivate?.(blockId) === true) return;
         if (blockId === activeBlockId()) return;
         setActiveBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
     const handleClose = (blockId: string) => {
-        if (model?.onClose?.(blockId) === true) return;
+        if (model()?.onClose?.(blockId) === true) return;
         void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
-        openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model?.newTabMeta);
+        openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model()?.newTabMeta);
     };
     // Same-pane drag-reorder (Phase 3, SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.2). No `model?.onReorder` escape hatch like activate/close have —
+    // §3.2). No `model()?.onReorder` escape hatch like activate/close have —
     // unlike activation (agent forks can live in a DIFFERENT pane) or close
     // (a view type may need its own confirmation/cleanup), reordering never
     // changes membership or requires side effects beyond the stack itself,
@@ -352,17 +367,20 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                     <span class="pane-tab-label">{labelOf(id)}</span>
                 )
             }
-            connBtnRef={model?.connBtnRef}
-            changeConnModalAtom={model?.changeConnModalAtom}
+            connBtnRef={model()?.connBtnRef}
+            changeConnModalAtom={model()?.changeConnModalAtom}
             onAdd={handleAdd}
-            addTitle={model?.addTitle ?? "Add tab"}
+            addTitle={model()?.addTitle ?? "Add tab"}
             nodeModel={nodeModel}
             viewModel={viewModel}
             activeBlockId={activeBlockId}
         />
     );
 
-    const contentRegion = <div class={model?.contentClass ?? "pane-stack-content"}>{content}</div>;
+    // Stable elements: only their classes and the body's leading overlays
+    // follow the active tab's model, so a switch between view types never
+    // moves the (kept-alive) content in the DOM.
+    const contentRegion = <div class={model()?.contentClass ?? "pane-stack-content"}>{content}</div>;
 
     return (
         <div
@@ -373,7 +391,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             classList={{
                 "pane-stack-focused": isFocused() && !isAlone(),
                 "pane-stack-focused-alone": isFocused() && isAlone(),
-                ...(model?.rootClass ? { [model.rootClass]: true } : {}),
+                ...(model()?.rootClass ? { [model()!.rootClass]: true } : {}),
             }}
             style={{ "--pane-ring-color": ringBorderColor() }}
             data-blockid={activeBlockId()}
@@ -383,9 +401,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             <ErrorBoundary fallback={renderHeader(null)}>
                 {renderHeader(activeViewModelOrUndefined() ?? null)}
             </ErrorBoundary>
-            {model?.renderBelowHeader?.()}
+            {model()?.renderBelowHeader?.()}
             <div class="pane-progress-bar-slot" ref={setProgressSlotEl} />
-            {model?.wrapContent ? model.wrapContent(contentRegion) : contentRegion}
+            <div class={`pane-stack-body${model()?.bodyClass ? ` ${model()!.bodyClass}` : ""}`}>
+                {model()?.renderBehindContent?.()}
+                {contentRegion}
+            </div>
         </div>
     );
 }
