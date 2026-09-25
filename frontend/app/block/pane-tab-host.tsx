@@ -14,9 +14,11 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NodeModel } from "@/layout/index";
 import { getMuxObjectAtom, makeORef } from "@/store/mos";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+import { usePaneTabVisibility } from "./pane-tab-visibility";
 
 /** Call inside the instance's own reactive root (block.tsx's `makeViewModel`),
- *  which then pins the block for as long as the instance lives. */
+ *  which then pins the block for as long as the instance lives, and inherits
+ *  the block's context (its window tab, for `visibility`). */
 export function makePaneTabHostContext(blockId: string, nodeModel: NodeModel): PaneTabHostContext {
     const oref = makeORef("block", blockId);
     const block = getMuxObjectAtom<Block>(oref);
@@ -27,6 +29,7 @@ export function makePaneTabHostContext(blockId: string, nodeModel: NodeModel): P
             await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: patch as MetaType });
         },
         isFocused: () => nodeModel.isFocused?.() ?? false,
+        visibility: usePaneTabVisibility(blockId),
     };
 }
 

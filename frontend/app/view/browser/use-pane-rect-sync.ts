@@ -4,10 +4,9 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { invokeCommand } from "@/app/platform/ipc";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
-import { TAB_VISIBILITY_CHANGED_EVENT } from "@/app/workspace/window-tab-visibility";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
-import { isBlockDormant } from "@/app/store/block-component-registry";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import type { BrowserViewModel } from "./browser-model";
 
 export interface PaneRect {
@@ -22,26 +21,6 @@ export interface PaneRectSync {
     createPane: (url: string) => Promise<void>;
     syncPosition: () => void;
     paneRect: () => PaneRect;
-}
-
-/**
- * True if `el` sits inside an inactive workspace tab (workspace.tsx): an
- * ancestor that is `content-visibility: hidden` (the default, PR #3239), or
- * one marked `data-tab-hidden-laid-out` (an inactive tab kept laid out with
- * `window:keepinactivetabslaidout`, hidden by `visibility` instead). Either
- * way the element's own `getBoundingClientRect()` keeps returning its real
- * size, so the native browser pane would stay drawn over the active tab; see
- * the call site. Keyed on the marker rather than computed `visibility`,
- * which the reveal gate also sets on the tab being shown (codex P1 on #3686).
- */
-export function isInsideHiddenTabContent(el: HTMLElement): boolean {
-    let node: HTMLElement | null = el;
-    while (node) {
-        if (node.dataset.tabHiddenLaidOut === "true") return true;
-        if (getComputedStyle(node).contentVisibility === "hidden") return true;
-        node = node.parentElement;
-    }
-    return false;
 }
 
 /**
@@ -79,6 +58,9 @@ export function usePaneRectSync(params: {
     diag: (msg: string) => void;
 }): PaneRectSync {
     const { model, placeholderRef, windowLabel, diag } = params;
+    // The tab's one visibility signal (Pane Tab contract Phase 3): the native
+    // page is collapsed whenever the tab isn't "active".
+    const visibility = usePaneTabVisibility(model.blockId);
 
     let resizeObserver: ResizeObserver | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
@@ -132,6 +114,10 @@ export function usePaneRectSync(params: {
 
     const syncPosition = () => {
         if (!placeholderRef() || !paneCreated() || model.closed) return;
+        // Collapse whenever the tab isn't visible (`usePaneTabVisibility`):
+        // its window tab isn't displayed, or it's a kept-alive tab that isn't
+        // its pane's active one. The placeholder's rect can't tell:
+        //
         // Inside an inactive workspace tab (content-visibility:hidden since
         // PR #3239 — workspace.tsx), the placeholder's getBoundingClientRect()
         // keeps returning its last-known REAL size — unlike the display:none
@@ -145,14 +131,10 @@ export function usePaneRectSync(params: {
         // entirely, independent of it. codex P1 on PR #3239.
         //
         // Same for a browser that is a kept-alive but INACTIVE pane tab
-        // (pane-leaf-chrome keeps every tab of a keep-alive pane mounted and
-        // only hides the inactive ones with `visibility`, which changes
-        // neither this rect nor any window-tab marker). Without this its
+        // (pane-leaf-chrome keeps it mounted and only hides it with
+        // `visibility`, which doesn't change this rect). Without this its
         // native page stayed drawn over whichever tab was active in the pane.
-        const rect =
-            isInsideHiddenTabContent(placeholderRef()!) || isBlockDormant(model.blockId)()
-                ? { x: 0, y: 0, width: 0, height: 0 }
-                : paneRect();
+        const rect = visibility() !== "active" ? { x: 0, y: 0, width: 0, height: 0 } : paneRect();
         if (
             lastSentRect &&
             lastSentRect.x === rect.x &&
@@ -246,10 +228,6 @@ export function usePaneRectSync(params: {
             resizeObserver = new ResizeObserver(syncPosition);
             resizeObserver.observe(ph);
             positionInterval = setInterval(syncPosition, 200);
-            // Hiding or showing a window tab doesn't change this
-            // placeholder's geometry, so the observer above never sees it.
-            window.addEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition);
-            onCleanup(() => window.removeEventListener(TAB_VISIBILITY_CHANGED_EVENT, syncPosition));
         }
         // macOS/Linux: after a JS-driven drag moves the floating pane window,
         // paneRect() returns the same client coords (unchanged by window
@@ -270,11 +248,12 @@ export function usePaneRectSync(params: {
         if (url) createPane(url);
     });
 
-    // Re-sync when this tab goes dormant or wakes up (see syncPosition): the
-    // placeholder's geometry doesn't change, so the ResizeObserver can't see
-    // it, and waiting for the 200ms interval would show a stale frame.
+    // Re-sync when the tab's visibility changes (see syncPosition): hiding
+    // or showing doesn't change the placeholder's geometry, so the
+    // ResizeObserver can't see it, and waiting for the 200ms interval would
+    // show a stale frame.
     createEffect(() => {
-        isBlockDormant(model.blockId)();
+        visibility();
         if (placeholderRef()) syncPosition();
     });
 

@@ -40,6 +40,7 @@ describe("HelpView zoom", () => {
             meta: () => meta as MetaType,
             setMeta: (patch) => setMetaMock(patch),
             isFocused: () => false,
+            visibility: () => "active",
         };
         return render(() => <HelpView ctx={ctx} />);
     }

@@ -21,7 +21,7 @@ import {
 } from "@/app/store/agentActivity";
 import { isBlockDormant } from "@/app/store/block-component-registry";
 import { AgentDormancyProvider } from "./agent-dormancy";
-import { useWindowTabHidden } from "@/app/workspace/window-tab-visibility";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
@@ -532,7 +532,11 @@ const AgentPresentationView = ({
     // and useAgentFailure's auto-retry below so neither fires invisibly
     // while backgrounded.
     const dormant = isBlockDormant(model.blockId);
-    const windowTabHidden = useWindowTabHidden();
+    // Not visible to the user: a dormant pane-stack member, or its window tab
+    // isn't displayed (`usePaneTabVisibility`, Pane Tab contract Phase 3).
+    // Render work pauses on this; the timers above stay on `dormant`.
+    const visibility = usePaneTabVisibility(model.blockId);
+    const hidden = (): boolean => visibility() !== "active";
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -1070,7 +1074,7 @@ const AgentPresentationView = ({
     );
     createEffect(
         on(
-            () => dormant() || windowTabHidden(),
+            hidden,
             (hidden) => {
                 if (hidden) scheduleRollOff();
             },
@@ -2374,7 +2378,7 @@ const AgentPresentationView = ({
         // A hidden window tab kept laid out (`window:keepinactivetabslaidout`)
         // pauses rendering the same way; only rendering, so this doesn't
         // touch the question auto-timeout or auto-retry `dormant` also drives.
-        <AgentDormancyProvider dormant={() => dormant() || windowTabHidden()}>
+        <AgentDormancyProvider dormant={hidden}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
