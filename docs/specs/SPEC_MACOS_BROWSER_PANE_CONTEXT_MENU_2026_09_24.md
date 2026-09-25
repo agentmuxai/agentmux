@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Type:** Bug / platform parity
-**Status:** Implemented (option A) in the PR that adds this doc. Checked live
+**Status:** implemented — PR #3736 (option A). Checked live
 on a macOS dev build: the menu shows over the page, and Escape closes it and
 restores the pane.
 **Scope:** `frontend/util/cef-api.ts` (`showJsContextMenu`),
