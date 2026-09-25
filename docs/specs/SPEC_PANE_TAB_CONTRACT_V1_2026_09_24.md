@@ -6,8 +6,9 @@ per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
 PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
 Help as pilot) in #3759; Phase 3a (one visibility signal) in #3760; Phase 3b (host-fired
-activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in the PR
-after it; Phases 2c, 5–6 not started.
+activation, focus hand-off) in #3761; Phase 4 (per-active-tab chrome) in #3764;
+Phases 5a–5b (capabilities replace view-name checks) in the PR after it;
+5c dropped (§4); Phases 2c and 6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -428,6 +429,41 @@ working throughout through a legacy adapter.
      would, and a moved subtree can pause media or reset renderers).
 5. **Capabilities** replace the view-name checks (§2.4 #5). On the backend,
    `defaultMeta` comes from the manifest instead of the `pane.rs` allow-list.
+   - **5a (implemented): header and frame.** `PaneTabCapabilities` gains
+     `nativeSurface` (browser), `header: "surface"` (agent: an uncolored
+     header keeps the theme's block surface instead of the fixed default
+     color), `headerMic: { title }` (term: the header mic and its tooltip —
+     agent takes voice beside its composer, so it doesn't declare it),
+     `statsBadgeSetting` (term: `term:showstatsbadge`) and `hueBorder` (term:
+     `frame:hue` colors the active border). `paneTabCapability(view, key)`
+     reads one; an alias carries its view's. `blockframe.tsx`'s and
+     `PaneChrome.tsx`'s seven view-name checks for these read the
+     capabilities; `block-registry.test.ts` pins that exactly the view types
+     the old checks named declare each one.
+   - **5b (implemented): input, zoom, new blocks.** `paneZoom: {
+     baseFontSize? }` replaces `zoom.ts`'s allowlist of views using
+     `term:zoom` (term, agent, swarm, editor, armory, warden — warden was once
+     missing from it by accident) and editor's hard-coded base size (13);
+     `acceptsInput` (term) is the pane menu's Paste rule
+     (`pane-actions.ts`); `shellKeys` (term) makes Ctrl+F search stand down
+     (`keymodel.ts`); `sharesCwd` (term) gives a new block the focused
+     block's `cmd:cwd` (`keymodel-blockcreate.ts`). The basic-terminal count
+     needs no capability — only the terminal implements `isBasicTerm`. The
+     terminal's env-derived header name moved into the terminal itself
+     (`termViewName`, termutil.ts, used by `TermViewModel.viewName`).
+     `splitDropsMeta` (agent: `AGENT_SPLIT_DROPPED_META`) lists the meta a
+     split must not copy — the split rule applied that blocklist only when
+     `view === "agent"`. No view-name check remains in shared header, frame, zoom, key or
+     pane-menu code; `command-registry.ts`/`keymodel-blockcreate.ts` still
+     *create* terminals by name, which is a choice of default, not a check.
+   - **5c (dropped, 2026-09-25):** backend `defaultMeta` from the manifest.
+     On inspection `pane.rs`'s `build_pane_meta` is not a defaults table but
+     validation of the agent-facing `pane.open`'s typed arguments (an editor
+     needs `file`, a browser `url`, a terminal takes `cwd`), and it only runs
+     when no `meta` is passed. With `meta`, `pane.open` is already generic —
+     that is how an agent opens any widget, including an `ext:` one — and the
+     backend can't see frontend manifests without a new sync channel nothing
+     else needs.
 6. **Third-party loading:** trusted, locally installed ES-module widgets
    listed in widgets.json, a shared Solid runtime, `apiVersion` checks and
    error boundaries. No sandbox in v1 (decided, §5).

@@ -469,6 +469,11 @@ describe("renderPaneChromeShell — header tail color", () => {
     // Asserted as "same across every active tab" rather than against a
     // literal, because that invariant IS the feature.
     it("two UNCOLORED tabs of different views still give one stable tail", () => {
+        // Agent's uncolored header keeps the theme surface — its manifest's
+        // `header: "surface"` capability (Pane Tab contract Phase 5).
+        unregisterTestTabs.push(
+            registerPaneTab(legacyAdapter("agent", class {} as any, { capabilities: { header: "surface" } }))
+        );
         setObjectValue("block:b1", { meta: { view: "agent" } });
         setObjectValue("block:b2", { meta: { view: "term" } });
         const [agentActive, termActive] = tailBgAcrossEveryActiveTab(["b1", "b2"]);

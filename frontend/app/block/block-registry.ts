@@ -25,7 +25,7 @@ import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
 import { WardenViewModel } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
-import { agentPaneTab } from "@/app/view/agent/agent-pane-tab";
+import { AGENT_SPLIT_DROPPED_META, agentPaneTab } from "@/app/view/agent/agent-pane-tab";
 import { buildAgentPaneChromeModel } from "@/app/view/agent/agent-view";
 import { buildTermPaneChromeModel } from "@/view/term/term";
 import { termPaneTab } from "@/view/term/term-pane-tab";
@@ -37,28 +37,62 @@ const builtins = [
     // (scroll, form input), the editor's cursor and undo. Agent per
     // SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md; browser and editor per the
     // repo owner's decision, SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
-    legacyAdapter("term", TermViewModel as any, { label: "Terminal", icon: "terminal", lifecycle: "keepAlive", tab: termPaneTab, chrome: buildTermPaneChromeModel }),
+    legacyAdapter("term", TermViewModel as any, {
+        label: "Terminal",
+        icon: "terminal",
+        lifecycle: "keepAlive",
+        capabilities: {
+            headerMic: { title: "Speak into this terminal (Ctrl+Shift+V)" },
+            statsBadgeSetting: "term:showstatsbadge",
+            hueBorder: true,
+            paneZoom: {},
+            acceptsInput: true,
+            shellKeys: true,
+            sharesCwd: true,
+        },
+        tab: termPaneTab,
+        chrome: buildTermPaneChromeModel,
+    }),
     // "forge" was folded into the agent pane in v0.33.197.
-    legacyAdapter("agent", AgentViewModel as any, { label: "Agent", icon: "sparkles", aliases: ["forge"], lifecycle: "keepAlive", tab: agentPaneTab, chrome: buildAgentPaneChromeModel }),
-    legacyAdapter("browser", BrowserViewModel as any, { label: "Browser", icon: "globe", lifecycle: "keepAlive" }),
-    legacyAdapter("editor", EditorViewModel as any, { label: "Editor", icon: "file-lines", lifecycle: "keepAlive" }),
+    legacyAdapter("agent", AgentViewModel as any, {
+        label: "Agent",
+        icon: "sparkles",
+        aliases: ["forge"],
+        lifecycle: "keepAlive",
+        capabilities: { header: "surface", paneZoom: {}, splitDropsMeta: AGENT_SPLIT_DROPPED_META },
+        tab: agentPaneTab,
+        chrome: buildAgentPaneChromeModel,
+    }),
+    legacyAdapter("browser", BrowserViewModel as any, {
+        label: "Browser",
+        icon: "globe",
+        lifecycle: "keepAlive",
+        capabilities: { nativeSurface: true },
+    }),
+    legacyAdapter("editor", EditorViewModel as any, {
+        label: "Editor",
+        icon: "file-lines",
+        lifecycle: "keepAlive",
+        capabilities: { paneZoom: { baseFontSize: 13 } },
+    }),
     legacyAdapter("sysinfo", SysinfoViewModel as any, { label: "Sysinfo", icon: "chart-line" }),
     legacyAdapter("cpuplot", SysinfoViewModel as any),
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     legacyAdapter("launcher", LauncherViewModel as any),
-    legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project" }),
+    // Swarm, Armory and Warden apply `term:zoom` as CSS zoom.
+    legacyAdapter("swarm", SwarmViewModel as any, { label: "Swarm", icon: "diagram-project", capabilities: { paneZoom: {} } }),
     legacyAdapter("memory", BundleViewModel as any, { label: "Memory" }),
     legacyAdapter("media", MediaViewModel as any, { label: "Media", icon: "photo-film" }),
     legacyAdapter("identity", IdentityPaneViewModel as any, { label: "Identity" }),
     // Workflows was renamed to Drone (SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18);
     // persisted blocks still say "workflows".
     legacyAdapter("drone", DroneViewModel as any, { label: "Drone", icon: "diagram-project", aliases: ["workflows"] }),
-    legacyAdapter("warden", WardenViewModel as any, { label: "Warden" }),
+    legacyAdapter("warden", WardenViewModel as any, { label: "Warden", capabilities: { paneZoom: {} } }),
     legacyAdapter("toolchain", ToolchainViewModel as any),
     // The Trust Center was renamed to Armory
     // (docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md);
     // persisted blocks still say "trust".
-    legacyAdapter("armory", ArmoryViewModel as any, { aliases: ["trust"] }),
+    legacyAdapter("armory", ArmoryViewModel as any, { aliases: ["trust"], capabilities: { paneZoom: {} } }),
     legacyAdapter("settings", SettingsViewModel as any),
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);

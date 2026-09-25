@@ -6,6 +6,7 @@
  * Used from both handleHeaderContextMenu (header) and onContextMenu (body) in blockframe.tsx.
  */
 
+import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
@@ -29,32 +30,15 @@ function getPaneSelection(viewModel?: ViewModel): string {
 }
 
 /**
- * Returns true if the pane accepts text input (i.e. paste makes sense).
- * Currently only terminal panes accept input via the PTY.
+ * Returns true if the pane accepts text input (i.e. paste makes sense) — its
+ * view's `acceptsInput` capability (today: the terminal, via its PTY).
  */
 function paneAcceptsInput(blockData: Block): boolean {
-    return blockData.meta?.view === "term";
+    return paneTabCapability(blockData.meta?.view, "acceptsInput") === true;
 }
 
 // ─── Split ────────────────────────────────────────────────────────────────────
 
-// Agent-specific meta fields that should NOT be inherited when splitting.
-// A split agent pane should open the picker, not re-launch the same agent.
-const agentInheritBlocklist = new Set([
-    "agentId",
-    "agentName",
-    "agentIcon",
-    "agentMode",
-    "agentProvider",
-    "agentCliPath",
-    "agentCliArgs",
-    "agentOutputFormat",
-    "agentBinDir",
-    "cmd",
-    "cmd:args",
-    "cmd:interactive",
-    "cmd:runonstart",
-]);
 
 /**
  * Split the pane in the given direction, spawning a new pane of the same type
@@ -70,12 +54,11 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
     if (!sourceConn || sourceConn === "local") {
         delete meta["connection"];
     }
-    // Agent panes: drop all agent-specific fields so the new pane shows
-    // the agent picker instead of re-launching the same agent session.
-    if (blockData.meta?.view === "agent") {
-        for (const key of agentInheritBlocklist) {
-            delete meta[key];
-        }
+    // A view can declare meta a split must not copy (`splitDropsMeta`, Pane
+    // Tab contract Phase 5) — the agent pane drops its agent-specific fields
+    // so the new pane shows the picker instead of re-launching the same agent.
+    for (const key of paneTabCapability(blockData.meta?.view, "splitDropsMeta") ?? []) {
+        delete meta[key];
     }
     const blockDef: BlockDef = { meta };
 
