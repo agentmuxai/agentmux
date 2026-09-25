@@ -93,7 +93,7 @@ One server operation, `self_quit::run(state, block_id, origin)`, used by both en
 3. **Graceful.** Shutdown is §2.2's `shutdown_agents`, never `ctrl.stop()`.
 4. **Nothing left acting in its name** (§4.3): the agent's work claims are released, and its `Shell()` children are stopped.
 5. **Conversation kept.** `save_final_state` keeps the session id; reopening the agent (launcher, `OpenAgent`) resumes it.
-6. **Idempotent.** A second quit for a block already `mark_closing` returns `already_quitting` and does nothing.
+6. **Idempotent.** A second quit for a block that is already `mark_quitting` (§4.2; set first by both origins, including during a tool quit's wait for turn end) or already `mark_closing` (§2.2; a pane × or delete already under way) returns `already_quitting` and does nothing.
 
 ## 4. Server design
 
@@ -323,7 +323,7 @@ Phase 2 must not ship the tool without the gate: a warning-only `QuitSelf` would
 - It uses `shutdown`, not `stop`: an active turn gets the interrupt and `save_final_state` keeps the session id.
 - Work claims held by the agent are released at quit; claims held by others are untouched.
 - `Shell()` children owned by the block are stopped; others' are untouched.
-- Idempotent: a second quit returns `already_quitting`.
+- Idempotent: a second quit returns `already_quitting` both during a tool quit's wait for turn end (`mark_quitting`) and during a close already in progress (`mark_closing`).
 - Gate: `QuitSelf` succeeds when `turn_origin == user`; refused (403, audited) for each of `jekt` (including a `host-verified` sender), `cron`, `nudge`, `broadcast`, `loop` and `system`.
 - Deferral: the 202 returns before shutdown; shutdown waits for turn end; the 30s cap forces the interrupt path.
 - Identity: a request with a bad signature is refused (401); there is no way to name another block.
