@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-25
 **Severity:** Medium: the only at-a-glance "this agent is working" signal is silently missing.
-**Status:** fixed. Both parts of the cause were confirmed live; the fix was
-verified in a `task dev` instance (see "Verification").
+**Status:** implemented. Both parts of the cause were confirmed live; the fix
+was verified in a `task dev` instance (see "Verification").
 
 ## What was reported
 

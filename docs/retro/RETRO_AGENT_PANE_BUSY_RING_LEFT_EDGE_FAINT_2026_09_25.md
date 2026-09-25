@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-25
 **Severity:** Low: cosmetic.
-**Status:** NOT root-caused yet. The isolated geometry is proven clean, and
+**Status:** analysis. NOT root-caused yet. The isolated geometry is proven clean, and
 three live-only candidates remain, ranked below. The next step is a live
 capture while the problem is showing.
 
