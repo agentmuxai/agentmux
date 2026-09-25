@@ -113,6 +113,12 @@ pub(crate) struct Heads {
     /// ([`import_history`]); `None` until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_at_ms: Option<i64>,
+    /// Per directory, per file: content found there at first sighting that
+    /// another agent's record already holds — kept out of this record for
+    /// the adoption list (spec §2.1.2), and left alone while the file
+    /// still holds it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub held: BTreeMap<String, BTreeMap<String, String>>,
     /// Fields a newer build added, kept when this build rewrites the file.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -352,6 +358,47 @@ pub(crate) fn reset_projections(fs: &FileStore, agent_uid: &str, dir_id: &str) -
             write_heads(z, &heads)?;
         }
         Ok(())
+    })
+}
+
+/// Which of `shas` another agent's record holds (a blob in its zone).
+pub(crate) fn held_by_other_records(
+    fs: &FileStore,
+    agent_uid: &str,
+    shas: &[String],
+) -> Result<std::collections::BTreeSet<String>, StoreError> {
+    let own = zone_or_err(agent_uid)?;
+    let mut found = std::collections::BTreeSet::new();
+    if shas.is_empty() {
+        return Ok(found);
+    }
+    for zone in fs.get_all_zone_ids()? {
+        if zone == own || !(zone.starts_with("agent-uid:") && zone.ends_with(":memory")) {
+            continue;
+        }
+        for sha in shas {
+            if !found.contains(sha) && fs.stat(&zone, &format!("blob/{sha}"))?.is_some() {
+                found.insert(sha.clone());
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Keep `files` (name, content hash) found in `dir_id` out of the record,
+/// for the adoption list. One transaction.
+pub(crate) fn hold_for_adoption(fs: &FileStore, agent_uid: &str, dir_id: &str, files: &[(String, String)]) -> Result<(), StoreError> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let zone = zone_or_err(agent_uid)?;
+    fs.zone_txn(&zone, |z| {
+        let mut heads = read_heads(z.read(HEADS_FILE)?)?;
+        let per_dir = heads.held.entry(dir_id.to_string()).or_default();
+        for (file, sha) in files {
+            per_dir.insert(file.clone(), sha.clone());
+        }
+        write_heads(z, &heads)
     })
 }
 
