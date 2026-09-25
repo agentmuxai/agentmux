@@ -636,7 +636,9 @@ wrap_task! {
                         // whole overlay now ignores the mouse: the keyboard
                         // belongs to that DOM overlay too (Escape to close,
                         // typing into a popover field), not the page under it.
-                        crate::ui_tasks::reclaim_key_for_window(std::ptr::null_mut());
+                        // Only when THIS pane holds the keyboard — an overlay
+                        // over pane A must not take it from pane B's page.
+                        crate::ui_tasks::reclaim_key_from_pane(&label);
                     }
                     if masked {
                         controller.set_visible(1);

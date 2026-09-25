@@ -299,6 +299,23 @@ pub(crate) fn reclaim_key_for_window(win: *mut std::ffi::c_void) {
     }
 }
 
+/// `reclaim_key_for_window` scoped to one pane: hands the keyboard back to the
+/// app only if `pane_label`'s own overlay is the key window. Used when a DOM
+/// overlay is punched through that pane, so a menu or tooltip over pane A
+/// can't take the keyboard from pane B's page. UI thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn reclaim_key_from_pane(pane_label: &str) {
+    let win = PANE_OVERLAY_WIN_TO_BLOCK
+        .lock()
+        .ok()
+        .and_then(|m| m.iter().find(|(_, (l, _, _))| l == pane_label).map(|(w, _)| *w));
+    if let Some(w) = win {
+        if unsafe { keywin_objc::key_window() } as usize == w {
+            reclaim_key_for_window(std::ptr::null_mut());
+        }
+    }
+}
+
 // A focus request for a pane whose overlay window isn't registered yet (the
 // frontend's claim-on-create can beat SetPaneBoundsViewsTask). Applied by
 // `apply_pending_pane_key` once that task has tagged + registered the overlay.
