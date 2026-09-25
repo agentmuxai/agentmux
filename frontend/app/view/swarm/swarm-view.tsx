@@ -20,6 +20,8 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
 import { focusBlock } from "@/app/util/focus-block";
+import { computeBlockActiveBorderColor } from "@/app/block/blockframe";
+import { lightenAgentColor } from "@/app/view/agent/agent-color";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 
@@ -232,6 +234,20 @@ export function AgentRow({
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
+    // The agent's own pane-tab color — same source PaneChrome's `tabColors`
+    // memo reads for the tab underline (hue-aware: an explicit `frame:hue`
+    // override wins, else `frame:activebordercolor`), so the Swarm row's
+    // selected border and hover tint always match that agent's actual pane
+    // tab instead of a fixed theme accent
+    // (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.1-2.2).
+    const blockMeta = createMemo(() =>
+        node.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node.blockId))()?.meta : undefined
+    );
+    const activeBorderColor = createMemo(() => computeBlockActiveBorderColor(blockMeta()));
+    const hoverTint = createMemo(() => {
+        const base = activeBorderColor();
+        return base ? lightenAgentColor(base) : undefined;
+    });
     // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
     // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
     // active work was a promoted Bash/sleep call had `hasChildren() === false`
@@ -288,7 +304,24 @@ export function AgentRow({
                     [`swarm-agent-card--${node.agentStatus}`]: true,
                     "swarm-agent-card--active": focusedBlockId() === node.blockId,
                 }}
-                onClick={() => node.blockId && model.toggleAgentCollapsed(node.blockId)}
+                style={{
+                    "--swarm-agent-active-border": activeBorderColor(),
+                    "--swarm-agent-hover-bg": hoverTint(),
+                }}
+                // Selecting an agent focuses ITS pane (switching tabs if it's
+                // a background tab in a multi-tab pane — focusBlock already
+                // handles that), not the Swarm pane itself. stopPropagation
+                // is required: without it this click bubbles to the Swarm
+                // block's own generic click-to-focus (block.tsx's
+                // handleBlockClick) and immediately re-steals focus back to
+                // Swarm (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md
+                // §2.3). Clicking the header/empty area (not a row) still
+                // reaches that handler unchanged, which is the desired
+                // "selects the pane" behavior for non-agent-entry clicks.
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (node.blockId) void focusBlock(node.blockId);
+                }}
                 onContextMenu={handleAgentRowContextMenu}
                 title={node.agentName}
             >
@@ -296,7 +329,7 @@ export function AgentRow({
                     {/* Fleet control selection (SPEC_MULTI_AGENT_FLEET_CONTROL_
                         2026_08_20.md) — only a block with a real blockId can be
                         a bulk-action target. stopPropagation so checking it
-                        doesn't also toggle the card's own collapse. */}
+                        doesn't also focus the card's own agent pane. */}
                     <Show when={node.blockId} fallback={<span class="swarm-agent-select-spacer" />}>
                         <input
                             type="checkbox"
@@ -309,13 +342,23 @@ export function AgentRow({
                     </Show>
                     {/* Chevron only when there's a subtree to collapse; a
                         fixed-width spacer otherwise so labels stay aligned
-                        across rows with and without children. No own click
-                        handler — the enclosing card's click already toggles. */}
+                        across rows with and without children. Its own click
+                        handler now that the enclosing card's click focuses
+                        the agent's pane instead of toggling collapse
+                        (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md
+                        §2.3) — stopPropagation so collapsing doesn't also
+                        move focus. */}
                     <Show
                         when={hasChildren()}
                         fallback={<span class="swarm-agent-expand-spacer" />}
                     >
-                        <i class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`} />
+                        <i
+                            class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (node.blockId) model.toggleAgentCollapsed(node.blockId);
+                            }}
+                        />
                     </Show>
                     <span class="swarm-agent-icon">
                         <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
@@ -328,16 +371,6 @@ export function AgentRow({
                         <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
                     </Show>
                     <AgentStatusChip status={displayStatus()} />
-                    <button
-                        class="swarm-agent-focus"
-                        title="Focus"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (node.blockId) void focusBlock(node.blockId);
-                        }}
-                    >
-                        <i class="fa-solid fa-arrow-up-right-from-square" />
-                    </button>
                 </div>
                 <Show when={node.activitySummary}>
                     <div classList={{ "swarm-activity-summary": true, "swarm-activity-summary--flash": summaryFlash() }}>
