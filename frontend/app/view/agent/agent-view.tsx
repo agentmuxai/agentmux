@@ -22,6 +22,7 @@ import {
 import { AgentDormancyProvider } from "./agent-dormancy";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { getRecentDispatches } from "@/app/store/command-source";
+import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     atoms,
@@ -2359,6 +2360,11 @@ const AgentPresentationView = ({
 
     // Context menu for copy
     const handleContextMenu = (e: MouseEvent) => {
+        // A registered context-menu region under the click (the Shell drawer)
+        // owns its own menu — this handler runs first (it is a descendant of
+        // blockframe's), so without yielding a transcript selection would win
+        // and show a Copy for the wrong text inside the terminal.
+        if (resolveContextMenuRegion(e.target, e.currentTarget as Element)) return;
         const sel = window.getSelection()?.toString();
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
