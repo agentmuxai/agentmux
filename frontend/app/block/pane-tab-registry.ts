@@ -27,7 +27,7 @@ export interface PaneTabCapabilities {
 }
 
 /** What the host gives a native instance — its only way in (no raw
- *  nodeModel, MOS or RpcApi). `visibility` arrives with Phase 3. */
+ *  nodeModel, MOS or RpcApi). */
 export interface PaneTabHostContext {
     blockId: string;
     /** The block's meta, reactive. */
@@ -35,6 +35,10 @@ export interface PaneTabHostContext {
     /** Merges `patch` into the block's meta (a `null` value removes the key). */
     setMeta(patch: Record<string, unknown>): Promise<void>;
     isFocused: Accessor<boolean>;
+    /** The ONE active/dormant/hidden signal (Phase 3, `usePaneTabVisibility`):
+     *  a `nativeSurface` view collapses its surface whenever it isn't
+     *  `"active"`. */
+    visibility: Accessor<"active" | "dormant" | "windowHidden">;
 }
 
 /** A live native tab. The host decides the header, chrome and hiding. */

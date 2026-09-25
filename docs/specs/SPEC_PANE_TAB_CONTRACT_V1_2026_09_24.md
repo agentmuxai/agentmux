@@ -5,7 +5,8 @@
 per-tab keep-alive (§5, decided) in PR #3725; Phase 1 (host-derived chrome) in
 PR #3752; host rules 8–10 (§3, instance lifetime) in PRs #3754 and the
 split-browser fix (#3755); Phase 2a (the registry, §4) in #3757; Phase 2b (the native `create(ctx)` path,
-Help as pilot) in the PR after it; Phases 2c–6 not started.
+Help as pilot) in #3759; Phase 3a (one visibility signal) in the PR after it;
+Phases 2c, 3b–6 not started.
 **Author:** Camper
 **Trigger:** repo owner, 2026-09-24: "the help pane tab, when going away, the
 help content lingers and goes away like a ghost. sounds like it could be a bad
@@ -378,6 +379,24 @@ working throughout through a legacy adapter.
    tabs. Move the browser's rect sync, agent dormancy
    (`agent-dormancy.tsx`), `useWindowTabHidden` consumers and term's focus
    restore onto it. Make keep-alive per tab.
+   - **3a (implemented):** `usePaneTabVisibility(blockId)`
+     (`frontend/app/block/pane-tab-visibility.ts`) →
+     `"active" | "dormant" | "windowHidden"`, from pane-stack dormancy and a
+     new per-window-tab `useWindowTabDisplayed` (`workspace.tsx` provides
+     it; true in BOTH window-tab modes, and outside any window tab). A native
+     instance gets it as `ctx.visibility`. The browser's rect sync collapses
+     on anything but `"active"` — replacing its DOM walk for hidden-tab
+     markers (`isInsideHiddenTabContent`), the `data-tab-hidden-laid-out`
+     marker and the `agentmux:tab-visibility-changed` event. The agent pane's
+     and history view's render pausing read it instead of `isBlockDormant` +
+     `useWindowTabHidden` (removed). With inactive tabs kept laid out (the
+     default) this is the same behavior; with them not laid out, a
+     window-hidden agent pane now also pauses rendering, which
+     `content-visibility` already skipped. Keep-alive is per tab since #3725.
+   - **3b:** the host fires `onActivate`/`onDeactivate` on both paths (term's
+     focus hand-off on a tab switch becomes the generic behavior), and the
+     agent's auto-timeout/auto-retry timers decide whether a window-hidden
+     tab should pause them too (today they pause on pane dormancy only).
 4. **Per-active-tab chrome:** `PaneChromeModel` becomes `instance.chrome`,
    read for the active tab.
 5. **Capabilities** replace the view-name checks (§2.4 #5). On the backend,

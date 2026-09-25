@@ -60,7 +60,7 @@ const [dormant, setDormant] = createSignal(false);
 /** Whether the reader follows the bottom, as the list would report it. */
 const [following, setFollowing] = createSignal(true);
 vi.mock("@/app/store/block-component-registry", () => ({ isBlockDormant: () => dormant }));
-vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabHidden: () => () => false }));
+vi.mock("@/app/workspace/window-tab-visibility", () => ({ useWindowTabDisplayed: () => () => true }));
 vi.mock("@/app/store/agent-pane-layout-store", () => ({ registerPane: () => {}, unregisterPane: () => {} }));
 
 /** The document view, reduced to the node list it was handed. */
